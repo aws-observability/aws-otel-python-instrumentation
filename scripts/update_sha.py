@@ -6,9 +6,7 @@ from ruamel.yaml import YAML
 CORE_API_URL = (
     "https://api.github.com/repos/open-telemetry/opentelemetry-python/commits/"
 )
-CONTRIB_API_URL = (
-    "https://api.github.com/repos/open-telemetry/opentelemetry-python-contrib/commits/"
-)
+CONTRIB_API_URL = "https://api.github.com/repos/open-telemetry/opentelemetry-python-contrib/commits/"
 WORKFLOW_FILE = ".github/workflows/test.yml"
 
 
@@ -17,6 +15,7 @@ def get_core_sha(branch):
     response = requests.get(url, timeout=15)
     response.raise_for_status()
     return response.json()["sha"]
+
 
 def get_contrib_sha(branch):
     url = CONTRIB_API_URL + branch
@@ -33,6 +32,7 @@ def update_core_sha(sha):
     workflow["env"]["CORE_REPO_SHA"] = sha
     with open(WORKFLOW_FILE, "w") as file:
         yaml.dump(workflow, file)
+
 
 def update_contrib_sha(sha):
     yaml = YAML()
@@ -57,7 +57,9 @@ def parse_args():
         description="Updates the SHA in the workflow file"
     )
     parser.add_argument("-cb", "--core-branch", help="core branch to use")
-    parser.add_argument("-tb", "--contrib-branch", help="contrib branch to use")
+    parser.add_argument(
+        "-tb", "--contrib-branch", help="contrib branch to use"
+    )
     return parser.parse_args()
 
 
