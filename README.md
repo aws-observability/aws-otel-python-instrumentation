@@ -1,15 +1,10 @@
-## My Project
+# AWS Distro for OpenTelemetry Python Instrumentation
 
-TODO: Fill this README out!
+## Introduction
 
-Be sure to:
-
-* Change the title in this README
-* Edit your repository description on GitHub
-
-## Security
-
-See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
+This project provide AWS Distro base on [OpenTelemetry Python Contrib](https://github.com/open-telemetry/opentelemetry-python-contrib),
+preconfigured for use with AWS services. Please check out that project too to get a better
+understanding of the underlying internals.
 
 ## License
 
