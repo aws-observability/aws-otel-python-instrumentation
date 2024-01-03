@@ -2,16 +2,13 @@
 
 import argparse
 import os
-import re
 import shlex
 import shutil
 import subprocess
 import sys
 from configparser import ConfigParser
-from datetime import datetime
 from inspect import cleandoc
 from itertools import chain
-from os.path import basename
 from pathlib import Path, PurePath
 
 DEFAULT_ALLSEP = " "
@@ -229,16 +226,6 @@ def parse_args(args=None):
         "pytestargs", nargs=argparse.REMAINDER, help=extraargs_help("pytest")
     )
 
-    releaseparser = subparsers.add_parser(
-        "update_versions",
-        help="Updates version numbers, used by maintainers and CI",
-    )
-    releaseparser.set_defaults(func=release_args)
-    releaseparser.add_argument("--versions", required=True)
-    releaseparser.add_argument(
-        "releaseargs", nargs=argparse.REMAINDER, help=extraargs_help("pytest")
-    )
-
     fmtparser = subparsers.add_parser(
         "format", help="Formats all source code with black and isort.",
     )
@@ -247,20 +234,6 @@ def parse_args(args=None):
         "--path",
         required=False,
         help="Format only this path instead of entire repository",
-    )
-
-    versionparser = subparsers.add_parser(
-        "version", help="Get the version for a release",
-    )
-    versionparser.set_defaults(func=version_args)
-    versionparser.add_argument(
-        "--mode",
-        "-m",
-        default="DEFAULT",
-        help=cleandoc(
-            """Section of config file to use for target selection configuration.
-        See description of exec for available options."""
-        ),
     )
 
     return parser.parse_args(args)
@@ -544,55 +517,6 @@ def lint_args(args):
     )
 
 
-def update_changelog(path, version, new_entry):
-    unreleased_changes = False
-    try:
-        with open(path, encoding="utf-8") as changelog:
-            text = changelog.read()
-            if f"## [{version}]" in text:
-                raise AttributeError(
-                    f"{path} already contains version {version}"
-                )
-        with open(path, encoding="utf-8") as changelog:
-            for line in changelog:
-                if line.startswith("## [Unreleased]"):
-                    unreleased_changes = False
-                elif line.startswith("## "):
-                    break
-                elif len(line.strip()) > 0:
-                    unreleased_changes = True
-
-    except FileNotFoundError:
-        print(f"file missing: {path}")
-        return
-
-    if unreleased_changes:
-        print(f"updating: {path}")
-        text = re.sub(r"## \[Unreleased\].*", new_entry, text)
-        with open(path, "w", encoding="utf-8") as changelog:
-            changelog.write(text)
-
-
-def update_changelogs(version):
-    today = datetime.now().strftime("%Y-%m-%d")
-    new_entry = """## [Unreleased](https://github.com/open-telemetry/opentelemetry-python/compare/v{version}...HEAD)
-
-## [{version}](https://github.com/open-telemetry/opentelemetry-python/releases/tag/v{version}) - {today}
-
-""".format(
-        version=version, today=today
-    )
-    errors = False
-    try:
-        update_changelog("./CHANGELOG.md", version, new_entry)
-    except Exception as err:  # pylint: disable=broad-except
-        print(str(err))
-        errors = True
-
-    if errors:
-        sys.exit(1)
-
-
 def find(name, path):
     non_src_dirs = [os.path.join(path, nsd) for nsd in NON_SRC_DIRS]
 
@@ -608,95 +532,6 @@ def find(name, path):
         if name in files:
             return os.path.join(root, name)
     return None
-
-
-def filter_packages(targets, packages):
-    if not packages:
-        return targets
-    filtered_packages = []
-    for target in targets:
-        for pkg in packages:
-            if str(pkg) == "all":
-                continue
-            if str(pkg) in str(target):
-                filtered_packages.append(target)
-                break
-    return filtered_packages
-
-
-def update_version_files(targets, version, packages):
-    print("updating version.py files")
-    targets = filter_packages(targets, packages)
-    update_files(
-        targets, "version.py", "__version__ .*", f'__version__ = "{version}"',
-    )
-
-
-def update_dependencies(targets, version, packages):
-    print("updating dependencies")
-    if "all" in packages:
-        packages.extend(targets)
-    for pkg in packages:
-        if str(pkg) == "all":
-            continue
-        print(pkg)
-        package_name = basename(pkg)
-        print(package_name)
-
-        update_files(
-            targets,
-            "pyproject.toml",
-            fr"({package_name}.*)==(.*)",
-            r"\1== " + version + '",',
-        )
-
-
-def update_files(targets, filename, search, replace):
-    errors = False
-    for target in targets:
-        curr_file = find(filename, target)
-        if curr_file is None:
-            print(f"file missing: {target}/{filename}")
-            continue
-
-        with open(curr_file, encoding="utf-8") as _file:
-            text = _file.read()
-
-        if replace in text:
-            print(f"{curr_file} already contains {replace}")
-            continue
-
-        with open(curr_file, "w", encoding="utf-8") as _file:
-            _file.write(re.sub(search, replace, text))
-
-    if errors:
-        sys.exit(1)
-
-
-def release_args(args):
-    print("preparing release")
-
-    rootpath = find_projectroot()
-    targets = list(find_targets_unordered(rootpath))
-    cfg = ConfigParser()
-    cfg.read(str(find_projectroot() / "eachdist.ini"))
-    versions = args.versions
-    updated_versions = []
-
-    excluded = cfg["exclude_release"]["packages"].split()
-    targets = [target for target in targets if basename(target) not in excluded]
-    for group in versions.split(","):
-        mcfg = cfg[group]
-        version = mcfg["version"]
-        updated_versions.append(version)
-        packages = None
-        if "packages" in mcfg:
-            packages = [pkg for pkg in mcfg["packages"].split() if pkg not in excluded]
-        print(f"update {group} packages to {version}")
-        update_dependencies(targets, version, packages)
-        update_version_files(targets, version, packages)
-
-    update_changelogs("-".join(updated_versions))
 
 
 def test_args(args):
@@ -731,12 +566,6 @@ def format_args(args):
         cwd=format_dir,
         check=True,
     )
-
-
-def version_args(args):
-    cfg = ConfigParser()
-    cfg.read(str(find_projectroot() / "eachdist.ini"))
-    print(cfg[args.mode]["version"])
 
 
 def main():
