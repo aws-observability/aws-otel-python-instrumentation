@@ -583,6 +583,8 @@ def format_args(args):
 
 
 def main():
+    num=5
+    print( f"'{num}'")
     args = parse_args()
     args.func(args)
 
