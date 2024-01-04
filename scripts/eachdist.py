@@ -373,8 +373,6 @@ def execute_args(args):
 
     rootpath = find_projectroot()
     targets = find_targets(args.mode, rootpath)
-    if not targets:
-        sys.exit(f"Error: No targets selected (root: {rootpath})")
 
     def fmt_for_path(fmt, path):
         return fmt.format(
