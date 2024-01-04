@@ -10,8 +10,9 @@ from configparser import ConfigParser
 from inspect import cleandoc
 from itertools import chain
 from pathlib import Path, PurePath
+import requests
 
-DEFAULT_ALLSEP = " "
+DEFAULT_ALLSEP=" "
 DEFAULT_ALLFMT = "{rel}"
 
 NON_SRC_DIRS = ["build", "dist", "__pycache__", "lib", "venv", ".tox"]
@@ -57,7 +58,7 @@ def parse_args(args=None):
         description=cleandoc(
             """Run a command according to the `format` argument for each or all targets.
 
-        This is an advanced command that is used internally by other commands.
+        This is an advanced command that is used internally by other comands.
 
         For example, to install all distributions in this repository
         editable, you could use:
