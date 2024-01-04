@@ -9,6 +9,8 @@ ignore =
   # allow line breaks after binary ops
   W504
 
+  E203
+
 exclude =
   .bzr
   .git

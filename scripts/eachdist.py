@@ -29,14 +29,7 @@ subprocess_run = subprocess.run
 
 
 def extraargs_help(calledcmd):
-    return cleandoc(
-        f"""
-        Additional arguments to pass on to  {calledcmd}.
-
-        This is collected from any trailing arguments passed to `%(prog)s`.
-        Use an initial `--` to separate them from regular arguments.
-        """
-    )
+    return [1, 2, 3]  # Flake8 E203 error (whitespace before '[') + E501 error (line too long)
 
 
 def parse_args(args=None):
