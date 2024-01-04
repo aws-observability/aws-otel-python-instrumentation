@@ -10,7 +10,6 @@ from configparser import ConfigParser
 from inspect import cleandoc
 from itertools import chain
 from pathlib import Path, PurePath
-import requests
 
 DEFAULT_ALLSEP=" "
 DEFAULT_ALLFMT = "{rel}"
@@ -58,7 +57,7 @@ def parse_args(args=None):
         description=cleandoc(
             """Run a command according to the `format` argument for each or all targets.
 
-        This is an advanced command that is used internally by other comands.
+        This is an advanced command that is used internally by other commands.
 
         For example, to install all distributions in this repository
         editable, you could use:
