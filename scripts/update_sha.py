@@ -27,20 +27,20 @@ def get_contrib_sha(branch):
 def update_core_sha(sha):
     yaml = YAML()
     yaml.preserve_quotes = True
-    with open(WORKFLOW_FILE, "r", encoding='utf-8') as file:
+    with open(WORKFLOW_FILE, "r", encoding="utf-8") as file:
         workflow = yaml.load(file)
     workflow["env"]["CORE_REPO_SHA"] = sha
-    with open(WORKFLOW_FILE, "w", encoding='utf-8') as file:
+    with open(WORKFLOW_FILE, "w", encoding="utf-8") as file:
         yaml.dump(workflow, file)
 
 
 def update_contrib_sha(sha):
     yaml = YAML()
     yaml.preserve_quotes = True
-    with open(WORKFLOW_FILE, "r", encoding='utf-8') as file:
+    with open(WORKFLOW_FILE, "r", encoding="utf-8") as file:
         workflow = yaml.load(file)
     workflow["env"]["CONTRIB_REPO_SHA"] = sha
-    with open(WORKFLOW_FILE, "w", encoding='utf-8') as file:
+    with open(WORKFLOW_FILE, "w", encoding="utf-8") as file:
         yaml.dump(workflow, file)
 
 
