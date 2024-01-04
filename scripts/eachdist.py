@@ -227,7 +227,8 @@ def parse_args(args=None):
     )
 
     fmtparser = subparsers.add_parser(
-        "format", help="Formats all source code with black and isort.",
+        "format",
+        help="Formats all source code with black and isort.",
     )
     fmtparser.set_defaults(func=format_args)
     fmtparser.add_argument(
@@ -253,10 +254,7 @@ def find_targets_unordered(rootpath):
             continue
         if subdir.name.startswith(".") or subdir.name.startswith("venv"):
             continue
-        if any(
-            (subdir / marker).exists()
-            for marker in ("pyproject.toml",)
-        ):
+        if any((subdir / marker).exists() for marker in ("pyproject.toml",)):
             yield subdir
         else:
             yield from find_targets_unordered(subdir)
@@ -503,7 +501,11 @@ def lint_args(args):
         cwd=rootdir,
         check=True,
     )
-    runsubprocess(args.dry_run, ("flake8", "--config", f"{rootdir}/.flake8", rootdir), check=True)
+    runsubprocess(
+        args.dry_run,
+        ("flake8", "--config", f"{rootdir}/.flake8", rootdir),
+        check=True,
+    )
     execute_args(
         parse_subargs(
             args, ("exec", "pylint {}", "--all", "--mode", "lintroots")
@@ -512,7 +514,11 @@ def lint_args(args):
     execute_args(
         parse_subargs(
             args,
-            ("exec", "python scripts/check_for_valid_readme.py {}", "--all",),
+            (
+                "exec",
+                "python scripts/check_for_valid_readme.py {}",
+                "--all",
+            ),
         )
     )
 
@@ -562,7 +568,14 @@ def format_args(args):
     )
     runsubprocess(
         args.dry_run,
-        ("isort", "--settings-path", f"{root_dir}/.isort.cfg", "--profile", "black", "."),
+        (
+            "isort",
+            "--settings-path",
+            f"{root_dir}/.isort.cfg",
+            "--profile",
+            "black",
+            ".",
+        ),
         cwd=format_dir,
         check=True,
     )
