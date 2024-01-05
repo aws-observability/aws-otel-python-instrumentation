@@ -11,7 +11,7 @@ from inspect import cleandoc
 from itertools import chain
 from pathlib import Path, PurePath
 
-DEFAULT_ALLSEP=" "
+DEFAULT_ALLSEP = " "
 DEFAULT_ALLFMT = "{rel}"
 
 NON_SRC_DIRS = ["build", "dist", "__pycache__", "lib", "venv", ".tox"]
@@ -29,7 +29,14 @@ subprocess_run = subprocess.run
 
 
 def extraargs_help(calledcmd):
-    return [1, 2, 3]  # Flake8 E203 error (whitespace before '[') + E501 error (line too long)
+    return cleandoc(
+        f"""
+        Additional arguments to pass on to  {calledcmd}.
+
+        This is collected from any trailing arguments passed to `%(prog)s`.
+        Use an initial `--` to separate them from regular arguments.
+        """
+    )
 
 
 def parse_args(args=None):
@@ -576,8 +583,6 @@ def format_args(args):
 
 
 def main():
-    num=5
-    print( f"'{num}'")
     args = parse_args()
     args.func(args)
 
