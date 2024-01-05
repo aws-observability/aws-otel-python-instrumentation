@@ -19,7 +19,8 @@ from requests import get
 from opentelemetry import trace
 from opentelemetry.propagate import inject
 import sys
-sys.path.append('./aws-otel-distro/src/opentelemetry/distro')
+
+sys.path.append("./aws-otel-distro/src/opentelemetry/distro")
 from aws_distro import AWSDistro
 from aws_distro import AWSTracerProvider
 from aws_distro import RemoteAttributesSpanProcessor
@@ -27,16 +28,13 @@ from aws_distro import RemoteAttributesSpanProcessor
 trace.set_tracer_provider(AWSTracerProvider())
 tracer = trace.get_tracer_provider().get_tracer(__name__)
 
-trace.get_tracer_provider().add_span_processor(
-    RemoteAttributesSpanProcessor()
-)
+trace.get_tracer_provider().add_span_processor(RemoteAttributesSpanProcessor())
 
 print("==================== argv" + str(argv))
 
 assert len(argv) == 2
 
 with tracer.start_as_current_span("client"):
-
     with tracer.start_as_current_span("client-server"):
         headers = {}
         inject(headers)
