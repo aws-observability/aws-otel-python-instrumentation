@@ -23,4 +23,3 @@ exclude =
   venv*/
   target
   __pycache__
-  scripts/*

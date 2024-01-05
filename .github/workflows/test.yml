@@ -1,3 +1,5 @@
+# This workflow check the code style for the repo
+# TODO: add unit test check after adding AWS Distro project
 name: AWS Distro Tests
 
 on:
