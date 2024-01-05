@@ -9,7 +9,6 @@ ignore =
   # allow line breaks after binary ops
   W504
 
-  # allow whitespace before ':' (https://github.com/psf/black#slices)
   E203
 
 exclude =
@@ -23,4 +22,3 @@ exclude =
   venv*/
   target
   __pycache__
-  scripts/*
