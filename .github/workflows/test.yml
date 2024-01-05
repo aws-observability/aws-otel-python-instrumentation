@@ -5,9 +5,6 @@ name: AWS Distro Tests
 on:
   push:
   pull_request:
-env:
-  CORE_REPO_SHA: da48e0b131ff34ff382b7d1206f71b2e31929cab
-  CONTRIB_REPO_SHA: 7c12ad9844ac179e3f6a493491707a9bafd06f6b
 
 jobs:
   misc:
