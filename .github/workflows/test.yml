@@ -1,5 +1,4 @@
-# This workflow check the code style for the repo
-# TODO: add unit test check after adding AWS Distro project
+# This workflow check the code style and run unit tests for the repo
 name: AWS Distro Tests
 
 on:
@@ -7,6 +6,42 @@ on:
   pull_request:
 
 jobs:
+  build:
+    env:
+      # We use these variables to convert between tox and GHA version literals
+      py37: 3.7
+      py38: 3.8
+      py39: 3.9
+      py310: "3.10"
+      py311: "3.11"
+      pypy3: "pypy3.7"
+      RUN_MATRIX_COMBINATION: ${{ matrix.python-version }}-${{ matrix.package }}-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false  # ensures the entire test matrix is run, even if one permutation fails
+      matrix:
+        python-version: [ py37, py38, py39, py310, py311, pypy3 ]
+        package: [ "distro-aws" ]
+        os: [ ubuntu-20.04 ]
+    steps:
+      - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@v2
+      - name: Set up Python ${{ env[matrix.python-version] }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env[matrix.python-version] }}
+      - name: Install tox
+        run: pip install tox==3.27.1 tox-factor
+      - name: Cache tox environment
+        # Preserves .tox directory between runs for faster installs
+        uses: actions/cache@v1
+        with:
+          path: |
+            .tox
+            ~/.cache/pip
+          key: v7-build-tox-cache-${{ env.RUN_MATRIX_COMBINATION }}-${{ hashFiles('tox.ini', 'dev-requirements.txt') }}
+      - name: run tox
+        run: tox -f ${{ matrix.python-version }}-${{ matrix.package }} -- -ra --benchmark-json=${{ env.RUN_MATRIX_COMBINATION }}-benchmark.json
   misc:
     strategy:
       fail-fast: false
