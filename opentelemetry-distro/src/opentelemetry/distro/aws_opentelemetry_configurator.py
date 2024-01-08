@@ -10,7 +10,7 @@ class AwsTracerProvider(TracerProvider):
     def __init__(
             self
     ):
-        super(AwsTracerProvider, self).__init__()
+        pass
         # TODO:
         # 1. Add SpanMetricsProcessor to generate AppSignal metrics from spans and exports them
         # 2. Add AttributePropagatingSpanProcessor to propagate span attributes from parent to child
@@ -19,6 +19,7 @@ class AwsTracerProvider(TracerProvider):
 
 
 class AwsConfigurator(_BaseConfigurator):
+    # pylint: disable=no-self-use
     def _configure(self, **kwargs):
         provider = AwsTracerProvider()
         set_tracer_provider(provider)
