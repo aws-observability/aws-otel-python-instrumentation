@@ -6,7 +6,7 @@ from unittest import TestCase
 from pkg_resources import DistributionNotFound, require
 
 
-class TestAWSDistro(TestCase):
+class TestAwsOpenTelemetryDistro(TestCase):
     def test_package_available(self):
         try:
             require(["aws-opentelemetry-distro"])

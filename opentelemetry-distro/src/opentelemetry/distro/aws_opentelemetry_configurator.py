@@ -18,8 +18,13 @@ class AwsTracerProvider(TracerProvider):
         # 4. Add AlwaysRecordSampler to record all spans.
 
 
-class AwsConfigurator(_BaseConfigurator):
-    # pylint: disable=no-self-use
+class AwsOpenTelemetryConfigurator(_BaseConfigurator):
+    def __init__(self):
+        self.trace_provider = None
+
     def _configure(self, **kwargs):
-        provider = AwsTracerProvider()
-        set_tracer_provider(provider)
+        self.trace_provider = AwsTracerProvider()
+        set_tracer_provider(self.trace_provider)
+
+    def get_trace_provider(self):
+        return self.trace_provider

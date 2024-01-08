@@ -9,7 +9,7 @@ Installation
     pip install aws-opentelemetry-distro
 
 
-This package provides AWS OpenTelemetry Distro for enabling AppSignals, which generates SAM(Standard Application Metrics) and traces for customers’ application in Python.
+This package provides AWS OpenTelemetry Python Distro, which allows for auto-instrumentation of Python applications.
 
 References
 ----------
