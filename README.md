@@ -14,7 +14,7 @@ This project ensures compatibility with the following supported Python versions:
 This package applies code style check automatically when created a push/pull request to the project repository. You can apply style check locally before submitting the PR by following:
 1. Install related packages:
 ```sh
-pip install isort pylint black flake8 codespell
+pip install isort pylint black flake8 codespell readme_renderer
 ```
 2. Check code style errors using codespell and lint:
 ```sh
