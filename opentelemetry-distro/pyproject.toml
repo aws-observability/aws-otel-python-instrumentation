@@ -39,4 +39,4 @@ include = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/amazon/opentelemetry"]
+packages = ["src/amazon/opentelemetry", "src/opentelemetry"]
