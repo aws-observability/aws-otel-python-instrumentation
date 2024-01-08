@@ -5,6 +5,7 @@ from opentelemetry.sdk._configuration import _BaseConfigurator
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.trace import set_tracer_provider
 
+
 class AwsTracerProvider(TracerProvider):
     def __init__(
             self
@@ -16,8 +17,8 @@ class AwsTracerProvider(TracerProvider):
         # 3. Add AwsMetricAttributesSpanExporter to add more attributes to all spans.
         # 4. Add AlwaysRecordSampler to record all spans.
 
+
 class AwsConfigurator(_BaseConfigurator):
     def _configure(self, **kwargs):
         provider = AwsTracerProvider()
         set_tracer_provider(provider)
-
