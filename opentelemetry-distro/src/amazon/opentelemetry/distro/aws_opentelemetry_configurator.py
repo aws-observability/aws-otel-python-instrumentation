@@ -5,7 +5,7 @@ from opentelemetry.sdk._configuration import _BaseConfigurator
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.trace import set_tracer_provider
 
-
+# pylint: disable=W0246
 class AwsTracerProvider(TracerProvider):
     def __init__(self):
         super(AwsTracerProvider, self).__init__()
