@@ -1,11 +1,2 @@
 [tool.black]
 line-length = 120
-exclude = '''
-(
-  \.git
-  | \.tox
-  | venv
-  | build
-  | dist
-)
-'''
