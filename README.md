@@ -6,12 +6,15 @@ This project provide AWS Distro base on [OpenTelemetry Python Contrib](https://g
 preconfigured for use with AWS services. Please check out that project too to get a better
 understanding of the underlying internals.
 
+## Python Version Support
+This project ensures compatibility with the following supported Python versions: 3.7, 3.8, 3.9, 3.10, 3.11
+
 ## Code Style Check
 
 This package applies code style check automatically when created a push/pull request to the project repository. You can apply style check locally before submitting the PR by following:
 1. Install related packages:
 ```sh
-pip install isort pylint black flake8 codespell
+pip install isort pylint black flake8 codespell readme_renderer
 ```
 2. Check code style errors using codespell and lint:
 ```sh
