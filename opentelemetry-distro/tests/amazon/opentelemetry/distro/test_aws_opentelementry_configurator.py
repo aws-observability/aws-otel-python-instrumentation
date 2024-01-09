@@ -3,10 +3,7 @@
 
 from unittest import TestCase
 
-from opentelemetry.distro.aws_opentelemetry_configurator import (
-    AwsOpenTelemetryConfigurator,
-    AwsTracerProvider,
-)
+from opentelemetry.distro.aws_opentelemetry_configurator import AwsOpenTelemetryConfigurator, AwsTracerProvider
 
 
 class TestAwsOpenTelemetryConfigurator(TestCase):
