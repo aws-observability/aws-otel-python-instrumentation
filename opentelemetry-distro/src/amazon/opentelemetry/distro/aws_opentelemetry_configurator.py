@@ -7,9 +7,7 @@ from opentelemetry.trace import set_tracer_provider
 
 
 class AwsTracerProvider(TracerProvider):
-    def __init__(
-            self
-    ):
+    def __init__(self):
         pass
         # TODO:
         # 1. Add SpanMetricsProcessor to generate AppSignal metrics from spans and exports them
