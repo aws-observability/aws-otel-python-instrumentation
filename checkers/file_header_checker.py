@@ -3,9 +3,7 @@
 
 from pylint.checkers import BaseRawFileChecker
 
-COPYWRITE_STRING = (
-    "# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.\n"
-)
+COPYWRITE_STRING = "# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.\n"
 COPYWRITE_BYTES = bytes(COPYWRITE_STRING, "utf-8")
 LICENSE_STRING = "# SPDX-License-Identifier: Apache-2.0"
 LICENSE_BYTES = bytes(LICENSE_STRING, "utf-8")
@@ -17,9 +15,7 @@ class FileHeaderChecker(BaseRawFileChecker):
         "E1234": (
             "File has missing or malformed header",
             "missing-header",
-            "All files must have required header: \n"
-            + COPYWRITE_STRING
-            + LICENSE_STRING,
+            "All files must have required header: \n" + COPYWRITE_STRING + LICENSE_STRING,
         ),
     }
     options = ()
