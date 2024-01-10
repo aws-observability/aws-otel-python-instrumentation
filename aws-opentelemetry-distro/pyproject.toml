@@ -27,7 +27,7 @@ aws_configurator = "opentelemetry.distro.aws_opentelemetry_configurator:AwsOpenT
 aws_distro = "opentelemetry.distro.aws_opentelemetry_distro:AwsOpenTelemetryDistro"
 
 [project.urls]
-Homepage = "https://github.com/aws-observability/aws-otel-python-instrumentation/tree/main/opentelemetry-distro"
+Homepage = "https://github.com/aws-observability/aws-otel-python-instrumentation/tree/main/aws-opentelemetry-distro"
 
 [tool.hatch.version]
 path = "src/amazon/opentelemetry/distro/version.py"
