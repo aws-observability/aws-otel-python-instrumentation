@@ -7,30 +7,21 @@ Please read through this document before submitting any issues or pull requests 
 information to effectively respond to your bug report or contribution.
 
 ## Build a Wheel file locally
-1. Get the latest versions of packaging tools
+**First time setup**
 ```sh
-pip install --upgrade pip setuptools wheel packaging
-```
-2. Create a dist directory to save build output
-```sh
+pip install --upgrade pip setuptools wheel packaging build
 mkdir -p ./dist
+```
+**Updating the wheel file**
+```sh
 rm -rf ./dist/*
-```
-3. cd to project folder
-```sh
-cd ./opentelemetry-distro
-```
-4. Build the project, and save the output into dist folder
-```sh
+cd ./aws-opentelemetry-distro
 python3 -m build --outdir ../dist
-```
-5. Check the project `${pkg_version}` which can be found in `./opentelemetry-distro/src/amazon/opentelemetry/distro/version.py`
-6. Build a wheel for the project distribution
-```sh
 cd ../dist
+pkg_version=$(grep '__version__' ../aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py | awk -F '"' '{print $2}')
 pip wheel --no-deps aws_opentelemetry_distro-${pkg_version}.tar.gz
+pip install aws_opentelemetry_distro-${pkg_version}-py3-none-any.whl --force-reinstall
 ```
-The `*.whl` can be found under `dist` folder, and the pkg can be built by `pip install`
 
 ## Test a sample App
 1. Setup env and install project dependencies
@@ -38,23 +29,18 @@ The `*.whl` can be found under `dist` folder, and the pkg can be built by `pip i
 mkdir auto_instrumentation
 virtualenv auto_instrumentation
 source auto_instrumentation/bin/activate
-pip install flask
-pip install requests
-pip install boto3
-pip install opentelemetry-instrumentation-flask
-pip install opentelemetry-instrumentation-botocore
-pip install opentelemetry-instrumentation
+pip install flask requests boto3 opentelemetry-instrumentation-flask opentelemetry-instrumentation-botocore opentelemetry-instrumentation
 ```
-2. Install the project pkg by following "Build a Wheel file locally" step above.
+2. Install the project pkg by following "Build a Wheel file locally" step above. Please make sure to install “aws-opentelemetry-distro” by following steps instead of install "opentelemetry-distro” directly.
 3. Add AWS test account credential into the terminal, setup environment variable and run sample server:
 ```sh
 export OTEL_PYTHON_DISTRO="aws_distro"
 export OTEL_PYTHON_CONFIGURATOR="aws_configurator"
-opentelemetry-instrument python ./tests/server_automatic_s3client.py
+opentelemetry-instrument python ./sample-applications/simple-client-server/server_automatic_s3client.py
 ```
 4. Prepare a client.py, an example is `./tests/client.py`, open a new terminal and run sample client:
 ```sh
-python client.py testing
+python ./sample-applications/simple-client-server/client.py testing
 ```
 The span content will be output into terminal console
 

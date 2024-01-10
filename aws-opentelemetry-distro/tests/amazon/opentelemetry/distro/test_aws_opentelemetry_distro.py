@@ -9,6 +9,6 @@ from pkg_resources import DistributionNotFound, require
 class TestAwsOpenTelemetryDistro(TestCase):
     def test_package_available(self):
         try:
-            require(["aws-opentelemetry-distro"])
+            require(["aws-aws-opentelemetry-distro"])
         except DistributionNotFound:
-            self.fail("aws-opentelemetry-distro not installed")
+            self.fail("aws-aws-opentelemetry-distro not installed")
