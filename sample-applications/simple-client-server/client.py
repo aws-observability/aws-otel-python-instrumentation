@@ -5,7 +5,6 @@ from sys import argv
 import requests
 
 try:
-    timeout_seconds = 10
     requested = requests.get("http://localhost:8082/server_request", params={"param": argv[0]}, timeout=120)
     assert requested.status_code == 200
 except requests.exceptions.HTTPError as http_err:
