@@ -1,9 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from aws_metric_attribute_generator import AwsMetricAttributeGenerator
-from aws_span_metrics_processor import AwsSpanMetricsProcessor
-from metric_attribute_generator import MetricAttributeGenerator
-
+from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
+from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
+from amazon.opentelemetry.distro.metric_attribute_generator import MetricAttributeGenerator
 from opentelemetry.sdk.metrics import Histogram, Meter, MeterProvider
 from opentelemetry.sdk.resources import Resource
 
@@ -14,7 +13,7 @@ _LATENCY: str = "Latency"
 _LATENCY_UNITS: str = "Milliseconds"
 
 # Defaults
-_DEFAULT_GENERATOR: MetricAttributeGenerator = AwsMetricAttributeGenerator()
+_DEFAULT_GENERATOR: MetricAttributeGenerator = _AwsMetricAttributeGenerator()
 _DEFAULT_SCOPE_NAME: str = "AwsSpanMetricsProcessor"
 
 

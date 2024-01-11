@@ -1,12 +1,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from metric_attribute_generator import MetricAttributeGenerator
-
+from amazon.opentelemetry.distro.metric_attribute_generator import MetricAttributeGenerator
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import BoundedAttributes, ReadableSpan
 
 
-class AwsMetricAttributeGenerator(MetricAttributeGenerator):
+class _AwsMetricAttributeGenerator(MetricAttributeGenerator):
     """AwsMetricAttributeGenerator generates specific metric attributes for incoming and outgoing traffic.
 
     AwsMetricAttributeGenerator generates very specific metric attributes based on low-cardinality span and resource
