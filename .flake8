@@ -1,8 +1,6 @@
 [flake8]
+max-line-length = 120
 ignore =
-  # line too long, defer to black
-  E501
-
   # allow line breaks before binary ops
   W503
 
