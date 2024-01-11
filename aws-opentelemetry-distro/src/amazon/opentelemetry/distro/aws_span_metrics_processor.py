@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 from typing import Optional
 
-from metric_attribute_generator import MetricAttributeGenerator
 from typing_extensions import override
 
+from amazon.opentelemetry.distro.metric_attribute_generator import MetricAttributeGenerator
 from opentelemetry.context import Context
 from opentelemetry.metrics import Histogram
 from opentelemetry.sdk.resources import Resource

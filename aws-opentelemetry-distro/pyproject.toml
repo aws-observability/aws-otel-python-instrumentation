@@ -21,10 +21,10 @@ dependencies = [
 test = []
 
 [project.entry-points.opentelemetry_configurator]
-aws_configurator = "opentelemetry.distro.aws_opentelemetry_configurator:AwsOpenTelemetryConfigurator"
+aws_configurator = "amazon.opentelemetry.distro.aws_opentelemetry_configurator:AwsOpenTelemetryConfigurator"
 
 [project.entry-points.opentelemetry_distro]
-aws_distro = "opentelemetry.distro.aws_opentelemetry_distro:AwsOpenTelemetryDistro"
+aws_distro = "amazon.opentelemetry.distro.aws_opentelemetry_distro:AwsOpenTelemetryDistro"
 
 [project.urls]
 Homepage = "https://github.com/aws-observability/aws-otel-python-instrumentation/tree/main/aws-opentelemetry-distro"
@@ -39,4 +39,4 @@ include = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/amazon/opentelemetry"]
+packages = ["src/amazon"]
