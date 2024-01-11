@@ -15,11 +15,14 @@ from opentelemetry.trace.propagation import get_current_span
 class AttributePropagatingSpanProcessor(SpanProcessor):
     """AwsAttributePropagatingSpanProcessor is SpanProcessor that propagates attributes from parent to child spans
 
-    AwsAttributePropagatingSpanProcessor handles the propagation of attributes from parent spans to child spans, specified in self._attribute_keys_to_propagate.
-    AwsAttributePropagatingSpanProcessor also propagates configurable data from parent spans to child spans, as a new attribute specified by self._propagation_data_key.
+    AwsAttributePropagatingSpanProcessor handles the propagation of attributes from parent spans to child spans,
+    specified in self._attribute_keys_to_propagate. AwsAttributePropagatingSpanProcessor also propagates
+    configurable data from parent spans to child spans, as a new attribute specified by self._propagation_data_key.
     Propagated data can be configured via the self._propagation_data_extractor.
-    Span data propagation only starts from local root server/consumer spans, but from there will be propagated to any descendant spans. If the span is a CONSUMER
-    PROCESS with the parent also a CONSUMER, it will set attribute AWS_CONSUMER_PARENT_SPAN_KIND as CONSUMER to indicate that dependency metrics should not be generated for this span.
+    Span data propagation only starts from local root server/consumer spans,
+    but from there will be propagated to any descendant spans. If the span is a CONSUMER
+    PROCESS with the parent also a CONSUMER, it will set attribute AWS_CONSUMER_PARENT_SPAN_KIND as CONSUMER
+    to indicate that dependency metrics should not be generated for this span.
     """
 
     _propagation_data_extractor: Callable[[ReadableSpan], str]
