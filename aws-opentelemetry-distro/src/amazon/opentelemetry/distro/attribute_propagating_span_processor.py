@@ -74,6 +74,7 @@ class AttributePropagatingSpanProcessor(SpanProcessor):
         if propagation_data is not None:
             span.set_attribute(self._propagation_data_key, propagation_data)
 
+    # pylint: disable=no-self-use
     @override
     def on_end(self, span: ReadableSpan) -> None:
         return
