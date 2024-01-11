@@ -4,15 +4,15 @@ from typing import Callable, List, Optional
 
 from typing_extensions import override
 
-from amazon.opentelemetry.distro.aws_attribute_keys import AwsAttributeKeys
-from amazon.opentelemetry.distro.aws_span_processing_util import AwsSpanProcessingUtil
+from amazon.opentelemetry.distro._aws_attribute_keys import _AwsAttributeKeys
+from amazon.opentelemetry.distro._aws_span_processing_util import is_aws_sdk_span, is_local_root
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
 from opentelemetry.trace import SpanKind
 from opentelemetry.trace.propagation import get_current_span
 
 
-class AwsAttributePropagatingSpanProcessor(SpanProcessor):
+class AttributePropagatingSpanProcessor(SpanProcessor):
     """AwsAttributePropagatingSpanProcessor is SpanProcessor that propagates attributes from parent to child spans
 
     AwsAttributePropagatingSpanProcessor handles the propagation of attributes from parent spans to child spans, specified in self._attribute_keys_to_propagate.
@@ -44,8 +44,8 @@ class AwsAttributePropagatingSpanProcessor(SpanProcessor):
             # This attribute helps the backend differentiate between SDK spans and their immediate children.
             # It's assumed that the HTTP spans are immediate children of the AWS SDK span
             # TODO: we should have a contract test to check the immediate children are HTTP span
-            if AwsSpanProcessingUtil.is_aws_sdk_span(parent_span):
-                span.set_attribute(AwsAttributeKeys.AWS_SDK_DESCENDANT, "true")
+            if is_aws_sdk_span(parent_span):
+                span.set_attribute(_AwsAttributeKeys.AWS_SDK_DESCENDANT, "true")
 
             if SpanKind.INTERNAL == parent_span.kind:
                 for key_to_propagate in self._attribute_keys_to_propagate:
@@ -56,14 +56,14 @@ class AwsAttributePropagatingSpanProcessor(SpanProcessor):
             # We cannot guarantee that messaging.operation is set onStart, it could be set after the fact.
             # To work around this, add the AWS_CONSUMER_PARENT_SPAN_KIND attribute if parent and child are both CONSUMER
             # then check later if a metric should be generated.
-            if self._is_consumer_kind(span) and self._is_consumer_kind(parent_span):
-                span.set_attribute(AwsAttributeKeys.AWS_CONSUMER_PARENT_SPAN_KIND, parent_span.kind.name)
+            if _is_consumer_kind(span) and _is_consumer_kind(parent_span):
+                span.set_attribute(_AwsAttributeKeys.AWS_CONSUMER_PARENT_SPAN_KIND, parent_span.kind.name)
 
         propagation_data: str = None
-        if AwsSpanProcessingUtil.is_local_root(span):
-            if not self._is_server_kind(span):
+        if is_local_root(span):
+            if not _is_server_kind(span):
                 propagation_data = self._propagation_data_extractor(span)
-        elif self._is_server_kind(parent_span):
+        elif _is_server_kind(parent_span):
             propagation_data = self._propagation_data_extractor(parent_span)
         else:
             propagation_data = parent_span.attributes.get(self._propagation_data_key)
@@ -73,7 +73,7 @@ class AwsAttributePropagatingSpanProcessor(SpanProcessor):
 
     @override
     def on_end(self, span: ReadableSpan) -> None:
-        pass
+        return
 
     @override
     def shutdown(self) -> None:
@@ -84,8 +84,10 @@ class AwsAttributePropagatingSpanProcessor(SpanProcessor):
     def force_flush(self, timeout_millis: int = None) -> bool:
         return True
 
-    def _is_consumer_kind(self, span: ReadableSpan) -> bool:
-        return SpanKind.CONSUMER == span.kind
 
-    def _is_server_kind(self, span: ReadableSpan) -> bool:
-        return SpanKind.SERVER == span.kind
+def _is_consumer_kind(span: ReadableSpan) -> bool:
+    return SpanKind.CONSUMER == span.kind
+
+
+def _is_server_kind(span: ReadableSpan) -> bool:
+    return SpanKind.SERVER == span.kind
