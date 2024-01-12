@@ -2,11 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 from unittest import TestCase
 
-from amazon.opentelemetry.distro.aws_always_record_sampler import AwsAlwaysRecordSampler
+from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from opentelemetry.sdk.trace.sampling import Sampler
 
 
-class TestAwsAlwaysRecordSampler(TestCase):
+class TestAlwaysRecordSampler(TestCase):
     def test_basic(self):
-        sampler: Sampler = AwsAlwaysRecordSampler()
-        self.assertIn("AwsAlwaysRecordSampler", sampler.get_description())
+        sampler: Sampler = AlwaysRecordSampler(None)
+        with self.assertRaises(ValueError):
+            sampler.get_description()
