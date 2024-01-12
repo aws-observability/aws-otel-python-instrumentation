@@ -4,7 +4,7 @@ from typing import Callable, Optional, Tuple
 
 from typing_extensions import override
 
-from amazon.opentelemetry.distro._aws_attribute_keys import _AwsAttributeKeys
+from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND, AWS_SDK_DESCENDANT
 from amazon.opentelemetry.distro._aws_span_processing_util import is_aws_sdk_span, is_local_root
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
@@ -48,7 +48,7 @@ class AttributePropagatingSpanProcessor(SpanProcessor):
             # It's assumed that the HTTP spans are immediate children of the AWS SDK span
             # TODO: we should have a contract test to check the immediate children are HTTP span
             if is_aws_sdk_span(parent_span):
-                span.set_attribute(_AwsAttributeKeys.AWS_SDK_DESCENDANT, "true")
+                span.set_attribute(AWS_SDK_DESCENDANT, "true")
 
             if SpanKind.INTERNAL == parent_span.kind:
                 for key_to_propagate in self._attribute_keys_to_propagate:
@@ -60,7 +60,7 @@ class AttributePropagatingSpanProcessor(SpanProcessor):
             # To work around this, add the AWS_CONSUMER_PARENT_SPAN_KIND attribute if parent and child are both CONSUMER
             # then check later if a metric should be generated.
             if _is_consumer_kind(span) and _is_consumer_kind(parent_span):
-                span.set_attribute(_AwsAttributeKeys.AWS_CONSUMER_PARENT_SPAN_KIND, parent_span.kind.name)
+                span.set_attribute(AWS_CONSUMER_PARENT_SPAN_KIND, parent_span.kind.name)
 
         propagation_data: str = None
         if is_local_root(span):
