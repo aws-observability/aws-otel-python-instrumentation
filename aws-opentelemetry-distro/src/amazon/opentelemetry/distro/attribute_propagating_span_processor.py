@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from typing_extensions import override
 
