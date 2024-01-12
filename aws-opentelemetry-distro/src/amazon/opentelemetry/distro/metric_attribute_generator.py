@@ -3,6 +3,9 @@
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import BoundedAttributes, ReadableSpan
 
+SERVICE_METRIC: str = "Service"
+DEPENDENCY_METRIC: str = "Dependency"
+
 
 class MetricAttributeGenerator:
     """MetricAttributeGenerator is an interface for generating metric attributes from a span.
@@ -10,9 +13,6 @@ class MetricAttributeGenerator:
     Metric attribute generator defines an interface for classes that can generate specific attributes to be used by an
     AwsSpanMetricsProcessor to produce metrics and by AwsMetricAttributesSpanExporter to wrap the original span.
     """
-
-    SERVICE_METRIC: str = "Service"
-    DEPENDENCY_METRIC: str = "Dependency"
 
     @staticmethod
     def generate_metric_attributes_dict_from_span(span: ReadableSpan, resource: Resource) -> [str, BoundedAttributes]:
