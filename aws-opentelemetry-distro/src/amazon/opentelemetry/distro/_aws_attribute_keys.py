@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 
-class AwsAttributeKeys:
+class _AwsAttributeKeys:
     """Utility class holding attribute keys with special meaning to AWS components"""
 
     AWS_SPAN_KIND: str = "aws.span.kind"

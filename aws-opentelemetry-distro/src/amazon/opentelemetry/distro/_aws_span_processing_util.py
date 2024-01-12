@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 """Utility module designed to support shared logic across AWS Span Processors."""
-from amazon.opentelemetry.distro._aws_attribute_keys import AwsAttributeKeys
+from amazon.opentelemetry.distro._aws_attribute_keys import _AwsAttributeKeys
 from opentelemetry.sdk.trace import InstrumentationScope, ReadableSpan
 from opentelemetry.semconv.trace import MessagingOperationValues, SpanAttributes
 from opentelemetry.trace import SpanKind
@@ -35,7 +35,7 @@ def get_ingress_operation(__, span: ReadableSpan) -> str:
 def get_egress_operation(span: ReadableSpan) -> str:
     if should_use_internal_operation(span):
         return INTERNAL_OPERATION
-    return span.attributes.get(AwsAttributeKeys.AWS_LOCAL_OPERATION)
+    return span.attributes.get(_AwsAttributeKeys.AWS_LOCAL_OPERATION)
 
 
 def extract_api_path_value(http_target: str) -> str:
@@ -117,7 +117,7 @@ def _is_dependency_consumer_span(span: ReadableSpan) -> bool:
     if is_consumer_process_span(span):
         if is_local_root(span):
             return True
-        parent_span_kind: str = span.attributes.get(AwsAttributeKeys.AWS_CONSUMER_PARENT_SPAN_KIND)
+        parent_span_kind: str = span.attributes.get(_AwsAttributeKeys.AWS_CONSUMER_PARENT_SPAN_KIND)
         return SpanKind.CONSUMER != parent_span_kind
 
     return True
