@@ -4,21 +4,19 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
-    dependencies = [
-    ]
+    dependencies = []
 
     operations = [
         migrations.CreateModel(
-            name='Vehicle',
+            name="Vehicle",
             fields=[
-                ('id', models.AutoField(primary_key=True, serialize=False)),
-                ('make', models.CharField(max_length=255)),
-                ('model', models.CharField(max_length=255)),
-                ('year', models.IntegerField(max_length=4)),
-                ('imageName', models.TextField(max_length=255)),
+                ("id", models.AutoField(primary_key=True, serialize=False)),
+                ("make", models.CharField(max_length=255)),
+                ("model", models.CharField(max_length=255)),
+                ("year", models.IntegerField(max_length=4)),
+                ("imageName", models.TextField(max_length=255)),
             ],
         ),
     ]
