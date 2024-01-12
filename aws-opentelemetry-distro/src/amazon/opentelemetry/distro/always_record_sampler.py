@@ -60,7 +60,7 @@ class AlwaysRecordSampler(Sampler):
         return "AlwaysRecordSampler{" + self._root_sampler.get_description() + "}"
 
 
-def _wrap_result_with_record_only_result(_, result: SamplingResult) -> SamplingResult:
+def _wrap_result_with_record_only_result(result: SamplingResult) -> SamplingResult:
     return SamplingResult(
         Decision.RECORD_ONLY,
         result.attributes,
