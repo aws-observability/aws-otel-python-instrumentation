@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
 from typing_extensions import override
 
@@ -27,13 +27,13 @@ class AttributePropagatingSpanProcessor(SpanProcessor):
 
     _propagation_data_extractor: Callable[[ReadableSpan], str]
     _propagation_data_key: str
-    _attribute_keys_to_propagate: List[str]
+    _attribute_keys_to_propagate: Tuple[str, ...]
 
     def __init__(
         self,
         propagation_data_extractor: Callable[[ReadableSpan], str],
         propagation_data_key: str,
-        attribute_keys_to_propagate: List[str],
+        attribute_keys_to_propagate: Tuple[str, ...],
     ):
         self._propagation_data_extractor = propagation_data_extractor
         self._propagation_data_key = propagation_data_key

@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import Callable, List
+from typing import Callable, List, Tuple
 
 from amazon.opentelemetry.distro._aws_attribute_keys import _AwsAttributeKeys
 from amazon.opentelemetry.distro._aws_span_processing_util import get_ingress_operation
@@ -17,10 +17,10 @@ class AttributePropagatingSpanProcessorBuilder:
 
     _propagation_data_extractor: str = get_ingress_operation
     _propagation_data_key: str = _AwsAttributeKeys.AWS_LOCAL_OPERATION
-    _attributes_keys_to_propagate: List[str] = [
+    _attributes_keys_to_propagate: Tuple[str, ...] = (
         _AwsAttributeKeys.AWS_REMOTE_SERVICE,
         _AwsAttributeKeys.AWS_REMOTE_OPERATION,
-    ]
+    )
 
     def set_propagation_data_extractor(
         self, propagation_data_extractor: Callable[[ReadableSpan], str]
