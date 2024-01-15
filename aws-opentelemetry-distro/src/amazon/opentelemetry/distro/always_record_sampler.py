@@ -13,7 +13,7 @@ from opentelemetry.util.types import Attributes
 
 _logger: Logger = getLogger(__name__)
 
-_OTEL_SAMPLER_ENTRY_POINT_GROUP = "opentelemetry_traces_sampler"
+_OTEL_SAMPLER_ENTRY_POINT_GROUP: str = "opentelemetry_traces_sampler"
 
 
 class AlwaysRecordSampler(Sampler):
@@ -33,6 +33,8 @@ class AlwaysRecordSampler(Sampler):
     _root_sampler: Sampler
 
     def __init__(self, root_sampler: Sampler):
+        if not root_sampler:
+            raise ValueError("root_sampler must not be None")
         self._root_sampler = root_sampler
 
     @override
@@ -55,8 +57,6 @@ class AlwaysRecordSampler(Sampler):
 
     @override
     def get_description(self) -> str:
-        if not self._root_sampler:
-            raise ValueError("root_sampler must not be None")
         return "AlwaysRecordSampler{" + self._root_sampler.get_description() + "}"
 
 

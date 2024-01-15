@@ -3,11 +3,11 @@
 from unittest import TestCase
 
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
-from opentelemetry.sdk.trace.sampling import Sampler
+from opentelemetry.sdk.trace.sampling import Decision, Sampler, StaticSampler
 
 
 class TestAlwaysRecordSampler(TestCase):
     def test_basic(self):
-        sampler: Sampler = AlwaysRecordSampler(None)
-        with self.assertRaises(ValueError):
-            sampler.get_description()
+        root_sampler: Sampler = StaticSampler(Decision.DROP)
+        sampler: Sampler = AlwaysRecordSampler(root_sampler)
+        self.assertIn("AlwaysRecordSampler", sampler.get_description())
