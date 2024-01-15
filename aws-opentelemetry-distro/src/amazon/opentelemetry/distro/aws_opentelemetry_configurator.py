@@ -11,10 +11,11 @@ class AwsTracerProvider(TracerProvider):
         super(AwsTracerProvider, self).__init__()
         self.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
         # TODO:
-        # 1. Add SpanMetricsProcessor to generate AppSignal metrics from spans and exports them
-        # 2. Add AttributePropagatingSpanProcessor to propagate span attributes from parent to child
+        # 1. Remove BatchSpanProcessor(ConsoleSpanExporter())) and update testing instructions
+        # 2. Add SpanMetricsProcessor to generate AppSignal metrics from spans and exports them
         # 3. Add AwsMetricAttributesSpanExporter to add more attributes to all spans.
         # 4. Add AlwaysRecordSampler to record all spans.
+        # 5. Add AttributePropagatingSpanProcessor to propagate span attributes from parent to child.
 
 
 class AwsOpenTelemetryConfigurator(_BaseConfigurator):
