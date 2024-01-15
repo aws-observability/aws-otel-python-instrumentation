@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from typing import Optional, Sequence
 
-from typing_extensions import override
-
 from opentelemetry import trace as trace_api
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Event, ReadableSpan
@@ -19,10 +17,11 @@ class _DelegatingReadableSpan(ReadableSpan):
 
     """
 
-    def __init__(self, readable_span: ReadableSpan) -> None:
+    def __init__(self, readable_span: ReadableSpan, attributes: types.Attributes = None) -> None:
         self._delegate = readable_span
+        self._attributes = attributes
 
-    @override
+    @property
     def dropped_attributes(self) -> int:
         return self._delegate.dropped_attributes
 

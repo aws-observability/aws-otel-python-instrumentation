@@ -1,17 +1,27 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+from types import MappingProxyType
 from typing import List, Sequence
 
+from typing_extensions import override
+
+from amazon.opentelemetry.distro._aws_attribute_keys import AWS_SPAN_KIND
 from amazon.opentelemetry.distro._aws_span_processing_util import (
+    LOCAL_ROOT,
     should_generate_dependency_metric_attributes,
     should_generate_service_metric_attributes,
 )
 from amazon.opentelemetry.distro._delegating_readable_span import _DelegatingReadableSpan
-from amazon.opentelemetry.distro.metric_attribute_generator import MetricAttributeGenerator
+from amazon.opentelemetry.distro.metric_attribute_generator import (
+    DEPENDENCY_METRIC,
+    SERVICE_METRIC,
+    MetricAttributeGenerator,
+)
 from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
+from opentelemetry.util import types
 
 
 class AwsMetricAttributesSpanExporter(SpanExporter):
@@ -31,13 +41,16 @@ class AwsMetricAttributesSpanExporter(SpanExporter):
         self._generator = generator
         self._resource = resource
 
+    @override
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
         modified_spans: Sequence[ReadableSpan] = self._add_metric_attributes(spans)
         return self._delegate.export(modified_spans)
 
+    @override
     def force_flush(self, timeout_millis: int = 30000) -> bool:
         return self._delegate.force_flush(timeout_millis)
 
+    @override
     def shutdown(self) -> None:
         return self._delegate.shutdown()
 
@@ -45,20 +58,27 @@ class AwsMetricAttributesSpanExporter(SpanExporter):
         modified_spans: List[ReadableSpan] = []
 
         for span in spans:
-            attribute_map: [str, BoundedAttributes] = self._generator.generate_metric_attribute_map_from_span(
+            # If the attribute_map has no items, no modifications are required. If there is one item, it means the
+            # span either produces Service or Dependency metric attributes, and in either case we want to
+            # modify the span with them. If there are two items, the span produces both Service and
+            # Dependency metric attributes indicating the span is a local dependency root. The Service
+            # Attributes must be a subset of the Dependency, with the exception of AWS_SPAN_KIND. The
+            # knowledge that the span is a local root is more important that knowing that it is a
+            # Dependency metric, so we take all the Dependency metrics but replace AWS_SPAN_KIND with
+            # LOCAL_ROOT.
+            attribute_map: [str, BoundedAttributes] = self._generator.generate_metric_attributes_dict_from_span(
                 span, self._resource
             )
             generates_service_metrics: bool = should_generate_service_metric_attributes(span)
             generates_dependency_metrics: bool = should_generate_dependency_metric_attributes(span)
 
+            attributes: BoundedAttributes = None
             if generates_service_metrics and generates_dependency_metrics:
-                attributes: BoundedAttributes = copy_attributes_with_local_root(
-                    attribute_map.get(MetricAttributeGenerator.DEPENDENCY_METRIC)
-                )
+                attributes: BoundedAttributes = copy_attributes_with_local_root(attribute_map.get(DEPENDENCY_METRIC))
             elif generates_service_metrics:
-                attributes: BoundedAttributes = attribute_map.get(MetricAttributeGenerator.SERVICE_METRIC)
+                attributes: BoundedAttributes = attribute_map.get(SERVICE_METRIC)
             elif generates_dependency_metrics:
-                attributes: BoundedAttributes = attribute_map.get(MetricAttributeGenerator.DEPENDENCY_METRIC)
+                attributes: BoundedAttributes = attribute_map.get(DEPENDENCY_METRIC)
 
             if attributes:
                 span = wrap_span_with_attributes(span, attributes)
@@ -68,19 +88,38 @@ class AwsMetricAttributesSpanExporter(SpanExporter):
 
 
 def copy_attributes_with_local_root(attributes: BoundedAttributes) -> BoundedAttributes:
-    attributes["AWS_SPAN_KIND"] = "LOCAL_ROOT"
-    return attributes
+    new_attributes: types.Attributes = {}
+    for key, value in attributes:
+        new_attributes[key] = value
+
+    new_attributes[AWS_SPAN_KIND] = LOCAL_ROOT
+
+    return BoundedAttributes(
+        maxlen=attributes.maxlen,
+        attributes=new_attributes,
+        immutable=attributes._immutable,
+        max_value_len=attributes.max_value_len,
+    )
 
 
+# ReadableSpan does not permit modification. However, we need to add derived metric attributes to the span.
+# To work around this, we will wrap the ReadableSpan with a _DelegatingReadableSpan
+# that simply passes through all API calls, except for those pertaining to Attributes,
+# i.e. ReadableSpan.attributes, similar as DelegatingSpanData class in Java.
+# See https://github.com/open-telemetry/opentelemetry-specification/issues/1089 for more context on this approach.
 def wrap_span_with_attributes(span: ReadableSpan, attributes: BoundedAttributes) -> ReadableSpan:
     original_attributes: BoundedAttributes = span.attributes
-    updated_attributes: BoundedAttributes = original_attributes.copy()
-    updated_attributes.update(attributes)
+    update_attributes: types.Attributes = {}
+    # Copy all attribute in span into update_attributes
+    for key, value in original_attributes:
+        update_attributes[key] = value
+    # Append all attribute in attributes that is not in original_attributes into update_attributes
+    for key, value in attributes:
+        if key not in update_attributes:
+            update_attributes[key] = value
 
-    def span_attributes_override_function(self):
-        return updated_attributes
-
-    delegating_span = _DelegatingReadableSpan(readable_span=span)
-    delegating_span.attributes = property(span_attributes_override_function)
+    delegating_span: _DelegatingReadableSpan = _DelegatingReadableSpan(
+        readable_span=span, attributes=MappingProxyType(update_attributes)
+    )
 
     return delegating_span
