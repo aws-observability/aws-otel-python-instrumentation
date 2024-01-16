@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 from unittest import TestCase
 
-from amazon.opentelemetry.distro.aws_opentelemetry_configurator import AwsOpenTelemetryConfigurator, AwsTracerProvider
+from amazon.opentelemetry.distro.aws_opentelemetry_configurator import AwsOpenTelemetryConfigurator
+from opentelemetry.sdk.trace import TracerProvider
 
 
 class TestAwsOpenTelemetryConfigurator(TestCase):
@@ -10,4 +11,4 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         configurator = AwsOpenTelemetryConfigurator()
         configurator.configure()
         trace_provider = configurator.get_trace_provider()
-        self.assertTrue(isinstance(trace_provider, AwsTracerProvider))
+        self.assertTrue(isinstance(trace_provider, TracerProvider))
