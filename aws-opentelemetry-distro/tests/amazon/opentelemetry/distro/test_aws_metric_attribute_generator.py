@@ -15,6 +15,3 @@ class TestAwsMetricAttributeGenerator(TestCase):
         span: ReadableSpan = ReadableSpan("test", context, parent_context)
         resource: Resource = Resource({})
         self.assertEqual(generator.generate_metric_attributes_dict_from_span(span, resource), {})
-
-    # TODO: Test on the functionality of span._attributes = MappingProxyType(update_attributes)
-    #  making sure it doesn't regress.

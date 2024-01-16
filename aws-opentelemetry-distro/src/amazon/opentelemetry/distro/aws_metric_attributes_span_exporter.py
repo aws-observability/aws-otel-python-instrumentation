@@ -73,11 +73,11 @@ class AwsMetricAttributesSpanExporter(SpanExporter):
 
             attributes: BoundedAttributes = None
             if generates_service_metrics and generates_dependency_metrics:
-                attributes: BoundedAttributes = copy_attributes_with_local_root(attribute_map.get(DEPENDENCY_METRIC))
+                attributes = copy_attributes_with_local_root(attribute_map.get(DEPENDENCY_METRIC))
             elif generates_service_metrics:
-                attributes: BoundedAttributes = attribute_map.get(SERVICE_METRIC)
+                attributes = attribute_map.get(SERVICE_METRIC)
             elif generates_dependency_metrics:
-                attributes: BoundedAttributes = attribute_map.get(DEPENDENCY_METRIC)
+                attributes = attribute_map.get(DEPENDENCY_METRIC)
 
             if attributes:
                 span = wrap_span_with_attributes(span, attributes)
@@ -101,13 +101,12 @@ def copy_attributes_with_local_root(attributes: BoundedAttributes) -> BoundedAtt
     )
 
 
-# ReadableSpan does not permit modification. However, we need to add derived metric attributes to the span.
-# To work around this, we will wrap the ReadableSpan with a _DelegatingReadableSpan
-# that simply passes through all API calls, except for those pertaining to Attributes,
-# i.e. ReadableSpan.attributes, similar as DelegatingSpanData class in Java.
-# See https://github.com/open-telemetry/opentelemetry-specification/issues/1089 for more context on this approach.
+# TODO: AwsMetricAttributesSpanExporter depends on internal ReadableSpan method _attributes.
+#  This is a bit risky but is required for our implementation.
+#  The risk is that the implementation of _attributes changes in the future.
+#  We need tests that thoroughly test this behaviour to make sure it does not change upstream.
 def wrap_span_with_attributes(span: ReadableSpan, attributes: BoundedAttributes) -> ReadableSpan:
-    original_attributes: BoundedAttributes = span.attributes
+    original_attributes: types.Attributes = span.attributes
     update_attributes: types.Attributes = {}
     # Copy all attribute in span into update_attributes
     for key, value in original_attributes:
