@@ -11,7 +11,6 @@ from amazon.opentelemetry.distro._aws_span_processing_util import (
     should_generate_dependency_metric_attributes,
     should_generate_service_metric_attributes,
 )
-from amazon.opentelemetry.distro._delegating_readable_span import _DelegatingReadableSpan
 from amazon.opentelemetry.distro.metric_attribute_generator import (
     DEPENDENCY_METRIC,
     SERVICE_METRIC,
@@ -118,8 +117,5 @@ def wrap_span_with_attributes(span: ReadableSpan, attributes: BoundedAttributes)
         if key not in update_attributes:
             update_attributes[key] = value
 
-    delegating_span: _DelegatingReadableSpan = _DelegatingReadableSpan(
-        readable_span=span, attributes=MappingProxyType(update_attributes)
-    )
-
-    return delegating_span
+    span._attributes = MappingProxyType(update_attributes)
+    return span
