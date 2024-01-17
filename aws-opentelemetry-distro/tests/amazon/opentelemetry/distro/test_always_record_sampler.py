@@ -33,7 +33,7 @@ class TestAlwaysRecordSampler(TestCase):
             name="name",
             kind=SpanKind.CLIENT,
             attributes={},
-            trace_state=TraceState()
+            trace_state=TraceState(),
         )
 
         if root_decision == expected_decision:
@@ -52,8 +52,6 @@ class TestAlwaysRecordSampler(TestCase):
         sampling_trace_state: TraceState = TraceState()
         sampling_trace_state.add("key", sampling_decision.name)
         sampling_result: SamplingResult = SamplingResult(
-            decision=sampling_decision,
-            attributes=sampling_attr,
-            trace_state=sampling_trace_state
+            decision=sampling_decision, attributes=sampling_attr, trace_state=sampling_trace_state
         )
         return sampling_result
