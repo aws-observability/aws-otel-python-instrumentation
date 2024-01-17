@@ -4,11 +4,11 @@ from unittest import TestCase
 from unittest.mock import MagicMock
 
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
-from opentelemetry.sdk.trace.sampling import Decision, Sampler, StaticSampler, SamplingResult
-from opentelemetry.util.types import Attributes
-from opentelemetry.trace.span import TraceState
 from opentelemetry.context import Context
+from opentelemetry.sdk.trace.sampling import Decision, Sampler, SamplingResult, StaticSampler
 from opentelemetry.trace import SpanKind
+from opentelemetry.trace.span import TraceState
+from opentelemetry.util.types import Attributes
 
 
 class TestAlwaysRecordSampler(TestCase):
