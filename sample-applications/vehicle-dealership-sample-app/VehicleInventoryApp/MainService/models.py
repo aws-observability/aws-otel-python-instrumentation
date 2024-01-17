@@ -6,4 +6,4 @@ class Vehicle(models.Model):
     make = models.CharField(max_length=255)
     model = models.CharField(max_length=255)
     year = models.IntegerField()
-    imageName = models.TextField(max_length=255)
+    image_name = models.TextField(max_length=255)

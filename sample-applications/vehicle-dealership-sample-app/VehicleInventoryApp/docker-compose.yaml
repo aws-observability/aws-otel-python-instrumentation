@@ -7,10 +7,10 @@ services:
     volumes:
       - data:/var/lib/mysql
     environment:
-      MYSQL_ROOT_PASSWORD: qwerty
-      MYSQL_DATABASE: vehicle_inventory
-      MYSQL_USER: djangouser
-      MYSQL_PASSWORD: qwerty
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     ports:
       - "3306:3306"
     healthcheck:
@@ -20,7 +20,8 @@ services:
     expose:
       - 3306
 
-  backend:
+  vehicle-inventory-backend:
+    image: pythonsampleapp/vehicle-inventory-service
     build:
       context: .
       dockerfile: Dockerfile

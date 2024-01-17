@@ -7,22 +7,27 @@ from django.http import HttpResponse, HttpResponseNotAllowed
 from django.views.decorators.csrf import csrf_exempt
 
 s3_client = boto3.client("s3")
+s3_resource = boto3.resource("s3")
 sqs = boto3.resource("sqs", region_name="us-west-2")
+
+
+# create resources if they don't exist
+bucket_name = "vehicle-inventory-image-bucket"
+bucket = s3_resource.create_bucket(Bucket=bucket_name)
+queue = sqs.create_queue(QueueName="imageQueue.fifo", Attributes={"FifoQueue": "true"})
 
 
 def read_from_queue():
     while True:
-        queue = sqs.get_queue_by_name(QueueName="imageQueue.fifo")
         for message in queue.receive_messages():
             image_name = message.body
             print("receiving " + image_name + " from the queue")
-            s3_client.put_object(Bucket="image-service-test", Key=image_name)
+            s3_client.put_object(Bucket=bucket_name, Key=image_name)
             message.delete()
         sleep(10)
 
 
 thread = Thread(target=read_from_queue)
-thread.start()
 
 
 def index(request):
@@ -43,7 +48,7 @@ def handle_image(request, image_name):
 
 
 def get_image(image_name):
-    s3_object = s3_client.get_object(Bucket="image-service-test", Key=image_name)
+    s3_object = s3_client.get_object(Bucket=bucket_name, Key=image_name)
     return str(s3_object)
 
 
@@ -53,7 +58,8 @@ def get_remote_image(request):
 
 
 def put_image(image_name):
-    queue = sqs.get_queue_by_name(QueueName="imageQueue.fifo")
     queue.send_message(MessageBody=image_name, MessageGroupId="1")
     print("adding " + image_name + " to the queue")
-    return HttpResponse("added to the queue")
+    if not thread.is_alive():
+        thread.start()
+    return HttpResponse("Image added to the queue")

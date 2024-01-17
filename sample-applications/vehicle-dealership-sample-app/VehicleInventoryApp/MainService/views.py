@@ -1,9 +1,20 @@
 import json
+import logging
+import os
+import traceback
 
 import requests
-from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseNotAllowed, HttpResponseRedirect
+from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseNotAllowed
 from django.views.decorators.csrf import csrf_exempt
+from dotenv import load_dotenv
 from MainService.models import Vehicle
+
+load_dotenv()
+
+
+def get_image_endpoint():
+    load_dotenv()
+    return "http://" + os.environ.get("IMAGE_BACKEND_SERVICE_HOST") + ":" + os.environ.get("IMAGE_BACKEND_SERVICE_PORT")
 
 
 @csrf_exempt
@@ -13,13 +24,17 @@ def vehicle(request):
         body = json.loads(body_unicode)
         try:
             vehicle_object = Vehicle(
-                make=body["make"], model=body["model"], year=body["year"], imageName=body["imageName"]
+                make=body["make"], model=body["model"], year=body["year"], image_name=body["image_name"]
             )
             vehicle_object.save()
-            requests.post("http://0.0.0.0:8000/images/name/" + body["imageName"])
+            print(get_image_endpoint() + "/images/name/" + body["image_name"])
+            requests.post(get_image_endpoint() + "/images/name/" + body["image_name"])
             return HttpResponse("VehicleId = " + str(vehicle_object.id))
         except KeyError as e:
             return HttpResponseBadRequest("Missing key: " + str(e))
+        except Exception as e:
+            logging.error(traceback.format_exc())
+            logging.error(str(e))
     elif request.method == "GET":
         vehicle_objects = Vehicle.objects.all().values()
         return HttpResponse(vehicle_objects)
@@ -38,17 +53,7 @@ def get_vehicle_by_id(request, vehicle_id):
 def get_vehicle_image(request, vehicle_id):
     if request.method == "GET":
         vehicle_object = Vehicle.objects.filter(id=vehicle_id).first()
-        image_name = getattr(vehicle_object, "imageName")
-        return HttpResponse(requests.get("http://0.0.0.0:8000/images/name/" + image_name))
+        image_name = getattr(vehicle_object, "image_name")
+        return HttpResponse(requests.get(get_image_endpoint() + "/images/name/" + image_name))
     else:
         return HttpResponseNotAllowed()
-
-
-def redirect(request, **kwargs):
-    print(request.path)
-    return HttpResponseRedirect("http://0.0.0.0:8000" + request.path)
-
-
-# add api to call other microservice
-
-# Do we need api gateway? could just route from vehicle to image service.

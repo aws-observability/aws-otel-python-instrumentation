@@ -16,4 +16,4 @@ Including another URLconf
 """
 from django.urls import include, path
 
-urlpatterns = [path("", include("MainService.url"))]
+urlpatterns = [path("vehicle-inventory/", include("MainService.url"))]
