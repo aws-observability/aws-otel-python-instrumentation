@@ -1,7 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from types import MappingProxyType
-from typing import List, Sequence
+from typing import List, Sequence, TypeVar
 
 from typing_extensions import override
 
@@ -21,6 +20,8 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from opentelemetry.util import types
+
+AttributesT = TypeVar("AttributesT", types.Attributes, BoundedAttributes)
 
 
 class AwsMetricAttributesSpanExporter(SpanExporter):
@@ -106,7 +107,7 @@ def copy_attributes_with_local_root(attributes: BoundedAttributes) -> BoundedAtt
 #  The risk is that the implementation of _attributes changes in the future.
 #  We need tests that thoroughly test this behaviour to make sure it does not change upstream.
 def wrap_span_with_attributes(span: ReadableSpan, attributes: BoundedAttributes) -> ReadableSpan:
-    original_attributes: types.Attributes = span.attributes
+    original_attributes: AttributesT = span.attributes
     update_attributes: types.Attributes = {}
     # Copy all attribute in span into update_attributes
     for key, value in original_attributes:
@@ -116,5 +117,13 @@ def wrap_span_with_attributes(span: ReadableSpan, attributes: BoundedAttributes)
         if key not in update_attributes:
             update_attributes[key] = value
 
-    span._attributes = MappingProxyType(update_attributes)
+    if isinstance(original_attributes, BoundedAttributes):
+        span._attributes = BoundedAttributes(
+            maxlen=original_attributes.maxlen,
+            attributes=update_attributes,
+            immutable=original_attributes._immutable,
+            max_value_len=original_attributes.max_value_len,
+        )
+    else:
+        span._attributes = update_attributes
     return span
