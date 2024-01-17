@@ -9,6 +9,9 @@ from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSample
 from amazon.opentelemetry.distro.attribute_propagating_span_processor_builder import (
     AttributePropagatingSpanProcessorBuilder,
 )
+from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder import (
+    AwsMetricAttributesSpanExporterBuilder,
+)
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.metrics import get_meter_provider, set_meter_provider
@@ -47,14 +50,31 @@ from opentelemetry.sdk.metrics.export import (
 )
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter, SpanExporter
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
 from opentelemetry.sdk.trace.id_generator import IdGenerator
 from opentelemetry.sdk.trace.sampling import Sampler
 from opentelemetry.semconv.resource import ResourceAttributes
 from opentelemetry.trace import set_tracer_provider
 
+OTEL_SMP_ENABLED = "OTEL_SMP_ENABLED"
+OTEL_METRIC_EXPORT_INTERVAL = "OTEL_METRIC_EXPORT_INTERVAL"
+OTEL_AWS_SMP_EXPORTER_ENDPOINT = "OTEL_AWS_SMP_EXPORTER_ENDPOINT"
+
 
 class AwsOpenTelemetryConfigurator(_BaseConfigurator):
+    """
+    This AwsOpenTelemetryConfigurator extend _BaseConfigurator configuration with the following change:
+
+    - Use AlwaysRecordSampler to record all spans.
+    - Add SpanMetricsProcessor to create metrics.
+    - Add AttributePropagatingSpanProcessor to propagate span attributes from parent to child spans.
+    - Add AwsMetricAttributesSpanExporter to add more attributes to all spans.
+    - Use AwsXRayIdGenerator to generate trace ID
+
+    You can control when these customizations are applied using the environment variable OTEL_SMP_ENABLED.
+    This flag is disabled by default.
+    """
+
     def __init__(self):
         self.trace_provider = None
 
@@ -82,9 +102,7 @@ class AwsOpenTelemetryConfigurator(_BaseConfigurator):
         auto_resource: Dict[str, str] = {}
         # populate version if using auto-instrumentation
         if auto_instrumentation_version:
-            auto_resource[
-                ResourceAttributes.TELEMETRY_AUTO_VERSION
-            ] = auto_instrumentation_version
+            auto_resource[ResourceAttributes.TELEMETRY_AUTO_VERSION] = auto_instrumentation_version
         resource: Resource = Resource.create(auto_resource)
 
         self._init_tracing(
@@ -107,19 +125,23 @@ class AwsOpenTelemetryConfigurator(_BaseConfigurator):
         resource: Resource = None,
     ):
         if is_smp_enabled():
-            sampler: Sampler = AlwaysRecordSampler(sampler)
+            if sampler:
+                sampler: Sampler = AlwaysRecordSampler(sampler)
             id_generator: IdGenerator = AwsXRayIdGenerator()
+
         self.trace_provider: TracerProvider = TracerProvider(
             id_generator=id_generator,
             sampler=sampler,
             resource=resource,
         )
         set_tracer_provider(self.trace_provider)
+
         exporter_args: Dict[str, any] = {}
         if is_smp_enabled():
             for _, exporter_class in trace_exporters.items():
-                # span_exporter: SpanExporter = AttributeSpanExporter(exporter_class(**exporter_args))
-                span_exporter: SpanExporter = exporter_class(**exporter_args)
+                span_exporter: SpanExporter = AwsMetricAttributesSpanExporterBuilder(
+                    exporter_class(**exporter_args), resource
+                ).build()
                 self.trace_provider.add_span_processor(BatchSpanProcessor(span_exporter))
             self.trace_provider.add_span_processor(AttributePropagatingSpanProcessorBuilder().build())
             meter_provider: MeterProvider = get_meter_provider()
@@ -128,9 +150,6 @@ class AwsOpenTelemetryConfigurator(_BaseConfigurator):
             for _, exporter_class in trace_exporters.items():
                 span_exporter: SpanExporter = exporter_class(**exporter_args)
                 self.trace_provider.add_span_processor(BatchSpanProcessor(span_exporter))
-
-        # TODO: Remove BatchSpanProcessor(ConsoleSpanExporter())) and update testing instructions
-        self.trace_provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
 
     # pylint: disable=no-self-use
     def _init_metrics(
@@ -164,13 +183,13 @@ class AwsOpenTelemetryConfigurator(_BaseConfigurator):
                 temporality_dict[typ] = AggregationTemporality.DELTA
             aggregation_dict[Histogram] = ExponentialBucketHistogramAggregation()
             temporality_dict[Histogram] = AggregationTemporality.DELTA
-            export_endpoint = os.environ.get(
-                "OTEL_AWS_SMP_EXPORTER_ENDPOINT", "http://cloudwatch-agent.amazon-cloudwatch:4317"
+            smp_endpoint = os.environ.get(
+                OTEL_AWS_SMP_EXPORTER_ENDPOINT, "http://cloudwatch-agent.amazon-cloudwatch:4317"
             )
             otel_metric_exporter = OTLPMetricExporter(
-                endpoint=export_endpoint, preferred_aggregation=aggregation_dict, preferred_temporality=temporality_dict
+                endpoint=smp_endpoint, preferred_aggregation=aggregation_dict, preferred_temporality=temporality_dict
             )
-            export_interval_millis = float(os.environ.get("OTEL_METRIC_EXPORT_INTERVAL", 60000))
+            export_interval_millis = float(os.environ.get(OTEL_METRIC_EXPORT_INTERVAL, 60000))
             periodic_exporting_metric_reader = PeriodicExportingMetricReader(
                 exporter=otel_metric_exporter, export_interval_millis=export_interval_millis
             )
@@ -178,5 +197,6 @@ class AwsOpenTelemetryConfigurator(_BaseConfigurator):
         provider = MeterProvider(resource=resource, metric_readers=metric_readers)
         set_meter_provider(provider)
 
+
 def is_smp_enabled():
-    return os.environ.get("OTEL_SMP_ENABLED", False)
+    return os.environ.get(OTEL_SMP_ENABLED, False)
