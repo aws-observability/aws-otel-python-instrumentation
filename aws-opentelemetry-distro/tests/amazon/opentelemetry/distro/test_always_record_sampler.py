@@ -22,9 +22,9 @@ class TestAlwaysRecordSampler(TestCase):
         self.assertIn("AlwaysRecordSampler", test_sampler.get_description())
 
     def test_record_and_sample_sampling_decision(self):
-        self.validateShouldSample(Decision.RECORD_AND_SAMPLE, Decision.RECORD_AND_SAMPLE)
+        self.validate_should_sample(Decision.RECORD_AND_SAMPLE, Decision.RECORD_AND_SAMPLE)
 
-    def validateShouldSample(self, root_decision: Decision, expected_decision: Decision):
+    def validate_should_sample(self, root_decision: Decision, expected_decision: Decision):
         root_result: SamplingResult = self.sampling_result(root_decision)
         self.mock_sampler.should_sample.return_value = root_result
         actual_result: SamplingResult = self.sampler.should_sample(
