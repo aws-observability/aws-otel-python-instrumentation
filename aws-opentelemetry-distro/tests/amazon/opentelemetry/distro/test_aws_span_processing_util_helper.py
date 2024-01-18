@@ -83,6 +83,7 @@ class TestAwsSpanProcessingUtilHelper(TestCase):
                 return MessagingOperationValues.PROCESS
             if key == AWS_CONSUMER_PARENT_SPAN_KIND:
                 return SpanKind.CONSUMER
+            return None
 
         self.attributes_mock.get.side_effect = attributes_side_effect
         self.span_data_mock.attributes = self.attributes_mock

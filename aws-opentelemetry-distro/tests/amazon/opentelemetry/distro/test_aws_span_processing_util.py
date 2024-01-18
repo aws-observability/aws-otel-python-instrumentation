@@ -52,6 +52,7 @@ class TestAwsSpanProcessingUtil(TestCase):
         def mock_get(key):
             if key == SpanAttributes.HTTP_METHOD:
                 return invalid_name
+            return None
 
         self.attributes_mock.get.side_effect = mock_get
         actual_operation: str = get_ingress_operation(self, self.span_data_mock)
@@ -66,6 +67,7 @@ class TestAwsSpanProcessingUtil(TestCase):
         def mock_get(key):
             if key == SpanAttributes.HTTP_TARGET:
                 return valid_target
+            return None
 
         self.attributes_mock.get.side_effect = mock_get
         actual_operation = get_ingress_operation(self, self.span_data_mock)
@@ -83,6 +85,7 @@ class TestAwsSpanProcessingUtil(TestCase):
                 return valid_target
             if key == SpanAttributes.HTTP_METHOD:
                 return valid_method
+            return None
 
         self.attributes_mock.get.side_effect = mock_get
         actual_operation = get_ingress_operation(self, self.span_data_mock)
@@ -103,6 +106,7 @@ class TestAwsSpanProcessingUtil(TestCase):
         def mock_get(key):
             if key == AWS_LOCAL_OPERATION:
                 return operation
+            return None
 
         self.attributes_mock.get.side_effect = mock_get
         self.span_data_mock.attributes = self.attributes_mock
