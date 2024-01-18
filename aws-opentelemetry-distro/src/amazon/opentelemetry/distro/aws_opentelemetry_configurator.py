@@ -127,19 +127,19 @@ def _init_tracing(
     set_tracer_provider(trace_provider)
 
 
-def _customize_sampler(sampler: Sampler):
+def _customize_sampler(sampler: Sampler) -> Sampler:
     if not is_smp_enabled():
         return sampler
     return AlwaysRecordSampler(sampler)
 
 
-def _customize_exporter(span_exporter: SpanExporter, resource: Resource):
+def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> SpanExporter:
     if not is_smp_enabled():
         return span_exporter
     return AwsMetricAttributesSpanExporterBuilder(span_exporter, resource).build()
 
 
-def _customize_span_processors(provider: TracerProvider, resource: Resource):
+def _customize_span_processors(provider: TracerProvider, resource: Resource) -> None:
     if not is_smp_enabled():
         return
 
