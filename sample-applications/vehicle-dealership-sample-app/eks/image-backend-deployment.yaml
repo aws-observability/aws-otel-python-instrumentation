@@ -28,6 +28,9 @@ spec:
         io.kompose.service: image-backend
     spec:
       containers:
+        - env:
+            - name: S3_BUCKET
+              value: ${S3_BUCKET}
         - args:
             - sh
             - -c

@@ -1,3 +1,4 @@
+import os
 from threading import Thread
 from time import sleep
 
@@ -5,6 +6,9 @@ import boto3
 import requests
 from django.http import HttpResponse, HttpResponseNotAllowed
 from django.views.decorators.csrf import csrf_exempt
+from dotenv import load_dotenv
+
+load_dotenv()
 
 s3_client = boto3.client("s3")
 s3_resource = boto3.resource("s3")
@@ -12,7 +16,8 @@ sqs = boto3.resource("sqs", region_name="us-west-2")
 
 
 # create resources if they don't exist
-bucket_name = "vehicle-inventory-image-bucket"
+# TODO: auto gen bucket name
+bucket_name = os.environ.get("S3_BUCKET")
 bucket = s3_resource.create_bucket(Bucket=bucket_name)
 queue = sqs.create_queue(QueueName="imageQueue.fifo", Attributes={"FifoQueue": "true"})
 

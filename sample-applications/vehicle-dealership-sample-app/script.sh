@@ -4,12 +4,14 @@ account=$1
 cluster_name=$2
 region=$3
 password=$4
+s3_bucket=$5
 
 export REPOSITORY_PREFIX=${account}.dkr.ecr.$region.amazonaws.com
 export MYSQL_ROOT_PASSWORD=${password}
 export MYSQL_DATABASE=vehicle_inventory
 export MYSQL_USER=djangouser
 export MYSQL_PASSWORD=${password}
+export S3_BUCKET=${s3_bucket}
 
 rm VehicleInventoryApp/.env
 touch VehicleInventoryApp/.env

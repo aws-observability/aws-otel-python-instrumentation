@@ -23,7 +23,7 @@ This directory contains code for a microservices based sample app that is used t
 
 ### EKS
 To get started with AWS EKS, you can run the one touch script as below.
-`bash script.sh <account_id> <cluster_name> <region> <mysql_password>`
+`bash script.sh <account_id> <cluster_name> <region> <mysql_password> <s3_bucket_name>`
 
 This will create the docker images, upload them to ECR and then create pods on EKS with those images. 
 
@@ -41,7 +41,7 @@ TODO
 
 ### Locally with Docker
 To get started, make sure you either have you AWS creds in `$HOME/.aws` or the following: `AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN` are exported.
-1. Run `bash local_script.sh <mysql_pass>`. 
+1. Run `bash local_script.sh <mysql_pass> <s3_bucket_name>`. 
 This will create docker containers, move the requirement env variables there and start them up. 
 
 They should be accessible through `0.0.0.0:8000` for the image service and `0.0.0.0:8001` for the vehicle service. 

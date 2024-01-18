@@ -1,6 +1,21 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 password=$1
+s3_bucket=$2
+
+if [ -n "$1" ]; then
+    password="$1"
+else
+    echo "password can't be empty!"
+    exit 1
+fi
+
+if [ -n "$2" ]; then
+    s3_bucket="$2"
+else
+    echo "s3 bucket cannot be empty!"
+    exit 1
+fi
 
 rm VehicleInventoryApp/.env
 rm ImageServiceApp/.env
@@ -17,7 +32,8 @@ echo "IMAGE_BACKEND_SERVICE_PORT=8000" >> VehicleInventoryApp/.env
 echo "AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}" >> ImageServiceApp/.env
 echo "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}" >> ImageServiceApp/.env
 echo "AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}" >> ImageServiceApp/.env
+echo "S3_BUCKET=${s3_bucket}" >> ImageServiceApp/.env
 
 
-docker compose -f VehicleInventoryApp/docker-compose.yaml up --build&
-docker compose -f ImageServiceApp/docker-compose.yaml up --build&
+#docker compose -f VehicleInventoryApp/docker-compose.yaml up --build&
+#docker compose -f ImageServiceApp/docker-compose.yaml up --build&
