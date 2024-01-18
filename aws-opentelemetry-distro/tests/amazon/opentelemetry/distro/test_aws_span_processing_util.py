@@ -1,15 +1,23 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from unittest.mock import MagicMock
 from unittest import TestCase
+from unittest.mock import MagicMock
 
 from opentelemetry.semconv.trace import SpanAttributes
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_OPERATION, AWS_CONSUMER_PARENT_SPAN_KIND
-from amazon.opentelemetry.distro._aws_span_processing_util import get_ingress_operation, get_egress_operation, \
-    extract_api_path_value, is_key_present, is_aws_sdk_span, should_use_internal_operation, \
-    should_generate_service_metric_attributes, should_generate_dependency_metric_attributes, is_local_root, \
-    is_consumer_process_span
+from amazon.opentelemetry.distro._aws_span_processing_util import (
+    get_ingress_operation,
+    get_egress_operation,
+    extract_api_path_value,
+    is_key_present,
+    is_aws_sdk_span,
+    should_use_internal_operation,
+    should_generate_service_metric_attributes,
+    should_generate_dependency_metric_attributes,
+    is_local_root,
+    is_consumer_process_span,
+)
 from opentelemetry.util.types import Attributes
 from opentelemetry.trace import SpanKind
 from opentelemetry.sdk.trace import Span, SpanContext
@@ -18,9 +26,9 @@ from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 
 
 class TestAwsSpanProcessingUtil(TestCase):
-    DEFAULT_PATH_VALUE: str = '/'
-    UNKNOWN_OPERATION: str = 'UnknownOperation'
-    INTERNAL_OPERATION: str = 'InternalOperation'
+    DEFAULT_PATH_VALUE: str = "/"
+    UNKNOWN_OPERATION: str = "UnknownOperation"
+    INTERNAL_OPERATION: str = "InternalOperation"
 
     def setUp(self):
         self.attributes_mock: Attributes = MagicMock()
@@ -151,12 +159,12 @@ class TestAwsSpanProcessingUtil(TestCase):
     def test_is_key_present_key_present(self):
         self.attributes_mock.get.return_value = "target"
         self.span_data_mock.attributes = self.attributes_mock
-        self.assertTrue(is_key_present(self.span_data_mock, 'HTTP_TARGET'))
+        self.assertTrue(is_key_present(self.span_data_mock, "HTTP_TARGET"))
 
     def test_is_key_present_key_absent(self):
         self.attributes_mock.get.return_value = None
         self.span_data_mock.attributes = self.attributes_mock
-        self.assertFalse(is_key_present(self.span_data_mock, 'HTTP_TARGET'))
+        self.assertFalse(is_key_present(self.span_data_mock, "HTTP_TARGET"))
 
     def test_is_aws_span_true(self):
         self.attributes_mock.get.return_value = "aws-api"
