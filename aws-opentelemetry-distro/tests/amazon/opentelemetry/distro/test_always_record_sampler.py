@@ -28,7 +28,7 @@ class TestAlwaysRecordSampler(TestCase):
         self.validate_should_sample(Decision.RECORD_ONLY, Decision.RECORD_ONLY)
 
     def test_drop_sampling_decision(self):
-        self.validate_should_sample(Decision.DROP, Decision.RECORD_AND_SAMPLE)
+        self.validate_should_sample(Decision.DROP, Decision.RECORD_ONLY)
 
     def validate_should_sample(self, root_decision: Decision, expected_decision: Decision):
         root_result: SamplingResult = _build_root_sampling_result(root_decision)
@@ -47,7 +47,7 @@ class TestAlwaysRecordSampler(TestCase):
             self.assertEqual(actual_result.decision, root_decision)
         else:
             self.assertNotEqual(actual_result, root_result)
-            self.assertNotEqual(actual_result.decision, expected_decision)
+            self.assertEqual(actual_result.decision, expected_decision)
 
         self.assertEqual(actual_result.attributes, root_result.attributes)
         self.assertEqual(actual_result.trace_state, root_result.trace_state)
