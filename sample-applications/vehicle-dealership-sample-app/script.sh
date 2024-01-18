@@ -13,12 +13,7 @@ export MYSQL_USER=djangouser
 export MYSQL_PASSWORD=${password}
 export S3_BUCKET=${s3_bucket}
 
-rm VehicleInventoryApp/.env
-touch VehicleInventoryApp/.env
-rm ImageServiceApp/.env
-touch ImageServiceApp/.env
-docker compose -f VehicleInventoryApp/docker-compose.yaml build
-docker compose -f ImageServiceApp/docker-compose.yaml build
+docker-compose up --build
 
 eksctl create cluster --name ${cluster_name} --region ${region} --zones ${region}a,${region}b
 eksctl create addon --name aws-ebs-csi-driver --cluster ${cluster_name} --service-account-role-arn arn:aws:iam::${account}:role/Admin --region ${region} --force
