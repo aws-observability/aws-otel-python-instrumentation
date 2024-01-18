@@ -1,3 +1,5 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
 from unittest import TestCase
 from unittest.mock import MagicMock
 
@@ -79,7 +81,7 @@ class TestAwsSpanProcessingUtilHelper(TestCase):
         def attributes_side_effect(key):
             if key == SpanAttributes.MESSAGING_OPERATION:
                 return MessagingOperationValues.PROCESS
-            elif key == AWS_CONSUMER_PARENT_SPAN_KIND:
+            if key == AWS_CONSUMER_PARENT_SPAN_KIND:
                 return SpanKind.CONSUMER
 
         self.attributes_mock.get.side_effect = attributes_side_effect

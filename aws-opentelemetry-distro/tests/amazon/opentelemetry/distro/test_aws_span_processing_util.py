@@ -81,7 +81,7 @@ class TestAwsSpanProcessingUtil(TestCase):
         def mock_get(key):
             if key == SpanAttributes.HTTP_TARGET:
                 return valid_target
-            elif key == SpanAttributes.HTTP_METHOD:
+            if key == SpanAttributes.HTTP_METHOD:
                 return valid_method
 
         self.attributes_mock.get.side_effect = mock_get
