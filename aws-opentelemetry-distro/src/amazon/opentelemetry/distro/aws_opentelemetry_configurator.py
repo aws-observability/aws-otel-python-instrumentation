@@ -69,6 +69,7 @@ class AwsOpenTelemetryConfigurator(_OTelSDKConfigurator):
     This flag is disabled by default.
     """
 
+    # pylint: disable=no-self-use
     @override
     def _configure(self, **kwargs):
         _initialize_components(kwargs.get("auto_instrumentation_version"))
