@@ -9,8 +9,8 @@ ENV PYTHONUNBUFFERED 1
 WORKDIR /image-service-app
 
 # Install dependencies
-COPY requirements.txt /image-service-app/
+COPY ImageServiceApp/requirements.txt /image-service-app/
 RUN pip install -r requirements.txt
 
 # Copy the project code into the container
-COPY . /image-service-app/
+COPY ImageServiceApp/. /image-service-app/

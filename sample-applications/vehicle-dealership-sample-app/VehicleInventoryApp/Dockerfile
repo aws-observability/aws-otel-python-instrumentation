@@ -9,8 +9,8 @@ ENV PYTHONUNBUFFERED 1
 WORKDIR /vehicle-inventory-app
 
 # Install dependencies
-COPY requirements.txt /vehicle-inventory-app/
+COPY VehicleInventoryApp/requirements.txt /vehicle-inventory-app/
 RUN pip install -r requirements.txt
 
 # Copy the project code into the container
-COPY . /vehicle-inventory-app/
+COPY VehicleInventoryApp/. /vehicle-inventory-app/
