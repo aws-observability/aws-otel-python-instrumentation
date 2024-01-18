@@ -14,6 +14,7 @@ from opentelemetry.semconv.trace import MessagingOperationValues, SpanAttributes
 from opentelemetry.trace import SpanKind
 from opentelemetry.util.types import Attributes
 
+
 class TestAwsSpanProcessingUtilHelper(TestCase):
     DEFAULT_PATH_VALUE: str = "/"
     UNKNOWN_OPERATION: str = "UnknownOperation"
@@ -88,7 +89,6 @@ class TestAwsSpanProcessingUtilHelper(TestCase):
 
         parent_span_context_mock.is_valid = False
         self.assertTrue(should_generate_dependency_metric_attributes(self.span_data_mock))
-
 
     def test_is_local_root(self):
         # Parent Context is empty
