@@ -23,3 +23,7 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
         #  2. Unlike opentelemetry Java, "otel.aws.imds.endpointOverride" is not configured on python.
         #  Need to figure out if we rely on ec2 and eks resource to get context about the platform for python
         #  and if we need endpoint override support.
+        #  3. Verify OTLPMetricExporter is using the ExponentialBucketHistogramAggregation.
+        #  4. OTLPMetricExporterMixin is using harded coded histogram_aggregation_type,
+        #  which reads OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION environment variable. Need to
+        #  work with upstream to make it to be configurable.

@@ -108,7 +108,7 @@ def _init_tracing(
     sampler: Sampler = None,
     resource: Resource = None,
 ):
-    sampler = customize_sampler(sampler)
+    sampler = _customize_sampler(sampler)
 
     trace_provider: TracerProvider = TracerProvider(
         id_generator=id_generator,
@@ -119,29 +119,29 @@ def _init_tracing(
     for _, exporter_class in exporters.items():
         exporter_args: Dict[str, any] = {}
         span_exporter: SpanExporter = exporter_class(**exporter_args)
-        span_exporter = customize_exporter(span_exporter, resource)
+        span_exporter = _customize_exporter(span_exporter, resource)
         trace_provider.add_span_processor(BatchSpanProcessor(span_exporter))
 
-    trace_provider = customize_span_processors(trace_provider, resource)
+    _customize_span_processors(trace_provider, resource)
 
     set_tracer_provider(trace_provider)
 
 
-def customize_sampler(sampler: Sampler):
+def _customize_sampler(sampler: Sampler):
     if not is_smp_enabled():
         return sampler
     return AlwaysRecordSampler(sampler)
 
 
-def customize_exporter(span_exporter: SpanExporter, resource: Resource):
+def _customize_exporter(span_exporter: SpanExporter, resource: Resource):
     if not is_smp_enabled():
         return span_exporter
     return AwsMetricAttributesSpanExporterBuilder(span_exporter, resource).build()
 
 
-def customize_span_processors(provider: TracerProvider, resource: Resource):
+def _customize_span_processors(provider: TracerProvider, resource: Resource):
     if not is_smp_enabled():
-        return provider
+        return
 
     # Construct and set local and remote attributes span processor
     provider.add_span_processor(AttributePropagatingSpanProcessorBuilder().build())
@@ -158,9 +158,13 @@ def customize_span_processors(provider: TracerProvider, resource: Resource):
         Histogram,
     ]:
         temporality_dict[typ] = AggregationTemporality.DELTA
+    _logger.info("Span Metrics Processor enabled")
     smp_endpoint = os.environ.get(OTEL_AWS_SMP_EXPORTER_ENDPOINT, "http://cloudwatch-agent.amazon-cloudwatch:4317")
     otel_metric_exporter = OTLPMetricExporter(endpoint=smp_endpoint, preferred_temporality=temporality_dict)
     export_interval_millis = float(os.environ.get(OTEL_METRIC_EXPORT_INTERVAL, DEFAULT_METRIC_EXPORT_INTERVAL))
+    _logger.debug("Span Metrics endpoint: %s", smp_endpoint)
+    _logger.debug("Span Metrics export interval: %s", export_interval_millis)
+    # Cap export interval to 60 seconds. This is currently required for metrics-trace correlation to work correctly.
     if export_interval_millis > DEFAULT_METRIC_EXPORT_INTERVAL:
         export_interval_millis = DEFAULT_METRIC_EXPORT_INTERVAL
         _logger.info("AWS AppSignals metrics export interval capped to %s", export_interval_millis)
@@ -171,7 +175,7 @@ def customize_span_processors(provider: TracerProvider, resource: Resource):
     # Construct and set span metrics processor
     provider.add_span_processor(AwsSpanMetricsProcessorBuilder(meter_provider, resource).build())
 
-    return provider
+    return
 
 
 def is_smp_enabled():
