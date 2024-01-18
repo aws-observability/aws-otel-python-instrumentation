@@ -13,7 +13,7 @@ export MYSQL_USER=djangouser
 export MYSQL_PASSWORD=${password}
 export S3_BUCKET=${s3_bucket}
 
-docker-compose up --build
+docker-compose build
 
 eksctl create cluster --name ${cluster_name} --region ${region} --zones ${region}a,${region}b
 eksctl create addon --name aws-ebs-csi-driver --cluster ${cluster_name} --service-account-role-arn arn:aws:iam::${account}:role/Admin --region ${region} --force
