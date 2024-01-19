@@ -58,6 +58,35 @@ class TestAwsSpanProcessingUtil(TestCase):
         actual_operation: str = get_ingress_operation(self, self.span_data_mock)
         self.assertEqual(actual_operation, self.UNKNOWN_OPERATION)
 
+    def test_get_ingress_operation_null_name_and_no_fallback(self):
+        invalid_name: str = None
+        self.span_data_mock.name = invalid_name
+        self.span_data_mock.kind = SpanKind.SERVER
+
+        def mock_get(key):
+            if key == SpanAttributes.HTTP_METHOD:
+                return invalid_name
+            return None
+
+        self.attributes_mock.get.side_effect = mock_get
+        actual_operation: str = get_ingress_operation(self, self.span_data_mock)
+        self.assertEqual(actual_operation, self.UNKNOWN_OPERATION)
+
+    def test_get_ingress_operation_unknown_name_and_no_fallback(self):
+        invalid_name: str = self.UNKNOWN_OPERATION
+        self.span_data_mock.name = invalid_name
+        self.span_data_mock.kind = SpanKind.SERVER
+
+        def mock_get(key):
+            if key == SpanAttributes.HTTP_METHOD:
+                return invalid_name
+            return None
+
+        self.attributes_mock.get.side_effect = mock_get
+        actual_operation: str = get_ingress_operation(self, self.span_data_mock)
+        self.assertEqual(actual_operation, self.UNKNOWN_OPERATION)
+
+
     def test_get_ingress_operation_invalid_name_and_valid_target(self):
         invalid_name = None
         valid_target = "/"
