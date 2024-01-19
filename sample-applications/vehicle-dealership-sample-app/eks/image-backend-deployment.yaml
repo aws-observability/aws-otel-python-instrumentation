@@ -28,9 +28,6 @@ spec:
         io.kompose.service: image-backend
     spec:
       containers:
-        - env:
-            - name: S3_BUCKET
-              value: ${S3_BUCKET}
         - args:
             - sh
             - -c
@@ -43,5 +40,8 @@ spec:
               hostPort: 8000
               protocol: TCP
           resources: {}
+          env:
+            - name: S3_BUCKET
+              value: ${S3_BUCKET}
       restartPolicy: Always
 status: {}

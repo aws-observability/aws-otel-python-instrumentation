@@ -6,6 +6,11 @@ region=$3
 password=$4
 s3_bucket=$5
 
+rm VehicleInventoryApp/.env
+touch VehicleInventoryApp/.env
+rm ImageServiceApp/.env
+touch ImageServiceApp/.env
+
 export REPOSITORY_PREFIX=${account}.dkr.ecr.$region.amazonaws.com
 export MYSQL_ROOT_PASSWORD=${password}
 export MYSQL_DATABASE=vehicle_inventory
