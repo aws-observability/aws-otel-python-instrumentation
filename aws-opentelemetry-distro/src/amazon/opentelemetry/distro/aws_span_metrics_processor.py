@@ -69,7 +69,8 @@ class AwsSpanMetricsProcessor(SpanProcessor):
         attribute_dict: dict[str, BoundedAttributes] = self._generator.generate_metric_attributes_dict_from_span(
             span, self._resource
         )
-        map(lambda attributes: self._record_metrics(span, attributes), attribute_dict.values())
+        for attributes in attribute_dict.values():
+            self._record_metrics(span, attributes)
 
     @override
     def shutdown(self) -> None:
