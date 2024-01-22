@@ -14,6 +14,7 @@ from amazon.opentelemetry.distro.metric_attribute_generator import (
     SERVICE_METRIC,
     MetricAttributeGenerator,
 )
+
 # Useful enum for indicating expected HTTP status code-related metrics
 from enum import Enum
 from opentelemetry.metrics import Histogram
