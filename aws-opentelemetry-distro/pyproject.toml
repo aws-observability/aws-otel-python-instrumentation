@@ -14,7 +14,8 @@ dependencies = [
   "opentelemetry-api ~= 1.12",
   "opentelemetry-instrumentation == 0.43b0",
   "opentelemetry-sdk ~= 1.13",
-  "opentelemetry-sdk-extension-aws ~= 2.0.1"
+  "opentelemetry-sdk-extension-aws ~= 2.0.1",
+  "opentelemetry-exporter-otlp-proto-grpc == 1.22.0"
 ]
 
 [project.optional-dependencies]
