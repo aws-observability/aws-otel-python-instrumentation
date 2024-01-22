@@ -267,8 +267,7 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self, http_status_code, expected_status_metric: ExpectedStatusMetric
     ):
         attributes: Attributes = {SpanAttributes.HTTP_STATUS_CODE: http_status_code}
-        span: ReadableSpan = build_readable_span_mock(attributes, SpanKind.PRODUCER, None,
-                                                           Status(StatusCode.ERROR))
+        span: ReadableSpan = build_readable_span_mock(attributes, SpanKind.PRODUCER, None, Status(StatusCode.ERROR))
         metric_attributes_map = build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
 
         self.__configure_mock_for_on_end(span, metric_attributes_map)
