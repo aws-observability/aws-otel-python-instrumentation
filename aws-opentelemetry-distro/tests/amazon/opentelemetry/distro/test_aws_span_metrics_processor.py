@@ -14,6 +14,8 @@ from amazon.opentelemetry.distro.metric_attribute_generator import (
     SERVICE_METRIC,
     MetricAttributeGenerator,
 )
+# Useful enum for indicating expected HTTP status code-related metrics
+from enum import Enum
 from opentelemetry.metrics import Histogram
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, Span, Status, StatusCode
@@ -21,6 +23,40 @@ from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 from opentelemetry.semconv.trace import SpanAttributes
 from opentelemetry.trace import SpanContext, SpanKind
 from opentelemetry.util.types import Attributes
+
+
+def build_span_attributes(contains_attribute):
+    attribute: Attributes = {}
+    if contains_attribute:
+        attribute = {"original key": "original value"}
+    return attribute
+
+
+def build_readable_span_mock(
+    span_attributes: Attributes,
+    span_kind: Optional[SpanKind] = SpanKind.SERVER,
+    parent_span_context: Optional[SpanContext] = None,
+    status_data: Optional[Status] = Status(status_code=StatusCode.UNSET),
+):
+    mock_span_data: ReadableSpan = MagicMock()
+    mock_span_data.instrumentation_scope = InstrumentationScope("aws-sdk", "version")
+    mock_span_data.attributes = span_attributes
+    mock_span_data.kind = span_kind
+    mock_span_data.parent = parent_span_context
+    mock_span_data.status = status_data
+    return mock_span_data
+
+
+def build_metric_attributes(contain_attributes: bool, span: Span):
+    attribute_map: Attributes = {}
+    if contain_attributes:
+        if should_generate_service_metric_attributes(span):
+            attributes = {"new service key": "new service value"}
+            attribute_map[SERVICE_METRIC] = attributes
+        if should_generate_dependency_metric_attributes(span):
+            attributes = {"new dependency key": "new dependency value"}
+            attribute_map[DEPENDENCY_METRIC] = attributes
+    return attribute_map
 
 
 class TestAwsSpanMetricsProcessor(TestCase):
@@ -33,9 +69,6 @@ class TestAwsSpanMetricsProcessor(TestCase):
     # Resource is not mockable, but tests can safely rely on an empty resource.
     # Assuming Resource is a class from a library you're using
     test_resource = Resource.get_empty()
-
-    # Useful enum for indicating expected HTTP status code-related metrics
-    from enum import Enum
 
     class ExpectedStatusMetric(Enum):
         ERROR = 1
@@ -66,9 +99,9 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self.assertTrue(self.aws_span_metrics_processor.force_flush())
 
     def test_on_end_metrics_generation_without_span_attributes(self):
-        span_attributes: Attributes = self.__build_span_attributes(self.CONTAINS_NO_ATTRIBUTES)
-        span: ReadableSpan = self.__build_readable_span_mock(span_attributes)
-        metric_attributes_map = self.__build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
+        span_attributes: Attributes = build_span_attributes(self.CONTAINS_NO_ATTRIBUTES)
+        span: ReadableSpan = build_readable_span_mock(span_attributes)
+        metric_attributes_map = build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
         self.__configure_mock_for_on_end(span, metric_attributes_map)
 
         self.aws_span_metrics_processor.on_end(span)
@@ -76,62 +109,62 @@ class TestAwsSpanMetricsProcessor(TestCase):
 
     def test_on_end_metrics_generation_without_metrics_attributes(self):
         span_attributes: Attributes = {SpanAttributes.HTTP_STATUS_CODE: 500}
-        span: ReadableSpan = self.__build_readable_span_mock(span_attributes)
-        metric_attributes_map = self.__build_metric_attributes(self.CONTAINS_NO_ATTRIBUTES, span)
+        span: ReadableSpan = build_readable_span_mock(span_attributes)
+        metric_attributes_map = build_metric_attributes(self.CONTAINS_NO_ATTRIBUTES, span)
         self.__configure_mock_for_on_end(span, metric_attributes_map)
 
         self.aws_span_metrics_processor.on_end(span)
         self.__verify_histogram_record(metric_attributes_map, 0, 0)
 
     def test_on_end_metrics_generation_local_root_server_span(self):
-        span_attributes: Attributes = self.__build_span_attributes(self.CONTAINS_NO_ATTRIBUTES)
-        span: ReadableSpan = self.__build_readable_span_mock(span_attributes, SpanKind.SERVER)
-        metric_attributes_map = self.__build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
+        span_attributes: Attributes = build_span_attributes(self.CONTAINS_NO_ATTRIBUTES)
+        span: ReadableSpan = build_readable_span_mock(span_attributes, SpanKind.SERVER)
+        metric_attributes_map = build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
         self.__configure_mock_for_on_end(span, metric_attributes_map)
 
         self.aws_span_metrics_processor.on_end(span)
         self.__verify_histogram_record(metric_attributes_map, 1, 0)
 
     def test_on_end_metrics_generation_local_root_consumer_span(self):
-        span_attributes: Attributes = self.__build_span_attributes(self.CONTAINS_NO_ATTRIBUTES)
-        span: ReadableSpan = self.__build_readable_span_mock(span_attributes, SpanKind.CONSUMER)
-        metric_attributes_map = self.__build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
+        span_attributes: Attributes = build_span_attributes(self.CONTAINS_NO_ATTRIBUTES)
+        span: ReadableSpan = build_readable_span_mock(span_attributes, SpanKind.CONSUMER)
+        metric_attributes_map = build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
         self.__configure_mock_for_on_end(span, metric_attributes_map)
 
         self.aws_span_metrics_processor.on_end(span)
         self.__verify_histogram_record(metric_attributes_map, 1, 1)
 
     def test_on_end_metrics_generation_local_root_client_span(self):
-        span_attributes: Attributes = self.__build_span_attributes(self.CONTAINS_NO_ATTRIBUTES)
-        span: ReadableSpan = self.__build_readable_span_mock(span_attributes, SpanKind.CLIENT)
-        metric_attributes_map = self.__build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
+        span_attributes: Attributes = build_span_attributes(self.CONTAINS_NO_ATTRIBUTES)
+        span: ReadableSpan = build_readable_span_mock(span_attributes, SpanKind.CLIENT)
+        metric_attributes_map = build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
         self.__configure_mock_for_on_end(span, metric_attributes_map)
 
         self.aws_span_metrics_processor.on_end(span)
         self.__verify_histogram_record(metric_attributes_map, 1, 1)
 
     def test_on_end_metrics_generation_local_root_producer_span(self):
-        span_attributes: Attributes = self.__build_span_attributes(self.CONTAINS_NO_ATTRIBUTES)
-        span: ReadableSpan = self.__build_readable_span_mock(span_attributes, SpanKind.PRODUCER)
-        metric_attributes_map = self.__build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
+        span_attributes: Attributes = build_span_attributes(self.CONTAINS_NO_ATTRIBUTES)
+        span: ReadableSpan = build_readable_span_mock(span_attributes, SpanKind.PRODUCER)
+        metric_attributes_map = build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
         self.__configure_mock_for_on_end(span, metric_attributes_map)
 
         self.aws_span_metrics_processor.on_end(span)
         self.__verify_histogram_record(metric_attributes_map, 1, 1)
 
     def test_on_end_metrics_generation_local_root_internal_span(self):
-        span_attributes: Attributes = self.__build_span_attributes(self.CONTAINS_NO_ATTRIBUTES)
-        span: ReadableSpan = self.__build_readable_span_mock(span_attributes, SpanKind.INTERNAL)
-        metric_attributes_map = self.__build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
+        span_attributes: Attributes = build_span_attributes(self.CONTAINS_NO_ATTRIBUTES)
+        span: ReadableSpan = build_readable_span_mock(span_attributes, SpanKind.INTERNAL)
+        metric_attributes_map = build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
         self.__configure_mock_for_on_end(span, metric_attributes_map)
 
         self.aws_span_metrics_processor.on_end(span)
         self.__verify_histogram_record(metric_attributes_map, 1, 0)
 
     def test_on_end_metrics_generation_local_root_producer_span_without_metric_attributes(self):
-        span_attributes: Attributes = self.__build_span_attributes(self.CONTAINS_NO_ATTRIBUTES)
-        span: ReadableSpan = self.__build_readable_span_mock(span_attributes, SpanKind.PRODUCER)
-        metric_attributes_map = self.__build_metric_attributes(self.CONTAINS_NO_ATTRIBUTES, span)
+        span_attributes: Attributes = build_span_attributes(self.CONTAINS_NO_ATTRIBUTES)
+        span: ReadableSpan = build_readable_span_mock(span_attributes, SpanKind.PRODUCER)
+        metric_attributes_map = build_metric_attributes(self.CONTAINS_NO_ATTRIBUTES, span)
         self.__configure_mock_for_on_end(span, metric_attributes_map)
 
         self.aws_span_metrics_processor.on_end(span)
@@ -141,9 +174,9 @@ class TestAwsSpanMetricsProcessor(TestCase):
         mock_span_context = MagicMock()
         mock_span_context.is_valid.return_value = True
         mock_span_context.is_remote.return_value = False
-        span_attributes: Attributes = self.__build_span_attributes(self.CONTAINS_NO_ATTRIBUTES)
-        span: ReadableSpan = self.__build_readable_span_mock(span_attributes, SpanKind.CLIENT, mock_span_context)
-        metric_attributes_map = self.__build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
+        span_attributes: Attributes = build_span_attributes(self.CONTAINS_NO_ATTRIBUTES)
+        span: ReadableSpan = build_readable_span_mock(span_attributes, SpanKind.CLIENT, mock_span_context)
+        metric_attributes_map = build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
         self.__configure_mock_for_on_end(span, metric_attributes_map)
 
         self.aws_span_metrics_processor.on_end(span)
@@ -153,9 +186,9 @@ class TestAwsSpanMetricsProcessor(TestCase):
         mock_span_context = MagicMock()
         mock_span_context.is_valid.return_value = True
         mock_span_context.is_remote.return_value = False
-        span_attributes: Attributes = self.__build_span_attributes(self.CONTAINS_NO_ATTRIBUTES)
-        span: ReadableSpan = self.__build_readable_span_mock(span_attributes, SpanKind.PRODUCER, mock_span_context)
-        metric_attributes_map = self.__build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
+        span_attributes: Attributes = build_span_attributes(self.CONTAINS_NO_ATTRIBUTES)
+        span: ReadableSpan = build_readable_span_mock(span_attributes, SpanKind.PRODUCER, mock_span_context)
+        metric_attributes_map = build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
         self.__configure_mock_for_on_end(span, metric_attributes_map)
 
         self.aws_span_metrics_processor.on_end(span)
@@ -163,8 +196,8 @@ class TestAwsSpanMetricsProcessor(TestCase):
 
     def test_on_end_metrics_generation_without_end_required(self):
         span_attributes: Attributes = {SpanAttributes.HTTP_STATUS_CODE: 500}
-        span: ReadableSpan = self.__build_readable_span_mock(span_attributes)
-        metric_attributes_map = self.__build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
+        span: ReadableSpan = build_readable_span_mock(span_attributes)
+        metric_attributes_map = build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
         self.__configure_mock_for_on_end(span, metric_attributes_map)
 
         self.aws_span_metrics_processor.on_end(span)
@@ -207,38 +240,6 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self.__validate_metrics_generated_for_status_data_error(599, self.ExpectedStatusMetric.FAULT)
         self.__validate_metrics_generated_for_status_data_error(600, self.ExpectedStatusMetric.FAULT)
 
-    def __build_span_attributes(self, contains_attribute):
-        attribute: Attributes = {}
-        if contains_attribute:
-            attribute = {"original key": "original value"}
-        return attribute
-
-    def __build_readable_span_mock(
-        self,
-        span_attributes: Attributes,
-        span_kind: Optional[SpanKind] = SpanKind.SERVER,
-        parent_span_context: Optional[SpanContext] = None,
-        status_data: Optional[Status] = Status(status_code=StatusCode.UNSET),
-    ):
-        mock_span_data: ReadableSpan = MagicMock()
-        mock_span_data.instrumentation_scope = InstrumentationScope("aws-sdk", "version")
-        mock_span_data.attributes = span_attributes
-        mock_span_data.kind = span_kind
-        mock_span_data.parent = parent_span_context
-        mock_span_data.status = status_data
-        return mock_span_data
-
-    def __build_metric_attributes(self, contain_attributes: bool, span: Span):
-        attribute_map: Attributes = {}
-        if contain_attributes:
-            if should_generate_service_metric_attributes(span):
-                attributes = {"new service key": "new service value"}
-                attribute_map[SERVICE_METRIC] = attributes
-            if should_generate_dependency_metric_attributes(span):
-                attributes = {"new dependency key": "new dependency value"}
-                attribute_map[DEPENDENCY_METRIC] = attributes
-        return attribute_map
-
     def __configure_mock_for_on_end(self, span: Span, attribute_map: {str: Attributes}):
         def generate_m_a_from_span_side_effect(input_span, resource):
             if input_span == span and resource == self.test_resource:
@@ -266,10 +267,9 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self, http_status_code, expected_status_metric: ExpectedStatusMetric
     ):
         attributes: Attributes = {SpanAttributes.HTTP_STATUS_CODE: http_status_code}
-        span: ReadableSpan = self.__build_readable_span_mock(
-            attributes, SpanKind.PRODUCER, None, Status(StatusCode.ERROR)
-        )
-        metric_attributes_map = self.__build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
+        span: ReadableSpan = build_readable_span_mock(attributes, SpanKind.PRODUCER, None,
+                                                           Status(StatusCode.ERROR))
+        metric_attributes_map = build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
 
         self.__configure_mock_for_on_end(span, metric_attributes_map)
         self.aws_span_metrics_processor.on_end(span)
@@ -279,8 +279,8 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self, http_status_code, expected_status_metric: ExpectedStatusMetric
     ):
         attributes: Attributes = {SpanAttributes.HTTP_STATUS_CODE: http_status_code}
-        span: ReadableSpan = self.__build_readable_span_mock(attributes, SpanKind.PRODUCER)
-        metric_attributes_map = self.__build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
+        span: ReadableSpan = build_readable_span_mock(attributes, SpanKind.PRODUCER)
+        metric_attributes_map = build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
 
         self.__configure_mock_for_on_end(span, metric_attributes_map)
         self.aws_span_metrics_processor.on_end(span)
@@ -290,8 +290,8 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self, aws_status_code, expected_status_metric: ExpectedStatusMetric
     ):
         attributes: Attributes = {"new key": "new value"}
-        span: ReadableSpan = self.__build_readable_span_mock(attributes, SpanKind.PRODUCER)
-        metric_attributes_map = self.__build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
+        span: ReadableSpan = build_readable_span_mock(attributes, SpanKind.PRODUCER)
+        metric_attributes_map = build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
         if aws_status_code is not None:
             attr_temp_service = {
                 "new service key": "new service value",
