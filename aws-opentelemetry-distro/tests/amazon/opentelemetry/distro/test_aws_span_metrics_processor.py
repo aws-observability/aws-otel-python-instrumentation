@@ -4,25 +4,23 @@ from typing import Optional
 from unittest import TestCase
 from unittest.mock import MagicMock, call
 
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.semconv.trace import SpanAttributes
-from opentelemetry.util.types import Attributes
-from opentelemetry.trace import SpanKind, SpanContext
-
-from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
-from opentelemetry.metrics import Histogram
-from opentelemetry.sdk.trace import Span, Status, StatusCode, ReadableSpan
-from opentelemetry.sdk.util.instrumentation import InstrumentationScope
-
-from amazon.opentelemetry.distro.metric_attribute_generator import (
-    MetricAttributeGenerator,
-    SERVICE_METRIC,
-    DEPENDENCY_METRIC,
-)
 from amazon.opentelemetry.distro._aws_span_processing_util import (
     should_generate_dependency_metric_attributes,
     should_generate_service_metric_attributes,
 )
+from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
+from amazon.opentelemetry.distro.metric_attribute_generator import (
+    DEPENDENCY_METRIC,
+    SERVICE_METRIC,
+    MetricAttributeGenerator,
+)
+from opentelemetry.metrics import Histogram
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import ReadableSpan, Span, Status, StatusCode
+from opentelemetry.sdk.util.instrumentation import InstrumentationScope
+from opentelemetry.semconv.trace import SpanAttributes
+from opentelemetry.trace import SpanContext, SpanKind
+from opentelemetry.util.types import Attributes
 
 
 class TestAwsSpanMetricsProcessor(TestCase):
