@@ -1,5 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+# Useful enum for indicating expected HTTP status code-related metrics
+from enum import Enum
 from typing import Optional
 from unittest import TestCase
 from unittest.mock import MagicMock, call
@@ -14,9 +16,6 @@ from amazon.opentelemetry.distro.metric_attribute_generator import (
     SERVICE_METRIC,
     MetricAttributeGenerator,
 )
-
-# Useful enum for indicating expected HTTP status code-related metrics
-from enum import Enum
 from opentelemetry.metrics import Histogram
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, Span, Status, StatusCode
