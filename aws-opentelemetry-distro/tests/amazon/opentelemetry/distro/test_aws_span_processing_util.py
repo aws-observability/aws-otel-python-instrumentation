@@ -5,7 +5,6 @@ from unittest.mock import MagicMock
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_OPERATION
 from amazon.opentelemetry.distro._aws_span_processing_util import (
-    extract_api_path_value,
     get_egress_operation,
     get_ingress_operation,
     is_aws_sdk_span,
@@ -142,36 +141,6 @@ class TestAwsSpanProcessingUtil(TestCase):
 
         actual_operation = get_egress_operation(self.span_data_mock)
         self.assertEqual(actual_operation, operation)
-
-    def test_extract_api_path_value_empty_target(self):
-        invalid_target = ""
-        path_value = extract_api_path_value(invalid_target)
-        self.assertEqual(path_value, self.DEFAULT_PATH_VALUE)
-
-    def test_extract_api_path_value_null_target(self):
-        invalid_target = None
-        path_value = extract_api_path_value(invalid_target)
-        self.assertEqual(path_value, self.DEFAULT_PATH_VALUE)
-
-    def test_extract_api_path_value_no_slash(self):
-        invalid_target = "users"
-        path_value = extract_api_path_value(invalid_target)
-        self.assertEqual(path_value, self.DEFAULT_PATH_VALUE)
-
-    def test_extract_api_path_value_only_slash(self):
-        invalid_target = "/"
-        path_value = extract_api_path_value(invalid_target)
-        self.assertEqual(path_value, self.DEFAULT_PATH_VALUE)
-
-    def test_extract_api_path_value_only_slash_at_end(self):
-        invalid_target = "users/"
-        path_value = extract_api_path_value(invalid_target)
-        self.assertEqual(path_value, self.DEFAULT_PATH_VALUE)
-
-    def test_extract_api_path_valid_path(self):
-        valid_target = "/users/1/pet?query#fragment"
-        path_value = extract_api_path_value(valid_target)
-        self.assertEqual(path_value, "/users")
 
     def test_is_key_present_key_present(self):
         self.attributes_mock.get.return_value = "target"

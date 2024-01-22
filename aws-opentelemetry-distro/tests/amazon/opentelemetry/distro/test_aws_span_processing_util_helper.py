@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND
 from amazon.opentelemetry.distro._aws_span_processing_util import (
+    extract_api_path_value,
     is_consumer_process_span,
     is_local_root,
     should_generate_dependency_metric_attributes,
@@ -28,6 +29,36 @@ class TestAwsSpanProcessingUtilHelper(TestCase):
         self.span_context_mock: SpanContext = MagicMock()
         self.span_data_mock.get_span_context.return_value = self.span_context_mock
         self.span_data_mock.attributes = self.attributes_mock
+
+    def test_extract_api_path_value_empty_target(self):
+        invalid_target = ""
+        path_value = extract_api_path_value(invalid_target)
+        self.assertEqual(path_value, self.DEFAULT_PATH_VALUE)
+
+    def test_extract_api_path_value_null_target(self):
+        invalid_target = None
+        path_value = extract_api_path_value(invalid_target)
+        self.assertEqual(path_value, self.DEFAULT_PATH_VALUE)
+
+    def test_extract_api_path_value_no_slash(self):
+        invalid_target = "users"
+        path_value = extract_api_path_value(invalid_target)
+        self.assertEqual(path_value, self.DEFAULT_PATH_VALUE)
+
+    def test_extract_api_path_value_only_slash(self):
+        invalid_target = "/"
+        path_value = extract_api_path_value(invalid_target)
+        self.assertEqual(path_value, self.DEFAULT_PATH_VALUE)
+
+    def test_extract_api_path_value_only_slash_at_end(self):
+        invalid_target = "users/"
+        path_value = extract_api_path_value(invalid_target)
+        self.assertEqual(path_value, self.DEFAULT_PATH_VALUE)
+
+    def test_extract_api_path_valid_path(self):
+        valid_target = "/users/1/pet?query#fragment"
+        path_value = extract_api_path_value(valid_target)
+        self.assertEqual(path_value, "/users")
 
     def test_should_generate_service_metric_attributes(self):
         parent_span_context: SpanContext = MagicMock()
