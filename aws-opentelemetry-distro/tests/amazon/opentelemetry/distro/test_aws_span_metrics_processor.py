@@ -185,7 +185,7 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self.__validate_metrics_generated_for_attributes_status_code(599, self.ExpectedStatusMetric.FAULT)
         self.__validate_metrics_generated_for_attributes_status_code(600, self.ExpectedStatusMetric.NEITHER)
 
-    def test_on_end_metrics_generation_with_aws_status_codes(self):
+    def test_on_end_metrics_generation_with_http_status_codes(self):
         self.__validate_metrics_generated_for_http_status_code(None, self.ExpectedStatusMetric.NEITHER)
 
         self.__validate_metrics_generated_for_http_status_code(200, self.ExpectedStatusMetric.NEITHER)
@@ -292,7 +292,7 @@ class TestAwsSpanMetricsProcessor(TestCase):
         attributes: Attributes = {"new key": "new value"}
         span: ReadableSpan = self.__build_readable_span_mock(attributes, SpanKind.PRODUCER)
         metric_attributes_map = self.__build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
-        if aws_status_code != None:
+        if aws_status_code is not None:
             attr_temp_service = {
                 "new service key": "new service value",
                 SpanAttributes.HTTP_STATUS_CODE: aws_status_code,
