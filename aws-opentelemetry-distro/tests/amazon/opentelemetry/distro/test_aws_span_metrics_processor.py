@@ -4,7 +4,6 @@ from typing import Optional
 from unittest import TestCase
 from unittest.mock import MagicMock, call
 
-from opentelemetry.context import Context
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.semconv.trace import SpanAttributes
 from opentelemetry.util.types import Attributes
@@ -18,16 +17,6 @@ from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 from amazon.opentelemetry.distro.metric_attribute_generator import MetricAttributeGenerator, SERVICE_METRIC, \
     DEPENDENCY_METRIC
 from amazon.opentelemetry.distro._aws_span_processing_util import (
-    LOCAL_ROOT,
-    UNKNOWN_OPERATION,
-    UNKNOWN_REMOTE_OPERATION,
-    UNKNOWN_REMOTE_SERVICE,
-    UNKNOWN_SERVICE,
-    extract_api_path_value,
-    get_egress_operation,
-    get_ingress_operation,
-    is_key_present,
-    is_local_root,
     should_generate_dependency_metric_attributes,
     should_generate_service_metric_attributes,
 )
@@ -187,6 +176,41 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self.error_histogram_mock.assert_has_calls([])
         self.fault_histogram_mock.assert_has_calls([])
 
+    def test_on_end_metrics_generation_with_aws_status_codes(self):
+        self.__validate_metrics_generated_for_attributes_status_code(None, self.ExpectedStatusMetric.NEITHER)
+
+        self.__validate_metrics_generated_for_attributes_status_code(399, self.ExpectedStatusMetric.NEITHER)
+        self.__validate_metrics_generated_for_attributes_status_code(400, self.ExpectedStatusMetric.ERROR)
+        self.__validate_metrics_generated_for_attributes_status_code(499, self.ExpectedStatusMetric.ERROR)
+        self.__validate_metrics_generated_for_attributes_status_code(500, self.ExpectedStatusMetric.FAULT)
+        self.__validate_metrics_generated_for_attributes_status_code(599, self.ExpectedStatusMetric.FAULT)
+        self.__validate_metrics_generated_for_attributes_status_code(600, self.ExpectedStatusMetric.NEITHER)
+
+    def test_on_end_metrics_generation_with_aws_status_codes(self):
+        self.__validate_metrics_generated_for_http_status_code(None, self.ExpectedStatusMetric.NEITHER)
+
+        self.__validate_metrics_generated_for_http_status_code(200, self.ExpectedStatusMetric.NEITHER)
+        self.__validate_metrics_generated_for_http_status_code(399, self.ExpectedStatusMetric.NEITHER)
+        self.__validate_metrics_generated_for_http_status_code(400, self.ExpectedStatusMetric.ERROR)
+        self.__validate_metrics_generated_for_http_status_code(499, self.ExpectedStatusMetric.ERROR)
+        self.__validate_metrics_generated_for_http_status_code(500, self.ExpectedStatusMetric.FAULT)
+        self.__validate_metrics_generated_for_http_status_code(599, self.ExpectedStatusMetric.FAULT)
+        self.__validate_metrics_generated_for_http_status_code(600, self.ExpectedStatusMetric.NEITHER)
+
+    def test_on_end_metrics_generation_with_status_data_error(self):
+        self.__validate_metrics_generated_for_status_data_error(None, self.ExpectedStatusMetric.FAULT)
+
+        self.__validate_metrics_generated_for_status_data_error(200, self.ExpectedStatusMetric.FAULT)
+        self.__validate_metrics_generated_for_status_data_error(399, self.ExpectedStatusMetric.FAULT)
+        self.__validate_metrics_generated_for_status_data_error(400, self.ExpectedStatusMetric.ERROR)
+        self.__validate_metrics_generated_for_status_data_error(499, self.ExpectedStatusMetric.ERROR)
+        self.__validate_metrics_generated_for_status_data_error(500, self.ExpectedStatusMetric.FAULT)
+        self.__validate_metrics_generated_for_status_data_error(599, self.ExpectedStatusMetric.FAULT)
+        self.__validate_metrics_generated_for_status_data_error(600, self.ExpectedStatusMetric.FAULT)
+
+
+
+
 
 
     def __build_span_attributes(self, contains_attribute):
@@ -242,3 +266,64 @@ class TestAwsSpanMetricsProcessor(TestCase):
 
         self.error_histogram_mock.assert_has_calls(dependency_metric_calls * wanted_dependency_metric_invocation)
         self.fault_histogram_mock.assert_has_calls(dependency_metric_calls * wanted_dependency_metric_invocation)
+
+    def __validate_metrics_generated_for_status_data_error(self, http_status_code, expected_status_metric: ExpectedStatusMetric):
+        attributes: Attributes = {SpanAttributes.HTTP_STATUS_CODE: http_status_code}
+        span: ReadableSpan = self.__build_readable_span_mock(
+            attributes,
+            SpanKind.PRODUCER,
+            None,
+            Status(StatusCode.ERROR))
+        metric_attributes_map = self.__build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
+
+        self.__configure_mock_for_on_end(span, metric_attributes_map)
+        self.aws_span_metrics_processor.on_end(span)
+        self.__valid_metrics(metric_attributes_map, expected_status_metric)
+
+    def __validate_metrics_generated_for_http_status_code(self, http_status_code, expected_status_metric: ExpectedStatusMetric):
+        attributes: Attributes = {SpanAttributes.HTTP_STATUS_CODE: http_status_code}
+        span: ReadableSpan = self.__build_readable_span_mock(attributes, SpanKind.PRODUCER)
+        metric_attributes_map = self.__build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
+
+        self.__configure_mock_for_on_end(span, metric_attributes_map)
+        self.aws_span_metrics_processor.on_end(span)
+        self.__valid_metrics(metric_attributes_map, expected_status_metric)
+
+    def __validate_metrics_generated_for_attributes_status_code(self, aws_status_code, expected_status_metric: ExpectedStatusMetric):
+        attributes: Attributes = {"new key": "new value"}
+        span: ReadableSpan = self.__build_readable_span_mock(attributes, SpanKind.PRODUCER)
+        metric_attributes_map = self.__build_metric_attributes(self.CONTAINS_ATTRIBUTES, span)
+        if aws_status_code != None:
+            attr_temp_service = {
+                "new service key": "new service value",
+                SpanAttributes.HTTP_STATUS_CODE: aws_status_code
+            }
+            metric_attributes_map[SERVICE_METRIC] = attr_temp_service
+            attr_temp_dependency = {
+                "new dependency key": "new dependency value",
+                SpanAttributes.HTTP_STATUS_CODE: aws_status_code
+            }
+            metric_attributes_map[DEPENDENCY_METRIC] = attr_temp_dependency
+        self.__configure_mock_for_on_end(span, metric_attributes_map)
+        self.aws_span_metrics_processor.on_end(span)
+        self.__valid_metrics(metric_attributes_map, expected_status_metric)
+
+    def __valid_metrics(self, metric_attributes_map, expected_status_metric: ExpectedStatusMetric):
+
+        if expected_status_metric == self.ExpectedStatusMetric.ERROR:
+            self.error_histogram_mock.assert_has_calls([call.record(1, metric_attributes_map.get(SERVICE_METRIC))])
+            self.fault_histogram_mock.assert_has_calls([call.record(0, metric_attributes_map.get(SERVICE_METRIC))])
+            self.error_histogram_mock.assert_has_calls([call.record(1, metric_attributes_map.get(DEPENDENCY_METRIC))])
+            self.fault_histogram_mock.assert_has_calls([call.record(0, metric_attributes_map.get(DEPENDENCY_METRIC))])
+
+        if expected_status_metric == self.ExpectedStatusMetric.FAULT:
+            self.error_histogram_mock.assert_has_calls([call.record(0, metric_attributes_map.get(SERVICE_METRIC))])
+            self.fault_histogram_mock.assert_has_calls([call.record(1, metric_attributes_map.get(SERVICE_METRIC))])
+            self.error_histogram_mock.assert_has_calls([call.record(0, metric_attributes_map.get(DEPENDENCY_METRIC))])
+            self.fault_histogram_mock.assert_has_calls([call.record(1, metric_attributes_map.get(DEPENDENCY_METRIC))])
+
+        if expected_status_metric == self.ExpectedStatusMetric.NEITHER:
+            self.error_histogram_mock.assert_has_calls([call.record(0, metric_attributes_map.get(SERVICE_METRIC))])
+            self.fault_histogram_mock.assert_has_calls([call.record(0, metric_attributes_map.get(SERVICE_METRIC))])
+            self.error_histogram_mock.assert_has_calls([call.record(0, metric_attributes_map.get(DEPENDENCY_METRIC))])
+            self.fault_histogram_mock.assert_has_calls([call.record(0, metric_attributes_map.get(DEPENDENCY_METRIC))])
