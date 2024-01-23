@@ -89,7 +89,7 @@ class AwsMetricAttributesSpanExporter(SpanExporter):
 
 def copy_attributes_with_local_root(attributes: BoundedAttributes) -> BoundedAttributes:
     new_attributes: types.Attributes = {}
-    for key, value in attributes:
+    for key, value in attributes.items():
         new_attributes[key] = value
 
     new_attributes[AWS_SPAN_KIND] = LOCAL_ROOT
