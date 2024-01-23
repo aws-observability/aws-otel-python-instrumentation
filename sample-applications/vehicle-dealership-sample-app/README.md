@@ -62,7 +62,7 @@ To deploy to EC2, you will have to go through the following steps.
 sudo dnf install python3.11
 sudo dnf install python3.11-pip
 sudo dnf install mariadb105
-sudo dnf install -y mariadb105-devel gcc python3.11-deve
+sudo dnf install -y mariadb105-devel gcc python3.11-devel
 
 mysql -h <RDS_DB_Endpoint> -P 3306 -u root -p<password_from_step_5>
 
@@ -90,7 +90,7 @@ DB_SERVICE_PORT=3306
 IMAGE_BACKEND_SERVICE_HOST=<image-service_ec2_public_IP>
 IMAGE_BACKEND_SERVICE_PORT=8000
 
-python3.11 manage.py runserver 0.0.0.0:8001
+python3.11 manage.py migrate --noinput && python3.11 manage.py runserver 0.0.0.0:8001
 ```
 7. Connect to the `image-service` EC2 instance and run the following:
 ```
@@ -106,7 +106,7 @@ python3.11 -m pip install -r requirements.txt
 Create a .env file with the following: 
 S3_BUCKET=<s3_bucket_to_host_images>
 
-python3.11 manage.py runserver 0.0.0.0:8000
+python3.11 manage.py migrate --noinput && python3.11 manage.py runserver 0.0.0.0:8000
 ```
 
 Now you should be able to access the APIs below through the EC2 addr:port of each service.
