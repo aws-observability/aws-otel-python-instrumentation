@@ -1,5 +1,7 @@
+#!/usr/bin/env bash
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+
 password=$1
 s3_bucket=$2
 

@@ -1,3 +1,5 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
 import os
 from threading import Thread
 from time import sleep
@@ -19,7 +21,9 @@ sqs = boto3.resource("sqs", region_name="us-west-2")
 # TODO: auto gen bucket name
 bucket_name = os.environ.get("S3_BUCKET")
 bucket = s3_resource.create_bucket(Bucket=bucket_name)
-queue = sqs.create_queue(QueueName="imageQueue.fifo", Attributes={"FifoQueue": "true", "ContentBasedDeduplication": "true"})
+queue = sqs.create_queue(
+    QueueName="imageQueue.fifo", Attributes={"FifoQueue": "true", "ContentBasedDeduplication": "true"}
+)
 
 
 def read_from_queue():
