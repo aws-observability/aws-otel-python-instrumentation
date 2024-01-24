@@ -112,10 +112,9 @@ def wrap_span_with_attributes(span: ReadableSpan, attributes: BoundedAttributes)
     # Copy all attribute in span into update_attributes
     for key, value in original_attributes.items():
         update_attributes[key] = value
-    # Append all attribute in attributes that is not in original_attributes into update_attributes
+    # Replace existing span-attributes if there is same key in Attributes
     for key, value in attributes.items():
-        if key not in update_attributes:
-            update_attributes[key] = value
+        update_attributes[key] = value
 
     if isinstance(original_attributes, BoundedAttributes):
         span._attributes = BoundedAttributes(
