@@ -41,15 +41,6 @@ def build_readable_span_mock(span_attributes: Attributes):
     return mock_span_data
 
 
-def configure_mock_for_export(span_data_mock: ReadableSpan, metric_attributes: Attributes):
-    attribute_map: Attributes = {}
-    if should_generate_service_metric_attributes(span_data_mock):
-        attribute_map[SERVICE_METRIC] = metric_attributes
-    if should_generate_dependency_metric_attributes(span_data_mock):
-        attribute_map[DEPENDENCY_METRIC] = metric_attributes
-    return attribute_map
-
-
 class TestAwsMetricAttributesSpanExporter(TestCase):
     CONTAINS_ATTRIBUTES = True
     CONTAINS_NO_ATTRIBUTES = False
@@ -68,8 +59,59 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         self.delegate_mock.assert_has_calls([call.force_flush(30000), call.shutdown()])
 
     def test_export_delegation_without_attributes_or_modification(self):
+        span_attributes: Attributes = build_span_attributes(self.CONTAINS_NO_ATTRIBUTES)
+        span_data_mock: ReadableSpan = build_readable_span_mock(span_attributes)
+        metric_attributes: Attributes = build_metric_attributes(self.CONTAINS_NO_ATTRIBUTES)
+        self.__configure_mock_for_export(span_data_mock, metric_attributes)
+
+        self.aws_metric_attributes_span_exporter.export([span_data_mock])
+        self.delegate_mock.assert_has_calls([call.export([span_data_mock])])
+
+    def test_export_delegation_with_attributes_but_without_modification(self):
         span_attributes: Attributes = build_span_attributes(self.CONTAINS_ATTRIBUTES)
         span_data_mock: ReadableSpan = build_readable_span_mock(span_attributes)
         metric_attributes: Attributes = build_metric_attributes(self.CONTAINS_NO_ATTRIBUTES)
+        self.__configure_mock_for_export(span_data_mock, metric_attributes)
 
         self.aws_metric_attributes_span_exporter.export([span_data_mock])
+        self.delegate_mock.assert_has_calls([call.export([span_data_mock])])
+
+    def test_export_delegation_without_attributes_but_with_modification(self):
+        span_attributes: Attributes = build_span_attributes(self.CONTAINS_NO_ATTRIBUTES)
+        span_data_mock: ReadableSpan = build_readable_span_mock(span_attributes)
+        metric_attributes: Attributes = build_metric_attributes(self.CONTAINS_ATTRIBUTES)
+        self.__configure_mock_for_export(span_data_mock, metric_attributes)
+
+        self.aws_metric_attributes_span_exporter.export([span_data_mock])
+        self.delegate_mock.assert_has_calls([call.export([span_data_mock])])
+        exported_spans_args = self.delegate_mock.export.call_args[0][0]
+        exported_span = exported_spans_args[0]
+        exported_attributes = exported_span.attributes
+        self.assertEquals(len(exported_attributes), len(metric_attributes))
+
+    def test_export_delegation_with_attributes_and_modification(self):
+        span_attributes: Attributes = build_span_attributes(self.CONTAINS_ATTRIBUTES)
+        span_data_mock: ReadableSpan = build_readable_span_mock(span_attributes)
+        metric_attributes: Attributes = build_metric_attributes(self.CONTAINS_ATTRIBUTES)
+        self.__configure_mock_for_export(span_data_mock, metric_attributes)
+
+        self.aws_metric_attributes_span_exporter.export([span_data_mock])
+        self.delegate_mock.assert_has_calls([call.export([span_data_mock])])
+        exported_spans_args = self.delegate_mock.export.call_args[0][0]
+        exported_span = exported_spans_args[0]
+        expected_attribute_count = len(metric_attributes) + len(span_attributes)
+        self.assertEqual(exported_span, expected_attribute_count)
+
+    def __configure_mock_for_export(self, span_data_mock: ReadableSpan, metric_attributes: Attributes):
+        attribute_map: Attributes = {}
+        if should_generate_service_metric_attributes(span_data_mock):
+            attribute_map[SERVICE_METRIC] = metric_attributes
+        if should_generate_dependency_metric_attributes(span_data_mock):
+            attribute_map[DEPENDENCY_METRIC] = metric_attributes
+
+        def generate_metric_attribute_map_side_effect(span, resource):
+            if span == span_data_mock and resource == self.test_resource:
+                return attribute_map
+            return None
+
+        self.generator_mock.generate_metric_attributes_dict_from_span.side_effect = generate_metric_attribute_map_side_effect
