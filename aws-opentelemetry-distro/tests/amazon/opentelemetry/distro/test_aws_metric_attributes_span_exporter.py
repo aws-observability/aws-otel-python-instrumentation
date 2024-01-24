@@ -2,9 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 from typing import Optional
 from unittest import TestCase
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock, call, Mock
 
-from amazon.opentelemetry.distro._aws_span_processing_util import should_generate_dependency_metric_attributes, should_generate_service_metric_attributes
+from opentelemetry.attributes import BoundedAttributes
+
+from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator, \
+    _generate_service_metric_attributes, _generate_dependency_metric_attributes
+from amazon.opentelemetry.distro._aws_span_processing_util import should_generate_dependency_metric_attributes, \
+    should_generate_service_metric_attributes
 from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsMetricAttributesSpanExporter
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import ConsoleSpanExporter
@@ -35,9 +40,10 @@ def build_metric_attributes(contains_attribute):
 
 def build_readable_span_mock(span_attributes: Attributes):
     mock_span_data: ReadableSpan = MagicMock()
-    mock_span_data.attributes = span_attributes
-    mock_span_data.kind = SpanKind.SERVER
-    mock_span_data.parent = None
+    mock_span_data._attributes = span_attributes
+    mock_span_data._kind = SpanKind.SERVER
+    mock_span_data._parent = None
+    mock_span_data.attributes = mock_span_data._attributes
     return mock_span_data
 
 
@@ -47,7 +53,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
 
     def setUp(self):
         self.delegate_mock: ConsoleSpanExporter = MagicMock()
-        self.generator_mock: MetricAttributeGenerator = MagicMock()
+        self.generator_mock: _AwsMetricAttributeGenerator = MagicMock()
         self.test_resource: Resource = Resource.get_empty()
         self.aws_metric_attributes_span_exporter: AwsMetricAttributesSpanExporter = AwsMetricAttributesSpanExporter(
             self.delegate_mock, self.generator_mock, self.test_resource
@@ -86,8 +92,11 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         self.delegate_mock.assert_has_calls([call.export([span_data_mock])])
         exported_spans_args = self.delegate_mock.export.call_args[0][0]
         exported_span = exported_spans_args[0]
-        exported_attributes = exported_span.attributes
+        self.assertEqual(len(exported_spans_args), 1)
+        exported_attributes = exported_span._attributes
         self.assertEquals(len(exported_attributes), len(metric_attributes))
+        for key, value in metric_attributes.items():
+            self.assertEqual(exported_span._attributes[key], value)
 
     def test_export_delegation_with_attributes_and_modification(self):
         span_attributes: Attributes = build_span_attributes(self.CONTAINS_ATTRIBUTES)
@@ -99,8 +108,44 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         self.delegate_mock.assert_has_calls([call.export([span_data_mock])])
         exported_spans_args = self.delegate_mock.export.call_args[0][0]
         exported_span = exported_spans_args[0]
-        expected_attribute_count = len(metric_attributes) + len(span_attributes)
-        self.assertEqual(exported_span, expected_attribute_count)
+        self.assertEqual(len(exported_spans_args), 1)
+        for key, value in metric_attributes.items():
+            self.assertEqual(exported_span._attributes[key], value)
+        for key, value in span_attributes.items():
+            self.assertEqual(exported_span._attributes[key], value)
+
+    def test_export_delegation_with_multiple_spans(self):
+        span_attributes1: Attributes = build_span_attributes(self.CONTAINS_NO_ATTRIBUTES)
+        span_data_mock1: ReadableSpan = build_readable_span_mock(span_attributes1)
+        metric_attributes1: Attributes = build_metric_attributes(self.CONTAINS_NO_ATTRIBUTES)
+        self.__configure_mock_for_export(span_data_mock1, metric_attributes1)
+
+        span_attributes2: Attributes = build_span_attributes(self.CONTAINS_ATTRIBUTES)
+        span_data_mock2: ReadableSpan = build_readable_span_mock(span_attributes2)
+        metric_attributes2: Attributes = build_metric_attributes(self.CONTAINS_ATTRIBUTES)
+        self.__configure_mock_for_export(span_data_mock2, metric_attributes2)
+
+        span_attributes3: Attributes = build_span_attributes(self.CONTAINS_ATTRIBUTES)
+        span_data_mock3: ReadableSpan = build_readable_span_mock(span_attributes3)
+        metric_attributes3: Attributes = build_metric_attributes(self.CONTAINS_NO_ATTRIBUTES)
+        self.__configure_mock_for_export(span_data_mock3, metric_attributes3)
+
+        self.aws_metric_attributes_span_exporter.export([span_data_mock1, span_data_mock2, span_data_mock3])
+        self.delegate_mock.assert_has_calls([call.export([span_data_mock1, span_data_mock2, span_data_mock3])])
+        exported_spans_args = self.delegate_mock.export.call_args[0][0]
+        self.assertEqual(len(exported_spans_args), 3)
+
+        exported_span1 = exported_spans_args[0]
+        exported_span2 = exported_spans_args[1]
+        exported_span3 = exported_spans_args[2]
+        self.assertEqual(exported_span1, span_data_mock1)
+        self.assertEqual(exported_span3, span_data_mock3)
+        expected_attribute_count = len(metric_attributes2) + len(span_attributes2)
+        for key, value in metric_attributes2.items():
+            self.assertEqual(exported_span2._attributes[key], value)
+        for key, value in span_attributes2.items():
+            self.assertEqual(exported_span2._attributes[key], value)
+
 
     def __configure_mock_for_export(self, span_data_mock: ReadableSpan, metric_attributes: Attributes):
         attribute_map: Attributes = {}
@@ -112,6 +157,6 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         def generate_metric_attribute_map_side_effect(span, resource):
             if span == span_data_mock and resource == self.test_resource:
                 return attribute_map
-            return None
+            return {}
 
         self.generator_mock.generate_metric_attributes_dict_from_span.side_effect = generate_metric_attribute_map_side_effect
