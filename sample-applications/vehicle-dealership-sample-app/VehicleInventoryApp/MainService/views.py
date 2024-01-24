@@ -1,9 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import json
-import logging
 import os
-import traceback
 
 import requests
 from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseNotAllowed
@@ -30,32 +28,26 @@ def vehicle(request):
             )
             vehicle_object.save()
             print(get_image_endpoint() + "/images/name/" + body["image_name"])
-            requests.post(get_image_endpoint() + "/images/name/" + body["image_name"])
+            requests.post(get_image_endpoint() + "/images/name/" + body["image_name"], timeout=10)
             return HttpResponse("VehicleId = " + str(vehicle_object.id))
-        except KeyError as e:
-            return HttpResponseBadRequest("Missing key: " + str(e))
-        except Exception as e:
-            logging.error(traceback.format_exc())
-            logging.error(str(e))
+        except KeyError as exception:
+            return HttpResponseBadRequest("Missing key: " + str(exception))
     elif request.method == "GET":
         vehicle_objects = Vehicle.objects.all().values()
         return HttpResponse(vehicle_objects)
-    else:
-        return HttpResponseNotAllowed()
+    return HttpResponseNotAllowed("Only GET/POST requests are allowed!")
 
 
 def get_vehicle_by_id(request, vehicle_id):
     if request.method == "GET":
         vehicle_objects = Vehicle.objects.filter(id=vehicle_id).values()
         return HttpResponse(vehicle_objects)
-    else:
-        return HttpResponseNotAllowed()
+    return HttpResponseNotAllowed("Only GET requests are allowed!")
 
 
 def get_vehicle_image(request, vehicle_id):
     if request.method == "GET":
         vehicle_object = Vehicle.objects.filter(id=vehicle_id).first()
         image_name = getattr(vehicle_object, "image_name")
-        return HttpResponse(requests.get(get_image_endpoint() + "/images/name/" + image_name))
-    else:
-        return HttpResponseNotAllowed()
+        return HttpResponse(requests.get(get_image_endpoint() + "/images/name/" + image_name, timeout=10))
+    return HttpResponseNotAllowed("Only GET requests are allowed!")

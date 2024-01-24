@@ -50,10 +50,9 @@ def handle_image(request, image_name):
     if request.method == "POST":
         put_image(image_name)
         return HttpResponse("Putting to queue")
-    elif request.method == "GET":
+    if request.method == "GET":
         return HttpResponse(get_image(image_name))
-    else:
-        return HttpResponseNotAllowed()
+    return HttpResponseNotAllowed("Only GET requests are allowed!")
 
 
 def get_image(image_name):
@@ -63,7 +62,7 @@ def get_image(image_name):
 
 def get_remote_image(request):
     api_url = "https://google.com"
-    return HttpResponse(requests.get(api_url))
+    return HttpResponse(requests.get(api_url, timeout=10))
 
 
 def put_image(image_name):
