@@ -29,8 +29,8 @@ class AwsSpanMetricsProcessorBuilder:
     _scope_name: str = _DEFAULT_SCOPE_NAME
 
     def __init__(self, meter_provider: MeterProvider, resource: Resource):
-        self.meter_provider = meter_provider
-        self.resource = resource
+        self._meter_provider = meter_provider
+        self._resource = resource
 
     def set_generator(self, generator: MetricAttributeGenerator) -> "AwsSpanMetricsProcessorBuilder":
         """
