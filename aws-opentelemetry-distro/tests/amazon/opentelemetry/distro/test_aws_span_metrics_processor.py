@@ -5,8 +5,6 @@ from typing import Optional
 from unittest import TestCase
 from unittest.mock import MagicMock, call
 
-from opentelemetry.context import Context
-
 from amazon.opentelemetry.distro._aws_span_processing_util import (
     should_generate_dependency_metric_attributes,
     should_generate_service_metric_attributes,
@@ -17,6 +15,7 @@ from amazon.opentelemetry.distro.metric_attribute_generator import (
     SERVICE_METRIC,
     MetricAttributeGenerator,
 )
+from opentelemetry.context import Context
 from opentelemetry.metrics import Histogram
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, Span, Status, StatusCode
@@ -174,8 +173,9 @@ class TestAwsSpanMetricsProcessor(TestCase):
 
         self.error_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dict.get(SERVICE_METRIC))])
         self.fault_histogram_mock.assert_has_calls([call.record(1, metric_attributes_dict.get(SERVICE_METRIC))])
-        self.latency_histogram_mock.assert_has_calls([call.record(_TEST_LATENCY_MILLIS, metric_attributes_dict.get(SERVICE_METRIC))])
-
+        self.latency_histogram_mock.assert_has_calls(
+            [call.record(_TEST_LATENCY_MILLIS, metric_attributes_dict.get(SERVICE_METRIC))]
+        )
 
     def test_on_end_metrics_generation_with_latency(self):
         span_attributes: Attributes = {SpanAttributes.HTTP_STATUS_CODE: 200}
@@ -244,7 +244,6 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self._validate_metrics_generated_for_status_data_ok(599, self.ExpectedStatusMetric.FAULT)
         self._validate_metrics_generated_for_status_data_ok(600, self.ExpectedStatusMetric.NEITHER)
 
-
     def _configure_mock_for_on_end(self, span: Span, attribute_map: {str: Attributes}):
         def generate_m_a_from_span_side_effect(input_span, resource):
             if input_span == span and resource == self.test_resource:
@@ -254,10 +253,10 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self.generator_mock.generate_metric_attributes_dict_from_span.side_effect = generate_m_a_from_span_side_effect
 
     def _verify_histogram_record(
-            self,
-            metric_attributes_dict: {str: Attributes},
-            wanted_service_metric_invocation: int,
-            wanted_dependency_metric_invocation: int,
+        self,
+        metric_attributes_dict: {str: Attributes},
+        wanted_service_metric_invocation: int,
+        wanted_dependency_metric_invocation: int,
     ):
         service_metric_calls = [call.record(0, metric_attributes_dict.get(SERVICE_METRIC))]
         dependency_metric_calls = [call.record(0, metric_attributes_dict.get(DEPENDENCY_METRIC))]
@@ -269,7 +268,7 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self.fault_histogram_mock.assert_has_calls(dependency_metric_calls * wanted_dependency_metric_invocation)
 
     def _validate_metrics_generated_for_status_data_error(
-            self, http_status_code, expected_status_metric: ExpectedStatusMetric
+        self, http_status_code, expected_status_metric: ExpectedStatusMetric
     ):
         attributes: Attributes = {SpanAttributes.HTTP_STATUS_CODE: http_status_code}
         span: ReadableSpan = _build_readable_span_mock(attributes, SpanKind.PRODUCER, None, Status(StatusCode.ERROR))
@@ -280,7 +279,7 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self._valid_metrics(metric_attributes_dict, expected_status_metric)
 
     def _validate_metrics_generated_for_status_data_ok(
-            self, http_status_code, expected_status_metric: ExpectedStatusMetric
+        self, http_status_code, expected_status_metric: ExpectedStatusMetric
     ):
         attributes: Attributes = {SpanAttributes.HTTP_STATUS_CODE: http_status_code}
         span: ReadableSpan = _build_readable_span_mock(attributes, SpanKind.PRODUCER, None, Status(StatusCode.OK))
@@ -291,7 +290,7 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self._valid_metrics(metric_attributes_dict, expected_status_metric)
 
     def _validate_metrics_generated_for_http_status_code(
-            self, http_status_code, expected_status_metric: ExpectedStatusMetric
+        self, http_status_code, expected_status_metric: ExpectedStatusMetric
     ):
         attributes: Attributes = {SpanAttributes.HTTP_STATUS_CODE: http_status_code}
         span: ReadableSpan = _build_readable_span_mock(attributes, SpanKind.PRODUCER)
@@ -302,7 +301,7 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self._valid_metrics(metric_attributes_dict, expected_status_metric)
 
     def _validate_metrics_generated_for_attributes_status_code(
-            self, aws_status_code, expected_status_metric: ExpectedStatusMetric
+        self, aws_status_code, expected_status_metric: ExpectedStatusMetric
     ):
         attributes: Attributes = {"new key": "new value"}
         span: ReadableSpan = _build_readable_span_mock(attributes, SpanKind.PRODUCER)
@@ -342,8 +341,12 @@ class TestAwsSpanMetricsProcessor(TestCase):
             self.error_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dict.get(DEPENDENCY_METRIC))])
             self.fault_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dict.get(DEPENDENCY_METRIC))])
 
-        self.latency_histogram_mock.assert_has_calls([call.record(_TEST_LATENCY_MILLIS, metric_attributes_dict.get(SERVICE_METRIC)),
-                                                      call.record(_TEST_LATENCY_MILLIS, metric_attributes_dict.get(DEPENDENCY_METRIC))])
+        self.latency_histogram_mock.assert_has_calls(
+            [
+                call.record(_TEST_LATENCY_MILLIS, metric_attributes_dict.get(SERVICE_METRIC)),
+                call.record(_TEST_LATENCY_MILLIS, metric_attributes_dict.get(DEPENDENCY_METRIC)),
+            ]
+        )
 
 
 def _build_span_attributes(contains_attribute: bool):
@@ -354,10 +357,10 @@ def _build_span_attributes(contains_attribute: bool):
 
 
 def _build_readable_span_mock(
-        span_attributes: Attributes,
-        span_kind: Optional[SpanKind] = SpanKind.SERVER,
-        parent_span_context: Optional[SpanContext] = None,
-        status_data: Optional[Status] = Status(status_code=StatusCode.UNSET),
+    span_attributes: Attributes,
+    span_kind: Optional[SpanKind] = SpanKind.SERVER,
+    parent_span_context: Optional[SpanContext] = None,
+    status_data: Optional[Status] = Status(status_code=StatusCode.UNSET),
 ):
     mock_span: ReadableSpan = MagicMock()
     mock_span.instrumentation_scope = InstrumentationScope("aws-sdk", "version")
