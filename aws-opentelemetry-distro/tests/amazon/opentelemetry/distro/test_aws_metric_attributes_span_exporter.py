@@ -91,7 +91,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         exported_span = exported_spans_args[0]
         self.assertEqual(len(exported_spans_args), 1)
         exported_attributes = exported_span._attributes
-        self.assertEquals(len(exported_attributes), len(metric_attributes))
+        self.assertEqual(len(exported_attributes), len(metric_attributes))
         for key, value in metric_attributes.items():
             self.assertEqual(exported_span._attributes[key], value)
 
@@ -112,16 +112,14 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
             self.assertEqual(exported_span._attributes[key], value)
 
     def test_export_delegation_with_multiple_spans(self):
-        span_attributes1: Attributes = build_span_attributes(self.CONTAINS_NO_ATTRIBUTES)
-        span_data_mock1: ReadableSpan = build_readable_span_mock(span_attributes1)
+        span_data_mock1: ReadableSpan = build_readable_span_mock(build_span_attributes(self.CONTAINS_NO_ATTRIBUTES))
         metric_attributes1: Attributes = build_metric_attributes(self.CONTAINS_NO_ATTRIBUTES)
 
         span_attributes2: Attributes = build_span_attributes(self.CONTAINS_ATTRIBUTES)
         span_data_mock2: ReadableSpan = build_readable_span_mock(span_attributes2)
         metric_attributes2: Attributes = build_metric_attributes(self.CONTAINS_ATTRIBUTES)
 
-        span_attributes3: Attributes = build_span_attributes(self.CONTAINS_ATTRIBUTES)
-        span_data_mock3: ReadableSpan = build_readable_span_mock(span_attributes3)
+        span_data_mock3: ReadableSpan = build_readable_span_mock(build_span_attributes(self.CONTAINS_ATTRIBUTES))
         metric_attributes3: Attributes = build_metric_attributes(self.CONTAINS_NO_ATTRIBUTES)
 
         self.__configure_mock_for_export_with_multiple_side_effect(
@@ -140,8 +138,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         self.assertEqual(exported_span1, span_data_mock1)
         self.assertEqual(exported_span3, span_data_mock3)
 
-        expected_attribute_count = len(metric_attributes2) + len(span_attributes2)
-        self.assertEqual(len(exported_span2._attributes), expected_attribute_count)
+        self.assertEqual(len(exported_span2._attributes), len(metric_attributes2) + len(span_attributes2))
         for key, value in metric_attributes2.items():
             self.assertEqual(exported_span2._attributes[key], value)
         for key, value in span_attributes2.items():
@@ -334,7 +331,6 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         def side_effect(span, resource):
             if span in span_data_mocks and resource == self.test_resource:
                 return attributes_map_list[span_data_mocks.index(span)]
-            else:
-                return {}
+            return {}
 
         self.generator_mock.generate_metric_attributes_dict_from_span.side_effect = side_effect
