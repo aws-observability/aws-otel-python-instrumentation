@@ -325,8 +325,6 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
                 attribute_map[SERVICE_METRIC] = copy.deepcopy(metric_attributes_list[span_data_mocks.index(span)])
             if should_generate_dependency_metric_attributes(span):
                 attribute_map[DEPENDENCY_METRIC] = copy.deepcopy(metric_attributes_list[span_data_mocks.index(span)])
-            print(should_generate_service_metric_attributes(span))
-            print(should_generate_dependency_metric_attributes(span))
             attributes_map_list.append(attribute_map)
 
         def side_effect(span, resource):
