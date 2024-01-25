@@ -6,6 +6,8 @@ from typing import Optional
 from unittest import TestCase
 from unittest.mock import MagicMock, call
 
+from opentelemetry.context import Context
+
 from amazon.opentelemetry.distro._aws_span_processing_util import (
     should_generate_dependency_metric_attributes,
     should_generate_service_metric_attributes,
@@ -25,7 +27,7 @@ from opentelemetry.trace import SpanContext, SpanKind
 from opentelemetry.util.types import Attributes
 
 
-def build_span_attributes(contains_attribute):
+def build_span_attributes(contains_attribute: bool):
     attribute: Attributes = {}
     if contains_attribute:
         attribute = {"original key": "original value"}
@@ -67,7 +69,6 @@ class TestAwsSpanMetricsProcessor(TestCase):
     TEST_LATENCY_NANOS = 150000000
 
     # Resource is not mockable, but tests can safely rely on an empty resource.
-    # Assuming Resource is a class from a library you're using
     test_resource = Resource.get_empty()
 
     class ExpectedStatusMetric(Enum):
@@ -89,9 +90,9 @@ class TestAwsSpanMetricsProcessor(TestCase):
         )
 
     def test_start_does_nothing_to_span(self):
-        parent_context_mock: Span = MagicMock()
+        parent_context_mock: Context = MagicMock()
         span_mock: Span = MagicMock()
-        self.aws_span_metrics_processor.on_start(parent_context_mock, span_mock)
+        self.aws_span_metrics_processor.on_start(span_mock, parent_context_mock)
         self.assertNotEqual(span_mock.parent, parent_context_mock)
 
     def test_tear_down(self):
