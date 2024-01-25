@@ -33,7 +33,7 @@ _TEST_LATENCY_NANOS: int = 150000000
 
 
 class TestAwsSpanMetricsProcessor(TestCase):
-    # Resource is not mock-able, but tests can safely rely on an empty resource.
+    # Tests can safely rely on an empty resource
     test_resource = Resource.get_empty()
 
     # Useful enum for indicating expected HTTP status code-related metrics
