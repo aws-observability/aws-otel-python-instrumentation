@@ -231,7 +231,7 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self._validate_metrics_generated_for_status_data_error(599, self.ExpectedStatusMetric.FAULT)
         self._validate_metrics_generated_for_status_data_error(600, self.ExpectedStatusMetric.FAULT)
 
-    def test_on_end_metrics_generation_with_status_data_OK(self):
+    def test_on_end_metrics_generation_with_status_data_ok(self):
         # Empty Status and HTTP with OK status
         self._validate_metrics_generated_for_status_data_ok(None, self.ExpectedStatusMetric.NEITHER)
 
