@@ -80,65 +80,65 @@ class TestAwsSpanMetricsProcessor(TestCase):
     def test_on_end_metrics_generation_without_metrics_attributes(self):
         span_attributes: Attributes = {SpanAttributes.HTTP_STATUS_CODE: 500}
         span: ReadableSpan = _build_readable_span_mock(span_attributes)
-        metric_attributes_dick = _build_metric_attributes(_CONTAINS_NO_ATTRIBUTES, span)
-        self._configure_mock_for_on_end(span, metric_attributes_dick)
+        metric_attributes_dict = _build_metric_attributes(_CONTAINS_NO_ATTRIBUTES, span)
+        self._configure_mock_for_on_end(span, metric_attributes_dict)
 
         self.aws_span_metrics_processor.on_end(span)
-        self._verify_histogram_record(metric_attributes_dick, 0, 0)
+        self._verify_histogram_record(metric_attributes_dict, 0, 0)
 
     def test_on_end_metrics_generation_local_root_server_span(self):
         span_attributes: Attributes = _build_span_attributes(_CONTAINS_NO_ATTRIBUTES)
         span: ReadableSpan = _build_readable_span_mock(span_attributes, SpanKind.SERVER)
-        metric_attributes_dick = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
-        self._configure_mock_for_on_end(span, metric_attributes_dick)
+        metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
+        self._configure_mock_for_on_end(span, metric_attributes_dict)
 
         self.aws_span_metrics_processor.on_end(span)
-        self._verify_histogram_record(metric_attributes_dick, 1, 0)
+        self._verify_histogram_record(metric_attributes_dict, 1, 0)
 
     def test_on_end_metrics_generation_local_root_consumer_span(self):
         span_attributes: Attributes = _build_span_attributes(_CONTAINS_NO_ATTRIBUTES)
         span: ReadableSpan = _build_readable_span_mock(span_attributes, SpanKind.CONSUMER)
-        metric_attributes_dick = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
-        self._configure_mock_for_on_end(span, metric_attributes_dick)
+        metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
+        self._configure_mock_for_on_end(span, metric_attributes_dict)
 
         self.aws_span_metrics_processor.on_end(span)
-        self._verify_histogram_record(metric_attributes_dick, 1, 1)
+        self._verify_histogram_record(metric_attributes_dict, 1, 1)
 
     def test_on_end_metrics_generation_local_root_client_span(self):
         span_attributes: Attributes = _build_span_attributes(_CONTAINS_NO_ATTRIBUTES)
         span: ReadableSpan = _build_readable_span_mock(span_attributes, SpanKind.CLIENT)
-        metric_attributes_dick = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
-        self._configure_mock_for_on_end(span, metric_attributes_dick)
+        metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
+        self._configure_mock_for_on_end(span, metric_attributes_dict)
 
         self.aws_span_metrics_processor.on_end(span)
-        self._verify_histogram_record(metric_attributes_dick, 1, 1)
+        self._verify_histogram_record(metric_attributes_dict, 1, 1)
 
     def test_on_end_metrics_generation_local_root_producer_span(self):
         span_attributes: Attributes = _build_span_attributes(_CONTAINS_NO_ATTRIBUTES)
         span: ReadableSpan = _build_readable_span_mock(span_attributes, SpanKind.PRODUCER)
-        metric_attributes_dick = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
-        self._configure_mock_for_on_end(span, metric_attributes_dick)
+        metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
+        self._configure_mock_for_on_end(span, metric_attributes_dict)
 
         self.aws_span_metrics_processor.on_end(span)
-        self._verify_histogram_record(metric_attributes_dick, 1, 1)
+        self._verify_histogram_record(metric_attributes_dict, 1, 1)
 
     def test_on_end_metrics_generation_local_root_internal_span(self):
         span_attributes: Attributes = _build_span_attributes(_CONTAINS_NO_ATTRIBUTES)
         span: ReadableSpan = _build_readable_span_mock(span_attributes, SpanKind.INTERNAL)
-        metric_attributes_dick = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
-        self._configure_mock_for_on_end(span, metric_attributes_dick)
+        metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
+        self._configure_mock_for_on_end(span, metric_attributes_dict)
 
         self.aws_span_metrics_processor.on_end(span)
-        self._verify_histogram_record(metric_attributes_dick, 1, 0)
+        self._verify_histogram_record(metric_attributes_dict, 1, 0)
 
     def test_on_end_metrics_generation_local_root_producer_span_without_metric_attributes(self):
         span_attributes: Attributes = _build_span_attributes(_CONTAINS_NO_ATTRIBUTES)
         span: ReadableSpan = _build_readable_span_mock(span_attributes, SpanKind.PRODUCER)
-        metric_attributes_dick = _build_metric_attributes(_CONTAINS_NO_ATTRIBUTES, span)
-        self._configure_mock_for_on_end(span, metric_attributes_dick)
+        metric_attributes_dict = _build_metric_attributes(_CONTAINS_NO_ATTRIBUTES, span)
+        self._configure_mock_for_on_end(span, metric_attributes_dict)
 
         self.aws_span_metrics_processor.on_end(span)
-        self._verify_histogram_record(metric_attributes_dick, 0, 0)
+        self._verify_histogram_record(metric_attributes_dict, 0, 0)
 
     def test_on_end_metrics_generation_client_span(self):
         mock_span_context = MagicMock()
@@ -146,11 +146,11 @@ class TestAwsSpanMetricsProcessor(TestCase):
         mock_span_context.is_remote.return_value = False
         span_attributes: Attributes = _build_span_attributes(_CONTAINS_NO_ATTRIBUTES)
         span: ReadableSpan = _build_readable_span_mock(span_attributes, SpanKind.CLIENT, mock_span_context)
-        metric_attributes_dick = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
-        self._configure_mock_for_on_end(span, metric_attributes_dick)
+        metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
+        self._configure_mock_for_on_end(span, metric_attributes_dict)
 
         self.aws_span_metrics_processor.on_end(span)
-        self._verify_histogram_record(metric_attributes_dick, 0, 1)
+        self._verify_histogram_record(metric_attributes_dict, 0, 1)
 
     def test_on_end_metrics_generation_producer_span(self):
         mock_span_context = MagicMock()
@@ -158,29 +158,46 @@ class TestAwsSpanMetricsProcessor(TestCase):
         mock_span_context.is_remote.return_value = False
         span_attributes: Attributes = _build_span_attributes(_CONTAINS_NO_ATTRIBUTES)
         span: ReadableSpan = _build_readable_span_mock(span_attributes, SpanKind.PRODUCER, mock_span_context)
-        metric_attributes_dick = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
-        self._configure_mock_for_on_end(span, metric_attributes_dick)
+        metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
+        self._configure_mock_for_on_end(span, metric_attributes_dict)
 
         self.aws_span_metrics_processor.on_end(span)
-        self._verify_histogram_record(metric_attributes_dick, 0, 1)
+        self._verify_histogram_record(metric_attributes_dict, 0, 1)
 
     def test_on_end_metrics_generation_without_end_required(self):
         span_attributes: Attributes = {SpanAttributes.HTTP_STATUS_CODE: 500}
         span: ReadableSpan = _build_readable_span_mock(span_attributes)
-        metric_attributes_dick = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
-        self._configure_mock_for_on_end(span, metric_attributes_dick)
+        metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
+        self._configure_mock_for_on_end(span, metric_attributes_dict)
 
         self.aws_span_metrics_processor.on_end(span)
 
-        self.error_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dick.get(SERVICE_METRIC))])
-        self.fault_histogram_mock.assert_has_calls([call.record(1, metric_attributes_dick.get(SERVICE_METRIC))])
+        self.error_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dict.get(SERVICE_METRIC))])
+        self.fault_histogram_mock.assert_has_calls([call.record(1, metric_attributes_dict.get(SERVICE_METRIC))])
+        self.latency_histogram_mock.assert_has_calls([call.record(_TEST_LATENCY_MILLIS, metric_attributes_dict.get(SERVICE_METRIC))])
 
-        self.error_histogram_mock.assert_has_calls([])
-        self.fault_histogram_mock.assert_has_calls([])
+
+    def test_on_end_metrics_generation_with_latency(self):
+        span_attributes: Attributes = {SpanAttributes.HTTP_STATUS_CODE: 200}
+        span: ReadableSpan = _build_readable_span_mock(span_attributes)
+        metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
+        self._configure_mock_for_on_end(span, metric_attributes_dict)
+
+        # To Mock a latency of 5500000 Nano Second / 5.5ms
+        span.start_time = 0
+        span.end_time = 5500000
+
+        self.aws_span_metrics_processor.on_end(span)
+
+        self.error_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dict.get(SERVICE_METRIC))])
+        self.fault_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dict.get(SERVICE_METRIC))])
+        self.latency_histogram_mock.assert_has_calls([call.record(5.5, metric_attributes_dict.get(SERVICE_METRIC))])
 
     def test_on_end_metrics_generation_with_aws_status_codes(self):
+        # INVALID HTTP STATUS CODE
         self._validate_metrics_generated_for_attributes_status_code(None, self.ExpectedStatusMetric.NEITHER)
 
+        # VALID HTTP STATUS CODE
         self._validate_metrics_generated_for_attributes_status_code(399, self.ExpectedStatusMetric.NEITHER)
         self._validate_metrics_generated_for_attributes_status_code(400, self.ExpectedStatusMetric.ERROR)
         self._validate_metrics_generated_for_attributes_status_code(499, self.ExpectedStatusMetric.ERROR)
@@ -189,8 +206,10 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self._validate_metrics_generated_for_attributes_status_code(600, self.ExpectedStatusMetric.NEITHER)
 
     def test_on_end_metrics_generation_with_http_status_codes(self):
+        # INVALID HTTP STATUS CODE
         self._validate_metrics_generated_for_http_status_code(None, self.ExpectedStatusMetric.NEITHER)
 
+        # VALID HTTP STATUS CODE
         self._validate_metrics_generated_for_http_status_code(200, self.ExpectedStatusMetric.NEITHER)
         self._validate_metrics_generated_for_http_status_code(399, self.ExpectedStatusMetric.NEITHER)
         self._validate_metrics_generated_for_http_status_code(400, self.ExpectedStatusMetric.ERROR)
@@ -200,8 +219,10 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self._validate_metrics_generated_for_http_status_code(600, self.ExpectedStatusMetric.NEITHER)
 
     def test_on_end_metrics_generation_with_status_data_error(self):
+        # INVALID HTTP STATUS CODE
         self._validate_metrics_generated_for_status_data_error(None, self.ExpectedStatusMetric.FAULT)
 
+        # VALID HTTP STATUS CODE
         self._validate_metrics_generated_for_status_data_error(200, self.ExpectedStatusMetric.FAULT)
         self._validate_metrics_generated_for_status_data_error(399, self.ExpectedStatusMetric.FAULT)
         self._validate_metrics_generated_for_status_data_error(400, self.ExpectedStatusMetric.ERROR)
@@ -220,12 +241,12 @@ class TestAwsSpanMetricsProcessor(TestCase):
 
     def _verify_histogram_record(
             self,
-            metric_attributes_dick: {str: Attributes},
+            metric_attributes_dict: {str: Attributes},
             wanted_service_metric_invocation: int,
             wanted_dependency_metric_invocation: int,
     ):
-        service_metric_calls = [call.record(0, metric_attributes_dick.get(SERVICE_METRIC))]
-        dependency_metric_calls = [call.record(0, metric_attributes_dick.get(DEPENDENCY_METRIC))]
+        service_metric_calls = [call.record(0, metric_attributes_dict.get(SERVICE_METRIC))]
+        dependency_metric_calls = [call.record(0, metric_attributes_dict.get(DEPENDENCY_METRIC))]
 
         self.error_histogram_mock.assert_has_calls(service_metric_calls * wanted_service_metric_invocation)
         self.fault_histogram_mock.assert_has_calls(service_metric_calls * wanted_service_metric_invocation)
@@ -238,63 +259,66 @@ class TestAwsSpanMetricsProcessor(TestCase):
     ):
         attributes: Attributes = {SpanAttributes.HTTP_STATUS_CODE: http_status_code}
         span: ReadableSpan = _build_readable_span_mock(attributes, SpanKind.PRODUCER, None, Status(StatusCode.ERROR))
-        metric_attributes_dick = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
+        metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
 
-        self._configure_mock_for_on_end(span, metric_attributes_dick)
+        self._configure_mock_for_on_end(span, metric_attributes_dict)
         self.aws_span_metrics_processor.on_end(span)
-        self._valid_metrics(metric_attributes_dick, expected_status_metric)
+        self._valid_metrics(metric_attributes_dict, expected_status_metric)
 
     def _validate_metrics_generated_for_http_status_code(
             self, http_status_code, expected_status_metric: ExpectedStatusMetric
     ):
         attributes: Attributes = {SpanAttributes.HTTP_STATUS_CODE: http_status_code}
         span: ReadableSpan = _build_readable_span_mock(attributes, SpanKind.PRODUCER)
-        metric_attributes_dick = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
+        metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
 
-        self._configure_mock_for_on_end(span, metric_attributes_dick)
+        self._configure_mock_for_on_end(span, metric_attributes_dict)
         self.aws_span_metrics_processor.on_end(span)
-        self._valid_metrics(metric_attributes_dick, expected_status_metric)
+        self._valid_metrics(metric_attributes_dict, expected_status_metric)
 
     def _validate_metrics_generated_for_attributes_status_code(
             self, aws_status_code, expected_status_metric: ExpectedStatusMetric
     ):
         attributes: Attributes = {"new key": "new value"}
         span: ReadableSpan = _build_readable_span_mock(attributes, SpanKind.PRODUCER)
-        metric_attributes_dick = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
+        metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
         if aws_status_code is not None:
             attr_temp_service = {
                 "new service key": "new service value",
                 SpanAttributes.HTTP_STATUS_CODE: aws_status_code,
             }
-            metric_attributes_dick[SERVICE_METRIC] = attr_temp_service
+            metric_attributes_dict[SERVICE_METRIC] = attr_temp_service
             attr_temp_dependency = {
                 "new dependency key": "new dependency value",
                 SpanAttributes.HTTP_STATUS_CODE: aws_status_code,
             }
-            metric_attributes_dick[DEPENDENCY_METRIC] = attr_temp_dependency
-        self._configure_mock_for_on_end(span, metric_attributes_dick)
+            metric_attributes_dict[DEPENDENCY_METRIC] = attr_temp_dependency
+        self._configure_mock_for_on_end(span, metric_attributes_dict)
         self.aws_span_metrics_processor.on_end(span)
-        self._valid_metrics(metric_attributes_dick, expected_status_metric)
+        self._valid_metrics(metric_attributes_dict, expected_status_metric)
 
-    def _valid_metrics(self, metric_attributes_dick, expected_status_metric: ExpectedStatusMetric):
+    def _valid_metrics(self, metric_attributes_dict, expected_status_metric: ExpectedStatusMetric):
 
         if expected_status_metric == self.ExpectedStatusMetric.ERROR:
-            self.error_histogram_mock.assert_has_calls([call.record(1, metric_attributes_dick.get(SERVICE_METRIC))])
-            self.fault_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dick.get(SERVICE_METRIC))])
-            self.error_histogram_mock.assert_has_calls([call.record(1, metric_attributes_dick.get(DEPENDENCY_METRIC))])
-            self.fault_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dick.get(DEPENDENCY_METRIC))])
+            self.error_histogram_mock.assert_has_calls([call.record(1, metric_attributes_dict.get(SERVICE_METRIC))])
+            self.fault_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dict.get(SERVICE_METRIC))])
+            self.error_histogram_mock.assert_has_calls([call.record(1, metric_attributes_dict.get(DEPENDENCY_METRIC))])
+            self.fault_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dict.get(DEPENDENCY_METRIC))])
 
         if expected_status_metric == self.ExpectedStatusMetric.FAULT:
-            self.error_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dick.get(SERVICE_METRIC))])
-            self.fault_histogram_mock.assert_has_calls([call.record(1, metric_attributes_dick.get(SERVICE_METRIC))])
-            self.error_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dick.get(DEPENDENCY_METRIC))])
-            self.fault_histogram_mock.assert_has_calls([call.record(1, metric_attributes_dick.get(DEPENDENCY_METRIC))])
+            self.error_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dict.get(SERVICE_METRIC))])
+            self.fault_histogram_mock.assert_has_calls([call.record(1, metric_attributes_dict.get(SERVICE_METRIC))])
+            self.error_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dict.get(DEPENDENCY_METRIC))])
+            self.fault_histogram_mock.assert_has_calls([call.record(1, metric_attributes_dict.get(DEPENDENCY_METRIC))])
 
         if expected_status_metric == self.ExpectedStatusMetric.NEITHER:
-            self.error_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dick.get(SERVICE_METRIC))])
-            self.fault_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dick.get(SERVICE_METRIC))])
-            self.error_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dick.get(DEPENDENCY_METRIC))])
-            self.fault_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dick.get(DEPENDENCY_METRIC))])
+            self.error_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dict.get(SERVICE_METRIC))])
+            self.fault_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dict.get(SERVICE_METRIC))])
+            self.error_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dict.get(DEPENDENCY_METRIC))])
+            self.fault_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dict.get(DEPENDENCY_METRIC))])
+
+        self.latency_histogram_mock.assert_has_calls([call.record(_TEST_LATENCY_MILLIS, metric_attributes_dict.get(SERVICE_METRIC)),
+                                                      call.record(_TEST_LATENCY_MILLIS, metric_attributes_dict.get(DEPENDENCY_METRIC))])
 
 
 def _build_span_attributes(contains_attribute: bool):
@@ -316,6 +340,11 @@ def _build_readable_span_mock(
     mock_span_data.kind = span_kind
     mock_span_data.parent = parent_span_context
     mock_span_data.status = status_data
+
+    # Simulate Latency
+    mock_span_data.start_time = 0
+    mock_span_data.end_time = 0 + _TEST_LATENCY_NANOS
+
     return mock_span_data
 
 
@@ -329,3 +358,7 @@ def _build_metric_attributes(contain_attributes: bool, span: Span):
             attributes = {"new dependency key": "new dependency value"}
             attribute_map[DEPENDENCY_METRIC] = attributes
     return attribute_map
+
+
+def _get_latency_nanos(span: ReadableSpan):
+    return span.end_time - span.start_time
