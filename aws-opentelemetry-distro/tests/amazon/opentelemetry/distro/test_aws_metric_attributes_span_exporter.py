@@ -319,7 +319,6 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
             generate_metric_attribute_map_side_effect
         )
 
-    # Since the side_effect design of the python cause reference issue, make another helper that allow multiple span && attr pair
     def __configure_mock_for_export_with_multiple_side_effect(
         self, span_data_mocks: [ReadableSpan], metric_attributes_list: [Attributes]
     ):
