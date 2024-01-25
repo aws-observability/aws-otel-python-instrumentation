@@ -33,7 +33,7 @@ _TEST_LATENCY_NANOS: int = 150000000
 
 
 class TestAwsSpanMetricsProcessor(TestCase):
-    # Resource is not mockable, but tests can safely rely on an empty resource.
+    # Resource is not mock-able, but tests can safely rely on an empty resource.
     test_resource = Resource.get_empty()
 
     # Useful enum for indicating expected HTTP status code-related metrics
@@ -70,7 +70,7 @@ class TestAwsSpanMetricsProcessor(TestCase):
 
     def test_on_end_metrics_generation_without_span_attributes(self):
         span_attributes: Attributes = _build_span_attributes(_CONTAINS_NO_ATTRIBUTES)
-        span: ReadableSpan = _build_readable_span_mock(span_attributes)
+        span: ReadableSpan = _build_readable_span_mock(span_attributes, parent_span_context=None)
         metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
         self._configure_mock_for_on_end(span, metric_attributes_dict)
 
@@ -79,7 +79,7 @@ class TestAwsSpanMetricsProcessor(TestCase):
 
     def test_on_end_metrics_generation_without_metrics_attributes(self):
         span_attributes: Attributes = {SpanAttributes.HTTP_STATUS_CODE: 500}
-        span: ReadableSpan = _build_readable_span_mock(span_attributes)
+        span: ReadableSpan = _build_readable_span_mock(span_attributes, parent_span_context=None)
         metric_attributes_dict = _build_metric_attributes(_CONTAINS_NO_ATTRIBUTES, span)
         self._configure_mock_for_on_end(span, metric_attributes_dict)
 
@@ -88,7 +88,7 @@ class TestAwsSpanMetricsProcessor(TestCase):
 
     def test_on_end_metrics_generation_local_root_server_span(self):
         span_attributes: Attributes = _build_span_attributes(_CONTAINS_NO_ATTRIBUTES)
-        span: ReadableSpan = _build_readable_span_mock(span_attributes, SpanKind.SERVER)
+        span: ReadableSpan = _build_readable_span_mock(span_attributes, SpanKind.SERVER, parent_span_context=None)
         metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
         self._configure_mock_for_on_end(span, metric_attributes_dict)
 
@@ -97,7 +97,7 @@ class TestAwsSpanMetricsProcessor(TestCase):
 
     def test_on_end_metrics_generation_local_root_consumer_span(self):
         span_attributes: Attributes = _build_span_attributes(_CONTAINS_NO_ATTRIBUTES)
-        span: ReadableSpan = _build_readable_span_mock(span_attributes, SpanKind.CONSUMER)
+        span: ReadableSpan = _build_readable_span_mock(span_attributes, SpanKind.CONSUMER, parent_span_context=None)
         metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
         self._configure_mock_for_on_end(span, metric_attributes_dict)
 
@@ -106,7 +106,7 @@ class TestAwsSpanMetricsProcessor(TestCase):
 
     def test_on_end_metrics_generation_local_root_client_span(self):
         span_attributes: Attributes = _build_span_attributes(_CONTAINS_NO_ATTRIBUTES)
-        span: ReadableSpan = _build_readable_span_mock(span_attributes, SpanKind.CLIENT)
+        span: ReadableSpan = _build_readable_span_mock(span_attributes, SpanKind.CLIENT, parent_span_context=None)
         metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
         self._configure_mock_for_on_end(span, metric_attributes_dict)
 
@@ -115,7 +115,7 @@ class TestAwsSpanMetricsProcessor(TestCase):
 
     def test_on_end_metrics_generation_local_root_producer_span(self):
         span_attributes: Attributes = _build_span_attributes(_CONTAINS_NO_ATTRIBUTES)
-        span: ReadableSpan = _build_readable_span_mock(span_attributes, SpanKind.PRODUCER)
+        span: ReadableSpan = _build_readable_span_mock(span_attributes, SpanKind.PRODUCER, parent_span_context=None)
         metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
         self._configure_mock_for_on_end(span, metric_attributes_dict)
 
@@ -124,7 +124,7 @@ class TestAwsSpanMetricsProcessor(TestCase):
 
     def test_on_end_metrics_generation_local_root_internal_span(self):
         span_attributes: Attributes = _build_span_attributes(_CONTAINS_NO_ATTRIBUTES)
-        span: ReadableSpan = _build_readable_span_mock(span_attributes, SpanKind.INTERNAL)
+        span: ReadableSpan = _build_readable_span_mock(span_attributes, SpanKind.INTERNAL, parent_span_context=None)
         metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
         self._configure_mock_for_on_end(span, metric_attributes_dict)
 
@@ -133,7 +133,7 @@ class TestAwsSpanMetricsProcessor(TestCase):
 
     def test_on_end_metrics_generation_local_root_producer_span_without_metric_attributes(self):
         span_attributes: Attributes = _build_span_attributes(_CONTAINS_NO_ATTRIBUTES)
-        span: ReadableSpan = _build_readable_span_mock(span_attributes, SpanKind.PRODUCER)
+        span: ReadableSpan = _build_readable_span_mock(span_attributes, SpanKind.PRODUCER, parent_span_context=None)
         metric_attributes_dict = _build_metric_attributes(_CONTAINS_NO_ATTRIBUTES, span)
         self._configure_mock_for_on_end(span, metric_attributes_dict)
 
@@ -179,7 +179,7 @@ class TestAwsSpanMetricsProcessor(TestCase):
 
     def test_on_end_metrics_generation_with_latency(self):
         span_attributes: Attributes = {SpanAttributes.HTTP_STATUS_CODE: 200}
-        span: ReadableSpan = _build_readable_span_mock(span_attributes)
+        span: ReadableSpan = _build_readable_span_mock(span_attributes, parent_span_context=None)
         metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
         self._configure_mock_for_on_end(span, metric_attributes_dict)
 
@@ -231,6 +231,20 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self._validate_metrics_generated_for_status_data_error(599, self.ExpectedStatusMetric.FAULT)
         self._validate_metrics_generated_for_status_data_error(600, self.ExpectedStatusMetric.FAULT)
 
+    def test_on_end_metrics_generation_with_status_data_OK(self):
+        # Empty Status and HTTP with OK status
+        self._validate_metrics_generated_for_status_data_ok(None, self.ExpectedStatusMetric.NEITHER)
+
+        # Valid HTTP with OK Status
+        self._validate_metrics_generated_for_status_data_ok(200, self.ExpectedStatusMetric.NEITHER)
+        self._validate_metrics_generated_for_status_data_ok(399, self.ExpectedStatusMetric.NEITHER)
+        self._validate_metrics_generated_for_status_data_ok(400, self.ExpectedStatusMetric.ERROR)
+        self._validate_metrics_generated_for_status_data_ok(499, self.ExpectedStatusMetric.ERROR)
+        self._validate_metrics_generated_for_status_data_ok(500, self.ExpectedStatusMetric.FAULT)
+        self._validate_metrics_generated_for_status_data_ok(599, self.ExpectedStatusMetric.FAULT)
+        self._validate_metrics_generated_for_status_data_ok(600, self.ExpectedStatusMetric.NEITHER)
+
+
     def _configure_mock_for_on_end(self, span: Span, attribute_map: {str: Attributes}):
         def generate_m_a_from_span_side_effect(input_span, resource):
             if input_span == span and resource == self.test_resource:
@@ -259,6 +273,17 @@ class TestAwsSpanMetricsProcessor(TestCase):
     ):
         attributes: Attributes = {SpanAttributes.HTTP_STATUS_CODE: http_status_code}
         span: ReadableSpan = _build_readable_span_mock(attributes, SpanKind.PRODUCER, None, Status(StatusCode.ERROR))
+        metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
+
+        self._configure_mock_for_on_end(span, metric_attributes_dict)
+        self.aws_span_metrics_processor.on_end(span)
+        self._valid_metrics(metric_attributes_dict, expected_status_metric)
+
+    def _validate_metrics_generated_for_status_data_ok(
+            self, http_status_code, expected_status_metric: ExpectedStatusMetric
+    ):
+        attributes: Attributes = {SpanAttributes.HTTP_STATUS_CODE: http_status_code}
+        span: ReadableSpan = _build_readable_span_mock(attributes, SpanKind.PRODUCER, None, Status(StatusCode.OK))
         metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
 
         self._configure_mock_for_on_end(span, metric_attributes_dict)
@@ -334,18 +359,18 @@ def _build_readable_span_mock(
         parent_span_context: Optional[SpanContext] = None,
         status_data: Optional[Status] = Status(status_code=StatusCode.UNSET),
 ):
-    mock_span_data: ReadableSpan = MagicMock()
-    mock_span_data.instrumentation_scope = InstrumentationScope("aws-sdk", "version")
-    mock_span_data.attributes = span_attributes
-    mock_span_data.kind = span_kind
-    mock_span_data.parent = parent_span_context
-    mock_span_data.status = status_data
+    mock_span: ReadableSpan = MagicMock()
+    mock_span.instrumentation_scope = InstrumentationScope("aws-sdk", "version")
+    mock_span.attributes = span_attributes
+    mock_span.kind = span_kind
+    mock_span.parent = parent_span_context
+    mock_span.status = status_data
 
     # Simulate Latency
-    mock_span_data.start_time = 0
-    mock_span_data.end_time = 0 + _TEST_LATENCY_NANOS
+    mock_span.start_time = 0
+    mock_span.end_time = 0 + _TEST_LATENCY_NANOS
 
-    return mock_span_data
+    return mock_span
 
 
 def _build_metric_attributes(contain_attributes: bool, span: Span):
