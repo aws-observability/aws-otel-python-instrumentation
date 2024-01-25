@@ -2,25 +2,23 @@
 # SPDX-License-Identifier: Apache-2.0
 import copy
 from unittest import TestCase
-from unittest.mock import MagicMock, call, Mock
+from unittest.mock import MagicMock, Mock, call
 
+from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND, AWS_SPAN_KIND
+from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
+from amazon.opentelemetry.distro._aws_span_processing_util import (
+    should_generate_dependency_metric_attributes,
+    should_generate_service_metric_attributes,
+)
+from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsMetricAttributesSpanExporter
+from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, SERVICE_METRIC
 from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import ConsoleSpanExporter
+from opentelemetry.semconv.trace import MessagingOperationValues, SpanAttributes
 from opentelemetry.trace import SpanKind
-from opentelemetry.semconv.trace import SpanAttributes, MessagingOperationValues
 from opentelemetry.util.types import Attributes
-
-from amazon.opentelemetry.distro._aws_attribute_keys import AWS_SPAN_KIND, AWS_CONSUMER_PARENT_SPAN_KIND
-from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
-from amazon.opentelemetry.distro._aws_span_processing_util import should_generate_dependency_metric_attributes, \
-    should_generate_service_metric_attributes
-from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsMetricAttributesSpanExporter
-from amazon.opentelemetry.distro.metric_attribute_generator import (
-    DEPENDENCY_METRIC,
-    SERVICE_METRIC,
-)
 
 
 def build_span_attributes(contains_attribute):
@@ -126,8 +124,10 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         span_data_mock3: ReadableSpan = build_readable_span_mock(span_attributes3)
         metric_attributes3: Attributes = build_metric_attributes(self.CONTAINS_NO_ATTRIBUTES)
 
-        self.__configure_mock_for_export_with_multiple_side_effect([span_data_mock1, span_data_mock2, span_data_mock3],
-                                                                   [metric_attributes1, metric_attributes2, metric_attributes3])
+        self.__configure_mock_for_export_with_multiple_side_effect(
+            [span_data_mock1, span_data_mock2, span_data_mock3],
+            [metric_attributes1, metric_attributes2, metric_attributes3],
+        )
 
         self.aws_metric_attributes_span_exporter.export([span_data_mock1, span_data_mock2, span_data_mock3])
         self.delegate_mock.assert_has_calls([call.export([span_data_mock1, span_data_mock2, span_data_mock3])])
@@ -225,14 +225,15 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         span_data_mock.parent_span_context = None
         span_data_mock.attributes = span_attributes
 
-        dependency_metric: BoundedAttributes = BoundedAttributes(attributes={"new dependency key": "new dependency value", AWS_SPAN_KIND: SpanKind.PRODUCER})
+        dependency_metric: BoundedAttributes = BoundedAttributes(
+            attributes={"new dependency key": "new dependency value", AWS_SPAN_KIND: SpanKind.PRODUCER}
+        )
 
-        attribute_map = {
-            SERVICE_METRIC: {"new service key": "new service value"},
-            DEPENDENCY_METRIC: dependency_metric
-        }
+        attribute_map = {SERVICE_METRIC: {"new service key": "new service value"}, DEPENDENCY_METRIC: dependency_metric}
 
-        self.generator_mock.generate_metric_attributes_dict_from_span.side_effect = lambda span, resource: attribute_map if span == span_data_mock and resource == self.test_resource else {}
+        self.generator_mock.generate_metric_attributes_dict_from_span.side_effect = (
+            lambda span, resource: attribute_map if span == span_data_mock and resource == self.test_resource else {}
+        )
 
         self.aws_metric_attributes_span_exporter.export([span_data_mock])
         self.delegate_mock.assert_has_calls([call.export([span_data_mock])])
@@ -314,10 +315,14 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
                 return attribute_map
             return {}
 
-        self.generator_mock.generate_metric_attributes_dict_from_span.side_effect = generate_metric_attribute_map_side_effect
+        self.generator_mock.generate_metric_attributes_dict_from_span.side_effect = (
+            generate_metric_attribute_map_side_effect
+        )
 
     # Since the side_effect design of the python cause reference issue, make another helper that allow multiple span && attr pair
-    def __configure_mock_for_export_with_multiple_side_effect(self, span_data_mocks: [ReadableSpan], metric_attributes_list: [Attributes]):
+    def __configure_mock_for_export_with_multiple_side_effect(
+        self, span_data_mocks: [ReadableSpan], metric_attributes_list: [Attributes]
+    ):
         attributes_map_list = []
         for span in span_data_mocks:
             attribute_map: Attributes = {}
