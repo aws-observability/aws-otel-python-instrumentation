@@ -59,6 +59,7 @@ class TestAwsSpanMetricsProcessor(TestCase):
         span_mock: ReadableSpan = MagicMock()
         self.aws_span_metrics_processor.on_start(span_mock, parent_context_mock)
         span_mock.parent.assert_not_called()
+        parent_context_mock.assert_not_called()
         self.assertNotEqual(span_mock.parent, parent_context_mock)
 
     def test_tear_down(self):
