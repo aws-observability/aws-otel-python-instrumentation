@@ -56,8 +56,9 @@ class TestAwsSpanMetricsProcessor(TestCase):
 
     def test_start_does_nothing_to_span(self):
         parent_context_mock: Context = MagicMock()
-        span_mock: Span = MagicMock()
+        span_mock: ReadableSpan = MagicMock()
         self.aws_span_metrics_processor.on_start(span_mock, parent_context_mock)
+        span_mock.parent.assert_not_called()
         self.assertNotEqual(span_mock.parent, parent_context_mock)
 
     def test_tear_down(self):
@@ -241,6 +242,7 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self._validate_metrics_generated_for_status_data_ok(400, self.ExpectedStatusMetric.ERROR)
         self._validate_metrics_generated_for_status_data_ok(499, self.ExpectedStatusMetric.ERROR)
         self._validate_metrics_generated_for_status_data_ok(500, self.ExpectedStatusMetric.FAULT)
+        self._validate_metrics_generated_for_status_data_ok(599, self.ExpectedStatusMetric.FAULT)
         self._validate_metrics_generated_for_status_data_ok(599, self.ExpectedStatusMetric.FAULT)
         self._validate_metrics_generated_for_status_data_ok(600, self.ExpectedStatusMetric.NEITHER)
 
