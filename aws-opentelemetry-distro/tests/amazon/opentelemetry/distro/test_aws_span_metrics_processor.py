@@ -141,7 +141,7 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self._verify_histogram_record(metric_attributes_dict, 0, 0)
 
     def test_on_end_metrics_generation_client_span(self):
-        span_context = SpanContext(1,1,False)
+        span_context = SpanContext(1, 1, False)
         span_attributes: Attributes = _build_span_attributes(_CONTAINS_NO_ATTRIBUTES)
         span: ReadableSpan = _build_readable_span_mock(span_attributes, SpanKind.CLIENT, span_context)
         metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
@@ -151,7 +151,7 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self._verify_histogram_record(metric_attributes_dict, 0, 1)
 
     def test_on_end_metrics_generation_producer_span(self):
-        span_context = SpanContext(1,1,False)
+        span_context = SpanContext(1, 1, False)
         span_attributes: Attributes = _build_span_attributes(_CONTAINS_NO_ATTRIBUTES)
         span: ReadableSpan = _build_readable_span_mock(span_attributes, SpanKind.PRODUCER, span_context)
         metric_attributes_dict = _build_metric_attributes(_CONTAINS_ATTRIBUTES, span)
@@ -401,4 +401,3 @@ def _build_metric_attributes(contain_attributes: bool, span: Span) -> Attributes
             attributes = {"new dependency key": "new dependency value"}
             attribute_map[DEPENDENCY_METRIC] = attributes
     return attribute_map
-
