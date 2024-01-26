@@ -41,6 +41,10 @@ class TestAwsSpanMetricsProcessor(TestCase):
         FAULT = 2
         NEITHER = 3
 
+    def test_basic(self):
+        processor: AwsSpanMetricsProcessor = AwsSpanMetricsProcessor(None, None, None, None, None)
+        self.assertTrue(processor.force_flush)
+
     def setUp(self):
         self.error_histogram_mock: Histogram = MagicMock()
         self.fault_histogram_mock: Histogram = MagicMock()
