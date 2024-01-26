@@ -270,12 +270,16 @@ class TestAwsSpanMetricsProcessor(TestCase):
     ):
         service_metric_calls = [call.record(0, metric_attributes_dict.get(SERVICE_METRIC))]
         dependency_metric_calls = [call.record(0, metric_attributes_dict.get(DEPENDENCY_METRIC))]
+        service_metric_latency_calls = [call.record(_TEST_LATENCY_MILLIS, metric_attributes_dict.get(SERVICE_METRIC))]
+        dependency_metric_latency_calls = [call.record(_TEST_LATENCY_MILLIS, metric_attributes_dict.get(SERVICE_METRIC))]
 
         self.error_histogram_mock.assert_has_calls(service_metric_calls * wanted_service_metric_invocation)
         self.fault_histogram_mock.assert_has_calls(service_metric_calls * wanted_service_metric_invocation)
+        self.latency_histogram_mock.assert_has_calls(service_metric_latency_calls * wanted_service_metric_invocation)
 
         self.error_histogram_mock.assert_has_calls(dependency_metric_calls * wanted_dependency_metric_invocation)
         self.fault_histogram_mock.assert_has_calls(dependency_metric_calls * wanted_dependency_metric_invocation)
+        self.latency_histogram_mock.assert_has_calls(dependency_metric_latency_calls * wanted_service_metric_invocation)
 
         total_wanted_invocations: int = wanted_service_metric_invocation + wanted_dependency_metric_invocation
         self.assertEqual(self.error_histogram_mock.record.call_count, total_wanted_invocations)
