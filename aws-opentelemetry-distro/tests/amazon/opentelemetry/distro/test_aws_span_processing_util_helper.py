@@ -17,12 +17,10 @@ from opentelemetry.semconv.trace import MessagingOperationValues, SpanAttributes
 from opentelemetry.trace import SpanKind
 from opentelemetry.util.types import Attributes
 
+_DEFAULT_PATH_VALUE: str = "/"
+
 
 class TestAwsSpanProcessingUtilHelper(TestCase):
-    DEFAULT_PATH_VALUE: str = "/"
-    UNKNOWN_OPERATION: str = "UnknownOperation"
-    INTERNAL_OPERATION: str = "InternalOperation"
-
     def setUp(self):
         self.attributes_mock: Attributes = MagicMock()
         self.span_data_mock: Span = MagicMock()
@@ -33,27 +31,27 @@ class TestAwsSpanProcessingUtilHelper(TestCase):
     def test_extract_api_path_value_empty_target(self):
         invalid_target = ""
         path_value = extract_api_path_value(invalid_target)
-        self.assertEqual(path_value, self.DEFAULT_PATH_VALUE)
+        self.assertEqual(path_value, _DEFAULT_PATH_VALUE)
 
     def test_extract_api_path_value_null_target(self):
         invalid_target = None
         path_value = extract_api_path_value(invalid_target)
-        self.assertEqual(path_value, self.DEFAULT_PATH_VALUE)
+        self.assertEqual(path_value, _DEFAULT_PATH_VALUE)
 
     def test_extract_api_path_value_no_slash(self):
         invalid_target = "users"
         path_value = extract_api_path_value(invalid_target)
-        self.assertEqual(path_value, self.DEFAULT_PATH_VALUE)
+        self.assertEqual(path_value, _DEFAULT_PATH_VALUE)
 
     def test_extract_api_path_value_only_slash(self):
         invalid_target = "/"
         path_value = extract_api_path_value(invalid_target)
-        self.assertEqual(path_value, self.DEFAULT_PATH_VALUE)
+        self.assertEqual(path_value, _DEFAULT_PATH_VALUE)
 
     def test_extract_api_path_value_only_slash_at_end(self):
         invalid_target = "users/"
         path_value = extract_api_path_value(invalid_target)
-        self.assertEqual(path_value, self.DEFAULT_PATH_VALUE)
+        self.assertEqual(path_value, _DEFAULT_PATH_VALUE)
 
     def test_extract_api_path_valid_path(self):
         valid_target = "/users/1/pet?query#fragment"
