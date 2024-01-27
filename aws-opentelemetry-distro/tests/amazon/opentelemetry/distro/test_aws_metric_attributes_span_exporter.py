@@ -301,8 +301,8 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
 
         exported_span: ReadableSpan = exported_spans[0]
 
-        expected_attribute_count = dependency_metric.__len__() + len(span_attributes.items())
-        self.assertEqual(exported_span._attributes.__len__(), expected_attribute_count)
+        expected_attribute_count = len(dependency_metric) + len(span_attributes.items())
+        self.assertEqual(len(exported_span._attributes), expected_attribute_count)
 
         for key, value in span_attributes.items():
             self.assertEqual(exported_span._attributes[key], value)
