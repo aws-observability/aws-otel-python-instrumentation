@@ -371,7 +371,7 @@ def _build_readable_span_mock(span_attributes: Attributes) -> ReadableSpan:
 
 
 def _build_readable_span_mock_without_deepcopy_support(span_attributes: Attributes) -> ReadableSpan:
-    class NoDeepCopyMock(MagicMock):
+    class Mock(MagicMock):
         def __init__(self, *args: Any, **kw: Any):
             super().__init__(*args, **kw)
             self._attributes = span_attributes
@@ -382,6 +382,6 @@ def _build_readable_span_mock_without_deepcopy_support(span_attributes: Attribut
         def __deepcopy__(self, memo):
             return self
 
-    mock_span_data: ReadableSpan = NoDeepCopyMock()
+    mock_span_data: ReadableSpan = Mock()
 
     return mock_span_data
