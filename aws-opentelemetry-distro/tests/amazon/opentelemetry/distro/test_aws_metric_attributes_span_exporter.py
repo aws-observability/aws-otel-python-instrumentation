@@ -173,7 +173,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         span_data_mock._parent = parent_span_context_mock
         self.assertEqual(exported_span._parent, parent_span_context_mock)
 
-        span_data_mock._resource = self.test_resource
+        span_data_mock.__setattr__("_resource", self.test_resource)
         self.assertEqual(exported_span._resource, self.test_resource)
 
         test_instrumentation_scope_info = MagicMock()
@@ -371,7 +371,7 @@ def _build_readable_span_mock(span_attributes: Attributes) -> ReadableSpan:
 
 
 def _build_readable_span_mock_without_deepcopy_support(span_attributes: Attributes) -> ReadableSpan:
-    class Mock(MagicMock):
+    class NoDeepCopyMock(MagicMock):
         def __init__(self, *args: Any, **kw: Any):
             super().__init__(*args, **kw)
             self._attributes = span_attributes
@@ -382,6 +382,6 @@ def _build_readable_span_mock_without_deepcopy_support(span_attributes: Attribut
         def __deepcopy__(self, memo):
             return self
 
-    mock_span_data: ReadableSpan = Mock()
+    mock_span_data: ReadableSpan = NoDeepCopyMock()
 
     return mock_span_data
