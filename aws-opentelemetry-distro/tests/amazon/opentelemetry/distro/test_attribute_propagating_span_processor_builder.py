@@ -26,6 +26,6 @@ class TestAttributePropagatingSpanProcessorBuilder(TestCase):
         builder.set_propagation_data_extractor(extractor)
 
         processor: AttributePropagatingSpanProcessor = builder.build()
-        self.assertEqual(processor._attribute_keys_to_propagate, ('test key',))
+        self.assertEqual(processor._attribute_keys_to_propagate, ("test key",))
         self.assertEqual(processor._propagation_data_key, "test")
         self.assertEqual(processor._propagation_data_extractor(span_mock), "value")
