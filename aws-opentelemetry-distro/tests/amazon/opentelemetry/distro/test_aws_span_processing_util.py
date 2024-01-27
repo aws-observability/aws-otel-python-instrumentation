@@ -18,9 +18,9 @@ from opentelemetry.util.types import Attributes
 
 
 class TestAwsSpanProcessingUtil(TestCase):
-    DEFAULT_PATH_VALUE: str = "/"
-    UNKNOWN_OPERATION: str = "UnknownOperation"
-    INTERNAL_OPERATION: str = "InternalOperation"
+    _DEFAULT_PATH_VALUE: str = "/"
+    _UNKNOWN_OPERATION: str = "UnknownOperation"
+    _INTERNAL_OPERATION: str = "InternalOperation"
 
     def setUp(self):
         self.attributes_mock: Attributes = MagicMock()
@@ -41,7 +41,7 @@ class TestAwsSpanProcessingUtil(TestCase):
         self.span_data_mock.name = valid_name
         self.span_data_mock.kind = SpanKind.CLIENT
         actual_operation: str = get_ingress_operation(self, self.span_data_mock)
-        self.assertEqual(actual_operation, self.INTERNAL_OPERATION)
+        self.assertEqual(actual_operation, self._INTERNAL_OPERATION)
 
     def test_get_ingress_operation_http_method_name_and_no_fallback(self):
         invalid_name: str = "GET"
@@ -55,7 +55,7 @@ class TestAwsSpanProcessingUtil(TestCase):
 
         self.attributes_mock.get.side_effect = mock_get
         actual_operation: str = get_ingress_operation(self, self.span_data_mock)
-        self.assertEqual(actual_operation, self.UNKNOWN_OPERATION)
+        self.assertEqual(actual_operation, self._UNKNOWN_OPERATION)
 
     def test_get_ingress_operation_null_name_and_no_fallback(self):
         invalid_name: str = None
@@ -69,10 +69,10 @@ class TestAwsSpanProcessingUtil(TestCase):
 
         self.attributes_mock.get.side_effect = mock_get
         actual_operation: str = get_ingress_operation(self, self.span_data_mock)
-        self.assertEqual(actual_operation, self.UNKNOWN_OPERATION)
+        self.assertEqual(actual_operation, self._UNKNOWN_OPERATION)
 
     def test_get_ingress_operation_unknown_name_and_no_fallback(self):
-        invalid_name: str = self.UNKNOWN_OPERATION
+        invalid_name: str = self._UNKNOWN_OPERATION
         self.span_data_mock.name = invalid_name
         self.span_data_mock.kind = SpanKind.SERVER
 
@@ -83,11 +83,11 @@ class TestAwsSpanProcessingUtil(TestCase):
 
         self.attributes_mock.get.side_effect = mock_get
         actual_operation: str = get_ingress_operation(self, self.span_data_mock)
-        self.assertEqual(actual_operation, self.UNKNOWN_OPERATION)
+        self.assertEqual(actual_operation, self._UNKNOWN_OPERATION)
 
     def test_get_ingress_operation_invalid_name_and_valid_target(self):
         invalid_name = None
-        valid_target = "/"
+        valid_target: str = "/"
         self.span_data_mock.name = invalid_name
         self.span_data_mock.kind = SpanKind.SERVER
 
@@ -102,8 +102,8 @@ class TestAwsSpanProcessingUtil(TestCase):
 
     def test_get_ingress_operation_invalid_name_and_valid_target_and_method(self):
         invalid_name = None
-        valid_target = "/"
-        valid_method = "GET"
+        valid_target: str = "/"
+        valid_method: str = "GET"
         self.span_data_mock.name = invalid_name
         self.span_data_mock.kind = SpanKind.SERVER
 
@@ -125,10 +125,10 @@ class TestAwsSpanProcessingUtil(TestCase):
         self.span_data_mock.kind = SpanKind.CONSUMER
 
         actual_operation = get_egress_operation(self.span_data_mock)
-        self.assertEqual(actual_operation, self.INTERNAL_OPERATION)
+        self.assertEqual(actual_operation, self._INTERNAL_OPERATION)
 
     def test_get_egress_operation_get_local_operation(self):
-        operation = "TestOperation"
+        operation: str = "TestOperation"
 
         def mock_get(key):
             if key == AWS_LOCAL_OPERATION:
