@@ -3,11 +3,10 @@
 from unittest import TestCase
 from unittest.mock import MagicMock
 
-from opentelemetry.sdk.metrics import MeterProvider
-
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
 from amazon.opentelemetry.distro.metric_attribute_generator import MetricAttributeGenerator
+from opentelemetry.sdk.metrics import MeterProvider
 
 
 class TestAwsSpanMetricsProcessorBuilder(TestCase):
