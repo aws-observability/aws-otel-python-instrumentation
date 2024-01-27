@@ -4,8 +4,6 @@ import copy
 from unittest import TestCase
 from unittest.mock import MagicMock, Mock, call
 
-from opentelemetry.context import Context
-
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND, AWS_SPAN_KIND
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
 from amazon.opentelemetry.distro._aws_span_processing_util import (
@@ -19,7 +17,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter
 from opentelemetry.semconv.trace import MessagingOperationValues, SpanAttributes
-from opentelemetry.trace import SpanKind
+from opentelemetry.trace import SpanKind, SpanContext
 from opentelemetry.util.types import Attributes
 
 
@@ -278,13 +276,11 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
 
     def test_export_delegation_with_dependency_metrics(self):
         span_attributes = _build_span_attributes(self._CONTAINS_ATTRIBUTES)
-        span_data_mock = Mock()
-        span_context_mock: Context = Mock()
-        span_context_mock.is_remote.return_value = False
-        span_context_mock.is_valid.return_value = True
+        span_data_mock: ReadableSpan = Mock()
+        span_context_mock: SpanContext = SpanContext(1, 1, False)
         span_data_mock.attributes = span_attributes
         span_data_mock.kind = SpanKind.PRODUCER
-        span_data_mock.parent_span_context = span_context_mock
+        span_data_mock.parent = span_context_mock
 
         dependency_metric: BoundedAttributes = BoundedAttributes(attributes={"new service key": "new dependency value"})
 
@@ -310,7 +306,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         for k, v in span_attributes.items():
             self.assertEqual(exported_span._attributes[k], v)
 
-        for k, v in dependency_metric.attributes.items():
+        for k, v in dependency_metric._dict.items():
             self.assertEqual(exported_span._attributes[k], v)
 
     def __configure_mock_for_export(self, span_data_mock: ReadableSpan, metric_attributes: Attributes):
