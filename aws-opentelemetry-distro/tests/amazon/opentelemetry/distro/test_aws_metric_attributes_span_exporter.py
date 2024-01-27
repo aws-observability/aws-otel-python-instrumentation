@@ -44,7 +44,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         span_attributes: Attributes = _build_span_attributes(_CONTAINS_NO_ATTRIBUTES)
         span_data_mock: ReadableSpan = _build_readable_span_mock(span_attributes)
         metric_attributes: Attributes = _build_metric_attributes(_CONTAINS_NO_ATTRIBUTES)
-        self.__configure_mock_for_export(span_data_mock, metric_attributes)
+        self._configure_mock_for_export(span_data_mock, metric_attributes)
 
         self.aws_metric_attributes_span_exporter.export([span_data_mock])
         self.delegate_mock.assert_has_calls([call.export([span_data_mock])])
@@ -57,7 +57,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         span_attributes: Attributes = _build_span_attributes(_CONTAINS_ATTRIBUTES)
         span_data_mock: ReadableSpan = _build_readable_span_mock(span_attributes)
         metric_attributes: Attributes = _build_metric_attributes(_CONTAINS_NO_ATTRIBUTES)
-        self.__configure_mock_for_export(span_data_mock, metric_attributes)
+        self._configure_mock_for_export(span_data_mock, metric_attributes)
 
         self.aws_metric_attributes_span_exporter.export([span_data_mock])
         self.delegate_mock.assert_has_calls([call.export([span_data_mock])])
@@ -70,7 +70,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         span_attributes: Attributes = _build_span_attributes(_CONTAINS_NO_ATTRIBUTES)
         span_data_mock: ReadableSpan = _build_readable_span_mock(span_attributes)
         metric_attributes: Attributes = _build_metric_attributes(_CONTAINS_ATTRIBUTES)
-        self.__configure_mock_for_export(span_data_mock, metric_attributes)
+        self._configure_mock_for_export(span_data_mock, metric_attributes)
 
         self.aws_metric_attributes_span_exporter.export([span_data_mock])
         self.delegate_mock.assert_has_calls([call.export([span_data_mock])])
@@ -86,7 +86,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         span_attributes: Attributes = _build_span_attributes(_CONTAINS_ATTRIBUTES)
         span_data_mock: ReadableSpan = _build_readable_span_mock(span_attributes)
         metric_attributes: Attributes = _build_metric_attributes(_CONTAINS_ATTRIBUTES)
-        self.__configure_mock_for_export(span_data_mock, metric_attributes)
+        self._configure_mock_for_export(span_data_mock, metric_attributes)
 
         self.aws_metric_attributes_span_exporter.export([span_data_mock])
         self.delegate_mock.assert_has_calls([call.export([span_data_mock])])
@@ -109,7 +109,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         span_data_mock3: ReadableSpan = _build_readable_span_mock(_build_span_attributes(_CONTAINS_ATTRIBUTES))
         metric_attributes3: Attributes = _build_metric_attributes(_CONTAINS_NO_ATTRIBUTES)
 
-        self.__configure_mock_for_export_with_multiple_side_effect(
+        self._configure_mock_for_export_with_multiple_side_effect(
             [span_data_mock1, span_data_mock2, span_data_mock3],
             [metric_attributes1, metric_attributes2, metric_attributes3],
         )
@@ -141,7 +141,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
             "key1": "new value1",
             "key3": "new value3",
         }
-        self.__configure_mock_for_export(span_data_mock, metric_attributes)
+        self._configure_mock_for_export(span_data_mock, metric_attributes)
 
         self.aws_metric_attributes_span_exporter.export([span_data_mock])
         self.delegate_mock.assert_has_calls([call.export([span_data_mock])])
@@ -156,7 +156,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         span_attributes = _build_span_attributes(_CONTAINS_ATTRIBUTES)
         span_data_mock = _build_readable_span_mock_without_deepcopy_support(span_attributes)
         metric_attributes = _build_metric_attributes(_CONTAINS_ATTRIBUTES)
-        self.__configure_mock_for_export(span_data_mock, metric_attributes)
+        self._configure_mock_for_export(span_data_mock, metric_attributes)
 
         self.aws_metric_attributes_span_exporter.export([span_data_mock])
         self.delegate_mock.assert_has_calls([call.export([span_data_mock])])
@@ -311,7 +311,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         for key, value in dependency_metric._dict.items():
             self.assertEqual(exported_span._attributes[key], value)
 
-    def __configure_mock_for_export(self, span_data_mock: ReadableSpan, metric_attributes: Attributes):
+    def _configure_mock_for_export(self, span_data_mock: ReadableSpan, metric_attributes: Attributes):
         attribute_map: Attributes = {}
         if should_generate_service_metric_attributes(span_data_mock):
             attribute_map[SERVICE_METRIC] = copy.deepcopy(metric_attributes)
@@ -327,7 +327,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
             generate_metric_attribute_map_side_effect
         )
 
-    def __configure_mock_for_export_with_multiple_side_effect(
+    def _configure_mock_for_export_with_multiple_side_effect(
             self, span_data_mocks: [ReadableSpan], metric_attributes_list: [Attributes]
     ):
         attributes_map_list: list = []
