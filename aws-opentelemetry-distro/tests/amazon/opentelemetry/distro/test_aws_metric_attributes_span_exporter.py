@@ -327,7 +327,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         )
 
     def __configure_mock_for_export_with_multiple_side_effect(
-        self, span_data_mocks: [ReadableSpan], metric_attributes_list: [Attributes]
+            self, span_data_mocks: [ReadableSpan], metric_attributes_list: [Attributes]
     ):
         attributes_map_list: list = []
         for span in span_data_mocks:
@@ -367,6 +367,7 @@ def _build_readable_span_mock(span_attributes: Attributes) -> ReadableSpan:
     mock_span_data._parent = None
     mock_span_data.attributes = mock_span_data._attributes
     return mock_span_data
+
 
 def _build_readable_span_mock_without_deepcopy_support(span_attributes: Attributes) -> ReadableSpan:
     class NoDeepCopyMock(MagicMock):
