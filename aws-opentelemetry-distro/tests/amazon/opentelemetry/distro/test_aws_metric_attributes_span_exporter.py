@@ -153,7 +153,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
 
     def test_export_delegating_span_data_behaviour(self):
         span_attributes = _build_span_attributes(self._CONTAINS_ATTRIBUTES)
-        span_data_mock = _build_readable_span_mock(span_attributes)
+        span_data_mock = _build_readable_span_mock_without_deepcopy_support(span_attributes)
         metric_attributes = _build_metric_attributes(self._CONTAINS_ATTRIBUTES)
         self.__configure_mock_for_export(span_data_mock, metric_attributes)
 
@@ -164,11 +164,11 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
 
         exported_span: ReadableSpan = exported_spans[0]
 
-        span_context_mock = Mock()
+        span_context_mock = MagicMock()
         span_data_mock.get_span_context.return_value = span_context_mock
         self.assertEqual(exported_span.get_span_context(), span_context_mock)
 
-        parent_span_context_mock = Mock()
+        parent_span_context_mock = MagicMock()
         span_data_mock.parent = parent_span_context_mock
         self.assertEqual(exported_span.parent, parent_span_context_mock)
 
@@ -277,7 +277,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
 
     def test_export_delegation_with_dependency_metrics(self):
         span_attributes = _build_span_attributes(self._CONTAINS_ATTRIBUTES)
-        span_data_mock: ReadableSpan = Mock()
+        span_data_mock: ReadableSpan = MagicMock()
         span_context_mock: SpanContext = SpanContext(1, 1, False)
         span_data_mock.attributes = span_attributes
         span_data_mock.kind = SpanKind.PRODUCER
@@ -295,7 +295,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         self.generator_mock.generate_metric_attributes_dict_from_span.side_effect = generate_metric_side_effect
 
         self.aws_metric_attributes_span_exporter.export([span_data_mock])
-        self.delegate_mock.export.assert_has_calls([call.export([span_data_mock])])
+        self.delegate_mock.assert_has_calls([call.export([span_data_mock])])
         exported_spans = self.delegate_mock.export.call_args[0][0]
         self.assertEqual(len(exported_spans), 1)
 
@@ -362,6 +362,18 @@ def _build_metric_attributes(contains_attribute: bool) -> Attributes:
 
 def _build_readable_span_mock(span_attributes: Attributes) -> ReadableSpan:
     mock_span_data: ReadableSpan = MagicMock()
+    mock_span_data._attributes = span_attributes
+    mock_span_data._kind = SpanKind.SERVER
+    mock_span_data._parent = None
+    mock_span_data.attributes = mock_span_data._attributes
+    return mock_span_data
+
+def _build_readable_span_mock_without_deepcopy_support(span_attributes: Attributes) -> ReadableSpan:
+    class NoDeepCopyMock(MagicMock):
+        def __deepcopy__(self, memo):
+            return self
+
+    mock_span_data: ReadableSpan = NoDeepCopyMock()
     mock_span_data._attributes = span_attributes
     mock_span_data._kind = SpanKind.SERVER
     mock_span_data._parent = None
