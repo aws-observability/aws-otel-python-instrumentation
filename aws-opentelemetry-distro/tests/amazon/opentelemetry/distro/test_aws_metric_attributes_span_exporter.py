@@ -8,7 +8,8 @@ from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
 from amazon.opentelemetry.distro._aws_span_processing_util import (
     should_generate_dependency_metric_attributes,
-    should_generate_service_metric_attributes, LOCAL_ROOT,
+    should_generate_service_metric_attributes,
+    LOCAL_ROOT,
 )
 from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsMetricAttributesSpanExporter
 from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, SERVICE_METRIC
@@ -326,7 +327,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         )
 
     def __configure_mock_for_export_with_multiple_side_effect(
-            self, span_data_mocks: [ReadableSpan], metric_attributes_list: [Attributes]
+        self, span_data_mocks: [ReadableSpan], metric_attributes_list: [Attributes]
     ):
         attributes_map_list = []
         for span in span_data_mocks:
