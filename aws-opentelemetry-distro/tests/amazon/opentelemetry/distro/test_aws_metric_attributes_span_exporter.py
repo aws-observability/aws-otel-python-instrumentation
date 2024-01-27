@@ -4,6 +4,8 @@ import copy
 from unittest import TestCase
 from unittest.mock import MagicMock, Mock, call
 
+from opentelemetry.context import Context
+
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND, AWS_SPAN_KIND
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
 from amazon.opentelemetry.distro._aws_span_processing_util import (
@@ -277,19 +279,23 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
     def test_export_delegation_with_dependency_metrics(self):
         span_attributes = _build_span_attributes(self._CONTAINS_ATTRIBUTES)
         span_data_mock = Mock()
-        span_context_mock = Mock()
+        span_context_mock: Context = Mock()
         span_context_mock.is_remote.return_value = False
         span_context_mock.is_valid.return_value = True
         span_data_mock.attributes = span_attributes
         span_data_mock.kind = SpanKind.PRODUCER
         span_data_mock.parent_span_context = span_context_mock
 
-        dependency_metric: BoundedAttributes = MagicMock()
-        dependency_metric.attributes = {"new service key": "new dependency value"}
-        dependency_metric.maxlen = None
+        dependency_metric: BoundedAttributes = BoundedAttributes(attributes={"new service key": "new dependency value"})
 
         attribute_map = {DEPENDENCY_METRIC: dependency_metric}
-        self.generator_mock.generate_metric_attributes_dict_from_span.return_value = attribute_map
+
+        def generate_metric_a_f_s_side_effect(span, resource):
+            if span == span_data_mock and resource == self.test_resource:
+                return attribute_map
+            return None
+
+        self.generator_mock.generate_metric_attributes_dict_from_span.side_effect = generate_metric_a_f_s_side_effect
 
         self.aws_metric_attributes_span_exporter.export([span_data_mock])
         self.delegate_mock.export.assert_has_calls([call.export([span_data_mock])])
@@ -298,13 +304,13 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
 
         exported_span = exported_spans[0]
 
-        expected_attribute_count = len(dependency_metric.attributes) + len(span_attributes)
-        self.assertEqual(len(exported_span._attributes), expected_attribute_count)
+        expected_attribute_count = dependency_metric.__len__() + len(span_attributes.items())
+        self.assertEqual(exported_span._attributes.__len__(), expected_attribute_count)
 
-        for k,v in span_attributes.items():
+        for k, v in span_attributes.items():
             self.assertEqual(exported_span._attributes[k], v)
 
-        for k,v in dependency_metric.attributes.items():
+        for k, v in dependency_metric.attributes.items():
             self.assertEqual(exported_span._attributes[k], v)
 
     def __configure_mock_for_export(self, span_data_mock: ReadableSpan, metric_attributes: Attributes):
