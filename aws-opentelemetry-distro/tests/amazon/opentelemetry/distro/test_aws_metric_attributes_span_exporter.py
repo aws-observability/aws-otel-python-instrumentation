@@ -177,27 +177,27 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         self.assertEqual(exported_span._resource, self.test_resource)
 
         test_instrumentation_scope_info = MagicMock()
-        span_data_mock._instrumentation_scope = test_instrumentation_scope_info
+        span_data_mock.set_attribute("_instrumentation_scope", test_instrumentation_scope_info)
         self.assertEqual(exported_span._instrumentation_scope, test_instrumentation_scope_info)
 
         test_name = "name"
-        span_data_mock._name = test_name
+        span_data_mock.set_attribute("_name", test_name)
         self.assertEqual(exported_span._name, test_name)
 
         kind_mock = Mock()
-        span_data_mock._kind = kind_mock
+        span_data_mock.set_attribute("_kind", kind_mock)
         self.assertEqual(exported_span._kind, kind_mock)
 
         events_mock = [Mock()]
-        span_data_mock._events = events_mock
+        span_data_mock.set_attribute("_events", events_mock)
         self.assertEqual(exported_span._events, events_mock)
 
         links_mock = [Mock()]
-        span_data_mock._links = links_mock
+        span_data_mock.set_attribute("_links", links_mock)
         self.assertEqual(exported_span._links, links_mock)
 
         status_mock = Mock()
-        span_data_mock._status = status_mock
+        span_data_mock.set_attribute("_status", status_mock)
         self.assertEqual(exported_span._status, status_mock)
 
     def test_export_delegation_with_two_metrics(self):
