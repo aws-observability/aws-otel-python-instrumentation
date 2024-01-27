@@ -328,7 +328,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         )
 
     def _configure_mock_for_export_with_multiple_side_effect(
-            self, span_data_mocks: [ReadableSpan], metric_attributes_list: [Attributes]
+        self, span_data_mocks: [ReadableSpan], metric_attributes_list: [Attributes]
     ):
         attributes_map_list: list = []
         for span in span_data_mocks:
