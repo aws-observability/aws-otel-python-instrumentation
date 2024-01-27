@@ -26,7 +26,6 @@ _CONTAINS_NO_ATTRIBUTES: bool = False
 
 
 class TestAwsMetricAttributesSpanExporter(TestCase):
-
     def setUp(self):
         self.delegate_mock: SpanExporter = MagicMock()
         self.generator_mock: _AwsMetricAttributeGenerator = MagicMock()
