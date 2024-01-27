@@ -230,14 +230,14 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         self.assertEqual(len(exported_span._attributes), expected_attribute_count)
 
         # Check that all expected attributes are present
-        for k, v in span_attributes.items():
-            self.assertEqual(exported_span._attributes[k], v)
+        for key, value in span_attributes.items():
+            self.assertEqual(exported_span._attributes[key], value)
 
-        for k, v in dependency_metric.items():
-            if k == AWS_SPAN_KIND:
-                self.assertNotEqual(exported_span._attributes[k], v)
+        for key, value in dependency_metric.items():
+            if key == AWS_SPAN_KIND:
+                self.assertNotEqual(exported_span._attributes[key], value)
             else:
-                self.assertEqual(exported_span._attributes[k], v)
+                self.assertEqual(exported_span._attributes[key], value)
 
         self.assertEqual(exported_span._attributes[AWS_SPAN_KIND], LOCAL_ROOT)
 
@@ -304,11 +304,11 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         expected_attribute_count = dependency_metric.__len__() + len(span_attributes.items())
         self.assertEqual(exported_span._attributes.__len__(), expected_attribute_count)
 
-        for k, v in span_attributes.items():
-            self.assertEqual(exported_span._attributes[k], v)
+        for key, value in span_attributes.items():
+            self.assertEqual(exported_span._attributes[key], value)
 
-        for k, v in dependency_metric._dict.items():
-            self.assertEqual(exported_span._attributes[k], v)
+        for key, value in dependency_metric._dict.items():
+            self.assertEqual(exported_span._attributes[key], value)
 
     def __configure_mock_for_export(self, span_data_mock: ReadableSpan, metric_attributes: Attributes):
         attribute_map: Attributes = {}
