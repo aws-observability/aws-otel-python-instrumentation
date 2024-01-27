@@ -153,7 +153,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         self.assertEqual(exported_span._attributes["key3"], "new value3")
 
     def test_export_delegating_span_data_behaviour(self):
-        span_attributes = _build_span_attributes(_CONTAINS_ATTRIBUTES)
+        span_attributes: Attributes = _build_span_attributes(_CONTAINS_ATTRIBUTES)
         span_data_mock = _build_readable_span_mock_without_deepcopy_support(span_attributes)
         metric_attributes = _build_metric_attributes(_CONTAINS_ATTRIBUTES)
         self._configure_mock_for_export(span_data_mock, metric_attributes)
@@ -173,7 +173,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         span_data_mock._parent = parent_span_context_mock
         self.assertEqual(exported_span._parent, parent_span_context_mock)
 
-        span_data_mock.__setattr__("_resource", self.test_resource)
+        span_data_mock.set_attribute("_resource", self.test_resource)
         self.assertEqual(exported_span._resource, self.test_resource)
 
         test_instrumentation_scope_info = MagicMock()
@@ -378,6 +378,9 @@ def _build_readable_span_mock_without_deepcopy_support(span_attributes: Attribut
             self._kind = SpanKind.SERVER
             self._parent = None
             self.attributes = self._attributes
+
+        def set_attribute(self, name, value):
+            setattr(self, name, value)
 
         def __deepcopy__(self, memo):
             return self
