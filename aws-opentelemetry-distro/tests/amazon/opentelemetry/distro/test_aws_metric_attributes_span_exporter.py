@@ -18,7 +18,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter
 from opentelemetry.semconv.trace import MessagingOperationValues, SpanAttributes
-from opentelemetry.trace import SpanKind, SpanContext
+from opentelemetry.trace import SpanContext, SpanKind
 from opentelemetry.util.types import Attributes
 
 
