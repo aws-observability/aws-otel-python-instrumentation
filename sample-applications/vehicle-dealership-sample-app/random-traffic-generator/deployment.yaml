@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: random-traffic-generator
-        image: ${REPOSITORY_PREFIX}
+        image: ${REPOSITORY_PREFIX}/random-traffic-generator:latest
         env:
         - name: URL
           value: "${URL}"
