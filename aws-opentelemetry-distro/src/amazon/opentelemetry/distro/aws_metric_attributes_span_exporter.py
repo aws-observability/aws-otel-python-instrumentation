@@ -89,7 +89,7 @@ class AwsMetricAttributesSpanExporter(SpanExporter):
 
 def copy_attributes_with_local_root(attributes: BoundedAttributes) -> BoundedAttributes:
     new_attributes: types.Attributes = {}
-    for key, value in attributes:
+    for key, value in attributes.items():
         new_attributes[key] = value
 
     new_attributes[AWS_SPAN_KIND] = LOCAL_ROOT
@@ -110,12 +110,11 @@ def wrap_span_with_attributes(span: ReadableSpan, attributes: BoundedAttributes)
     original_attributes: AttributesT = span.attributes
     update_attributes: types.Attributes = {}
     # Copy all attribute in span into update_attributes
-    for key, value in original_attributes:
+    for key, value in original_attributes.items():
         update_attributes[key] = value
-    # Append all attribute in attributes that is not in original_attributes into update_attributes
-    for key, value in attributes:
-        if key not in update_attributes:
-            update_attributes[key] = value
+    # Replace existing span-attributes if there is same key in Attributes
+    for key, value in attributes.items():
+        update_attributes[key] = value
 
     if isinstance(original_attributes, BoundedAttributes):
         span._attributes = BoundedAttributes(
