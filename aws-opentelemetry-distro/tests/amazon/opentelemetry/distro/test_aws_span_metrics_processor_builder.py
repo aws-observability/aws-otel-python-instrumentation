@@ -10,13 +10,13 @@ from opentelemetry.sdk.metrics import MeterProvider
 
 
 class TestAwsSpanMetricsProcessorBuilder(TestCase):
-    def test_basic(self):
+    def test_all_methods(self):
+        # Basic functionality tests for constructor, setters, and build(). Mostly these tests exist to validate the
+        # code can be run, as the implementation is fairly trivial and does not require robust unit tests.
         meter_provider: MeterProvider = MeterProvider()
         builder: AwsSpanMetricsProcessorBuilder = AwsSpanMetricsProcessorBuilder(meter_provider, None)
-        self.assertIs(builder.set_scope_name("test"), builder)
-
         generator_mock: MetricAttributeGenerator = MagicMock()
-        builder.set_generator(generator_mock)
-        builder.set_scope_name("test scope name")
+        self.assertIs(builder.set_generator(generator_mock), builder)
+        self.assertIs(builder.set_scope_name("test"), builder)
         metric_processor: AwsSpanMetricsProcessor = builder.build()
-        self.assertEqual(metric_processor._error_histogram.record(1, None), None)
+        self.assertIsNotNone(metric_processor)
