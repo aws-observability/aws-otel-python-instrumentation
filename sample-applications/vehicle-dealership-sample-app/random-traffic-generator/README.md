@@ -9,7 +9,7 @@ The traffic generator generates the following traffic:
 ## Running locally
 1. Run `npm install`
 2. Run locally:
-    - If you are running against you applicaiton locally, just run `node index.js`. The default endpoint is `0.0.0.0:8000` for the ImageServiceApp and `0.0.0.0:8001` for VehicleInventoryApp.
+    - If you are running against you application locally, just run `node index.js`. The default endpoint is `0.0.0.0:8000` for the ImageServiceApp and `0.0.0.0:8001` for VehicleInventoryApp.
     - If you want to run against the application on EKS, before running the `node index.js`, run `export <EKS_URL>`.
 
 ## Deploying to EKS
