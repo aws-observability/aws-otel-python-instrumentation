@@ -32,6 +32,11 @@ const postGetCarsTrafficTask = cron.schedule('* * * * *', async () => {
             .catch(err => {
                 console.error(`${err.response}, ${err.response.data}`);
             }); // Catch and log errors
+        
+        axios.get(`http://${vehicleURL}/1`, { timeout: 10000 })
+            .catch(err => {
+                console.error(err.response && err.response.data);
+            }); // Catch and log errors
 }, { scheduled: false });
 postGetCarsTrafficTask.start();
 
@@ -63,7 +68,7 @@ const getCarThrottle = cron.schedule('*/5 * * * *', async () => {
     await sleep(sleepSecs*1000);
     throttleSecs = getRandomNumber(5,20);
     console.log(`request will be throttled for ${throttleSecs} seconds`)
-    axios.get(`http://${vehicleURL}/1`, {params: {"throttle": 5}}, { timeout: 10000 })
+    axios.get(`http://${vehicleURL}/1`, {params: {"throttle": throttleSecs}}, { timeout: 10000 })
         .catch(err => {
             console.error(err.response && err.response.data);
         }); // Catch and log errors
