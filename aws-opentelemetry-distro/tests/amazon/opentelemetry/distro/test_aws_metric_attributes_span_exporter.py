@@ -5,8 +5,6 @@ from typing import Any
 from unittest import TestCase
 from unittest.mock import MagicMock, Mock, call
 
-from opentelemetry.sdk.util.instrumentation import InstrumentationScope
-
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND, AWS_SPAN_KIND
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
 from amazon.opentelemetry.distro._aws_span_processing_util import (
@@ -18,10 +16,11 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsM
 from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, SERVICE_METRIC
 from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import ReadableSpan, Event
+from opentelemetry.sdk.trace import Event, ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter
+from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 from opentelemetry.semconv.trace import MessagingOperationValues, SpanAttributes
-from opentelemetry.trace import SpanContext, SpanKind, Link, Status
+from opentelemetry.trace import Link, SpanContext, SpanKind, Status
 from opentelemetry.util.types import Attributes
 
 _CONTAINS_ATTRIBUTES: bool = True
@@ -101,14 +100,18 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
             self.assertEqual(exported_span._attributes[key], value)
 
     def test_export_delegation_with_multiple_spans(self):
-        span_data_mock1: ReadableSpan = self._build_readable_span_mock(self._build_span_attributes(_CONTAINS_NO_ATTRIBUTES))
+        span_data_mock1: ReadableSpan = self._build_readable_span_mock(
+            self._build_span_attributes(_CONTAINS_NO_ATTRIBUTES)
+        )
         metric_attributes1: Attributes = self._build_metric_attributes(_CONTAINS_NO_ATTRIBUTES)
 
         span_attributes2: Attributes = self._build_span_attributes(_CONTAINS_ATTRIBUTES)
         span_data_mock2: ReadableSpan = self._build_readable_span_mock(span_attributes2)
         metric_attributes2: Attributes = self._build_metric_attributes(_CONTAINS_ATTRIBUTES)
 
-        span_data_mock3: ReadableSpan = self._build_readable_span_mock(self._build_span_attributes(_CONTAINS_ATTRIBUTES))
+        span_data_mock3: ReadableSpan = self._build_readable_span_mock(
+            self._build_span_attributes(_CONTAINS_ATTRIBUTES)
+        )
         metric_attributes3: Attributes = self._build_metric_attributes(_CONTAINS_NO_ATTRIBUTES)
 
         self._configure_mock_for_export_with_multiple_side_effect(
@@ -215,7 +218,10 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
             attributes={"new dependency key": "new dependency value", AWS_SPAN_KIND: SpanKind.PRODUCER}
         )
 
-        attribute_map: {str: Attributes} = {SERVICE_METRIC: {"new service key": "new service value"}, DEPENDENCY_METRIC: dependency_metric}
+        attribute_map: {str: Attributes} = {
+            SERVICE_METRIC: {"new service key": "new service value"},
+            DEPENDENCY_METRIC: dependency_metric,
+        }
 
         self.generator_mock.generate_metric_attributes_dict_from_span.side_effect = (
             lambda span, resource: attribute_map if span == span_data_mock and resource == self.test_resource else {}
@@ -354,15 +360,13 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         if contains_attribute:
             attribute = {"original key": "original value"}
         return attribute
-    
-    
+
     def _build_metric_attributes(self, contains_attribute: bool) -> Attributes:
         attribute: Attributes = {}
         if contains_attribute:
             attribute["new key"] = "new value"
         return attribute
-    
-    
+
     def _build_readable_span_mock(self, span_attributes: Attributes) -> ReadableSpan:
         mock_span_data: ReadableSpan = MagicMock()
         mock_span_data._attributes = span_attributes
@@ -370,8 +374,7 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         mock_span_data._parent = None
         mock_span_data.attributes = mock_span_data._attributes
         return mock_span_data
-    
-    
+
     def _build_readable_span_mock_without_deepcopy_support(self, span_attributes: Attributes) -> ReadableSpan:
         class NoDeepCopyMock(MagicMock):
             def __init__(self, *args: Any, **kw: Any):
@@ -380,13 +383,13 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
                 self._kind = SpanKind.SERVER
                 self._parent = None
                 self.attributes = self._attributes
-    
+
             def set_attribute(self, name, value):
                 setattr(self, name, value)
-    
+
             def __deepcopy__(self, memo):
                 return self
-    
+
         mock_span_data: ReadableSpan = NoDeepCopyMock()
-    
+
         return mock_span_data
