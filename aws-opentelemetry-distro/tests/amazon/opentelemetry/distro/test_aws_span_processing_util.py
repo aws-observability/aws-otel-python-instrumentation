@@ -28,7 +28,6 @@ _DEFAULT_PATH_VALUE: str = "/"
 
 
 # pylint: disable=too-many-public-methods
-# pylint: disable=inconsistent-return-statements
 class TestAwsSpanProcessingUtil(TestCase):
     def setUp(self):
         self.attributes_mock: Attributes = MagicMock()
@@ -336,7 +335,8 @@ class TestAwsSpanProcessingUtil(TestCase):
         self.assertTrue(should_generate_service_metric_attributes(self.span_data_mock))
         self.assertTrue(should_generate_dependency_metric_attributes(self.span_data_mock))
 
-    # check that SQS ReceiveMessage consumer span metrics are suppressed if messaging operation is process and not receive
+    # check that SQS ReceiveMessage consumer span metrics are suppressed if messaging operation
+    # is process and not receive
     def test_no_metric_attributes_for_aws_sdk_sqs_consumer_process_span(self):
         instrumentation_scope_info_mock = MagicMock()
         instrumentation_scope_info_mock.name = "io.opentelemetry.aws-sdk-2.2"
