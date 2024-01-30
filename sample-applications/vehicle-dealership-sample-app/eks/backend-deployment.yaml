@@ -35,13 +35,11 @@ spec:
           image: ${REPOSITORY_PREFIX}/pythonsampleapp/vehicle-inventory-service:latest
           name: vehicle-inventory-backend
           env:
-            - name: MYSQL_DATABASE
+            - name: POSTGRES_DATABASE
               value: vehicle_inventory
-            - name: MYSQL_PASSWORD
-              value: ${MYSQL_PASSWORD}
-            - name: MYSQL_ROOT_PASSWORD
-              value: ${MYSQL_PASSWORD}
-            - name: MYSQL_USER
+            - name: POSTGRES_PASSWORD
+              value: ${POSTGRES_PASSWORD}
+            - name: POSTGRES_USER
               value: djangouser
           imagePullPolicy: Always
           ports:
