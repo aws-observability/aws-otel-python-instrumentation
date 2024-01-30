@@ -347,6 +347,7 @@ class TestAwsSpanProcessingUtil(TestCase):
         def attributes_get_side_effect_process(key):
             if key == SpanAttributes.MESSAGING_OPERATION:
                 return MessagingOperationValues.PROCESS
+            return None
 
         self.attributes_mock.get.side_effect = attributes_get_side_effect_process
         self.span_data_mock.attributes = self.attributes_mock
@@ -357,6 +358,7 @@ class TestAwsSpanProcessingUtil(TestCase):
         def attributes_get_side_effect_receive(key):
             if key == SpanAttributes.MESSAGING_OPERATION:
                 return MessagingOperationValues.RECEIVE
+            return None
 
         self.attributes_mock.get.side_effect = attributes_get_side_effect_receive
         self.assertTrue(should_generate_service_metric_attributes(self.span_data_mock))
