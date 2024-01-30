@@ -35,6 +35,7 @@ class TestAwsSpanProcessingUtil(TestCase):
         self.span_context_mock: SpanContext = MagicMock()
         self.span_data_mock.get_span_context.return_value = self.span_context_mock
         self.span_data_mock.attributes = self.attributes_mock
+        self.attributes_mock.get = MagicMock(return_value=None)
 
     def test_get_ingress_operation_valid_name(self):
         valid_name: str = "ValidName"
@@ -58,7 +59,6 @@ class TestAwsSpanProcessingUtil(TestCase):
         def mock_get(key):
             if key == SpanAttributes.HTTP_METHOD:
                 return invalid_name
-            return None
 
         self.attributes_mock.get.side_effect = mock_get
         actual_operation: str = get_ingress_operation(self, self.span_data_mock)
@@ -72,7 +72,6 @@ class TestAwsSpanProcessingUtil(TestCase):
         def mock_get(key):
             if key == SpanAttributes.HTTP_METHOD:
                 return invalid_name
-            return None
 
         self.attributes_mock.get.side_effect = mock_get
         actual_operation: str = get_ingress_operation(self, self.span_data_mock)
@@ -86,7 +85,6 @@ class TestAwsSpanProcessingUtil(TestCase):
         def mock_get(key):
             if key == SpanAttributes.HTTP_METHOD:
                 return invalid_name
-            return None
 
         self.attributes_mock.get.side_effect = mock_get
         actual_operation: str = get_ingress_operation(self, self.span_data_mock)
@@ -101,7 +99,6 @@ class TestAwsSpanProcessingUtil(TestCase):
         def mock_get(key):
             if key == SpanAttributes.HTTP_TARGET:
                 return valid_target
-            return None
 
         self.attributes_mock.get.side_effect = mock_get
         actual_operation = get_ingress_operation(self, self.span_data_mock)
@@ -119,7 +116,6 @@ class TestAwsSpanProcessingUtil(TestCase):
                 return valid_target
             if key == SpanAttributes.HTTP_METHOD:
                 return valid_method
-            return None
 
         self.attributes_mock.get.side_effect = mock_get
         actual_operation = get_ingress_operation(self, self.span_data_mock)
@@ -140,7 +136,6 @@ class TestAwsSpanProcessingUtil(TestCase):
         def mock_get(key):
             if key == AWS_LOCAL_OPERATION:
                 return operation
-            return None
 
         self.attributes_mock.get.side_effect = mock_get
         self.span_data_mock.kind = SpanKind.SERVER
@@ -271,7 +266,6 @@ class TestAwsSpanProcessingUtil(TestCase):
                 return MessagingOperationValues.PROCESS
             if key == AWS_CONSUMER_PARENT_SPAN_KIND:
                 return SpanKind.CONSUMER
-            return None
 
         self.attributes_mock.get.side_effect = attributes_side_effect
 
@@ -310,7 +304,6 @@ class TestAwsSpanProcessingUtil(TestCase):
         def attributes_side_effect(key):
             if key == SpanAttributes.MESSAGING_OPERATION:
                 return MessagingOperationValues.PROCESS
-            return None
 
         self.attributes_mock.get.side_effect = attributes_side_effect
         self.span_data_mock.kind = SpanKind.CONSUMER
@@ -343,8 +336,8 @@ class TestAwsSpanProcessingUtil(TestCase):
 
     def test_metric_attributes_generated_for_other_instrumentation_sqs_consumer_span(self):
         instrumentation_scope_info_mock = MagicMock()
-        instrumentation_scope_info_mock.get_name.return_value = "my-instrumentation"
-        self.span_data_mock.instrumentation_scope_info = instrumentation_scope_info_mock
+        instrumentation_scope_info_mock.name = "my-instrumentation"
+        self.span_data_mock.instrumentation_scope = instrumentation_scope_info_mock
         self.span_data_mock.kind = SpanKind.CONSUMER
         self.span_data_mock.name = "Sqs.ReceiveMessage"
 
@@ -353,24 +346,23 @@ class TestAwsSpanProcessingUtil(TestCase):
 
     def test_no_metric_attributes_for_aws_sdk_sqs_consumer_process_span(self):
         instrumentation_scope_info_mock = MagicMock()
-        instrumentation_scope_info_mock.get_name.return_value = "io.opentelemetry.aws-sdk-2.2"
-        self.span_data_mock.instrumentation_scope_info = instrumentation_scope_info_mock
+        instrumentation_scope_info_mock.name = "io.opentelemetry.aws-sdk-2.2"
+        self.span_data_mock.instrumentation_scope = instrumentation_scope_info_mock
         self.span_data_mock.kind = SpanKind.CONSUMER
         self.span_data_mock.name = "Sqs.ReceiveMessage"
 
         def attributes_side_effect(key):
             if key == SpanAttributes.MESSAGING_OPERATION:
                 return MessagingOperationValues.PROCESS
-            return None
 
         self.attributes_mock.get.side_effect = attributes_side_effect
+        self.span_data_mock.attributes = self.attributes_mock
 
         self.assertFalse(should_generate_service_metric_attributes(self.span_data_mock))
         self.assertFalse(should_generate_dependency_metric_attributes(self.span_data_mock))
         def get_side_effect(key):
             if key == SpanAttributes.MESSAGING_OPERATION:
                 return MessagingOperationValues.RECEIVE
-            return None
 
         self.attributes_mock.get.side_effect = get_side_effect
         self.assertTrue(should_generate_service_metric_attributes(self.span_data_mock))
