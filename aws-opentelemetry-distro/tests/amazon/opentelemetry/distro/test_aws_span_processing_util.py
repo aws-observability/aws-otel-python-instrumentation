@@ -27,7 +27,7 @@ _INTERNAL_OPERATION: str = "InternalOperation"
 _DEFAULT_PATH_VALUE: str = "/"
 
 
-# pylink: disable=too-many-public-methods
+# pylint: disable=too-many-public-methods
 class TestAwsSpanProcessingUtil(TestCase):
     def setUp(self):
         self.attributes_mock: Attributes = MagicMock()
@@ -143,30 +143,35 @@ class TestAwsSpanProcessingUtil(TestCase):
             return None
 
         self.attributes_mock.get.side_effect = mock_get
-        self.span_data_mock.attributes = self.attributes_mock
         self.span_data_mock.kind = SpanKind.SERVER
 
         actual_operation = get_egress_operation(self.span_data_mock)
         self.assertEqual(actual_operation, operation)
 
     def test_is_key_present_key_present(self):
-        self.attributes_mock.get.return_value = "target"
-        self.span_data_mock.attributes = self.attributes_mock
-        self.assertTrue(is_key_present(self.span_data_mock, "HTTP_TARGET"))
+        def mock_get(key):
+            if key == SpanAttributes.HTTP_TARGET:
+                return "target"
+            return None
+
+        self.attributes_mock.get.side_effect = mock_get
+        self.assertTrue(is_key_present(self.span_data_mock, SpanAttributes.HTTP_TARGET))
 
     def test_is_key_present_key_absent(self):
         self.attributes_mock.get.return_value = None
-        self.span_data_mock.attributes = self.attributes_mock
         self.assertFalse(is_key_present(self.span_data_mock, "HTTP_TARGET"))
 
     def test_is_aws_span_true(self):
-        self.attributes_mock.get.return_value = "aws-api"
-        self.span_data_mock.attributes = self.attributes_mock
+        def mock_get(key):
+            if key == SpanAttributes.RPC_SYSTEM:
+                return "aws-api"
+            return None
+
+        self.attributes_mock.get.side_effect = mock_get
         self.assertTrue(is_aws_sdk_span(self.span_data_mock))
 
     def test_is_aws_span_false(self):
         self.attributes_mock.get.return_value = None
-        self.span_data_mock.attributes = self.attributes_mock
         self.assertFalse(is_aws_sdk_span(self.span_data_mock))
 
     def test_should_use_internal_operation_false(self):
@@ -269,7 +274,6 @@ class TestAwsSpanProcessingUtil(TestCase):
             return None
 
         self.attributes_mock.get.side_effect = attributes_side_effect
-        self.span_data_mock.attributes = self.attributes_mock
 
         self.assertFalse(should_generate_dependency_metric_attributes(self.span_data_mock))
 
@@ -309,11 +313,11 @@ class TestAwsSpanProcessingUtil(TestCase):
             return None
 
         self.attributes_mock.get.side_effect = attributes_side_effect
-        self.span_data_mock.attributes = self.attributes_mock
         self.span_data_mock.kind = SpanKind.CONSUMER
 
         self.assertTrue(is_consumer_process_span(self.span_data_mock))
 
+    # check that AWS SDK v1 SQS ReceiveMessage consumer spans metrics are suppressed
     def test_no_metric_attributes_for_sqs_consumer_span_aws_sdk_v1(self):
         instrumentation_scope_mock: InstrumentationScope = MagicMock()
         instrumentation_scope_mock.name = "io.opentelemetry.aws-sdk-1.11"
@@ -325,6 +329,7 @@ class TestAwsSpanProcessingUtil(TestCase):
         self.assertFalse(should_generate_service_metric_attributes(self.span_data_mock))
         self.assertFalse(should_generate_dependency_metric_attributes(self.span_data_mock))
 
+    # check that AWS SDK v1 SQS ReceiveMessage consumer spans metrics are suppressed
     def test_no_metric_attributes_for_sqs_consumer_span_aws_sdk_v2(self):
         instrumentation_scope_mock: InstrumentationScope = MagicMock()
         instrumentation_scope_mock.name = "io.opentelemetry.aws-sdk-2.2"
@@ -359,7 +364,6 @@ class TestAwsSpanProcessingUtil(TestCase):
             return None
 
         self.attributes_mock.get.side_effect = attributes_side_effect
-        self.span_data_mock.attributes = self.attributes_mock
 
         self.assertFalse(should_generate_service_metric_attributes(self.span_data_mock))
         self.assertFalse(should_generate_dependency_metric_attributes(self.span_data_mock))
