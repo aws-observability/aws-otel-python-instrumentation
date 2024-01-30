@@ -69,12 +69,6 @@ class TestAwsSpanProcessingUtil(TestCase):
         invalid_name: str = None
         self.span_data_mock.name = invalid_name
         self.span_data_mock.kind = SpanKind.SERVER
-
-        def attributes_get_side_effect(key):
-            if key == SpanAttributes.HTTP_METHOD:
-                return invalid_name
-
-        self.attributes_mock.get.side_effect = attributes_get_side_effect
         actual_operation: str = get_ingress_operation(self, self.span_data_mock)
         self.assertEqual(actual_operation, _UNKNOWN_OPERATION)
 
@@ -82,12 +76,6 @@ class TestAwsSpanProcessingUtil(TestCase):
         invalid_name: str = _UNKNOWN_OPERATION
         self.span_data_mock.name = invalid_name
         self.span_data_mock.kind = SpanKind.SERVER
-
-        def attributes_get_side_effect(key):
-            if key == SpanAttributes.HTTP_METHOD:
-                return invalid_name
-
-        self.attributes_mock.get.side_effect = attributes_get_side_effect
         actual_operation: str = get_ingress_operation(self, self.span_data_mock)
         self.assertEqual(actual_operation, _UNKNOWN_OPERATION)
 
