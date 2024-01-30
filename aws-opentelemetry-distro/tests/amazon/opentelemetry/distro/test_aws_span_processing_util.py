@@ -312,13 +312,6 @@ class TestAwsSpanProcessingUtil(TestCase):
         self.span_data_mock.instrumentation_scope = instrumentation_scope_mock
         self.span_data_mock.kind = SpanKind.CONSUMER
         self.span_data_mock.name = "SQS.ReceiveMessage"
-
-        def attributes_get_side_effect(key):
-            if key == SpanAttributes.MESSAGING_OPERATION:
-                return MessagingOperationValues.PROCESS
-            return None
-
-        self.attributes_mock.get.side_effect = attributes_get_side_effect
         self.assertFalse(should_generate_service_metric_attributes(self.span_data_mock))
         self.assertFalse(should_generate_dependency_metric_attributes(self.span_data_mock))
 
@@ -329,16 +322,10 @@ class TestAwsSpanProcessingUtil(TestCase):
         self.span_data_mock.instrumentation_scope = instrumentation_scope_mock
         self.span_data_mock.kind = SpanKind.CONSUMER
         self.span_data_mock.name = "SQS.ReceiveMessage"
-
-        def attributes_get_side_effect(key):
-            if key == SpanAttributes.MESSAGING_OPERATION:
-                return MessagingOperationValues.PROCESS
-            return None
-
-        self.attributes_mock.get.side_effect = attributes_get_side_effect
         self.assertFalse(should_generate_service_metric_attributes(self.span_data_mock))
         self.assertFalse(should_generate_dependency_metric_attributes(self.span_data_mock))
 
+    # check that SQS ReceiveMessage consumer spans metrics are still generated for other instrumentation
     def test_metric_attributes_generated_for_other_instrumentation_sqs_consumer_span(self):
         instrumentation_scope_info_mock = MagicMock()
         instrumentation_scope_info_mock.name = "my-instrumentation"
@@ -349,6 +336,7 @@ class TestAwsSpanProcessingUtil(TestCase):
         self.assertTrue(should_generate_service_metric_attributes(self.span_data_mock))
         self.assertTrue(should_generate_dependency_metric_attributes(self.span_data_mock))
 
+    # check that SQS ReceiveMessage consumer span metrics are suppressed if messaging operation is process and not receive
     def test_no_metric_attributes_for_aws_sdk_sqs_consumer_process_span(self):
         instrumentation_scope_info_mock = MagicMock()
         instrumentation_scope_info_mock.name = "io.opentelemetry.aws-sdk-2.2"
