@@ -33,9 +33,9 @@ class AwsXRaySamplingClientTest(TestCase):
 
     @patch("requests.post")
     def test_get_two_sampling_rules(self, mock_post=None):
-        with open(f"{DATA_DIR}/get-sampling-rules-response-sample.json") as f:
-            mock_post.return_value.configure_mock(**{"json.return_value": json.load(f)})
-            f.close()
+        with open(f"{DATA_DIR}/get-sampling-rules-response-sample.json", encoding="UTF-8") as file:
+            mock_post.return_value.configure_mock(**{"json.return_value": json.load(file)})
+            file.close()
         client = AwsXRaySamplingClient("http://127.0.0.1:2000")
         sampling_rules = client.get_sampling_rules()
         self.assertTrue(len(sampling_rules) == 3)

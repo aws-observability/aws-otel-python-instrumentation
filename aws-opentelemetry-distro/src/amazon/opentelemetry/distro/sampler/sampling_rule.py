@@ -1,9 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+
+
+# Disable snake_case naming style so this class can match the sampling rules response from X-Ray
+# pylint: disable=invalid-name
 class SamplingRule:
     def __init__(
         self,
-        Attributes={},
+        Attributes=None,
         FixedRate=None,
         HTTPMethod=None,
         Host=None,

@@ -18,19 +18,19 @@ class AwsXRaySamplingClient:
 
         if endpoint is None:
             _logger.error("endpoint must be specified")
-        self.__getSamplingRulesEndpoint = endpoint + "/GetSamplingRules"
+        self.__get_sampling_rules_endpoint = endpoint + "/GetSamplingRules"
 
     def get_sampling_rules(self):
         sampling_rules = []
         headers = {"content-type": "application/json"}
 
         try:
-            r = requests.post(url=self.__getSamplingRulesEndpoint, headers=headers)
-            if r is None:
-                raise Exception("GetSamplingRules response is None")
-            sampling_rules_response = r.json()
+            xray_response = requests.post(url=self.__get_sampling_rules_endpoint, headers=headers, timeout=20)
+            if xray_response is None:
+                raise ValueError("GetSamplingRules response is None")
+            sampling_rules_response = xray_response.json()
             if "SamplingRuleRecords" not in sampling_rules_response:
-                raise Exception(
+                raise ValueError(
                     f"SamplingRuleRecords is missing in getSamplingRules response:{sampling_rules_response}"
                 )
 
@@ -39,10 +39,10 @@ class AwsXRaySamplingClient:
                 sampling_rules.append(SamplingRule(**record["SamplingRule"]))
 
         except requests.exceptions.RequestException as req_err:
-            _logger.exception(f"Request error occurred: {req_err}")
+            _logger.exception("Request error occurred: %s", req_err)
         except json.JSONDecodeError as json_err:
-            _logger.exception(f"Error in decoding JSON response: {json_err}")
-        except Exception as ex:
-            _logger.exception(f"Exception occurred: {ex}")
+            _logger.exception("Error in decoding JSON response: %s", json_err)
+        except ValueError as ex:
+            _logger.exception("Exception occurred: %s", ex)
 
         return sampling_rules

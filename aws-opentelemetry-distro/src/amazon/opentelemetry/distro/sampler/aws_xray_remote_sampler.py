@@ -1,5 +1,3 @@
-# Copyright The OpenTelemetry Authors
-#
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import json
@@ -50,10 +48,13 @@ class AwsXRayRemoteSampler(Sampler):
 
         self.__xray_client = AwsXRaySamplingClient(endpoint, log_level=log_level)
         self.__polling_interval = polling_interval
+
+        # pylint: disable=unused-private-member
         self.__resource = resource
 
         self.__start_sampling_rule_poller()
 
+    # pylint: disable=no-self-use
     def should_sample(
         self,
         parent_context: Optional["Context"],
@@ -67,6 +68,7 @@ class AwsXRayRemoteSampler(Sampler):
         # TODO: add sampling functionality
         return ALWAYS_OFF
 
+    # pylint: disable=no-self-use
     def get_description(self) -> str:
         description = "AwsXRayRemoteSampler{remote sampling with AWS X-Ray}"
         return description
@@ -75,7 +77,7 @@ class AwsXRayRemoteSampler(Sampler):
         sampling_rules = self.__xray_client.get_sampling_rules()
 
         # TODO: Update sampling rules cache
-        _logger.info(f"Got Sampling Rules: {json.dumps([ob.__dict__ for ob in sampling_rules])}")
+        _logger.info("Got Sampling Rules: %s", {json.dumps([ob.__dict__ for ob in sampling_rules])})
 
     def __start_sampling_rule_poller(self):
         self.__get_and_update_sampling_rules()

@@ -38,7 +38,7 @@ class AwsXRayRemoteSamplerTest(TestCase):
         self.assertIsNotNone(rs._AwsXRayRemoteSampler__xray_client)
         self.assertIsNotNone(rs._AwsXRayRemoteSampler__resource)
         self.assertEqual(
-            rs._AwsXRayRemoteSampler__xray_client._AwsXRaySamplingClient__getSamplingRulesEndpoint,
+            rs._AwsXRayRemoteSampler__xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint,
             "http://abc.com/GetSamplingRules",
         )  # "http://127.0.0.1:2000"
         self.assertEqual(rs._AwsXRayRemoteSampler__resource.attributes["service.name"], "test-service-name")
