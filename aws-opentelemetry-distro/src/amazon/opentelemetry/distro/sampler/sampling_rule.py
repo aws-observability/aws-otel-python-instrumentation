@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 class SamplingRule:
     def __init__(
-        self, 
+        self,
         Attributes={},
         FixedRate=None,
         HTTPMethod=None,
@@ -15,18 +15,18 @@ class SamplingRule:
         ServiceName=None,
         ServiceType=None,
         URLPath=None,
-        Version=None
+        Version=None,
     ):
-        self.Attributes=Attributes
-        self.FixedRate=FixedRate
-        self.HTTPMethod=HTTPMethod
-        self.Host=Host
-        self.Priority=Priority
-        self.ReservoirSize=ReservoirSize
-        self.ResourceARN=ResourceARN
-        self.RuleARN=RuleARN
-        self.RuleName=RuleName
-        self.ServiceName=ServiceName
-        self.ServiceType=ServiceType
-        self.URLPath=URLPath
-        self.Version=Version
+        self.Attributes = Attributes
+        self.FixedRate = FixedRate
+        self.HTTPMethod = HTTPMethod
+        self.Host = Host
+        self.Priority = Priority
+        self.ReservoirSize = ReservoirSize
+        self.ResourceARN = ResourceARN
+        self.RuleARN = RuleARN
+        self.RuleName = RuleName
+        self.ServiceName = ServiceName
+        self.ServiceType = ServiceType
+        self.URLPath = URLPath
+        self.Version = Version

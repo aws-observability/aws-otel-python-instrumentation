@@ -21,6 +21,7 @@ DEFAULT_RULES_POLLING_INTERVAL = 300
 DEFAULT_TARGET_POLLING_INTERVAL = 10
 DEFAULT_SAMPLING_PROXY_ENDPOINT = "http://127.0.0.1:2000"
 
+
 class AwsXRayRemoteSampler(Sampler):
     """
     Remote Sampler for OpenTelemetry that gets sampling configurations from AWS X-Ray
@@ -32,11 +33,17 @@ class AwsXRayRemoteSampler(Sampler):
         log_level: custom log level configuration for remote sampler (Optional)
     """
 
-    __resource : Resource
-    __polling_interval : int
-    __xray_client : AwsXRaySamplingClient
+    __resource: Resource
+    __polling_interval: int
+    __xray_client: AwsXRaySamplingClient
 
-    def __init__(self, resource=None, endpoint=DEFAULT_SAMPLING_PROXY_ENDPOINT, polling_interval=DEFAULT_RULES_POLLING_INTERVAL, log_level = None):
+    def __init__(
+        self,
+        resource=None,
+        endpoint=DEFAULT_SAMPLING_PROXY_ENDPOINT,
+        polling_interval=DEFAULT_RULES_POLLING_INTERVAL,
+        log_level=None,
+    ):
         # Override default log level
         if log_level is not None:
             _logger.setLevel(log_level)
@@ -72,8 +79,7 @@ class AwsXRayRemoteSampler(Sampler):
 
     def __start_sampling_rule_poller(self):
         self.__get_and_update_sampling_rules()
-        # Schedule the next sampling rule poll 
+        # Schedule the next sampling rule poll
         self._timer = Timer(self.__polling_interval, self.__start_sampling_rule_poller)
         self._timer.daemon = True
         self._timer.start()
-

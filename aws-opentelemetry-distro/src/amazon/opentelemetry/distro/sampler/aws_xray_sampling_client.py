@@ -9,6 +9,7 @@ from amazon.opentelemetry.distro.sampler.sampling_rule import SamplingRule
 
 _logger = getLogger(__name__)
 
+
 class AwsXRaySamplingClient:
     def __init__(self, endpoint=None, log_level=None):
         # Override default log level
@@ -21,7 +22,7 @@ class AwsXRaySamplingClient:
 
     def get_sampling_rules(self):
         sampling_rules = []
-        headers = {'content-type': 'application/json'}
+        headers = {"content-type": "application/json"}
 
         try:
             r = requests.post(url=self.__getSamplingRulesEndpoint, headers=headers)
@@ -29,7 +30,9 @@ class AwsXRaySamplingClient:
                 raise Exception("GetSamplingRules response is None")
             sampling_rules_response = r.json()
             if "SamplingRuleRecords" not in sampling_rules_response:
-                raise Exception(f"SamplingRuleRecords is missing in getSamplingRules response:{sampling_rules_response}")
+                raise Exception(
+                    f"SamplingRuleRecords is missing in getSamplingRules response:{sampling_rules_response}"
+                )
 
             sampling_rules_records = sampling_rules_response["SamplingRuleRecords"]
             for record in sampling_rules_records:
