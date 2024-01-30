@@ -360,20 +360,20 @@ class TestAwsSpanProcessingUtil(TestCase):
         self.span_data_mock.kind = SpanKind.CONSUMER
         self.span_data_mock.name = "Sqs.ReceiveMessage"
 
-        def attributes_get_side_effect(key):
+        def attributes_get_side_effect_process(key):
             if key == SpanAttributes.MESSAGING_OPERATION:
                 return MessagingOperationValues.PROCESS
 
-        self.attributes_mock.get.side_effect = attributes_get_side_effect
+        self.attributes_mock.get.side_effect = attributes_get_side_effect_process
         self.span_data_mock.attributes = self.attributes_mock
 
         self.assertFalse(should_generate_service_metric_attributes(self.span_data_mock))
         self.assertFalse(should_generate_dependency_metric_attributes(self.span_data_mock))
 
-        def attributes_get_side_effect(key):
+        def attributes_get_side_effect_receive(key):
             if key == SpanAttributes.MESSAGING_OPERATION:
                 return MessagingOperationValues.RECEIVE
 
-        self.attributes_mock.get.side_effect = attributes_get_side_effect
+        self.attributes_mock.get.side_effect = attributes_get_side_effect_receive
         self.assertTrue(should_generate_service_metric_attributes(self.span_data_mock))
         self.assertTrue(should_generate_dependency_metric_attributes(self.span_data_mock))
