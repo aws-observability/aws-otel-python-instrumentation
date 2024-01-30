@@ -27,6 +27,7 @@ _INTERNAL_OPERATION: str = "InternalOperation"
 _DEFAULT_PATH_VALUE: str = "/"
 
 
+# pylink: disable=too-many-public-methods
 class TestAwsSpanProcessingUtil(TestCase):
     def setUp(self):
         self.attributes_mock: Attributes = MagicMock()
