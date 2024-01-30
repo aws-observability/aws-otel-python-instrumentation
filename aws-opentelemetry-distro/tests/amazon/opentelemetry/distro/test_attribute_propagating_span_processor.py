@@ -46,15 +46,22 @@ class TestAttributePropagatingSpanProcessor(TestCase):
                 self._validate_span_attributes_inheritance(span_with_op_only, "parent", None, None)
                 self._validate_span_attributes_inheritance(span_with_app_and_op, "parent", None, None)
 
-    def _create_nested_span(self, parent_span: Span, depth: int):
+    def _create_nested_span(self, parent_span: Span, depth: int) -> Span:
         if depth == 0:
             return parent_span
-        child_span: Span = self.tracer.start_span(name="child" + str(depth), context=Context(parent_span.context))
+        child_span: Span = self.tracer.start_span(name="child:" + str(depth))
+        child_span._parent = parent_span
         try:
             return self._create_nested_span(child_span, depth - 1)
         finally:
             child_span.end()
 
     def _validate_span_attributes_inheritance(self, parent_span: Span, propageted_name: str, propagation_value1: str, propagation_value2: str):
-        leaf_span: ReadableSpan = ReadableSpan(self._create_nested_span(parent_span, 10))
+        leaf_span: ReadableSpan = self._create_nested_span(parent_span, 10)
         self.assertIsNotNone(leaf_span.parent)
+        self.assertEqual(leaf_span.name, "child:1")
+        if propageted_name is not None:
+            self.assertEqual(leaf_span.attributes[_SPAN_NAME_KEY], propageted_name)
+        else:
+            self.assertIsNone(leaf_span.attributes[_SPAN_NAME_KEY])
+
