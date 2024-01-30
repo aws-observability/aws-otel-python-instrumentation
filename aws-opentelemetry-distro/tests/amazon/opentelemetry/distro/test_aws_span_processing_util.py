@@ -3,21 +3,18 @@
 from unittest import TestCase
 from unittest.mock import MagicMock
 
-from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_OPERATION
+from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND, AWS_LOCAL_OPERATION
 from amazon.opentelemetry.distro._aws_span_processing_util import (
+    extract_api_path_value,
     get_egress_operation,
     get_ingress_operation,
     is_aws_sdk_span,
-    is_key_present,
-    should_use_internal_operation,
-)
-from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND
-from amazon.opentelemetry.distro._aws_span_processing_util import (
-    extract_api_path_value,
     is_consumer_process_span,
+    is_key_present,
     is_local_root,
     should_generate_dependency_metric_attributes,
     should_generate_service_metric_attributes,
+    should_use_internal_operation,
 )
 from opentelemetry.sdk.trace import Span, SpanContext
 from opentelemetry.sdk.util.instrumentation import InstrumentationScope
