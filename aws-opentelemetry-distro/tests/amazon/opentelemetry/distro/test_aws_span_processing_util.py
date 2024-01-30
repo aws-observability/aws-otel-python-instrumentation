@@ -367,9 +367,11 @@ class TestAwsSpanProcessingUtil(TestCase):
 
         self.assertFalse(should_generate_service_metric_attributes(self.span_data_mock))
         self.assertFalse(should_generate_dependency_metric_attributes(self.span_data_mock))
-        self.attributes_mock.get.side_effect = (
-            lambda key: MessagingOperationValues.RECEIVE if key == SpanAttributes.MESSAGING_OPERATION else None
-        )
+        def get_side_effect(key):
+            if key == SpanAttributes.MESSAGING_OPERATION:
+                return MessagingOperationValues.RECEIVE
+            return None
 
+        self.attributes_mock.get.side_effect = get_side_effect
         self.assertTrue(should_generate_service_metric_attributes(self.span_data_mock))
         self.assertTrue(should_generate_dependency_metric_attributes(self.span_data_mock))
