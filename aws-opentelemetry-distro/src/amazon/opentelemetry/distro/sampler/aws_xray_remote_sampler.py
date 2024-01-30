@@ -1,16 +1,19 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-import json
+import datetime
+import random
 from logging import getLogger
-from threading import Timer
+from threading import Lock, Timer
 from typing import Optional, Sequence
 
 from typing_extensions import override
 
 from amazon.opentelemetry.distro.sampler._aws_xray_sampling_client import _AwsXRaySamplingClient
+from amazon.opentelemetry.distro.sampler._fallback_sampler import _FallbackSampler
+from amazon.opentelemetry.distro.sampler._rule_cache import _RuleCache
 from opentelemetry.context import Context
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace.sampling import ALWAYS_OFF, Sampler, SamplingResult
+from opentelemetry.sdk.trace.sampling import Sampler, SamplingResult
 from opentelemetry.trace import Link, SpanKind
 from opentelemetry.trace.span import TraceState
 from opentelemetry.util.types import Attributes
@@ -48,8 +51,13 @@ class AwsXRayRemoteSampler(Sampler):
         if log_level is not None:
             _logger.setLevel(log_level)
 
+        self.__date_time = datetime
         self.__xray_client = _AwsXRaySamplingClient(endpoint, log_level=log_level)
+        self.__rule_polling_jitter = random.uniform(0.0, 5.0)
         self.__polling_interval = polling_interval
+        self.__fallback_sampler = _FallbackSampler()
+
+        # TODO add client id
 
         # pylint: disable=unused-private-member
         if resource is not None:
@@ -57,6 +65,11 @@ class AwsXRayRemoteSampler(Sampler):
         else:
             _logger.warning("OTel Resource provided is `None`. Defaulting to empty resource")
             self.__resource = Resource.get_empty()
+
+        self.__rule_cache_lock = Lock()
+        self.__rule_cache = _RuleCache(
+            self.__resource, self.__fallback_sampler, self.__date_time, self.__rule_cache_lock
+        )
 
         # Schedule the next rule poll now
         # Python Timers only run once, so they need to be recreated for every poll
@@ -68,16 +81,22 @@ class AwsXRayRemoteSampler(Sampler):
     @override
     def should_sample(
         self,
-        parent_context: Optional["Context"],
+        parent_context: Optional[Context],
         trace_id: int,
         name: str,
         kind: SpanKind = None,
         attributes: Attributes = None,
-        links: Sequence["Link"] = None,
-        trace_state: "TraceState" = None,
+        links: Sequence[Link] = None,
+        trace_state: TraceState = None,
     ) -> SamplingResult:
-        # TODO: add sampling functionality
-        return ALWAYS_OFF.should_sample(
+
+        if self.__rule_cache.expired():
+            _logger.info("Rule cache is expired so using fallback sampling strategy")
+            return self.__fallback_sampler.should_sample(
+                parent_context, trace_id, name, kind=kind, attributes=attributes, links=links, trace_state=trace_state
+            )
+
+        return self.__rule_cache.should_sample(
             parent_context, trace_id, name, kind=kind, attributes=attributes, links=links, trace_state=trace_state
         )
 
@@ -87,15 +106,13 @@ class AwsXRayRemoteSampler(Sampler):
         description = "AwsXRayRemoteSampler{remote sampling with AWS X-Ray}"
         return description
 
-    def __get_and_update_sampling_rules(self):
+    def __get_and_update_sampling_rules(self) -> None:
         sampling_rules = self.__xray_client.get_sampling_rules()
+        self.__rule_cache.update_sampling_rules(sampling_rules)
 
-        # TODO: Update sampling rules cache
-        _logger.info("Got Sampling Rules: %s", {json.dumps([ob.__dict__ for ob in sampling_rules])})
-
-    def __start_sampling_rule_poller(self):
+    def __start_sampling_rule_poller(self) -> None:
         self.__get_and_update_sampling_rules()
         # Schedule the next sampling rule poll
-        self._timer = Timer(self.__polling_interval, self.__start_sampling_rule_poller)
+        self._timer = Timer(self.__polling_interval + self.__rule_polling_jitter, self.__start_sampling_rule_poller)
         self._timer.daemon = True
         self._timer.start()
