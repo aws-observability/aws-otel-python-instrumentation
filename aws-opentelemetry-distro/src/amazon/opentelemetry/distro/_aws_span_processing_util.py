@@ -102,7 +102,7 @@ def _is_sqs_receive_message_consumer_span(span: ReadableSpan) -> bool:
     instrumentation_scope: InstrumentationScope = span.instrumentation_scope
 
     return (
-        _SQS_RECEIVE_MESSAGE_SPAN_NAME.casefold() == span.name.casefold()
+        (span.name is not None and _SQS_RECEIVE_MESSAGE_SPAN_NAME.casefold() == span.name.casefold())
         and SpanKind.CONSUMER == span.kind
         and instrumentation_scope is not None
         and instrumentation_scope.name.startswith(_AWS_SDK_INSTRUMENTATION_SCOPE_PREFIX)
