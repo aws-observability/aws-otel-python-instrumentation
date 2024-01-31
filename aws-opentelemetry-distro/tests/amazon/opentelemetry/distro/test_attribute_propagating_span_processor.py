@@ -37,20 +37,29 @@ class TestAttributePropagatingSpanProcessor(TestCase):
 
     def test_attributes_propagation_by_spankind(self):
         for span_kind in SpanKind:
-            span_with_app_only: Span = self.tracer.start_span(name="parent", kind=span_kind.value, attributes={_TEST_KEY_1: "TestValue1"})
-            span_with_op_only: Span = self.tracer.start_span(name="parent", kind=span_kind.value, attributes={_TEST_KEY_2: "TestValue2"})
-            span_with_app_and_op: Span = self.tracer.start_span(name="parent", kind=span_kind.value, attributes={_TEST_KEY_1: "TestValue1", _TEST_KEY_2: "TestValue2"})
+            span_with_app_only: Span = self.tracer.start_span(name="parent", kind=span_kind, attributes={_TEST_KEY_1: "TestValue1"})
+            span_with_op_only: Span = self.tracer.start_span(name="parent", kind=span_kind, attributes={_TEST_KEY_2: "TestValue2"})
+            span_with_app_and_op: Span = self.tracer.start_span(name="parent", kind=span_kind, attributes={_TEST_KEY_1: "TestValue1", _TEST_KEY_2: "TestValue2"})
 
             if span_kind == SpanKind.SERVER:
                 self._validate_span_attributes_inheritance(span_with_app_only, "parent", None, None)
                 self._validate_span_attributes_inheritance(span_with_op_only, "parent", None, None)
                 self._validate_span_attributes_inheritance(span_with_app_and_op, "parent", None, None)
+            elif span_kind == SpanKind.INTERNAL:
+                self._validate_span_attributes_inheritance(span_with_app_only, "InternalOperation", "TestValue1", None)
+                self._validate_span_attributes_inheritance(span_with_op_only, "InternalOperation", None, "TestValue2")
+                self._validate_span_attributes_inheritance(span_with_app_and_op, "InternalOperation", "TestValue1", "TestValue2")
+            else:
+                self._validate_span_attributes_inheritance(span_with_app_only, "InternalOperation", None, None)
+                self._validate_span_attributes_inheritance(span_with_op_only, "InternalOperation", None, None)
+                self._validate_span_attributes_inheritance(span_with_app_and_op, "InternalOperation", None, None)
 
     def _create_nested_span(self, parent_span: Span, depth: int) -> Span:
         if depth == 0:
             return parent_span
         child_span: Span = self.tracer.start_span(name="child:" + str(depth))
         child_span._parent = parent_span
+        print(child_span)
         try:
             return self._create_nested_span(child_span, depth - 1)
         finally:
