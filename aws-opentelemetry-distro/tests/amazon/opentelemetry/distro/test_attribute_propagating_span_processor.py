@@ -163,7 +163,7 @@ class TestAttributePropagatingSpanProcessor(TestCase):
         child_span: Span = self.tracer.start_span(
             name="parent", kind=SpanKind.CONSUMER, context=set_span_in_context(parent_span)
         )
-        self.assertEqual(child_span.attributes.get(AWS_CONSUMER_PARENT_SPAN_KIND), "CONSUMER")
+        self.assertEqual(child_span.attributes.get(AWS_CONSUMER_PARENT_SPAN_KIND), SpanKind.CONSUMER.name)
 
     def _create_nested_span(self, parent_span: Span, depth: int) -> Span:
         if depth == 0:
