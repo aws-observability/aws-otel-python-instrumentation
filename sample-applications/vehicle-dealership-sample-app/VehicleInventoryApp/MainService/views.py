@@ -28,8 +28,7 @@ def vehicle(request):
                 make=body["make"], model=body["model"], year=body["year"], image_name=body["image_name"]
             )
             vehicle_object.save()
-            print(get_image_endpoint() + "/images/name/" + body["image_name"])
-            requests.post(get_image_endpoint() + "/images/name/" + body["image_name"], timeout=10)
+            requests.post(build_image_url(body["image_name"]), timeout=10)
             return HttpResponse("VehicleId = " + str(vehicle_object.id))
         except KeyError as exception:
             return HttpResponseBadRequest("Missing key: " + str(exception))
@@ -59,5 +58,21 @@ def get_vehicle_image(request, vehicle_id):
         if not vehicle_object:
             return HttpResponseNotFound("Vehicle with id=" + str(vehicle_id) + " is not found")
         image_name = getattr(vehicle_object, "image_name")
-        return HttpResponse(requests.get(get_image_endpoint() + "/images/name/" + image_name, timeout=10))
+        return HttpResponse(requests.get(build_image_url(image_name), timeout=10))
     return HttpResponseNotAllowed("Only GET requests are allowed!")
+
+
+@csrf_exempt
+def get_image_by_name(request, image_name):
+    print(image_name)
+    if request.method == "GET":
+        response = requests.get(build_image_url(image_name), timeout=10);
+        if response.ok:
+            return HttpResponse(response)
+        else:
+            return HttpResponseNotFound("Image with name: " + image_name + " is not found")
+    return HttpResponseNotAllowed("Only GET requests are allowed!")
+
+
+def build_image_url(image_name):
+    return get_image_endpoint() + "/images/name/" + image_name

@@ -3,7 +3,6 @@
 const axios = require('axios');
 const cron = require('node-cron');
 
-const imageUrl = process.env.URL ? `${process.env.URL}/images` : 'http://0.0.0.0:8000/images'
 const vehicleURL = process.env.URL ? `${process.env.URL}/vehicle-inventory` : 'http://0.0.0.0:8001/vehicle-inventory'
 
 function getRandomNumber(min, max) {
@@ -16,7 +15,6 @@ function sleep(ms) {
 }
 
 console.log(vehicleURL)
-console.log(imageUrl)
 
 // sends two requests every minute, 1 POST request and 1 GET request
 const postGetCarsTrafficTask = cron.schedule('* * * * *', async () => {
@@ -90,12 +88,13 @@ getInvalidRequest.start();
 
 // sends an invalid GET request with a non existent image name to trigger 500 error due to S3 Error:
 // "An error occurred (NoSuchKey) when calling the GetObject operation: The specified key does not exist."
+// The vehicle service will then return 404.
 const getNonExistentImage = cron.schedule('*/5 * * * *', async () => {
     sleepSecs = getRandomNumber(30,120);
     console.log(`sleep ${sleepSecs} seconds`);
     await sleep(sleepSecs*1000);
     console.log('get an non existent image to trigger aws error');
-    axios.get(`http://${imageUrl}/name/doesnotexist.jpeg`)
+    axios.get(`http://${vehicleURL}/image/doesnotexist.jpeg`)
         .catch(err => {
             console.error(err.response && err.response.data);
         }); // Catch and log errors
