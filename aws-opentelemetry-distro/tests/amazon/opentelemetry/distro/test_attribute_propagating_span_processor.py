@@ -177,15 +177,15 @@ class TestAttributePropagatingSpanProcessor(TestCase):
     def _validate_span_attributes_inheritance(
         self,
         parent_span: Span,
-        propageted_name: Optional[str] = None,
+        propagated_name: Optional[str] = None,
         propagation_value1: Optional[str] = None,
         propagation_value2: Optional[str] = None,
     ):
         leaf_span: ReadableSpan = self._create_nested_span(parent_span, 10)
         self.assertIsNotNone(leaf_span.parent)
         self.assertEqual(leaf_span.name, "child:1")
-        if propageted_name is not None:
-            self.assertEqual(propageted_name, leaf_span.attributes.get(_SPAN_NAME_KEY))
+        if propagated_name is not None:
+            self.assertEqual(propagated_name, leaf_span.attributes.get(_SPAN_NAME_KEY))
         else:
             self.assertIsNone(leaf_span.attributes.get(_SPAN_NAME_KEY))
         if propagation_value1 is not None:
