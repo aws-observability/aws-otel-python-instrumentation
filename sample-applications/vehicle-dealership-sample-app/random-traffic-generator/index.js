@@ -38,9 +38,9 @@ const postGetCarsTrafficTask = cron.schedule('* * * * *', async () => {
 }, { scheduled: false });
 postGetCarsTrafficTask.start();
 
-// sends a burst of traffic sending 10 requests every hour:
+// sends a burst of traffic sending 10 requests every 15 mins:
 // 5 POST requests and 5 GET requests. 
-const postGetCarsTrafficBurstTask = cron.schedule('0 * * * *', async () => {
+const postGetCarsTrafficBurstTask = cron.schedule('*/15 * * * *', async () => {
     console.log('add 5 cars within 1 minutes');
     const carData = {"make": "BMW", "model": "M340", "year": 2022, "image_name": "newCar.jpg"}
     for (let i = 0; i < 5; i++) {
@@ -59,12 +59,12 @@ const postGetCarsTrafficBurstTask = cron.schedule('0 * * * *', async () => {
 postGetCarsTrafficBurstTask.start();
 
 // sends a GET request with custom throttle parameter in the body that mimics being throttled. The throttle time
-// is going to be random between 5 - 20 secs.
+// is going to be random between 2 - 5 secs.
 const getCarThrottle = cron.schedule('*/5 * * * *', async () => {    
     sleepSecs = getRandomNumber(30,60);
     console.log(`sleep ${sleepSecs} seconds`);
     await sleep(sleepSecs*1000);
-    throttleSecs = getRandomNumber(5,20);
+    throttleSecs = getRandomNumber(2,5);
     console.log(`request will be throttled for ${throttleSecs} seconds`)
     axios.get(`http://${vehicleURL}/1`, {params: {"throttle": throttleSecs}}, { timeout: 10000 })
         .catch(err => {

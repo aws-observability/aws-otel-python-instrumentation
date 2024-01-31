@@ -66,7 +66,7 @@ def get_vehicle_image(request, vehicle_id):
 def get_image_by_name(request, image_name):
     print(image_name)
     if request.method == "GET":
-        response = requests.get(build_image_url(image_name), timeout=10);
+        response = requests.get(build_image_url(image_name), timeout=10)
         if response.ok:
             return HttpResponse(response)
         else:
