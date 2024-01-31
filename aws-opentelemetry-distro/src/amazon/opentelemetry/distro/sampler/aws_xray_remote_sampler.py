@@ -66,7 +66,9 @@ class AwsXRayRemoteSampler(Sampler):
         trace_state: "TraceState" = None,
     ) -> "SamplingResult":
         # TODO: add sampling functionality
-        return ALWAYS_OFF
+        return ALWAYS_OFF.should_sample(
+            self, parent_context, trace_id, name, kind=kind, attributes=attributes, links=links, trace_state=trace_state
+        )
 
     # pylint: disable=no-self-use
     def get_description(self) -> str:
