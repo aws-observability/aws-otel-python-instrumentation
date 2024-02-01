@@ -31,6 +31,11 @@ echo "DB_SERVICE_PORT=5432" >> VehicleInventoryApp/.env
 echo "IMAGE_BACKEND_SERVICE_HOST=image-service-backend" >> VehicleInventoryApp/.env
 echo "IMAGE_BACKEND_SERVICE_PORT=8000" >> VehicleInventoryApp/.env
 
+echo "POSTGRES_DATABASE=vehicle_inventory" >> ImageServiceApp/.env
+echo "POSTGRES_USER=djangouser" >> ImageServiceApp/.env
+echo "POSTGRES_PASSWORD=${password}" >> ImageServiceApp/.env
+echo "DB_SERVICE_HOST=db" >> ImageServiceApp/.env
+echo "DB_SERVICE_PORT=5432" >> ImageServiceApp/.env
 echo "AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}" >> ImageServiceApp/.env
 echo "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}" >> ImageServiceApp/.env
 echo "AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}" >> ImageServiceApp/.env

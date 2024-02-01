@@ -43,5 +43,11 @@ spec:
           env:
             - name: S3_BUCKET
               value: ${S3_BUCKET}
+            - name: POSTGRES_DATABASE
+              value: vehicle_inventory
+            - name: POSTGRES_PASSWORD
+              value: ${POSTGRES_PASSWORD}
+            - name: POSTGRES_USER
+              value: djangouser
       restartPolicy: Always
 status: {}

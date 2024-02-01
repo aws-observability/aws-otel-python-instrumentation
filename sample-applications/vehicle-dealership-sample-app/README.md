@@ -89,7 +89,8 @@ IMAGE_BACKEND_SERVICE_PORT=8000
 
 python3.11 manage.py migrate --noinput && python3.11 manage.py runserver 0.0.0.0:8001
 ```
-7. Connect to the `image-service` EC2 instance and run the following:
+7. Go to the EC2 console and select the `image-service`, Go Actions -> Networking -> Connect RDS database.
+8. Connect to the `image-service` EC2 instance and run the following:
 ```
 sudo dnf install python3.11
 sudo dnf install python3.11-pip

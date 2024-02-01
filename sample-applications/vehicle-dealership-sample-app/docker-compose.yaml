@@ -51,6 +51,10 @@ services:
       - $HOME/.aws/credentials:/home/app/.aws/credentials:ro
     ports:
       - "8000:8000"
+    depends_on:
+       db:
+          condition: service_healthy
+          
 volumes:
   data:
 
