@@ -1,0 +1,25 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: random-traffic-generator
+  labels:
+    app: random-traffic-generator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: random-traffic-generator
+  template:
+    metadata:
+      labels:
+        app: random-traffic-generator
+    spec:
+      containers:
+      - name: random-traffic-generator
+        image: ${REPOSITORY_PREFIX}/random-traffic-generator:latest
+        env:
+        - name: URL
+          value: "${URL}"
+
