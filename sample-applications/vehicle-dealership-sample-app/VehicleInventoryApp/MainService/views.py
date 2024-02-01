@@ -69,8 +69,7 @@ def get_image_by_name(request, image_name):
         response = requests.get(build_image_url(image_name), timeout=10)
         if response.ok:
             return HttpResponse(response)
-        else:
-            return HttpResponseNotFound("Image with name: " + image_name + " is not found")
+        return HttpResponseNotFound("Image with name: " + image_name + " is not found")
     return HttpResponseNotAllowed("Only GET requests are allowed!")
 
 
