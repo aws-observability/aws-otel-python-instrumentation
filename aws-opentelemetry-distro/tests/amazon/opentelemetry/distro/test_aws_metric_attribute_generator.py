@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+from typing import Optional
 from unittest import TestCase
 from unittest.mock import MagicMock
 
@@ -351,10 +352,34 @@ class TestAwsMetricAttributeGenerator(TestCase):
     def _update_resource_with_service_name(self):
         self.resource: Resource = Resource(attributes={SERVICE_NAME: _SERVICE_NAME_VALUE})
 
-    def _mock_attribute(self, keys: [str], values: [str]):
+    def _mock_attribute(self, keys: [str], values: [Optional[str]]):
         def get_side_effect(get_key):
             if get_key in keys:
                 return values[keys.index(get_key)]
             return None
 
         self.attributes_mock.get.side_effect = get_side_effect
+
+    def _validate_expected_remote_attributes(self, expected_remote_service, expected_remote_operation):
+        self.span_mock.kind = SpanKind.CLIENT
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(DEPENDENCY_METRIC)
+        self.assertEqual(actual_attributes[AWS_REMOTE_SERVICE], expected_remote_service)
+        self.assertEqual(actual_attributes[AWS_REMOTE_OPERATION], expected_remote_operation)
+
+        self.span_mock.kind = SpanKind.PRODUCER
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(DEPENDENCY_METRIC)
+        self.assertEqual(actual_attributes[AWS_REMOTE_SERVICE], expected_remote_service)
+        self.assertEqual(actual_attributes[AWS_REMOTE_OPERATION], expected_remote_operation)
+
+    def _validate_and_remove_remote_attributes(self, remote_service_key, remote_service_value, remote_operation_key, remote_operation_value):
+        self._mock_attribute([remote_service_key, remote_operation_key], [remote_service_value, remote_operation_value])
+        self._validate_expected_remote_attributes(remote_service_value, remote_operation_value)
+
+        self._mock_attribute([remote_service_key, remote_operation_key], [None, remote_operation_value])
+        self._validate_expected_remote_attributes(UNKNOWN_REMOTE_SERVICE, remote_operation_value)
+
+        self._mock_attribute([remote_service_key, remote_operation_key], [remote_service_value, None])
+        self._validate_expected_remote_attributes(remote_service_value, UNKNOWN_REMOTE_OPERATION)
+
+        self._mock_attribute([remote_service_key, None], [remote_service_value, None])
+
