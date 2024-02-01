@@ -12,7 +12,7 @@ metadata:
   name: db
 spec:
   ports:
-    - port: 3306
+    - port: 5432
   selector:
     io.kompose.service: db
 status:

@@ -14,10 +14,9 @@ rm ImageServiceApp/.env
 touch ImageServiceApp/.env
 
 export REPOSITORY_PREFIX=${account}.dkr.ecr.$region.amazonaws.com
-export MYSQL_ROOT_PASSWORD=${password}
-export MYSQL_DATABASE=vehicle_inventory
-export MYSQL_USER=djangouser
-export MYSQL_PASSWORD=${password}
+export POSTGRES_DATABASE=vehicle_inventory
+export POSTGRES_USER=djangouser
+export POSTGRES_PASSWORD=${password}
 export S3_BUCKET=${s3_bucket}
 
 docker-compose build
