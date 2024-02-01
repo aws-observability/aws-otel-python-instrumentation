@@ -57,6 +57,9 @@ class AwsSpanMetricsProcessorBuilder:
         error_histogram: Histogram = meter.create_histogram(_ERROR)
         fault_histogram: Histogram = meter.create_histogram(_FAULT)
         latency_histogram: Histogram = meter.create_histogram(_LATENCY, unit=_LATENCY_UNITS)
+        error_histogram.name = _ERROR
+        fault_histogram.name = _FAULT
+        latency_histogram.name = _LATENCY
 
         return AwsSpanMetricsProcessor(
             error_histogram, fault_histogram, latency_histogram, self._generator, self._resource
