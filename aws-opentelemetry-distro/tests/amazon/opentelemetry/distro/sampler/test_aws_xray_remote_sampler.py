@@ -7,7 +7,7 @@ from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayR
 from opentelemetry.sdk.resources import Resource
 
 
-class AwsXRayRemoteSamplerTest(TestCase):
+class TestAwsXRayRemoteSampler(TestCase):
     def test_create_remote_sampler_with_empty_resource(self):
         rs = AwsXRayRemoteSampler(resource=Resource.get_empty())
         self.assertIsNotNone(rs._timer)
@@ -40,6 +40,6 @@ class AwsXRayRemoteSamplerTest(TestCase):
         self.assertEqual(
             rs._AwsXRayRemoteSampler__xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint,
             "http://abc.com/GetSamplingRules",
-        )  # "http://127.0.0.1:2000"
+        )
         self.assertEqual(rs._AwsXRayRemoteSampler__resource.attributes["service.name"], "test-service-name")
         self.assertEqual(rs._AwsXRayRemoteSampler__resource.attributes["cloud.platform"], "test-cloud-platform")
