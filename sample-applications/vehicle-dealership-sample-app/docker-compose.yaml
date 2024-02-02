@@ -3,24 +3,24 @@
 version: '3'
 services:
   db:
-    image: mysql:8.0
+    image: postgres:14.0
     container_name: vehicle_inventory_db
     restart: always
     volumes:
-      - data:/var/lib/mysql
+      - data:/var/lib/postgres
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DATABASE}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGUSER: ${POSTGRES_USER}
     ports:
-      - "3306:3306"
+      - "5432:5432"
     healthcheck:
-      test: ["CMD", "mysql", "-h", "localhost", "-u", "root", "-p${MYSQL_PASSWORD}", "-e", "SELECT 1"]
+      test: ["CMD", "pg_isready", "-d", "vehicle_inventory", "-U", "djangouser"]
       timeout: 20s
       retries: 10
     expose:
-      - 3306
+      - 5432
 
   vehicle-inventory-backend:
     image: pythonsampleapp/vehicle-inventory-service
@@ -44,13 +44,17 @@ services:
       context: .
       dockerfile: ImageServiceApp/Dockerfile
     container_name: image-service-backend
-    command: sh -c "python3 manage.py migrate --noinput && python3 manage.py collectstatic --noinput && python3 manage.py runserver 0.0.0.0:8000"
+    command: sh -c "python3 manage.py runserver 0.0.0.0:8000"
     restart: always
     volumes:
       - ./ImageServiceApp/.:/image-service-app
       - $HOME/.aws/credentials:/home/app/.aws/credentials:ro
     ports:
       - "8000:8000"
+    depends_on:
+       db:
+          condition: service_healthy
+          
 volumes:
   data:
 

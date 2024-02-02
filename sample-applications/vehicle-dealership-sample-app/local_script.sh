@@ -23,23 +23,26 @@ rm VehicleInventoryApp/.env
 rm ImageServiceApp/.env
 rm .env
 
-echo "MYSQL_ROOT_PASSWORD=${password}" >> VehicleInventoryApp/.env
-echo "MYSQL_DATABASE=vehicle_inventory" >> VehicleInventoryApp/.env
-echo "MYSQL_USER=djangouser" >> VehicleInventoryApp/.env
-echo "MYSQL_PASSWORD=${password}" >> VehicleInventoryApp/.env
+echo "POSTGRES_DATABASE=vehicle_inventory" >> VehicleInventoryApp/.env
+echo "POSTGRES_USER=djangouser" >> VehicleInventoryApp/.env
+echo "POSTGRES_PASSWORD=${password}" >> VehicleInventoryApp/.env
 echo "DB_SERVICE_HOST=db" >> VehicleInventoryApp/.env
-echo "DB_SERVICE_PORT=3306" >> VehicleInventoryApp/.env
+echo "DB_SERVICE_PORT=5432" >> VehicleInventoryApp/.env
 echo "IMAGE_BACKEND_SERVICE_HOST=image-service-backend" >> VehicleInventoryApp/.env
 echo "IMAGE_BACKEND_SERVICE_PORT=8000" >> VehicleInventoryApp/.env
 
+echo "POSTGRES_DATABASE=vehicle_inventory" >> ImageServiceApp/.env
+echo "POSTGRES_USER=djangouser" >> ImageServiceApp/.env
+echo "POSTGRES_PASSWORD=${password}" >> ImageServiceApp/.env
+echo "DB_SERVICE_HOST=db" >> ImageServiceApp/.env
+echo "DB_SERVICE_PORT=5432" >> ImageServiceApp/.env
 echo "AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}" >> ImageServiceApp/.env
 echo "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}" >> ImageServiceApp/.env
 echo "AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}" >> ImageServiceApp/.env
 echo "S3_BUCKET=${s3_bucket}" >> ImageServiceApp/.env
 
-echo "MYSQL_ROOT_PASSWORD=${password}" >> .env
-echo "MYSQL_DATABASE=vehicle_inventory" >> .env
-echo "MYSQL_USER=djangouser" >> .env
-echo "MYSQL_PASSWORD=${password}" >> .env
+echo "POSTGRES_DATABASE=vehicle_inventory" >> .env
+echo "POSTGRES_USER=djangouser" >> .env
+echo "POSTGRES_PASSWORD=${password}" >> .env
 
 docker-compose up --build

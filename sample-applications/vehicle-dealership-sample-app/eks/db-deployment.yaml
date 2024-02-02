@@ -29,36 +29,31 @@ spec:
     spec:
       containers:
         - env:
-            - name: MYSQL_DATABASE
+            - name: POSTGRES_DB
               value: vehicle_inventory
-            - name: MYSQL_PASSWORD
-              value: ${MYSQL_PASSWORD}
-            - name: MYSQL_ROOT_PASSWORD
-              value: ${MYSQL_PASSWORD}
-            - name: MYSQL_USER
+            - name: POSTGRES_PASSWORD
+              value: ${POSTGRES_PASSWORD}
+            - name: POSTGRES_USER
               value: djangouser
-          image: mysql:8.0
+          image: postgres:14.0
           livenessProbe:
             exec:
               command:
-                - mysql
-                - -h
-                - localhost
-                - -u
-                - root
-                - -p${MYSQL_PASSWORD}
-                - -e
-                - SELECT 1
+                - pg_isready
+                - -d
+                - vehicle_inventory
+                - -U
+                - djangouser
             failureThreshold: 10
             timeoutSeconds: 20
           name: vehicle-inventory-db
           ports:
-            - containerPort: 3306
-              hostPort: 3306
+            - containerPort: 5432
+              hostPort: 5432
               protocol: TCP
           resources: {}
           volumeMounts:
-            - mountPath: /var/lib/mysql
+            - mountPath: /var/lib/postgres
               name: data
       restartPolicy: Always
       volumes:

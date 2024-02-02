@@ -31,7 +31,7 @@ spec:
         - args:
             - sh
             - -c
-            - python3 manage.py migrate --noinput; python3 manage.py collectstatic --noinput; python3 manage.py runserver 0.0.0.0:8000
+            - python3 manage.py runserver 0.0.0.0:8000
           image: ${REPOSITORY_PREFIX}/pythonsampleapp/image-service:latest
           name: image-service-backend
           imagePullPolicy: Always
@@ -43,5 +43,11 @@ spec:
           env:
             - name: S3_BUCKET
               value: ${S3_BUCKET}
+            - name: POSTGRES_DATABASE
+              value: vehicle_inventory
+            - name: POSTGRES_PASSWORD
+              value: ${POSTGRES_PASSWORD}
+            - name: POSTGRES_USER
+              value: djangouser
       restartPolicy: Always
 status: {}

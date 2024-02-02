@@ -14,11 +14,11 @@ then
 else 
     for config in $(ls ./eks/*.yaml)
     do
-        sed  -e 's#\${REPOSITORY_PREFIX}'"#${REPOSITORY_PREFIX}#g" -e 's#\${MYSQL_PASSWORD}'"#${MYSQL_PASSWORD}#g" -e 's#\${S3_BUCKET}'"#${S3_BUCKET}#g" ${config} | kubectl ${OPERATION} -f -
+        sed  -e 's#\${REPOSITORY_PREFIX}'"#${REPOSITORY_PREFIX}#g" -e 's#\${POSTGRES_PASSWORD}'"#${POSTGRES_PASSWORD}#g" -e 's#\${S3_BUCKET}'"#${S3_BUCKET}#g" ${config} | kubectl ${OPERATION} -f -
     done
 
     for config in $(ls ./eks/k8s-nginx-ingress/*.yaml)
     do
-        sed  -e 's#\${REPOSITORY_PREFIX}'"#${REPOSITORY_PREFIX}#g" -e 's#\${MYSQL_PASSWORD}'"#${MYSQL_PASSWORD}#g" -e 's#\${S3_BUCKET}'"#${S3_BUCKET}#g" ${config} | kubectl ${OPERATION} -f -
+        sed  -e 's#\${REPOSITORY_PREFIX}'"#${REPOSITORY_PREFIX}#g" -e 's#\${POSTGRES_PASSWORD}'"#${POSTGRES_PASSWORD}#g" -e 's#\${S3_BUCKET}'"#${S3_BUCKET}#g" ${config} | kubectl ${OPERATION} -f -
     done
 fi
