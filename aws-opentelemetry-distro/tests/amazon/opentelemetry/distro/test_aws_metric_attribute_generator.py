@@ -515,8 +515,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         ).get(DEPENDENCY_METRIC)
         self.assertEqual(actual_attributes.get(AWS_REMOTE_SERVICE), "TestString")
 
-    # Exception handling and remote target handling seems not really available not
-    # testClientSpanWithRemoteTargetAttributes && testHttpStatusAttributeXXXX are not available here
+    # TODO: add HTTP_STATUS_CODE based test when http-status-code related implementation ready
 
     def test_normalize_service_name_non_aws_sdk_span(self):
         service_name: str = "non aws service"
