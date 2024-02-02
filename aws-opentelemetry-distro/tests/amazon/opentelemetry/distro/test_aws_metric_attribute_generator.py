@@ -74,6 +74,7 @@ _GENERATOR = _AwsMetricAttributeGenerator()
 #         return self._http_status_code
 
 
+# pylint: disable=too-many-public-methods
 class TestAwsMetricAttributeGenerator(TestCase):
     def setUp(self):
         self.attributes_mock: Attributes = MagicMock()
@@ -254,7 +255,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         service_attributes: BoundedAttributes = attribute_map.get(SERVICE_METRIC)
         dependency_attributes: BoundedAttributes = attribute_map.get(DEPENDENCY_METRIC)
         if attribute_map is not None and len(attribute_map) > 0:
-            if kind == SpanKind.PRODUCER or kind == SpanKind.CLIENT or kind == SpanKind.CONSUMER:
+            if kind in [SpanKind.PRODUCER, SpanKind.CLIENT, SpanKind.CONSUMER]:
                 self.assertIsNone(service_attributes)
                 self.assertEqual(len(dependency_attributes), len(BoundedAttributes(attributes=expected_attributes)))
                 self.assertEqual(dependency_attributes, BoundedAttributes(attributes=expected_attributes))
