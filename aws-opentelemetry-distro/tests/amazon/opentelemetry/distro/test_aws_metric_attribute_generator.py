@@ -10,7 +10,6 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_LOCAL_SERVICE,
     AWS_REMOTE_OPERATION,
     AWS_REMOTE_SERVICE,
-    AWS_REMOTE_TARGET,
     AWS_SPAN_KIND,
 )
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
@@ -25,7 +24,6 @@ from amazon.opentelemetry.distro._aws_span_processing_util import (
 from amazon.opentelemetry.distro.metric_attribute_generator import (
     DEPENDENCY_METRIC,
     SERVICE_METRIC,
-    MetricAttributeGenerator,
 )
 from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.sdk.resources import _DEFAULT_RESOURCE, SERVICE_NAME
