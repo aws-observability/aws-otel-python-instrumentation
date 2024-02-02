@@ -8,14 +8,15 @@
 #   Those two packages are essential to Python auto-instrumentation.
 # - Grant the necessary access to `/autoinstrumentation` directory. `chmod -R go+r /autoinstrumentation`
 # - For auto-instrumentation by container injection, the Linux command cp is
-#   used and must be availabe in the image.
+#   used and must be available in the image.
 FROM python:3.10 AS build
 
 WORKDIR /operator-build
 
-ADD autoinstrumentation/image-requirements.txt .
+ADD image-requirements.txt .
+ADD aws-opentelemetry-distro/ ./aws-opentelemetry-distro/
 
-RUN mkdir workspace && pip install --target workspace -r image-requirements.txt && pip install --target workspace ./aws_opentelemetry_distro
+RUN mkdir workspace && pip install --target workspace -r image-requirements.txt && pip install --target workspace ./aws-opentelemetry-distro
 
 FROM busybox
 

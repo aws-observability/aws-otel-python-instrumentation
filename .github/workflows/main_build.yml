@@ -1,3 +1,4 @@
+# This workflow build the aws-opentelemetry-distro wheel file, upload to staging S3 bucket, and build project docker image then push to staging ECR
 name: Python Instrumentation Main Build
 on:
   push:
@@ -10,9 +11,9 @@ on:
       - "release/v*"
 env:
   AWS_DEFAULT_REGION: us-east-1
-  TEST_TAG: 611364707713.dkr.ecr.us-east-1.amazonaws.com/eks/observability/adot-autoinstrumentation-python:test
-  STAGING_ECR_REGISTRY: 611364707713.dkr.ecr.us-east-1.amazonaws.com
+  STAGING_ECR_REGISTRY: 637423224110.dkr.ecr.us-east-1.amazonaws.com
   STAGING_ECR_REPOSITORY: eks/observability/adot-autoinstrumentation-python
+  S3_INTEGRATION_BUCKET: ${{ secrets.S3_INTEGRATION_BUCKET }}
 
 concurrency:
   group: python-instrumentation-main-build
@@ -26,9 +27,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     outputs:
-      python_image_tag: ${{ steps.java_agent_versioning.outputs.STAGING_TAG}}
+      python_distro_tag: ${{ steps.python_distro_versioning.outputs.STAGING_TAG}}
       staging-image-name: ${{ steps.imageNameOutput.outputs.imageName }}
-      staging_wheel_file: ${}
+      staging_wheel_file: ${{ steps.staging_wheel_build.outputs.STAGING_WHEEL}}
     steps:
       - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@v2
@@ -39,14 +40,17 @@ jobs:
           python-version: "3.11"
 
       - name: Install Dependencies and Build Wheel
+        id: staging_wheel_build
         run: |
           pip install --upgrade pip setuptools wheel packaging build
           rm -rf ./dist/*
           cd ./aws-opentelemetry-distro
-          python3 -m build --outdir ../dist
+          python -m build --outdir ../dist
           cd ../dist
           pkg_version=$(grep '__version__' ../aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py | awk -F '"' '{print $2}')
-          pip wheel --no-deps aws_opentelemetry_distro-${pkg_version}.tar.gz
+          echo "ADOT_PYTHON_VERSION=$pkg_version" >> $GITHUB_OUTPUT
+          pip wheel --no-deps aws_opentelemetry_distro-$pkg_version.tar.gz
+          echo "STAGING_WHEEL=aws_opentelemetry_distro-$pkg_version-py3-none-any.whl" >> $GITHUB_OUTPUT
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -55,7 +59,7 @@ jobs:
           aws-region: ${{ env.AWS_DEFAULT_REGION }}
 
       - name: Upload wheel to S3
-        run: aws s3 cp dist/*.whl s3://your-s3-bucket/path/to/wheels/
+        run: aws s3 cp dist/*.whl ${{ env.S3_INTEGRATION_BUCKET }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -66,25 +70,29 @@ jobs:
       - name: Log in to AWS ECR
         uses: docker/login-action@v3
         with:
-          registry: 611364707713.dkr.ecr.us-east-1.amazonaws.com
+          registry: ${{ env.STAGING_ECR_REGISTRY }}
         env:
-          AWS_REGION: us-east-1
+          AWS_REGION: ${{ env.AWS_DEFAULT_REGION }}
 
-      - name: Copy Files to Docker Build Context
+      - name: Get Python Distro Image Tag
+        id: python_distro_versioning
         run: |
-          mkdir -p $GITHUB_WORKSPACE/auto-instrumentation/
-          cp -r ./distro $GITHUB_WORKSPACE/auto-instrumentation/
-          cp -r docker_requirements $GITHUB_WORKSPACE/auto-instrumentation//
+          shortsha="$(git rev-parse --short HEAD)"
+          python_distro_tag=${{ steps.staging_wheel_build.outputs.ADOT_PYTHON_VERSION }}-$shortsha
+          echo "STAGING_TAG=$python_distro_tag" >> $GITHUB_OUTPUT
 
       - name: Build and push staging image
         uses: docker/build-push-action@v5
         with:
           push: true
-          context: $GITHUB_WORKSPACE/auto-instrumentation/
+          context: .
+          file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           tags: |
-            ${{ env.STAGING_ECR_REGISTRY }}/${{ env.STAGING_ECR_REPOSITORY }}:${{ steps.java_agent_versioning.outputs.STAGING_TAG }}
+            ${{ env.STAGING_ECR_REGISTRY }}/${{ env.STAGING_ECR_REPOSITORY }}:${{ steps.python_distro_versioning.outputs.STAGING_TAG }}
 
       - name: Set image name to output
         id: imageNameOutput
-        run: echo "imageName=${{ env.STAGING_ECR_REGISTRY }}/${{ env.STAGING_ECR_REPOSITORY }}:${{ steps.java_agent_versioning.outputs.STAGING_TAG }}" >> "$GITHUB_OUTPUT"
+        run: echo "imageName=${{ env.STAGING_ECR_REGISTRY }}/${{ env.STAGING_ECR_REPOSITORY }}:${{ steps.python_distro_versioning.outputs.STAGING_TAG }}" >> "$GITHUB_OUTPUT"
+
+#  TODO: Add Contract test and E2E test
