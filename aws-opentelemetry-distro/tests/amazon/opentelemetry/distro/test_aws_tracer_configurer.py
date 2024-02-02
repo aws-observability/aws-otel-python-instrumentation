@@ -25,7 +25,7 @@ class TestAwsTracerConfigurer(TestCase):
         self.tracer_provider.add_span_processor(self.simple_span_processor)
 
     def test_provide_generate_xray_ids(self):
-        for i in range(20):
+        for _ in range(20):
             tracer: Tracer = self.tracer_provider.get_tracer("test")
             start_time_sec: int = int(time.time())
             span: Span = tracer.start_span("test")
