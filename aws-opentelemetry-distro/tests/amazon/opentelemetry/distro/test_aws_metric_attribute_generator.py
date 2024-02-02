@@ -21,10 +21,7 @@ from amazon.opentelemetry.distro._aws_span_processing_util import (
     UNKNOWN_REMOTE_SERVICE,
     UNKNOWN_SERVICE,
 )
-from amazon.opentelemetry.distro.metric_attribute_generator import (
-    DEPENDENCY_METRIC,
-    SERVICE_METRIC,
-)
+from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, SERVICE_METRIC
 from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.sdk.resources import _DEFAULT_RESOURCE, SERVICE_NAME
 from opentelemetry.sdk.trace import ReadableSpan, Resource
