@@ -21,6 +21,8 @@ class TestAwsTracerConfigurer(TestCase):
         os.environ.setdefault(OTEL_LOGS_EXPORTER, "none")
         os.environ.setdefault(OTEL_TRACES_SAMPLER, "traceidratio")
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "0.01")
+        print(os.environ.get(OTEL_TRACES_SAMPLER))
+        print("KKKKKKKKKKKKKKK" + os.environ.get(OTEL_TRACES_SAMPLER_ARG))
         self.span_exporter: InMemorySpanExporter = InMemorySpanExporter()
         self.simple_span_processor: SimpleSpanProcessor = SimpleSpanProcessor(self.span_exporter)
         self.aws_otel_configurator: AwsOpenTelemetryConfigurator = AwsOpenTelemetryConfigurator()
