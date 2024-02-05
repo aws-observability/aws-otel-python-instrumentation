@@ -13,9 +13,6 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_SPAN_KIND,
 )
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
-from amazon.opentelemetry.distro._aws_span_processing_util import (
-    INTERNAL_OPERATION,
-)
 from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, SERVICE_METRIC
 from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.sdk.resources import _DEFAULT_RESOURCE, SERVICE_NAME
@@ -142,7 +139,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
             SERVICE_METRIC: {
                 AWS_SPAN_KIND: _LOCAL_ROOT,
                 AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
-                AWS_LOCAL_OPERATION: INTERNAL_OPERATION,
+                AWS_LOCAL_OPERATION: _INTERNAL_OPERATION,
             }
         }
 
@@ -163,7 +160,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
                 attributes={
                     AWS_SPAN_KIND: _LOCAL_ROOT,
                     AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
-                    AWS_LOCAL_OPERATION: INTERNAL_OPERATION,
+                    AWS_LOCAL_OPERATION: _INTERNAL_OPERATION,
                 },
                 maxlen=None,
             ),
@@ -171,7 +168,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
                 attributes={
                     AWS_SPAN_KIND: SpanKind.CLIENT.name,
                     AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
-                    AWS_LOCAL_OPERATION: INTERNAL_OPERATION,
+                    AWS_LOCAL_OPERATION: _INTERNAL_OPERATION,
                     AWS_REMOTE_SERVICE: _AWS_REMOTE_SERVICE_VALUE,
                     AWS_REMOTE_OPERATION: _AWS_REMOTE_OPERATION_VALUE,
                 },
@@ -197,12 +194,12 @@ class TestAwsMetricAttributeGenerator(TestCase):
             SERVICE_METRIC: {
                 AWS_SPAN_KIND: _LOCAL_ROOT,
                 AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
-                AWS_LOCAL_OPERATION: INTERNAL_OPERATION,
+                AWS_LOCAL_OPERATION: _INTERNAL_OPERATION,
             },
             DEPENDENCY_METRIC: {
                 AWS_SPAN_KIND: SpanKind.CONSUMER.name,
                 AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
-                AWS_LOCAL_OPERATION: INTERNAL_OPERATION,
+                AWS_LOCAL_OPERATION: _INTERNAL_OPERATION,
                 AWS_REMOTE_SERVICE: _AWS_REMOTE_SERVICE_VALUE,
                 AWS_REMOTE_OPERATION: _AWS_REMOTE_OPERATION_VALUE,
             },
@@ -246,12 +243,12 @@ class TestAwsMetricAttributeGenerator(TestCase):
             SERVICE_METRIC: {
                 AWS_SPAN_KIND: _LOCAL_ROOT,
                 AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
-                AWS_LOCAL_OPERATION: INTERNAL_OPERATION,
+                AWS_LOCAL_OPERATION: _INTERNAL_OPERATION,
             },
             DEPENDENCY_METRIC: {
                 AWS_SPAN_KIND: SpanKind.PRODUCER.name,
                 AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
-                AWS_LOCAL_OPERATION: INTERNAL_OPERATION,
+                AWS_LOCAL_OPERATION: _INTERNAL_OPERATION,
                 AWS_REMOTE_SERVICE: _AWS_REMOTE_SERVICE_VALUE,
                 AWS_REMOTE_OPERATION: _AWS_REMOTE_OPERATION_VALUE,
             },
