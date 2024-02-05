@@ -4,6 +4,8 @@ import os
 import time
 from unittest import TestCase
 
+from opentelemetry.sdk.environment_variables import OTEL_TRACES_SAMPLER, OTEL_TRACES_SAMPLER_ARG
+
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import AwsOpenTelemetryConfigurator
 from opentelemetry.environment_variables import OTEL_LOGS_EXPORTER, OTEL_METRICS_EXPORTER, OTEL_TRACES_EXPORTER
 from opentelemetry.sdk.trace import Span, Tracer, TracerProvider
@@ -17,12 +19,15 @@ class TestAwsTracerConfigurer(TestCase):
         os.environ.setdefault(OTEL_TRACES_EXPORTER, "none")
         os.environ.setdefault(OTEL_METRICS_EXPORTER, "none")
         os.environ.setdefault(OTEL_LOGS_EXPORTER, "none")
+        os.environ.setdefault(OTEL_TRACES_SAMPLER, "traceidratio")
+        os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "0.01")
         self.span_exporter: InMemorySpanExporter = InMemorySpanExporter()
         self.simple_span_processor: SimpleSpanProcessor = SimpleSpanProcessor(self.span_exporter)
         self.aws_otel_configurator: AwsOpenTelemetryConfigurator = AwsOpenTelemetryConfigurator()
         self.aws_otel_configurator.configure()
         self.tracer_provider: TracerProvider = get_tracer_provider()
         self.tracer_provider.add_span_processor(self.simple_span_processor)
+
 
     def test_provide_generate_xray_ids(self):
         for _ in range(20):
@@ -32,15 +37,13 @@ class TestAwsTracerConfigurer(TestCase):
             trace_id: int = span.get_span_context().trace_id
             self.assertGreater(trace_id, start_time_sec)
 
-    # TODO: After finish implementation of sampler, enable this test
-    # def test_trace_id_ratio_sampler(self):
-    #     num_spans: int = 10000
-    #     num_sampled: int = 0
-    #     tracer: Tracer = self.tracer_provider.get_tracer("test")
-    #     for i in range(num_spans):
-    #         span: Span = tracer.start_span("test")
-    #         print(span.get_span_context().trace_flags)
-    #         if span.get_span_context().trace_flags.sampled:
-    #             num_sampled += 1
-    #         span.end()
-    #     self.assertGreater(0.05, num_sampled / num_spans)
+    def test_trace_id_ratio_sampler(self):
+        num_spans: int = 10000
+        num_sampled: int = 0
+        tracer: Tracer = self.tracer_provider.get_tracer("test")
+        for i in range(num_spans):
+            span: Span = tracer.start_span("test")
+            if span.get_span_context().trace_flags.sampled:
+                num_sampled += 1
+            span.end()
+        self.assertGreater(0.05, num_sampled / num_spans)
