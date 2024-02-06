@@ -7,7 +7,7 @@ preconfigured for use with AWS services. Please check out that project too to ge
 understanding of the underlying internals.
 
 ## Python Version Support
-This project ensures compatibility with the following supported Python versions: 3.7, 3.8, 3.9, 3.10, 3.11
+This project ensures compatibility with the following supported Python versions: 3.8, 3.9, 3.10, 3.11
 
 ## Code Style Check
 
