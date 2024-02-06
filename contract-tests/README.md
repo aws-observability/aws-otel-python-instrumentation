@@ -37,11 +37,6 @@ Pre-requirements:
 From `aws-otel-python-instrumentation/contract-tests` execute:
 
 ```
-./create-images.sh
-mkdir dist
-cd images/mock-collector
-python3 -m build --outdir ../../dist
-pip wheel --no-deps mock_collector-1.0.0.tar.gz
-pip install mock_collector-1.0.0-py3-none-any.whl --force-reinstall
-<TODO>
+./set-up-contract-tests.sh
+pytest tests
 ```

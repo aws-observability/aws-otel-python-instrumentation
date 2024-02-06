@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [tool.hatch.build.targets.sdist]
-include = ["/src"]
+include = ["*.py"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/amazon"]
+include = ["*.py"]
