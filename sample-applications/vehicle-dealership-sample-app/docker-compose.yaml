@@ -28,10 +28,13 @@ services:
       context: .
       dockerfile: VehicleInventoryApp/Dockerfile
     container_name: vehicle-inventory-backend
-    command: sh -c "python3 manage.py migrate --noinput && python3 manage.py collectstatic --noinput && python3 manage.py runserver 0.0.0.0:8001"
+    command: sh -c "python3 manage.py migrate --noinput && python3 manage.py collectstatic --noinput && python3 manage.py runserver 0.0.0.0:8001 --noreload"
     restart: always
     volumes:
       - ./VehicleInventoryApp/.:/vehicle-inventory-app
+    environment:
+      DJANGO_SETTINGS_MODULE: "VehicleInventoryApp.settings"
+      OTEL_TRACES_SAMPLER: "always_on"
     ports:
       - "8001:8001"
     depends_on:
@@ -44,11 +47,14 @@ services:
       context: .
       dockerfile: ImageServiceApp/Dockerfile
     container_name: image-service-backend
-    command: sh -c "python3 manage.py runserver 0.0.0.0:8000"
+    command: sh -c "python3 manage.py runserver 0.0.0.0:8000 --noreload"
     restart: always
     volumes:
       - ./ImageServiceApp/.:/image-service-app
       - $HOME/.aws/credentials:/home/app/.aws/credentials:ro
+    environment:
+      DJANGO_SETTINGS_MODULE: "ImageServiceApp.settings"
+      OTEL_TRACES_SAMPLER: "always_on"
     ports:
       - "8000:8000"
     depends_on:

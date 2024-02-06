@@ -22,6 +22,7 @@ spec:
       annotations:
         kompose.cmd: Kompose convert -f docker-compose.yaml
         kompose.version: 1.31.2 (HEAD)
+        instrumentation.opentelemetry.io/inject-python: "true"
       creationTimestamp: null
       labels:
         io.kompose.network/imageserviceapp-default: "true"
@@ -31,7 +32,7 @@ spec:
         - args:
             - sh
             - -c
-            - python3 manage.py runserver 0.0.0.0:8000
+            - python3 manage.py runserver 0.0.0.0:8000 --noreload
           image: ${REPOSITORY_PREFIX}/pythonsampleapp/image-service:latest
           name: image-service-backend
           imagePullPolicy: Always
@@ -49,5 +50,9 @@ spec:
               value: ${POSTGRES_PASSWORD}
             - name: POSTGRES_USER
               value: djangouser
+            - name: DJANGO_SETTINGS_MODULE
+              value: "ImageServiceApp.settings"
+            - name: OTEL_TRACES_SAMPLER
+              value: "always_on"
       restartPolicy: Always
 status: {}
