@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import copy
 from typing import List, Sequence, TypeVar
 
 from typing_extensions import override
@@ -102,12 +103,11 @@ def copy_attributes_with_local_root(attributes: BoundedAttributes) -> BoundedAtt
     )
 
 
-# TODO: AwsMetricAttributesSpanExporter depends on internal ReadableSpan method _attributes.
-#  This is a bit risky but is required for our implementation.
-#  The risk is that the implementation of _attributes changes in the future.
-#  We need tests that thoroughly test this behaviour to make sure it does not change upstream.
 def wrap_span_with_attributes(span: ReadableSpan, attributes: BoundedAttributes) -> ReadableSpan:
-    original_attributes: AttributesT = span.attributes
+    # To make sure we create a new span without influence original span's Attributes
+    # We have to create a deepcopy for it
+    new_span = copy.deepcopy(span)
+    original_attributes: AttributesT = new_span.attributes
     update_attributes: types.Attributes = {}
     # Copy all attribute in span into update_attributes
     for key, value in original_attributes.items():
@@ -117,12 +117,12 @@ def wrap_span_with_attributes(span: ReadableSpan, attributes: BoundedAttributes)
         update_attributes[key] = value
 
     if isinstance(original_attributes, BoundedAttributes):
-        span._attributes = BoundedAttributes(
+        new_span._attributes = BoundedAttributes(
             maxlen=original_attributes.maxlen,
             attributes=update_attributes,
             immutable=original_attributes._immutable,
             max_value_len=original_attributes.max_value_len,
         )
     else:
-        span._attributes = update_attributes
-    return span
+        new_span._attributes = update_attributes
+    return new_span

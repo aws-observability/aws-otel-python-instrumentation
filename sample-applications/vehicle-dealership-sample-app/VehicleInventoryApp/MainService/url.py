@@ -8,4 +8,5 @@ urlpatterns = [
     path("", views.vehicle, name="vehicle"),
     path("<int:vehicle_id>", views.get_vehicle_by_id, name="get_vehicle_by_id"),
     path("<int:vehicle_id>/image", views.get_vehicle_image, name="get_vehicle_image"),
+    path("image/<str:image_name>", views.get_image_by_name, name="image_by_name"),
 ]

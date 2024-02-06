@@ -81,10 +81,10 @@ WSGI_APPLICATION = "VehicleInventoryApp.wsgi.application"
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.mysql",
-        "USER": os.environ.get("MYSQL_USER"),
-        "NAME": os.environ.get("MYSQL_DATABASE"),
-        "PASSWORD": os.environ.get("MYSQL_PASSWORD"),
+        "ENGINE": "django.db.backends.postgresql",
+        "USER": os.environ.get("POSTGRES_USER"),
+        "NAME": os.environ.get("POSTGRES_DATABASE"),
+        "PASSWORD": os.environ.get("POSTGRES_PASSWORD"),
         "HOST": os.environ.get("DB_SERVICE_HOST"),
         "PORT": os.environ.get("DB_SERVICE_PORT"),
     }
