@@ -48,18 +48,18 @@ class TestAwsXRaySamplingClient(TestCase):
 
         sampling_rule = sampling_rules[0]
         self.assertEqual(sampling_rule.Attributes, {})
-        self.assertEqual(sampling_rule.FixedRate, "")
+        self.assertEqual(sampling_rule.FixedRate, 0.0)
         self.assertEqual(sampling_rule.HTTPMethod, "")
         self.assertEqual(sampling_rule.Host, "")
-        self.assertEqual(sampling_rule.Priority, "")
-        self.assertEqual(sampling_rule.ReservoirSize, "")
+        self.assertEqual(sampling_rule.Priority, 10001)
+        self.assertEqual(sampling_rule.ReservoirSize, 0)
         self.assertEqual(sampling_rule.ResourceARN, "")
         self.assertEqual(sampling_rule.RuleARN, "")
         self.assertEqual(sampling_rule.RuleName, "")
         self.assertEqual(sampling_rule.ServiceName, "")
         self.assertEqual(sampling_rule.ServiceType, "")
         self.assertEqual(sampling_rule.URLPath, "")
-        self.assertEqual(sampling_rule.Version, "")
+        self.assertEqual(sampling_rule.Version, 0)
 
     @patch("requests.post")
     def test_get_three_sampling_rules(self, mock_post=None):
