@@ -21,6 +21,14 @@ _NETWORK: Network = NetworkCollection(client=DockerClient()).create(_NETWORK_NAM
 
 
 class ContractTestBase(TestCase):
+    """Base class for implementing a contract test.
+
+    This class will create all the boilerplate necessary to run a contract test. It will: 1.Create a mock collector
+    container that receives telemetry data of the application being tested. 2. Create an application container which
+    will be used to exercise the library under test.
+
+    Several methods are provided that can be overridden to customize the test scenario.
+    """
     _mock_collector_client: MockCollectorClient
     _application: DockerContainer
 

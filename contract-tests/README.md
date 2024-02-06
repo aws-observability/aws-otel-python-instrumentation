@@ -14,22 +14,24 @@ The frameworks and libraries that are tested in the contract tests should fall i
 * http-servers - applications meant to test http servers (e.g. Django).
 * http-clients - applications meant to test http clients (e.g. requests).
 * aws-sdk - Applications meant to test the AWS SDK (e.g. botocore).
-* database-clients - Applications meant to test database clients (e.g. asycnpg).
+* database-clients - Applications meant to test database clients (e.g. psychopg2).
 
-When testing a framework, we will create a sample application. The sample applications are stored following this convention: `contract-tests/images/<framework-name>`.
+When testing a framework, we will create a sample application. The sample applications are stored following this convention: `contract-tests/images/applications/<framework-name>`.
 
 # Adding tests for a new library or framework
 
 The steps to add a new test for a library or framework are:
 * Create a sample application.
     * The sample application should be created in `contract-tests/images/applications/<framework-name>`.
+    * Implement a `pyproject.toml` (to ensure code style checks run), `Dockerfile`, and `requirements.txt` file. See the `requests` application for an example of this.
 * Add a test class for the sample application.
     * The test class should be created in `contract-tests/tests/amazon/<framework-name>`.
+    * The test class should extend `contract_test_base.py`
 
 # How to run the tests locally?
 
 Pre-requirements:
-* Have `docker` installed and running
+* Have `docker` installed and running - verify by running the `docker` command.
 * Copy the `aws_opentelemetry_distro` wheel file to each application folder under `images` (e.g. to `requests`, but not `mock-collector`)
 
 From `aws-otel-python-instrumentation/contract-tests` execute:

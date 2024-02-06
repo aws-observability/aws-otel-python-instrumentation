@@ -9,17 +9,19 @@ from typing_extensions import override
 
 _PORT: int = 8080
 _NETWORK_ALIAS: str = "backend"
-_SUCCESS = "success"
-_ERROR = "error"
-_FAULT = "fault"
+_SUCCESS: str = "success"
+_ERROR: str = "error"
+_FAULT: str = "fault"
 
 
 class RequestHandler(BaseHTTPRequestHandler):
     @override
+    # pylint: disable=invalid-name
     def do_GET(self):
         self.handle_request("GET")
 
     @override
+    # pylint: disable=invalid-name
     def do_POST(self):
         self.handle_request("POST")
 
@@ -35,13 +37,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             else:
                 status_code = 404
         else:
-            response: Response = request(method, "http://backend:8080/backend{}".format(self.path))
+            url: str = f"http://{_NETWORK_ALIAS}:{_PORT}/{_NETWORK_ALIAS}{self.path}"
+            response: Response = request(method, url, timeout=20)
             status_code = response.status_code
         self.send_response_only(status_code)
         self.end_headers()
 
     def in_path(self, sub_path: str):
-        return self.path.__contains__(sub_path)
+        return sub_path in self.path
 
 
 def main() -> None:
@@ -49,7 +52,7 @@ def main() -> None:
     request_handler_class: type = RequestHandler
     requests_server: ThreadingHTTPServer = ThreadingHTTPServer(server_address, request_handler_class)
     atexit.register(requests_server.shutdown)
-    server_thread = Thread(target=requests_server.serve_forever)
+    server_thread: Thread = Thread(target=requests_server.serve_forever)
     server_thread.start()
     print("Ready")
     server_thread.join()

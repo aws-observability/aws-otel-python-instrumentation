@@ -24,7 +24,7 @@ from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans, ScopeSpans, Sp
 _logger: Logger = getLogger(__name__)
 _TIMEOUT_DELAY: timedelta = timedelta(seconds=20)
 _WAIT_INTERVAL: float = 0.1
-T = TypeVar("T")
+T: TypeVar = TypeVar("T")
 
 
 class ResourceScopeSpan:
@@ -35,7 +35,7 @@ class ResourceScopeSpan:
 
     def __init__(self, resource_spans: ResourceSpans, scope_spans: ScopeSpans, span: Span):
         self.resource_spans: ResourceSpans = resource_spans
-        self.scope_spans = scope_spans
+        self.scope_spans: ScopeSpans = scope_spans
         self.span: Span = span
 
 

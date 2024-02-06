@@ -7,7 +7,7 @@ name = "contract-tests"
 description = "Contract tests for AWS OTEL Python Instrumentation"
 version = "1.0.0"
 license = "Apache-2.0"
-requires-python = ">=3.7"
+requires-python = ">=3.8
 
 dependencies = [
     "opentelemetry-proto==1.22.0",

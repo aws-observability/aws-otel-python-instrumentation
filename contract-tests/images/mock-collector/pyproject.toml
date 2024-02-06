@@ -7,7 +7,7 @@ name = "mock-collector"
 description = "Mock Collector used by contract tests for AWS OTEL Python Instrumentation"
 version = "1.0.0"
 license = "Apache-2.0"
-requires-python = ">=3.7"
+requires-python = ">=3.8"
 
 dependencies = [
     "grpcio ~= 1.60.0",
