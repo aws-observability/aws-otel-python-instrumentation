@@ -20,7 +20,7 @@ class _AwsXRaySamplingClient:
             _logger.error("endpoint must be specified")
         self.__get_sampling_rules_endpoint = endpoint + "/GetSamplingRules"
 
-    def get_sampling_rules(self):
+    def get_sampling_rules(self) -> [_SamplingRule]:
         sampling_rules = []
         headers = {"content-type": "application/json"}
 
@@ -38,7 +38,10 @@ class _AwsXRaySamplingClient:
 
             sampling_rules_records = sampling_rules_response["SamplingRuleRecords"]
             for record in sampling_rules_records:
-                sampling_rules.append(_SamplingRule(**record["SamplingRule"]))
+                if "SamplingRule" not in record:
+                    _logger.error("SamplingRule is missing in SamplingRuleRecord")
+                else:
+                    sampling_rules.append(_SamplingRule(**record["SamplingRule"]))
 
         except requests.exceptions.RequestException as req_err:
             _logger.error("Request error occurred: %s", req_err)

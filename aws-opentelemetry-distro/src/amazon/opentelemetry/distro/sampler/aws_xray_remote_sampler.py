@@ -59,8 +59,9 @@ class AwsXRayRemoteSampler(Sampler):
             self.__resource = Resource.get_empty()
 
         # Schedule the next rule poll now
+        # Python Timers only run once, so they need to be recreated for every poll
         self._timer = Timer(0, self.__start_sampling_rule_poller)
-        self._timer.daemon = True
+        self._timer.daemon = True  # Ensures that when the main thread exits, the Timer threads are killed
         self._timer.start()
 
     # pylint: disable=no-self-use
