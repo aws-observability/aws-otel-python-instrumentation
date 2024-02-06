@@ -13,6 +13,8 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import get_tracer_provider
 
+from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
+
 
 class TestAwsTracerConfigurer(TestCase):
     def setUp(self):
@@ -26,6 +28,8 @@ class TestAwsTracerConfigurer(TestCase):
         self.aws_otel_configurator: AwsOpenTelemetryConfigurator = AwsOpenTelemetryConfigurator()
         self.aws_otel_configurator.configure()
         self.tracer_provider: TracerProvider = get_tracer_provider()
+        self.aws_open_telemetry_distro: AwsOpenTelemetryDistro = AwsOpenTelemetryDistro()
+        self.aws_open_telemetry_distro.configure()
 
     def test_provide_generate_xray_ids(self):
         for _ in range(20):
