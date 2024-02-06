@@ -24,6 +24,7 @@ class MockCollectorMetricsService(MetricsServiceServicer):
             self._export_requests.queue.clear()
 
     @override
+    # pylint: disable=invalid-name
     def Export(self, request: ExportMetricsServiceRequest, context: ServicerContext) -> ExportMetricsServiceResponse:
         self._export_requests.put(request)
         return ExportMetricsServiceResponse()

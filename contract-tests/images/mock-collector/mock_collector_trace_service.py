@@ -24,6 +24,7 @@ class MockCollectorTraceService(TraceServiceServicer):
             self._export_requests.queue.clear()
 
     @override
+    # pylint: disable=invalid-name
     def Export(self, request: ExportTraceServiceRequest, context: ServicerContext) -> ExportTraceServiceResponse:
         self._export_requests.put(request)
         return ExportTraceServiceResponse()
