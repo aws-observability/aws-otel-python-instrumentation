@@ -26,7 +26,6 @@ class TestAwsTracerConfigurer(TestCase):
         self.aws_otel_configurator: AwsOpenTelemetryConfigurator = AwsOpenTelemetryConfigurator()
         self.aws_otel_configurator.configure()
         self.tracer_provider: TracerProvider = get_tracer_provider()
-        self.tracer_provider.add_span_processor(self.simple_span_processor)
 
 
     def test_provide_generate_xray_ids(self):
