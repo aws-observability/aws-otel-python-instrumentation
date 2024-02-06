@@ -38,7 +38,7 @@ _UNKNOWN_REMOTE_OPERATION: str = "UnknownRemoteOperation"
 _INTERNAL_OPERATION: str = "InternalOperation"
 _LOCAL_ROOT: str = "LOCAL_ROOT"
 
-_GENERATOR = _AwsMetricAttributeGenerator()
+_GENERATOR: _AwsMetricAttributeGenerator = _AwsMetricAttributeGenerator()
 
 
 # pylint: disable=too-many-public-methods
@@ -422,14 +422,14 @@ class TestAwsMetricAttributeGenerator(TestCase):
 
         # Validate behaviour of extracting Remote Service from net.peer.name and net.peer.port
         keys, values = self._mock_attribute(
-            [SpanAttributes.NET_PEER_NAME, SpanAttributes.NET_SOCK_PEER_PORT],
+            [SpanAttributes.NET_PEER_NAME, SpanAttributes.NET_PEER_PORT],
             ["192.168.0.0", "8081"],
             keys,
             values,
         )
-        self._validate_expected_remote_attributes("192.168.0.0", _UNKNOWN_REMOTE_OPERATION)
+        self._validate_expected_remote_attributes("192.168.0.0:8081", _UNKNOWN_REMOTE_OPERATION)
         keys, values = self._mock_attribute(
-            [SpanAttributes.NET_PEER_NAME, SpanAttributes.NET_SOCK_PEER_PORT], [None, None], keys, values
+            [SpanAttributes.NET_PEER_NAME, SpanAttributes.NET_PEER_PORT], [None, None], keys, values
         )
 
         # Validate behaviour of extracting Remote Service from net.peer.socket.addr
@@ -543,9 +543,9 @@ class TestAwsMetricAttributeGenerator(TestCase):
     def _mock_attribute(
         self,
         keys: list[str],
-        values: [Optional[str]],
-        exist_keys: Optional[str] = None,
-        exist_values: Optional[Optional[str]] = None,
+        values: Optional[list[str]],
+        exist_keys: Optional[list[str]] = None,
+        exist_values: Optional[list[str]] = None,
     ) -> (Optional[list[str]], Optional[list[str]]):
         if exist_keys is not None and exist_values is not None:
             for key in exist_keys:
