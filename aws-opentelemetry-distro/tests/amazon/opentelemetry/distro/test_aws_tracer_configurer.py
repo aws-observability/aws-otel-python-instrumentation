@@ -27,7 +27,6 @@ class TestAwsTracerConfigurer(TestCase):
         self.aws_otel_configurator.configure()
         self.tracer_provider: TracerProvider = get_tracer_provider()
 
-
     def test_provide_generate_xray_ids(self):
         for _ in range(20):
             tracer: Tracer = self.tracer_provider.get_tracer("test")
