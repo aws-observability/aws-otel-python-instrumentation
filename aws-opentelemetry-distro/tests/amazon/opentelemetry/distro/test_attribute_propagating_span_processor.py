@@ -36,7 +36,6 @@ class TestAttributePropagatingSpanProcessor(TestCase):
             sampler=None,
             resource=None,
         )
-        set_tracer_provider(self.provider)
         self.provider.add_span_processor(self.processor)
         self.tracer: Tracer = self.provider.get_tracer("awsxray")
 

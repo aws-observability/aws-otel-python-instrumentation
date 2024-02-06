@@ -37,12 +37,9 @@ class TestAwsTracerConfigurer(TestCase):
             self.assertGreater(trace_id, start_time_sec)
 
     def test_trace_id_ratio_sampler(self):
-        print(os.environ.get(OTEL_TRACES_SAMPLER))
-        print("KKKKKKKKKKKKKKK" + os.environ.get(OTEL_TRACES_SAMPLER_ARG))
         num_spans: int = 10000
         num_sampled: int = 0
         tracer: Tracer = self.tracer_provider.get_tracer("test")
-        print(self.tracer_provider.sampler.get_description() + "BBBBBBBBBBB")
         for i in range(num_spans):
             span: Span = tracer.start_span("test")
             if span.get_span_context().trace_flags.sampled:
