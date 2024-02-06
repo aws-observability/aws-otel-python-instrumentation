@@ -211,6 +211,10 @@ def _set_remote_service_and_operation(span: ReadableSpan, attributes: BoundedAtt
     elif is_key_present(span, _DB_SYSTEM) or is_key_present(span, _DB_OPERATION):
         remote_service = _get_remote_service(span, _DB_SYSTEM)
         remote_operation = _get_remote_operation(span, _DB_OPERATION)
+    elif is_key_present(span, _DB_SYSTEM) or (is_key_present(span, DB_STATEMENT("db.statement")) and key_not_present(span, _DB_OPERATION))
+        remote_service = _get_remote_service(span, _DB_SYSTEM)
+        database_operation_key = DB_STATEMENT.split(" ")[0]
+        remote_operation = _get_remote_operation(span, database_operation_key)
     elif is_key_present(span, _FAAS_INVOKED_NAME) or is_key_present(span, _FAAS_TRIGGER):
         remote_service = _get_remote_service(span, _FAAS_INVOKED_NAME)
         remote_operation = _get_remote_operation(span, _FAAS_TRIGGER)
