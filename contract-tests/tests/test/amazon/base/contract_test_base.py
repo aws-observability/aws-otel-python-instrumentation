@@ -29,6 +29,7 @@ class ContractTestBase(TestCase):
 
     Several methods are provided that can be overridden to customize the test scenario.
     """
+
     _mock_collector_client: MockCollectorClient
     _application: DockerContainer
 
