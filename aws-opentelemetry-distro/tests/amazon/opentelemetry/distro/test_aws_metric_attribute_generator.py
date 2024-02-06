@@ -330,7 +330,9 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._validate_attributes_produced_for_non_LOCAL_ROOT_span_of_kind(expected_attributes, SpanKind.CLIENT)
 
     def test_remote_attributes_combinations(self):
-        keys: [str] = [
+     # Set all expected fields to a test string, we will overwrite them in descending order to test
+     # the priority-order logic in AwsMetricAttributeGenerator remote attribute methods.
+        keys: list[str] = [
             AWS_REMOTE_SERVICE,
             AWS_REMOTE_OPERATION,
             SpanAttributes.RPC_SERVICE,
@@ -342,10 +344,12 @@ class TestAwsMetricAttributeGenerator(TestCase):
             SpanAttributes.MESSAGING_SYSTEM,
             SpanAttributes.MESSAGING_OPERATION,
             SpanAttributes.GRAPHQL_OPERATION_TYPE,
+            # Do not set dummy value for PEER_SERVICE, since it has special behaviour.
+            # Two unused attributes to show that we will not make use of unrecognized attributes
             "unknown.service.key",
             "unknown.operation.key",
         ]
-        values: [str] = [
+        values: list[str] = [
             "TestString",
             "TestString",
             "TestString",
@@ -362,6 +366,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         ]
         self._mock_attribute(keys, values)
 
+        # Validate behaviour of various combinations of AWS remote attributes, then remove them.
         keys, values = self._validate_and_remove_remote_attributes(
             AWS_REMOTE_SERVICE,
             _AWS_REMOTE_SERVICE_VALUE,
@@ -371,14 +376,17 @@ class TestAwsMetricAttributeGenerator(TestCase):
             values,
         )
 
+        # Validate behaviour of various combinations of RPC attributes, then remove them.
         keys, values = self._validate_and_remove_remote_attributes(
             SpanAttributes.RPC_SERVICE, "RPC service", SpanAttributes.RPC_METHOD, "RPC method", keys, values
         )
 
+        # Validate behaviour of various combinations of DB attributes, then remove them.
         keys, values = self._validate_and_remove_remote_attributes(
             SpanAttributes.DB_SYSTEM, "DB system", SpanAttributes.DB_OPERATION, "DB operation", keys, values
         )
 
+        # Validate behaviour of various combinations of FAAS attributes, then remove them.
         keys, values = self._validate_and_remove_remote_attributes(
             SpanAttributes.FAAS_INVOKED_NAME,
             "FAAS invoked name",
@@ -388,6 +396,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
             values,
         )
 
+        # Validate behaviour of various combinations of Messaging attributes, then remove them.
         keys, values = self._validate_and_remove_remote_attributes(
             SpanAttributes.MESSAGING_SYSTEM,
             "Messaging system",
@@ -397,16 +406,43 @@ class TestAwsMetricAttributeGenerator(TestCase):
             values,
         )
 
+        # Validate behaviour of GraphQL operation type attribute, then remove it.
         keys, values = self._mock_attribute(
             [SpanAttributes.GRAPHQL_OPERATION_TYPE], ["GraphQL operation type"], keys, values
         )
         self._validate_expected_remote_attributes("graphql", "GraphQL operation type")
         keys, values = self._mock_attribute([SpanAttributes.GRAPHQL_OPERATION_TYPE], [None], keys, values)
 
+        # Validate behaviour of extracting Remote Service from net.peer.name
         keys, values = self._mock_attribute([SpanAttributes.NET_PEER_NAME], ["www.example.com"], keys, values)
         self._validate_expected_remote_attributes("www.example.com", _UNKNOWN_REMOTE_OPERATION)
         keys, values = self._mock_attribute([SpanAttributes.NET_PEER_NAME], [None], keys, values)
 
+        # Validate behaviour of extracting Remote Service from net.peer.name and net.peer.port
+        keys, values = self._mock_attribute(
+            [SpanAttributes.NET_PEER_NAME, SpanAttributes.NET_SOCK_PEER_PORT],
+            ["192.168.0.0", "8081"],
+            keys,
+            values,
+        )
+        self._validate_expected_remote_attributes("192.168.0.0:8081", _UNKNOWN_REMOTE_OPERATION)
+        keys, values = self._mock_attribute(
+            [SpanAttributes.NET_PEER_NAME, SpanAttributes.NET_SOCK_PEER_PORT], [None, None], keys, values
+        )
+
+        # Validate behaviour of extracting Remote Service from net.peer.socket.addr
+        keys, values = self._mock_attribute(
+            [SpanAttributes.NET_SOCK_PEER_ADDR],
+            ["www.example.com"],
+            keys,
+            values,
+        )
+        self._validate_expected_remote_attributes("www.example.com", _UNKNOWN_REMOTE_OPERATION)
+        keys, values = self._mock_attribute(
+            [SpanAttributes.NET_SOCK_PEER_ADDR], [None], keys, values
+        )
+
+        # Validate behaviour of extracting Remote Service from net.peer.socket.addr and net.sock.peer.port
         keys, values = self._mock_attribute(
             [SpanAttributes.NET_SOCK_PEER_ADDR, SpanAttributes.NET_SOCK_PEER_PORT],
             ["192.168.0.0", "8081"],
@@ -418,24 +454,31 @@ class TestAwsMetricAttributeGenerator(TestCase):
             [SpanAttributes.NET_SOCK_PEER_ADDR, SpanAttributes.NET_SOCK_PEER_PORT], [None, None], keys, values
         )
 
+        # Validate behavior of Remote Operation from HttpTarget - with 1st api part, then remove it
         keys, values = self._mock_attribute(
             [SpanAttributes.HTTP_URL], ["http://www.example.com/payment/123"], keys, values
         )
         self._validate_expected_remote_attributes(_UNKNOWN_REMOTE_SERVICE, "/payment")
         keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], [None], keys, values)
 
+        # Validate behavior of Remote Operation from HttpTarget - without 1st api part, then remove it
         keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], ["http://www.example.com"], keys, values)
         self._validate_expected_remote_attributes(_UNKNOWN_REMOTE_SERVICE, "/")
         keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], [None], keys, values)
 
+        # Validate behavior of Remote Operation from HttpTarget - invalid url, then remove it
+        # We designed to let Generator return a "/" rather than UNKNOWN OPERATION when receive invalid HTTP URL
+        # We basically expect url to be well formed, both / or unknown is acceptable since it should never really happen
         keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], ["abc"], keys, values)
         self._validate_expected_remote_attributes(_UNKNOWN_REMOTE_SERVICE, "/")
         keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], [None], keys, values)
 
+        # Validate behaviour of Peer service attribute, then remove it.
         keys, values = self._mock_attribute([SpanAttributes.PEER_SERVICE], ["Peer service"], keys, values)
         self._validate_expected_remote_attributes("Peer service", _UNKNOWN_REMOTE_OPERATION)
         keys, values = self._mock_attribute([SpanAttributes.PEER_SERVICE], [None], keys, values)
 
+        # Once we have removed all usable metrics, we only have "unknown" attributes, which are unused.
         self._validate_expected_remote_attributes(_UNKNOWN_REMOTE_SERVICE, _UNKNOWN_REMOTE_OPERATION)
 
     def test_peer_service_does_override_other_remote_services(self):
@@ -494,16 +537,16 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.assertIsNotNone(service_attributes)
         self.assertIsNotNone(dependency_attributes)
 
-    def _update_resource_with_service_name(self):
+    def _update_resource_with_service_name(self) -> None:
         self.resource: Resource = Resource(attributes={SERVICE_NAME: _SERVICE_NAME_VALUE})
 
     def _mock_attribute(
             self,
-            keys: [str],
+            keys: list[str],
             values: [Optional[str]],
             exist_keys: Optional[str] = None,
             exist_values: Optional[Optional[str]] = None,
-    ):
+    ) -> (Optional[list[str]], Optional[list[str]]):
         if exist_keys is not None and exist_values is not None:
             for key in exist_keys:
                 if key not in keys:
@@ -519,7 +562,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
 
         return keys, values
 
-    def _validate_expected_remote_attributes(self, expected_remote_service, expected_remote_operation):
+    def _validate_expected_remote_attributes(self, expected_remote_service: str, expected_remote_operation: str) -> None:
         self.span_mock.kind = SpanKind.CLIENT
         actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
             DEPENDENCY_METRIC
@@ -535,7 +578,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.assertEqual(actual_attributes[AWS_REMOTE_OPERATION], expected_remote_operation)
 
     def _validate_and_remove_remote_attributes(
-            self, remote_service_key, remote_service_value, remote_operation_key, remote_operation_value, keys, values
+            self, remote_service_key: str, remote_service_value: str, remote_operation_key: str, remote_operation_value: str, keys: Optional[list[str]], values: Optional[list[str]]
     ):
         keys, values = self._mock_attribute(
             [remote_service_key, remote_operation_key], [remote_service_value, remote_operation_value], keys, values
@@ -555,7 +598,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         keys, values = self._mock_attribute([remote_service_key, remote_operation_key], [None, None], keys, values)
         return keys, values
 
-    def _validate_peer_service_does_override(self, remote_service_key):
+    def _validate_peer_service_does_override(self, remote_service_key: str) -> None:
         self._mock_attribute([remote_service_key, SpanAttributes.PEER_SERVICE], ["TestString", "PeerService"])
         self.span_mock.kind = SpanKind.CLIENT
 
@@ -568,7 +611,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
 
     def _validate_attributes_produced_for_non_LOCAL_ROOT_span_of_kind(
             self, expected_attributes: Attributes, kind: SpanKind
-    ):
+    ) -> None:
         self.span_mock.kind = kind
 
         attribute_map: {str, BoundedAttributes} = _GENERATOR.generate_metric_attributes_dict_from_span(
