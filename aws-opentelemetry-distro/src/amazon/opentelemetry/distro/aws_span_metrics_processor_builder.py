@@ -57,6 +57,7 @@ class AwsSpanMetricsProcessorBuilder:
         error_histogram: Histogram = meter.create_histogram(_ERROR)
         fault_histogram: Histogram = meter.create_histogram(_FAULT)
         latency_histogram: Histogram = meter.create_histogram(_LATENCY, unit=_LATENCY_UNITS)
+        # TODO: Remove the Histogram name override after the CWAgent is fixed with metric name case-insensitive.
         error_histogram.name = _ERROR
         fault_histogram.name = _FAULT
         latency_histogram.name = _LATENCY
