@@ -145,7 +145,9 @@ class TestAwsMetricAttributeGenerator(TestCase):
         }
 
         self.span_mock.kind = SpanKind.INTERNAL
-        actual_attributes_map: dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource)
+        actual_attributes_map: dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
+            self.span_mock, self.resource
+        )
         self.assertEqual(actual_attributes_map, expected_attributes_map)
 
     def test_LOCAL_ROOT_client_span(self):
@@ -158,17 +160,17 @@ class TestAwsMetricAttributeGenerator(TestCase):
 
         expected_attributes_map: dict[str, BoundedAttributes] = {
             SERVICE_METRIC: {
-                    AWS_SPAN_KIND: _LOCAL_ROOT,
-                    AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
-                    AWS_LOCAL_OPERATION: _INTERNAL_OPERATION,
-                },
+                AWS_SPAN_KIND: _LOCAL_ROOT,
+                AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
+                AWS_LOCAL_OPERATION: _INTERNAL_OPERATION,
+            },
             DEPENDENCY_METRIC: {
-                    AWS_SPAN_KIND: SpanKind.CLIENT.name,
-                    AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
-                    AWS_LOCAL_OPERATION: _INTERNAL_OPERATION,
-                    AWS_REMOTE_SERVICE: _AWS_REMOTE_SERVICE_VALUE,
-                    AWS_REMOTE_OPERATION: _AWS_REMOTE_OPERATION_VALUE,
-                }
+                AWS_SPAN_KIND: SpanKind.CLIENT.name,
+                AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
+                AWS_LOCAL_OPERATION: _INTERNAL_OPERATION,
+                AWS_REMOTE_SERVICE: _AWS_REMOTE_SERVICE_VALUE,
+                AWS_REMOTE_OPERATION: _AWS_REMOTE_OPERATION_VALUE,
+            },
         }
 
         self.span_mock.kind = SpanKind.CLIENT
@@ -330,8 +332,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._validate_attributes_produced_for_non_LOCAL_ROOT_span_of_kind(expected_attributes, SpanKind.CLIENT)
 
     def test_remote_attributes_combinations(self):
-     # Set all expected fields to a test string, we will overwrite them in descending order to test
-     # the priority-order logic in AwsMetricAttributeGenerator remote attribute methods.
+        # Set all expected fields to a test string, we will overwrite them in descending order to test
+        # the priority-order logic in AwsMetricAttributeGenerator remote attribute methods.
         keys: list[str] = [
             AWS_REMOTE_SERVICE,
             AWS_REMOTE_OPERATION,
@@ -438,9 +440,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
             values,
         )
         self._validate_expected_remote_attributes("www.example.com", _UNKNOWN_REMOTE_OPERATION)
-        keys, values = self._mock_attribute(
-            [SpanAttributes.NET_SOCK_PEER_ADDR], [None], keys, values
-        )
+        keys, values = self._mock_attribute([SpanAttributes.NET_SOCK_PEER_ADDR], [None], keys, values)
 
         # Validate behaviour of extracting Remote Service from net.peer.socket.addr and net.sock.peer.port
         keys, values = self._mock_attribute(
@@ -541,11 +541,11 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.resource: Resource = Resource(attributes={SERVICE_NAME: _SERVICE_NAME_VALUE})
 
     def _mock_attribute(
-            self,
-            keys: list[str],
-            values: [Optional[str]],
-            exist_keys: Optional[str] = None,
-            exist_values: Optional[Optional[str]] = None,
+        self,
+        keys: list[str],
+        values: [Optional[str]],
+        exist_keys: Optional[str] = None,
+        exist_values: Optional[Optional[str]] = None,
     ) -> (Optional[list[str]], Optional[list[str]]):
         if exist_keys is not None and exist_values is not None:
             for key in exist_keys:
@@ -562,7 +562,9 @@ class TestAwsMetricAttributeGenerator(TestCase):
 
         return keys, values
 
-    def _validate_expected_remote_attributes(self, expected_remote_service: str, expected_remote_operation: str) -> None:
+    def _validate_expected_remote_attributes(
+        self, expected_remote_service: str, expected_remote_operation: str
+    ) -> None:
         self.span_mock.kind = SpanKind.CLIENT
         actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
             DEPENDENCY_METRIC
@@ -578,7 +580,13 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.assertEqual(actual_attributes[AWS_REMOTE_OPERATION], expected_remote_operation)
 
     def _validate_and_remove_remote_attributes(
-            self, remote_service_key: str, remote_service_value: str, remote_operation_key: str, remote_operation_value: str, keys: Optional[list[str]], values: Optional[list[str]]
+        self,
+        remote_service_key: str,
+        remote_service_value: str,
+        remote_operation_key: str,
+        remote_operation_value: str,
+        keys: Optional[list[str]],
+        values: Optional[list[str]],
     ):
         keys, values = self._mock_attribute(
             [remote_service_key, remote_operation_key], [remote_service_value, remote_operation_value], keys, values
@@ -610,7 +618,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute([remote_service_key, SpanAttributes.PEER_SERVICE], [None, None])
 
     def _validate_attributes_produced_for_non_LOCAL_ROOT_span_of_kind(
-            self, expected_attributes: Attributes, kind: SpanKind
+        self, expected_attributes: Attributes, kind: SpanKind
     ) -> None:
         self.span_mock.kind = kind
 
