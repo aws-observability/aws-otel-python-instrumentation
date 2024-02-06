@@ -58,6 +58,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.parent_span_context.is_remote = False
         self.span_mock.parent = self.parent_span_context
 
+        # OTel strongly recommends to start out with the default instead of Resource.empty()
         self.resource: Resource = _DEFAULT_RESOURCE
 
     def test_span_attributes_for_empty_resource(self):
@@ -116,7 +117,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.parent_span_context.is_valid = False
         self.span_mock.name = _SPAN_NAME_VALUE
 
-        expected_attributes_map: {str: Attributes} = {
+        expected_attributes_map: dict[str, BoundedAttributes] = {
             SERVICE_METRIC: {
                 AWS_SPAN_KIND: _LOCAL_ROOT,
                 AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
@@ -125,7 +126,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         }
 
         self.span_mock.kind = SpanKind.SERVER
-        actual_attributes_map: {str: Attributes} = _GENERATOR.generate_metric_attributes_dict_from_span(
+        actual_attributes_map: dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
             self.span_mock, self.resource
         )
         self.assertEqual(actual_attributes_map, expected_attributes_map)
@@ -135,7 +136,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.parent_span_context.is_valid = False
         self.span_mock.name = _SPAN_NAME_VALUE
 
-        expected_attributes_map: {str: Attributes} = {
+        expected_attributes_map: dict[str, BoundedAttributes] = {
             SERVICE_METRIC: {
                 AWS_SPAN_KIND: _LOCAL_ROOT,
                 AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
@@ -144,7 +145,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         }
 
         self.span_mock.kind = SpanKind.INTERNAL
-        actual_attributes_map = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource)
+        actual_attributes_map: dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource)
         self.assertEqual(actual_attributes_map, expected_attributes_map)
 
     def test_LOCAL_ROOT_client_span(self):
@@ -155,29 +156,23 @@ class TestAwsMetricAttributeGenerator(TestCase):
             [AWS_REMOTE_SERVICE, AWS_REMOTE_OPERATION], [_AWS_REMOTE_SERVICE_VALUE, _AWS_REMOTE_OPERATION_VALUE]
         )
 
-        expected_attributes_map: {str: Attributes} = {
-            SERVICE_METRIC: BoundedAttributes(
-                attributes={
+        expected_attributes_map: dict[str, BoundedAttributes] = {
+            SERVICE_METRIC: {
                     AWS_SPAN_KIND: _LOCAL_ROOT,
                     AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
                     AWS_LOCAL_OPERATION: _INTERNAL_OPERATION,
                 },
-                maxlen=None,
-            ),
-            DEPENDENCY_METRIC: BoundedAttributes(
-                attributes={
+            DEPENDENCY_METRIC: {
                     AWS_SPAN_KIND: SpanKind.CLIENT.name,
                     AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
                     AWS_LOCAL_OPERATION: _INTERNAL_OPERATION,
                     AWS_REMOTE_SERVICE: _AWS_REMOTE_SERVICE_VALUE,
                     AWS_REMOTE_OPERATION: _AWS_REMOTE_OPERATION_VALUE,
-                },
-                maxlen=None,
-            ),
+                }
         }
 
         self.span_mock.kind = SpanKind.CLIENT
-        actual_attributes_map: BoundedAttributes = _GENERATOR.generate_metric_attributes_dict_from_span(
+        actual_attributes_map: dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
             self.span_mock, self.resource
         )
         self.assertEqual(actual_attributes_map, expected_attributes_map)
@@ -190,7 +185,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
             [AWS_REMOTE_SERVICE, AWS_REMOTE_OPERATION], [_AWS_REMOTE_SERVICE_VALUE, _AWS_REMOTE_OPERATION_VALUE]
         )
 
-        expected_attributes_map: {str: Attributes} = {
+        expected_attributes_map: dict[str, BoundedAttributes] = {
             SERVICE_METRIC: {
                 AWS_SPAN_KIND: _LOCAL_ROOT,
                 AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
@@ -206,30 +201,10 @@ class TestAwsMetricAttributeGenerator(TestCase):
         }
 
         self.span_mock.kind = SpanKind.CONSUMER
-        actual_attributes_map: BoundedAttributes = _GENERATOR.generate_metric_attributes_dict_from_span(
+        actual_attributes_map: dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
             self.span_mock, self.resource
         )
         self.assertEqual(actual_attributes_map, expected_attributes_map)
-
-    def _validate_attributes_produced_for_non_LOCAL_ROOT_span_of_kind(
-            self, expected_attributes: Attributes, kind: SpanKind
-    ):
-        self.span_mock.kind = kind
-
-        attribute_map: {str, Attributes} = _GENERATOR.generate_metric_attributes_dict_from_span(
-            self.span_mock, self.resource
-        )
-        service_attributes: BoundedAttributes = attribute_map.get(SERVICE_METRIC)
-        dependency_attributes: BoundedAttributes = attribute_map.get(DEPENDENCY_METRIC)
-        if attribute_map is not None and len(attribute_map) > 0:
-            if kind in [SpanKind.PRODUCER, SpanKind.CLIENT, SpanKind.CONSUMER]:
-                self.assertIsNone(service_attributes)
-                self.assertEqual(len(dependency_attributes), len(BoundedAttributes(attributes=expected_attributes)))
-                self.assertEqual(dependency_attributes, BoundedAttributes(attributes=expected_attributes))
-            else:
-                self.assertIsNone(dependency_attributes)
-                self.assertEqual(len(service_attributes), len(BoundedAttributes(attributes=expected_attributes)))
-                self.assertEqual(service_attributes, BoundedAttributes(attributes=expected_attributes))
 
     def test_LOCAL_ROOT_producer_span(self):
         self._update_resource_with_service_name()
@@ -239,7 +214,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
             [AWS_REMOTE_SERVICE, AWS_REMOTE_OPERATION], [_AWS_REMOTE_SERVICE_VALUE, _AWS_REMOTE_OPERATION_VALUE]
         )
 
-        expected_attributes_map: {str: Attributes} = {
+        expected_attributes_map: dict[str, BoundedAttributes] = {
             SERVICE_METRIC: {
                 AWS_SPAN_KIND: _LOCAL_ROOT,
                 AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
@@ -255,7 +230,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         }
 
         self.span_mock.kind = SpanKind.PRODUCER
-        actual_attributes_map: BoundedAttributes = _GENERATOR.generate_metric_attributes_dict_from_span(
+        actual_attributes_map: dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
             self.span_mock, self.resource
         )
         self.assertEqual(actual_attributes_map, expected_attributes_map)
@@ -590,3 +565,23 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.assertEqual(actual_attributes.get(AWS_REMOTE_SERVICE), "PeerService")
 
         self._mock_attribute([remote_service_key, SpanAttributes.PEER_SERVICE], [None, None])
+
+    def _validate_attributes_produced_for_non_LOCAL_ROOT_span_of_kind(
+            self, expected_attributes: Attributes, kind: SpanKind
+    ):
+        self.span_mock.kind = kind
+
+        attribute_map: {str, BoundedAttributes} = _GENERATOR.generate_metric_attributes_dict_from_span(
+            self.span_mock, self.resource
+        )
+        service_attributes: BoundedAttributes = attribute_map.get(SERVICE_METRIC)
+        dependency_attributes: BoundedAttributes = attribute_map.get(DEPENDENCY_METRIC)
+        if attribute_map is not None and len(attribute_map) > 0:
+            if kind in [SpanKind.PRODUCER, SpanKind.CLIENT, SpanKind.CONSUMER]:
+                self.assertIsNone(service_attributes)
+                self.assertEqual(len(dependency_attributes), len(BoundedAttributes(attributes=expected_attributes)))
+                self.assertEqual(dependency_attributes, BoundedAttributes(attributes=expected_attributes))
+            else:
+                self.assertIsNone(dependency_attributes)
+                self.assertEqual(len(service_attributes), len(BoundedAttributes(attributes=expected_attributes)))
+                self.assertEqual(service_attributes, BoundedAttributes(attributes=expected_attributes))
