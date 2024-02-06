@@ -425,7 +425,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
             keys,
             values,
         )
-        self._validate_expected_remote_attributes("192.168.0.0:8081", _UNKNOWN_REMOTE_OPERATION)
+        self._validate_expected_remote_attributes("192.168.0.0", _UNKNOWN_REMOTE_OPERATION)
         keys, values = self._mock_attribute(
             [SpanAttributes.NET_PEER_NAME, SpanAttributes.NET_SOCK_PEER_PORT], [None, None], keys, values
         )
