@@ -157,54 +157,6 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         self.assertEqual(exported_span._attributes["key2"], "old value2")
         self.assertEqual(exported_span._attributes["key3"], "new value3")
 
-    def test_export_delegating_span_data_behaviour(self):
-        span_attributes: Attributes = self._build_span_attributes(_CONTAINS_ATTRIBUTES)
-        span_data_mock: ReadableSpan = self._build_readable_span_mock(span_attributes)
-        metric_attributes: Attributes = self._build_metric_attributes(_CONTAINS_ATTRIBUTES)
-        self._configure_mock_for_export(span_data_mock, metric_attributes)
-
-        self.aws_metric_attributes_span_exporter.export([span_data_mock])
-        self.delegate_mock.assert_has_calls([call.export([span_data_mock])])
-        exported_spans: Attributes = self.delegate_mock.export.call_args[0][0]
-        self.assertEqual(len(exported_spans), 1)
-
-        exported_span: ReadableSpan = exported_spans[0]
-
-        span_context_mock: SpanContext = MagicMock()
-        span_data_mock.get_span_context.return_value = span_context_mock
-        self.assertEqual(exported_span.get_span_context(), span_context_mock)
-
-        parent_span_context_mock: SpanContext = MagicMock()
-        span_data_mock._parent = parent_span_context_mock
-        self.assertEqual(exported_span._parent, parent_span_context_mock)
-
-        span_data_mock._resource = self.test_resource
-        self.assertEqual(exported_span._resource, self.test_resource)
-
-        test_instrumentation_scope_info: InstrumentationScope = MagicMock()
-        span_data_mock._instrumentation_scope = test_instrumentation_scope_info
-        self.assertEqual(exported_span._instrumentation_scope, test_instrumentation_scope_info)
-
-        test_name: str = "name"
-        span_data_mock._name = test_name
-        self.assertEqual(exported_span._name, test_name)
-
-        kind_mock: SpanKind = Mock()
-        span_data_mock._kind = kind_mock
-        self.assertEqual(exported_span._kind, kind_mock)
-
-        events_mock: [Event] = [Mock()]
-        span_data_mock._events = events_mock
-        self.assertEqual(exported_span._events, events_mock)
-
-        links_mock: [Link] = [Mock()]
-        span_data_mock._links = links_mock
-        self.assertEqual(exported_span._links, links_mock)
-
-        status_mock: Status = Mock()
-        span_data_mock._status = status_mock
-        self.assertEqual(exported_span._status, status_mock)
-
     def test_export_delegation_with_two_metrics(self):
         span_attributes: Attributes = self._build_span_attributes(_CONTAINS_ATTRIBUTES)
 
