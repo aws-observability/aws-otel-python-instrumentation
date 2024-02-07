@@ -1,7 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import copy
-from typing import Any
 from unittest import TestCase
 from unittest.mock import MagicMock, Mock, call
 
