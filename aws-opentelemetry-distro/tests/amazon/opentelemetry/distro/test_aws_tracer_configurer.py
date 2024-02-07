@@ -28,7 +28,7 @@ class TestAwsTracerConfigurer(TestCase):
         aws_otel_configurator.configure()
         cls.tracer_provider: TracerProvider = get_tracer_provider()
 
-    # Sanity check that the trace ID ratio sampler works fine with the x-ray generator.
+    # The probability of this passing once without correct IDs is low, 20 times is inconceivable.
     def test_provide_generate_xray_ids(self):
         for _ in range(20):
             tracer: Tracer = self.tracer_provider.get_tracer("test")
