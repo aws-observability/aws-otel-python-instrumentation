@@ -1,6 +1,5 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-import copy
 from typing import List, Sequence, TypeVar
 
 from typing_extensions import override
