@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta
 from logging import Logger, getLogger
 from time import sleep
-from typing import Callable, TypeVar, List
+from typing import Callable, List, TypeVar
 
 from google.protobuf.internal.containers import RepeatedScalarFieldContainer
 from grpc import Channel, insecure_channel
