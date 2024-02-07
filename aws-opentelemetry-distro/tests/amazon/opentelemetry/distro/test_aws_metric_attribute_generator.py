@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import Optional
+from typing import Optional, List
 from unittest import TestCase
 from unittest.mock import MagicMock
 
@@ -334,7 +334,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
     def test_remote_attributes_combinations(self):
         # Set all expected fields to a test string, we will overwrite them in descending order to test
         # the priority-order logic in AwsMetricAttributeGenerator remote attribute methods.
-        keys: list[str] = [
+        keys: List[str] = [
             AWS_REMOTE_SERVICE,
             AWS_REMOTE_OPERATION,
             SpanAttributes.RPC_SERVICE,
@@ -351,7 +351,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
             "unknown.service.key",
             "unknown.operation.key",
         ]
-        values: list[str] = [
+        values: List[str] = [
             "TestString",
             "TestString",
             "TestString",
@@ -542,11 +542,11 @@ class TestAwsMetricAttributeGenerator(TestCase):
 
     def _mock_attribute(
         self,
-        keys: list[str],
-        values: Optional[list[str]],
-        exist_keys: Optional[list[str]] = None,
-        exist_values: Optional[list[str]] = None,
-    ) -> (Optional[list[str]], Optional[list[str]]):
+        keys: List[str],
+        values: Optional[List[str]],
+        exist_keys: Optional[List[str]] = None,
+        exist_values: Optional[List[str]] = None,
+    ) -> (Optional[List[str]], Optional[List[str]]):
         if exist_keys is not None and exist_values is not None:
             for key in exist_keys:
                 if key not in keys:
@@ -585,8 +585,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         remote_service_value: str,
         remote_operation_key: str,
         remote_operation_value: str,
-        keys: Optional[list[str]],
-        values: Optional[list[str]],
+        keys: Optional[List[str]],
+        values: Optional[List[str]],
     ):
         keys, values = self._mock_attribute(
             [remote_service_key, remote_operation_key], [remote_service_value, remote_operation_value], keys, values
