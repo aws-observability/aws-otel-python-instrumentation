@@ -1,23 +1,16 @@
-name: Release Build
+name: Python Instrumentation PR Build
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: The version to tag the release with, e.g., 1.2.0, 1.2.1-alpha.1
-        required: true
+  pull_request:
+    branches:
+      - main
+      - "release/v*"
 env:
   AWS_DEFAULT_REGION: us-east-1
-  ECR_REGISTRY: 637423224110.dkr.ecr.us-east-1.amazonaws.com
-  ECR_REPOSITORY: eks/observability/adot-autoinstrumentation-python
-
-permissions:
-  id-token: write
-  contents: read
+  TEST_TAG: 637423224110.dkr.ecr.us-east-1.amazonaws.com/eks/observability/adot-autoinstrumentation-python:test
 
 jobs:
   build:
     env:
-      py311: "3.11"
       RUN_MATRIX_COMBINATION: ${{ matrix.python-version }}-${{ matrix.package }}-${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -26,15 +19,18 @@ jobs:
         python-version: [ py311 ]
         package: [ "aws-opentelemetry-distro" ]
         os: [ ubuntu-latest ]
+    outputs:
+      staging-image-name: ${{ steps.imageNameOutput.outputs.imageName }}
+      staging_wheel_file: ${{ steps.pr_wheel_build.outputs.STAGING_WHEEL}}
     steps:
       - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: ${{ env[matrix.python-version] }}
-          
+
       - name: Install tox
         run: pip install tox==3.27.1 tox-factor
 
@@ -51,7 +47,7 @@ jobs:
         run: tox -f ${{ matrix.python-version }}-${{ matrix.package }} -- -ra --benchmark-json=${{ env.RUN_MATRIX_COMBINATION }}-benchmark.json
 
       - name: Install Dependencies and Build Wheel
-        id: staging_wheel_build
+        id: pr_wheel_build
         run: |
           pip install --upgrade pip setuptools wheel packaging build
           rm -rf ./dist/*
@@ -60,12 +56,15 @@ jobs:
           cd ../dist
           pkg_version=$(grep '__version__' ../aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py | awk -F '"' '{print $2}')
           echo "ADOT_PYTHON_VERSION=$pkg_version" >> $GITHUB_OUTPUT
+          shortsha="$(git rev-parse --short HEAD)"
+          mv aws_opentelemetry_distro-$pkg_version-py3-none-any.whl aws_opentelemetry_distro-$pkg_version-$shortsha.whl
+          echo "STAGING_WHEEL=aws_opentelemetry_distro-$pkg_version-$shortsha.whl" >> $GITHUB_OUTPUT
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Upload to GitHub Actions
+        uses: actions/upload-artifact@v3
         with:
-          role-to-assume: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
-          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+          name: aws_opentelemetry_distro.whl
+          path: dist/aws_opentelemetry_distro-*.whl
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -73,30 +72,18 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to AWS ECR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.ECR_REGISTRY }}
-        env:
-          AWS_REGION: ${{ env.AWS_DEFAULT_REGION }}
-
-      - name: Build and push staging image
+      - name: Build image for testing
         uses: docker/build-push-action@v5
         with:
-          push: true
+          push: false
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:v${{ github.event.inputs.version }}
+          platforms: linux/amd64
+          tags: ${{ env.TEST_TAG }}
+          load: true
 
-      - name: Create release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
-        run: |
-          cp "dist/aws_opentelemetry_distro-${{ steps.staging_wheel_build.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl" aws_opentelemetry_distro.whl
-          gh release create --target "$GITHUB_REF_NAME" \
-             --title "Release v${{ github.event.inputs.version }}" \
-             --draft \
-             "v${{ github.event.inputs.version }}" \
-             aws_opentelemetry_distro.whl
+      - name: Set image name to output
+        id: imageNameOutput
+        run: echo "imageName=${{ env.TEST_TAG }}" >> "$GITHUB_OUTPUT"
+
+#  TODO: Add Contract test and E2E test

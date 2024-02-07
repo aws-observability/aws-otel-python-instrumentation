@@ -12,7 +12,7 @@ on:
 env:
   AWS_DEFAULT_REGION: us-east-1
   STAGING_ECR_REGISTRY: 637423224110.dkr.ecr.us-east-1.amazonaws.com
-  STAGING_ECR_REPOSITORY: eks/observability/adot-autoinstrumentation-python
+  STAGING_ECR_REPOSITORY: aws-observability/adot-autoinstrumentation-python-staging
   S3_INTEGRATION_BUCKET: ${{ secrets.S3_INTEGRATION_BUCKET }}
 
 concurrency:
@@ -25,19 +25,43 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    env:
+      py311: "3.11"
+      RUN_MATRIX_COMBINATION: ${{ matrix.python-version }}-${{ matrix.package }}-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false  # ensures the entire test matrix is run, even if one permutation fails
+      matrix:
+        python-version: [ py311 ]
+        package: [ "aws-opentelemetry-distro" ]
+        os: [ ubuntu-latest ]
     outputs:
       python_distro_tag: ${{ steps.python_distro_versioning.outputs.STAGING_TAG}}
       staging-image-name: ${{ steps.imageNameOutput.outputs.imageName }}
       staging_wheel_file: ${{ steps.staging_wheel_build.outputs.STAGING_WHEEL}}
     steps:
       - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.11"
+          python-version: ${{ env[matrix.python-version] }}
+
+      - name: Install tox
+        run: pip install tox==3.27.1 tox-factor
+
+      - name: Cache tox environment
+        # Preserves .tox directory between runs for faster installs
+        uses: actions/cache@v1
+        with:
+          path: |
+            .tox
+            ~/.cache/pip
+          key: v7-build-tox-cache-${{ env.RUN_MATRIX_COMBINATION }}-${{ hashFiles('tox.ini', 'dev-requirements.txt') }}
+
+      - name: run tox
+        run: tox -f ${{ matrix.python-version }}-${{ matrix.package }} -- -ra --benchmark-json=${{ env.RUN_MATRIX_COMBINATION }}-benchmark.json
 
       - name: Install Dependencies and Build Wheel
         id: staging_wheel_build
@@ -49,8 +73,15 @@ jobs:
           cd ../dist
           pkg_version=$(grep '__version__' ../aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py | awk -F '"' '{print $2}')
           echo "ADOT_PYTHON_VERSION=$pkg_version" >> $GITHUB_OUTPUT
-          pip wheel --no-deps aws_opentelemetry_distro-$pkg_version.tar.gz
-          echo "STAGING_WHEEL=aws_opentelemetry_distro-$pkg_version-py3-none-any.whl" >> $GITHUB_OUTPUT
+          shortsha="$(git rev-parse --short HEAD)"
+          mv aws_opentelemetry_distro-$pkg_version-py3-none-any.whl aws_opentelemetry_distro-$pkg_version-$shortsha.whl
+          echo "STAGING_WHEEL=aws_opentelemetry_distro-$pkg_version-$shortsha.whl" >> $GITHUB_OUTPUT
+
+      - name: Upload to GitHub Actions
+        uses: actions/upload-artifact@v3
+        with:
+          name: aws_opentelemetry_distro.whl
+          path: dist/aws_opentelemetry_distro-*.whl
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -87,7 +118,7 @@ jobs:
           push: true
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           tags: |
             ${{ env.STAGING_ECR_REGISTRY }}/${{ env.STAGING_ECR_REPOSITORY }}:${{ steps.python_distro_versioning.outputs.STAGING_TAG }}
 
