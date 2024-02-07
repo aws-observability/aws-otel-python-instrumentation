@@ -1,9 +1,7 @@
 name: Python Instrumentation PR Build
 on:
   pull_request:
-    branches:
-      - main
-      - "release/v*"
+
 env:
   AWS_DEFAULT_REGION: us-east-1
   TEST_TAG: 637423224110.dkr.ecr.us-east-1.amazonaws.com/eks/observability/adot-autoinstrumentation-python:test
@@ -11,12 +9,16 @@ env:
 jobs:
   build:
     env:
+      py38: 3.8
+      py39: 3.9
+      py310: "3.10"
+      py311: "3.11"
       RUN_MATRIX_COMBINATION: ${{ matrix.python-version }}-${{ matrix.package }}-${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false  # ensures the entire test matrix is run, even if one permutation fails
       matrix:
-        python-version: [ py311 ]
+        python-version: [ py38, py39, py310, py311 ]
         package: [ "aws-opentelemetry-distro" ]
         os: [ ubuntu-latest ]
     outputs:
@@ -57,14 +59,14 @@ jobs:
           pkg_version=$(grep '__version__' ../aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py | awk -F '"' '{print $2}')
           echo "ADOT_PYTHON_VERSION=$pkg_version" >> $GITHUB_OUTPUT
           shortsha="$(git rev-parse --short HEAD)"
-          mv aws_opentelemetry_distro-$pkg_version-py3-none-any.whl aws_opentelemetry_distro-$pkg_version-$shortsha.whl
           echo "STAGING_WHEEL=aws_opentelemetry_distro-$pkg_version-$shortsha.whl" >> $GITHUB_OUTPUT
+          mv aws_opentelemetry_distro-$pkg_version-py3-none-any.whl aws_opentelemetry_distro-$pkg_version-$shortsha.whl
 
       - name: Upload to GitHub Actions
         uses: actions/upload-artifact@v3
         with:
           name: aws_opentelemetry_distro.whl
-          path: dist/aws_opentelemetry_distro-*.whl
+          path: dist/${{ steps.pr_wheel_build.outputs.STAGING_WHEEL}}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -85,5 +87,34 @@ jobs:
       - name: Set image name to output
         id: imageNameOutput
         run: echo "imageName=${{ env.TEST_TAG }}" >> "$GITHUB_OUTPUT"
-
-#  TODO: Add Contract test and E2E test
+#     TODO: Add Contract test and E2E test
+  misc:
+    strategy:
+      fail-fast: false
+      matrix:
+        tox-environment: ["spellcheck", "lint"]
+    name: ${{ matrix.tox-environment }}
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@v2
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v2
+        with:
+          python-version: "3.10"
+      - name: Install tox
+        run: pip install tox==3.27.1
+      - name: Install libsnappy-dev
+        if: ${{ matrix.tox-environment == 'lint' }}
+        run: sudo apt-get install -y libsnappy-dev
+      - name: Cache tox environment
+        # Preserves .tox directory between runs for faster installs
+        uses: actions/cache@v1
+        with:
+          path: |
+            .tox
+            ~/.cache/pip
+          key: v7-misc-tox-cache-${{ matrix.tox-environment }}-${{ hashFiles('tox.ini',
+            'dev-requirements.txt') }}
+      - name: run tox
+        run: tox -e ${{ matrix.tox-environment }}

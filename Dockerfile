@@ -13,10 +13,9 @@ FROM python:3.10 AS build
 
 WORKDIR /operator-build
 
-ADD image-requirements.txt .
 ADD aws-opentelemetry-distro/ ./aws-opentelemetry-distro/
 
-RUN mkdir workspace && pip install --target workspace -r image-requirements.txt && pip install --target workspace ./aws-opentelemetry-distro
+RUN mkdir workspace && pip install --target workspace ./aws-opentelemetry-distro
 
 FROM busybox
 

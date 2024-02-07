@@ -8,7 +8,7 @@ on:
 env:
   AWS_DEFAULT_REGION: us-east-1
   ECR_REGISTRY: 637423224110.dkr.ecr.us-east-1.amazonaws.com
-  ECR_REPOSITORY: eks/observability/adot-autoinstrumentation-python
+  PRIVATE_ECR_REPOSITORY: eks/observability/adot-autoinstrumentation-python
 
 permissions:
   id-token: write
@@ -17,13 +17,16 @@ permissions:
 jobs:
   build:
     env:
+      py38: 3.8
+      py39: 3.9
+      py310: "3.10"
       py311: "3.11"
       RUN_MATRIX_COMBINATION: ${{ matrix.python-version }}-${{ matrix.package }}-${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false  # ensures the entire test matrix is run, even if one permutation fails
       matrix:
-        python-version: [ py311 ]
+        python-version: [ py38, py39, py310, py311 ]
         package: [ "aws-opentelemetry-distro" ]
         os: [ ubuntu-latest ]
     steps:
@@ -51,7 +54,7 @@ jobs:
         run: tox -f ${{ matrix.python-version }}-${{ matrix.package }} -- -ra --benchmark-json=${{ env.RUN_MATRIX_COMBINATION }}-benchmark.json
 
       - name: Install Dependencies and Build Wheel
-        id: staging_wheel_build
+        id: wheel_build
         run: |
           pip install --upgrade pip setuptools wheel packaging build
           rm -rf ./dist/*
@@ -88,13 +91,13 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           tags: |
-            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:v${{ github.event.inputs.version }}
+            ${{ env.ECR_REGISTRY }}/${{ env.PRIVATE_ECR_REPOSITORY }}:v${{ github.event.inputs.version }}
 
       - name: Create release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
         run: |
-          cp "dist/aws_opentelemetry_distro-${{ steps.staging_wheel_build.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl" aws_opentelemetry_distro.whl
+          cp "dist/aws_opentelemetry_distro-${{ steps.wheel_build.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl" aws_opentelemetry_distro.whl
           gh release create --target "$GITHUB_REF_NAME" \
              --title "Release v${{ github.event.inputs.version }}" \
              --draft \

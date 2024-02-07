@@ -22,13 +22,16 @@ permissions:
 jobs:
   build:
     env:
+      py38: 3.8
+      py39: 3.9
+      py310: "3.10"
       py311: "3.11"
       RUN_MATRIX_COMBINATION: ${{ matrix.python-version }}-${{ matrix.package }}-${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false  # ensures the entire test matrix is run, even if one permutation fails
       matrix:
-        python-version: [ py311 ]
+        python-version: [ py38, py39, py310, py311 ]
         package: [ "aws-opentelemetry-distro" ]
         os: [ ubuntu-latest ]
     outputs:
@@ -70,14 +73,14 @@ jobs:
           pkg_version=$(grep '__version__' ../aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py | awk -F '"' '{print $2}')
           echo "ADOT_PYTHON_VERSION=$pkg_version" >> $GITHUB_OUTPUT
           shortsha="$(git rev-parse --short HEAD)"
-          mv aws_opentelemetry_distro-$pkg_version-py3-none-any.whl aws_opentelemetry_distro-$pkg_version-$shortsha.whl
           echo "STAGING_WHEEL=aws_opentelemetry_distro-$pkg_version-$shortsha.whl" >> $GITHUB_OUTPUT
+          mv aws_opentelemetry_distro-$pkg_version-py3-none-any.whl aws_opentelemetry_distro-$pkg_version-$shortsha.whl
 
       - name: Upload to GitHub Actions
         uses: actions/upload-artifact@v3
         with:
           name: aws_opentelemetry_distro.whl
-          path: dist/aws_opentelemetry_distro-*.whl
+          path: dist/${{ steps.staging_wheel_build.outputs.STAGING_WHEEL}}
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -86,7 +89,7 @@ jobs:
           aws-region: ${{ env.AWS_DEFAULT_REGION }}
 
       - name: Upload wheel to S3
-        run: aws s3 cp dist/*.whl ${{ env.S3_INTEGRATION_BUCKET }}
+        run: aws s3 cp dist/${{ steps.staging_wheel_build.outputs.STAGING_WHEEL}} ${{ env.S3_INTEGRATION_BUCKET }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
