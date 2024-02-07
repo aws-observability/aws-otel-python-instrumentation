@@ -3,12 +3,11 @@
 from unittest import TestCase
 from unittest.mock import MagicMock
 
-from opentelemetry.sdk.trace import ReadableSpan
-
 from amazon.opentelemetry.distro.attribute_propagating_span_processor import AttributePropagatingSpanProcessor
 from amazon.opentelemetry.distro.attribute_propagating_span_processor_builder import (
     AttributePropagatingSpanProcessorBuilder,
 )
+from opentelemetry.sdk.trace import ReadableSpan
 
 
 class TestAttributePropagatingSpanProcessorBuilder(TestCase):
