@@ -271,6 +271,10 @@ def _generate_remote_service(span: ReadableSpan) -> str:
         if is_key_present(span, _NET_SOCK_PEER_PORT):
             port: str = str(span.attributes.get(_NET_SOCK_PEER_PORT))
             remote_service += ":" + port
+    elif is_key_present(span, _HTTP_URL):
+        http_url: str = span.attributes.get(_HTTP_URL)
+        url: ParseResult = urlparse(http_url)
+        remote_service = str(url.netloc)
     else:
         _log_unknown_attribute(AWS_REMOTE_SERVICE, span)
 
