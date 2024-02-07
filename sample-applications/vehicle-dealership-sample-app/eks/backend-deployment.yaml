@@ -46,6 +46,7 @@ spec:
               value: "/vehicle-inventory-app"
             - name: DJANGO_SETTINGS_MODULE
               value: "VehicleInventoryApp.settings"
+#              TODO: Remove OTEL_TRACES_SAMPLER when XRay trace sampler is ready
             - name: OTEL_TRACES_SAMPLER
               value: "always_on"
           imagePullPolicy: Always
