@@ -41,7 +41,7 @@ class AttributePropagatingSpanProcessorBuilder:
         return self
 
     def set_attributes_keys_to_propagate(
-        self, attributes_keys_to_propagate: List[str]
+        self, attributes_keys_to_propagate: list[str]
     ) -> "AttributePropagatingSpanProcessorBuilder":
         if attributes_keys_to_propagate is None:
             raise ValueError("attributes_keys_to_propagate must not be None")
