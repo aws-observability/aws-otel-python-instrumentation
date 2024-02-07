@@ -52,5 +52,5 @@ class TestAwsTracerConfigurer(TestCase):
                 if span.get_span_context().trace_flags.sampled:
                     num_sampled += 1
                 span.end()
-        # Configured for 1%, confirm there are at most 5% to account for randomness and reduce test flakiness.
+            # Configured for 1%, confirm there are at most 5% to account for randomness and reduce test flakiness.
             self.assertGreater(0.05, num_sampled / num_spans)
