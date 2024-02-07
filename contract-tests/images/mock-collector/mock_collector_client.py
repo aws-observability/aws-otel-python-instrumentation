@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta
 from logging import Logger, getLogger
 from time import sleep
-from typing import Callable, TypeVar
+from typing import Callable, TypeVar, List
 
 from google.protobuf.internal.containers import RepeatedScalarFieldContainer
 from grpc import Channel, insecure_channel
@@ -62,7 +62,7 @@ class MockCollectorClient:
         """Clear all the signals in the backend collector"""
         self.client.clear(ClearRequest())
 
-    def get_traces(self) -> list[ResourceScopeSpan]:
+    def get_traces(self) -> List[ResourceScopeSpan]:
         """Get all traces that are currently stored in the collector
 
         Returns:
@@ -70,16 +70,16 @@ class MockCollectorClient:
             scope and resources.
         """
 
-        def get_export() -> list[ExportTraceServiceRequest]:
+        def get_export() -> List[ExportTraceServiceRequest]:
             response: GetTracesResponse = self.client.get_traces(GetTracesRequest())
             serialized_traces: RepeatedScalarFieldContainer[bytes] = response.traces
             return list(map(ExportTraceServiceRequest.FromString, serialized_traces))
 
-        def wait_condition(exported: list[ExportTraceServiceRequest], current: list[ExportTraceServiceRequest]) -> bool:
+        def wait_condition(exported: List[ExportTraceServiceRequest], current: List[ExportTraceServiceRequest]) -> bool:
             return 0 < len(exported) == len(current)
 
-        exported_traces: list[ExportTraceServiceRequest] = _wait_for_content(get_export, wait_condition)
-        spans: list[ResourceScopeSpan] = []
+        exported_traces: List[ExportTraceServiceRequest] = _wait_for_content(get_export, wait_condition)
+        spans: List[ResourceScopeSpan] = []
         for exported_trace in exported_traces:
             for resource_span in exported_trace.resource_spans:
                 for scope_span in resource_span.scope_spans:
@@ -87,7 +87,7 @@ class MockCollectorClient:
                         spans.append(ResourceScopeSpan(resource_span, scope_span, span))
         return spans
 
-    def get_metrics(self, present_metrics: set[str]) -> list[ResourceScopeMetric]:
+    def get_metrics(self, present_metrics: set[str]) -> List[ResourceScopeMetric]:
         """Get all metrics that are currently stored in the mock collector.
 
         Returns:
@@ -95,13 +95,13 @@ class MockCollectorClient:
              resources.
         """
 
-        def get_export() -> list[ExportMetricsServiceRequest]:
+        def get_export() -> List[ExportMetricsServiceRequest]:
             response: GetMetricsResponse = self.client.get_metrics(GetMetricsRequest())
             serialized_metrics: RepeatedScalarFieldContainer[bytes] = response.metrics
             return list(map(ExportMetricsServiceRequest.FromString, serialized_metrics))
 
         def wait_condition(
-            exported: list[ExportMetricsServiceRequest], current: list[ExportMetricsServiceRequest]
+            exported: List[ExportMetricsServiceRequest], current: List[ExportMetricsServiceRequest]
         ) -> bool:
             received_metrics: set[str] = set()
             for exported_metric in current:
@@ -111,8 +111,8 @@ class MockCollectorClient:
                             received_metrics.add(metric.name)
             return 0 < len(exported) == len(current) and present_metrics.issubset(received_metrics)
 
-        exported_metrics: list[ExportMetricsServiceRequest] = _wait_for_content(get_export, wait_condition)
-        metrics: list[ResourceScopeMetric] = []
+        exported_metrics: List[ExportMetricsServiceRequest] = _wait_for_content(get_export, wait_condition)
+        metrics: List[ResourceScopeMetric] = []
         for exported_metric in exported_metrics:
             for resource_metric in exported_metric.resource_metrics:
                 for scope_metric in resource_metric.scope_metrics:
@@ -121,14 +121,14 @@ class MockCollectorClient:
         return metrics
 
 
-def _wait_for_content(get_export: Callable[[], list[T]], wait_condition: Callable[[list[T], list[T]], bool]) -> list[T]:
+def _wait_for_content(get_export: Callable[[], List[T]], wait_condition: Callable[[list[T], List[T]], bool]) -> List[T]:
     # Verify that there is no more data to be received
     deadline: datetime = datetime.now() + _TIMEOUT_DELAY
-    exported: list[T] = []
+    exported: List[T] = []
 
     while deadline > datetime.now():
         try:
-            current_exported: list[T] = get_export()
+            current_exported: List[T] = get_export()
             if wait_condition(exported, current_exported):
                 return current_exported
             exported = current_exported

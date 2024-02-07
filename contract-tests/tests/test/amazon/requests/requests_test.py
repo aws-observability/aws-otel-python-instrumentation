@@ -1,5 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+from typing import List
+
 from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
 from requests import Response, request
 from typing_extensions import override
@@ -27,7 +29,7 @@ class RequestsTest(ContractTestBase):
         return "aws-appsignals-tests-requests-app"
 
     @override
-    def get_application_network_aliases(self) -> list[str]:
+    def get_application_network_aliases(self) -> List[str]:
         """
         This will be the target hostname of the clients making http requests in the application image, so that they
         don't use localhost.
@@ -70,11 +72,11 @@ class RequestsTest(ContractTestBase):
 
         self.assertEqual(status_code, response.status_code)
 
-        resource_scope_spans: list[ResourceScopeSpan] = self._mock_collector_client.get_traces()
+        resource_scope_spans: List[ResourceScopeSpan] = self._mock_collector_client.get_traces()
         self._assert_aws_span_attributes(resource_scope_spans, method, path)
         self._assert_semantic_conventions_span_attributes(resource_scope_spans, method, path, status_code)
 
-        metrics: list[ResourceScopeMetric] = self._mock_collector_client.get_metrics(
+        metrics: List[ResourceScopeMetric] = self._mock_collector_client.get_metrics(
             {LATENCY_METRIC, ERROR_METRIC, FAULT_METRIC}
         )
         self._assert_metric_attributes(metrics, method, path, LATENCY_METRIC, 5000)
@@ -82,9 +84,9 @@ class RequestsTest(ContractTestBase):
         self._assert_metric_attributes(metrics, method, path, FAULT_METRIC, expected_fault)
 
     def _assert_aws_span_attributes(
-        self, resource_scope_spans: list[ResourceScopeSpan], method: str, path: str
+        self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str
     ) -> None:
-        target_spans: list[Span] = []
+        target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
             if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
@@ -93,7 +95,7 @@ class RequestsTest(ContractTestBase):
         self.assertEqual(len(target_spans), 1)
         self._assert_aws_attributes(target_spans[0].attributes, method, path)
 
-    def _assert_aws_attributes(self, attributes_list: list[KeyValue], method: str, endpoint: str) -> None:
+    def _assert_aws_attributes(self, attributes_list: List[KeyValue], method: str, endpoint: str) -> None:
         attributes_dict: dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # InternalOperation as OTEL does not instrument the basic server we are using, so the client span is a local
@@ -106,7 +108,7 @@ class RequestsTest(ContractTestBase):
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
 
-    def _get_attributes_dict(self, attributes_list: list[KeyValue]) -> dict[str, AnyValue]:
+    def _get_attributes_dict(self, attributes_list: List[KeyValue]) -> dict[str, AnyValue]:
         attributes_dict: dict[str, AnyValue] = {}
         for attribute in attributes_list:
             key: str = attribute.key
@@ -129,9 +131,9 @@ class RequestsTest(ContractTestBase):
         self.assertEqual(expected_value, actual_value.int_value)
 
     def _assert_semantic_conventions_span_attributes(
-        self, resource_scope_spans: list[ResourceScopeSpan], method: str, path: str, status_code: int
+        self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str, status_code: int
     ) -> None:
-        target_spans: list[Span] = []
+        target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
             if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
@@ -142,7 +144,7 @@ class RequestsTest(ContractTestBase):
         self._assert_semantic_conventions_attributes(target_spans[0].attributes, method, path, status_code)
 
     def _assert_semantic_conventions_attributes(
-        self, attributes_list: list[KeyValue], method: str, endpoint: str, status_code: int
+        self, attributes_list: List[KeyValue], method: str, endpoint: str, status_code: int
     ) -> None:
         attributes_dict: dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         # TODO: requests instrumentation is not populating net peer attributes
@@ -156,20 +158,20 @@ class RequestsTest(ContractTestBase):
 
     def _assert_metric_attributes(
         self,
-        resource_scope_metrics: list[ResourceScopeMetric],
+        resource_scope_metrics: List[ResourceScopeMetric],
         method: str,
         path: str,
         metric_name: str,
         expected_sum: float,
     ) -> None:
-        target_metrics: list[Metric] = []
+        target_metrics: List[Metric] = []
         for resource_scope_metric in resource_scope_metrics:
             if resource_scope_metric.metric.name == metric_name:
                 target_metrics.append(resource_scope_metric.metric)
 
         self.assertEqual(len(target_metrics), 1)
         target_metric: Metric = target_metrics[0]
-        dp_list: list[ExponentialHistogramDataPoint] = target_metric.exponential_histogram.data_points
+        dp_list: List[ExponentialHistogramDataPoint] = target_metric.exponential_histogram.data_points
 
         self.assertEqual(len(dp_list), 2)
         dp: ExponentialHistogramDataPoint = dp_list[0]

@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+from typing import List
 from unittest import TestCase
 
 from docker import DockerClient
@@ -86,7 +87,7 @@ class ContractTestBase(TestCase):
     def get_application_extra_environment_variables(self) -> dict[str, str]:
         return {}
 
-    def get_application_network_aliases(self) -> list[str]:
+    def get_application_network_aliases(self) -> List[str]:
         return []
 
     def get_application_image_name(self) -> str:

@@ -1,5 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+from typing import List
+
 from grpc import ServicerContext
 from mock_collector_metrics_service import MockCollectorMetricsService
 from mock_collector_service_pb2 import (
@@ -37,14 +39,14 @@ class MockCollectorService(MockCollectorServiceServicer):
 
     @override
     def get_traces(self, request: GetTracesRequest, context: ServicerContext) -> GetTracesResponse:
-        trace_requests: list[ExportTraceServiceRequest] = self.trace_collector.get_requests()
-        traces: list[bytes] = list(map(ExportTraceServiceRequest.SerializeToString, trace_requests))
+        trace_requests: List[ExportTraceServiceRequest] = self.trace_collector.get_requests()
+        traces: List[bytes] = list(map(ExportTraceServiceRequest.SerializeToString, trace_requests))
         response: GetTracesResponse = GetTracesResponse(traces=traces)
         return response
 
     @override
     def get_metrics(self, request: GetMetricsRequest, context: ServicerContext) -> GetMetricsResponse:
-        metric_requests: list[ExportMetricsServiceRequest] = self.metrics_collector.get_requests()
-        metrics: list[bytes] = list(map(ExportTraceServiceRequest.SerializeToString, metric_requests))
+        metric_requests: List[ExportMetricsServiceRequest] = self.metrics_collector.get_requests()
+        metrics: List[bytes] = list(map(ExportTraceServiceRequest.SerializeToString, metric_requests))
         response: GetMetricsResponse = GetMetricsResponse(metrics=metrics)
         return response
