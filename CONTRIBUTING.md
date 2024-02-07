@@ -19,7 +19,6 @@ cd ./aws-opentelemetry-distro
 python3 -m build --outdir ../dist
 cd ../dist
 pkg_version=$(grep '__version__' ../aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py | awk -F '"' '{print $2}')
-pip wheel --no-deps aws_opentelemetry_distro-${pkg_version}.tar.gz
 pip install aws_opentelemetry_distro-${pkg_version}-py3-none-any.whl --force-reinstall
 cd ..
 ```
