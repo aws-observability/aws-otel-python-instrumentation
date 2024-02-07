@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import copy
 from unittest import TestCase
-from unittest.mock import MagicMock, Mock, call
+from unittest.mock import MagicMock, call
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND, AWS_SPAN_KIND
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
@@ -15,11 +15,10 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsM
 from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, SERVICE_METRIC
 from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import Event, ReadableSpan
+from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter
-from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 from opentelemetry.semconv.trace import MessagingOperationValues, SpanAttributes
-from opentelemetry.trace import Link, SpanContext, SpanKind, Status
+from opentelemetry.trace import SpanContext, SpanKind
 from opentelemetry.util.types import Attributes
 
 _CONTAINS_ATTRIBUTES: bool = True
