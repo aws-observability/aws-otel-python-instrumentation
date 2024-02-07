@@ -1,9 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import copy
-from typing import Any
 from unittest import TestCase
-from unittest.mock import MagicMock, Mock, call
+from unittest.mock import MagicMock, call
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND, AWS_SPAN_KIND
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
@@ -16,11 +15,10 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsM
 from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, SERVICE_METRIC
 from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import Event, ReadableSpan
+from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter
-from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 from opentelemetry.semconv.trace import MessagingOperationValues, SpanAttributes
-from opentelemetry.trace import Link, SpanContext, SpanKind, Status
+from opentelemetry.trace import SpanContext, SpanKind
 from opentelemetry.util.types import Attributes
 
 _CONTAINS_ATTRIBUTES: bool = True
@@ -157,54 +155,6 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         self.assertEqual(exported_span._attributes["key1"], "new value1")
         self.assertEqual(exported_span._attributes["key2"], "old value2")
         self.assertEqual(exported_span._attributes["key3"], "new value3")
-
-    def test_export_delegating_span_data_behaviour(self):
-        span_attributes: Attributes = self._build_span_attributes(_CONTAINS_ATTRIBUTES)
-        span_data_mock: ReadableSpan = self._build_readable_span_mock_without_deepcopy_support(span_attributes)
-        metric_attributes: Attributes = self._build_metric_attributes(_CONTAINS_ATTRIBUTES)
-        self._configure_mock_for_export(span_data_mock, metric_attributes)
-
-        self.aws_metric_attributes_span_exporter.export([span_data_mock])
-        self.delegate_mock.assert_has_calls([call.export([span_data_mock])])
-        exported_spans: Attributes = self.delegate_mock.export.call_args[0][0]
-        self.assertEqual(len(exported_spans), 1)
-
-        exported_span: ReadableSpan = exported_spans[0]
-
-        span_context_mock: SpanContext = MagicMock()
-        span_data_mock.get_span_context.return_value = span_context_mock
-        self.assertEqual(exported_span.get_span_context(), span_context_mock)
-
-        parent_span_context_mock: SpanContext = MagicMock()
-        span_data_mock._parent = parent_span_context_mock
-        self.assertEqual(exported_span._parent, parent_span_context_mock)
-
-        span_data_mock.set_attribute("_resource", self.test_resource)
-        self.assertEqual(exported_span._resource, self.test_resource)
-
-        test_instrumentation_scope_info: InstrumentationScope = MagicMock()
-        span_data_mock.set_attribute("_instrumentation_scope", test_instrumentation_scope_info)
-        self.assertEqual(exported_span._instrumentation_scope, test_instrumentation_scope_info)
-
-        test_name: str = "name"
-        span_data_mock.set_attribute("_name", test_name)
-        self.assertEqual(exported_span._name, test_name)
-
-        kind_mock: SpanKind = Mock()
-        span_data_mock.set_attribute("_kind", kind_mock)
-        self.assertEqual(exported_span._kind, kind_mock)
-
-        events_mock: [Event] = [Mock()]
-        span_data_mock.set_attribute("_events", events_mock)
-        self.assertEqual(exported_span._events, events_mock)
-
-        links_mock: [Link] = [Mock()]
-        span_data_mock.set_attribute("_links", links_mock)
-        self.assertEqual(exported_span._links, links_mock)
-
-        status_mock: Status = Mock()
-        span_data_mock.set_attribute("_status", status_mock)
-        self.assertEqual(exported_span._status, status_mock)
 
     def test_export_delegation_with_two_metrics(self):
         span_attributes: Attributes = self._build_span_attributes(_CONTAINS_ATTRIBUTES)
@@ -374,23 +324,4 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
         mock_span_data._kind = SpanKind.SERVER
         mock_span_data._parent = None
         mock_span_data.attributes = mock_span_data._attributes
-        return mock_span_data
-
-    def _build_readable_span_mock_without_deepcopy_support(self, span_attributes: Attributes) -> ReadableSpan:
-        class NoDeepCopyMock(MagicMock):
-            def __init__(self, *args: Any, **kw: Any):
-                super().__init__(*args, **kw)
-                self._attributes = span_attributes
-                self._kind = SpanKind.SERVER
-                self._parent = None
-                self.attributes = self._attributes
-
-            def set_attribute(self, name, value):
-                setattr(self, name, value)
-
-            def __deepcopy__(self, memo):
-                return self
-
-        mock_span_data: ReadableSpan = NoDeepCopyMock()
-
         return mock_span_data

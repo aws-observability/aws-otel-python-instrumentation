@@ -8,7 +8,7 @@ from amazon.opentelemetry.distro._aws_span_processing_util import get_ingress_op
 from amazon.opentelemetry.distro.attribute_propagating_span_processor import AttributePropagatingSpanProcessor
 from opentelemetry.sdk.trace import ReadableSpan, Span, Tracer, TracerProvider
 from opentelemetry.semconv.trace import MessagingOperationValues, SpanAttributes
-from opentelemetry.trace import SpanContext, SpanKind, TraceFlags, TraceState, set_span_in_context, set_tracer_provider
+from opentelemetry.trace import SpanContext, SpanKind, TraceFlags, TraceState, set_span_in_context
 
 
 def _get_ingress_operation(span: Span):
@@ -36,7 +36,6 @@ class TestAttributePropagatingSpanProcessor(TestCase):
             sampler=None,
             resource=None,
         )
-        set_tracer_provider(self.provider)
         self.provider.add_span_processor(self.processor)
         self.tracer: Tracer = self.provider.get_tracer("awsxray")
 
