@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+from logging import Logger, getLogger, INFO
 from typing import List
 from unittest import TestCase
 
@@ -9,6 +10,9 @@ from mock_collector_client import MockCollectorClient
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.waiting_utils import wait_for_logs
 from typing_extensions import override
+
+_logger: Logger = getLogger(__name__)
+_logger.setLevel(INFO)
 
 _MOCK_COLLECTOR_ALIAS: str = "collector"
 _MOCK_COLLECTOR_NAME: str = "aws-appsignals-mock-collector-python"
@@ -44,6 +48,10 @@ class ContractTestBase(TestCase):
     @classmethod
     @override
     def tearDownClass(cls) -> None:
+        _logger.info("MockCollector stdout")
+        _logger.info(_MOCK_COLLECTOR.get_logs()[0].decode())
+        _logger.info("MockCollector stderr")
+        _logger.info(_MOCK_COLLECTOR.get_logs()[1].decode())
         _MOCK_COLLECTOR.stop()
         _NETWORK.remove()
 
@@ -76,6 +84,10 @@ class ContractTestBase(TestCase):
 
     @override
     def tearDown(self) -> None:
+        _logger.info("Application stdout")
+        _logger.info(self._application.get_logs()[0].decode())
+        _logger.info("Application stderr")
+        _logger.info(self._application.get_logs()[1].decode())
         self._application.stop()
         self._mock_collector_client.clear_signals()
 
