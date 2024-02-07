@@ -3,6 +3,7 @@
 from unittest import TestCase
 
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
+from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsMetricAttributesSpanExporter
 from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder import (
     AwsMetricAttributesSpanExporterBuilder,
 )
@@ -13,3 +14,5 @@ class TestAwsMetricAttributesSpanExporterBuilder(TestCase):
         generator: _AwsMetricAttributeGenerator = _AwsMetricAttributeGenerator()
         builder: AwsMetricAttributesSpanExporterBuilder = AwsMetricAttributesSpanExporterBuilder(None, None)
         self.assertIs(builder.set_generator(generator), builder)
+        exporter: AwsMetricAttributesSpanExporter = builder.build()
+        self.assertIs(exporter._generator, generator)
