@@ -42,7 +42,7 @@ class TestAwsTracerConfigurer(TestCase):
             num_spans: int = 10000
             num_sampled: int = 0
             tracer: Tracer = self.tracer_provider.get_tracer("test")
-            for i in range(num_spans):
+            for _ in range(num_spans):
                 span: Span = tracer.start_span("test")
                 if span.get_span_context().trace_flags.sampled:
                     num_sampled += 1
