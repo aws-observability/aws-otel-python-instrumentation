@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from logging import Logger, getLogger, INFO
+from logging import INFO, Logger, getLogger
 from typing import List
 from unittest import TestCase
 
