@@ -19,8 +19,8 @@ jobs:
     env:
       py38: 3.8
       py39: 3.9
-      py310: "3.10"
-      py311: "3.11"
+      py310: 3.10
+      py311: 3.11
       RUN_MATRIX_COMBINATION: ${{ matrix.python-version }}-${{ matrix.package }}-${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -56,7 +56,7 @@ jobs:
       - name: Install Dependencies and Build Wheel
         id: wheel_build
         run: |
-          pip install --upgrade pip setuptools wheel packaging build
+          pip install --upgrade pip setuptools wheel packaging build twine
           rm -rf ./dist/*
           cd ./aws-opentelemetry-distro
           python -m build --outdir ../dist
@@ -83,7 +83,7 @@ jobs:
         env:
           AWS_REGION: ${{ env.AWS_DEFAULT_REGION }}
 
-      - name: Build and push staging image
+      - name: Build and push release image
         uses: docker/build-push-action@v5
         with:
           push: true
@@ -103,3 +103,29 @@ jobs:
              --draft \
              "v${{ github.event.inputs.version }}" \
              aws_opentelemetry_distro.whl
+
+      - name: Get PyPI secrets by name and ARN
+        uses: aws-actions/aws-secretsmanager-get-secrets@v1
+        id: pypi_secrets
+        with:
+          secret-ids: |
+            prod/PyPI/apiToken,arn:aws:secretsmanager:us-east-1:637423224110:secret:prod/PyPI/apiToken-W2a9ny
+            prod/PyPI/credentials,arn:aws:secretsmanager:us-east-1:637423224110:secret:prod/PyPI/credentials-JAzHsX
+            test/PyPI/apiToken,arn:aws:secretsmanager:us-east-1:637423224110:secret:test/PyPI/apiToken-z5iqc6
+            test/PyPI/credentials,arn:aws:secretsmanager:us-east-1:637423224110:secret:test/PyPI/credentials-bCQfg9
+
+      # The step below publishes to testpypi in order to catch any issues
+      # with the package configuration that would cause a failure to upload to pypi.
+      - name: Publish to TestPyPI
+        env:
+          TWINE_USERNAME: ${{ steps.pypi_secrets.outputs.test/PyPI/apiToken }}
+          TWINE_PASSWORD: ${{ steps.pypi_secrets.outputs.test/PyPI/credentials }}
+        run: |
+          twine upload --repository testpypi --skip-existing --verbose dist/aws_opentelemetry_distro-${{ steps.wheel_build.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl
+
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: ${{ steps.pypi_secrets.outputs.prod/PyPI/apiToken }}
+          TWINE_PASSWORD: ${{ steps.pypi_secrets.outputs.prod/PyPI/credentials }}
+        run: |
+          twine upload --skip-existing --verbose dist/aws_opentelemetry_distro-${{ steps.wheel_build.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl

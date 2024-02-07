@@ -11,8 +11,8 @@ jobs:
     env:
       py38: 3.8
       py39: 3.9
-      py310: "3.10"
-      py311: "3.11"
+      py310: 3.10
+      py311: 3.11
       RUN_MATRIX_COMBINATION: ${{ matrix.python-version }}-${{ matrix.package }}-${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
