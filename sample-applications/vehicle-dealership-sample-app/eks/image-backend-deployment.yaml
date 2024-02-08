@@ -50,6 +50,7 @@ spec:
               value: ${POSTGRES_PASSWORD}
             - name: POSTGRES_USER
               value: djangouser
+#             Setting PYTHONPATH is currently required due to the issue in OTel: open-telemetry/opentelemetry-operator#2302
             - name: PYTHONPATH
               value: "/image-service-app"
             - name: DJANGO_SETTINGS_MODULE

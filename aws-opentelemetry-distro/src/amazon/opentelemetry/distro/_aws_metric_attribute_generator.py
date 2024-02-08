@@ -23,6 +23,7 @@ from amazon.opentelemetry.distro._aws_span_processing_util import (
     get_ingress_operation,
     is_key_present,
     is_local_root,
+    is_valid_db_operation,
     should_generate_dependency_metric_attributes,
     should_generate_service_metric_attributes,
 )
@@ -38,6 +39,7 @@ from opentelemetry.semconv.trace import SpanAttributes
 # Pertinent OTEL attribute keys
 _SERVICE_NAME: str = ResourceAttributes.SERVICE_NAME
 _DB_OPERATION: str = SpanAttributes.DB_OPERATION
+_DB_STATEMENT: str = SpanAttributes.DB_STATEMENT
 _DB_SYSTEM: str = SpanAttributes.DB_SYSTEM
 _FAAS_INVOKED_NAME: str = SpanAttributes.FAAS_INVOKED_NAME
 _FAAS_TRIGGER: str = SpanAttributes.FAAS_TRIGGER
@@ -208,9 +210,12 @@ def _set_remote_service_and_operation(span: ReadableSpan, attributes: BoundedAtt
     elif is_key_present(span, _RPC_SERVICE) or is_key_present(span, _RPC_METHOD):
         remote_service = _normalize_service_name(span, _get_remote_service(span, _RPC_SERVICE))
         remote_operation = _get_remote_operation(span, _RPC_METHOD)
-    elif is_key_present(span, _DB_SYSTEM) or is_key_present(span, _DB_OPERATION):
+    elif is_key_present(span, _DB_SYSTEM) or is_key_present(span, _DB_OPERATION) or is_key_present(span, _DB_STATEMENT):
         remote_service = _get_remote_service(span, _DB_SYSTEM)
-        remote_operation = _get_remote_operation(span, _DB_OPERATION)
+        if is_key_present(span, _DB_OPERATION):
+            remote_operation = _get_remote_operation(span, _DB_OPERATION)
+        else:
+            remote_operation = _get_db_statement_remote_operation(span, _DB_STATEMENT)
     elif is_key_present(span, _FAAS_INVOKED_NAME) or is_key_present(span, _FAAS_TRIGGER):
         remote_service = _get_remote_service(span, _FAAS_INVOKED_NAME)
         remote_operation = _get_remote_operation(span, _FAAS_TRIGGER)
@@ -247,6 +252,16 @@ def _get_remote_operation(span: ReadableSpan, remote_operation_key: str) -> str:
     remote_operation: str = span.attributes.get(remote_operation_key)
     if remote_operation is None:
         remote_operation = UNKNOWN_REMOTE_OPERATION
+
+    return remote_operation
+
+def _get_db_statement_remote_operation(span: ReadableSpan, statement_key: str) -> str:
+    remote_operation: str = span.attributes.get(statement_key)
+    if remote_operation is None:
+        remote_operation = UNKNOWN_REMOTE_OPERATION
+
+    operation = remote_operation.split()[0]
+    remote_operation = operation if is_valid_db_operation(operation) else UNKNOWN_REMOTE_OPERATION
 
     return remote_operation
 
