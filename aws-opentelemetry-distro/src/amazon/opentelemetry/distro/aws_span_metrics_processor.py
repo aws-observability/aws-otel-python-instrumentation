@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import Optional
+from typing import Dict, Optional
 
 from typing_extensions import override
 
@@ -66,7 +66,7 @@ class AwsSpanMetricsProcessor(SpanProcessor):
 
     @override
     def on_end(self, span: ReadableSpan) -> None:
-        attribute_dict: dict[str, BoundedAttributes] = self._generator.generate_metric_attributes_dict_from_span(
+        attribute_dict: Dict[str, BoundedAttributes] = self._generator.generate_metric_attributes_dict_from_span(
             span, self._resource
         )
         for attributes in attribute_dict.values():
