@@ -94,12 +94,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
         run: |
-          cp "dist/aws_opentelemetry_distro-${{ steps.wheel_build.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl" aws_opentelemetry_distro.whl
           gh release create --target "$GITHUB_REF_NAME" \
              --title "Release v${{ github.event.inputs.version }}" \
              --draft \
              "v${{ github.event.inputs.version }}" \
-             aws_opentelemetry_distro.whl
+             dist/aws_opentelemetry_distro-${{ steps.wheel_build.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl
 
       - name: Get PyPI secrets by name and ARN
         uses: aws-actions/aws-secretsmanager-get-secrets@v1

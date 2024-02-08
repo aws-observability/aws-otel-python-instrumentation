@@ -70,13 +70,13 @@ jobs:
           pkg_version=$(grep '__version__' ../aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py | awk -F '"' '{print $2}')
           echo "ADOT_PYTHON_VERSION=$pkg_version" >> $GITHUB_OUTPUT
           shortsha="$(git rev-parse --short HEAD)"
-          echo "STAGING_WHEEL=aws_opentelemetry_distro-$pkg_version-$shortsha.whl" >> $GITHUB_OUTPUT
-          mv aws_opentelemetry_distro-$pkg_version-py3-none-any.whl aws_opentelemetry_distro-$pkg_version-$shortsha.whl
+          echo "STAGING_WHEEL=aws_opentelemetry_distro-$pkg_version-$shortsha-py3-none-any.whl" >> $GITHUB_OUTPUT
+          cp aws_opentelemetry_distro-$pkg_version-py3-none-any.whl aws_opentelemetry_distro-$pkg_version-$shortsha-py3-none-any.whl
 
       - name: Upload to GitHub Actions
         uses: actions/upload-artifact@v3
         with:
-          name: aws_opentelemetry_distro.whl
+          name: aws_opentelemetry_distro-${{ steps.staging_wheel_build.outputs.ADOT_PYTHON_VERSION}}-py3-none-any.whl
           path: dist/${{ steps.staging_wheel_build.outputs.STAGING_WHEEL}}
 
       - name: Configure AWS Credentials
