@@ -14,6 +14,10 @@ rm -rf dist/contract_tests*
 # Create mock-collector image
 cd contract-tests/images/mock-collector
 docker build . -t aws-appsignals-mock-collector-python
+if [ $? = 1 ]; then
+  echo "Docker build for mock collector failed"
+  exit 1
+fi
 
 # Find and store aws_opentelemetry_distro whl file
 cd ../../../dist
@@ -29,6 +33,10 @@ for dir in contract-tests/images/applications/*
 do
   application="${dir##*/}"
   docker build . -t aws-appsignals-tests-${application}-app -f ${dir}/Dockerfile --build-arg="DISTRO=${DISTRO}"
+  if [ $? = 1 ]; then
+    echo "Docker build for ${application} application failed"
+    exit 1
+  fi
 done
 
 # Build and install mock-collector
