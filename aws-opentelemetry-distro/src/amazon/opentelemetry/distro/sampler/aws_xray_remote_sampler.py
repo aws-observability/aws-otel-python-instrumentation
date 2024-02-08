@@ -1,6 +1,5 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-import datetime
 import random
 from logging import getLogger
 from threading import Lock, Timer
@@ -9,11 +8,12 @@ from typing import Optional, Sequence
 from typing_extensions import override
 
 from amazon.opentelemetry.distro.sampler._aws_xray_sampling_client import _AwsXRaySamplingClient
+from amazon.opentelemetry.distro.sampler._clock import _Clock
 from amazon.opentelemetry.distro.sampler._fallback_sampler import _FallbackSampler
-from amazon.opentelemetry.distro.sampler._rule_cache import _RuleCache
+from amazon.opentelemetry.distro.sampler._rule_cache import DEFAULT_TARGET_POLLING_INTERVAL_SECONDS, _RuleCache
 from opentelemetry.context import Context
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace.sampling import Sampler, SamplingResult
+from opentelemetry.sdk.trace.sampling import ParentBased, Sampler, SamplingResult
 from opentelemetry.trace import Link, SpanKind
 from opentelemetry.trace.span import TraceState
 from opentelemetry.util.types import Attributes
@@ -21,7 +21,6 @@ from opentelemetry.util.types import Attributes
 _logger = getLogger(__name__)
 
 DEFAULT_RULES_POLLING_INTERVAL_SECONDS = 300
-DEFAULT_TARGET_POLLING_INTERVAL_SECONDS = 10
 DEFAULT_SAMPLING_PROXY_ENDPOINT = "http://127.0.0.1:2000"
 
 
@@ -36,10 +35,6 @@ class AwsXRayRemoteSampler(Sampler):
         log_level: custom log level configuration for remote sampler (Optional)
     """
 
-    __resource: Resource
-    __polling_interval: int
-    __xray_client: _AwsXRaySamplingClient
-
     def __init__(
         self,
         resource: Resource,
@@ -51,15 +46,16 @@ class AwsXRayRemoteSampler(Sampler):
         if log_level is not None:
             _logger.setLevel(log_level)
 
-        self.__date_time = datetime
+        self.__client_id = self.__generate_client_id()
+        self._clock = _Clock()
         self.__xray_client = _AwsXRaySamplingClient(endpoint, log_level=log_level)
-        self.__rule_polling_jitter = random.uniform(0.0, 5.0)
+        self.__fallback_sampler = ParentBased(_FallbackSampler(self._clock))
+
         self.__polling_interval = polling_interval
-        self.__fallback_sampler = _FallbackSampler()
+        self.__target_polling_interval = DEFAULT_TARGET_POLLING_INTERVAL_SECONDS
+        self.__rule_polling_jitter = random.uniform(0.0, 5.0)
+        self.__target_polling_jitter = random.uniform(0.0, 0.1)
 
-        # TODO add client id
-
-        # pylint: disable=unused-private-member
         if resource is not None:
             self.__resource = resource
         else:
@@ -68,14 +64,19 @@ class AwsXRayRemoteSampler(Sampler):
 
         self.__rule_cache_lock = Lock()
         self.__rule_cache = _RuleCache(
-            self.__resource, self.__fallback_sampler, self.__date_time, self.__rule_cache_lock
+            self.__resource, self.__fallback_sampler, self.__client_id, self._clock, self.__rule_cache_lock
         )
 
         # Schedule the next rule poll now
         # Python Timers only run once, so they need to be recreated for every poll
-        self._timer = Timer(0, self.__start_sampling_rule_poller)
-        self._timer.daemon = True  # Ensures that when the main thread exits, the Timer threads are killed
-        self._timer.start()
+        self._rules_timer = Timer(0, self.__start_sampling_rule_poller)
+        self._rules_timer.daemon = True  # Ensures that when the main thread exits, the Timer threads are killed
+        self._rules_timer.start()
+
+        # set up the target poller to go off once after the default interval. Subsequent polls may use new intervals.
+        self._targets_timer = Timer(DEFAULT_TARGET_POLLING_INTERVAL_SECONDS, self.__start_sampling_target_poller)
+        self._targets_timer.daemon = True  # Ensures that when the main thread exits, the Timer threads are killed
+        self._targets_timer.start()
 
     # pylint: disable=no-self-use
     @override
@@ -89,7 +90,6 @@ class AwsXRayRemoteSampler(Sampler):
         links: Sequence[Link] = None,
         trace_state: TraceState = None,
     ) -> SamplingResult:
-
         if self.__rule_cache.expired():
             _logger.debug("Rule cache is expired so using fallback sampling strategy")
             return self.__fallback_sampler.should_sample(
@@ -113,6 +113,33 @@ class AwsXRayRemoteSampler(Sampler):
     def __start_sampling_rule_poller(self) -> None:
         self.__get_and_update_sampling_rules()
         # Schedule the next sampling rule poll
-        self._timer = Timer(self.__polling_interval + self.__rule_polling_jitter, self.__start_sampling_rule_poller)
-        self._timer.daemon = True
-        self._timer.start()
+        self._rules_timer = Timer(
+            self.__polling_interval + self.__rule_polling_jitter, self.__start_sampling_rule_poller
+        )
+        self._rules_timer.daemon = True
+        self._rules_timer.start()
+
+    def __get_and_update_sampling_targets(self) -> None:
+        all_statistics = self.__rule_cache.get_all_statistics()
+        sampling_targets_response = self.__xray_client.get_sampling_targets_response(all_statistics)
+        refresh_rules, min_polling_interval = self.__rule_cache.update_sampling_targets(sampling_targets_response)
+        if refresh_rules:
+            self.__get_and_update_sampling_rules()
+        if min_polling_interval is not None:
+            self.__target_polling_interval = min_polling_interval
+
+    def __start_sampling_target_poller(self) -> None:
+        self.__get_and_update_sampling_targets()
+        # Schedule the next sampling rule poll
+        self._targets_timer = Timer(
+            self.__target_polling_interval + self.__target_polling_jitter, self.__start_sampling_target_poller
+        )
+        self._targets_timer.daemon = True
+        self._targets_timer.start()
+
+    def __generate_client_id(self) -> str:
+        hex_chars = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"]
+        client_id_array = []
+        for _ in range(0, 24):
+            client_id_array.append(random.choice(hex_chars))
+        return "".join(client_id_array)

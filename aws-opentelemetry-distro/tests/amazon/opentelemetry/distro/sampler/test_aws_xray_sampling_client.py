@@ -103,3 +103,32 @@ class TestAwsXRaySamplingClient(TestCase):
             self.assertEqual(sampling_rule.URLPath, sampling_record["SamplingRule"]["URLPath"])
             self.assertIsNotNone(sampling_rule.Version)
             self.assertEqual(sampling_rule.Version, sampling_record["SamplingRule"]["Version"])
+
+    @patch("requests.post")
+    def test_get_sampling_targets(self, mock_post=None):
+        with open(f"{DATA_DIR}/get-sampling-targets-response-sample.json", encoding="UTF-8") as file:
+            sample_response = json.load(file)
+            mock_post.return_value.configure_mock(**{"json.return_value": sample_response})
+            file.close()
+        client = _AwsXRaySamplingClient("http://127.0.0.1:2000")
+        sampling_targets_response = client.get_sampling_targets_response(statistics=[])
+        self.assertEqual(len(sampling_targets_response.SamplingTargetDocuments), 2)
+        self.assertEqual(len(sampling_targets_response.UnprocessedStatistics), 0)
+        self.assertEqual(sampling_targets_response.LastRuleModification, 1707551387.0)
+
+    @patch("requests.post")
+    def test_get_invalid_sampling_targets(self, mock_post=None):
+        mock_post.return_value.configure_mock(
+            **{
+                "json.return_value": {
+                    "LastRuleModification": None,
+                    "SamplingTargetDocuments": None,
+                    "UnprocessedStatistics": None,
+                }
+            }
+        )
+        client = _AwsXRaySamplingClient("http://127.0.0.1:2000")
+        sampling_targets_response = client.get_sampling_targets_response(statistics=[])
+        self.assertEqual(sampling_targets_response.SamplingTargetDocuments, [])
+        self.assertEqual(sampling_targets_response.UnprocessedStatistics, [])
+        self.assertEqual(sampling_targets_response.LastRuleModification, 0.0)

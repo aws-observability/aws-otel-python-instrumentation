@@ -1,13 +1,14 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-import datetime
 from logging import getLogger
 from threading import Lock
 from typing import Optional, Sequence
 
+from amazon.opentelemetry.distro.sampler._clock import _Clock
 from amazon.opentelemetry.distro.sampler._fallback_sampler import _FallbackSampler
 from amazon.opentelemetry.distro.sampler._sampling_rule import _SamplingRule
 from amazon.opentelemetry.distro.sampler._sampling_rule_applier import _SamplingRuleApplier
+from amazon.opentelemetry.distro.sampler._sampling_target import _SamplingTarget, _SamplingTargetResponse
 from opentelemetry.context import Context
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace.sampling import SamplingResult
@@ -18,16 +19,20 @@ from opentelemetry.util.types import Attributes
 _logger = getLogger(__name__)
 
 CACHE_TTL_SECONDS = 3600
+DEFAULT_TARGET_POLLING_INTERVAL_SECONDS = 10
 
 
 class _RuleCache:
-    def __init__(self, resource: Resource, fallback_sampler: _FallbackSampler, date_time: datetime, lock: Lock):
+    def __init__(
+        self, resource: Resource, fallback_sampler: _FallbackSampler, client_id: str, clock: _Clock, lock: Lock
+    ):
+        self.__client_id = client_id
         self.__rule_appliers: [_SamplingRuleApplier] = []
         self.__cache_lock = lock
         self.__resource = resource
         self._fallback_sampler = fallback_sampler
-        self._date_time = date_time
-        self._last_modified = self._date_time.datetime.now()
+        self._clock = clock
+        self._last_modified = self._clock.now()
 
     def should_sample(
         self,
@@ -39,6 +44,7 @@ class _RuleCache:
         links: Sequence[Link] = None,
         trace_state: TraceState = None,
     ) -> SamplingResult:
+        rule_applier: _SamplingRuleApplier
         for rule_applier in self.__rule_appliers:
             if rule_applier.matches(self.__resource, attributes):
                 return rule_applier.should_sample(
@@ -51,6 +57,7 @@ class _RuleCache:
                     trace_state=trace_state,
                 )
 
+        # Should not ever reach fallback sampler as default rule is able to match
         return self._fallback_sampler.should_sample(
             parent_context, trace_id, name, kind=kind, attributes=attributes, links=links, trace_state=trace_state
         )
@@ -65,14 +72,17 @@ class _RuleCache:
             if sampling_rule.Version != 1:
                 _logger.debug("sampling rule without Version 1 is not supported: RuleName: %s", sampling_rule.RuleName)
                 continue
-            temp_rule_appliers.append(_SamplingRuleApplier(sampling_rule))
+            temp_rule_appliers.append(_SamplingRuleApplier(sampling_rule, self.__client_id, self._clock))
 
         self.__cache_lock.acquire()
 
         # map list of rule appliers by each applier's sampling_rule name
-        rule_applier_map = {rule.sampling_rule.RuleName: rule for rule in self.__rule_appliers}
+        rule_applier_map: dict[str, _SamplingRuleApplier] = {
+            applier.sampling_rule.RuleName: applier for applier in self.__rule_appliers
+        }
 
         # If a sampling rule has not changed, keep its respective applier in the cache.
+        new_applier: _SamplingRuleApplier
         for index, new_applier in enumerate(temp_rule_appliers):
             rule_name_to_check = new_applier.sampling_rule.RuleName
             if rule_name_to_check in rule_applier_map:
@@ -80,13 +90,46 @@ class _RuleCache:
                 if new_applier.sampling_rule == old_applier.sampling_rule:
                     temp_rule_appliers[index] = old_applier
         self.__rule_appliers = temp_rule_appliers
-        self._last_modified = datetime.datetime.now()
+        self._last_modified = self._clock.now()
 
         self.__cache_lock.release()
+
+    def update_sampling_targets(self, sampling_targets_response: _SamplingTargetResponse) -> (bool, int):
+        targets = sampling_targets_response.SamplingTargetDocuments
+
+        self.__cache_lock.acquire()
+
+        rule_applier_map: dict[str, _SamplingRuleApplier] = {
+            applier.sampling_rule.RuleName: applier for applier in self.__rule_appliers
+        }
+        min_polling_interval = None
+
+        target: _SamplingTarget
+        for target in targets:
+            if target.RuleName in rule_applier_map:
+                rule_applier_map[target.RuleName].update_target(target)
+
+                if target.Interval is not None:
+                    if min_polling_interval is None or min_polling_interval > target.Interval:
+                        min_polling_interval = target.Interval
+
+        last_rule_modification = self._clock.from_timestamp(sampling_targets_response.LastRuleModification)
+        refresh_rules = last_rule_modification > self._last_modified
+
+        self.__cache_lock.release()
+
+        return (refresh_rules, min_polling_interval)
+
+    def get_all_statistics(self) -> [dict]:
+        all_statistics = []
+        applier: _SamplingRuleApplier
+        for applier in self.__rule_appliers:
+            all_statistics.append(applier.get_then_reset_statistics())
+        return all_statistics
 
     def expired(self) -> bool:
         self.__cache_lock.acquire()
         try:
-            return datetime.datetime.now() > self._last_modified + datetime.timedelta(seconds=CACHE_TTL_SECONDS)
+            return self._clock.now() > self._last_modified + self._clock.time_delta(seconds=CACHE_TTL_SECONDS)
         finally:
             self.__cache_lock.release()
