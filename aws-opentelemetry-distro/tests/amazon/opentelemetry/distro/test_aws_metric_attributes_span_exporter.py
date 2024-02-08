@@ -174,8 +174,8 @@ class TestAwsMetricAttributesSpanExporter(TestCase):
             DEPENDENCY_METRIC: dependency_metric,
         }
 
-        self.generator_mock.generate_metric_attributes_dict_from_span.side_effect = (
-            lambda span, resource: attribute_map if span == span_data_mock and resource == self.test_resource else {}
+        self.generator_mock.generate_metric_attributes_dict_from_span.side_effect = lambda span, resource: (
+            attribute_map if span == span_data_mock and resource == self.test_resource else {}
         )
 
         self.aws_metric_attributes_span_exporter.export([span_data_mock])
