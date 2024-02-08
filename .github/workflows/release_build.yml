@@ -107,22 +107,20 @@ jobs:
         with:
           secret-ids: |
             prod/PyPI/apiToken,arn:aws:secretsmanager:us-east-1:637423224110:secret:prod/PyPI/apiToken-W2a9ny
-            prod/PyPI/credentials,arn:aws:secretsmanager:us-east-1:637423224110:secret:prod/PyPI/credentials-JAzHsX
             test/PyPI/apiToken,arn:aws:secretsmanager:us-east-1:637423224110:secret:test/PyPI/apiToken-z5iqc6
-            test/PyPI/credentials,arn:aws:secretsmanager:us-east-1:637423224110:secret:test/PyPI/credentials-bCQfg9
 
       # The step below publishes to testpypi in order to catch any issues
       # with the package configuration that would cause a failure to upload to pypi.
       - name: Publish to TestPyPI
         env:
-          TWINE_USERNAME: ${{ steps.pypi_secrets.outputs.test/PyPI/apiToken }}
-          TWINE_PASSWORD: ${{ steps.pypi_secrets.outputs.test/PyPI/credentials }}
+          TWINE_USERNAME: '__token__'
+          TWINE_PASSWORD: ${{ steps.pypi_secrets.outputs.test/PyPI/apiToken }}
         run: |
           twine upload --repository testpypi --skip-existing --verbose dist/aws_opentelemetry_distro-${{ steps.wheel_build.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl
 
       - name: Publish to PyPI
         env:
-          TWINE_USERNAME: ${{ steps.pypi_secrets.outputs.prod/PyPI/apiToken }}
-          TWINE_PASSWORD: ${{ steps.pypi_secrets.outputs.prod/PyPI/credentials }}
+          TWINE_USERNAME: '__token__'
+          TWINE_PASSWORD: ${{ steps.pypi_secrets.outputs.prod/PyPI/apiToken }}
         run: |
           twine upload --skip-existing --verbose dist/aws_opentelemetry_distro-${{ steps.wheel_build.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl
