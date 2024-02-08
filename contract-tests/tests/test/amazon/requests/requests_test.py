@@ -166,7 +166,7 @@ class RequestsTest(ContractTestBase):
     ) -> None:
         target_metrics: List[Metric] = []
         for resource_scope_metric in resource_scope_metrics:
-            if resource_scope_metric.metric.name == metric_name:
+            if resource_scope_metric.metric.name.lower() == metric_name.lower():
                 target_metrics.append(resource_scope_metric.metric)
 
         self.assertEqual(len(target_metrics), 1)

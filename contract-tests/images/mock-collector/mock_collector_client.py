@@ -95,6 +95,8 @@ class MockCollectorClient:
              resources.
         """
 
+        present_metrics_lower: Set[str] = {s.lower() for s in present_metrics}
+
         def get_export() -> List[ExportMetricsServiceRequest]:
             response: GetMetricsResponse = self.client.get_metrics(GetMetricsRequest())
             serialized_metrics: RepeatedScalarFieldContainer[bytes] = response.metrics
@@ -108,8 +110,8 @@ class MockCollectorClient:
                 for resource_metric in exported_metric.resource_metrics:
                     for scope_metric in resource_metric.scope_metrics:
                         for metric in scope_metric.metrics:
-                            received_metrics.add(metric.name)
-            return 0 < len(exported) == len(current) and present_metrics.issubset(received_metrics)
+                            received_metrics.add(metric.name.lower())
+            return 0 < len(exported) == len(current) and present_metrics_lower.issubset(received_metrics)
 
         exported_metrics: List[ExportMetricsServiceRequest] = _wait_for_content(get_export, wait_condition)
         metrics: List[ResourceScopeMetric] = []
