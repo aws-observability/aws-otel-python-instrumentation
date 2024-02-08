@@ -40,7 +40,7 @@ class RequestsTest(ContractTestBase):
     def get_application_extra_environment_variables(self) -> Dict[str, str]:
         """
         This does not appear to do anything, as it does not seem that OTEL supports peer service for Python. Keeping
-        for consistency at this time.
+        for consistency with Java contract tests at this time.
         """
         return {"OTEL_INSTRUMENTATION_COMMON_PEER_SERVICE_MAPPING": "backend=backend:8080"}
 
@@ -162,7 +162,7 @@ class RequestsTest(ContractTestBase):
         method: str,
         path: str,
         metric_name: str,
-        expected_sum: float,
+        expected_sum: int,
     ) -> None:
         target_metrics: List[Metric] = []
         for resource_scope_metric in resource_scope_metrics:

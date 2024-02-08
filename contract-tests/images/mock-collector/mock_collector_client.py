@@ -23,7 +23,7 @@ from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans, ScopeSpans, Sp
 
 _logger: Logger = getLogger(__name__)
 _TIMEOUT_DELAY: timedelta = timedelta(seconds=20)
-_WAIT_INTERVAL: float = 0.1
+_WAIT_INTERVAL_SEC: float = 0.1
 T: TypeVar = TypeVar("T")
 
 
@@ -133,7 +133,7 @@ def _wait_for_content(get_export: Callable[[], List[T]], wait_condition: Callabl
                 return current_exported
             exported = current_exported
 
-            sleep(_WAIT_INTERVAL)
+            sleep(_WAIT_INTERVAL_SEC)
         # pylint: disable=broad-exception-caught
         except Exception:
             _logger.exception("Error while reading content")

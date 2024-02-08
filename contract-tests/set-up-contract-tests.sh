@@ -15,7 +15,6 @@ rm -rf dist/contract_tests*
 cd contract-tests/images/mock-collector
 docker build . -t aws-appsignals-mock-collector-python
 
-
 # Find and store aws_opentelemetry_distro whl file
 cd ../../../dist
 DISTRO=(aws_opentelemetry_distro-*-py3-none-any.whl)
