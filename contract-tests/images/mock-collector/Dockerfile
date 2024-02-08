@@ -1,4 +1,4 @@
-FROM python:3.9-slim
+FROM public.ecr.aws/docker/library/python:3.11-slim
 WORKDIR /mock-collector
 COPY . /mock-collector
 

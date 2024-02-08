@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import List
+from typing import Dict, List
 
 from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
 from requests import Response, request
@@ -37,7 +37,7 @@ class RequestsTest(ContractTestBase):
         return ["backend"]
 
     @override
-    def get_application_extra_environment_variables(self) -> dict[str, str]:
+    def get_application_extra_environment_variables(self) -> Dict[str, str]:
         """
         This does not appear to do anything, as it does not seem that OTEL supports peer service for Python. Keeping
         for consistency at this time.
@@ -96,7 +96,7 @@ class RequestsTest(ContractTestBase):
         self._assert_aws_attributes(target_spans[0].attributes, method, path)
 
     def _assert_aws_attributes(self, attributes_list: List[KeyValue], method: str, endpoint: str) -> None:
-        attributes_dict: dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
+        attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # InternalOperation as OTEL does not instrument the basic server we are using, so the client span is a local
         # root.
@@ -108,8 +108,8 @@ class RequestsTest(ContractTestBase):
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
 
-    def _get_attributes_dict(self, attributes_list: List[KeyValue]) -> dict[str, AnyValue]:
-        attributes_dict: dict[str, AnyValue] = {}
+    def _get_attributes_dict(self, attributes_list: List[KeyValue]) -> Dict[str, AnyValue]:
+        attributes_dict: Dict[str, AnyValue] = {}
         for attribute in attributes_list:
             key: str = attribute.key
             value: AnyValue = attribute.value
@@ -119,13 +119,13 @@ class RequestsTest(ContractTestBase):
             attributes_dict[key] = value
         return attributes_dict
 
-    def _assert_str_attribute(self, attributes_dict: dict[str, AnyValue], key: str, expected_value: str):
+    def _assert_str_attribute(self, attributes_dict: Dict[str, AnyValue], key: str, expected_value: str):
         self.assertIn(key, attributes_dict)
         actual_value: AnyValue = attributes_dict[key]
         self.assertIsNotNone(actual_value)
         self.assertEqual(expected_value, actual_value.string_value)
 
-    def _assert_int_attribute(self, attributes_dict: dict[str, AnyValue], key: str, expected_value: int) -> None:
+    def _assert_int_attribute(self, attributes_dict: Dict[str, AnyValue], key: str, expected_value: int) -> None:
         actual_value: AnyValue = attributes_dict[key]
         self.assertIsNotNone(actual_value)
         self.assertEqual(expected_value, actual_value.int_value)
@@ -146,7 +146,7 @@ class RequestsTest(ContractTestBase):
     def _assert_semantic_conventions_attributes(
         self, attributes_list: List[KeyValue], method: str, endpoint: str, status_code: int
     ) -> None:
-        attributes_dict: dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
+        attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         # TODO: requests instrumentation is not populating net peer attributes
         # self._assert_str_attribute(attributes_dict, SpanAttributes.NET_PEER_NAME, "backend")
         # self._assert_int_attribute(attributes_dict, SpanAttributes.NET_PEER_PORT, 8080)
@@ -177,7 +177,7 @@ class RequestsTest(ContractTestBase):
         dp: ExponentialHistogramDataPoint = dp_list[0]
         if len(dp_list[1].attributes) > len(dp_list[0].attributes):
             dp = dp_list[1]
-        attribute_dict: dict[str, AnyValue] = self._get_attributes_dict(dp.attributes)
+        attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(dp.attributes)
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")

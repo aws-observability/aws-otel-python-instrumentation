@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 from logging import INFO, Logger, getLogger
-from typing import List
+from typing import Dict, List
 from unittest import TestCase
 
 from docker import DockerClient
@@ -71,7 +71,7 @@ class ContractTestBase(TestCase):
             .with_name(self.get_application_image_name())
         )
 
-        extra_env: dict[str, str] = self.get_application_extra_environment_variables()
+        extra_env: Dict[str, str] = self.get_application_extra_environment_variables()
         for key in extra_env:
             self._application.with_env(key, extra_env.get(key))
         self._application.start()
@@ -96,7 +96,7 @@ class ContractTestBase(TestCase):
     def get_application_port(self) -> int:
         return 8080
 
-    def get_application_extra_environment_variables(self) -> dict[str, str]:
+    def get_application_extra_environment_variables(self) -> Dict[str, str]:
         return {}
 
     def get_application_network_aliases(self) -> List[str]:

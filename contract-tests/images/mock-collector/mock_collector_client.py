@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta
 from logging import Logger, getLogger
 from time import sleep
-from typing import Callable, List, TypeVar
+from typing import Callable, List, Set, TypeVar
 
 from google.protobuf.internal.containers import RepeatedScalarFieldContainer
 from grpc import Channel, insecure_channel
@@ -87,7 +87,7 @@ class MockCollectorClient:
                         spans.append(ResourceScopeSpan(resource_span, scope_span, span))
         return spans
 
-    def get_metrics(self, present_metrics: set[str]) -> List[ResourceScopeMetric]:
+    def get_metrics(self, present_metrics: Set[str]) -> List[ResourceScopeMetric]:
         """Get all metrics that are currently stored in the mock collector.
 
         Returns:
@@ -103,7 +103,7 @@ class MockCollectorClient:
         def wait_condition(
             exported: List[ExportMetricsServiceRequest], current: List[ExportMetricsServiceRequest]
         ) -> bool:
-            received_metrics: set[str] = set()
+            received_metrics: Set[str] = set()
             for exported_metric in current:
                 for resource_metric in exported_metric.resource_metrics:
                     for scope_metric in resource_metric.scope_metrics:
@@ -121,7 +121,7 @@ class MockCollectorClient:
         return metrics
 
 
-def _wait_for_content(get_export: Callable[[], List[T]], wait_condition: Callable[[list[T], List[T]], bool]) -> List[T]:
+def _wait_for_content(get_export: Callable[[], List[T]], wait_condition: Callable[[List[T], List[T]], bool]) -> List[T]:
     # Verify that there is no more data to be received
     deadline: datetime = datetime.now() + _TIMEOUT_DELAY
     exported: List[T] = []
