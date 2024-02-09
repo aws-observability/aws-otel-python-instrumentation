@@ -255,6 +255,7 @@ def _get_remote_operation(span: ReadableSpan, remote_operation_key: str) -> str:
 
     return remote_operation
 
+
 def _get_db_statement_remote_operation(span: ReadableSpan, statement_key: str) -> str:
     remote_operation: str = span.attributes.get(statement_key)
     if remote_operation is None:

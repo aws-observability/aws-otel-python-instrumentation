@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Utility module designed to support shared logic across AWS Span Processors."""
 from typing import Set
+
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND, AWS_LOCAL_OPERATION
 from opentelemetry.sdk.trace import InstrumentationScope, ReadableSpan
 from opentelemetry.semconv.trace import MessagingOperationValues, SpanAttributes
@@ -17,9 +18,34 @@ LOCAL_ROOT: str = "LOCAL_ROOT"
 
 # The valid remote operation values retrieved from db.statement if no db.operation value is identified
 VALID_DB_OPERATION: Set[str] = {
-    "SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "TRUNCATE",
-    "COPY", "ANALYZE", "VACUUM", "EXPLAIN", "GRANT", "REVOKE", "SET", "BEGIN", "COMMIT", "ROLLBACK", "SAVEPOINT",
-    "LISTEN", "NOTIFY", "DISCARD", "SHOW", "LOCK", "UNLOCK", "REINDEX", "CLUSTER", "COMMENT"
+    "SELECT",
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "CREATE",
+    "DROP",
+    "ALTER",
+    "TRUNCATE",
+    "COPY",
+    "ANALYZE",
+    "VACUUM",
+    "EXPLAIN",
+    "GRANT",
+    "REVOKE",
+    "SET",
+    "BEGIN",
+    "COMMIT",
+    "ROLLBACK",
+    "SAVEPOINT",
+    "LISTEN",
+    "NOTIFY",
+    "DISCARD",
+    "SHOW",
+    "LOCK",
+    "UNLOCK",
+    "REINDEX",
+    "CLUSTER",
+    "COMMENT",
 }
 
 # Useful constants
@@ -164,6 +190,7 @@ def _generate_ingress_operation(span: ReadableSpan) -> str:
                     operation = http_method + " " + operation
 
     return operation
+
 
 def is_valid_db_operation(operation: str) -> bool:
     return operation.upper() in VALID_DB_OPERATION
