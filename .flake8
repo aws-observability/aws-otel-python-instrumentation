@@ -21,3 +21,6 @@ exclude =
   venv*/
   target
   __pycache__
+  mock_collector_service_pb2.py
+  mock_collector_service_pb2.pyi
+  mock_collector_service_pb2_grpc.py
