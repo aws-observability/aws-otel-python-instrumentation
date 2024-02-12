@@ -33,11 +33,11 @@ jobs:
       - name: Install libsnappy-dev
         if: ${{ matrix.tox-environment == 'lint' }}
         run: |
-          if ( "${{ matrix.os }}" == "ubuntu-latest" ); then
+          if ( test "${{ matrix.os }}" == "ubuntu-latest" ); then
             sudo apt-get update && sudo apt-get install -y libsnappy-dev
-          elif ( "${{ matrix.os }}" == "macos-latest" ); then
+          elif ( test "${{ matrix.os }}" == "macos-latest" ); then
             brew install snappy
-          elif ( "${{ matrix.os }}" == "windows-latest" ); then
+          elif ( test "${{ matrix.os }}" == "windows-latest" ); then
             choco install snappy
           fi
 
