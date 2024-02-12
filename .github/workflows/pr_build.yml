@@ -33,7 +33,6 @@ jobs:
       - name: Install libsnappy-dev
         if: ${{ matrix.tox-environment == 'lint' }}
         run: |
-          sudo apt-get install -y libsnappy-dev
           if [[ matrix.os == ubuntu-latest ]]; then
             sudo apt-get update && sudo apt-get install -y libsnappy-dev
           elif [[ matrix.os == macos-latest ]]; then
