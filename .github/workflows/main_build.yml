@@ -70,7 +70,11 @@ jobs:
           cp aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION}}-py3-none-any.whl $staging_wheel
 
       - name: Upload wheel to S3
-        run: aws s3 cp dist/${{ steps.staging_wheel_output.outputs.STAGING_WHEEL}} ${{ env.S3_INTEGRATION_BUCKET }}
+        run: |
+          pwd
+          echo "dist/${{ steps.staging_wheel_output.outputs.STAGING_WHEEL}}"
+          echo "${{ env.S3_INTEGRATION_BUCKET }}"
+          aws s3 cp dist/${{ steps.staging_wheel_output.outputs.STAGING_WHEEL}} ${{ env.S3_INTEGRATION_BUCKET }}
 
       - name: Upload Wheel to GitHub Actions
         uses: actions/upload-artifact@v3
