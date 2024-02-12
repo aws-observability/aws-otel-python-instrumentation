@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import List, Optional
+from typing import Dict, List, Optional
 from unittest import TestCase
 from unittest.mock import MagicMock
 
@@ -117,7 +117,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.parent_span_context.is_valid = False
         self.span_mock.name = _SPAN_NAME_VALUE
 
-        expected_attributes_map: dict[str, BoundedAttributes] = {
+        expected_attributes_map: Dict[str, BoundedAttributes] = {
             SERVICE_METRIC: {
                 AWS_SPAN_KIND: _LOCAL_ROOT,
                 AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
@@ -126,7 +126,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         }
 
         self.span_mock.kind = SpanKind.SERVER
-        actual_attributes_map: dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
+        actual_attributes_map: Dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
             self.span_mock, self.resource
         )
         self.assertEqual(actual_attributes_map, expected_attributes_map)
@@ -136,7 +136,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.parent_span_context.is_valid = False
         self.span_mock.name = _SPAN_NAME_VALUE
 
-        expected_attributes_map: dict[str, BoundedAttributes] = {
+        expected_attributes_map: Dict[str, BoundedAttributes] = {
             SERVICE_METRIC: {
                 AWS_SPAN_KIND: _LOCAL_ROOT,
                 AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
@@ -145,7 +145,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         }
 
         self.span_mock.kind = SpanKind.INTERNAL
-        actual_attributes_map: dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
+        actual_attributes_map: Dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
             self.span_mock, self.resource
         )
         self.assertEqual(actual_attributes_map, expected_attributes_map)
@@ -158,7 +158,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
             [AWS_REMOTE_SERVICE, AWS_REMOTE_OPERATION], [_AWS_REMOTE_SERVICE_VALUE, _AWS_REMOTE_OPERATION_VALUE]
         )
 
-        expected_attributes_map: dict[str, BoundedAttributes] = {
+        expected_attributes_map: Dict[str, BoundedAttributes] = {
             SERVICE_METRIC: {
                 AWS_SPAN_KIND: _LOCAL_ROOT,
                 AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
@@ -174,7 +174,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         }
 
         self.span_mock.kind = SpanKind.CLIENT
-        actual_attributes_map: dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
+        actual_attributes_map: Dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
             self.span_mock, self.resource
         )
         self.assertEqual(actual_attributes_map, expected_attributes_map)
@@ -187,7 +187,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
             [AWS_REMOTE_SERVICE, AWS_REMOTE_OPERATION], [_AWS_REMOTE_SERVICE_VALUE, _AWS_REMOTE_OPERATION_VALUE]
         )
 
-        expected_attributes_map: dict[str, BoundedAttributes] = {
+        expected_attributes_map: Dict[str, BoundedAttributes] = {
             SERVICE_METRIC: {
                 AWS_SPAN_KIND: _LOCAL_ROOT,
                 AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
@@ -203,7 +203,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         }
 
         self.span_mock.kind = SpanKind.CONSUMER
-        actual_attributes_map: dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
+        actual_attributes_map: Dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
             self.span_mock, self.resource
         )
         self.assertEqual(actual_attributes_map, expected_attributes_map)
@@ -216,7 +216,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
             [AWS_REMOTE_SERVICE, AWS_REMOTE_OPERATION], [_AWS_REMOTE_SERVICE_VALUE, _AWS_REMOTE_OPERATION_VALUE]
         )
 
-        expected_attributes_map: dict[str, BoundedAttributes] = {
+        expected_attributes_map: Dict[str, BoundedAttributes] = {
             SERVICE_METRIC: {
                 AWS_SPAN_KIND: _LOCAL_ROOT,
                 AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
@@ -232,7 +232,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         }
 
         self.span_mock.kind = SpanKind.PRODUCER
-        actual_attributes_map: dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
+        actual_attributes_map: Dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
             self.span_mock, self.resource
         )
         self.assertEqual(actual_attributes_map, expected_attributes_map)
