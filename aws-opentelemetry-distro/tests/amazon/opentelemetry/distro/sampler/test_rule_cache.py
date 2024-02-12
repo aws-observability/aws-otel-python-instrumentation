@@ -9,6 +9,7 @@ from amazon.opentelemetry.distro.sampler._sampling_rule import _SamplingRule
 from opentelemetry.sdk.resources import Resource
 
 
+# pylint: disable=no-member
 class TestRuleCache(TestCase):
     def test_cache_update_rules_and_sorts_rules(self):
         cache = _RuleCache(None, None, datetime, Lock())
