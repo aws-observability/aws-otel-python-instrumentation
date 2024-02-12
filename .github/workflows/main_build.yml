@@ -65,7 +65,7 @@ jobs:
         id: staging_wheel_output
         run: |
           staging_wheel="aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION}}-${{ env.SHORT_SHA }}-py3-none-any.whl"
-          echo "STAGING_WHEEL=$staging_wheel" >> $GITHUB_ENV
+          echo "STAGING_WHEEL=$staging_wheel" >> $GITHUB_OUTPUT
           cd ./dist
           cp aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION}}-py3-none-any.whl $staging_wheel
 
