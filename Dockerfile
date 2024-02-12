@@ -1,4 +1,4 @@
-# This Dokcer file build auto-instrumentation image for aws-otel-python-instrumentation following updatream Docker build instruction:
+# This Docker file build auto-instrumentation image for aws-otel-python-instrumentation following updatream Docker build instruction:
 # https://github.com/open-telemetry/opentelemetry-operator/blob/main/autoinstrumentation/python/Dockerfile
 #   The packages are installed in the `/autoinstrumentation` directory. This is required as when instrumenting the pod by CWOperator,
 #   one init container will be created to copy all the content in `/autoinstrumentation` directory to app's container. Then
