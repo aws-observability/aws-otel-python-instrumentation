@@ -10,6 +10,10 @@ env:
   AWS_DEFAULT_REGION: us-east-1
   TEST_TAG: 637423224110.dkr.ecr.us-east-1.amazonaws.com/eks/observability/adot-autoinstrumentation-python:test
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
