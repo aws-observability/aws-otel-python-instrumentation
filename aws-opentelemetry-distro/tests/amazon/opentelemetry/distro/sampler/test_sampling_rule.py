@@ -5,7 +5,7 @@ from unittest import TestCase
 from amazon.opentelemetry.distro.sampler._sampling_rule import _SamplingRule
 
 
-class TestRuleCache(TestCase):
+class TestSamplingRule(TestCase):
     def test_sampling_rule_ordering(self):
         rule1 = _SamplingRule(Priority=1, RuleName="abcdef", Version=1)
         rule2 = _SamplingRule(Priority=100, RuleName="A", Version=1)
