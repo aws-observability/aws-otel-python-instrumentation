@@ -1,6 +1,10 @@
 name: Python Instrumentation PR Build
 on:
   pull_request:
+    branches:
+      - main
+      - main_workflow
+      - "release/v*"
 
 env:
   AWS_DEFAULT_REGION: us-east-1
@@ -8,22 +12,11 @@ env:
 
 jobs:
   build:
-    env:
-      py38: "3.8"
-      py39: "3.9"
-      py310: "3.10"
-      py311: "3.11"
-      RUN_MATRIX_COMBINATION: ${{ matrix.python-version }}-${{ matrix.package }}-${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false  # ensures the entire test matrix is run, even if one permutation fails
       matrix:
-        python-version: [ py38, py39, py310, py311 ]
-        package: [ "aws-opentelemetry-distro" ]
-        os: [ ubuntu-latest ]
-    outputs:
-      staging-image-name: ${{ steps.imageNameOutput.outputs.imageName }}
-      staging_wheel_file: ${{ steps.pr_wheel_build.outputs.STAGING_WHEEL}}
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+        tox-environment: ["spellcheck", "lint"]
     steps:
       - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@v4
@@ -31,90 +24,23 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: ${{ env[matrix.python-version] }}
+          python-version: 3.11
 
-      - name: Install tox
-        run: pip install tox==3.27.1 tox-factor
-
-      - name: Cache tox environment
-        # Preserves .tox directory between runs for faster installs
-        uses: actions/cache@v1
-        with:
-          path: |
-            .tox
-            ~/.cache/pip
-          key: v7-build-tox-cache-${{ env.RUN_MATRIX_COMBINATION }}-${{ hashFiles('tox.ini', 'dev-requirements.txt') }}
-
-      - name: run tox
-        run: tox -f ${{ matrix.python-version }}-${{ matrix.package }} -- -ra --benchmark-json=${{ env.RUN_MATRIX_COMBINATION }}-benchmark.json
-
-      - name: Install Dependencies and Build Wheel
-        id: pr_wheel_build
-        run: |
-          pip install --upgrade pip setuptools wheel packaging build
-          rm -rf ./dist/*
-          cd ./aws-opentelemetry-distro
-          python -m build --outdir ../dist
-          cd ../dist
-          pkg_version=$(grep '__version__' ../aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py | awk -F '"' '{print $2}')
-          echo "ADOT_PYTHON_VERSION=$pkg_version" >> $GITHUB_OUTPUT
-          shortsha="$(git rev-parse --short HEAD)"
-          echo "STAGING_WHEEL=aws_opentelemetry_distro-$pkg_version-$shortsha-py3-none-any.whl" >> $GITHUB_OUTPUT
-          cp aws_opentelemetry_distro-$pkg_version-py3-none-any.whl aws_opentelemetry_distro-$pkg_version-$shortsha-py3-none-any.whl
-
-      - name: Upload to GitHub Actions
-        uses: actions/upload-artifact@v3
-        with:
-          name: aws_opentelemetry_distro-${{ steps.pr_wheel_build.outputs.ADOT_PYTHON_VERSION}}-py3-none-any.whl
-          path: dist/${{ steps.pr_wheel_build.outputs.STAGING_WHEEL}}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build image for testing
-        uses: docker/build-push-action@v5
-        with:
-          push: false
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64
-          tags: ${{ env.TEST_TAG }}
-          load: true
-
-      - name: Set image name to output
-        id: imageNameOutput
-        run: echo "imageName=${{ env.TEST_TAG }}" >> "$GITHUB_OUTPUT"
-#     TODO: Add Contract test and E2E test
-  misc:
-    strategy:
-      fail-fast: false
-      matrix:
-        tox-environment: ["spellcheck", "lint"]
-    name: ${{ matrix.tox-environment }}
-    runs-on: ubuntu-20.04
-    steps:
-      - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
-        uses: actions/checkout@v2
-      - name: Set up Python 3.10
-        uses: actions/setup-python@v2
-        with:
-          python-version: "3.10"
-      - name: Install tox
-        run: pip install tox==3.27.1
       - name: Install libsnappy-dev
         if: ${{ matrix.tox-environment == 'lint' }}
         run: sudo apt-get install -y libsnappy-dev
-      - name: Cache tox environment
-        # Preserves .tox directory between runs for faster installs
-        uses: actions/cache@v1
+
+      - name: Build Wheel and Image Files
+        uses: ./.github/actions/artifacts_build
         with:
-          path: |
-            .tox
-            ~/.cache/pip
-          key: v7-misc-tox-cache-${{ matrix.tox-environment }}-${{ hashFiles('tox.ini',
-            'dev-requirements.txt') }}
-      - name: run tox
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+          image_uri_with_tag: ${{ env.TEST_TAG }}
+          image_registry: 637423224110.dkr.ecr.us-east-1.amazonaws.com
+          snapshot-ecr-role: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
+          push_image: false
+          load_image: true
+
+      - name: run spell check tox
         run: tox -e ${{ matrix.tox-environment }}
+
+#     TODO: Add Contract test.
