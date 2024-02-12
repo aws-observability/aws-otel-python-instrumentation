@@ -12,12 +12,12 @@ from opentelemetry.sdk.resources import Resource
 class TestRuleCache(TestCase):
     def test_cache_update_rules_and_sorts_rules(self):
         cache = _RuleCache(None, None, datetime, Lock())
-        self.assertTrue(len(cache.rules) == 0)
+        self.assertTrue(len(cache._RuleCache__rule_appliers) == 0)
 
         rule1 = _SamplingRule(Priority=200, RuleName="only_one_rule", Version=1)
         rules = [rule1]
         cache.update_sampling_rules(rules)
-        self.assertTrue(len(cache.rules) == 1)
+        self.assertTrue(len(cache._RuleCache__rule_appliers) == 1)
 
         rule1 = _SamplingRule(Priority=200, RuleName="abcdef", Version=1)
         rule2 = _SamplingRule(Priority=100, RuleName="abc", Version=1)
@@ -28,13 +28,13 @@ class TestRuleCache(TestCase):
         rules = [rule1, rule2, rule3, rule4, rule5, rule6]
         cache.update_sampling_rules(rules)
 
-        self.assertTrue(len(cache.rules) == 6)
-        self.assertEqual(cache.rules[0].sampling_rule.RuleName, "abcdef")
-        self.assertEqual(cache.rules[1].sampling_rule.RuleName, "A")
-        self.assertEqual(cache.rules[2].sampling_rule.RuleName, "Abc")
-        self.assertEqual(cache.rules[3].sampling_rule.RuleName, "ab")
-        self.assertEqual(cache.rules[4].sampling_rule.RuleName, "abc")
-        self.assertEqual(cache.rules[5].sampling_rule.RuleName, "abcdef")
+        self.assertTrue(len(cache._RuleCache__rule_appliers) == 6)
+        self.assertEqual(cache._RuleCache__rule_appliers[0].sampling_rule.RuleName, "abcdef")
+        self.assertEqual(cache._RuleCache__rule_appliers[1].sampling_rule.RuleName, "A")
+        self.assertEqual(cache._RuleCache__rule_appliers[2].sampling_rule.RuleName, "Abc")
+        self.assertEqual(cache._RuleCache__rule_appliers[3].sampling_rule.RuleName, "ab")
+        self.assertEqual(cache._RuleCache__rule_appliers[4].sampling_rule.RuleName, "abc")
+        self.assertEqual(cache._RuleCache__rule_appliers[5].sampling_rule.RuleName, "abcdef")
 
     def test_rule_cache_expiration_logic(self):
         dt = datetime
@@ -54,34 +54,34 @@ class TestRuleCache(TestCase):
         rules = [rule1, rule2, rule3]
         cache.update_sampling_rules(rules)
 
-        cache_rules_copy = cache.rules
+        cache_rules_copy = cache._RuleCache__rule_appliers
 
         new_rule3 = _SamplingRule(Priority=5, RuleName="Abc", Version=1)
         rules = [rule1, rule2, new_rule3]
         cache.update_sampling_rules(rules)
 
-        self.assertTrue(len(cache.rules) == 3)
-        self.assertEqual(cache.rules[0].sampling_rule.RuleName, "abcdef")
-        self.assertEqual(cache.rules[1].sampling_rule.RuleName, "Abc")
-        self.assertEqual(cache.rules[2].sampling_rule.RuleName, "ab")
+        self.assertTrue(len(cache._RuleCache__rule_appliers) == 3)
+        self.assertEqual(cache._RuleCache__rule_appliers[0].sampling_rule.RuleName, "abcdef")
+        self.assertEqual(cache._RuleCache__rule_appliers[1].sampling_rule.RuleName, "Abc")
+        self.assertEqual(cache._RuleCache__rule_appliers[2].sampling_rule.RuleName, "ab")
 
         # Compare that only rule1 and rule2 objects have not changed due to new_rule3 even after sorting
-        self.assertTrue(cache_rules_copy[0] is cache.rules[0])
-        self.assertTrue(cache_rules_copy[1] is cache.rules[2])
-        self.assertTrue(cache_rules_copy[2] is not cache.rules[1])
+        self.assertTrue(cache_rules_copy[0] is cache._RuleCache__rule_appliers[0])
+        self.assertTrue(cache_rules_copy[1] is cache._RuleCache__rule_appliers[2])
+        self.assertTrue(cache_rules_copy[2] is not cache._RuleCache__rule_appliers[1])
 
     def test_update_rules_removes_older_rule(self):
         cache = _RuleCache(None, None, datetime, Lock())
-        self.assertTrue(len(cache.rules) == 0)
+        self.assertTrue(len(cache._RuleCache__rule_appliers) == 0)
 
         rule1 = _SamplingRule(Priority=200, RuleName="first_rule", Version=1)
         rules = [rule1]
         cache.update_sampling_rules(rules)
-        self.assertTrue(len(cache.rules) == 1)
-        self.assertEqual(cache.rules[0].sampling_rule.RuleName, "first_rule")
+        self.assertTrue(len(cache._RuleCache__rule_appliers) == 1)
+        self.assertEqual(cache._RuleCache__rule_appliers[0].sampling_rule.RuleName, "first_rule")
 
         rule1 = _SamplingRule(Priority=200, RuleName="second_rule", Version=1)
         rules = [rule1]
         cache.update_sampling_rules(rules)
-        self.assertTrue(len(cache.rules) == 1)
-        self.assertEqual(cache.rules[0].sampling_rule.RuleName, "second_rule")
+        self.assertTrue(len(cache._RuleCache__rule_appliers) == 1)
+        self.assertEqual(cache._RuleCache__rule_appliers[0].sampling_rule.RuleName, "second_rule")

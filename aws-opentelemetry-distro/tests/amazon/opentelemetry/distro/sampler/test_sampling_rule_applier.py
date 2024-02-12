@@ -4,8 +4,8 @@ import json
 import os
 from unittest import TestCase
 
-from amazon.opentelemetry.distro.sampler._rule import _Rule
 from amazon.opentelemetry.distro.sampler._sampling_rule import _SamplingRule
+from amazon.opentelemetry.distro.sampler._sampling_rule_applier import _SamplingRuleApplier
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.semconv.resource import ResourceAttributes
 from opentelemetry.semconv.trace import SpanAttributes
@@ -32,16 +32,16 @@ class TestRule(TestCase):
             }
         )
         attr: Attributes = {
-            SpanAttributes.HTTP_TARGET: "target",
-            SpanAttributes.HTTP_METHOD: "method",
-            SpanAttributes.HTTP_URL: "url",
-            SpanAttributes.HTTP_HOST: "host",
+            SpanAttributes.URL_PATH: "target",
+            SpanAttributes.HTTP_REQUEST_METHOD: "method",
+            SpanAttributes.URL_FULL: "url",
+            SpanAttributes.SERVER_ADDRESS: "host",
             "foo": "bar",
             "abc": "1234",
         }
 
-        rule0 = _Rule(default_rule)
-        self.assertTrue(rule0.matches(res, attr))
+        rule_applier = _SamplingRuleApplier(default_rule)
+        self.assertTrue(rule_applier.matches(res, attr))
 
     def test_rule_matches_with_all_attributes(self):
         sampling_rule = _SamplingRule(
@@ -63,9 +63,9 @@ class TestRule(TestCase):
         )
 
         attributes: Attributes = {
-            "http.host": "localhost",
-            SpanAttributes.HTTP_METHOD: "GET",
-            "http.url": "http://127.0.0.1:5000/helloworld",
+            "server.address": "localhost",
+            SpanAttributes.HTTP_REQUEST_METHOD: "GET",
+            "url.full": "http://127.0.0.1:5000/helloworld",
             "abc": "123",
             "def": "456",
             "ghi": "789",
@@ -77,8 +77,8 @@ class TestRule(TestCase):
         }
         resource = Resource.create(attributes=resource_attr)
 
-        rule = _Rule(sampling_rule)
-        self.assertTrue(rule.matches(resource, attributes))
+        rule_applier = _SamplingRuleApplier(sampling_rule)
+        self.assertTrue(rule_applier.matches(resource, attributes))
 
     def test_rule_wild_card_attributes_matches_span_attributes(self):
         sampling_rule = _SamplingRule(
@@ -119,8 +119,8 @@ class TestRule(TestCase):
             "attr9": "Bye.World",
         }
 
-        rule = _Rule(sampling_rule)
-        self.assertTrue(rule.matches(Resource.get_empty(), attributes))
+        rule_applier = _SamplingRuleApplier(sampling_rule)
+        self.assertTrue(rule_applier.matches(Resource.get_empty(), attributes))
 
     def test_rule_wild_card_attributes_matches_http_span_attributes(self):
         sampling_rule = _SamplingRule(
@@ -140,13 +140,13 @@ class TestRule(TestCase):
         )
 
         attributes: Attributes = {
-            SpanAttributes.HTTP_HOST: "localhost",
-            SpanAttributes.HTTP_METHOD: "GET",
-            SpanAttributes.HTTP_URL: "http://127.0.0.1:5000/helloworld",
+            SpanAttributes.SERVER_ADDRESS: "localhost",
+            SpanAttributes.HTTP_REQUEST_METHOD: "GET",
+            SpanAttributes.URL_FULL: "http://127.0.0.1:5000/helloworld",
         }
 
-        rule = _Rule(sampling_rule)
-        self.assertTrue(rule.matches(Resource.get_empty(), attributes))
+        rule_applier = _SamplingRuleApplier(sampling_rule)
+        self.assertTrue(rule_applier.matches(Resource.get_empty(), attributes))
 
     def test_rule_wild_card_attributes_matches_with_empty_attributes(self):
         sampling_rule = _SamplingRule(
@@ -172,13 +172,13 @@ class TestRule(TestCase):
         }
         resource = Resource.create(attributes=resource_attr)
 
-        rule = _Rule(sampling_rule)
-        self.assertTrue(rule.matches(resource, attributes))
-        self.assertTrue(rule.matches(resource, None))
-        self.assertTrue(rule.matches(Resource.get_empty(), attributes))
-        self.assertTrue(rule.matches(Resource.get_empty(), None))
-        self.assertTrue(rule.matches(None, attributes))
-        self.assertTrue(rule.matches(None, None))
+        rule_applier = _SamplingRuleApplier(sampling_rule)
+        self.assertTrue(rule_applier.matches(resource, attributes))
+        self.assertTrue(rule_applier.matches(resource, None))
+        self.assertTrue(rule_applier.matches(Resource.get_empty(), attributes))
+        self.assertTrue(rule_applier.matches(Resource.get_empty(), None))
+        self.assertTrue(rule_applier.matches(None, attributes))
+        self.assertTrue(rule_applier.matches(None, None))
 
     def test_rule_does_not_match_without_http_target(self):
         sampling_rule = _SamplingRule(
@@ -204,8 +204,8 @@ class TestRule(TestCase):
         }
         resource = Resource.create(attributes=resource_attr)
 
-        rule = _Rule(sampling_rule)
-        self.assertFalse(rule.matches(resource, attributes))
+        rule_applier = _SamplingRuleApplier(sampling_rule)
+        self.assertFalse(rule_applier.matches(resource, attributes))
 
     def test_rule_matches_with_http_target(self):
         sampling_rule = _SamplingRule(
@@ -224,15 +224,15 @@ class TestRule(TestCase):
             Version=1,
         )
 
-        attributes: Attributes = {SpanAttributes.HTTP_TARGET: "/helloworld"}
+        attributes: Attributes = {SpanAttributes.URL_PATH: "/helloworld"}
         resource_attr: Resource = {
             ResourceAttributes.SERVICE_NAME: "myServiceName",
             ResourceAttributes.CLOUD_PLATFORM: "aws_ec2",
         }
         resource = Resource.create(attributes=resource_attr)
 
-        rule = _Rule(sampling_rule)
-        self.assertTrue(rule.matches(resource, attributes))
+        rule_applier = _SamplingRuleApplier(sampling_rule)
+        self.assertTrue(rule_applier.matches(resource, attributes))
 
     def test_rule_matches_with_span_attributes(self):
         sampling_rule = _SamplingRule(
@@ -253,8 +253,8 @@ class TestRule(TestCase):
 
         attributes: Attributes = {
             "http.host": "localhost",
-            SpanAttributes.HTTP_METHOD: "GET",
-            "http.url": "http://127.0.0.1:5000/helloworld",
+            SpanAttributes.HTTP_REQUEST_METHOD: "GET",
+            "url.full": "http://127.0.0.1:5000/helloworld",
             "abc": "123",
             "def": "456",
             "ghi": "789",
@@ -266,8 +266,8 @@ class TestRule(TestCase):
         }
         resource = Resource.create(attributes=resource_attr)
 
-        rule = _Rule(sampling_rule)
-        self.assertTrue(rule.matches(resource, attributes))
+        rule_applier = _SamplingRuleApplier(sampling_rule)
+        self.assertTrue(rule_applier.matches(resource, attributes))
 
     def test_rule_does_not_match_with_less_span_attributes(self):
         sampling_rule = _SamplingRule(
@@ -288,8 +288,8 @@ class TestRule(TestCase):
 
         attributes: Attributes = {
             "http.host": "localhost",
-            SpanAttributes.HTTP_METHOD: "GET",
-            "http.url": "http://127.0.0.1:5000/helloworld",
+            SpanAttributes.HTTP_REQUEST_METHOD: "GET",
+            "url.full": "http://127.0.0.1:5000/helloworld",
             "abc": "123",
         }
 
@@ -299,5 +299,5 @@ class TestRule(TestCase):
         }
         resource = Resource.create(attributes=resource_attr)
 
-        rule = _Rule(sampling_rule)
-        self.assertFalse(rule.matches(resource, attributes))
+        rule_applier = _SamplingRuleApplier(sampling_rule)
+        self.assertFalse(rule_applier.matches(resource, attributes))

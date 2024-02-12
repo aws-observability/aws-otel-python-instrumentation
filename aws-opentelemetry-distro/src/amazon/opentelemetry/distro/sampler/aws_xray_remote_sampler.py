@@ -91,7 +91,7 @@ class AwsXRayRemoteSampler(Sampler):
     ) -> SamplingResult:
 
         if self.__rule_cache.expired():
-            _logger.info("Rule cache is expired so using fallback sampling strategy")
+            _logger.debug("Rule cache is expired so using fallback sampling strategy")
             return self.__fallback_sampler.should_sample(
                 parent_context, trace_id, name, kind=kind, attributes=attributes, links=links, trace_state=trace_state
             )
