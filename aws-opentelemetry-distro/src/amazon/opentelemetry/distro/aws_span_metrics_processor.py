@@ -94,9 +94,6 @@ class AwsSpanMetricsProcessor(SpanProcessor):
         http_status_code: int = span.attributes.get(_HTTP_STATUS_CODE)
         status_code: StatusCode = span.status.status_code
 
-        if http_status_code is None:
-            http_status_code = attributes.get(_HTTP_STATUS_CODE)
-
         if _is_not_error_or_fault(http_status_code):
             if StatusCode.ERROR == status_code:
                 self._error_histogram.record(0, attributes)

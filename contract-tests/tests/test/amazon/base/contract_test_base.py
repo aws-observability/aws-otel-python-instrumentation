@@ -6,25 +6,22 @@ from unittest import TestCase
 
 from docker import DockerClient
 from docker.models.networks import Network, NetworkCollection
+from docker.types import EndpointConfig
 from mock_collector_client import MockCollectorClient
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.waiting_utils import wait_for_logs
 from typing_extensions import override
 
+NETWORK_NAME: str = "aws-appsignals-network"
+
 _logger: Logger = getLogger(__name__)
 _logger.setLevel(INFO)
-
 _MOCK_COLLECTOR_ALIAS: str = "collector"
 _MOCK_COLLECTOR_NAME: str = "aws-appsignals-mock-collector-python"
 _MOCK_COLLECTOR_PORT: int = 4315
-_NETWORK_NAME: str = "aws-appsignals-network"
-
-_MOCK_COLLECTOR: DockerContainer = (
-    DockerContainer(_MOCK_COLLECTOR_NAME).with_exposed_ports(_MOCK_COLLECTOR_PORT).with_name(_MOCK_COLLECTOR_NAME)
-)
-_NETWORK: Network = NetworkCollection(client=DockerClient()).create(_NETWORK_NAME)
 
 
+# pylint: disable=broad-exception-caught
 class ContractTestBase(TestCase):
     """Base class for implementing a contract test.
 
@@ -35,29 +32,53 @@ class ContractTestBase(TestCase):
     Several methods are provided that can be overridden to customize the test scenario.
     """
 
-    _mock_collector_client: MockCollectorClient
-    _application: DockerContainer
+    application: DockerContainer
+    mock_collector: DockerContainer
+    mock_collector_client: MockCollectorClient
+    network: Network
 
     @classmethod
     @override
     def setUpClass(cls) -> None:
-        _MOCK_COLLECTOR.start()
-        wait_for_logs(_MOCK_COLLECTOR, "Ready", timeout=20)
-        _NETWORK.connect(_MOCK_COLLECTOR_NAME, aliases=[_MOCK_COLLECTOR_ALIAS])
+        cls.addClassCleanup(cls.class_tear_down)
+        cls.network = NetworkCollection(client=DockerClient()).create(NETWORK_NAME)
+        mock_collector_networking_config: Dict[str, EndpointConfig] = {
+            NETWORK_NAME: EndpointConfig(version="1.22", aliases=[_MOCK_COLLECTOR_ALIAS])
+        }
+        cls.mock_collector: DockerContainer = (
+            DockerContainer(_MOCK_COLLECTOR_NAME)
+            .with_exposed_ports(_MOCK_COLLECTOR_PORT)
+            .with_name(_MOCK_COLLECTOR_NAME)
+            .with_kwargs(network=NETWORK_NAME, networking_config=mock_collector_networking_config)
+        )
+        cls.mock_collector.start()
+        wait_for_logs(cls.mock_collector, "Ready", timeout=20)
+        cls.set_up_dependency_container()
 
     @classmethod
-    @override
-    def tearDownClass(cls) -> None:
-        _logger.info("MockCollector stdout")
-        _logger.info(_MOCK_COLLECTOR.get_logs()[0].decode())
-        _logger.info("MockCollector stderr")
-        _logger.info(_MOCK_COLLECTOR.get_logs()[1].decode())
-        _MOCK_COLLECTOR.stop()
-        _NETWORK.remove()
+    def class_tear_down(cls) -> None:
+        try:
+            cls.tear_down_dependency_container()
+        except Exception:
+            _logger.exception("Failed to tear down dependency container")
+
+        try:
+            _logger.info("MockCollector stdout")
+            _logger.info(cls.mock_collector.get_logs()[0].decode())
+            _logger.info("MockCollector stderr")
+            _logger.info(cls.mock_collector.get_logs()[1].decode())
+            cls.mock_collector.stop()
+        except Exception:
+            _logger.exception("Failed to tear down mock collector")
+
+        cls.network.remove()
 
     @override
     def setUp(self) -> None:
-        self._application: DockerContainer = (
+        application_networking_config: Dict[str, EndpointConfig] = {
+            NETWORK_NAME: EndpointConfig(version="1.22", aliases=self.get_application_network_aliases())
+        }
+        self.application: DockerContainer = (
             DockerContainer(self.get_application_image_name())
             .with_exposed_ports(self.get_application_port())
             .with_env("OTEL_METRIC_EXPORT_INTERVAL", "100")
@@ -68,31 +89,42 @@ class ContractTestBase(TestCase):
             .with_env("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", f"http://collector:{_MOCK_COLLECTOR_PORT}")
             .with_env("OTEL_RESOURCE_ATTRIBUTES", self.get_application_otel_resource_attributes())
             .with_env("OTEL_TRACES_SAMPLER", "always_on")
+            .with_kwargs(network=NETWORK_NAME, networking_config=application_networking_config)
             .with_name(self.get_application_image_name())
         )
 
         extra_env: Dict[str, str] = self.get_application_extra_environment_variables()
         for key in extra_env:
-            self._application.with_env(key, extra_env.get(key))
-        self._application.start()
-        wait_for_logs(self._application, self.get_application_wait_pattern(), timeout=20)
-        _NETWORK.connect(self.get_application_image_name(), aliases=self.get_application_network_aliases())
-
-        self._mock_collector_client: MockCollectorClient = MockCollectorClient(
-            _MOCK_COLLECTOR.get_container_host_ip(), _MOCK_COLLECTOR.get_exposed_port(_MOCK_COLLECTOR_PORT)
+            self.application.with_env(key, extra_env.get(key))
+        self.application.start()
+        wait_for_logs(self.application, self.get_application_wait_pattern(), timeout=20)
+        self.mock_collector_client: MockCollectorClient = MockCollectorClient(
+            self.mock_collector.get_container_host_ip(), self.mock_collector.get_exposed_port(_MOCK_COLLECTOR_PORT)
         )
 
     @override
     def tearDown(self) -> None:
-        _logger.info("Application stdout")
-        _logger.info(self._application.get_logs()[0].decode())
-        _logger.info("Application stderr")
-        _logger.info(self._application.get_logs()[1].decode())
-        self._application.stop()
-        self._mock_collector_client.clear_signals()
+        try:
+            _logger.info("Application stdout")
+            _logger.info(self.application.get_logs()[0].decode())
+            _logger.info("Application stderr")
+            _logger.info(self.application.get_logs()[1].decode())
+            self.application.stop()
+        except Exception:
+            _logger.exception("Failed to tear down application")
+
+        self.mock_collector_client.clear_signals()
 
     # pylint: disable=no-self-use
     # Methods that should be overridden in subclasses
+    @classmethod
+    def set_up_dependency_container(cls):
+        return
+
+    @classmethod
+    def tear_down_dependency_container(cls):
+        return
+
     def get_application_port(self) -> int:
         return 8080
 

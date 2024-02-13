@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 
 from requests import Response, request
-from typing_extensions import override
+from typing_extensions import Tuple, override
 
 _PORT: int = 8080
 _NETWORK_ALIAS: str = "backend"
@@ -48,7 +48,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    server_address: tuple[str, int] = ("0.0.0.0", _PORT)
+    server_address: Tuple[str, int] = ("0.0.0.0", _PORT)
     request_handler_class: type = RequestHandler
     requests_server: ThreadingHTTPServer = ThreadingHTTPServer(server_address, request_handler_class)
     atexit.register(requests_server.shutdown)

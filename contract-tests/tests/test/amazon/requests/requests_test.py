@@ -65,18 +65,18 @@ class RequestsTest(ContractTestBase):
     def do_test_requests(
         self, path: str, method: str, status_code: int, expected_error: int, expected_fault: int
     ) -> None:
-        address: str = self._application.get_container_host_ip()
-        port: str = self._application.get_exposed_port(self.get_application_port())
+        address: str = self.application.get_container_host_ip()
+        port: str = self.application.get_exposed_port(self.get_application_port())
         url: str = f"http://{address}:{port}/{path}"
         response: Response = request(method, url, timeout=20)
 
         self.assertEqual(status_code, response.status_code)
 
-        resource_scope_spans: List[ResourceScopeSpan] = self._mock_collector_client.get_traces()
+        resource_scope_spans: List[ResourceScopeSpan] = self.mock_collector_client.get_traces()
         self._assert_aws_span_attributes(resource_scope_spans, method, path)
         self._assert_semantic_conventions_span_attributes(resource_scope_spans, method, path, status_code)
 
-        metrics: List[ResourceScopeMetric] = self._mock_collector_client.get_metrics(
+        metrics: List[ResourceScopeMetric] = self.mock_collector_client.get_metrics(
             {LATENCY_METRIC, ERROR_METRIC, FAULT_METRIC}
         )
         self._assert_metric_attributes(metrics, method, path, LATENCY_METRIC, 5000)

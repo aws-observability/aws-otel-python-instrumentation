@@ -1,0 +1,90 @@
+#This Release Build workflow is not fully ready yet, will be tested as Beta release when it is ready.
+name: Release Build
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The version to tag the release with, e.g., 1.2.0, 1.2.1-alpha.1
+        required: true
+
+env:
+  AWS_DEFAULT_REGION: us-east-1
+  ECR_REGISTRY: 637423224110.dkr.ecr.us-east-1.amazonaws.com
+  PRIVATE_ECR_REPOSITORY: eks/observability/adot-autoinstrumentation-python
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@v4
+
+      - name: Build Wheel and Image Files
+        uses: ./.github/actions/artifacts_build
+        with:
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+          image_uri_with_tag: ${{ env.ECR_REGISTRY }}/${{ env.PRIVATE_ECR_REPOSITORY }}:v${{ github.event.inputs.version }}
+          image_registry: ${{ env.ECR_REGISTRY }}
+          snapshot-ecr-role: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
+          push_image: false
+          load_image: false
+          python_version: 3.11
+          package_name: aws-opentelemetry-distro
+          os: ubuntu-latest
+
+      - name: Get PyPI secrets by name and ARN
+        uses: aws-actions/aws-secretsmanager-get-secrets@v1
+        id: pypi_secrets
+        with:
+          secret-ids: |
+            PROD_PYPI_TOKEN,arn:aws:secretsmanager:us-east-1:637423224110:secret:prod/PyPI/apiToken-W2a9ny
+            TEST_PYPI_TOKEN,arn:aws:secretsmanager:us-east-1:637423224110:secret:test/PyPI/apiToken-z5iqc6
+
+      - name: Export distro version
+        id: distro_version
+        shell: bash
+        run: |
+          pkg_version=$(grep '__version__' ./aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py | awk -F '"' '{print $2}')
+          echo "ADOT_PYTHON_VERSION=$pkg_version" >> $GITHUB_OUTPUT
+
+      # The step below publishes to testpypi in order to catch any issues
+      # with the package configuration that would cause a failure to upload to pypi.
+      - name: Publish to TestPyPI
+        env:
+          TWINE_USERNAME: '__token__'
+          TWINE_PASSWORD: ${{ steps.pypi_secrets.outputs.TEST_PYPI_TOKEN }}
+        run: |
+          pip install --upgrade twine
+          twine upload --repository testpypi --skip-existing --verbose dist/aws_opentelemetry_distro-${{ steps.distro_version.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl
+
+      - name: Push release image
+        uses: docker/build-push-action@v5
+        with:
+          push: true
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ env.ECR_REGISTRY }}/${{ env.PRIVATE_ECR_REPOSITORY }}:v${{ github.event.inputs.version }}
+
+#TODO: Uncomment "Publish to PyPI" after test release_build workflow.
+#      - name: Publish to PyPI
+#        env:
+#          TWINE_USERNAME: '__token__'
+#          TWINE_PASSWORD: ${{ steps.pypi_secrets.outputs.PROD_PYPI_TOKEN }}
+#        run: |
+#          twine upload --skip-existing --verbose dist/aws_opentelemetry_distro-${{ steps.distro_version.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl
+
+      - name: Create release
+        id: create_release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
+        run: |
+          gh release create --target "$GITHUB_REF_NAME" \
+             --title "Release v${{ github.event.inputs.version }}" \
+             --draft \
+             "v${{ github.event.inputs.version }}" \
+             dist/aws_opentelemetry_distro-${{ steps.distro_version.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl
