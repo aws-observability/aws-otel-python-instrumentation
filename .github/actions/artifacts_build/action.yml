@@ -38,7 +38,7 @@ runs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: ${{ inputs.python_version }}
 
     - name: Install tox
       shell: bash
@@ -51,11 +51,11 @@ runs:
         path: |
           .tox
           ~/.cache/pip
-        key: v7-build-tox-cache-${{ matrix.python-version }}-${{ inputs.package_name }}-${{ inputs.os }}-${{ hashFiles('tox.ini', 'dev-requirements.txt') }}
+        key: v7-build-tox-cache-${{ inputs.python_version }}-${{ inputs.package_name }}-${{ inputs.os }}-${{ hashFiles('tox.ini', 'dev-requirements.txt') }}
 
     - name: run tox
       shell: bash
-      run: tox -f ${{ matrix.python-version }}-${{ inputs.package_name }} -- -ra --benchmark-json=${{ matrix.python-version }}-${{ inputs.package_name }}-${{ inputs.os }}-benchmark.json
+      run: tox -f ${{ inputs.python_version }}-${{ inputs.package_name }} -- -ra --benchmark-json=${{ inputs.python_version }}-${{ inputs.package_name }}-${{ inputs.os }}-benchmark.json
 
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v4
