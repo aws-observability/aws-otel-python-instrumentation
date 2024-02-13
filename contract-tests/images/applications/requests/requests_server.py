@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 
 from requests import Response, request
-from typing_extensions import override, Tuple
+from typing_extensions import Tuple, override
 
 _PORT: int = 8080
 _NETWORK_ALIAS: str = "backend"
