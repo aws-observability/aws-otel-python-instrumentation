@@ -65,7 +65,7 @@ jobs:
         run: |
           pwd
           pkg_version=$(grep '__version__' ./aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py | awk -F '"' '{print $2}')
-          echo "ADOT_PYTHON_VERSION=$pkg_version" >> $GITHUB_OUTPUT
+          echo "ADOT_PYTHON_VERSION=$pkg_version"
           gh release create --target "$GITHUB_REF_NAME" \
              --title "Release v${{ github.event.inputs.version }}" \
              --draft \
