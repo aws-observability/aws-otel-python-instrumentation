@@ -45,12 +45,22 @@ jobs:
             PROD_PYPI_TOKEN,arn:aws:secretsmanager:us-east-1:637423224110:secret:prod/PyPI/apiToken-W2a9ny
             TEST_PYPI_TOKEN,arn:aws:secretsmanager:us-east-1:637423224110:secret:test/PyPI/apiToken-z5iqc6
 
+      - name: Push Release image
+        uses: docker/build-push-action@v5
+        with:
+          push: true
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ env.ECR_REGISTRY }}/${{ env.PRIVATE_ECR_REPOSITORY }}:v_test
+
       - name: Create release
         id: create_release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
         run: |
-          pkg_version=$(grep '__version__' ../aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py | awk -F '"' '{print $2}')
+          pwd
+          pkg_version=$(grep '__version__' ./aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py | awk -F '"' '{print $2}')
           echo "ADOT_PYTHON_VERSION=$pkg_version" >> $GITHUB_OUTPUT
           gh release create --target "$GITHUB_REF_NAME" \
              --title "Release v${{ github.event.inputs.version }}" \
@@ -67,15 +77,6 @@ jobs:
         run: |
           pip install --upgrade twine
           twine upload --repository testpypi --skip-existing --verbose dist/aws_opentelemetry_distro-${{ steps.create_release.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl
-
-      - name: Push Release image
-        uses: docker/build-push-action@v5
-        with:
-          push: true
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ env.ECR_REGISTRY }}/${{ env.PRIVATE_ECR_REPOSITORY }}:v_test
 
 #TODO: Uncomment "Publish to PyPI" after test release_build workflow.
 #      - name: Publish to PyPI
