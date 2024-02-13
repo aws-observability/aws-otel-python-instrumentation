@@ -76,4 +76,10 @@ jobs:
           name: aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION}}-py3-none-any.whl
           path: dist/${{ steps.staging_wheel_output.outputs.STAGING_WHEEL}}
 
-#  TODO: Add Contract test and E2E test
+      - name: Set up and run contract tests with pytest
+        run: |
+          bash contract-tests/set-up-contract-tests.sh
+          pip install pytest
+          pytest contract-tests/tests
+
+#  TODO: Add E2E tests
