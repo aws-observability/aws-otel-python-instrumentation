@@ -1,9 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 """Utility module designed to support shared logic across AWS Span Processors."""
-from typing import Dict, Set
-
-import sqlparse
+import json
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND, AWS_LOCAL_OPERATION
 from opentelemetry.sdk.trace import InstrumentationScope, ReadableSpan
@@ -18,51 +16,6 @@ UNKNOWN_REMOTE_OPERATION: str = "UnknownRemoteOperation"
 INTERNAL_OPERATION: str = "InternalOperation"
 LOCAL_ROOT: str = "LOCAL_ROOT"
 
-# The valid keywords retrieved from db.statement if no db.operation value is identified
-DIALECT_KEYWORDS: Dict[str, Set[str]] = {
-    "CUSTOM_DIALECT": {
-        "DROP VIEW",
-        "INNER JOIN",
-        "SELECT TOP",
-        "NOT NULL",
-        "TRUNCATE TABLE",
-        "OUTER JOIN",
-        "CREATE TABLE",
-        "ALTER TABLE",
-        "CREATE INDEX",
-        "ORDER BY",
-        "BACKUP DATABASE",
-        "INSERT INTO SELECT",
-        "UNION ALL",
-        "PRIMARY KEY",
-        "IS NOT NULL",
-        "DROP CONSTRAINT",
-        "TOP",
-        "IS NULL",
-        "LEFT JOIN",
-        "CREATE DATABASE",
-        "DROP DATABASE",
-        "FOREIGN KEY",
-        "DROP DEFAULT",
-        "SELECT INTO",
-        "GROUP BY",
-        "SELECT DISTINCT",
-        "DROP COLUMN",
-        "RIGHT JOIN",
-        "DROP INDEX",
-        "CREATE VIEW",
-        "ALTER COLUMN",
-        "INSERT INTO",
-        "DROP TABLE",
-        "FULL OUTER JOIN",
-    },
-    "ANSI_SQL": sqlparse.keywords.KEYWORDS_COMMON,
-    "PL_PGSQL": sqlparse.keywords.KEYWORDS_ORACLE,
-    "POSTGRESQL": sqlparse.keywords.KEYWORDS_PLPGSQL,
-    "HQL": sqlparse.keywords.KEYWORDS_HQL,
-    "KEYWORDS_MSACCESS": sqlparse.keywords.KEYWORDS_MSACCESS,
-    "KEYWORDS": sqlparse.keywords.KEYWORDS,
-}
 # Useful constants
 _SQS_RECEIVE_MESSAGE_SPAN_NAME: str = "Sqs.ReceiveMessage"
 _AWS_SDK_INSTRUMENTATION_SCOPE_PREFIX: str = "io.opentelemetry.aws-sdk-"
@@ -143,6 +96,13 @@ def is_local_root(span: ReadableSpan) -> bool:
     and returns true if it is a local root.
     """
     return span.parent is None or not span.parent.is_valid or span.parent.is_remote
+
+
+# Get valid keywords retrieved from db.statement if no db.operation value is identified
+def get_dialect_keywords():
+    with open("configuration/dialect_keywords.json", "r") as json_file:
+        keywords_data = json.load(json_file)
+    return keywords_data["keywords"]
 
 
 def _is_sqs_receive_message_consumer_span(span: ReadableSpan) -> bool:

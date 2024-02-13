@@ -386,7 +386,9 @@ class TestAwsMetricAttributeGenerator(TestCase):
         )
 
         # Validate behaviour of various combinations of DB attributes.
-        # Validate db.operation not exist, but db.statement exist, where SpanAttributes.DB_STATEMENT is valid
+        # Validate SpanAttributes.DB_OPERATION not exist, but SpanAttributes.DB_STATEMENT exist,
+        # where SpanAttributes.DB_STATEMENT is valid
+        # Case 1: Only 1 valid keywords match
         keys, values = self._mock_attribute(
             [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT, SpanAttributes.DB_OPERATION],
             ["DB system", "SELECT DB statement", None],
@@ -395,10 +397,39 @@ class TestAwsMetricAttributeGenerator(TestCase):
         )
         self._validate_expected_remote_attributes("DB system", "SELECT")
 
+        # Case 2: More than 1 valid keywords match, we want to pick the longest match
+        keys, values = self._mock_attribute(
+            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT, SpanAttributes.DB_OPERATION],
+            ["DB system", "DROP VIEW DB statement", None],
+            keys,
+            values,
+        )
+        self._validate_expected_remote_attributes("DB system", "DROP VIEW")
+
+        # Case 3: More than 1 valid keywords match, but the other keywords is not
+        # at the start of the SpanAttributes.DB_STATEMENT. We want to only pick start match
+        keys, values = self._mock_attribute(
+            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT, SpanAttributes.DB_OPERATION],
+            ["DB system", "SELECT data FROM domains", None],
+            keys,
+            values,
+        )
+        self._validate_expected_remote_attributes("DB system", "SELECT")
+
         # Validate db.operation not exist, but db.statement exist, where SpanAttributes.DB_STATEMENT is invalid
+        # Case 1: No valid match
         keys, values = self._mock_attribute(
             [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT, SpanAttributes.DB_OPERATION],
             ["DB system", "invalid DB statement", None],
+            keys,
+            values,
+        )
+        self._validate_expected_remote_attributes("DB system", _UNKNOWN_REMOTE_OPERATION)
+
+        # Case 2: Have valid but it is not at the start of SpanAttributes.DB_STATEMENT
+        keys, values = self._mock_attribute(
+            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT, SpanAttributes.DB_OPERATION],
+            ["DB system", "invalid SELECT DB statement", None],
             keys,
             values,
         )

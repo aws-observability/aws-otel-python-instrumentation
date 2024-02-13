@@ -14,13 +14,13 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_SPAN_KIND,
 )
 from amazon.opentelemetry.distro._aws_span_processing_util import (
-    DIALECT_KEYWORDS,
     LOCAL_ROOT,
     UNKNOWN_OPERATION,
     UNKNOWN_REMOTE_OPERATION,
     UNKNOWN_REMOTE_SERVICE,
     UNKNOWN_SERVICE,
     extract_api_path_value,
+    get_dialect_keywords,
     get_egress_operation,
     get_ingress_operation,
     is_key_present,
@@ -238,7 +238,11 @@ def _get_remote_operation(span: ReadableSpan, remote_operation_key: str) -> str:
     return remote_operation
 
 
-# If no db.operation attribute provided in the span, we use db.statement to retrieved valid remote operation
+# If no db.operation attribute provided in the span,
+# we use db.statement to compute a valid remote operation in a best-effort manner.
+# To do this, we take the first substring of the statement
+# and compare to a regex list of known SQL keywords.
+# The substring length is determined by the longest known SQL keywords.
 def _get_db_statement_remote_operation(span: ReadableSpan, statement_key: str) -> str:
     remote_operation: str = span.attributes.get(statement_key)
 
@@ -246,12 +250,10 @@ def _get_db_statement_remote_operation(span: ReadableSpan, statement_key: str) -
         return UNKNOWN_REMOTE_OPERATION
 
     # Iterate through supported SQL dialects and match keywords at the beginning of the remote_operation
-    remote_operation = remote_operation[:20]
-    for keywords in DIALECT_KEYWORDS.values():
-        pattern: re.Pattern[str] = r"^(?:" + "|".join(keywords) + r")\b"
-        match: Union[re.Match[str], None] = re.match(pattern, remote_operation.upper())
-        if match:
-            break
+    dialect_keywords = get_dialect_keywords()
+    remote_operation = remote_operation[:27]
+    pattern: re.Pattern[str] = r"^(?:" + "|".join(dialect_keywords) + r")\b"
+    match: Union[re.Match[str], None] = re.match(pattern, remote_operation.upper())
     remote_operation = match.group(0) if match else UNKNOWN_REMOTE_OPERATION
 
     return remote_operation
