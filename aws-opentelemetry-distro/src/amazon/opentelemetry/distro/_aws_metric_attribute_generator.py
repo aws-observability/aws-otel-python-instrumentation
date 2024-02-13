@@ -1,7 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import re
 from logging import DEBUG, Logger, getLogger
-from typing import Optional
+from typing import Optional, Union
 from urllib.parse import ParseResult, urlparse
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
@@ -13,6 +14,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_SPAN_KIND,
 )
 from amazon.opentelemetry.distro._aws_span_processing_util import (
+    DIALECT_KEYWORDS,
     LOCAL_ROOT,
     UNKNOWN_OPERATION,
     UNKNOWN_REMOTE_OPERATION,
@@ -23,7 +25,6 @@ from amazon.opentelemetry.distro._aws_span_processing_util import (
     get_ingress_operation,
     is_key_present,
     is_local_root,
-    is_valid_db_operation,
     should_generate_dependency_metric_attributes,
     should_generate_service_metric_attributes,
 )
@@ -256,13 +257,17 @@ def _get_remote_operation(span: ReadableSpan, remote_operation_key: str) -> str:
     return remote_operation
 
 
+# If no db.operation attribute provided in the span, we use db.statement to retrieved valid remote operation
 def _get_db_statement_remote_operation(span: ReadableSpan, statement_key: str) -> str:
-    remote_operation: str = span.attributes.get(statement_key)
-    if remote_operation is None:
-        remote_operation = UNKNOWN_REMOTE_OPERATION
+    remote_operation: str = span.attributes.get(statement_key)[:20]
 
-    operation = remote_operation.split()[0]
-    remote_operation = operation if is_valid_db_operation(operation) else UNKNOWN_REMOTE_OPERATION
+    # Iterate through supported SQL dialects and match keywords at the beginning of the remote_operation
+    for keywords in DIALECT_KEYWORDS.values():
+        pattern: re.Pattern[str] = r"^(?:" + "|".join(keywords) + r")\b"
+        match: Union[re.Match[str], None] = re.match(pattern, remote_operation.upper())
+        if match:
+            break
+    remote_operation = match.group(0) if match else UNKNOWN_REMOTE_OPERATION
 
     return remote_operation
 

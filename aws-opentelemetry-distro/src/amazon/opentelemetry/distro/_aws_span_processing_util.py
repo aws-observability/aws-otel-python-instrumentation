@@ -1,7 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 """Utility module designed to support shared logic across AWS Span Processors."""
-from typing import Set
+from typing import Dict, Set
+
+import sqlparse
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND, AWS_LOCAL_OPERATION
 from opentelemetry.sdk.trace import InstrumentationScope, ReadableSpan
@@ -16,38 +18,51 @@ UNKNOWN_REMOTE_OPERATION: str = "UnknownRemoteOperation"
 INTERNAL_OPERATION: str = "InternalOperation"
 LOCAL_ROOT: str = "LOCAL_ROOT"
 
-# The valid remote operation values retrieved from db.statement if no db.operation value is identified
-VALID_DB_OPERATION: Set[str] = {
-    "SELECT",
-    "INSERT",
-    "UPDATE",
-    "DELETE",
-    "CREATE",
-    "DROP",
-    "ALTER",
-    "TRUNCATE",
-    "COPY",
-    "ANALYZE",
-    "VACUUM",
-    "EXPLAIN",
-    "GRANT",
-    "REVOKE",
-    "SET",
-    "BEGIN",
-    "COMMIT",
-    "ROLLBACK",
-    "SAVEPOINT",
-    "LISTEN",
-    "NOTIFY",
-    "DISCARD",
-    "SHOW",
-    "LOCK",
-    "UNLOCK",
-    "REINDEX",
-    "CLUSTER",
-    "COMMENT",
+# The valid keywords retrieved from db.statement if no db.operation value is identified
+DIALECT_KEYWORDS: Dict[str, Set[str]] = {
+    "CUSTOM_DIALECT": {
+        "DROP VIEW",
+        "INNER JOIN",
+        "SELECT TOP",
+        "NOT NULL",
+        "TRUNCATE TABLE",
+        "OUTER JOIN",
+        "CREATE TABLE",
+        "ALTER TABLE",
+        "CREATE INDEX",
+        "ORDER BY",
+        "BACKUP DATABASE",
+        "INSERT INTO SELECT",
+        "UNION ALL",
+        "PRIMARY KEY",
+        "IS NOT NULL",
+        "DROP CONSTRAINT",
+        "TOP",
+        "IS NULL",
+        "LEFT JOIN",
+        "CREATE DATABASE",
+        "DROP DATABASE",
+        "FOREIGN KEY",
+        "DROP DEFAULT",
+        "SELECT INTO",
+        "GROUP BY",
+        "SELECT DISTINCT",
+        "DROP COLUMN",
+        "RIGHT JOIN",
+        "DROP INDEX",
+        "CREATE VIEW",
+        "ALTER COLUMN",
+        "INSERT INTO",
+        "DROP TABLE",
+        "FULL OUTER JOIN",
+    },
+    "ANSI_SQL": sqlparse.keywords.KEYWORDS_COMMON,
+    "PL_PGSQL": sqlparse.keywords.KEYWORDS_ORACLE,
+    "POSTGRESQL": sqlparse.keywords.KEYWORDS_PLPGSQL,
+    "HQL": sqlparse.keywords.KEYWORDS_HQL,
+    "KEYWORDS_MSACCESS": sqlparse.keywords.KEYWORDS_MSACCESS,
+    "KEYWORDS": sqlparse.keywords.KEYWORDS,
 }
-
 # Useful constants
 _SQS_RECEIVE_MESSAGE_SPAN_NAME: str = "Sqs.ReceiveMessage"
 _AWS_SDK_INSTRUMENTATION_SCOPE_PREFIX: str = "io.opentelemetry.aws-sdk-"
@@ -190,7 +205,3 @@ def _generate_ingress_operation(span: ReadableSpan) -> str:
                     operation = http_method + " " + operation
 
     return operation
-
-
-def is_valid_db_operation(operation: str) -> bool:
-    return operation.upper() in VALID_DB_OPERATION

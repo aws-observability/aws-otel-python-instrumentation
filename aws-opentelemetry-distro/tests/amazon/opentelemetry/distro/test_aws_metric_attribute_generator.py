@@ -341,6 +341,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
             SpanAttributes.RPC_METHOD,
             SpanAttributes.DB_SYSTEM,
             SpanAttributes.DB_OPERATION,
+            SpanAttributes.DB_STATEMENT,
             SpanAttributes.FAAS_INVOKED_PROVIDER,
             SpanAttributes.FAAS_INVOKED_NAME,
             SpanAttributes.MESSAGING_SYSTEM,
@@ -352,6 +353,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
             "unknown.operation.key",
         ]
         values: List[str] = [
+            "TestString",
             "TestString",
             "TestString",
             "TestString",
@@ -383,7 +385,26 @@ class TestAwsMetricAttributeGenerator(TestCase):
             SpanAttributes.RPC_SERVICE, "RPC service", SpanAttributes.RPC_METHOD, "RPC method", keys, values
         )
 
-        # Validate behaviour of various combinations of DB attributes, then remove them.
+        # Validate behaviour of various combinations of DB attributes.
+        # Validate db.operation not exist, but db.statement exist, where SpanAttributes.DB_STATEMENT is valid
+        keys, values = self._mock_attribute(
+            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT], ["DB system", "SELECT DB statement"], keys, values
+        )
+        self._validate_expected_remote_attributes("DB system", "SELECT")
+
+        # Validate db.operation not exist, but db.statement exist, where SpanAttributes.DB_STATEMENT is invalid
+        keys, values = self._mock_attribute(
+            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT], ["DB system", "invalid DB statement"], keys, values
+        )
+        self._validate_expected_remote_attributes("DB system", _UNKNOWN_REMOTE_OPERATION)
+
+        # Validate both db.operation and db.statement not exist.
+        keys, values = self._mock_attribute(
+            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT], ["DB system", None], keys, values
+        )
+        self._validate_expected_remote_attributes("DB system", _UNKNOWN_REMOTE_OPERATION)
+
+        # Validate db.operation exist, then remove it.
         keys, values = self._validate_and_remove_remote_attributes(
             SpanAttributes.DB_SYSTEM, "DB system", SpanAttributes.DB_OPERATION, "DB operation", keys, values
         )
