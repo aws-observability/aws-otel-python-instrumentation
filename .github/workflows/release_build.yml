@@ -30,7 +30,7 @@ jobs:
           snapshot-ecr-role: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
           push_image: false
           load_image: false
-          python_version: 3.11
+          python_version: "3.11"
           package_name: "aws-opentelemetry-distro"
           os: ubuntu-latest
 
