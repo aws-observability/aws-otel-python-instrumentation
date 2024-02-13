@@ -28,10 +28,6 @@ jobs:
         if: ${{ matrix.tox-environment == 'lint' }}
         run: sudo apt-get update && sudo apt-get install -y libsnappy-dev
 
-      - name: Debug Python Version
-        run:
-          echo "Python version is: ${{ matrix.python-version }}"
-
       - name: Build Wheel and Image Files
         uses: ./.github/actions/artifacts_build
         with:

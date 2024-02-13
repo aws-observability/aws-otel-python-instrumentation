@@ -1,17 +1,11 @@
 name: Release Build
 on:
-#  workflow_dispatch:
-#    inputs:
-#      version:
-#        description: The version to tag the release with, e.g., 1.2.0, 1.2.1-alpha.1
-#        required: true
-  push:
-    branches:
-      - main_workflow
-  pull_request:
-    branches:
-      - main
-      - "release/v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The version to tag the release with, e.g., 1.2.0, 1.2.1-alpha.1
+        required: true
+
 env:
   AWS_DEFAULT_REGION: us-east-1
   ECR_REGISTRY: 637423224110.dkr.ecr.us-east-1.amazonaws.com
@@ -32,7 +26,7 @@ jobs:
         uses: ./.github/actions/artifacts_build
         with:
           aws-region: ${{ env.AWS_DEFAULT_REGION }}
-          image_uri_with_tag: ${{ env.ECR_REGISTRY }}/${{ env.PRIVATE_ECR_REPOSITORY }}:v_test
+          image_uri_with_tag: ${{ env.ECR_REGISTRY }}/${{ env.PRIVATE_ECR_REPOSITORY }}:v${{ github.event.inputs.version }}
           image_registry: ${{ env.ECR_REGISTRY }}
           snapshot-ecr-role: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
           push_image: false
@@ -56,17 +50,15 @@ jobs:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
-          tags: ${{ env.ECR_REGISTRY }}/${{ env.PRIVATE_ECR_REPOSITORY }}:v_test
+          tags: ${{ env.ECR_REGISTRY }}/${{ env.PRIVATE_ECR_REPOSITORY }}:v${{ github.event.inputs.version }}
 
       - name: Create release
         id: create_release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
         run: |
-          pwd
           pkg_version=$(grep '__version__' ./aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py | awk -F '"' '{print $2}')
-          echo "ADOT_PYTHON_VERSION=$pkg_version"
-          echo "GITHUB_REF_NAME=$GITHUB_REF_NAME"
+          echo "ADOT_PYTHON_VERSION=$pkg_version" >> $GITHUB_OUTPUT
           gh release create --target "$GITHUB_REF_NAME" \
              --title "Release v${{ github.event.inputs.version }}" \
              --draft \
