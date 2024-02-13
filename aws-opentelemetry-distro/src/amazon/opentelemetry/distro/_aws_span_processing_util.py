@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Utility module designed to support shared logic across AWS Span Processors."""
 import json
+import os
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND, AWS_LOCAL_OPERATION
 from opentelemetry.sdk.trace import InstrumentationScope, ReadableSpan
@@ -100,6 +101,7 @@ def is_local_root(span: ReadableSpan) -> bool:
 
 # Get valid keywords retrieved from db.statement if no db.operation value is identified
 def get_dialect_keywords():
+    print("Current working directory:", os.getcwd())
     with open("./configuration/dialect_keywords.json", "r") as json_file:
         keywords_data = json.load(json_file)
     return keywords_data["keywords"]
