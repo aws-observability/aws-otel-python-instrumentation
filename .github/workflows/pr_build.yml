@@ -3,6 +3,7 @@ on:
   pull_request:
     branches:
       - main
+      - main_workflow
       - "release/v*"
 
 env:
@@ -15,30 +16,15 @@ permissions:
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        os: [ ubuntu-latest ]
+        python-version: [3.8, 3.9, 3.10, 3.11]
         tox-environment: ["spellcheck", "lint"]
     steps:
-      - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.11
-
       - name: Install libsnappy-dev
         if: ${{ matrix.tox-environment == 'lint' }}
-        run: |
-          if ( test "${{ matrix.os }}" == "ubuntu-latest" ); then
-            sudo apt-get update && sudo apt-get install -y libsnappy-dev
-          elif ( test "${{ matrix.os }}" == "macos-latest" ); then
-            brew install snappy
-          elif ( test "${{ matrix.os }}" == "windows-latest" ); then
-            choco install snappy
-          fi
+        run: sudo apt-get update && sudo apt-get install -y libsnappy-dev
 
       - name: Build Wheel and Image Files
         uses: ./.github/actions/artifacts_build
@@ -49,6 +35,9 @@ jobs:
           snapshot-ecr-role: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
           push_image: false
           load_image: true
+          python_version: ${{ matrix.python-version }}
+          package_name: "aws-opentelemetry-distro"
+          os: ubuntu-latest
 
       - name: run spell check tox
         run: tox -e ${{ matrix.tox-environment }}

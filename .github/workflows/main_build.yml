@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - main_workflow
       - "release/v*"
 env:
   AWS_DEFAULT_REGION: us-east-1
@@ -29,14 +30,6 @@ jobs:
       staging_repository: ${{ steps.python_output.outputs.stagingRepository}}
       staging_wheel_file: ${{ steps.staging_wheel_output.outputs.STAGING_WHEEL}}
     steps:
-      - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.11
-
       - name: Get Python Distro Output
         id: python_output
         run: |
@@ -59,6 +52,9 @@ jobs:
           snapshot-ecr-role: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
           push_image: true
           load_image: false
+          python_version: 3.11
+          package_name: "aws-opentelemetry-distro"
+          os: ubuntu-latest
 
       - name: Output Wheel File Name
         id: staging_wheel_output
@@ -70,9 +66,6 @@ jobs:
 
       - name: Upload wheel to S3
         run: |
-          pwd
-          echo "dist/${{ steps.staging_wheel_output.outputs.STAGING_WHEEL}}"
-          echo "${{ env.S3_INTEGRATION_BUCKET }}"
           aws s3 cp dist/${{ steps.staging_wheel_output.outputs.STAGING_WHEEL}} ${{ env.S3_INTEGRATION_BUCKET }}
 
       - name: Upload Wheel to GitHub Actions

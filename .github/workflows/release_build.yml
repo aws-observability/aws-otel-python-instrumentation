@@ -18,14 +18,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
-        uses: actions/checkout@v2
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.11
-
       - name: Build Wheel and Image Files
         uses: ./.github/actions/artifacts_build
         with:
@@ -35,6 +27,9 @@ jobs:
           snapshot-ecr-role: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
           push_image: false
           load_image: false
+          python_version: 3.11
+          package_name: "aws-opentelemetry-distro"
+          os: ubuntu-latest
 
       - name: Get PyPI secrets by name and ARN
         uses: aws-actions/aws-secretsmanager-get-secrets@v1

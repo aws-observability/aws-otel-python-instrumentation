@@ -17,15 +17,32 @@ inputs:
     description: "IAM Role used for pushing to snapshot ecr"
   push_image:
     required: true
-    description: "Whether Push image to ECR"
+    description: "Whether push image to ECR"
   load_image:
     required: true
-    description: "Whether Push image to ECR"
+    description: "Whether load the image for the following use, only load in PR build"
+  python_version:
+    required: true
+    description: "The python version used in actions"
+  package_name:
+    required: true
+    description: "The package name"
+  os:
+    required: true
+    description: "The os"
 
 
 runs:
   using: "composite"
   steps:
+    - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
     - name: Install tox
       shell: bash
       run: pip install tox==3.27.1 tox-factor
@@ -37,11 +54,11 @@ runs:
         path: |
           .tox
           ~/.cache/pip
-        key: v7-build-tox-cache-py38-aws-opentelemetry-distro-ubuntu-latest-${{ hashFiles('tox.ini', 'dev-requirements.txt') }}
+        key: v7-build-tox-cache-${{ matrix.python-version }}-${{ matrix.package }}-${{ matrix.os }}-${{ hashFiles('tox.ini', 'dev-requirements.txt') }}
 
     - name: run tox
       shell: bash
-      run: tox -f py38-aws-opentelemetry-distro -- -ra --benchmark-json=py38-aws-opentelemetry-distro-ubuntu-latest-benchmark.json
+      run: tox -f ${{ matrix.python-version }}-${{ matrix.package }} -- -ra --benchmark-json=${{ matrix.python-version }}-${{ matrix.package }}-${{ matrix.os }}-benchmark.json
 
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v4
