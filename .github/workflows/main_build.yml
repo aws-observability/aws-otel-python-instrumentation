@@ -54,8 +54,8 @@ jobs:
           snapshot-ecr-role: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
           push_image: true
           load_image: false
-          python_version: "3.11"
-          package_name: "aws-opentelemetry-distro"
+          python_version: 3.11
+          package_name: aws-opentelemetry-distro
           os: ubuntu-latest
 
       - name: Output Wheel File Name

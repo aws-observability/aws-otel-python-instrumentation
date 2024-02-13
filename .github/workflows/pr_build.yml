@@ -38,7 +38,7 @@ jobs:
           push_image: false
           load_image: true
           python_version: ${{ matrix.python-version }}
-          package_name: "aws-opentelemetry-distro"
+          package_name: aws-opentelemetry-distro
           os: ubuntu-latest
 
       - name: run spell check tox

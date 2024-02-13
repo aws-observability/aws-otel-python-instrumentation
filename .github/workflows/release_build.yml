@@ -33,8 +33,8 @@ jobs:
           snapshot-ecr-role: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
           push_image: false
           load_image: false
-          python_version: "3.11"
-          package_name: "aws-opentelemetry-distro"
+          python_version: 3.11
+          package_name: aws-opentelemetry-distro
           os: ubuntu-latest
 
       - name: Get PyPI secrets by name and ARN
@@ -68,7 +68,7 @@ jobs:
              "v${{ github.event.inputs.version }}" \
              dist/aws_opentelemetry_distro-$pkg_version-py3-none-any.whl
           
-            # The step below publishes to testpypi in order to catch any issues
+      # The step below publishes to testpypi in order to catch any issues
       # with the package configuration that would cause a failure to upload to pypi.
       - name: Publish to TestPyPI
         env:
