@@ -101,8 +101,10 @@ def is_local_root(span: ReadableSpan) -> bool:
 
 # Get valid keywords retrieved from db.statement if no db.operation value is identified
 def get_dialect_keywords():
-    print("Current working directory:", os.getcwd())
-    with open("./amazon/opentelemetry/distro/configuration/dialect_keywords.json", "r") as json_file:
+    project_dir = os.path.dirname(os.path.abspath("pyproject.toml"))
+    file_path = os.path.join(project_dir, "configuration/dialect_keywords.json")
+    print("Current working directory:",file_path)
+    with open(file_path, "r") as json_file:
         keywords_data = json.load(json_file)
     return keywords_data["keywords"]
 
