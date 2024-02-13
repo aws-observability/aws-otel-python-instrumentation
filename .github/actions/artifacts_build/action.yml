@@ -55,7 +55,9 @@ runs:
 
     - name: run tox
       shell: bash
-      run: tox -f ${{ inputs.python-version }}-${{ inputs.package }} -- -ra --benchmark-json=${{ inputs.python-version }}-${{ inputs.package }}-${{ inputs.os }}-benchmark.json
+      run: |
+        echo "python_version=${{ inputs.python-version }}"
+        tox -f ${{ inputs.python-version }}-${{ inputs.package }} -- -ra --benchmark-json=${{ inputs.python-version }}-${{ inputs.package }}-${{ inputs.os }}-benchmark.json
 
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v4
