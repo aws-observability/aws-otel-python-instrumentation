@@ -259,12 +259,13 @@ def _get_remote_operation(span: ReadableSpan, remote_operation_key: str) -> str:
 
 # If no db.operation attribute provided in the span, we use db.statement to retrieved valid remote operation
 def _get_db_statement_remote_operation(span: ReadableSpan, statement_key: str) -> str:
-    remote_operation: str = span.attributes.get(statement_key)[:20]
+    remote_operation: str = span.attributes.get(statement_key)
 
     if remote_operation is None:
         return UNKNOWN_REMOTE_OPERATION
 
     # Iterate through supported SQL dialects and match keywords at the beginning of the remote_operation
+    remote_operation = remote_operation[:20]
     for keywords in DIALECT_KEYWORDS.values():
         pattern: re.Pattern[str] = r"^(?:" + "|".join(keywords) + r")\b"
         match: Union[re.Match[str], None] = re.match(pattern, remote_operation.upper())
