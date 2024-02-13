@@ -48,7 +48,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    server_address: tuple[str, int] = ("0.0.0.0", _PORT)
+    server_address: Tuple[str, int] = ("0.0.0.0", _PORT)
     request_handler_class: type = RequestHandler
     requests_server: ThreadingHTTPServer = ThreadingHTTPServer(server_address, request_handler_class)
     atexit.register(requests_server.shutdown)
