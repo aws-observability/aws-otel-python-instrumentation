@@ -28,7 +28,7 @@ jobs:
         uses: ./.github/actions/artifacts_build
         with:
           aws-region: ${{ env.AWS_DEFAULT_REGION }}
-          image_uri_with_tag: ${{ env.ECR_REGISTRY }}/${{ env.PRIVATE_ECR_REPOSITORY }}:v${{ github.event.inputs.version }}
+          image_uri_with_tag: ${{ env.ECR_REGISTRY }}/${{ env.PRIVATE_ECR_REPOSITORY }}:v_test
           image_registry: ${{ env.ECR_REGISTRY }}
           snapshot-ecr-role: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
           push_image: false
@@ -50,7 +50,7 @@ jobs:
       - name: Publish to TestPyPI
         env:
           TWINE_USERNAME: '__token__'
-          TWINE_PASSWORD: ${{ steps.pypi_secrets.outputs.test/PyPI/apiToken }}
+          TWINE_PASSWORD: ${{ steps.pypi_secrets.outputs.test.PyPI.apiToken }}
         run: |
           twine upload --repository testpypi --skip-existing --verbose dist/aws_opentelemetry_distro-${{ steps.create_release.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl
 
@@ -74,7 +74,7 @@ jobs:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
-          tags: ${{ env.ECR_REGISTRY }}/${{ env.PRIVATE_ECR_REPOSITORY }}:v${{ github.event.inputs.version }}
+          tags: ${{ env.ECR_REGISTRY }}/${{ env.PRIVATE_ECR_REPOSITORY }}:v_test
 
 #TODO: Uncomment "Publish to PyPI" after test release_build workflow.
 #      - name: Publish to PyPI
