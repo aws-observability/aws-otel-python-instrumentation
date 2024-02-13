@@ -100,7 +100,7 @@ def is_local_root(span: ReadableSpan) -> bool:
 
 # Get valid keywords retrieved from db.statement if no db.operation value is identified
 def get_dialect_keywords():
-    with open("configuration/dialect_keywords.json", "r") as json_file:
+    with open("./configuration/dialect_keywords.json", "r") as json_file:
         keywords_data = json.load(json_file)
     return keywords_data["keywords"]
 
