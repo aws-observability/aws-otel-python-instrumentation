@@ -388,19 +388,19 @@ class TestAwsMetricAttributeGenerator(TestCase):
         # Validate behaviour of various combinations of DB attributes.
         # Validate db.operation not exist, but db.statement exist, where SpanAttributes.DB_STATEMENT is valid
         keys, values = self._mock_attribute(
-            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT], ["DB system", "SELECT DB statement"], keys, values
+            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT, SpanAttributes.DB_OPERATION], ["DB system", "SELECT DB statement", None], keys, values
         )
         self._validate_expected_remote_attributes("DB system", "SELECT")
 
         # Validate db.operation not exist, but db.statement exist, where SpanAttributes.DB_STATEMENT is invalid
         keys, values = self._mock_attribute(
-            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT], ["DB system", "invalid DB statement"], keys, values
+            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT, SpanAttributes.DB_OPERATION], ["DB system", "invalid DB statement", None], keys, values
         )
         self._validate_expected_remote_attributes("DB system", _UNKNOWN_REMOTE_OPERATION)
 
         # Validate both db.operation and db.statement not exist.
         keys, values = self._mock_attribute(
-            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT], ["DB system", None], keys, values
+            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT, SpanAttributes.DB_OPERATION], ["DB system", None, None], keys, values
         )
         self._validate_expected_remote_attributes("DB system", _UNKNOWN_REMOTE_OPERATION)
 
