@@ -5,6 +5,9 @@ on:
       version:
         description: The version to tag the release with, e.g., 1.2.0, 1.2.1-alpha.1
         required: true
+  push:
+    branches:
+      - main_workflow
 env:
   AWS_DEFAULT_REGION: us-east-1
   ECR_REGISTRY: 637423224110.dkr.ecr.us-east-1.amazonaws.com
