@@ -103,7 +103,7 @@ def is_local_root(span: ReadableSpan) -> bool:
 def get_dialect_keywords():
     current_dir = os.path.dirname(__file__)
     file_path = os.path.join(current_dir, "configuration/dialect_keywords.json")
-    with open(file_path, "r") as json_file:
+    with open(file_path, "r", encoding="utf-8") as json_file:
         keywords_data = json.load(json_file)
     return keywords_data["keywords"]
 
