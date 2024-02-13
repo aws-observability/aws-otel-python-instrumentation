@@ -22,6 +22,9 @@ jobs:
         python-version: [3.8, 3.9, 3.10, 3.11]
         tox-environment: ["spellcheck", "lint"]
     steps:
+      - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@v4
+
       - name: Install libsnappy-dev
         if: ${{ matrix.tox-environment == 'lint' }}
         run: sudo apt-get update && sudo apt-get install -y libsnappy-dev

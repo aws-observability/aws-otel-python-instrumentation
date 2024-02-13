@@ -18,6 +18,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@v4
+
       - name: Build Wheel and Image Files
         uses: ./.github/actions/artifacts_build
         with:
