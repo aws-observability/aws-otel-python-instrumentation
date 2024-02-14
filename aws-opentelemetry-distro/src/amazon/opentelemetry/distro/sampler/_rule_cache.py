@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from logging import getLogger
 from threading import Lock
-from typing import Optional, Sequence
+from typing import Dict, Optional, Sequence
 
 from amazon.opentelemetry.distro.sampler._clock import _Clock
 from amazon.opentelemetry.distro.sampler._fallback_sampler import _FallbackSampler
@@ -77,7 +77,7 @@ class _RuleCache:
         self.__cache_lock.acquire()
 
         # map list of rule appliers by each applier's sampling_rule name
-        rule_applier_map: dict[str, _SamplingRuleApplier] = {
+        rule_applier_map: Dict[str, _SamplingRuleApplier] = {
             applier.sampling_rule.RuleName: applier for applier in self.__rule_appliers
         }
 
@@ -99,7 +99,7 @@ class _RuleCache:
 
         self.__cache_lock.acquire()
 
-        rule_applier_map: dict[str, _SamplingRuleApplier] = {
+        rule_applier_map: Dict[str, _SamplingRuleApplier] = {
             applier.sampling_rule.RuleName: applier for applier in self.__rule_appliers
         }
         min_polling_interval = None
