@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import Optional
+from typing import Dict, Optional
 
 from typing_extensions import override
 
@@ -66,7 +66,7 @@ class AwsSpanMetricsProcessor(SpanProcessor):
 
     @override
     def on_end(self, span: ReadableSpan) -> None:
-        attribute_dict: dict[str, BoundedAttributes] = self._generator.generate_metric_attributes_dict_from_span(
+        attribute_dict: Dict[str, BoundedAttributes] = self._generator.generate_metric_attributes_dict_from_span(
             span, self._resource
         )
         for attributes in attribute_dict.values():
@@ -93,9 +93,6 @@ class AwsSpanMetricsProcessor(SpanProcessor):
         # https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/exporter/awsxrayexporter/internal/translator/cause.go#L121-L160
         http_status_code: int = span.attributes.get(_HTTP_STATUS_CODE)
         status_code: StatusCode = span.status.status_code
-
-        if http_status_code is None:
-            http_status_code = attributes.get(_HTTP_STATUS_CODE)
 
         if _is_not_error_or_fault(http_status_code):
             if StatusCode.ERROR == status_code:
