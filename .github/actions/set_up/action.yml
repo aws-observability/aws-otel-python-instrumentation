@@ -12,6 +12,9 @@ inputs:
   os:
     required: true
     description: "The os"
+  run_unit_tests:
+    required: true
+    description: "true/false flag indicating if we should run unit tests/benchmarks with tox"
 
 
 runs:
@@ -36,5 +39,6 @@ runs:
         key: v7-build-tox-cache-${{ inputs.python_version }}-${{ inputs.package_name }}-${{ inputs.os }}-${{ hashFiles('tox.ini', 'dev-requirements.txt') }}
 
     - name: Run unit tests/benchmarks with tox
+      if: ${{ inputs.python_version == 'true' }}
       shell: bash
       run: tox -f ${{ inputs.python_version }}-${{ inputs.package_name }} -- -ra --benchmark-json=${{ inputs.python_version }}-${{ inputs.package_name }}-${{ inputs.os }}-benchmark.json

@@ -63,6 +63,7 @@ jobs:
           python_version: 3.11
           package_name: aws-opentelemetry-distro
           os: ubuntu-latest
+          run_unit_tests: false
 
       - name: Run ${{ matrix.tox-environment }} with tox
         run: tox -e ${{ matrix.tox-environment }}
