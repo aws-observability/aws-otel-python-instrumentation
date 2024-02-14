@@ -331,7 +331,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         }
         self._validate_attributes_produced_for_non_local_root_span_of_kind(expected_attributes, SpanKind.CLIENT)
 
-    def test_remote_attributes_combinations(self):
+    def test_remote_attributes_combinations(self): # noqa:R0915
         # Set all expected fields to a test string, we will overwrite them in descending order to test
         # the priority-order logic in AwsMetricAttributeGenerator remote attribute methods.
         keys: List[str] = [
