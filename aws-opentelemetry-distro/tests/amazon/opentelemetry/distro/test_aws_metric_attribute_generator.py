@@ -454,23 +454,47 @@ class TestAwsMetricAttributeGenerator(TestCase):
             [SpanAttributes.NET_SOCK_PEER_ADDR, SpanAttributes.NET_SOCK_PEER_PORT], [None, None], keys, values
         )
 
-        # Validate behavior of Remote Operation from HttpTarget - with 1st api part, then remove it
+        # Validate behavior of Remote Operation from HttpTarget - with 1st api part. Also validates that
+        # RemoteService is extracted from http.url.
         keys, values = self._mock_attribute(
             [SpanAttributes.HTTP_URL], ["http://www.example.com/payment/123"], keys, values
         )
-        self._validate_expected_remote_attributes(_UNKNOWN_REMOTE_SERVICE, "/payment")
+        self._validate_expected_remote_attributes("www.example.com", "/payment")
         keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], [None], keys, values)
 
         # Validate behavior of Remote Operation from HttpTarget - without 1st api part, then remove it
         keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], ["http://www.example.com"], keys, values)
+        self._validate_expected_remote_attributes("www.example.com", "/")
+        keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], [None], keys, values)
+
+        # Validate behaviour of extracting Remote Service from http.url. When url is None, it should default to
+        # _UNKNOWN_REMOTE_SERVICE
+        keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], [None], keys, values)
+        self._validate_expected_remote_attributes(_UNKNOWN_REMOTE_SERVICE, _UNKNOWN_REMOTE_OPERATION)
+        keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], [None], keys, values)
+
+        # Validate behaviour of extracting Remote Service from http.url. When url is empty, it should default to
+        # _UNKNOWN_REMOTE_SERVICE
+        keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], [""], keys, values)
         self._validate_expected_remote_attributes(_UNKNOWN_REMOTE_SERVICE, "/")
         keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], [None], keys, values)
 
-        # Validate behavior of Remote Operation from HttpTarget - invalid url, then remove it
-        # We designed to let Generator return a "/" rather than UNKNOWN OPERATION when receive invalid HTTP URL
-        # We basically expect url to be well formed, both / or unknown is acceptable since it should never really happen
-        keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], ["abc"], keys, values)
+        # Validate behaviour of extracting Remote Service from http.url. When url is invalid, it should default to
+        # _UNKNOWN_REMOTE_SERVICE
+        keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], ["invalid_url"], keys, values)
         self._validate_expected_remote_attributes(_UNKNOWN_REMOTE_SERVICE, "/")
+        keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], [None], keys, values)
+
+        # Validate behaviour of extracting Remote Service from http.url. When url is a host name like
+        # https://www.example.com, it should extract the netaddr name as www.example.com
+        keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], ["https://www.example.com"], keys, values)
+        self._validate_expected_remote_attributes("www.example.com", "/")
+        keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], [None], keys, values)
+
+        # Validate behaviour of extracting Remote Service from http.url. When url is an ip address with port like
+        # http://192.168.1.1:1234, it should extract the netaddr name as 192.168.1.1:1234
+        keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], ["http://192.168.1.1:1234"], keys, values)
+        self._validate_expected_remote_attributes("192.168.1.1:1234", "/")
         keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], [None], keys, values)
 
         # Validate behaviour of Peer service attribute, then remove it.
