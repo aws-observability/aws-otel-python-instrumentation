@@ -458,12 +458,12 @@ class TestAwsMetricAttributeGenerator(TestCase):
         keys, values = self._mock_attribute(
             [SpanAttributes.HTTP_URL], ["http://www.example.com/payment/123"], keys, values
         )
-        self._validate_expected_remote_attributes(_UNKNOWN_REMOTE_SERVICE, "/payment")
+        self._validate_expected_remote_attributes("www.example.com", "/payment")
         keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], [None], keys, values)
 
         # Validate behavior of Remote Operation from HttpTarget - without 1st api part, then remove it
         keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], ["http://www.example.com"], keys, values)
-        self._validate_expected_remote_attributes(_UNKNOWN_REMOTE_SERVICE, "/")
+        self._validate_expected_remote_attributes("www.example.com", "/")
         keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], [None], keys, values)
 
         # Validate behavior of Remote Operation from HttpTarget - invalid url, then remove it

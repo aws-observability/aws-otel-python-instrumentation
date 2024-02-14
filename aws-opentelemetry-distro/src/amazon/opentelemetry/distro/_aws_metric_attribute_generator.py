@@ -178,7 +178,7 @@ def _set_remote_service_and_operation(span: ReadableSpan, attributes: BoundedAtt
     * Attributes are confirmed to have low-cardinality values, based on code analysis.
 
     if the selected attributes are still producing the UnknownRemoteService or UnknownRemoteOperation, `net.peer.name`,
-    `net.peer.port`, `net.peer.sock.addr` and `net.peer.sock.port` will be used to derive the RemoteService. And
+    `net.peer.port`, `net.peer.sock.addr`, `net.peer.sock.port`and 'http.url' will be used to derive the RemoteService. And
     `http.method` and `http.url` will be used to derive the RemoteOperation.
     """
     remote_service: str = UNKNOWN_REMOTE_SERVICE
@@ -254,8 +254,10 @@ def _generate_remote_service(span: ReadableSpan) -> str:
             remote_service += ":" + port
     elif is_key_present(span, _HTTP_URL):
         http_url: str = span.attributes.get(_HTTP_URL)
-        url: ParseResult = urlparse(http_url)
-        remote_service = str(url.netloc)
+        if http_url:
+            url: ParseResult = urlparse(http_url)
+            if str(url.netloc):
+                remote_service = str(url.netloc)
     else:
         _log_unknown_attribute(AWS_REMOTE_SERVICE, span)
 
