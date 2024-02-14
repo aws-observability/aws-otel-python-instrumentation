@@ -3,6 +3,7 @@
 """Utility module designed to support shared logic across AWS Span Processors."""
 import json
 import os
+from typing import Dict, List
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND, AWS_LOCAL_OPERATION
 from opentelemetry.sdk.trace import InstrumentationScope, ReadableSpan
@@ -20,6 +21,22 @@ LOCAL_ROOT: str = "LOCAL_ROOT"
 # Useful constants
 _SQS_RECEIVE_MESSAGE_SPAN_NAME: str = "Sqs.ReceiveMessage"
 _AWS_SDK_INSTRUMENTATION_SCOPE_PREFIX: str = "io.opentelemetry.aws-sdk-"
+
+# Max keyword length supported by parsing into remote_operation from DB_STATEMENT
+MAX_KEYWORD_LENGTH = 27
+
+
+# Get dialect keywords retrieved from dialect_keywords.json file
+def get_dialect_keywords() -> List[str]:
+    current_dir: str = os.path.dirname(__file__)
+    file_path: str = os.path.join(current_dir, "configuration/sql_dialect_keywords.json")
+    with open(file_path, "r", encoding="utf-8") as json_file:
+        keywords_data: Dict[str, str] = json.load(json_file)
+    return keywords_data["keywords"]
+
+
+# A regular expression pattern to match SQL keywords.
+SQL_KEYWORD_PATTERN = r"^(?:" + "|".join(get_dialect_keywords()) + r")\b"
 
 
 def get_ingress_operation(__, span: ReadableSpan) -> str:
@@ -97,15 +114,6 @@ def is_local_root(span: ReadableSpan) -> bool:
     and returns true if it is a local root.
     """
     return span.parent is None or not span.parent.is_valid or span.parent.is_remote
-
-
-# Get valid keywords retrieved from db.statement if no db.operation value is identified
-def get_dialect_keywords():
-    current_dir = os.path.dirname(__file__)
-    file_path = os.path.join(current_dir, "configuration/dialect_keywords.json")
-    with open(file_path, "r", encoding="utf-8") as json_file:
-        keywords_data = json.load(json_file)
-    return keywords_data["keywords"]
 
 
 def _is_sqs_receive_message_consumer_span(span: ReadableSpan) -> bool:

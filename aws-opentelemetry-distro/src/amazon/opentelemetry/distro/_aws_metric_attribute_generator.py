@@ -15,12 +15,13 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
 )
 from amazon.opentelemetry.distro._aws_span_processing_util import (
     LOCAL_ROOT,
+    MAX_KEYWORD_LENGTH,
+    SQL_KEYWORD_PATTERN,
     UNKNOWN_OPERATION,
     UNKNOWN_REMOTE_OPERATION,
     UNKNOWN_REMOTE_SERVICE,
     UNKNOWN_SERVICE,
     extract_api_path_value,
-    get_dialect_keywords,
     get_egress_operation,
     get_ingress_operation,
     is_key_present,
@@ -238,12 +239,14 @@ def _get_remote_operation(span: ReadableSpan, remote_operation_key: str) -> str:
     return remote_operation
 
 
-# If no db.operation attribute provided in the span,
-# we use db.statement to compute a valid remote operation in a best-effort manner.
-# To do this, we take the first substring of the statement
-# and compare to a regex list of known SQL keywords.
-# The substring length is determined by the longest known SQL keywords.
 def _get_db_statement_remote_operation(span: ReadableSpan, statement_key: str) -> str:
+    """
+    If no db.operation attribute provided in the span,
+    we use db.statement to compute a valid remote operation in a best-effort manner.
+    To do this, we take the first substring of the statement
+    and compare to a regex list of known SQL keywords.
+    The substring length is determined by the longest known SQL keywords.
+    """
     remote_operation: str = span.attributes.get(statement_key)
 
     if remote_operation is None:
@@ -251,10 +254,8 @@ def _get_db_statement_remote_operation(span: ReadableSpan, statement_key: str) -
 
     # Remove all whitespace and newline characters from the beginning of remote_operation
     # and retrieve the first 27 characters
-    remote_operation = remote_operation.lstrip()[:27]
-    dialect_keywords = get_dialect_keywords()
-    pattern: str = r"^(?:" + "|".join(dialect_keywords) + r")\b"
-    match: Optional[Match[str]] = re.match(pattern, remote_operation.upper())
+    remote_operation = remote_operation.lstrip()[:MAX_KEYWORD_LENGTH]
+    match: Optional[Match[str]] = re.match(SQL_KEYWORD_PATTERN, remote_operation.upper())
     remote_operation = match.group(0) if match else UNKNOWN_REMOTE_OPERATION
 
     return remote_operation
