@@ -454,7 +454,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
             [SpanAttributes.NET_SOCK_PEER_ADDR, SpanAttributes.NET_SOCK_PEER_PORT], [None, None], keys, values
         )
 
-        # Validate behavior of Remote Operation from HttpTarget - with 1st api part, then remove it
+        # Validate behavior of Remote Operation from HttpTarget - with 1st api part. Also validates that
+        # RemoteService is extracted from http.url.
         keys, values = self._mock_attribute(
             [SpanAttributes.HTTP_URL], ["http://www.example.com/payment/123"], keys, values
         )

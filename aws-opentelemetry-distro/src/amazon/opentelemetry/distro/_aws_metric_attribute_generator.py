@@ -256,8 +256,8 @@ def _generate_remote_service(span: ReadableSpan) -> str:
         http_url: str = span.attributes.get(_HTTP_URL)
         if http_url:
             url: ParseResult = urlparse(http_url)
-            if url and str(url.netloc):
-                remote_service = str(url.netloc)
+            if url and url.netloc:
+                remote_service = url.netloc
     else:
         _log_unknown_attribute(AWS_REMOTE_SERVICE, span)
 
