@@ -331,6 +331,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         }
         self._validate_attributes_produced_for_non_local_root_span_of_kind(expected_attributes, SpanKind.CLIENT)
 
+    # pylint: disable=too-many-statements
     def test_remote_attributes_combinations(self):
         # Set all expected fields to a test string, we will overwrite them in descending order to test
         # the priority-order logic in AwsMetricAttributeGenerator remote attribute methods.
@@ -341,6 +342,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
             SpanAttributes.RPC_METHOD,
             SpanAttributes.DB_SYSTEM,
             SpanAttributes.DB_OPERATION,
+            SpanAttributes.DB_STATEMENT,
             SpanAttributes.FAAS_INVOKED_PROVIDER,
             SpanAttributes.FAAS_INVOKED_NAME,
             SpanAttributes.MESSAGING_SYSTEM,
@@ -352,6 +354,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
             "unknown.operation.key",
         ]
         values: List[str] = [
+            "TestString",
             "TestString",
             "TestString",
             "TestString",
@@ -383,7 +386,25 @@ class TestAwsMetricAttributeGenerator(TestCase):
             SpanAttributes.RPC_SERVICE, "RPC service", SpanAttributes.RPC_METHOD, "RPC method", keys, values
         )
 
-        # Validate behaviour of various combinations of DB attributes, then remove them.
+        # Validate db.operation not exist, but db.statement exist, where SpanAttributes.DB_STATEMENT is invalid
+        keys, values = self._mock_attribute(
+            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT, SpanAttributes.DB_OPERATION],
+            ["DB system", "invalid DB statement", None],
+            keys,
+            values,
+        )
+        self._validate_expected_remote_attributes("DB system", _UNKNOWN_REMOTE_OPERATION)
+
+        # Validate both db.operation and db.statement not exist.
+        keys, values = self._mock_attribute(
+            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT, SpanAttributes.DB_OPERATION],
+            ["DB system", None, None],
+            keys,
+            values,
+        )
+        self._validate_expected_remote_attributes("DB system", _UNKNOWN_REMOTE_OPERATION)
+
+        # Validate db.operation exist, then remove it.
         keys, values = self._validate_and_remove_remote_attributes(
             SpanAttributes.DB_SYSTEM, "DB system", SpanAttributes.DB_OPERATION, "DB operation", keys, values
         )
@@ -504,6 +525,96 @@ class TestAwsMetricAttributeGenerator(TestCase):
 
         # Once we have removed all usable metrics, we only have "unknown" attributes, which are unused.
         self._validate_expected_remote_attributes(_UNKNOWN_REMOTE_SERVICE, _UNKNOWN_REMOTE_OPERATION)
+
+    # Validate behaviour of various combinations of DB attributes.
+    def test_get_db_statement_remote_operation(self):
+        # Set all expected fields to a test string, we will overwrite them in descending order to test
+        keys: List[str] = [
+            SpanAttributes.DB_SYSTEM,
+            SpanAttributes.DB_OPERATION,
+            SpanAttributes.DB_STATEMENT,
+        ]
+        values: List[str] = [
+            "TestString",
+            "TestString",
+            "TestString",
+        ]
+        self._mock_attribute(keys, values)
+
+        # Validate SpanAttributes.DB_OPERATION not exist, but SpanAttributes.DB_STATEMENT exist,
+        # where SpanAttributes.DB_STATEMENT is valid
+        # Case 1: Only 1 valid keywords match
+        keys, values = self._mock_attribute(
+            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT, SpanAttributes.DB_OPERATION],
+            ["DB system", "SELECT DB statement", None],
+            keys,
+            values,
+        )
+        self._validate_expected_remote_attributes("DB system", "SELECT")
+
+        # Case 2: More than 1 valid keywords match, we want to pick the longest match
+        keys, values = self._mock_attribute(
+            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT, SpanAttributes.DB_OPERATION],
+            ["DB system", "DROP VIEW DB statement", None],
+            keys,
+            values,
+        )
+        self._validate_expected_remote_attributes("DB system", "DROP VIEW")
+
+        # Case 3: More than 1 valid keywords match, but the other keywords is not
+        # at the start of the SpanAttributes.DB_STATEMENT. We want to only pick start match
+        keys, values = self._mock_attribute(
+            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT, SpanAttributes.DB_OPERATION],
+            ["DB system", "SELECT data FROM domains", None],
+            keys,
+            values,
+        )
+        self._validate_expected_remote_attributes("DB system", "SELECT")
+
+        # Case 4: Have valid keywords， but it is not at the start of SpanAttributes.DB_STATEMENT
+        keys, values = self._mock_attribute(
+            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT, SpanAttributes.DB_OPERATION],
+            ["DB system", "invalid SELECT DB statement", None],
+            keys,
+            values,
+        )
+        self._validate_expected_remote_attributes("DB system", _UNKNOWN_REMOTE_OPERATION)
+
+        # Case 5: Have valid keywords, match the longest word
+        keys, values = self._mock_attribute(
+            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT, SpanAttributes.DB_OPERATION],
+            ["DB system", "UUID", None],
+            keys,
+            values,
+        )
+        self._validate_expected_remote_attributes("DB system", "UUID")
+
+        # Case 6: Have valid keywords, match with first word
+        keys, values = self._mock_attribute(
+            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT, SpanAttributes.DB_OPERATION],
+            ["DB system", "FROM SELECT * ", None],
+            keys,
+            values,
+        )
+        self._validate_expected_remote_attributes("DB system", "FROM")
+
+        # Case 7: Have valid keyword, match with first word
+        keys, values = self._mock_attribute(
+            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT, SpanAttributes.DB_OPERATION],
+            ["DB system", "SELECT FROM *", None],
+            keys,
+            values,
+        )
+        self._validate_expected_remote_attributes("DB system", "SELECT")
+
+        # Case 8: Have valid keywords, match with upper case
+        keys, values = self._mock_attribute(
+            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_STATEMENT, SpanAttributes.DB_OPERATION],
+            ["DB system", "seLeCt *", None],
+            keys,
+            values,
+        )
+        self._validate_expected_remote_attributes("DB system", "SELECT")
 
     def test_peer_service_does_override_other_remote_services(self):
         self._validate_peer_service_does_override(SpanAttributes.RPC_SERVICE)

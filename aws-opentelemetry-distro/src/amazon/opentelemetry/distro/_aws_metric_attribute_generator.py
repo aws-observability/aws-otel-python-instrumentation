@@ -1,7 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import re
 from logging import DEBUG, Logger, getLogger
-from typing import Optional
+from typing import Match, Optional
 from urllib.parse import ParseResult, urlparse
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
@@ -14,6 +15,8 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
 )
 from amazon.opentelemetry.distro._aws_span_processing_util import (
     LOCAL_ROOT,
+    MAX_KEYWORD_LENGTH,
+    SQL_KEYWORD_PATTERN,
     UNKNOWN_OPERATION,
     UNKNOWN_REMOTE_OPERATION,
     UNKNOWN_REMOTE_SERVICE,
@@ -38,6 +41,7 @@ from opentelemetry.semconv.trace import SpanAttributes
 # Pertinent OTEL attribute keys
 _SERVICE_NAME: str = ResourceAttributes.SERVICE_NAME
 _DB_OPERATION: str = SpanAttributes.DB_OPERATION
+_DB_STATEMENT: str = SpanAttributes.DB_STATEMENT
 _DB_SYSTEM: str = SpanAttributes.DB_SYSTEM
 _FAAS_INVOKED_NAME: str = SpanAttributes.FAAS_INVOKED_NAME
 _FAAS_TRIGGER: str = SpanAttributes.FAAS_TRIGGER
@@ -189,9 +193,12 @@ def _set_remote_service_and_operation(span: ReadableSpan, attributes: BoundedAtt
     elif is_key_present(span, _RPC_SERVICE) or is_key_present(span, _RPC_METHOD):
         remote_service = _normalize_service_name(span, _get_remote_service(span, _RPC_SERVICE))
         remote_operation = _get_remote_operation(span, _RPC_METHOD)
-    elif is_key_present(span, _DB_SYSTEM) or is_key_present(span, _DB_OPERATION):
+    elif is_key_present(span, _DB_SYSTEM) or is_key_present(span, _DB_OPERATION) or is_key_present(span, _DB_STATEMENT):
         remote_service = _get_remote_service(span, _DB_SYSTEM)
-        remote_operation = _get_remote_operation(span, _DB_OPERATION)
+        if is_key_present(span, _DB_OPERATION):
+            remote_operation = _get_remote_operation(span, _DB_OPERATION)
+        else:
+            remote_operation = _get_db_statement_remote_operation(span, _DB_STATEMENT)
     elif is_key_present(span, _FAAS_INVOKED_NAME) or is_key_present(span, _FAAS_TRIGGER):
         remote_service = _get_remote_service(span, _FAAS_INVOKED_NAME)
         remote_operation = _get_remote_operation(span, _FAAS_TRIGGER)
@@ -228,6 +235,28 @@ def _get_remote_operation(span: ReadableSpan, remote_operation_key: str) -> str:
     remote_operation: str = span.attributes.get(remote_operation_key)
     if remote_operation is None:
         remote_operation = UNKNOWN_REMOTE_OPERATION
+
+    return remote_operation
+
+
+def _get_db_statement_remote_operation(span: ReadableSpan, statement_key: str) -> str:
+    """
+    If no db.operation attribute provided in the span,
+    we use db.statement to compute a valid remote operation in a best-effort manner.
+    To do this, we take the first substring of the statement
+    and compare to a regex list of known SQL keywords.
+    The substring length is determined by the longest known SQL keywords.
+    """
+    remote_operation: str = span.attributes.get(statement_key)
+
+    if remote_operation is None:
+        return UNKNOWN_REMOTE_OPERATION
+
+    # Remove all whitespace and newline characters from the beginning of remote_operation
+    # and retrieve the first MAX_KEYWORD_LENGTH characters
+    remote_operation = remote_operation.lstrip()[:MAX_KEYWORD_LENGTH]
+    match: Optional[Match[str]] = re.match(SQL_KEYWORD_PATTERN, remote_operation.upper())
+    remote_operation = match.group(0) if match else UNKNOWN_REMOTE_OPERATION
 
     return remote_operation
 
