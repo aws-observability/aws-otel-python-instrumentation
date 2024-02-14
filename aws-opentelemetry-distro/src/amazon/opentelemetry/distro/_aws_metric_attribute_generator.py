@@ -178,8 +178,8 @@ def _set_remote_service_and_operation(span: ReadableSpan, attributes: BoundedAtt
     * Attributes are confirmed to have low-cardinality values, based on code analysis.
 
     if the selected attributes are still producing the UnknownRemoteService or UnknownRemoteOperation, `net.peer.name`,
-    `net.peer.port`, `net.peer.sock.addr`, `net.peer.sock.port`and 'http.url' will be used to derive the RemoteService. And
-    `http.method` and `http.url` will be used to derive the RemoteOperation.
+    `net.peer.port`, `net.peer.sock.addr`, `net.peer.sock.port`and 'http.url' will be used to derive the RemoteService.
+    And `http.method` and `http.url` will be used to derive the RemoteOperation.
     """
     remote_service: str = UNKNOWN_REMOTE_SERVICE
     remote_operation: str = UNKNOWN_REMOTE_OPERATION
