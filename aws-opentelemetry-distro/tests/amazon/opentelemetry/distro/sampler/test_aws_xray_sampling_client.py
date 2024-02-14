@@ -62,7 +62,7 @@ class TestAwsXRaySamplingClient(TestCase):
         self.assertEqual(sampling_rule.Version, 0)
 
     @patch("requests.post")
-    def test_get_three_sampling_rules(self, mock_post=None):
+    def test_get_correct_number_of_sampling_rules(self, mock_post=None):
         sampling_records = []
         with open(f"{DATA_DIR}/get-sampling-rules-response-sample.json", encoding="UTF-8") as file:
             sample_response = json.load(file)

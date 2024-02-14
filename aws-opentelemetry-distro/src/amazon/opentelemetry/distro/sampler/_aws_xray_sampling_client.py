@@ -11,7 +11,7 @@ _logger = getLogger(__name__)
 
 
 class _AwsXRaySamplingClient:
-    def __init__(self, endpoint=None, log_level=None):
+    def __init__(self, endpoint: str = None, log_level: str = None):
         # Override default log level
         if log_level is not None:
             _logger.setLevel(log_level)
