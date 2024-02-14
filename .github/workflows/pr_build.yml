@@ -1,0 +1,51 @@
+name: Python Instrumentation PR Build
+on:
+  pull_request:
+    branches:
+      - main
+      - "release/v*"
+
+env:
+  AWS_DEFAULT_REGION: us-east-1
+  TEST_TAG: 637423224110.dkr.ecr.us-east-1.amazonaws.com/eks/observability/adot-autoinstrumentation-python:test
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11"]
+        tox-environment: ["spellcheck", "lint"]
+    steps:
+      - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@v4
+
+      - name: Install libsnappy-dev
+        if: ${{ matrix.tox-environment == 'lint' }}
+        run: sudo apt-get update && sudo apt-get install -y libsnappy-dev
+
+      - name: Build Wheel and Image Files
+        uses: ./.github/actions/artifacts_build
+        with:
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+          image_uri_with_tag: ${{ env.TEST_TAG }}
+          image_registry: 637423224110.dkr.ecr.us-east-1.amazonaws.com
+          snapshot-ecr-role: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
+          push_image: false
+          load_image: true
+          python_version: ${{ matrix.python-version }}
+          package_name: aws-opentelemetry-distro
+          os: ubuntu-latest
+
+      - name: run spell check tox
+        run: tox -e ${{ matrix.tox-environment }}
+
+      - name: Set up and run contract tests with pytest
+        run: |
+          bash contract-tests/set-up-contract-tests.sh
+          pip install pytest
+          pytest contract-tests/tests

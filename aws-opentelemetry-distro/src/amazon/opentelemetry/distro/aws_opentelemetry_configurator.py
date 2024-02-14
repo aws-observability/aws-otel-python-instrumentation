@@ -27,6 +27,9 @@ from opentelemetry.sdk._configuration import (
     _OTelSDKConfigurator,
 )
 from opentelemetry.sdk.environment_variables import _OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED
+from opentelemetry.sdk.extension.aws.resource.ec2 import AwsEc2ResourceDetector
+from opentelemetry.sdk.extension.aws.resource.ecs import AwsEcsResourceDetector
+from opentelemetry.sdk.extension.aws.resource.eks import AwsEksResourceDetector
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics._internal.instrument import (
     Counter,
@@ -37,7 +40,7 @@ from opentelemetry.sdk.metrics._internal.instrument import (
     UpDownCounter,
 )
 from opentelemetry.sdk.metrics.export import AggregationTemporality, PeriodicExportingMetricReader
-from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.resources import Resource, get_aggregated_resources
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
 from opentelemetry.sdk.trace.id_generator import IdGenerator
@@ -88,7 +91,14 @@ def _initialize_components(auto_instrumentation_version):
     # populate version if using auto-instrumentation
     if auto_instrumentation_version:
         auto_resource[ResourceAttributes.TELEMETRY_AUTO_VERSION] = auto_instrumentation_version
-    resource = Resource.create(auto_resource)
+
+    resource = get_aggregated_resources(
+        [
+            AwsEc2ResourceDetector(),
+            AwsEksResourceDetector(),
+            AwsEcsResourceDetector(),
+        ]
+    ).merge(Resource.create(auto_resource))
 
     _init_tracing(
         exporters=trace_exporters,

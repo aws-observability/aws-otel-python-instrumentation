@@ -43,7 +43,6 @@ _FAAS_INVOKED_NAME: str = SpanAttributes.FAAS_INVOKED_NAME
 _FAAS_TRIGGER: str = SpanAttributes.FAAS_TRIGGER
 _GRAPHQL_OPERATION_TYPE: str = SpanAttributes.GRAPHQL_OPERATION_TYPE
 _HTTP_METHOD: str = SpanAttributes.HTTP_METHOD
-_HTTP_STATUS_CODE: str = SpanAttributes.HTTP_STATUS_CODE
 _HTTP_URL: str = SpanAttributes.HTTP_URL
 _MESSAGING_OPERATION: str = SpanAttributes.MESSAGING_OPERATION
 _MESSAGING_SYSTEM: str = SpanAttributes.MESSAGING_SYSTEM
@@ -92,7 +91,6 @@ def _generate_service_metric_attributes(span: ReadableSpan, resource: Resource) 
     _set_service(resource, span, attributes)
     _set_ingress_operation(span, attributes)
     _set_span_kind_for_service(span, attributes)
-    _set_http_status(span, attributes)
     return attributes
 
 
@@ -103,7 +101,6 @@ def _generate_dependency_metric_attributes(span: ReadableSpan, resource: Resourc
     _set_remote_service_and_operation(span, attributes)
     _set_remote_target(span, attributes)
     _set_span_kind_for_dependency(span, attributes)
-    _set_http_status(span, attributes)
     return attributes
 
 
@@ -138,22 +135,6 @@ def _set_span_kind_for_service(span: ReadableSpan, attributes: BoundedAttributes
         span_kind = LOCAL_ROOT
 
     attributes[AWS_SPAN_KIND] = span_kind
-
-
-def _set_http_status(span: ReadableSpan, attributes: BoundedAttributes) -> None:
-    if is_key_present(span, _HTTP_STATUS_CODE):
-        return
-
-    status_code: Optional[int] = _get_aws_status_code(span)
-    if status_code is not None:
-        attributes[_HTTP_STATUS_CODE] = status_code
-
-
-def _get_aws_status_code(span: ReadableSpan) -> Optional[int]:
-    """
-    TODO: We need to determine if the same status code issue in Java AWS SDK instrumentation is present in Python.
-    """
-    return None
 
 
 def _set_egress_operation(span: ReadableSpan, attributes: BoundedAttributes) -> None:
