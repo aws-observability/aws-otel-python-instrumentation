@@ -10,7 +10,13 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_LOCAL_SERVICE,
     AWS_REMOTE_OPERATION,
     AWS_REMOTE_SERVICE,
+    AWS_REMOTE_TARGET,
     AWS_SPAN_KIND,
+    AWS_TABLE_NAME,
+    AWS_BUCKET_NAME,
+    AWS_QUEUE_URL,
+    AWS_QUEUE_NAME,
+    AWS_STREAM_NAME,
 )
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
 from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, SERVICE_METRIC
@@ -616,8 +622,16 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute([remote_service_key, SpanAttributes.PEER_SERVICE], [None, None])
 
     def test_client_span_with_remote_target_attributes(self):
+        # Validate behaviour of aws bucket name attribute, then remove it.
+        self._mock_attribute([AWS_BUCKET_NAME], ["aws_s3_bucket_name"])
         self._validate_remote_target_attributes(AWS_REMOTE_TARGET, "::s3:::aws_s3_bucket_name")
+        self._mock_attribute([AWS_BUCKET_NAME], [None])
+
+        # Validate behaviour of AWS_QUEUE_NAME attribute, then remove it
+        self._mock_attribute([AWS_QUEUE_NAME], ["aws_queue_name"])
         self._validate_remote_target_attributes(AWS_REMOTE_TARGET, "::sqs:::aws_queue_name")
+        self._mock_attribute([AWS_QUEUE_NAME], [None])
+
         self._validate_remote_target_attributes(AWS_REMOTE_TARGET, "arn:aws:sqs:us-east-2:123456789012:Queue")
         self._validate_remote_target_attributes(AWS_REMOTE_TARGET, "::sqs:::aws_queue_name")
         self._validate_remote_target_attributes(AWS_REMOTE_TARGET, "::kinesis:::stream/aws_stream_name")

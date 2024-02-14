@@ -11,6 +11,11 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_REMOTE_SERVICE,
     AWS_REMOTE_TARGET,
     AWS_SPAN_KIND,
+    AWS_TABLE_NAME,
+    AWS_BUCKET_NAME,
+    AWS_QUEUE_URL,
+    AWS_QUEUE_NAME,
+    AWS_STREAM_NAME,
 )
 from amazon.opentelemetry.distro._aws_span_processing_util import (
     LOCAL_ROOT,
@@ -31,6 +36,7 @@ from amazon.opentelemetry.distro.metric_attribute_generator import (
     SERVICE_METRIC,
     MetricAttributeGenerator,
 )
+from amazon.opentelemetry.distro.sqs_url_parser import SqsUrlParser
 from opentelemetry.sdk.resources import Resource, ResourceAttributes
 from opentelemetry.sdk.trace import BoundedAttributes, ReadableSpan
 from opentelemetry.semconv.trace import SpanAttributes
@@ -284,37 +290,13 @@ def _set_remote_target(span: ReadableSpan, attributes: BoundedAttributes) -> Non
     if remote_target is not None:
         attributes[AWS_REMOTE_TARGET] = remote_target
 
-
 def _get_remote_target(span: ReadableSpan) -> Optional[str]:
-    """
-    TODO: Keys we depended on in Java for RemoteTarget are not present in Python, we need to determine the path forward
-     here.
-    """
-    return None
-
-def get_remote_target(span):
-    def is_key_present(span, key):
-        # Assume this function is implemented elsewhere
-        pass
-
-def get_remote_target(span):
-
-    def get_sqs_remote_target(url):
-        # Assume this function is implemented elsewhere
-        pass
-
-    AWS_BUCKET_NAME = "aws.bucket.name"
-    AWS_QUEUE_URL = "aws.queue.url"
-    AWS_QUEUE_NAME = "aws.queue.name"
-    AWS_STREAM_NAME = "aws.stream.name"
-    AWS_TABLE_NAME = "aws.table.name"
-
     if is_key_present(span, AWS_BUCKET_NAME):
         return "::s3:::" + span.attributes.get(AWS_BUCKET_NAME)
 
     if is_key_present(span, AWS_QUEUE_URL):
-        arn = get_sqs_remote_target(span.get_attributes().get(AWS_QUEUE_URL))
-        if arn is not None:
+        arn = SqsUrlParser.get_sqs_remote_target(span.get_attributes().get(AWS_QUEUE_URL))
+        if arn:
             return arn
 
     if is_key_present(span, AWS_QUEUE_NAME):
