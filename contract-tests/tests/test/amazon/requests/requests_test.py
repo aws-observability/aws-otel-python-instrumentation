@@ -101,9 +101,7 @@ class RequestsTest(ContractTestBase):
         # InternalOperation as OTEL does not instrument the basic server we are using, so the client span is a local
         # root.
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_OPERATION, "InternalOperation")
-        # TODO: This should be "backend:8080", but isn't because requests instrumentation is not populating peer
-        #  attributes
-        self._assert_str_attribute(attributes_dict, AWS_REMOTE_SERVICE, "UnknownRemoteService")
+        self._assert_str_attribute(attributes_dict, AWS_REMOTE_SERVICE, "backend:8080")
         self._assert_str_attribute(attributes_dict, AWS_REMOTE_OPERATION, f"{method} /backend")
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
@@ -181,8 +179,7 @@ class RequestsTest(ContractTestBase):
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
-        # See comment on AWS_REMOTE_SERVICE in _assert_aws_attributes
-        self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, "UnknownRemoteService")
+        self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, "backend:8080")
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, f"{method} /backend")
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "CLIENT")
 
