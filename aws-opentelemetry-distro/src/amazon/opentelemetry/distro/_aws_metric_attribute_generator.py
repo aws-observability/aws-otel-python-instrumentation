@@ -292,6 +292,44 @@ def _get_remote_target(span: ReadableSpan) -> Optional[str]:
     """
     return None
 
+def get_remote_target(span):
+    def is_key_present(span, key):
+        # Assume this function is implemented elsewhere
+        pass
+
+def get_remote_target(span):
+
+    def get_sqs_remote_target(url):
+        # Assume this function is implemented elsewhere
+        pass
+
+    AWS_BUCKET_NAME = "aws.bucket.name"
+    AWS_QUEUE_URL = "aws.queue.url"
+    AWS_QUEUE_NAME = "aws.queue.name"
+    AWS_STREAM_NAME = "aws.stream.name"
+    AWS_TABLE_NAME = "aws.table.name"
+
+    if is_key_present(span, AWS_BUCKET_NAME):
+        return "::s3:::" + span.attributes.get(AWS_BUCKET_NAME)
+
+    if is_key_present(span, AWS_QUEUE_URL):
+        arn = get_sqs_remote_target(span.get_attributes().get(AWS_QUEUE_URL))
+        if arn is not None:
+            return arn
+
+    if is_key_present(span, AWS_QUEUE_NAME):
+        return "::sqs:::" + span.attributes.get(AWS_QUEUE_NAME)
+
+    if is_key_present(span, AWS_STREAM_NAME):
+        return "::kinesis:::stream/" + span.attributes.get(AWS_STREAM_NAME)
+
+    if is_key_present(span, AWS_TABLE_NAME):
+        return "::dynamodb:::table/" + span.attributes.get(AWS_TABLE_NAME)
+
+    return None
+
+
+
 
 def _set_span_kind_for_dependency(span: ReadableSpan, attributes: BoundedAttributes) -> None:
     span_kind: str = span.kind.name
