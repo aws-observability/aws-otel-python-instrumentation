@@ -632,6 +632,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._validate_remote_target_attributes(AWS_REMOTE_TARGET, "::sqs:::aws_queue_name")
         self._mock_attribute([AWS_QUEUE_NAME], [None])
 
+        # Validate behaviour of having both AWS_QUEUE_NAME and AWS_QUEUE_URL attribute, then remove them
+        self._mock_attribute([AWS_QUEUE_URL, AWS_QUEUE_NAME], ["https://sqs.us-east-2.amazonaws.com/123456789012/Queue", "aws_queue_name"])
         self._validate_remote_target_attributes(AWS_REMOTE_TARGET, "arn:aws:sqs:us-east-2:123456789012:Queue")
         self._validate_remote_target_attributes(AWS_REMOTE_TARGET, "::sqs:::aws_queue_name")
         self._validate_remote_target_attributes(AWS_REMOTE_TARGET, "::kinesis:::stream/aws_stream_name")

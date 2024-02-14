@@ -290,6 +290,7 @@ def _set_remote_target(span: ReadableSpan, attributes: BoundedAttributes) -> Non
     if remote_target is not None:
         attributes[AWS_REMOTE_TARGET] = remote_target
 
+
 def _get_remote_target(span: ReadableSpan) -> Optional[str]:
     if is_key_present(span, AWS_BUCKET_NAME):
         return "::s3:::" + span.attributes.get(AWS_BUCKET_NAME)
@@ -309,8 +310,6 @@ def _get_remote_target(span: ReadableSpan) -> Optional[str]:
         return "::dynamodb:::table/" + span.attributes.get(AWS_TABLE_NAME)
 
     return None
-
-
 
 
 def _set_span_kind_for_dependency(span: ReadableSpan, attributes: BoundedAttributes) -> None:
