@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import re
 from logging import DEBUG, Logger, getLogger
-from typing import Optional, Union
+from typing import Match, Optional
 from urllib.parse import ParseResult, urlparse
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
@@ -252,8 +252,8 @@ def _get_db_statement_remote_operation(span: ReadableSpan, statement_key: str) -
     # Iterate through supported SQL dialects and match keywords at the beginning of the remote_operation
     dialect_keywords = get_dialect_keywords()
     remote_operation = remote_operation[:27]
-    pattern: re.Pattern[str] = r"^(?:" + "|".join(dialect_keywords) + r")\b"
-    match: Union[re.Match[str], None] = re.match(pattern, remote_operation.upper())
+    pattern: str = r"^(?:" + "|".join(dialect_keywords) + r")\b"
+    match: Optional[Match[str]] = re.match(pattern, remote_operation.upper())
     remote_operation = match.group(0) if match else UNKNOWN_REMOTE_OPERATION
 
     return remote_operation
