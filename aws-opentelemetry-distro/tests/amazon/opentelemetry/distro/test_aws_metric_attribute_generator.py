@@ -635,9 +635,22 @@ class TestAwsMetricAttributeGenerator(TestCase):
         # Validate behaviour of having both AWS_QUEUE_NAME and AWS_QUEUE_URL attribute, then remove them
         self._mock_attribute([AWS_QUEUE_URL, AWS_QUEUE_NAME], ["https://sqs.us-east-2.amazonaws.com/123456789012/Queue", "aws_queue_name"])
         self._validate_remote_target_attributes(AWS_REMOTE_TARGET, "arn:aws:sqs:us-east-2:123456789012:Queue")
+        self._mock_attribute([AWS_QUEUE_URL, AWS_QUEUE_NAME], [None, None])
+
+        # Valid queue name with invalid queue URL, we should default to using the queue name.
+        self._mock_attribute([AWS_QUEUE_URL, AWS_QUEUE_NAME], ["invalidUrl", "aws_queue_name"])
         self._validate_remote_target_attributes(AWS_REMOTE_TARGET, "::sqs:::aws_queue_name")
+        self._mock_attribute([AWS_QUEUE_URL, AWS_QUEUE_NAME], [None, None])
+
+        # Validate behaviour of AWS_STREAM_NAME attribute, then remove it.
+        self._mock_attribute([AWS_STREAM_NAME], ["aws_stream_name"])
         self._validate_remote_target_attributes(AWS_REMOTE_TARGET, "::kinesis:::stream/aws_stream_name")
+        self._mock_attribute([AWS_STREAM_NAME], [None])
+
+        # Validate behaviour of AWS_TABLE_NAME attribute, then remove it.
+        self._mock_attribute([AWS_TABLE_NAME], ["aws_stream_name"])
         self._validate_remote_target_attributes(AWS_REMOTE_TARGET, "::dynamodb:::table/aws_table_name")
+        self._mock_attribute([AWS_TABLE_NAME], [None])
 
     def test_sqs_client_span_basic_urls(self):
         self._test_sqs_url("https://sqs.us-east-1.amazonaws.com/123412341234/Q_Name-5",
