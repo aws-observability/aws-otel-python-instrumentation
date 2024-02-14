@@ -17,6 +17,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
       matrix:
         python-version: ["3.8", "3.9", "3.10", "3.11"]
         tox-environment: ["spellcheck", "lint"]
@@ -45,6 +46,7 @@ jobs:
         run: tox -e ${{ matrix.tox-environment }}
 
       - name: Set up and run contract tests with pytest
+        if: ${{ matrix.tox-environment == 'spellcheck' }}
         run: |
           bash contract-tests/set-up-contract-tests.sh
           pip install pytest
