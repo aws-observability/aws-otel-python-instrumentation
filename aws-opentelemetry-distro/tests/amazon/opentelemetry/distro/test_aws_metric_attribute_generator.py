@@ -655,7 +655,6 @@ class TestAwsMetricAttributeGenerator(TestCase):
     def test_sqs_client_span_basic_urls(self):
         self._test_sqs_url("https://sqs.us-east-1.amazonaws.com/123412341234/Q_Name-5",
                            "arn:aws:sqs:us-east-1:123412341234:Q_Name-5")
-        # Add the rest of the test cases...
         self._test_sqs_url(
             "https://sqs.af-south-1.amazonaws.com/999999999999/-_ThisIsValid",
             "arn:aws:sqs:af-south-1:999999999999:-_ThisIsValid")
@@ -722,9 +721,9 @@ class TestAwsMetricAttributeGenerator(TestCase):
 
 
     def _test_sqs_url(self, sqs_url, expected_remote_target):
-        self._mock_attribute(AWS_QUEUE_URL, sqs_url)
-        self.assertEqual(_validate_remote_target_attributes(AWS_REMOTE_TARGET), expected_remote_target)
-        self._mock_attribute(AWS_QUEUE_URL, None)
+        self._mock_attribute([AWS_QUEUE_URL], [sqs_url])
+        self._validate_remote_target_attributes(AWS_REMOTE_TARGET, expected_remote_target)
+        self._mock_attribute([AWS_QUEUE_URL], [None])
 
     def _validate_remote_target_attributes(self, remote_target_key, remote_target) -> None:
         # Client, Producer, and Consumer spans should generate the expected RemoteTarget attribute
