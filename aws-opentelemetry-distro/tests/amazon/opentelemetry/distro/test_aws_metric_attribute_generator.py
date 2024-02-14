@@ -484,8 +484,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._validate_expected_remote_attributes(_UNKNOWN_REMOTE_SERVICE, "/")
         keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], [None], keys, values)
 
-        # Validate behaviour of extracting Remote Service from http.url. When url is a host name like https://www.example.com,
-        # it should extract the netaddr name as www.example.com
+        # Validate behaviour of extracting Remote Service from http.url. When url is a host name like
+        # https://www.example.com, it should extract the netaddr name as www.example.com
         keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], ["https://www.example.com"], keys, values)
         self._validate_expected_remote_attributes("www.example.com", "/")
         keys, values = self._mock_attribute([SpanAttributes.HTTP_URL], [None], keys, values)
