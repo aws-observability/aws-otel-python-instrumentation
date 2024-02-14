@@ -26,7 +26,8 @@ _AWS_SDK_INSTRUMENTATION_SCOPE_PREFIX: str = "io.opentelemetry.aws-sdk-"
 MAX_KEYWORD_LENGTH = 27
 
 
-# Get dialect keywords retrieved from dialect_keywords.json file. Only meant to be invoked by SQL_KEYWORD_PATTERN and unit tests
+# Get dialect keywords retrieved from dialect_keywords.json file.
+# Only meant to be invoked by SQL_KEYWORD_PATTERN and unit tests
 def _get_dialect_keywords() -> List[str]:
     current_dir: str = os.path.dirname(__file__)
     file_path: str = os.path.join(current_dir, "configuration/sql_dialect_keywords.json")

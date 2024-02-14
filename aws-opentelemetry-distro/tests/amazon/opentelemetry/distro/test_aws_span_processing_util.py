@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND, AWS_LOCAL_OPERATION
 from amazon.opentelemetry.distro._aws_span_processing_util import (
     MAX_KEYWORD_LENGTH,
-    extract_api_path_value,
     _get_dialect_keywords,
+    extract_api_path_value,
     get_egress_operation,
     get_ingress_operation,
     is_aws_sdk_span,
