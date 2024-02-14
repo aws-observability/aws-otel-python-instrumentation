@@ -75,7 +75,7 @@ class ContractTestBase(TestCase):
 
     @override
     def setUp(self) -> None:
-        self.addCleanup(self.test_tear_down)
+        self.addCleanup(self.tear_down)
         application_networking_config: Dict[str, EndpointConfig] = {
             NETWORK_NAME: EndpointConfig(version="1.22", aliases=self.get_application_network_aliases())
         }
@@ -103,7 +103,7 @@ class ContractTestBase(TestCase):
             self.mock_collector.get_container_host_ip(), self.mock_collector.get_exposed_port(_MOCK_COLLECTOR_PORT)
         )
 
-    def test_tear_down(self) -> None:
+    def tear_down(self) -> None:
         try:
             _logger.info("Application stdout")
             _logger.info(self.application.get_logs()[0].decode())
