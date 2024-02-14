@@ -249,7 +249,8 @@ def _get_db_statement_remote_operation(span: ReadableSpan, statement_key: str) -
     if remote_operation is None:
         return UNKNOWN_REMOTE_OPERATION
 
-    # Remove all whitespace and newline characters from the beginning of remote_operation and retrieve the first 27 characters
+    # Remove all whitespace and newline characters from the beginning of remote_operation
+    # and retrieve the first 27 characters
     remote_operation = remote_operation.lstrip()[:27]
     dialect_keywords = get_dialect_keywords()
     pattern: str = r"^(?:" + "|".join(dialect_keywords) + r")\b"
