@@ -8,7 +8,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_
 from amazon.opentelemetry.distro._aws_span_processing_util import (
     MAX_KEYWORD_LENGTH,
     extract_api_path_value,
-    get_dialect_keywords,
+    _get_dialect_keywords,
     get_egress_operation,
     get_ingress_operation,
     is_aws_sdk_span,
@@ -368,23 +368,17 @@ class TestAwsSpanProcessingUtil(TestCase):
         self.assertTrue(should_generate_dependency_metric_attributes(self.span_data_mock))
 
     def test_sql_dialect_keywords_order(self):
-        keywords: List[str] = get_dialect_keywords()
-        prev_count_length: int = None
+        keywords: List[str] = _get_dialect_keywords()
         prev_char_length: int = None
         for keyword in keywords:
-            cur_count_length: int = len(keyword.split())
             cur_char_length: int = len(keyword)
-            # Confirm the keywords are sorted based on descending order of words count
-            if prev_count_length is not None and prev_char_length is not None and prev_count_length != cur_count_length:
-                self.assertGreater(prev_count_length, cur_count_length)
             # Confirm the keywords are sorted based on descending order of keywords character length
-            if prev_count_length is not None and prev_count_length == cur_count_length:
+            if prev_char_length is not None:
                 self.assertGreaterEqual(prev_char_length, cur_char_length)
-            prev_count_length = cur_count_length
             prev_char_length = cur_char_length
 
     # Confirm maximum length of keywords is not longer than MAX_KEYWORD_LENGTH
     def test_sql_dialect_keywords_max_length(self):
-        keywords: List[str] = get_dialect_keywords()
+        keywords: List[str] = _get_dialect_keywords()
         for keyword in keywords:
             self.assertLessEqual(len(keyword), MAX_KEYWORD_LENGTH)

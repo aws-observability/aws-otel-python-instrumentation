@@ -544,6 +544,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
             keys,
             values,
         )
+        self._validate_expected_remote_attributes("DB system", "SELECT")
 
         # Case 4: Have valid keywords， but it is not at the start of SpanAttributes.DB_STATEMENT
         keys, values = self._mock_attribute(
