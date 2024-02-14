@@ -4,7 +4,7 @@
 #   one init container will be created to copy all the content in `/autoinstrumentation` directory to app's container. Then
 #   update the `PYTHONPATH` environment variable accordingly. Then in the second stage, copy the directory to `/autoinstrumentation`.
 
-FROM python:3.11 AS build
+FROM python:3.10 AS build
 
 WORKDIR /operator-build
 
