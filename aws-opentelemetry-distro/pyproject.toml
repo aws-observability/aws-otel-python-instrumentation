@@ -93,6 +93,3 @@ include = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/amazon"]
-
-[tool.mytool]
-dialect_keywords = "src/amazon/opentelemetry/distro/configuration/dialect_keywords.json"

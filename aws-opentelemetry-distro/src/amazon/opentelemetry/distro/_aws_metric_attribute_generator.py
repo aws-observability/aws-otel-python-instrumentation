@@ -249,9 +249,9 @@ def _get_db_statement_remote_operation(span: ReadableSpan, statement_key: str) -
     if remote_operation is None:
         return UNKNOWN_REMOTE_OPERATION
 
-    # Iterate through supported SQL dialects and match keywords at the beginning of the remote_operation
+    # Remove all whitespace and newline characters from the beginning of remote_operation and retrieve the first 27 characters
+    remote_operation = remote_operation.lstrip()[:27]
     dialect_keywords = get_dialect_keywords()
-    remote_operation = remote_operation[:27]
     pattern: str = r"^(?:" + "|".join(dialect_keywords) + r")\b"
     match: Optional[Match[str]] = re.match(pattern, remote_operation.upper())
     remote_operation = match.group(0) if match else UNKNOWN_REMOTE_OPERATION
