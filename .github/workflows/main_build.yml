@@ -78,7 +78,7 @@ jobs:
 
       - name: Set up and run contract tests with pytest
         run: |
-          bash contract-tests/set-up-contract-tests.sh
+          bash scripts/set-up-contract-tests.sh
           pip install pytest
           pytest contract-tests/tests
 
