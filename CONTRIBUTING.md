@@ -6,21 +6,10 @@ documentation, we greatly value feedback and contributions from our community.
 Please read through this document before submitting any issues or pull requests to ensure we have all the necessary
 information to effectively respond to your bug report or contribution.
 
-## Build a Wheel file locally
-**First time setup**
+## Build and install distro locally
+From `aws-otel-python-instrumentation` dir, execute:
 ```sh
-pip install --upgrade pip setuptools wheel packaging build
-mkdir -p ./dist
-```
-**Updating the wheel file**
-```sh
-rm -rf ./dist/*
-cd ./aws-opentelemetry-distro
-python3 -m build --outdir ../dist
-cd ../dist
-pkg_version=$(grep '__version__' ../aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py | awk -F '"' '{print $2}')
-pip install aws_opentelemetry_distro-${pkg_version}-py3-none-any.whl --force-reinstall
-cd ..
+./scripts/build_and_install_distro.sh
 ```
 
 ## Test a sample App

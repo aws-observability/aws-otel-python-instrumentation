@@ -6,8 +6,9 @@ WORKDIR /requests
 COPY ./dist/$DISTRO /requests
 COPY ./contract-tests/images/applications/requests /requests
 
+ENV PIP_ROOT_USER_ACTION=ignore
 ARG DISTRO
-RUN pip install -r requirements.txt && pip install ${DISTRO} --force-reinstall
+RUN pip install --upgrade pip && pip install -r requirements.txt && pip install ${DISTRO} --force-reinstall
 RUN opentelemetry-bootstrap -a install
 
 # Without `-u`, logs will be buffered and `wait_for_logs` will never return.

@@ -75,6 +75,7 @@ class ContractTestBase(TestCase):
 
     @override
     def setUp(self) -> None:
+        self.addCleanup(self.tear_down)
         application_networking_config: Dict[str, EndpointConfig] = {
             NETWORK_NAME: EndpointConfig(version="1.22", aliases=self.get_application_network_aliases())
         }
@@ -82,10 +83,10 @@ class ContractTestBase(TestCase):
             DockerContainer(self.get_application_image_name())
             .with_exposed_ports(self.get_application_port())
             .with_env("OTEL_METRIC_EXPORT_INTERVAL", "100")
-            .with_env("OTEL_SMP_ENABLED", "true")
+            .with_env("OTEL_AWS_APP_SIGNALS_ENABLED", "true")
             .with_env("OTEL_METRICS_EXPORTER", "none")
             .with_env("OTEL_BSP_SCHEDULE_DELAY", "1")
-            .with_env("OTEL_AWS_SMP_EXPORTER_ENDPOINT", f"http://collector:{_MOCK_COLLECTOR_PORT}")
+            .with_env("OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT", f"http://collector:{_MOCK_COLLECTOR_PORT}")
             .with_env("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", f"http://collector:{_MOCK_COLLECTOR_PORT}")
             .with_env("OTEL_RESOURCE_ATTRIBUTES", self.get_application_otel_resource_attributes())
             .with_env("OTEL_TRACES_SAMPLER", "always_on")
@@ -102,8 +103,7 @@ class ContractTestBase(TestCase):
             self.mock_collector.get_container_host_ip(), self.mock_collector.get_exposed_port(_MOCK_COLLECTOR_PORT)
         )
 
-    @override
-    def tearDown(self) -> None:
+    def tear_down(self) -> None:
         try:
             _logger.info("Application stdout")
             _logger.info(self.application.get_logs()[0].decode())
