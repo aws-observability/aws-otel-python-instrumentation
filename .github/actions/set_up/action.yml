@@ -1,0 +1,44 @@
+name: Set up
+description: |
+  This action assumes that the repo was checked out. Installs python and tox, then runs tox to trigger unit tests.
+
+inputs:
+  python_version:
+    required: true
+    description: "The python version used in actions"
+  package_name:
+    required: true
+    description: "The package name"
+  os:
+    required: true
+    description: "The os"
+  run_unit_tests:
+    required: true
+    description: "true/false flag indicating if we should run unit tests/benchmarks with tox"
+
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ inputs.python_version }}
+
+    - name: Install tox
+      shell: bash
+      run: pip install tox==3.27.1 tox-factor
+
+    - name: Cache tox environment
+      # Preserves .tox directory between runs for faster installs
+      uses: actions/cache@v1
+      with:
+        path: |
+          .tox
+          ~/.cache/pip
+        key: v7-build-tox-cache-${{ inputs.python_version }}-${{ inputs.package_name }}-${{ inputs.os }}-${{ hashFiles('tox.ini', 'dev-requirements.txt') }}
+
+    - name: Run unit tests/benchmarks with tox
+      if: ${{ inputs.python_version == 'true' }}
+      shell: bash
+      run: tox -f ${{ inputs.python_version }}-${{ inputs.package_name }} -- -ra --benchmark-json=${{ inputs.python_version }}-${{ inputs.package_name }}-${{ inputs.os }}-benchmark.json
