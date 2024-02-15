@@ -17,16 +17,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
       matrix:
         python-version: ["3.8", "3.9", "3.10", "3.11"]
-        tox-environment: ["spellcheck", "lint"]
     steps:
       - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@v4
-
-      - name: Install libsnappy-dev
-        if: ${{ matrix.tox-environment == 'lint' }}
-        run: sudo apt-get update && sudo apt-get install -y libsnappy-dev
 
       - name: Build Wheel and Image Files
         uses: ./.github/actions/artifacts_build
@@ -41,11 +37,33 @@ jobs:
           package_name: aws-opentelemetry-distro
           os: ubuntu-latest
 
-      - name: run spell check tox
-        run: tox -e ${{ matrix.tox-environment }}
-
       - name: Set up and run contract tests with pytest
         run: |
           bash contract-tests/set-up-contract-tests.sh
           pip install pytest
           pytest contract-tests/tests
+
+  lint:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
+      matrix:
+        tox-environment: ["spellcheck", "lint"]
+    steps:
+      - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@v4
+
+      - name: Install libsnappy-dev
+        if: ${{ matrix.tox-environment == 'lint' }}
+        run: sudo apt-get update && sudo apt-get install -y libsnappy-dev
+
+      - name: Set up
+        uses: ./.github/actions/set_up
+        with:
+          python_version: 3.11
+          package_name: aws-opentelemetry-distro
+          os: ubuntu-latest
+          run_unit_tests: false
+
+      - name: Run ${{ matrix.tox-environment }} with tox
+        run: tox -e ${{ matrix.tox-environment }}

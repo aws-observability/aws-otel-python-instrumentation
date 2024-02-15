@@ -1,6 +1,6 @@
-name: Build and Push aws-opentelemetry-distro Wheel and Image files according inputs
+name: Build and Push aws-opentelemetry-distro
 description: |
-  This action assumes that Repo was checked out and Python was set correctly
+  This action assumes that the repo was checked out. Builds and pushes/loads wheel and image files.
 
 inputs:
   aws-region:
@@ -35,27 +35,13 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Set up Python
-      uses: actions/setup-python@v4
+    - name: Set up
+      uses: ./.github/actions/set_up
       with:
-        python-version: ${{ inputs.python_version }}
-
-    - name: Install tox
-      shell: bash
-      run: pip install tox==3.27.1 tox-factor
-
-    - name: Cache tox environment
-      # Preserves .tox directory between runs for faster installs
-      uses: actions/cache@v1
-      with:
-        path: |
-          .tox
-          ~/.cache/pip
-        key: v7-build-tox-cache-${{ inputs.python_version }}-${{ inputs.package_name }}-${{ inputs.os }}-${{ hashFiles('tox.ini', 'dev-requirements.txt') }}
-
-    - name: run tox
-      shell: bash
-      run: tox -f ${{ inputs.python_version }}-${{ inputs.package_name }} -- -ra --benchmark-json=${{ inputs.python_version }}-${{ inputs.package_name }}-${{ inputs.os }}-benchmark.json
+        python_version: ${{ inputs.python_version }}
+        package_name: ${{ inputs.package_name }}
+        os: ${{ inputs.os }}
+        run_unit_tests: true
 
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v4
