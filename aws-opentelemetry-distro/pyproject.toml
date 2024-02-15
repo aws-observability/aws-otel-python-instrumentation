@@ -67,7 +67,10 @@ dependencies = [
   "opentelemetry-instrumentation-urllib ~= 0.43b0",
   "opentelemetry-instrumentation-urllib3 ~= 0.43b0",
   "opentelemetry-instrumentation-wsgi ~= 0.43b0",
-  "opentelemetry-instrumentation-cassandra ~= 0.43b0"
+  "opentelemetry-instrumentation-cassandra ~= 0.43b0",
+
+  # Patch dependencies
+  "botocore ~= 1.0",
 ]
 
 [project.optional-dependencies]
