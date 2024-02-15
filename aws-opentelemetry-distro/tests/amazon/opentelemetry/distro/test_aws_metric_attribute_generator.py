@@ -802,7 +802,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute([AWS_STREAM_NAME], [None])
 
         # Validate behaviour of AWS_TABLE_NAME attribute, then remove it.
-        self._mock_attribute([AWS_TABLE_NAME], ["aws_stream_name"])
+        self._mock_attribute([AWS_TABLE_NAME], ["aws_table_name"])
         self._validate_remote_target_attributes(AWS_REMOTE_TARGET, "::dynamodb:::table/aws_table_name")
         self._mock_attribute([AWS_TABLE_NAME], [None])
 

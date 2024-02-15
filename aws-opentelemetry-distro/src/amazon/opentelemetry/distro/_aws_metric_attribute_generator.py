@@ -331,7 +331,7 @@ def _get_remote_target(span: ReadableSpan) -> Optional[str]:
         return "::s3:::" + span.attributes.get(AWS_BUCKET_NAME)
 
     if is_key_present(span, AWS_QUEUE_URL):
-        arn = SqsUrlParser.get_sqs_remote_target(span.get_attributes().get(AWS_QUEUE_URL))
+        arn = SqsUrlParser.get_sqs_remote_target(span.attributes.get(AWS_QUEUE_URL))
         if arn:
             return arn
 
