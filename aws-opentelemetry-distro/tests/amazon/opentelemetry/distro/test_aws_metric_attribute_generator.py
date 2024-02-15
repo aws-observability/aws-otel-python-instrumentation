@@ -757,13 +757,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute([remote_service_key, SpanAttributes.PEER_SERVICE], [None, None])
 
     def test_client_span_with_remote_target_attributes(self):
-        keys: List[str] = [
-            AWS_BUCKET_NAME,
-            AWS_QUEUE_NAME,
-            AWS_QUEUE_URL,
-            AWS_STREAM_NAME,
-            AWS_TABLE_NAME
-        ]
+        keys: List[str] = [AWS_BUCKET_NAME, AWS_QUEUE_NAME, AWS_QUEUE_URL, AWS_STREAM_NAME, AWS_TABLE_NAME]
         values: List[str] = [
             "TestString",
             "TestString",
