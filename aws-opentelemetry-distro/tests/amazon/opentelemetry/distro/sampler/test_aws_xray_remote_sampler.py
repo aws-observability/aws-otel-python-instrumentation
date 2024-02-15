@@ -18,6 +18,36 @@ TEST_DIR = os.path.dirname(os.path.realpath(__file__))
 DATA_DIR = os.path.join(TEST_DIR, "data")
 
 
+def create_spans(sampled_array, thread_id, span_attributes, remote_sampler, number_of_spans):
+    sampled = 0
+    for _ in range(0, number_of_spans):
+        if remote_sampler.should_sample(None, 0, "name", attributes=span_attributes).decision != Decision.DROP:
+            sampled += 1
+    sampled_array[thread_id] = sampled
+
+
+def mocked_requests_get(*args, **kwargs):
+    class MockResponse:
+        def __init__(self, json_data, status_code):
+            self.json_data = json_data
+            self.status_code = status_code
+
+        def json(self):
+            return self.json_data
+
+    if kwargs["url"] == "http://127.0.0.1:2000/GetSamplingRules":
+        with open(f"{DATA_DIR}/test-remote-sampler_sampling-rules-response-sample.json", encoding="UTF-8") as file:
+            sample_response = json.load(file)
+            file.close()
+        return MockResponse(sample_response, 200)
+    if kwargs["url"] == "http://127.0.0.1:2000/SamplingTargets":
+        with open(f"{DATA_DIR}/test-remote-sampler_sampling-targets-response-sample.json", encoding="UTF-8") as file:
+            sample_response = json.load(file)
+            file.close()
+        return MockResponse(sample_response, 200)
+    return MockResponse(None, 404)
+
+
 class TestAwsXRayRemoteSampler(TestCase):
     def test_create_remote_sampler_with_empty_resource(self):
         rs = AwsXRayRemoteSampler(resource=Resource.get_empty())
@@ -56,30 +86,6 @@ class TestAwsXRayRemoteSampler(TestCase):
         self.assertEqual(rs._AwsXRayRemoteSampler__resource.attributes["service.name"], "test-service-name")
         self.assertEqual(rs._AwsXRayRemoteSampler__resource.attributes["cloud.platform"], "test-cloud-platform")
 
-    @staticmethod
-    def mocked_requests_get(*args, **kwargs):
-        class MockResponse:
-            def __init__(self, json_data, status_code):
-                self.json_data = json_data
-                self.status_code = status_code
-
-            def json(self):
-                return self.json_data
-
-        if kwargs["url"] == "http://127.0.0.1:2000/GetSamplingRules":
-            with open(f"{DATA_DIR}/test-remote-sampler_sampling-rules-response-sample.json", encoding="UTF-8") as file:
-                sample_response = json.load(file)
-                file.close()
-            return MockResponse(sample_response, 200)
-        if kwargs["url"] == "http://127.0.0.1:2000/SamplingTargets":
-            with open(
-                f"{DATA_DIR}/test-remote-sampler_sampling-targets-response-sample.json", encoding="UTF-8"
-            ) as file:
-                sample_response = json.load(file)
-                file.close()
-            return MockResponse(sample_response, 200)
-        return MockResponse(None, 404)
-
     @patch("requests.post", side_effect=mocked_requests_get)
     @patch("amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler.DEFAULT_TARGET_POLLING_INTERVAL_SECONDS", 2)
     def test_update_sampling_rules_and_targets_with_pollers_and_should_sample(self, mock_post=None):
@@ -107,23 +113,15 @@ class TestAwsXRayRemoteSampler(TestCase):
             rs.should_sample(None, 0, "name", attributes={"abc": "1234"}).decision, Decision.RECORD_AND_SAMPLE
         )
 
-    @staticmethod
-    def create_spans(sampled_array, thread_id, span_attributes, remote_sampler, number_of_spans):
-        sampled = 0
-        for _ in range(0, number_of_spans):
-            if remote_sampler.should_sample(None, 0, "name", attributes=span_attributes).decision != Decision.DROP:
-                sampled += 1
-        sampled_array[thread_id] = sampled
-
     @patch("requests.post", side_effect=mocked_requests_get)
-    @patch("amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler.DEFAULT_TARGET_POLLING_INTERVAL_SECONDS", 2)
+    @patch("amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler.DEFAULT_TARGET_POLLING_INTERVAL_SECONDS", 3)
     def test_multithreading_with_large_reservoir_with_otel_sdk(self, mock_post=None):
         rs = AwsXRayRemoteSampler(
             resource=Resource.create({"service.name": "test-service-name", "cloud.platform": "test-cloud-platform"})
         )
         attributes = {"abc": "1234"}
 
-        time.sleep(1.0)
+        time.sleep(2.0)
         self.assertEqual(rs.should_sample(None, 0, "name", attributes=attributes).decision, Decision.DROP)
 
         # wait 3 more seconds since targets polling was patched to 2 seconds (rather than 10s)
@@ -138,7 +136,7 @@ class TestAwsXRayRemoteSampler(TestCase):
             sampled_array.append(0)
             threads.append(
                 threading.Thread(
-                    target=self.create_spans,
+                    target=create_spans,
                     name="thread_" + str(idx),
                     daemon=True,
                     args=(sampled_array, idx, attributes, rs, number_of_spans),
@@ -193,7 +191,7 @@ class TestAwsXRayRemoteSampler(TestCase):
             sampled_array.append(0)
             threads.append(
                 threading.Thread(
-                    target=self.create_spans,
+                    target=create_spans,
                     name="thread_" + str(idx),
                     daemon=True,
                     args=(sampled_array, idx, attributes, rs, number_of_spans),
