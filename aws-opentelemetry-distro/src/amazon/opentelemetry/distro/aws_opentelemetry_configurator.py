@@ -14,6 +14,7 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
+from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.sdk._configuration import (
     _get_exporter_names,
@@ -138,6 +139,9 @@ def _init_tracing(
 
 
 def _customize_sampler(sampler: Sampler) -> Sampler:
+    if sampler is None:
+        sampler = AwsXRayRemoteSampler
+
     if not is_smp_enabled():
         return sampler
     return AlwaysRecordSampler(sampler)
