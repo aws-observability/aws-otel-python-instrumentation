@@ -5,18 +5,18 @@ from unittest import TestCase
 from unittest.mock import MagicMock
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
+    AWS_BUCKET_NAME,
     AWS_CONSUMER_PARENT_SPAN_KIND,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
+    AWS_QUEUE_NAME,
+    AWS_QUEUE_URL,
     AWS_REMOTE_OPERATION,
     AWS_REMOTE_SERVICE,
     AWS_REMOTE_TARGET,
     AWS_SPAN_KIND,
-    AWS_TABLE_NAME,
-    AWS_BUCKET_NAME,
-    AWS_QUEUE_URL,
-    AWS_QUEUE_NAME,
     AWS_STREAM_NAME,
+    AWS_TABLE_NAME,
 )
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
 from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, SERVICE_METRIC
@@ -633,7 +633,10 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute([AWS_QUEUE_NAME], [None])
 
         # Validate behaviour of having both AWS_QUEUE_NAME and AWS_QUEUE_URL attribute, then remove them
-        self._mock_attribute([AWS_QUEUE_URL, AWS_QUEUE_NAME], ["https://sqs.us-east-2.amazonaws.com/123456789012/Queue", "aws_queue_name"])
+        self._mock_attribute(
+            [AWS_QUEUE_URL, AWS_QUEUE_NAME],
+            ["https://sqs.us-east-2.amazonaws.com/123456789012/Queue", "aws_queue_name"],
+        )
         self._validate_remote_target_attributes(AWS_REMOTE_TARGET, "arn:aws:sqs:us-east-2:123456789012:Queue")
         self._mock_attribute([AWS_QUEUE_URL, AWS_QUEUE_NAME], [None, None])
 
@@ -653,61 +656,69 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute([AWS_TABLE_NAME], [None])
 
     def test_sqs_client_span_basic_urls(self):
-        self._test_sqs_url("https://sqs.us-east-1.amazonaws.com/123412341234/Q_Name-5",
-                           "arn:aws:sqs:us-east-1:123412341234:Q_Name-5")
+        self._test_sqs_url(
+            "https://sqs.us-east-1.amazonaws.com/123412341234/Q_Name-5", "arn:aws:sqs:us-east-1:123412341234:Q_Name-5"
+        )
         self._test_sqs_url(
             "https://sqs.af-south-1.amazonaws.com/999999999999/-_ThisIsValid",
-            "arn:aws:sqs:af-south-1:999999999999:-_ThisIsValid")
+            "arn:aws:sqs:af-south-1:999999999999:-_ThisIsValid",
+        )
         self._test_sqs_url(
             "http://sqs.eu-west-3.amazonaws.com/000000000000/FirstQueue",
-            "arn:aws:sqs:eu-west-3:000000000000:FirstQueue")
+            "arn:aws:sqs:eu-west-3:000000000000:FirstQueue",
+        )
         self._test_sqs_url(
-            "sqs.sa-east-1.amazonaws.com/123456781234/SecondQueue",
-            "arn:aws:sqs:sa-east-1:123456781234:SecondQueue")
+            "sqs.sa-east-1.amazonaws.com/123456781234/SecondQueue", "arn:aws:sqs:sa-east-1:123456781234:SecondQueue"
+        )
 
     def test_sqs_client_span_us_gov_urls(self):
-        self._test_sqs_url("https://sqs.us-gov-east-1.amazonaws.com/123456789012/MyQueue",
-                           "arn:aws-us-gov:sqs:us-gov-east-1:123456789012:MyQueue")
         self._test_sqs_url(
-            "sqs.us-gov-west-1.amazonaws.com/112233445566/Queue",
-            "arn:aws-us-gov:sqs:us-gov-west-1:112233445566:Queue")
+            "https://sqs.us-gov-east-1.amazonaws.com/123456789012/MyQueue",
+            "arn:aws-us-gov:sqs:us-gov-east-1:123456789012:MyQueue",
+        )
+        self._test_sqs_url(
+            "sqs.us-gov-west-1.amazonaws.com/112233445566/Queue", "arn:aws-us-gov:sqs:us-gov-west-1:112233445566:Queue"
+        )
 
     def test_sqs_client_span_legacy_format_urls(self):
         self._test_sqs_url(
             "https://ap-northeast-2.queue.amazonaws.com/123456789012/MyQueue",
-            "arn:aws:sqs:ap-northeast-2:123456789012:MyQueue")
+            "arn:aws:sqs:ap-northeast-2:123456789012:MyQueue",
+        )
         self._test_sqs_url(
             "http://cn-northwest-1.queue.amazonaws.com/123456789012/MyQueue",
-            "arn:aws-cn:sqs:cn-northwest-1:123456789012:MyQueue")
+            "arn:aws-cn:sqs:cn-northwest-1:123456789012:MyQueue",
+        )
         self._test_sqs_url(
             "http://cn-north-1.queue.amazonaws.com/123456789012/MyQueue",
-            "arn:aws-cn:sqs:cn-north-1:123456789012:MyQueue")
+            "arn:aws-cn:sqs:cn-north-1:123456789012:MyQueue",
+        )
         self._test_sqs_url(
             "ap-south-1.queue.amazonaws.com/123412341234/MyLongerQueueNameHere",
-            "arn:aws:sqs:ap-south-1:123412341234:MyLongerQueueNameHere")
+            "arn:aws:sqs:ap-south-1:123412341234:MyLongerQueueNameHere",
+        )
         self._test_sqs_url(
             "https://us-gov-east-1.queue.amazonaws.com/123456789012/MyQueue",
-            "arn:aws-us-gov:sqs:us-gov-east-1:123456789012:MyQueue")
+            "arn:aws-us-gov:sqs:us-gov-east-1:123456789012:MyQueue",
+        )
 
     def test_sqs_client_span_north_virginia_legacy_url(self):
         self._test_sqs_url(
-            "https://queue.amazonaws.com/123456789012/MyQueue",
-            "arn:aws:sqs:us-east-1:123456789012:MyQueue")
+            "https://queue.amazonaws.com/123456789012/MyQueue", "arn:aws:sqs:us-east-1:123456789012:MyQueue"
+        )
 
     def test_sqs_client_span_custom_urls(self):
         self._test_sqs_url("http://127.0.0.1:1212/123456789012/MyQueue", "::sqs::123456789012:MyQueue")
-        self._test_sqs_url("https://127.0.0.1:1212/123412341234/RRR", "::sqs::123412341234:RRR")s
+        self._test_sqs_url("https://127.0.0.1:1212/123412341234/RRR", "::sqs::123412341234:RRR")
         self._test_sqs_url("127.0.0.1:1212/123412341234/QQ", "::sqs::123412341234:QQ")
         self._test_sqs_url("https://amazon.com/123412341234/BB", "::sqs::123412341234:BB")
 
     def test_sqs_client_span_long_urls(self):
         queue_name = "a" * 80
-        self._test_sqs_url(
-            "http://127.0.0.1:1212/123456789012/" + queue_name, "::sqs::123456789012:" + queue_name)
+        self._test_sqs_url("http://127.0.0.1:1212/123456789012/" + queue_name, "::sqs::123456789012:" + queue_name)
 
         queue_name_too_long = "a" * 81
-        self._test_sqs_url(
-            "http://127.0.0.1:1212/123456789012/" + queue_name_too_long, None)
+        self._test_sqs_url("http://127.0.0.1:1212/123456789012/" + queue_name_too_long, None)
 
     def test_client_span_sqs_invalid_or_empty_urls(self):
         self._test_sqs_url(None, None)
@@ -719,7 +730,6 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._test_sqs_url("https://sqs.us-east-1.amazonaws.com/A/A", None)
         self._test_sqs_url("https://sqs.us-east-1.amazonaws.com/123412341234/A/ThisShouldNotBeHere", None)
 
-
     def _test_sqs_url(self, sqs_url, expected_remote_target):
         self._mock_attribute([AWS_QUEUE_URL], [sqs_url])
         self._validate_remote_target_attributes(AWS_REMOTE_TARGET, expected_remote_target)
@@ -728,22 +738,29 @@ class TestAwsMetricAttributeGenerator(TestCase):
     def _validate_remote_target_attributes(self, remote_target_key, remote_target) -> None:
         # Client, Producer, and Consumer spans should generate the expected RemoteTarget attribute
         self.span_mock.kind = SpanKind.CLIENT
-        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(DEPENDENCY_METRIC)
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
         self.assertEqual(actual_attributes[remote_target_key], remote_target)
 
         self.span_mock.kind = SpanKind.PRODUCER
-        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(DEPENDENCY_METRIC)
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
         self.assertEqual(actual_attributes[remote_target_key], remote_target)
 
         self.span_mock.kind = SpanKind.CONSUMER
-        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(DEPENDENCY_METRIC)
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
         self.assertEqual(actual_attributes[remote_target_key], remote_target)
 
         # Server span should not generate RemoteTarget attribute
         self.span_mock.kind = SpanKind.SERVER
-        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(SERVICE_METRIC)
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            SERVICE_METRIC
+        )
         self.assertIsNone(actual_attributes[remote_target_key])
-
 
     def _validate_attributes_produced_for_non_local_root_span_of_kind(
         self, expected_attributes: Attributes, kind: SpanKind

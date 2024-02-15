@@ -5,17 +5,17 @@ from typing import Optional
 from urllib.parse import ParseResult, urlparse
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
+    AWS_BUCKET_NAME,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
+    AWS_QUEUE_NAME,
+    AWS_QUEUE_URL,
     AWS_REMOTE_OPERATION,
     AWS_REMOTE_SERVICE,
     AWS_REMOTE_TARGET,
     AWS_SPAN_KIND,
-    AWS_TABLE_NAME,
-    AWS_BUCKET_NAME,
-    AWS_QUEUE_URL,
-    AWS_QUEUE_NAME,
     AWS_STREAM_NAME,
+    AWS_TABLE_NAME,
 )
 from amazon.opentelemetry.distro._aws_span_processing_util import (
     LOCAL_ROOT,

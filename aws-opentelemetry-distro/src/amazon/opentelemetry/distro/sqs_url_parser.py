@@ -1,5 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+from typing import List, Optional
+
 _ARN_DELIMETER: str = ":"
 _HTTP_SCHEMA: str = "http://"
 _HTTPS_SCHEMA: str = "https://"
@@ -51,12 +53,14 @@ def get_region(sqs_url: str) -> Optional[str]:
 
     if sqs_url.startswith("queue.amazonaws.com/"):
         return "us-east-1"
-    elif is_sqs_url(sqs_url):
+
+    if is_sqs_url(sqs_url):
         return get_region_from_sqs_url(sqs_url)
-    elif is_legacy_sqs_url(sqs_url):
+
+    if is_legacy_sqs_url(sqs_url):
         return get_region_from_legacy_sqs_url(sqs_url)
-    else:
-        return None
+
+    return None
 
 
 def is_sqs_url(sqs_url: str) -> bool:
@@ -85,12 +89,12 @@ def is_custom_url(sqs_url: str) -> bool:
     return len(split) == 3 and is_account_id(split[1]) and is_valid_queue_name(split[2])
 
 
-def is_valid_queue_name(input: str) -> bool:
-    if len(input) == 0 or len(input) > 80:
+def is_valid_queue_name(input_str: str) -> bool:
+    if len(input_str) == 0 or len(input) > 80:
         return False
 
-    for c in input:
-        if c != "_" and c != "-" and not c.isalpha() and not c.isdigit():
+    for char in input_str:
+        if char != "_" and char != "-" and not char.isalpha() and not char.isdigit():
             return False
 
     return True
@@ -134,10 +138,11 @@ def get_partition(sqs_url: str) -> Optional[str]:
 
     if region.startswith("us-gov-"):
         return "aws-us-gov"
-    elif region.startswith("cn-"):
+
+    if region.startswith("cn-"):
         return "aws-cn"
-    else:
-        return "aws"
+
+    return "aws"
 
 
 def get_queue_name(sqs_url: str) -> Optional[str]:
@@ -145,5 +150,5 @@ def get_queue_name(sqs_url: str) -> Optional[str]:
     return split[2] if len(split) >= 3 else None
 
 
-def null_to_empty(input: str) -> str:
-    return input if input is not None else ""
+def null_to_empty(input_str: str) -> str:
+    return input_str if input_str is not None else ""
