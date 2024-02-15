@@ -12,7 +12,7 @@ from amazon.opentelemetry.distro.sampler._sampling_statistics_document import _S
 from amazon.opentelemetry.distro.sampler._sampling_target import _SamplingTarget
 from opentelemetry.context import Context
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace.sampling import Decision, ParentBased, SamplingResult, TraceIdRatioBased
+from opentelemetry.sdk.trace.sampling import Decision, ParentBased, Sampler, SamplingResult, TraceIdRatioBased
 from opentelemetry.semconv.resource import CloudPlatformValues, ResourceAttributes
 from opentelemetry.semconv.trace import SpanAttributes
 from opentelemetry.trace import Link, SpanKind
@@ -32,6 +32,8 @@ class _SamplingRuleApplier:
 
         # Initialize with borrowing allowed if there will be a quota > 0
         if self.sampling_rule.ReservoirSize > 0:
+            # __create_reservoir_sampler wraps _RateLimitingSampler with ParentBased
+            # The method will create a reference self.__rate_limiting_sampler to access/set its `borrowing` value
             self.__reservoir_sampler = self.__create_reservoir_sampler(quota=1, borrowing=True)
         else:
             self.__reservoir_sampler = self.__create_reservoir_sampler(quota=0, borrowing=False)
@@ -84,16 +86,10 @@ class _SamplingRuleApplier:
 
         return old_stats.snapshot(self._clock)
 
-    def __create_reservoir_sampler(self, quota: int, borrowing: bool) -> ParentBased:
-        # Keep a reference to rate_limiting_sampler to update its `borrowing` status
-        self.__rate_limiting_sampler = _RateLimitingSampler(quota, self._clock)
-        self.__rate_limiting_sampler.borrowing = borrowing
-        return ParentBased(self.__rate_limiting_sampler)
-
     def update_target(self, target: _SamplingTarget) -> None:
         new_quota = target.ReservoirQuota if target.ReservoirQuota is not None else 0
         new_fixed_rate = target.FixedRate if target.FixedRate is not None else 0
-        self.__reservoir_sampler = self.__create_reservoir_sampler(new_quota, False)
+        self.__reservoir_sampler = self.__create_reservoir_sampler(quota=new_quota, borrowing=False)
         self.__fixed_rate_sampler = ParentBased(TraceIdRatioBased(new_fixed_rate))
 
         if target.ReservoirQuotaTTL is not None:
@@ -149,6 +145,11 @@ class _SamplingRuleApplier:
             and _Matcher.wild_card_match(self.__get_service_type(resource), self.sampling_rule.ServiceType)
             and _Matcher.wild_card_match(self.__get_arn(resource, attributes), self.sampling_rule.ResourceARN)
         )
+
+    def __create_reservoir_sampler(self, quota: int, borrowing: bool) -> Sampler:
+        # Keep a reference to rate_limiting_sampler to access/update its `borrowing` status
+        self.__rate_limiting_sampler = _RateLimitingSampler(quota, self._clock, borrowing)
+        return ParentBased(self.__rate_limiting_sampler)
 
     # pylint: disable=no-self-use
     def __get_service_type(self, resource: Resource) -> str:

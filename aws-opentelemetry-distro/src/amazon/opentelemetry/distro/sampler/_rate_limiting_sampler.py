@@ -12,9 +12,10 @@ from opentelemetry.util.types import Attributes
 
 
 class _RateLimitingSampler(Sampler):
-    def __init__(self, quota: int, clock: _Clock):
+    def __init__(self, quota: int, clock: _Clock, borrowing: bool = False):
+        self.__quota = quota
         self.__reservoir = _RateLimiter(1, quota, clock)
-        self.borrowing = False
+        self.borrowing = borrowing
 
     # pylint: disable=no-self-use
     def should_sample(
@@ -34,6 +35,8 @@ class _RateLimitingSampler(Sampler):
     # pylint: disable=no-self-use
     def get_description(self) -> str:
         description = (
-            "RateLimitingSampler{fallback sampling with sampling config of 1 req/sec and 5% of additional requests}"
+            "RateLimitingSampler{rate limiting sampling with sampling config of "
+            + self.__quota
+            + " req/sec and 0% of additional requests}"
         )
         return description

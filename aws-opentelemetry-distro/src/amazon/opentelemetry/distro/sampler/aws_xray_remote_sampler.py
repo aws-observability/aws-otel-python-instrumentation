@@ -121,7 +121,7 @@ class AwsXRayRemoteSampler(Sampler):
 
     def __get_and_update_sampling_targets(self) -> None:
         all_statistics = self.__rule_cache.get_all_statistics()
-        sampling_targets_response = self.__xray_client.get_sampling_targets_response(all_statistics)
+        sampling_targets_response = self.__xray_client.get_sampling_targets(all_statistics)
         refresh_rules, min_polling_interval = self.__rule_cache.update_sampling_targets(sampling_targets_response)
         if refresh_rules:
             self.__get_and_update_sampling_rules()
@@ -130,7 +130,7 @@ class AwsXRayRemoteSampler(Sampler):
 
     def __start_sampling_target_poller(self) -> None:
         self.__get_and_update_sampling_targets()
-        # Schedule the next sampling rule poll
+        # Schedule the next sampling targets poll
         self._targets_timer = Timer(
             self.__target_polling_interval + self.__target_polling_jitter, self.__start_sampling_target_poller
         )

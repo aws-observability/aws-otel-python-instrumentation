@@ -32,7 +32,7 @@ class _AwsXRaySamplingClient:
                 _logger.error("GetSamplingRules response is None")
                 return []
             sampling_rules_response = xray_response.json()
-            if "SamplingRuleRecords" not in sampling_rules_response:
+            if sampling_rules_response is None or "SamplingRuleRecords" not in sampling_rules_response:
                 _logger.error(
                     "SamplingRuleRecords is missing in getSamplingRules response: %s", sampling_rules_response
                 )
@@ -54,7 +54,7 @@ class _AwsXRaySamplingClient:
 
         return sampling_rules
 
-    def get_sampling_targets_response(self, statistics: [dict]) -> _SamplingTargetResponse:
+    def get_sampling_targets(self, statistics: [dict]) -> _SamplingTargetResponse:
         sampling_targets_response = _SamplingTargetResponse(
             LastRuleModification=None, SamplingTargetDocuments=None, UnprocessedStatistics=None
         )
@@ -70,7 +70,11 @@ class _AwsXRaySamplingClient:
                 _logger.debug("GetSamplingTargets response is None. Unable to update targets.")
                 return sampling_targets_response
             xray_response_json = xray_response.json()
-            if "SamplingTargetDocuments" not in xray_response_json or "LastRuleModification" not in xray_response_json:
+            if (
+                xray_response_json is None
+                or "SamplingTargetDocuments" not in xray_response_json
+                or "LastRuleModification" not in xray_response_json
+            ):
                 _logger.debug("getSamplingTargets response is invalid. Unable to update targets.")
                 return sampling_targets_response
 

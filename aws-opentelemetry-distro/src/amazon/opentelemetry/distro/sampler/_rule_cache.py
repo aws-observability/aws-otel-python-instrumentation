@@ -57,6 +57,7 @@ class _RuleCache:
                     trace_state=trace_state,
                 )
 
+        _logger.debug("No sampling rules were matched")
         # Should not ever reach fallback sampler as default rule is able to match
         return self._fallback_sampler.should_sample(
             parent_context, trace_id, name, kind=kind, attributes=attributes, links=links, trace_state=trace_state
@@ -102,6 +103,8 @@ class _RuleCache:
         rule_applier_map: Dict[str, _SamplingRuleApplier] = {
             applier.sampling_rule.RuleName: applier for applier in self.__rule_appliers
         }
+
+        next_polling_interval = DEFAULT_TARGET_POLLING_INTERVAL_SECONDS
         min_polling_interval = None
 
         target: _SamplingTarget
@@ -113,12 +116,15 @@ class _RuleCache:
                     if min_polling_interval is None or min_polling_interval > target.Interval:
                         min_polling_interval = target.Interval
 
+        if min_polling_interval is not None:
+            next_polling_interval = min_polling_interval
+
         last_rule_modification = self._clock.from_timestamp(sampling_targets_response.LastRuleModification)
         refresh_rules = last_rule_modification > self._last_modified
 
         self.__cache_lock.release()
 
-        return (refresh_rules, min_polling_interval)
+        return (refresh_rules, next_polling_interval)
 
     def get_all_statistics(self) -> [dict]:
         all_statistics = []
