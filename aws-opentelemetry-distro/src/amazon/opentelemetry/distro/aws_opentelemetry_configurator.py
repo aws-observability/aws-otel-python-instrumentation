@@ -48,9 +48,9 @@ from opentelemetry.sdk.trace.sampling import Sampler
 from opentelemetry.semconv.resource import ResourceAttributes
 from opentelemetry.trace import set_tracer_provider
 
-OTEL_SMP_ENABLED = "OTEL_SMP_ENABLED"
+OTEL_AWS_APP_SIGNALS_ENABLED = "OTEL_AWS_APP_SIGNALS_ENABLED"
 OTEL_METRIC_EXPORT_INTERVAL = "OTEL_METRIC_EXPORT_INTERVAL"
-OTEL_AWS_SMP_EXPORTER_ENDPOINT = "OTEL_AWS_SMP_EXPORTER_ENDPOINT"
+OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT = "OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT"
 DEFAULT_METRIC_EXPORT_INTERVAL = 60000.0
 
 _logger: Logger = getLogger(__name__)
@@ -65,7 +65,7 @@ class AwsOpenTelemetryConfigurator(_OTelSDKConfigurator):
     - Add AttributePropagatingSpanProcessor to propagate span attributes from parent to child spans.
     - Add AwsMetricAttributesSpanExporter to add more attributes to all spans.
 
-    You can control when these customizations are applied using the environment variable OTEL_SMP_ENABLED.
+    You can control when these customizations are applied using the environment variable OTEL_AWS_APP_SIGNALS_ENABLED.
     This flag is disabled by default.
     """
 
@@ -169,7 +169,7 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource) -> 
     ]:
         temporality_dict[typ] = AggregationTemporality.DELTA
     _logger.info("Span Metrics Processor enabled")
-    smp_endpoint = os.environ.get(OTEL_AWS_SMP_EXPORTER_ENDPOINT, "http://cloudwatch-agent.amazon-cloudwatch:4317")
+    smp_endpoint = os.environ.get(OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT, "http://localhost:4315")
     otel_metric_exporter = OTLPMetricExporter(endpoint=smp_endpoint, preferred_temporality=temporality_dict)
     export_interval_millis = float(os.environ.get(OTEL_METRIC_EXPORT_INTERVAL, DEFAULT_METRIC_EXPORT_INTERVAL))
     _logger.debug("Span Metrics endpoint: %s", smp_endpoint)
@@ -189,4 +189,4 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource) -> 
 
 
 def is_smp_enabled():
-    return os.environ.get(OTEL_SMP_ENABLED, False)
+    return os.environ.get(OTEL_AWS_APP_SIGNALS_ENABLED, False)
