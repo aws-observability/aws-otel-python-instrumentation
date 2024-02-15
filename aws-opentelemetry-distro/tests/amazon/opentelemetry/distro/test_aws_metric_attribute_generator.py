@@ -741,26 +741,36 @@ class TestAwsMetricAttributeGenerator(TestCase):
         actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
             DEPENDENCY_METRIC
         )
-        self.assertEqual(actual_attributes[remote_target_key], remote_target)
+        if not remote_target_key in actual_attributes:
+            self.assertEqual(remote_target, None)
+        else:
+            self.assertEqual(actual_attributes[remote_target_key], remote_target)
 
         self.span_mock.kind = SpanKind.PRODUCER
         actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
             DEPENDENCY_METRIC
         )
-        self.assertEqual(actual_attributes[remote_target_key], remote_target)
+        if not remote_target_key in actual_attributes:
+            self.assertEqual(remote_target, None)
+        else:
+            self.assertEqual(actual_attributes[remote_target_key], remote_target)
 
         self.span_mock.kind = SpanKind.CONSUMER
         actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
             DEPENDENCY_METRIC
         )
-        self.assertEqual(actual_attributes[remote_target_key], remote_target)
+        if not remote_target_key in actual_attributes:
+            self.assertEqual(remote_target, None)
+        else:
+            self.assertEqual(actual_attributes[remote_target_key], remote_target)
 
         # Server span should not generate RemoteTarget attribute
         self.span_mock.kind = SpanKind.SERVER
         actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
             SERVICE_METRIC
         )
-        self.assertIsNone(actual_attributes[remote_target_key])
+
+        self.assertNotIn(remote_target_key, actual_attributes)
 
     def _validate_attributes_produced_for_non_local_root_span_of_kind(
         self, expected_attributes: Attributes, kind: SpanKind
