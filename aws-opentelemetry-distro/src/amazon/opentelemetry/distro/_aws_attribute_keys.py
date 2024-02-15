@@ -17,6 +17,6 @@ AWS_CONSUMER_PARENT_SPAN_KIND: str = "aws.consumer.parent.span.kind"
 # TODO：Move to Semantic Conventions when these attributes are added.
 AWS_TABLE_NAME: str = SpanAttributes.AWS_DYNAMODB_TABLE_NAMES
 AWS_BUCKET_NAME: str = SpanAttributes.AWS_S3_BUCKET
-AWS_QUEUE_URL: str = "aws.queue.url"
+AWS_QUEUE_URL: str = "aws.queue_url"
 AWS_QUEUE_NAME: str = "aws.queue.name"
 AWS_STREAM_NAME: str = "aws.stream.name"
