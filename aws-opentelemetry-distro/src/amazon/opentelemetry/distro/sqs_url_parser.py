@@ -90,7 +90,7 @@ def is_custom_url(sqs_url: str) -> bool:
 
 
 def is_valid_queue_name(input_str: str) -> bool:
-    if len(input_str) == 0 or len(input) > 80:
+    if len(input_str) == 0 or len(input_str) > 80:
         return False
 
     for char in input_str:
