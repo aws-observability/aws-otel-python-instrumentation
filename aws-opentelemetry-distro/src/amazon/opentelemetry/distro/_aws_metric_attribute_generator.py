@@ -6,7 +6,6 @@ from typing import Match, Optional
 from urllib.parse import ParseResult, urlparse
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
-    AWS_BUCKET_NAME,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_QUEUE_NAME,
@@ -16,7 +15,6 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_REMOTE_TARGET,
     AWS_SPAN_KIND,
     AWS_STREAM_NAME,
-    AWS_TABLE_NAME,
 )
 from amazon.opentelemetry.distro._aws_span_processing_util import (
     LOCAL_ROOT,
@@ -63,6 +61,8 @@ _NET_SOCK_PEER_PORT: str = SpanAttributes.NET_SOCK_PEER_PORT
 _PEER_SERVICE: str = SpanAttributes.PEER_SERVICE
 _RPC_METHOD: str = SpanAttributes.RPC_METHOD
 _RPC_SERVICE: str = SpanAttributes.RPC_SERVICE
+_AWS_TABLE_NAMES: str = SpanAttributes.AWS_DYNAMODB_TABLE_NAMES
+_AWS_BUCKET_NAME: str = SpanAttributes.AWS_S3_BUCKET
 
 # Special DEPENDENCY attribute value if GRAPHQL_OPERATION_TYPE attribute key is present.
 _GRAPHQL: str = "graphql"
@@ -327,8 +327,14 @@ def _set_remote_target(span: ReadableSpan, attributes: BoundedAttributes) -> Non
 
 
 def _get_remote_target(span: ReadableSpan) -> Optional[str]:
-    if is_key_present(span, AWS_BUCKET_NAME):
-        return "::s3:::" + span.attributes.get(AWS_BUCKET_NAME)
+    """
+    RemoteTarget attribute AWS_REMOTE_TARGET is used to store the resource
+    name of the remote invokes, such as S3 bucket name, mysql table name, etc.
+    TODO: currently only support AWS resource name, will be extended to support
+    the general remote targets, such as ActiveMQ name, etc.
+    """
+    if is_key_present(span, _AWS_BUCKET_NAME):
+        return "::s3:::" + span.attributes.get(_AWS_BUCKET_NAME)
 
     if is_key_present(span, AWS_QUEUE_URL):
         arn = SqsUrlParser.get_sqs_remote_target(span.attributes.get(AWS_QUEUE_URL))
@@ -341,8 +347,9 @@ def _get_remote_target(span: ReadableSpan) -> Optional[str]:
     if is_key_present(span, AWS_STREAM_NAME):
         return "::kinesis:::stream/" + span.attributes.get(AWS_STREAM_NAME)
 
-    if is_key_present(span, AWS_TABLE_NAME):
-        return "::dynamodb:::table/" + span.attributes.get(AWS_TABLE_NAME)
+    # Only extract the table name when _AWS_TABLE_NAMES has size equals to one
+    if is_key_present(span, _AWS_TABLE_NAMES) and len(span.attributes.get(_AWS_TABLE_NAMES)) == 1:
+        return "::dynamodb:::table/" + span.attributes.get(_AWS_TABLE_NAMES)[0]
 
     return None
 

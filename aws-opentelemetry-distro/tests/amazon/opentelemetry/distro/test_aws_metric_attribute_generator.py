@@ -5,7 +5,6 @@ from unittest import TestCase
 from unittest.mock import MagicMock
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
-    AWS_BUCKET_NAME,
     AWS_CONSUMER_PARENT_SPAN_KIND,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
@@ -16,7 +15,6 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_REMOTE_TARGET,
     AWS_SPAN_KIND,
     AWS_STREAM_NAME,
-    AWS_TABLE_NAME,
 )
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
 from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, SERVICE_METRIC
@@ -757,7 +755,13 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute([remote_service_key, SpanAttributes.PEER_SERVICE], [None, None])
 
     def test_client_span_with_remote_target_attributes(self):
-        keys: List[str] = [AWS_BUCKET_NAME, AWS_QUEUE_NAME, AWS_QUEUE_URL, AWS_STREAM_NAME, AWS_TABLE_NAME]
+        keys: List[str] = [
+            SpanAttributes.AWS_S3_BUCKET,
+            AWS_QUEUE_NAME,
+            AWS_QUEUE_URL,
+            AWS_STREAM_NAME,
+            SpanAttributes.AWS_DYNAMODB_TABLE_NAMES,
+        ]
         values: List[str] = [
             "TestString",
             "TestString",
@@ -768,9 +772,9 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(keys, values)
 
         # Validate behaviour of aws bucket name attribute, then remove it.
-        self._mock_attribute([AWS_BUCKET_NAME], ["aws_s3_bucket_name"])
+        self._mock_attribute([SpanAttributes.AWS_S3_BUCKET], ["aws_s3_bucket_name"])
         self._validate_remote_target_attributes(AWS_REMOTE_TARGET, "::s3:::aws_s3_bucket_name")
-        self._mock_attribute([AWS_BUCKET_NAME], [None])
+        self._mock_attribute([SpanAttributes.AWS_S3_BUCKET], [None])
 
         # Validate behaviour of AWS_QUEUE_NAME attribute, then remove it
         self._mock_attribute([AWS_QUEUE_NAME], ["aws_queue_name"])
@@ -795,10 +799,20 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._validate_remote_target_attributes(AWS_REMOTE_TARGET, "::kinesis:::stream/aws_stream_name")
         self._mock_attribute([AWS_STREAM_NAME], [None])
 
-        # Validate behaviour of AWS_TABLE_NAME attribute, then remove it.
-        self._mock_attribute([AWS_TABLE_NAME], ["aws_table_name"])
+        # Validate behaviour of SpanAttributes.AWS_DYNAMODB_TABLE_NAMES attribute with one table name, then remove it.
+        self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [["aws_table_name"]])
         self._validate_remote_target_attributes(AWS_REMOTE_TARGET, "::dynamodb:::table/aws_table_name")
-        self._mock_attribute([AWS_TABLE_NAME], [None])
+        self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [None])
+
+        # Validate behaviour of SpanAttributes.AWS_DYNAMODB_TABLE_NAMES attribute with no table name, then remove it.
+        self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [[]])
+        self._validate_remote_target_attributes(AWS_REMOTE_TARGET, None)
+        self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [None])
+
+        # Validate behaviour of SpanAttributes.AWS_DYNAMODB_TABLE_NAMES attribute with two table names, then remove it.
+        self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [["aws_table_name1", "aws_table_name1"]])
+        self._validate_remote_target_attributes(AWS_REMOTE_TARGET, None)
+        self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [None])
 
     def test_sqs_client_span_basic_urls(self):
         self._test_sqs_url(
@@ -889,7 +903,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         if remote_target_key not in actual_attributes:
             self.assertEqual(remote_target, None)
         else:
-            self.assertEqual(actual_attributes[remote_target_key], remote_target)
+            self.assertEqual(actual_attributes.get(remote_target_key), remote_target)
 
         self.span_mock.kind = SpanKind.PRODUCER
         actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
@@ -898,7 +912,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         if remote_target_key not in actual_attributes:
             self.assertEqual(remote_target, None)
         else:
-            self.assertEqual(actual_attributes[remote_target_key], remote_target)
+            self.assertEqual(actual_attributes.get(remote_target_key), remote_target)
 
         self.span_mock.kind = SpanKind.CONSUMER
         actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
@@ -907,7 +921,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         if remote_target_key not in actual_attributes:
             self.assertEqual(remote_target, None)
         else:
-            self.assertEqual(actual_attributes[remote_target_key], remote_target)
+            self.assertEqual(actual_attributes.get(remote_target_key), remote_target)
 
         # Server span should not generate RemoteTarget attribute
         self.span_mock.kind = SpanKind.SERVER
