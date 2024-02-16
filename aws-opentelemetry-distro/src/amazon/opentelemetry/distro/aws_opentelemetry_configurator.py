@@ -106,11 +106,6 @@ def _initialize_components(auto_instrumentation_version):
     sampler_name = _get_sampler()
     sampler = _custom_import_sampler(sampler_name, resource)
 
-    if sampler is not None:
-        _logger.debug("Using sampler: %s", sampler.get_description())
-    else:
-        _logger.debug("Sampler is None")
-
     _init_tracing(
         exporters=trace_exporters,
         id_generator=id_generator,
@@ -152,6 +147,8 @@ def _custom_import_sampler(sampler_name, resource) -> Sampler:
     # TODO: Remove `sampler_name is None` condition when xray sampler is configured here:
     # https://github.com/aws/amazon-cloudwatch-agent-operator/blob/main/pkg/instrumentation/defaultinstrumentation.go#L90
     if sampler_name is None or sampler_name == "xray":
+        # Example env var value
+        # OTEL_TRACES_SAMPLER_ARG=endpoint=http://localhost:2000,polling_interval=360
         sampler_argument_env = os.getenv(OTEL_TRACES_SAMPLER_ARG, None)
         endpoint = None
         polling_interval = None
