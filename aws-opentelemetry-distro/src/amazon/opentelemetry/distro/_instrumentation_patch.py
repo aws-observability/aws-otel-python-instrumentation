@@ -21,7 +21,7 @@ def apply_instrumentation_patches() -> None:
 
 
 def _apply_botocore_instrumentation_patches() -> None:
-    """ Botocore instrumentation patches
+    """Botocore instrumentation patches
 
     Adds patches to provide additional support and Java parity for Kinesis, S3, and SQS.
     """
@@ -31,7 +31,7 @@ def _apply_botocore_instrumentation_patches() -> None:
 
 
 def _apply_botocore_kinesis_patch() -> None:
-    """ Botocore instrumentation patch for Kinesis
+    """Botocore instrumentation patch for Kinesis
 
     This patch adds an extension to the upstream's list of known extension for Kinesis. Extensions allow for custom
     logic for adding service-specific information to spans, such as attributes. Specifically, we are adding logic to add
@@ -42,7 +42,7 @@ def _apply_botocore_kinesis_patch() -> None:
 
 
 def _apply_botocore_s3_patch() -> None:
-    """ Botocore instrumentation patch for S3
+    """Botocore instrumentation patch for S3
 
     This patch adds an extension to the upstream's list of known extension for S3. Extensions allow for custom
     logic for adding service-specific information to spans, such as attributes. Specifically, we are adding logic to add
@@ -54,13 +54,13 @@ def _apply_botocore_s3_patch() -> None:
 
 
 def _apply_botocore_sqs_patch() -> None:
-    """ Botocore instrumentation patch for SQS
+    """Botocore instrumentation patch for SQS
 
     This patch extends the existing upstream extension for SQS. Extensions allow for custom logic for adding
     service-specific information to spans, such as attributes. Specifically, we are adding logic to add
     `aws.sqs.queue_url` and `aws.sqs.queue_name` attributes, to be used to generate RemoteTarget and achieve parity
     with the Java instrumentation. Callout that today, the upstream logic adds `aws.queue_url` but we feel that
-    `aws.sqs` is more in line with existing AWS Semantic Convetion attributes like `AWS_S3_BUCKET`, etc.
+    `aws.sqs` is more in line with existing AWS Semantic Convention attributes like `AWS_S3_BUCKET`, etc.
     """
     old_extract_attributes = _SqsExtension.extract_attributes
 
@@ -77,10 +77,11 @@ def _apply_botocore_sqs_patch() -> None:
 
 
 def _lazy_load(module, cls):
-    """ Clone of upstream opentelemetry.instrumentation.botocore.extensions.lazy_load
+    """Clone of upstream opentelemetry.instrumentation.botocore.extensions.lazy_load
 
     The logic in this method is dependent on the file path of where it is implemented, so must be cloned here.
     """
+
     def loader():
         imported_mod = importlib.import_module(module, __name__)
         return getattr(imported_mod, cls, None)
