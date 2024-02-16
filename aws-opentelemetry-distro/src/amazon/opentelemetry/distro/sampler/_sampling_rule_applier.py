@@ -38,6 +38,7 @@ class _SamplingRuleApplier:
         else:
             self.__reservoir_sampler = self.__create_reservoir_sampler(quota=0, borrowing=False)
 
+        self.__reservoir_expiry_lock = Lock()
         self.__reservoir_expiry = self._clock.now()
 
     def should_sample(
@@ -52,9 +53,11 @@ class _SamplingRuleApplier:
     ) -> SamplingResult:
         has_borrowed = False
         has_sampled = False
-
-        reservoir_expired: bool = self._clock.now() >= self.__reservoir_expiry
         sampling_result = SamplingResult(decision=Decision.DROP, attributes=attributes, trace_state=trace_state)
+
+        with self.__reservoir_expiry_lock:
+            reservoir_expired: bool = self._clock.now() >= self.__reservoir_expiry
+
         if reservoir_expired:
             self.__rate_limiting_sampler.borrowing = True
 
@@ -92,11 +95,12 @@ class _SamplingRuleApplier:
         self.__reservoir_sampler = self.__create_reservoir_sampler(quota=new_quota, borrowing=False)
         self.__fixed_rate_sampler = ParentBased(TraceIdRatioBased(new_fixed_rate))
 
-        if target.ReservoirQuotaTTL is not None:
-            self.__reservoir_expiry = self._clock.from_timestamp(target.ReservoirQuotaTTL)
-        else:
-            # Treat as expired
-            self.__reservoir_expiry = self._clock.now()
+        with self.__reservoir_expiry_lock:
+            if target.ReservoirQuotaTTL is not None:
+                self.__reservoir_expiry = self._clock.from_timestamp(target.ReservoirQuotaTTL)
+            else:
+                # Treat as expired
+                self.__reservoir_expiry = self._clock.now()
 
     def matches(self, resource: Resource, attributes: Attributes) -> bool:
         url_path = None
