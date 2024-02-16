@@ -14,6 +14,7 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
+from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.sdk._configuration import (
     _get_exporter_names,
@@ -26,7 +27,10 @@ from opentelemetry.sdk._configuration import (
     _init_metrics,
     _OTelSDKConfigurator,
 )
-from opentelemetry.sdk.environment_variables import _OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED
+from opentelemetry.sdk.environment_variables import (
+    _OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED,
+    OTEL_TRACES_SAMPLER_ARG,
+)
 from opentelemetry.sdk.extension.aws.resource.ec2 import AwsEc2ResourceDetector
 from opentelemetry.sdk.extension.aws.resource.ecs import AwsEcsResourceDetector
 from opentelemetry.sdk.extension.aws.resource.eks import AwsEksResourceDetector
@@ -81,8 +85,7 @@ def _initialize_components(auto_instrumentation_version):
         _get_exporter_names("metrics"),
         _get_exporter_names("logs"),
     )
-    sampler_name = _get_sampler()
-    sampler = _import_sampler(sampler_name)
+
     id_generator_name = _get_id_generator()
     id_generator = _import_id_generator(id_generator_name)
     # if env var OTEL_RESOURCE_ATTRIBUTES is given, it will read the service_name
@@ -99,6 +102,9 @@ def _initialize_components(auto_instrumentation_version):
             AwsEcsResourceDetector(),
         ]
     ).merge(Resource.create(auto_resource))
+
+    sampler_name = _get_sampler()
+    sampler = _custom_import_sampler(sampler_name, resource)
 
     _init_tracing(
         exporters=trace_exporters,
@@ -135,6 +141,36 @@ def _init_tracing(
     _customize_span_processors(trace_provider, resource)
 
     set_tracer_provider(trace_provider)
+
+
+def _custom_import_sampler(sampler_name: str, resource: Resource) -> Sampler:
+    # TODO: Remove `sampler_name is None` condition when xray sampler is configured here:
+    # https://github.com/aws/amazon-cloudwatch-agent-operator/blob/main/pkg/instrumentation/defaultinstrumentation.go#L90
+    if sampler_name is None or sampler_name == "xray":
+        # Example env var value
+        # OTEL_TRACES_SAMPLER_ARG=endpoint=http://localhost:2000,polling_interval=360
+        sampler_argument_env: str = os.getenv(OTEL_TRACES_SAMPLER_ARG, None)
+        endpoint: str = None
+        polling_interval: int = None
+
+        if sampler_argument_env is not None:
+            args = sampler_argument_env.split(",")
+            for arg in args:
+                key_value = arg.split("=", 1)
+                if len(key_value) != 2:
+                    continue
+                if key_value[0] == "endpoint":
+                    endpoint = key_value[1]
+                elif key_value[0] == "polling_interval":
+                    try:
+                        polling_interval = int(key_value[1])
+                    except ValueError as error:
+                        _logger.error("polling_interval in OTEL_TRACES_SAMPLER_ARG must be a number: %s", error)
+
+        _logger.debug("XRay Sampler Endpoint: %s", str(endpoint))
+        _logger.debug("XRay Sampler Polling Interval: %s", str(polling_interval))
+        return AwsXRayRemoteSampler(resource=resource, endpoint=endpoint, polling_interval=polling_interval)
+    return _import_sampler(sampler_name)
 
 
 def _customize_sampler(sampler: Sampler) -> Sampler:
