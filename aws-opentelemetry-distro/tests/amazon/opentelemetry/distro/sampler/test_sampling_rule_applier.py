@@ -366,7 +366,7 @@ class TestSamplingRuleApplier(TestCase):
         rule_applier = _SamplingRuleApplier(sampling_rule, CLIENT_ID, _Clock())
         self.assertFalse(rule_applier.matches(resource, attributes))
 
-    def test_update_sampling_targets(self):
+    def test_update_sampling_applier(self):
         sampling_rule = _SamplingRule(
             Attributes={},
             FixedRate=0.11,
@@ -392,12 +392,13 @@ class TestSamplingRuleApplier(TestCase):
         self.assertEqual(
             rule_applier._SamplingRuleApplier__reservoir_sampler._root._RateLimitingSampler__reservoir._quota, 1
         )
-        self.assertEqual(rule_applier._SamplingRuleApplier__reservoir_expiry, mock_clock.now())
+        self.assertEqual(rule_applier._SamplingRuleApplier__reservoir_expiry, datetime.datetime.max)
 
         target = _SamplingTarget(
             FixedRate=1.0, Interval=10, ReservoirQuota=30, ReservoirQuotaTTL=1707764006.0, RuleName="test"
         )
-        rule_applier.update_target(target)
+        # Update rule applier
+        rule_applier = rule_applier.with_target(target)
 
         time_now = datetime.datetime.fromtimestamp(target.ReservoirQuotaTTL)
         mock_clock.set_time(time_now)
@@ -464,7 +465,7 @@ class TestSamplingRuleApplier(TestCase):
             ReservoirQuotaTTL=mock_clock.now().timestamp() + 10,
             RuleName="test",
         )
-        rule_applier.update_target(target)
+        rule_applier = rule_applier.with_target(target)
 
         # Use only 100% of quota (10 out of 10), even if 2 seconds have passed
         mock_clock.add_time(seconds=2.0)
@@ -482,10 +483,10 @@ class TestSamplingRuleApplier(TestCase):
                 sampled_count += 1
         self.assertEqual(sampled_count, 5)
 
-        # Expired, used borrowing logic again
+        # Expired at 10s, do not sample
         mock_clock.add_time(seconds=7.5)
         sampled_count = 0
         for _ in range(0, reservoir_size + 10):
             if rule_applier.should_sample(None, 0, "name").decision != Decision.DROP:
                 sampled_count += 1
-        self.assertEqual(sampled_count, 1)
+        self.assertEqual(sampled_count, 0)

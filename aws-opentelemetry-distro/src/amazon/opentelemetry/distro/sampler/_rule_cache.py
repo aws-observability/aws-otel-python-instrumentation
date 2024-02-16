@@ -96,35 +96,36 @@ class _RuleCache:
         self.__cache_lock.release()
 
     def update_sampling_targets(self, sampling_targets_response: _SamplingTargetResponse) -> (bool, int):
-        targets = sampling_targets_response.SamplingTargetDocuments
+        targets: [_SamplingTarget] = sampling_targets_response.SamplingTargetDocuments
 
-        self.__cache_lock.acquire()
+        with self.__cache_lock:
+            next_polling_interval = DEFAULT_TARGET_POLLING_INTERVAL_SECONDS
+            min_polling_interval = None
 
-        rule_applier_map: Dict[str, _SamplingRuleApplier] = {
-            applier.sampling_rule.RuleName: applier for applier in self.__rule_appliers
-        }
+            target_map: Dict[str, _SamplingTarget] = {target.RuleName: target for target in targets}
 
-        next_polling_interval = DEFAULT_TARGET_POLLING_INTERVAL_SECONDS
-        min_polling_interval = None
+            new_appliers = []
+            applier: _SamplingRuleApplier
+            for applier in self.__rule_appliers:
+                if applier.sampling_rule.RuleName in target_map:
+                    target = target_map[applier.sampling_rule.RuleName]
+                    new_appliers.append(applier.with_target(target))
 
-        target: _SamplingTarget
-        for target in targets:
-            if target.RuleName in rule_applier_map:
-                rule_applier_map[target.RuleName].update_target(target)
+                    if target.Interval is not None:
+                        if min_polling_interval is None or min_polling_interval > target.Interval:
+                            min_polling_interval = target.Interval
+                else:
+                    new_appliers.append(applier)
 
-                if target.Interval is not None:
-                    if min_polling_interval is None or min_polling_interval > target.Interval:
-                        min_polling_interval = target.Interval
+            self.__rule_appliers = new_appliers
 
-        if min_polling_interval is not None:
-            next_polling_interval = min_polling_interval
+            if min_polling_interval is not None:
+                next_polling_interval = min_polling_interval
 
-        last_rule_modification = self._clock.from_timestamp(sampling_targets_response.LastRuleModification)
-        refresh_rules = last_rule_modification > self._last_modified
+            last_rule_modification = self._clock.from_timestamp(sampling_targets_response.LastRuleModification)
+            refresh_rules = last_rule_modification > self._last_modified
 
-        self.__cache_lock.release()
-
-        return (refresh_rules, next_polling_interval)
+            return (refresh_rules, next_polling_interval)
 
     def get_all_statistics(self) -> [dict]:
         all_statistics = []

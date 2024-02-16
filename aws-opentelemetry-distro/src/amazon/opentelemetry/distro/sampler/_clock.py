@@ -12,8 +12,11 @@ class _Clock:
         return self.__datetime.now()
 
     # pylint: disable=no-self-use
-    def from_timestamp(self, timestamp: float) -> datetime:
+    def from_timestamp(self, timestamp: float) -> datetime.datetime:
         return datetime.datetime.fromtimestamp(timestamp)
 
     def time_delta(self, seconds: float) -> datetime.timedelta:
         return datetime.timedelta(seconds=seconds)
+
+    def max(self) -> datetime.datetime:
+        return datetime.datetime.max

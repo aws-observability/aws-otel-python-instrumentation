@@ -43,17 +43,6 @@ class TestRateLimitingSampler(TestCase):
                 sampled += 1
         self.assertEqual(sampled, 30)
 
-        # Switch on borrowing
-        sampler.borrowing = True
-        sampled = 0
-        clock.add_time(1.0)
-        for _ in range(0, 100):
-            if sampler.should_sample(None, 1234, "name").decision != Decision.DROP:
-                sampled += 1
-        self.assertEqual(sampled, 1)
-
-        # Switch off borrowing
-        sampler.borrowing = False
         sampled = 0
         clock.add_time(1000)
         for _ in range(0, 100):
@@ -61,10 +50,10 @@ class TestRateLimitingSampler(TestCase):
                 sampled += 1
         self.assertEqual(sampled, 30)
 
-    def test_should_sample_borrowing(self):
+    def test_should_sample_with_quota_of_one(self):
         time_now = datetime.datetime.fromtimestamp(1707551387.0)
         clock = MockClock(time_now)
-        sampler = _RateLimitingSampler(30, clock, True)
+        sampler = _RateLimitingSampler(1, clock)
 
         sampled = 0
         for _ in range(0, 50):

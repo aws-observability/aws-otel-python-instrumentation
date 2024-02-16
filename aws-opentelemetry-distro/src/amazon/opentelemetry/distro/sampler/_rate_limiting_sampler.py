@@ -12,10 +12,9 @@ from opentelemetry.util.types import Attributes
 
 
 class _RateLimitingSampler(Sampler):
-    def __init__(self, quota: int, clock: _Clock, borrowing: bool = False):
+    def __init__(self, quota: int, clock: _Clock):
         self.__quota = quota
         self.__reservoir = _RateLimiter(1, quota, clock)
-        self.borrowing = borrowing
 
     # pylint: disable=no-self-use
     def should_sample(
@@ -28,7 +27,7 @@ class _RateLimitingSampler(Sampler):
         links: Sequence[Link] = None,
         trace_state: TraceState = None,
     ) -> SamplingResult:
-        if self.__reservoir.try_spend(1, self.borrowing):
+        if self.__reservoir.try_spend(1):
             return SamplingResult(decision=Decision.RECORD_AND_SAMPLE, attributes=attributes, trace_state=trace_state)
         return SamplingResult(decision=Decision.DROP, attributes=attributes, trace_state=trace_state)
 

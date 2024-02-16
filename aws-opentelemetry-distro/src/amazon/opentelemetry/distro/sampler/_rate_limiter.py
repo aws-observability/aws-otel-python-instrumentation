@@ -19,14 +19,11 @@ class _RateLimiter:
 
         self.__lock = Lock()
 
-    def try_spend(self, cost: float, borrow: bool) -> bool:
+    def try_spend(self, cost: float) -> bool:
         if self._quota == 0:
             return False
 
         quota_per_millis = self._quota / Decimal(1000.0)
-        if borrow and quota_per_millis != 0:
-            # When `Borrowing`, pretend that the quota is 1 per second
-            quota_per_millis = Decimal(1.0) / Decimal(1000.0)
 
         # assume divide by zero not possible
         cost_in_millis = Decimal(cost) / quota_per_millis

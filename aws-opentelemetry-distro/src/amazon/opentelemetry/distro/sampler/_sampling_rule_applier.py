@@ -21,25 +21,46 @@ from opentelemetry.util.types import Attributes
 
 
 class _SamplingRuleApplier:
-    def __init__(self, sampling_rule: _SamplingRule, client_id: str, clock: _Clock):
+    def __init__(
+        self,
+        sampling_rule: _SamplingRule,
+        client_id: str,
+        clock: _Clock,
+        statistics: _SamplingStatisticsDocument = None,
+        target: _SamplingTarget = None,
+    ):
         self.__client_id = client_id
         self._clock = clock
         self.sampling_rule = sampling_rule
 
-        self.__statistics = _SamplingStatisticsDocument(self.__client_id, self.sampling_rule.RuleName)
-        self.__statistics_lock = Lock()
-        self.__fixed_rate_sampler = ParentBased(TraceIdRatioBased(self.sampling_rule.FixedRate))
-
-        # Initialize with borrowing allowed if there will be a quota > 0
-        if self.sampling_rule.ReservoirSize > 0:
-            # __create_reservoir_sampler wraps _RateLimitingSampler with ParentBased
-            # The method will create a reference self.__rate_limiting_sampler to access/set its `borrowing` value
-            self.__reservoir_sampler = self.__create_reservoir_sampler(quota=1, borrowing=True)
+        if statistics is None:
+            self.__statistics = _SamplingStatisticsDocument(self.__client_id, self.sampling_rule.RuleName)
         else:
-            self.__reservoir_sampler = self.__create_reservoir_sampler(quota=0, borrowing=False)
+            self.__statistics = statistics
+        self.__statistics_lock = Lock()
 
-        self.__reservoir_expiry_lock = Lock()
-        self.__reservoir_expiry = self._clock.now()
+        self.__borrowing = False
+
+        if target is None:
+            self.__fixed_rate_sampler = ParentBased(TraceIdRatioBased(self.sampling_rule.FixedRate))
+            # Until targets are fetched, initialize as borrowing=True if there will be a quota > 0
+            if self.sampling_rule.ReservoirSize > 0:
+                self.__reservoir_sampler = self.__create_reservoir_sampler(quota=1)
+                self.__borrowing = True
+            else:
+                self.__reservoir_sampler = self.__create_reservoir_sampler(quota=0)
+            # No targets are present, borrow until the end of time if there is any quota
+            self.__reservoir_expiry = self._clock.max()
+        else:
+            new_quota = target.ReservoirQuota if target.ReservoirQuota is not None else 0
+            new_fixed_rate = target.FixedRate if target.FixedRate is not None else 0
+            self.__reservoir_sampler = self.__create_reservoir_sampler(quota=new_quota)
+            self.__fixed_rate_sampler = ParentBased(TraceIdRatioBased(new_fixed_rate))
+            if target.ReservoirQuotaTTL is not None:
+                self.__reservoir_expiry = self._clock.from_timestamp(target.ReservoirQuotaTTL)
+            else:
+                # assume expired if no TTL
+                self.__reservoir_expiry = self._clock.now()
 
     def should_sample(
         self,
@@ -55,18 +76,14 @@ class _SamplingRuleApplier:
         has_sampled = False
         sampling_result = SamplingResult(decision=Decision.DROP, attributes=attributes, trace_state=trace_state)
 
-        with self.__reservoir_expiry_lock:
-            reservoir_expired: bool = self._clock.now() >= self.__reservoir_expiry
-
-        if reservoir_expired:
-            self.__rate_limiting_sampler.borrowing = True
-
-        sampling_result = self.__reservoir_sampler.should_sample(
-            parent_context, trace_id, name, kind=kind, attributes=attributes, links=links, trace_state=trace_state
-        )
+        reservoir_expired: bool = self._clock.now() >= self.__reservoir_expiry
+        if not reservoir_expired:
+            sampling_result = self.__reservoir_sampler.should_sample(
+                parent_context, trace_id, name, kind=kind, attributes=attributes, links=links, trace_state=trace_state
+            )
 
         if sampling_result.decision is not Decision.DROP:
-            has_borrowed = self.__rate_limiting_sampler.borrowing
+            has_borrowed = self.__borrowing
             has_sampled = True
         else:
             sampling_result = self.__fixed_rate_sampler.should_sample(
@@ -89,18 +106,9 @@ class _SamplingRuleApplier:
 
         return old_stats.snapshot(self._clock)
 
-    def update_target(self, target: _SamplingTarget) -> None:
-        new_quota = target.ReservoirQuota if target.ReservoirQuota is not None else 0
-        new_fixed_rate = target.FixedRate if target.FixedRate is not None else 0
-        self.__reservoir_sampler = self.__create_reservoir_sampler(quota=new_quota, borrowing=False)
-        self.__fixed_rate_sampler = ParentBased(TraceIdRatioBased(new_fixed_rate))
-
-        with self.__reservoir_expiry_lock:
-            if target.ReservoirQuotaTTL is not None:
-                self.__reservoir_expiry = self._clock.from_timestamp(target.ReservoirQuotaTTL)
-            else:
-                # Treat as expired
-                self.__reservoir_expiry = self._clock.now()
+    def with_target(self, target: _SamplingTarget) -> "_SamplingRuleApplier":
+        new_applier = _SamplingRuleApplier(self.sampling_rule, self.__client_id, self._clock, self.__statistics, target)
+        return new_applier
 
     def matches(self, resource: Resource, attributes: Attributes) -> bool:
         url_path = None
@@ -150,10 +158,8 @@ class _SamplingRuleApplier:
             and _Matcher.wild_card_match(self.__get_arn(resource, attributes), self.sampling_rule.ResourceARN)
         )
 
-    def __create_reservoir_sampler(self, quota: int, borrowing: bool) -> Sampler:
-        # Keep a reference to rate_limiting_sampler to access/update its `borrowing` status
-        self.__rate_limiting_sampler = _RateLimitingSampler(quota, self._clock, borrowing)
-        return ParentBased(self.__rate_limiting_sampler)
+    def __create_reservoir_sampler(self, quota: int) -> Sampler:
+        return ParentBased(_RateLimitingSampler(quota, self._clock))
 
     # pylint: disable=no-self-use
     def __get_service_type(self, resource: Resource) -> str:
