@@ -9,8 +9,6 @@ from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_METRICS_D
 
 
 class AwsOpenTelemetryDistro(OpenTelemetryDistro):
-    APPLY_PATCHES: str = "apply_patches"
-
     def _configure(self, **kwargs):
         """
         kwargs:
