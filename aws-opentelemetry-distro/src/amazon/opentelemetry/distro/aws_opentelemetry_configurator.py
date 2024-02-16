@@ -159,7 +159,7 @@ def _custom_import_sampler(sampler_name, resource) -> Sampler:
         if sampler_argument_env is not None:
             args = sampler_argument_env.split(",")
             for arg in args:
-                key_value = arg.split("=")
+                key_value = arg.split("=", 1)
                 if len(key_value) != 2:
                     continue
                 if key_value[0] == "endpoint":
