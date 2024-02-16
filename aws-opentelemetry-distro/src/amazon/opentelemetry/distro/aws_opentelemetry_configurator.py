@@ -143,15 +143,15 @@ def _init_tracing(
     set_tracer_provider(trace_provider)
 
 
-def _custom_import_sampler(sampler_name, resource) -> Sampler:
+def _custom_import_sampler(sampler_name: str, resource: Resource) -> Sampler:
     # TODO: Remove `sampler_name is None` condition when xray sampler is configured here:
     # https://github.com/aws/amazon-cloudwatch-agent-operator/blob/main/pkg/instrumentation/defaultinstrumentation.go#L90
     if sampler_name is None or sampler_name == "xray":
         # Example env var value
         # OTEL_TRACES_SAMPLER_ARG=endpoint=http://localhost:2000,polling_interval=360
-        sampler_argument_env = os.getenv(OTEL_TRACES_SAMPLER_ARG, None)
-        endpoint = None
-        polling_interval = None
+        sampler_argument_env: str = os.getenv(OTEL_TRACES_SAMPLER_ARG, None)
+        endpoint: str = None
+        polling_interval: int = None
 
         if sampler_argument_env is not None:
             args = sampler_argument_env.split(",")
