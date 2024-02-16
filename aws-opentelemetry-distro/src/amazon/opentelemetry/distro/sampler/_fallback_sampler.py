@@ -2,17 +2,18 @@
 # SPDX-License-Identifier: Apache-2.0
 from typing import Optional, Sequence
 
+from amazon.opentelemetry.distro.sampler._clock import _Clock
+from amazon.opentelemetry.distro.sampler._rate_limiting_sampler import _RateLimitingSampler
 from opentelemetry.context import Context
-from opentelemetry.sdk.trace.sampling import ALWAYS_ON, Sampler, SamplingResult, TraceIdRatioBased
+from opentelemetry.sdk.trace.sampling import Decision, Sampler, SamplingResult, TraceIdRatioBased
 from opentelemetry.trace import Link, SpanKind
 from opentelemetry.trace.span import TraceState
 from opentelemetry.util.types import Attributes
 
 
 class _FallbackSampler(Sampler):
-    def __init__(self):
-        # TODO: Add Reservoir sampler
-        # pylint: disable=unused-private-member
+    def __init__(self, clock: _Clock):
+        self.__rate_limiting_sampler = _RateLimitingSampler(1, clock)
         self.__fixed_rate_sampler = TraceIdRatioBased(0.05)
 
     # pylint: disable=no-self-use
@@ -26,8 +27,12 @@ class _FallbackSampler(Sampler):
         links: Sequence[Link] = None,
         trace_state: TraceState = None,
     ) -> SamplingResult:
-        # TODO: add reservoir + fixed rate sampling
-        return ALWAYS_ON.should_sample(
+        sampling_result = self.__rate_limiting_sampler.should_sample(
+            parent_context, trace_id, name, kind=kind, attributes=attributes, links=links, trace_state=trace_state
+        )
+        if sampling_result.decision is not Decision.DROP:
+            return sampling_result
+        return self.__fixed_rate_sampler.should_sample(
             parent_context, trace_id, name, kind=kind, attributes=attributes, links=links, trace_state=trace_state
         )
 

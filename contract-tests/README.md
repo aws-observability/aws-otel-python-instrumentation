@@ -32,11 +32,11 @@ The steps to add a new test for a library or framework are:
 
 Pre-requirements:
 * Have `docker` installed and running - verify by running the `docker` command.
-* Ensure the `aws_opentelemetry_distro` wheel file exists in to `aws-otel-python-instrumentation/dist` folder
 
-From `aws-otel-python-instrumentation` dir, execute:
-
-```
-./contract-tests/set-up-contract-tests.sh
+Steps:
+* From `aws-otel-python-instrumentation` dir, execute:
+```sh
+./scripts/build_and_install_distro.sh
+./scripts/set-up-contract-tests.sh
 pytest contract-tests/tests
 ```
