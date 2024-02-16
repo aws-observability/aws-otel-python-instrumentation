@@ -38,13 +38,22 @@ class AwsXRayRemoteSampler(Sampler):
     def __init__(
         self,
         resource: Resource,
-        endpoint=DEFAULT_SAMPLING_PROXY_ENDPOINT,
-        polling_interval=DEFAULT_RULES_POLLING_INTERVAL_SECONDS,
+        endpoint: str = None,
+        polling_interval: int = None,
         log_level=None,
     ):
         # Override default log level
         if log_level is not None:
             _logger.setLevel(log_level)
+
+        if endpoint is None:
+            _logger.info("`endpoint` is `None`. Defaulting to %s", DEFAULT_SAMPLING_PROXY_ENDPOINT)
+            endpoint = DEFAULT_SAMPLING_PROXY_ENDPOINT
+        if polling_interval is None or polling_interval < 10:
+            _logger.info(
+                "`polling_interval` is `None` or too small. Defaulting to %s", DEFAULT_RULES_POLLING_INTERVAL_SECONDS
+            )
+            polling_interval = DEFAULT_RULES_POLLING_INTERVAL_SECONDS
 
         self.__client_id = self.__generate_client_id()
         self._clock = _Clock()
