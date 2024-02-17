@@ -306,7 +306,6 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self._valid_metrics(metric_attributes_dict, expected_status_metric)
 
     def _valid_metrics(self, metric_attributes_dict, expected_status_metric: ExpectedStatusMetric):
-
         if expected_status_metric == self.ExpectedStatusMetric.ERROR:
             self.error_histogram_mock.assert_has_calls([call.record(1, metric_attributes_dict.get(SERVICE_METRIC))])
             self.fault_histogram_mock.assert_has_calls([call.record(0, metric_attributes_dict.get(SERVICE_METRIC))])

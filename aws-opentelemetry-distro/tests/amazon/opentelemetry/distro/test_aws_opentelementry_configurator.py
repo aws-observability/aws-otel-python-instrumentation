@@ -30,7 +30,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.setdefault(OTEL_TRACES_SAMPLER, "traceidratio")
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "0.01")
         aws_open_telemetry_distro: AwsOpenTelemetryDistro = AwsOpenTelemetryDistro()
-        aws_open_telemetry_distro.configure()
+        aws_open_telemetry_distro.configure(apply_patches=False)
         aws_otel_configurator: AwsOpenTelemetryConfigurator = AwsOpenTelemetryConfigurator()
         aws_otel_configurator.configure()
         cls.tracer_provider: TracerProvider = get_tracer_provider()
