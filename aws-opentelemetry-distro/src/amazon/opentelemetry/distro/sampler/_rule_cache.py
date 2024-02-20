@@ -75,22 +75,25 @@ class _RuleCache:
                 continue
             temp_rule_appliers.append(_SamplingRuleApplier(sampling_rule, self.__client_id, self._clock))
 
-        with self.__cache_lock:
-            # map list of rule appliers by each applier's sampling_rule name
-            rule_applier_map: Dict[str, _SamplingRuleApplier] = {
-                applier.sampling_rule.RuleName: applier for applier in self.__rule_appliers
-            }
+        self.__cache_lock.acquire()
 
-            # If a sampling rule has not changed, keep its respective applier in the cache.
-            new_applier: _SamplingRuleApplier
-            for index, new_applier in enumerate(temp_rule_appliers):
-                rule_name_to_check = new_applier.sampling_rule.RuleName
-                if rule_name_to_check in rule_applier_map:
-                    old_applier = rule_applier_map[rule_name_to_check]
-                    if new_applier.sampling_rule == old_applier.sampling_rule:
-                        temp_rule_appliers[index] = old_applier
-            self.__rule_appliers = temp_rule_appliers
-            self._last_modified = self._clock.now()
+        # map list of rule appliers by each applier's sampling_rule name
+        rule_applier_map: Dict[str, _SamplingRuleApplier] = {
+            applier.sampling_rule.RuleName: applier for applier in self.__rule_appliers
+        }
+
+        # If a sampling rule has not changed, keep its respective applier in the cache.
+        new_applier: _SamplingRuleApplier
+        for index, new_applier in enumerate(temp_rule_appliers):
+            rule_name_to_check = new_applier.sampling_rule.RuleName
+            if rule_name_to_check in rule_applier_map:
+                old_applier = rule_applier_map[rule_name_to_check]
+                if new_applier.sampling_rule == old_applier.sampling_rule:
+                    temp_rule_appliers[index] = old_applier
+        self.__rule_appliers = temp_rule_appliers
+        self._last_modified = self._clock.now()
+
+        self.__cache_lock.release()
 
     def update_sampling_targets(self, sampling_targets_response: _SamplingTargetResponse) -> (bool, int):
         targets: [_SamplingTarget] = sampling_targets_response.SamplingTargetDocuments
@@ -132,5 +135,8 @@ class _RuleCache:
         return all_statistics
 
     def expired(self) -> bool:
-        with self.__cache_lock:
+        self.__cache_lock.acquire()
+        try:
             return self._clock.now() > self._last_modified + self._clock.time_delta(seconds=CACHE_TTL_SECONDS)
+        finally:
+            self.__cache_lock.release()

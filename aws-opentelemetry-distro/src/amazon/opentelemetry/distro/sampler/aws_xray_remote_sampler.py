@@ -83,9 +83,7 @@ class AwsXRayRemoteSampler(Sampler):
         self._rules_timer.start()
 
         # set up the target poller to go off once after the default interval. Subsequent polls may use new intervals.
-        self._targets_timer = Timer(
-            self.__target_polling_interval + self.__target_polling_jitter, self.__start_sampling_target_poller
-        )
+        self._targets_timer = Timer(DEFAULT_TARGET_POLLING_INTERVAL_SECONDS, self.__start_sampling_target_poller)
         self._targets_timer.daemon = True  # Ensures that when the main thread exits, the Timer threads are killed
         self._targets_timer.start()
 

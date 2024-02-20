@@ -16,14 +16,14 @@ DATA_DIR = os.path.join(TEST_DIR, "data")
 
 
 class TestAwsXRaySamplingClient(TestCase):
-    @patch("requests.Session.post")
+    @patch("requests.post")
     def test_get_no_sampling_rules(self, mock_post=None):
         mock_post.return_value.configure_mock(**{"json.return_value": {"SamplingRuleRecords": []}})
         client = _AwsXRaySamplingClient("http://127.0.0.1:2000")
         sampling_rules = client.get_sampling_rules()
         self.assertTrue(len(sampling_rules) == 0)
 
-    @patch("requests.Session.post")
+    @patch("requests.post")
     def test_get_invalid_responses(self, mock_post=None):
         mock_post.return_value.configure_mock(**{"json.return_value": {}})
         client = _AwsXRaySamplingClient("http://127.0.0.1:2000")
@@ -31,7 +31,7 @@ class TestAwsXRaySamplingClient(TestCase):
             sampling_rules = client.get_sampling_rules()
             self.assertTrue(len(sampling_rules) == 0)
 
-    @patch("requests.Session.post")
+    @patch("requests.post")
     def test_get_sampling_rule_missing_in_records(self, mock_post=None):
         mock_post.return_value.configure_mock(**{"json.return_value": {"SamplingRuleRecords": [{}]}})
         client = _AwsXRaySamplingClient("http://127.0.0.1:2000")
@@ -39,7 +39,7 @@ class TestAwsXRaySamplingClient(TestCase):
             sampling_rules = client.get_sampling_rules()
             self.assertTrue(len(sampling_rules) == 0)
 
-    @patch("requests.Session.post")
+    @patch("requests.post")
     def test_default_values_used_when_missing_properties_in_sampling_rule(self, mock_post=None):
         mock_post.return_value.configure_mock(**{"json.return_value": {"SamplingRuleRecords": [{"SamplingRule": {}}]}})
         client = _AwsXRaySamplingClient("http://127.0.0.1:2000")
@@ -61,7 +61,7 @@ class TestAwsXRaySamplingClient(TestCase):
         self.assertEqual(sampling_rule.URLPath, "")
         self.assertEqual(sampling_rule.Version, 0)
 
-    @patch("requests.Session.post")
+    @patch("requests.post")
     def test_get_correct_number_of_sampling_rules(self, mock_post=None):
         sampling_records = []
         with open(f"{DATA_DIR}/get-sampling-rules-response-sample.json", encoding="UTF-8") as file:
@@ -104,7 +104,7 @@ class TestAwsXRaySamplingClient(TestCase):
             self.assertIsNotNone(sampling_rule.Version)
             self.assertEqual(sampling_rule.Version, sampling_record["SamplingRule"]["Version"])
 
-    @patch("requests.Session.post")
+    @patch("requests.post")
     def test_get_sampling_targets(self, mock_post=None):
         with open(f"{DATA_DIR}/get-sampling-targets-response-sample.json", encoding="UTF-8") as file:
             sample_response = json.load(file)
@@ -116,7 +116,7 @@ class TestAwsXRaySamplingClient(TestCase):
         self.assertEqual(len(sampling_targets_response.UnprocessedStatistics), 0)
         self.assertEqual(sampling_targets_response.LastRuleModification, 1707551387.0)
 
-    @patch("requests.Session.post")
+    @patch("requests.post")
     def test_get_invalid_sampling_targets(self, mock_post=None):
         mock_post.return_value.configure_mock(
             **{

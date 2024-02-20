@@ -86,7 +86,7 @@ class TestAwsXRayRemoteSampler(TestCase):
         self.assertEqual(rs._AwsXRayRemoteSampler__resource.attributes["service.name"], "test-service-name")
         self.assertEqual(rs._AwsXRayRemoteSampler__resource.attributes["cloud.platform"], "test-cloud-platform")
 
-    @patch("requests.Session.post", side_effect=mocked_requests_get)
+    @patch("requests.post", side_effect=mocked_requests_get)
     @patch("amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler.DEFAULT_TARGET_POLLING_INTERVAL_SECONDS", 2)
     def test_update_sampling_rules_and_targets_with_pollers_and_should_sample(self, mock_post=None):
         rs = AwsXRayRemoteSampler(
@@ -113,7 +113,7 @@ class TestAwsXRayRemoteSampler(TestCase):
             rs.should_sample(None, 0, "name", attributes={"abc": "1234"}).decision, Decision.RECORD_AND_SAMPLE
         )
 
-    @patch("requests.Session.post", side_effect=mocked_requests_get)
+    @patch("requests.post", side_effect=mocked_requests_get)
     @patch("amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler.DEFAULT_TARGET_POLLING_INTERVAL_SECONDS", 3)
     def test_multithreading_with_large_reservoir_with_otel_sdk(self, mock_post=None):
         rs = AwsXRayRemoteSampler(
@@ -157,7 +157,7 @@ class TestAwsXRayRemoteSampler(TestCase):
         self.assertEqual(sum_sampled, 100000)
 
     # pylint: disable=no-member
-    @patch("requests.Session.post", side_effect=mocked_requests_get)
+    @patch("requests.post", side_effect=mocked_requests_get)
     @patch("amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler.DEFAULT_TARGET_POLLING_INTERVAL_SECONDS", 2)
     @patch("amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler._Clock", MockClock)
     def test_multithreading_with_some_reservoir_with_otel_sdk(self, mock_post=None):
