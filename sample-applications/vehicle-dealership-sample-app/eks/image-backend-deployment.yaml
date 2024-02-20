@@ -55,8 +55,7 @@ spec:
               value: "/image-service-app"
             - name: DJANGO_SETTINGS_MODULE
               value: "ImageServiceApp.settings"
-#              TODO: Remove OTEL_TRACES_SAMPLER when XRay trace sampler is ready
             - name: OTEL_TRACES_SAMPLER
-              value: "always_on"
+              value: "xray"
       restartPolicy: Always
 status: {}

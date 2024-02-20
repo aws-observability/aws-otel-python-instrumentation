@@ -34,7 +34,7 @@ services:
       - ./VehicleInventoryApp/.:/vehicle-inventory-app
     environment:
       DJANGO_SETTINGS_MODULE: "VehicleInventoryApp.settings"
-      OTEL_TRACES_SAMPLER: "always_on"
+      OTEL_TRACES_SAMPLER: "xray"
     ports:
       - "8001:8001"
     depends_on:
@@ -54,7 +54,7 @@ services:
       - $HOME/.aws/credentials:/home/app/.aws/credentials:ro
     environment:
       DJANGO_SETTINGS_MODULE: "ImageServiceApp.settings"
-      OTEL_TRACES_SAMPLER: "always_on"
+      OTEL_TRACES_SAMPLER: "xray"
     ports:
       - "8000:8000"
     depends_on:
