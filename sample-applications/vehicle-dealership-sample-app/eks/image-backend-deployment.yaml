@@ -55,7 +55,5 @@ spec:
               value: "/image-service-app"
             - name: DJANGO_SETTINGS_MODULE
               value: "ImageServiceApp.settings"
-            - name: OTEL_TRACES_SAMPLER
-              value: "xray"
       restartPolicy: Always
 status: {}
