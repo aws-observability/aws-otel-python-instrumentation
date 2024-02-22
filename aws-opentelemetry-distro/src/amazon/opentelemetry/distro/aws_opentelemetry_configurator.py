@@ -4,6 +4,7 @@ import os
 from logging import Logger, getLogger
 from typing import Dict, Type
 
+from importlib_metadata import version
 from typing_extensions import override
 
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
@@ -94,6 +95,10 @@ def _initialize_components(auto_instrumentation_version):
     # populate version if using auto-instrumentation
     if auto_instrumentation_version:
         auto_resource[ResourceAttributes.TELEMETRY_AUTO_VERSION] = auto_instrumentation_version
+
+    distro_version = version("aws-opentelemetry-distro")
+    auto_resource[ResourceAttributes.TELEMETRY_SDK_VERSION] = distro_version
+    _logger.info("aws-opentelementry-distro - version: %s", distro_version)
 
     resource = get_aggregated_resources(
         [
