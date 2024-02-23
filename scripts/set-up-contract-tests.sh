@@ -47,7 +47,7 @@ pip install mock_collector-1.0.0-py3-none-any.whl --force-reinstall
 
 # Build and install contract-tests
 cd ../contract-tests
-docker-compose -f images/applications/psychopg2/postgreSQL-docker.yaml up -d
+docker compose -f images/applications/psychopg2/postgreSQL-docker.yaml up -d
 cd tests
 python3 -m build --outdir ../../dist
 cd ../../dist
