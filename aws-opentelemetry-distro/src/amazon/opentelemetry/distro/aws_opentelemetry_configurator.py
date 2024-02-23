@@ -228,7 +228,7 @@ class AppSignalsExporterProvider:
     # pylint: disable=no-self-use
     def create_exporter(self):
         protocol = os.environ.get(
-            OTEL_EXPORTER_OTLP_PROTOCOL, os.environ.get(OTEL_EXPORTER_OTLP_METRICS_PROTOCOL, "grpc")
+            OTEL_EXPORTER_OTLP_METRICS_PROTOCOL, os.environ.get(OTEL_EXPORTER_OTLP_PROTOCOL, "grpc")
         )
         _logger.debug("AppSignals export protocol: %s", protocol)
 
