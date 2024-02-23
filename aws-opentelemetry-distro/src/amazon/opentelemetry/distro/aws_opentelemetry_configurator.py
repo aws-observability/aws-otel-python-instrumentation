@@ -31,6 +31,7 @@ from opentelemetry.sdk._configuration import (
 from opentelemetry.sdk.environment_variables import (
     _OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED,
     OTEL_EXPORTER_OTLP_METRICS_PROTOCOL,
+    OTEL_EXPORTER_OTLP_PROTOCOL,
     OTEL_TRACES_SAMPLER_ARG,
 )
 from opentelemetry.sdk.extension.aws.resource.ec2 import AwsEc2ResourceDetector
@@ -226,7 +227,9 @@ class AppSignalsExporterProvider:
 
     # pylint: disable=no-self-use
     def create_exporter(self):
-        protocol = os.environ.get(OTEL_EXPORTER_OTLP_METRICS_PROTOCOL, "grpc")
+        protocol = os.environ.get(
+            OTEL_EXPORTER_OTLP_PROTOCOL, os.environ.get(OTEL_EXPORTER_OTLP_METRICS_PROTOCOL, "grpc")
+        )
         _logger.debug("AppSignals export protocol: %s", protocol)
 
         app_signals_endpoint = os.environ.get(
