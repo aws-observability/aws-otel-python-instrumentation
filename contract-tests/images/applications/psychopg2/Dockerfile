@@ -2,9 +2,9 @@
 # Assumes existence of dist/aws_opentelemetry_distro-<pkg_version>-py3-none-any.whl.
 # Assumes filename of aws_opentelemetry_distro-<pkg_version>-py3-none-any.whl is passed in as "DISTRO" arg.
 FROM public.ecr.aws/docker/library/python:3.11-slim
-WORKDIR /requests
-COPY ./dist/$DISTRO /requests
-COPY ./contract-tests/images/applications/requests /requests
+WORKDIR /psychopg2
+COPY ./dist/$DISTRO /psychopg2
+COPY ./contract-tests/images/applications/psychopg2 /psychopg2
 
 ENV PIP_ROOT_USER_ACTION=ignore
 ARG DISTRO
