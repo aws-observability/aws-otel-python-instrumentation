@@ -40,6 +40,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             url: str = f"http://{_NETWORK_ALIAS}:{_PORT}/{_NETWORK_ALIAS}{self.path}"
             response: Response = request(method, url, timeout=20)
             status_code = response.status_code
+        print("received a " + method + " request")
         self.send_response_only(status_code)
         self.end_headers()
 
@@ -54,7 +55,7 @@ def main() -> None:
     atexit.register(requests_server.shutdown)
     server_thread: Thread = Thread(target=requests_server.serve_forever)
     server_thread.start()
-    print("Ready")
+    print("Request-Ready")
     server_thread.join()
 
 

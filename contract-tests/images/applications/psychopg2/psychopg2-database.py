@@ -15,12 +15,15 @@ _HOST = 'localhost'
 class RequestHandler(BaseHTTPRequestHandler):
 
     def __init__(self, request, client_address, server):
+        print("psychopg init")
         super().__init__(request, client_address, server)
         self.prepare_database()
 
     def prepare_database(self) -> None:
 
         conn = psycopg2.connect(dbname=_DBNAME, user=_USER, password=_PASSWORD, host=_HOST)
+
+        print("db connected")
 
         cur = conn.cursor()
 
@@ -70,7 +73,7 @@ def main()->None:
     atexit.register(requests_server.shutdown)
     server_thread: Thread = Thread(target=requests_server.serve_forever)
     server_thread.start()
-    print("Ready")
+    print("Psychopg2-Ready")
     server_thread.join()
 
 if __name__ == "__main__":
