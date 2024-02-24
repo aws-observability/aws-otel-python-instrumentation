@@ -14,6 +14,8 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
+
+# TODO: get AwsXRayRemoteSampler from OTel Python Contrib when it is released
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.sdk._configuration import (
@@ -143,6 +145,22 @@ def _init_tracing(
     set_tracer_provider(trace_provider)
 
 
+def _exclude_urls_for_instrumentations():
+    urls_to_exclude_instr = "SamplingTargets,GetSamplingRules"
+    requests_excluded_urls = os.environ.pop("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", "")
+    urllib3_excluded_urls = os.environ.pop("OTEL_PYTHON_URLLIB3_EXCLUDED_URLS", "")
+    if len(requests_excluded_urls) > 0:
+        requests_excluded_urls = ",".join([requests_excluded_urls, urls_to_exclude_instr])
+    else:
+        requests_excluded_urls = urls_to_exclude_instr
+    if len(urllib3_excluded_urls) > 0:
+        urllib3_excluded_urls = ",".join([urllib3_excluded_urls, urls_to_exclude_instr])
+    else:
+        urllib3_excluded_urls = urls_to_exclude_instr
+    os.environ.setdefault("OTEL_PYTHON_URLLIB3_EXCLUDED_URLS", requests_excluded_urls)
+    os.environ.setdefault("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", urllib3_excluded_urls)
+
+
 def _custom_import_sampler(sampler_name: str, resource: Resource) -> Sampler:
     if sampler_name == "xray":
         # Example env var value
@@ -164,6 +182,11 @@ def _custom_import_sampler(sampler_name: str, resource: Resource) -> Sampler:
                         polling_interval = int(key_value[1])
                     except ValueError as error:
                         _logger.error("polling_interval in OTEL_TRACES_SAMPLER_ARG must be a number: %s", error)
+        # Until `suppress_instrumentation` is available in next OTEL Python version (>=1.23.0/0.44b0),
+        # suppress recording of X-Ray sampler's Request POST calls via setting `exclude urls` Env Vars. This
+        # should be done in this class's `_configure()` method which is run before any instrumentation is loaded
+        # TODO: Replace usage of `exclude urls` by wrapping X-Ray sampler POST calls with `suppress_instrumentation`
+        _exclude_urls_for_instrumentations()
 
         _logger.debug("XRay Sampler Endpoint: %s", str(endpoint))
         _logger.debug("XRay Sampler Polling Interval: %s", str(polling_interval))
