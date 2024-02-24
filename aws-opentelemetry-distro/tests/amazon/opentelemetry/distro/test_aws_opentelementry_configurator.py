@@ -66,7 +66,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
     @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
     @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
     def test_import_xray_sampler_without_environment_arguments(self):
-        os.environ.pop(OTEL_TRACES_SAMPLER_ARG)
+        os.environ.pop(OTEL_TRACES_SAMPLER_ARG, None)
 
         # May log http request error as xray sampler will attempt to fetch rules
         xray_sampler: Sampler = _custom_import_sampler("xray", resource=None)
@@ -79,7 +79,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
     @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
     @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
     def test_import_xray_sampler_with_valid_environment_arguments(self):
-        os.environ.pop(OTEL_TRACES_SAMPLER_ARG)
+        os.environ.pop(OTEL_TRACES_SAMPLER_ARG, None)
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "endpoint=http://localhost:2000,polling_interval=600")
 
         # May log http request error as xray sampler will attempt to fetch rules
@@ -90,7 +90,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint, "http://localhost:2000/GetSamplingRules"
         )
 
-        os.environ.pop(OTEL_TRACES_SAMPLER_ARG)
+        os.environ.pop(OTEL_TRACES_SAMPLER_ARG, None)
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "polling_interval=123")
 
         # May log http request error as xray sampler will attempt to fetch rules
@@ -101,7 +101,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint, "http://127.0.0.1:2000/GetSamplingRules"
         )
 
-        os.environ.pop(OTEL_TRACES_SAMPLER_ARG)
+        os.environ.pop(OTEL_TRACES_SAMPLER_ARG, None)
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "endpoint=http://cloudwatch-agent.amazon-cloudwatch:2000")
 
         # May log http request error as xray sampler will attempt to fetch rules
@@ -116,7 +116,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
     @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
     @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
     def test_import_xray_sampler_with_invalid_environment_arguments(self):
-        os.environ.pop(OTEL_TRACES_SAMPLER_ARG)
+        os.environ.pop(OTEL_TRACES_SAMPLER_ARG, None)
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "endpoint=h=tt=p://=loca=lho=st:2000,polling_interval=FOOBAR")
 
         # May log http request error as xray sampler will attempt to fetch rules
@@ -128,7 +128,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             "h=tt=p://=loca=lho=st:2000/GetSamplingRules",
         )
 
-        os.environ.pop(OTEL_TRACES_SAMPLER_ARG)
+        os.environ.pop(OTEL_TRACES_SAMPLER_ARG, None)
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, ",,=,==,,===,")
 
         # May log http request error as xray sampler will attempt to fetch rules
@@ -139,7 +139,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint, "http://127.0.0.1:2000/GetSamplingRules"
         )
 
-        os.environ.pop(OTEL_TRACES_SAMPLER_ARG)
+        os.environ.pop(OTEL_TRACES_SAMPLER_ARG, None)
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "endpoint,polling_interval")
 
         # May log http request error as xray sampler will attempt to fetch rules
