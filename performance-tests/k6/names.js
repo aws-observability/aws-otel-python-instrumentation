@@ -12,7 +12,7 @@ const petNames = [
     "LUKKA", "NERO", "SHERMAN", "LOKI", "BELL A DONNA", "MCGYVER", "MAXIMILLIAN", "MOCA", "LADY", "TATIA", "WARD",
     "PESKY", "DELILAH", "SYRAH", "FARRAH", "SHOOTER", "MULDER", "GOOBER", "IRA", "HOOCH", "DENEKI 4", "MUSHU", "SHELDON", "TUBBY",
     "BITZER", "MARKER", "KRASH", "SPIRIT", "HERA", "LUCY LU", "BLUE", "STORMY", "NAVI", "MARLI", "CHOCHO", "DYLAN",
-    "TOBY", "BRYCE", "TIGGER", "MARY ANN", "RIKU", "PHOENIX", "MEKA", "CUDDY", "SABRINA", "DAYTON", "DAKODA", "OGUN",
+    "TOBY", "BRYCE"s, "MARY ANN", "RIKU", "PHOENIX", "MEKA", "CUDDY", "SABRINA", "DAYTON", "DAKODA", "OGUN",
     "SOLAR", "RAJ", "DIESEL", "RIPLEY 2", "CARLIE", "ROSEY", "SWISS", "KILLER", "KENLEY", "FEENA", "PIGLET",
     "KEYONA", "CHEWIE", "TEINE", "CORWIN", "FLOPPER", "ADELAIDE", "HUNNY", "GEDEON", "BEE", "TALACHULITNA", "PATTON", "KLOEE",
     "TRANGO", "IZZI", "PEPPERMINT", "TILLAMOOK", "QI", "KEESTER BOB", "KAINANI", "ELLERA", "RACHEL", "DUKE", "MAZEL", "PRINCE FREDR",
@@ -46,7 +46,7 @@ const firstNames = [
 // $ curl https://raw.githubusercontent.com/rossgoodwin/american-names/master/surnames.json | jq | shuf | tail -25
 const surnames = [
  "Coomes", "Kasputis", "Eing", "Budro", "Paszkiewicz", "Reichwald", "Mennona", "Esplin", "Trute", "Endlich",
-  "Kaman", "Coody", "Urish", "Styes", "Balles", "Semanek", "Tes", "Mediano", "Clave", "Beliard", "Christianson",
+  "Kaman", "Coody", "Urish", "Balles", "Semanek", "Tes", "Mediano", "Clave", "Beliard", "Christianson",
   "Doy", "Bozman", "Waligura", "Templeman", "Gershenson", "Eckberg", "Harader", "Baurer", "Villao", "Decius",
   "Marquardt", "Smaha", "Grzych", "Getto", "Wilberger", "Fleites", "Spoerl", "Oliger", "Gramza", "Prillaman",
   "Beinlich", "Marzella", "Bota", "Arguilez", "Piotti", "Karri", "Spiropoulos", "Gambhir", "Franchak"
