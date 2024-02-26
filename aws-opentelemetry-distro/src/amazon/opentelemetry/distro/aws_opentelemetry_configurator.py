@@ -91,15 +91,9 @@ def _initialize_components(auto_instrumentation_version):
     id_generator = _import_id_generator(id_generator_name)
     # if env var OTEL_RESOURCE_ATTRIBUTES is given, it will read the service_name
     # from the env variable else defaults to "unknown_service"
-    auto_resource = {}
-    # populate version if using auto-instrumentation
-    if auto_instrumentation_version:
-        auto_resource[ResourceAttributes.TELEMETRY_AUTO_VERSION] = auto_instrumentation_version
 
-    distro_version = version("aws-opentelemetry-distro")
-    auto_resource[ResourceAttributes.TELEMETRY_SDK_VERSION] = distro_version
-    _logger.info("aws-opentelementry-distro - version: %s", distro_version)
-
+    auto_resource: Dict[str, any] = {}
+    auto_resource = _customize_versions(auto_resource, auto_instrumentation_version)
     resource = get_aggregated_resources(
         [
             AwsEc2ResourceDetector(),
@@ -225,6 +219,16 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource) -> 
     provider.add_span_processor(AwsSpanMetricsProcessorBuilder(meter_provider, resource).build())
 
     return
+
+
+def _customize_versions(auto_resource: Dict[str, any], auto_instrumentation_version: str) -> Dict[str, any]:
+    # populate version if using auto-instrumentation
+    if auto_instrumentation_version:
+        auto_resource[ResourceAttributes.TELEMETRY_AUTO_VERSION] = auto_instrumentation_version
+    distro_version = version("aws-opentelemetry-distro")
+    auto_resource[ResourceAttributes.TELEMETRY_SDK_VERSION] = distro_version
+    _logger.debug("aws-opentelementry-distro - version: %s", distro_version)
+    return auto_resource
 
 
 def is_smp_enabled():
