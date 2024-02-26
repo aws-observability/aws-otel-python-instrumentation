@@ -9,7 +9,7 @@ env:
   AWS_DEFAULT_REGION: us-east-1
   STAGING_ECR_REGISTRY: 637423224110.dkr.ecr.us-east-1.amazonaws.com
   STAGING_ECR_REPOSITORY: aws-observability/adot-autoinstrumentation-python-staging
-  S3_INTEGRATION_BUCKET: ${{ secrets.S3_INTEGRATION_BUCKET }}
+  STAGING_S3_BUCKET: ${{ secrets.STAGING_BUCKET_NAME }}
 
 concurrency:
   group: python-instrumentation-main-build
@@ -38,7 +38,7 @@ jobs:
           pkg_version=$(grep '__version__' ./aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py | awk -F '"' '{print $2}')
           echo "ADOT_PYTHON_VERSION=$pkg_version" >> $GITHUB_OUTPUT
           shortsha="$(git rev-parse --short HEAD)"
-          echo "SHORT_SHA=$pkg_version" >> $GITHUB_ENV
+          echo "SHORT_SHA=$shortsha" >> $GITHUB_ENV
           python_distro_tag=$pkg_version-$shortsha
           echo "python_image_tag=$python_distro_tag" >> $GITHUB_OUTPUT
           echo "stagingRegistry=${{ env.STAGING_ECR_REGISTRY }}" >> $GITHUB_OUTPUT
@@ -68,7 +68,7 @@ jobs:
 
       - name: Upload wheel to S3
         run: |
-          aws s3 cp dist/${{ steps.staging_wheel_output.outputs.STAGING_WHEEL}} ${{ env.S3_INTEGRATION_BUCKET }}
+          aws s3 cp dist/${{ steps.staging_wheel_output.outputs.STAGING_WHEEL}} s3://${{ env.STAGING_S3_BUCKET }}
 
       - name: Upload Wheel to GitHub Actions
         uses: actions/upload-artifact@v3
