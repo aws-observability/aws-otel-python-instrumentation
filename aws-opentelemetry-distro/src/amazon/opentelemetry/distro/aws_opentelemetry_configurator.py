@@ -214,7 +214,7 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource) -> 
 
 def _customize_versions(auto_resource: Dict[str, any]) -> Dict[str, any]:
     distro_version = version("aws-opentelemetry-distro")
-    auto_resource[ResourceAttributes.TELEMETRY_AUTO_VERSION] = distro_version
+    auto_resource[ResourceAttributes.TELEMETRY_AUTO_VERSION] = distro_version + "-aws"
     _logger.debug("aws-opentelementry-distro - version: %s", distro_version)
     return auto_resource
 
