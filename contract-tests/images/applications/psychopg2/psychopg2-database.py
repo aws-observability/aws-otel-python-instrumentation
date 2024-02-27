@@ -74,9 +74,19 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def handle_request(self, method: str, db_host, db_user, db_pass, db_name):
         status_code: int
+        conn = psycopg2.connect(dbname=db_name, user=db_user, password=db_pass, host=db_host)
+        print(self.path)
         if self.in_path(_NETWORK_ALIAS):
             if self.in_path(_SUCCESS):
-                status_code = 200
+                cur = conn.cursor()
+                cur.execute("SELECT id, name FROM test_table")
+                rows = cur.fetchall()
+                cur.close()
+                conn.close()
+                if len(rows) == 2:
+                    status_code = 200
+                else:
+                    status_code = 400
             elif self.in_path(_ERROR):
                 status_code = 400
             elif self.in_path(_FAULT):
@@ -88,6 +98,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             response: Response = request(method, url, timeout=20)
             status_code = response.status_code
         print("received a " + method + " request")
+        cur.close()
+        conn.close()
         self.send_response_only(status_code)
         self.end_headers()
 
