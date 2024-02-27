@@ -8,7 +8,7 @@ import requests
 from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseNotAllowed, HttpResponseNotFound
 from django.views.decorators.csrf import csrf_exempt
 from dotenv import load_dotenv
-from MainService.models import Vehicle
+from MainService.models import Vehicle, VehiclePurchaseHistory
 
 load_dotenv()
 
@@ -49,6 +49,22 @@ def get_vehicle_by_id(request, vehicle_id):
         if not vehicle_objects:
             return HttpResponseNotFound("Vehicle with id=" + str(vehicle_id) + " is not found")
         return HttpResponse(vehicle_objects)
+    elif request.method == "DELETE":
+        vehicle_objects = Vehicle.objects.filter(id=vehicle_id)
+        vehicle_objects_values = Vehicle.objects.filter(id=vehicle_id).values()
+        if not vehicle_objects_values:
+            return HttpResponseNotFound("Vehicle with id=" + str(vehicle_id) + " is not found")
+        vehicle_objects.delete()
+        return HttpResponse("Vehicle with id=" + str(vehicle_id) + " has been deleted")
+    return HttpResponseNotAllowed("Only GET/DELETE requests are allowed!")
+
+
+def get_vehicles_by_name(request, vehicles_name):
+    if request.method == "GET":
+        vehicles_objects = Vehicle.objects.filter(name=vehicles_name).values()
+        if not vehicles_objects:
+            return HttpResponseNotFound("Couldn't find any vehicle with name=" + str(vehicles_name))
+        return HttpResponse(vehicles_objects)
     return HttpResponseNotAllowed("Only GET requests are allowed!")
 
 
@@ -63,14 +79,58 @@ def get_vehicle_image(request, vehicle_id):
 
 
 @csrf_exempt
-def get_image_by_name(request, image_name):
+def image(request, image_name):
     print(image_name)
     if request.method == "GET":
         response = requests.get(build_image_url(image_name), timeout=10)
         if response.ok:
             return HttpResponse(response)
         return HttpResponseNotFound("Image with name: " + image_name + " is not found")
-    return HttpResponseNotAllowed("Only GET requests are allowed!")
+    elif request.method == "POST":
+        response = requests.post(build_image_url(image_name), timeout=10)
+        if response.ok:
+            return HttpResponse(response)
+        return HttpResponseNotFound("Image with name: " + image_name + " failed to saved")
+    return HttpResponseNotAllowed("Only GET/POST requests are allowed!")
+
+
+@csrf_exempt
+def vehicle_purchase_history(request):
+    if request.method == "POST":
+        body_unicode = request.body.decode("utf-8")
+        body = json.loads(body_unicode)
+        try:
+            vehicle_purchase_history_object = VehiclePurchaseHistory(
+                vehicle_id=body["vehicle_id"], purchase_price=body["purchase_price"]
+            )
+            vehicle_purchase_history_object.save()
+            return HttpResponse("VehiclePurchaseHistoryId = " + str(vehicle_purchase_history_object.id))
+        except KeyError as exception:
+            return HttpResponseBadRequest("Missing key: " + str(exception))
+    elif request.method == "GET":
+        vehicle_purchase_history_object = VehiclePurchaseHistory.objects.all().values()
+        return HttpResponse(vehicle_purchase_history_object)
+    return HttpResponseNotAllowed("Only GET/POST requests are allowed!")
+
+
+def get_vehicle_purchase_history_by_id(request, vehicle_purchase_history_id):
+    if request.method == "GET":
+        vehicle_purchase_history_object = VehiclePurchaseHistory.objects.filter(id=vehicle_purchase_history_id).values()
+        if not vehicle_purchase_history_object:
+            return HttpResponseNotFound(
+                "VehiclePurchaseHistory with id=" + str(vehicle_purchase_history_id) + " is not found"
+            )
+        return HttpResponse(vehicle_purchase_history_object)
+    elif request.method == "DELETE":
+        vehicle_purchase_history_object = VehiclePurchaseHistory.objects.filter(id=vehicle_purchase_history_id)
+        vehicle_purchase_history_object_values = Vehicle.objects.filter(id=vehicle_purchase_history_id).values()
+        if not vehicle_purchase_history_object_values:
+            return HttpResponseNotFound(
+                "VehiclePurchaseHistory with id=" + str(vehicle_purchase_history_id) + " is not found"
+            )
+        vehicle_purchase_history_object.delete()
+        return HttpResponse("VehiclePurchaseHistory with id=" + str(vehicle_purchase_history_id) + " has been deleted")
+    return HttpResponseNotAllowed("Only GET/DELETE requests are allowed!")
 
 
 def build_image_url(image_name):
