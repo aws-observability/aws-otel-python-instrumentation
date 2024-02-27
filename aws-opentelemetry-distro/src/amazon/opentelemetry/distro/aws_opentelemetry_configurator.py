@@ -4,6 +4,7 @@ import os
 from logging import Logger, getLogger
 from typing import ClassVar, Dict, Type
 
+from importlib_metadata import version
 from typing_extensions import override
 
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
@@ -80,10 +81,10 @@ class AwsOpenTelemetryConfigurator(_OTelSDKConfigurator):
     # pylint: disable=no-self-use
     @override
     def _configure(self, **kwargs):
-        _initialize_components(kwargs.get("auto_instrumentation_version"))
+        _initialize_components()
 
 
-def _initialize_components(auto_instrumentation_version):
+def _initialize_components():
     trace_exporters, metric_exporters, log_exporters = _import_exporters(
         _get_exporter_names("traces"),
         _get_exporter_names("metrics"),
@@ -94,11 +95,9 @@ def _initialize_components(auto_instrumentation_version):
     id_generator = _import_id_generator(id_generator_name)
     # if env var OTEL_RESOURCE_ATTRIBUTES is given, it will read the service_name
     # from the env variable else defaults to "unknown_service"
-    auto_resource = {}
-    # populate version if using auto-instrumentation
-    if auto_instrumentation_version:
-        auto_resource[ResourceAttributes.TELEMETRY_AUTO_VERSION] = auto_instrumentation_version
 
+    auto_resource: Dict[str, any] = {}
+    auto_resource = _customize_versions(auto_resource)
     resource = get_aggregated_resources(
         [
             AwsEc2ResourceDetector(),
@@ -211,6 +210,13 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource) -> 
     provider.add_span_processor(AwsSpanMetricsProcessorBuilder(meter_provider, resource).build())
 
     return
+
+
+def _customize_versions(auto_resource: Dict[str, any]) -> Dict[str, any]:
+    distro_version = version("aws-opentelemetry-distro")
+    auto_resource[ResourceAttributes.TELEMETRY_AUTO_VERSION] = distro_version + "-aws"
+    _logger.debug("aws-opentelementry-distro - version: %s", auto_resource[ResourceAttributes.TELEMETRY_AUTO_VERSION])
+    return auto_resource
 
 
 def is_app_signals_enabled():
