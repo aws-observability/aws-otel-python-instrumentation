@@ -120,23 +120,25 @@ They should be accessible through `0.0.0.0:8000` for the image service and `0.0.
 ## APIs
 
 The following are the APIs and what they do:
-1. `GET /vehicle-inventory/`: returns all the vehicles entries for postgres db
-2. `POST /vehicle-inventory/`: puts vehicle into db. For example: `curl -X POST http://0.0.0.0:8001/vehicle-inventory/ -d '{"make": "BMW","model": "M340","year": 2022,"image_name": "newCar.jpg"}'`
-3. `GET /vehicle-inventory/<int>`: returns vehicle entry with id = <int>
-4. `DELETE /vehicle-inventory/<int>`: deletes vehicle entry with id = <int>
-5. `GET /vehicle-inventory/name/<str>`: returns vehicle entries with name = <str>
-6. `GET /vehicle-inventory/<int>/image`: returns image file information from S3 for the specific vehicle by calling 
+1. `GET /vehicle-inventory/heatlh-check/`: returns 200 if the vehicle service is up and running.
+2. `GET /vehicle-inventory/`: returns all the vehicles entries for postgres db
+3. `POST /vehicle-inventory/`: puts vehicle into db. For example: `curl -X POST http://0.0.0.0:8001/vehicle-inventory/ 
+   -d '{"make": "BMW","model": "M340","year": 2022,"image_name": "newCar.jpg"}'`
+4. `GET /vehicle-inventory/<int>`: returns vehicle entry with id = <int>
+5. `DELETE /vehicle-inventory/<int>`: deletes vehicle entry with id = <int>
+6. `GET /vehicle-inventory/name/<str>`: returns vehicle entries with name = <str>
+7. `GET /vehicle-inventory/<int>/image`: returns image file information from S3 for the specific vehicle by calling 
    the image microservice
-7. `GET /vehicle-inventory/image/<image_name>`: returns image information for <image_name> from S3 if present through 
+8. `GET /vehicle-inventory/image/<image_name>`: returns image information for <image_name> from S3 if present through 
    the image service.
-8. `POST /vehicle-inventory/image/<image_name>`: Calls the image service API `POST /images/name/<image_name>`
-9. `GET /vehicle-inventory/history/`: returns all the vehicle purchase history entries from postgres db
-10. `POST /vehicle-inventory/history/`: puts vehicle purchase history into db. For example: `curl -X POST http://0.0.0.
+9. `POST /vehicle-inventory/image/<image_name>`: Calls the image service API `POST /images/name/<image_name>`
+10. `GET /vehicle-inventory/history/`: returns all the vehicle purchase history entries from postgres db
+11. `POST /vehicle-inventory/history/`: puts vehicle purchase history into db. For example: `curl -X POST http://0.0.0.
    0:8001/vehicle-inventory/history/ -d '{"vehicle_id": "1","purchase_price": "66000"}'`
-11. `GET /vehicle-inventory/history/<int>`: returns vehicle purchase history entry with id = <int>
-12. `DELETE /vehicle-inventory/history/<int>`: deletes vehicle purchase history entry entry with id = <int>
-13. `GET /images/name/<image_name>`: returns image information for <image_name> from S3 if present. 
-14. `POST /images/name/<image_name>`: creates an empty file in S3. This is an async endpoint since it will put image 
+12. `GET /vehicle-inventory/history/<int>`: returns vehicle purchase history entry with id = <int>
+13. `DELETE /vehicle-inventory/history/<int>`: deletes vehicle purchase history entry entry with id = <int>
+14. `GET /images/name/<image_name>`: returns image information for <image_name> from S3 if present. 
+15. `POST /images/name/<image_name>`: creates an empty file in S3. This is an async endpoint since it will put image 
    name in an SQS queue and not wait for the file to be created in S3. Instead, a long running thread will poll SQS 
    and then create the image file later. 
-15. `GET /image/remote-image`: makes a remote http call to google.com. 
+16. `GET /image/remote-image`: makes a remote http call to google.com. 

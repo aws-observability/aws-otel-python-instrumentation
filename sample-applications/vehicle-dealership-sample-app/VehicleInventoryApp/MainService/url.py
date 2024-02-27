@@ -11,5 +11,10 @@ urlpatterns = [
     path("<int:vehicle_id>/image", views.get_vehicle_image, name="get_vehicle_image"),
     path("image/<str:image_name>", views.image, name="image"),
     path("history/", views.vehicle_purchase_history, name="purchase_history"),
-    path("history/<int:vehicle_purchase_history_id>", views.get_vehicle_purchase_history_by_id),
+    path(
+        "history/<int:vehicle_purchase_history_id>",
+        views.get_vehicle_purchase_history_by_id,
+        name="get_vehicle_purchase_history_by_id",
+    ),
+    path("health-check/", views.health_check, name="health_check"),
 ]

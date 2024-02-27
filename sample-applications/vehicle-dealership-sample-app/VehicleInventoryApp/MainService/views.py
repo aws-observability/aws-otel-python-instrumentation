@@ -13,6 +13,10 @@ from MainService.models import Vehicle, VehiclePurchaseHistory
 load_dotenv()
 
 
+def health_check():
+    return HttpResponse("Vehicle Inventory Service up and running!")
+
+
 def get_image_endpoint():
     load_dotenv()
     return "http://" + os.environ.get("IMAGE_BACKEND_SERVICE_HOST") + ":" + os.environ.get("IMAGE_BACKEND_SERVICE_PORT")
