@@ -102,7 +102,6 @@ class ContractTestBase(TestCase):
         self.mock_collector_client: MockCollectorClient = MockCollectorClient(
             self.mock_collector.get_container_host_ip(), self.mock_collector.get_exposed_port(_MOCK_COLLECTOR_PORT)
         )
-        self.network.connect("psychopg2-postgres-1")
 
     def tear_down(self) -> None:
         try:
