@@ -5,7 +5,7 @@
 
 package io.opentelemetry.config;
 
-import io.opentelemetry.agents.Agent;
+import io.opentelemetry.distros.DistroConfig;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -20,7 +20,7 @@ public class TestConfig {
 
   private final String name;
   private final String description;
-  private final List<Agent> agents;
+  private final List<DistroConfig> distroConfigs;
   private final int maxRequestRate;
   private final int concurrentConnections;
   private final int totalIterations;
@@ -29,7 +29,7 @@ public class TestConfig {
   public TestConfig(Builder builder) {
     this.name = builder.name;
     this.description = builder.description;
-    this.agents = Collections.unmodifiableList(builder.agents);
+    this.distroConfigs = Collections.unmodifiableList(builder.distroConfigs);
     this.maxRequestRate = builder.maxRequestRate;
     this.concurrentConnections = builder.concurrentConnections;
     this.totalIterations = builder.totalIterations;
@@ -44,8 +44,8 @@ public class TestConfig {
     return description;
   }
 
-  public List<Agent> getAgents() {
-    return Collections.unmodifiableList(agents);
+  public List<DistroConfig> getDistroConfigs() {
+    return Collections.unmodifiableList(distroConfigs);
   }
 
   public int getMaxRequestRate() {
@@ -71,7 +71,7 @@ public class TestConfig {
   static class Builder {
     private String name;
     private String description;
-    private List<Agent> agents = new ArrayList<>();
+    private List<DistroConfig> distroConfigs = new ArrayList<>();
     private int maxRequestRate = DEFAULT_MAX_REQUEST_RATE;
     private int concurrentConnections = DEFAULT_CONCURRENT_CONNECTIONS;
     private int totalIterations = DEFAULT_TOTAL_ITERATIONS;
@@ -87,8 +87,8 @@ public class TestConfig {
       return this;
     }
 
-    Builder withAgents(Agent... agents) {
-      this.agents.addAll(Arrays.asList(agents));
+    Builder withDistroConfigs(DistroConfig... distroConfigs) {
+      this.distroConfigs.addAll(Arrays.asList(distroConfigs));
       return this;
     }
 

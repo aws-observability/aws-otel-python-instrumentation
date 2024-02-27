@@ -5,7 +5,7 @@
 
 package io.opentelemetry.config;
 
-import io.opentelemetry.agents.Agent;
+import io.opentelemetry.distros.DistroConfig;
 import java.util.Arrays;
 import java.util.stream.Stream;
 
@@ -14,8 +14,8 @@ public enum Configs {
   RELEASE(
       TestConfig.builder()
           .name("release")
-          .description("compares no agent, latest stable, and latest snapshot agents")
-          .withAgents(Agent.NONE, Agent.LATEST_RELEASE, Agent.LATEST_SNAPSHOT)
+          .description("compares no distro, latest stable, and latest snapshot distro")
+          .withDistroConfigs(DistroConfig.NONE, DistroConfig.LATEST_RELEASE, DistroConfig.LATEST_SNAPSHOT)
           .warmupSeconds(60)
           .build());
 
