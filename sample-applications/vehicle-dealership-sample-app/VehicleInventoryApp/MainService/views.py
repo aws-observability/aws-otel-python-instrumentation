@@ -146,7 +146,7 @@ def get_vehicle_from_vehicle_history(request, vehicle_purchase_history_id):
             return HttpResponseNotFound(
                 "VehiclePurchaseHistory with id=" + str(vehicle_purchase_history_id) + " is not found"
             )
-        vehicle_id = getattr(vehicle_purchase_history_object, "vehicle")
+        vehicle_id = getattr(vehicle_purchase_history_object, "vehicle_id")
         vehicle_objects = Vehicle.objects.filter(id=vehicle_id).values()
         if not vehicle_objects:
             return HttpResponseNotFound("Vehicle with id=" + str(vehicle_id) + " is not found")

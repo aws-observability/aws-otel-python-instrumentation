@@ -136,7 +136,7 @@ The following are the APIs and what they do:
 11. `POST /vehicle-inventory/history/`: puts vehicle purchase history into db. For example: `curl -X POST http://0.0.0.
    0:8001/vehicle-inventory/history/ -d '{"vehicle_id": "1","purchase_price": "66000"}'`
 12. `GET /vehicle-inventory/history/<int>`: returns vehicle purchase history entry with id = <int>
-13. `DELETE /vehicle-inventory/history/<int>`: deletes vehicle purchase history entry entry with id = <int>
+13. `DELETE /vehicle-inventory/history/<int>`: deletes vehicle purchase history entry with id = <int>
 14. `GET /vehicle-inventory/history/<int>/vehicle`: returns vehicle entry that is linked to vehicle purchase history 
     with id = <int>
 15. `GET /images/name/<image_name>`: returns image information for <image_name> from S3 if present. 
