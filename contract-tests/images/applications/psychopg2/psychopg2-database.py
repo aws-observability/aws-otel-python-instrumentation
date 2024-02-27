@@ -54,15 +54,19 @@ class RequestHandler(BaseHTTPRequestHandler):
             cur.close()
             conn.close()
             if len(rows) == 2:
-                self.send_response(200, "success")
+                print("sucess request triggered, responding")
+                self.send_response_only(200, "success")
+                self.end_headers()
             else:
-                self.send_response(400, "failed")
+                self.send_response_only(400, "failed")
+                self.end_headers()
         elif "fault" in self.path:
             cur = conn.cursor()
             cur.execute("SELECT id, name FROM invalid_table")
             cur.close()
             conn.close()
-            self.send_response(200, "success")
+            self.send_response_only(200, "success")
+            self.end_headers()
 
 
 def main() -> None:
