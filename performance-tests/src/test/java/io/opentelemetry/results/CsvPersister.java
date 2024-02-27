@@ -53,8 +53,10 @@ class CsvPersister implements ResultsPersister {
 
     StringBuilder sb = new StringBuilder().append(System.currentTimeMillis() / 1000);
     // Don't be confused by the loop -- This generates a single long csv line.
-    // Each result is for a given distroConfig run, and we want all the fields for all distroConfigs on the same
-    // line so that we can create a columnar structure that allows us to more easily compare distroConfig
+    // Each result is for a given distroConfig run, and we want all the fields for all distroConfigs
+    // on the same
+    // line so that we can create a columnar structure that allows us to more easily compare
+    // distroConfig
     // to distroConfig for a given run.
     for (FieldSpec field : FIELDS) {
       for (AppPerfResults result : results) {
@@ -84,11 +86,14 @@ class CsvPersister implements ResultsPersister {
   private String createHeaderLine(List<AppPerfResults> results) {
     StringBuilder sb = new StringBuilder("timestamp");
     // Don't be confused by the loop -- This generates a single long csv line.
-    // Each result is for a given distroConfig run, and we want all the fields for all distroConfigs on the same
-    // line so that we can create a columnar structure that allows us to more easily compare distroConfig
+    // Each result is for a given distroConfig run, and we want all the fields for all distroConfigs
+    // on the same
+    // line so that we can create a columnar structure that allows us to more easily compare
+    // distroConfig
     // to distroConfig for a given run.
 
-    List<String> distroConfigs = results.stream().map(r -> r.distroConfig.getName()).collect(Collectors.toList());
+    List<String> distroConfigs =
+        results.stream().map(r -> r.distroConfig.getName()).collect(Collectors.toList());
     for (FieldSpec field : FIELDS) {
       for (String distroConfig : distroConfigs) {
         sb.append(",").append(distroConfig).append(':').append(field.name);

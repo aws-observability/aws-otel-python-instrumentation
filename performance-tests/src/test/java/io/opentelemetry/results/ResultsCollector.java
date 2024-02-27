@@ -6,8 +6,8 @@
 package io.opentelemetry.results;
 
 import com.jayway.jsonpath.JsonPath;
-import io.opentelemetry.distros.DistroConfig;
 import io.opentelemetry.config.TestConfig;
+import io.opentelemetry.distros.DistroConfig;
 import io.opentelemetry.results.AppPerfResults.MinMax;
 import io.opentelemetry.util.JFRUtils;
 import io.opentelemetry.util.NamingConvention;
@@ -52,15 +52,15 @@ public class ResultsCollector {
     }
   }
 
-  private AppPerfResults.Builder addStartupTime(AppPerfResults.Builder builder, DistroConfig distroConfig)
-      throws IOException {
+  private AppPerfResults.Builder addStartupTime(
+      AppPerfResults.Builder builder, DistroConfig distroConfig) throws IOException {
     Path file = namingConvention.startupDurationFile(distroConfig);
     long startupDuration = Long.parseLong(new String(Files.readAllBytes(file)).trim());
     return builder.startupDurationMs(startupDuration);
   }
 
-  private AppPerfResults.Builder addK6Results(AppPerfResults.Builder builder, DistroConfig distroConfig)
-      throws IOException {
+  private AppPerfResults.Builder addK6Results(
+      AppPerfResults.Builder builder, DistroConfig distroConfig) throws IOException {
     Path k6File = namingConvention.k6Results(distroConfig);
     String json = new String(Files.readAllBytes(k6File));
     double iterationAvg = read(json, "$.metrics.iteration_duration.avg");
@@ -80,8 +80,8 @@ public class ResultsCollector {
     return result.doubleValue();
   }
 
-  private AppPerfResults.Builder addJfrResults(AppPerfResults.Builder builder, DistroConfig distroConfig)
-      throws IOException {
+  private AppPerfResults.Builder addJfrResults(
+      AppPerfResults.Builder builder, DistroConfig distroConfig) throws IOException {
     Path jfrFile = namingConvention.jfrFile(distroConfig);
     return builder
         .totalGCTime(readTotalGCTime(jfrFile))

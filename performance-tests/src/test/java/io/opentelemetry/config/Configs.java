@@ -15,7 +15,8 @@ public enum Configs {
       TestConfig.builder()
           .name("release")
           .description("compares no distro, latest stable, and latest snapshot distro")
-          .withDistroConfigs(DistroConfig.NONE, DistroConfig.LATEST_RELEASE, DistroConfig.LATEST_SNAPSHOT)
+          .withDistroConfigs(
+              DistroConfig.NONE, DistroConfig.LATEST_RELEASE, DistroConfig.LATEST_SNAPSHOT)
           .warmupSeconds(60)
           .build());
 

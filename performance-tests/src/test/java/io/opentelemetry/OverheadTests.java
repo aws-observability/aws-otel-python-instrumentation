@@ -8,13 +8,13 @@ package io.opentelemetry;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.DynamicTest.dynamicTest;
 
-import io.opentelemetry.distros.DistroConfig;
 import io.opentelemetry.config.Configs;
 import io.opentelemetry.config.TestConfig;
 import io.opentelemetry.containers.CollectorContainer;
 import io.opentelemetry.containers.K6Container;
-import io.opentelemetry.containers.VehicleInventoryServiceContainer;
 import io.opentelemetry.containers.PostgresContainer;
+import io.opentelemetry.containers.VehicleInventoryServiceContainer;
+import io.opentelemetry.distros.DistroConfig;
 import io.opentelemetry.results.AppPerfResults;
 import io.opentelemetry.results.MainResultsPersister;
 import io.opentelemetry.results.ResultsCollector;
@@ -82,7 +82,8 @@ public class OverheadTests {
     postgres.start();
 
     GenericContainer<?> vehicleInventoryService =
-        new VehicleInventoryServiceContainer(NETWORK, collector, distroConfig, namingConventions).build();
+        new VehicleInventoryServiceContainer(NETWORK, collector, distroConfig, namingConventions)
+            .build();
     long start = System.currentTimeMillis();
     vehicleInventoryService.start();
     writeStartupTimeFile(distroConfig, start);
@@ -94,7 +95,8 @@ public class OverheadTests {
     long testStart = System.currentTimeMillis();
     startRecording(distroConfig, vehicleInventoryService);
 
-    GenericContainer<?> k6 = new K6Container(NETWORK, distroConfig, config, namingConventions).build();
+    GenericContainer<?> k6 =
+        new K6Container(NETWORK, distroConfig, config, namingConventions).build();
     k6.start();
 
     long runDuration = System.currentTimeMillis() - testStart;
@@ -109,7 +111,8 @@ public class OverheadTests {
     postgres.stop();
   }
 
-  private void startRecording(DistroConfig distroConfig, GenericContainer<?> vehicleInventoryService) throws Exception {
+  private void startRecording(
+      DistroConfig distroConfig, GenericContainer<?> vehicleInventoryService) throws Exception {
     Path outFile = namingConventions.container.jfrFile(distroConfig);
     String[] command = {
       "jcmd",

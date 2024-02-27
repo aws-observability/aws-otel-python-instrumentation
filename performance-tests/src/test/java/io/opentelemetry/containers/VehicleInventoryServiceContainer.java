@@ -5,8 +5,8 @@
 
 package io.opentelemetry.containers;
 
-import io.opentelemetry.distros.DistroConfig;
 import io.opentelemetry.distros.AgentResolver;
+import io.opentelemetry.distros.DistroConfig;
 import io.opentelemetry.util.NamingConventions;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -26,7 +26,8 @@ import org.testcontainers.utility.MountableFile;
 
 public class VehicleInventoryServiceContainer {
 
-  private static final Logger logger = LoggerFactory.getLogger(VehicleInventoryServiceContainer.class);
+  private static final Logger logger =
+      LoggerFactory.getLogger(VehicleInventoryServiceContainer.class);
   private static final int PETCLINIC_PORT = 9966;
   private final AgentResolver agentResolver = new AgentResolver();
 
@@ -36,7 +37,10 @@ public class VehicleInventoryServiceContainer {
   private final NamingConventions namingConventions;
 
   public VehicleInventoryServiceContainer(
-          Network network, Startable collector, DistroConfig distroConfig, NamingConventions namingConventions) {
+      Network network,
+      Startable collector,
+      DistroConfig distroConfig,
+      NamingConventions namingConventions) {
     this.network = network;
     this.collector = collector;
     this.distroConfig = distroConfig;

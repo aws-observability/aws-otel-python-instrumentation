@@ -5,8 +5,8 @@
 
 package io.opentelemetry.results;
 
-import io.opentelemetry.distros.DistroConfig;
 import io.opentelemetry.config.TestConfig;
+import io.opentelemetry.distros.DistroConfig;
 
 public class AppPerfResults {
 

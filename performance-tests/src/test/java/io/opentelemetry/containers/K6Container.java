@@ -5,8 +5,8 @@
 
 package io.opentelemetry.containers;
 
-import io.opentelemetry.distros.DistroConfig;
 import io.opentelemetry.config.TestConfig;
+import io.opentelemetry.distros.DistroConfig;
 import io.opentelemetry.util.NamingConventions;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -27,7 +27,10 @@ public class K6Container {
   private final NamingConventions namingConventions;
 
   public K6Container(
-          Network network, DistroConfig distroConfig, TestConfig config, NamingConventions namingConvention) {
+      Network network,
+      DistroConfig distroConfig,
+      TestConfig config,
+      NamingConventions namingConvention) {
     this.network = network;
     this.distroConfig = distroConfig;
     this.config = config;
