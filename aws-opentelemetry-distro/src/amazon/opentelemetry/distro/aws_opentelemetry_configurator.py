@@ -81,10 +81,10 @@ class AwsOpenTelemetryConfigurator(_OTelSDKConfigurator):
     # pylint: disable=no-self-use
     @override
     def _configure(self, **kwargs):
-        _initialize_components(kwargs.get("auto_instrumentation_version"))
+        _initialize_components()
 
 
-def _initialize_components(auto_instrumentation_version):
+def _initialize_components():
     trace_exporters, metric_exporters, log_exporters = _import_exporters(
         _get_exporter_names("traces"),
         _get_exporter_names("metrics"),
@@ -97,7 +97,7 @@ def _initialize_components(auto_instrumentation_version):
     # from the env variable else defaults to "unknown_service"
 
     auto_resource: Dict[str, any] = {}
-    auto_resource = _customize_versions(auto_resource, auto_instrumentation_version)
+    auto_resource = _customize_versions(auto_resource)
     resource = get_aggregated_resources(
         [
             AwsEc2ResourceDetector(),
@@ -212,12 +212,9 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource) -> 
     return
 
 
-def _customize_versions(auto_resource: Dict[str, any], auto_instrumentation_version: str) -> Dict[str, any]:
-    # populate version if using auto-instrumentation
-    if auto_instrumentation_version:
-        auto_resource[ResourceAttributes.TELEMETRY_AUTO_VERSION] = auto_instrumentation_version
+def _customize_versions(auto_resource: Dict[str, any]) -> Dict[str, any]:
     distro_version = version("aws-opentelemetry-distro")
-    auto_resource[ResourceAttributes.TELEMETRY_SDK_VERSION] = distro_version
+    auto_resource[ResourceAttributes.TELEMETRY_AUTO_VERSION] = distro_version
     _logger.debug("aws-opentelementry-distro - version: %s", distro_version)
     return auto_resource
 
