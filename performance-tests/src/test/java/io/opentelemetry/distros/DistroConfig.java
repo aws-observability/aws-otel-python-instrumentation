@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package io.opentelemetry.agents;
+package io.opentelemetry.distros;
 
 import java.net.MalformedURLException;
 import java.net.URI;
@@ -12,31 +12,31 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-public class Agent {
+public class DistroConfig {
 
   static final String OTEL_LATEST =
       "https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/latest/download/opentelemetry-javaagent.jar";
 
-  public static final Agent NONE = new Agent("none", "no agent at all");
-  public static final Agent LATEST_RELEASE =
-      new Agent("latest", "latest mainstream release", OTEL_LATEST);
-  public static final Agent LATEST_SNAPSHOT =
-      new Agent("snapshot", "latest available snapshot version from main");
+  public static final DistroConfig NONE = new DistroConfig("none", "no distro at all");
+  public static final DistroConfig LATEST_RELEASE =
+      new DistroConfig("latest", "latest mainstream release", OTEL_LATEST);
+  public static final DistroConfig LATEST_SNAPSHOT =
+      new DistroConfig("snapshot", "latest available snapshot version from main");
 
   private final String name;
   private final String description;
   private final URL url;
   private final List<String> additionalJvmArgs;
 
-  public Agent(String name, String description) {
+  public DistroConfig(String name, String description) {
     this(name, description, null);
   }
 
-  public Agent(String name, String description, String url) {
+  public DistroConfig(String name, String description, String url) {
     this(name, description, url, Collections.emptyList());
   }
 
-  public Agent(String name, String description, String url, List<String> additionalJvmArgs) {
+  public DistroConfig(String name, String description, String url, List<String> additionalJvmArgs) {
     this.name = name;
     this.description = description;
     this.url = makeUrl(url);

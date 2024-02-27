@@ -6,7 +6,7 @@
 package io.opentelemetry.results;
 
 import com.jayway.jsonpath.JsonPath;
-import io.opentelemetry.agents.Agent;
+import io.opentelemetry.distros.DistroConfig;
 import io.opentelemetry.config.TestConfig;
 import io.opentelemetry.results.AppPerfResults.MinMax;
 import io.opentelemetry.util.JFRUtils;
@@ -29,22 +29,22 @@ public class ResultsCollector {
   }
 
   public List<AppPerfResults> collect(TestConfig config) {
-    return config.getAgents().stream()
-        .map(a -> readAgentResults(a, config))
+    return config.getDistroConfigs().stream()
+        .map(a -> readDistroConfigResults(a, config))
         .collect(Collectors.toList());
   }
 
-  private AppPerfResults readAgentResults(Agent agent, TestConfig config) {
+  private AppPerfResults readDistroConfigResults(DistroConfig distroConfig, TestConfig config) {
     try {
       AppPerfResults.Builder builder =
           AppPerfResults.builder()
-              .agent(agent)
-              .runDurationMs(runDurations.get(agent.getName()))
+              .distroConfig(distroConfig)
+              .runDurationMs(runDurations.get(distroConfig.getName()))
               .config(config);
 
-      builder = addStartupTime(builder, agent);
-      builder = addK6Results(builder, agent);
-      builder = addJfrResults(builder, agent);
+      builder = addStartupTime(builder, distroConfig);
+      builder = addK6Results(builder, distroConfig);
+      builder = addJfrResults(builder, distroConfig);
 
       return builder.build();
     } catch (IOException e) {
@@ -52,16 +52,16 @@ public class ResultsCollector {
     }
   }
 
-  private AppPerfResults.Builder addStartupTime(AppPerfResults.Builder builder, Agent agent)
+  private AppPerfResults.Builder addStartupTime(AppPerfResults.Builder builder, DistroConfig distroConfig)
       throws IOException {
-    Path file = namingConvention.startupDurationFile(agent);
+    Path file = namingConvention.startupDurationFile(distroConfig);
     long startupDuration = Long.parseLong(new String(Files.readAllBytes(file)).trim());
     return builder.startupDurationMs(startupDuration);
   }
 
-  private AppPerfResults.Builder addK6Results(AppPerfResults.Builder builder, Agent agent)
+  private AppPerfResults.Builder addK6Results(AppPerfResults.Builder builder, DistroConfig distroConfig)
       throws IOException {
-    Path k6File = namingConvention.k6Results(agent);
+    Path k6File = namingConvention.k6Results(distroConfig);
     String json = new String(Files.readAllBytes(k6File));
     double iterationAvg = read(json, "$.metrics.iteration_duration.avg");
     double iterationP95 = read(json, "$.metrics.iteration_duration['p(95)']");
@@ -80,9 +80,9 @@ public class ResultsCollector {
     return result.doubleValue();
   }
 
-  private AppPerfResults.Builder addJfrResults(AppPerfResults.Builder builder, Agent agent)
+  private AppPerfResults.Builder addJfrResults(AppPerfResults.Builder builder, DistroConfig distroConfig)
       throws IOException {
-    Path jfrFile = namingConvention.jfrFile(agent);
+    Path jfrFile = namingConvention.jfrFile(distroConfig);
     return builder
         .totalGCTime(readTotalGCTime(jfrFile))
         .totalAllocated(readTotalAllocated(jfrFile))

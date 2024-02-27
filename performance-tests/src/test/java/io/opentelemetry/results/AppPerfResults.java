@@ -5,12 +5,12 @@
 
 package io.opentelemetry.results;
 
-import io.opentelemetry.agents.Agent;
+import io.opentelemetry.distros.DistroConfig;
 import io.opentelemetry.config.TestConfig;
 
 public class AppPerfResults {
 
-  final Agent agent;
+  final DistroConfig distroConfig;
   final TestConfig config;
   final double iterationAvg;
   final double iterationP95;
@@ -31,7 +31,7 @@ public class AppPerfResults {
   final long totalGcPauseNanos;
 
   private AppPerfResults(Builder builder) {
-    this.agent = builder.agent;
+    this.distroConfig = builder.distroConfig;
     this.config = builder.config;
     this.iterationAvg = builder.iterationAvg;
     this.iterationP95 = builder.iterationP95;
@@ -68,8 +68,8 @@ public class AppPerfResults {
     return x / (1024.0 * 1024.0);
   }
 
-  String getAgentName() {
-    return agent.getName();
+  String getDistroConfigName() {
+    return distroConfig.getName();
   }
 
   static Builder builder() {
@@ -78,7 +78,7 @@ public class AppPerfResults {
 
   static class Builder {
     private long startupDurationMs;
-    private Agent agent;
+    private DistroConfig distroConfig;
     private TestConfig config;
     private double iterationAvg;
     private double iterationP95;
@@ -101,8 +101,8 @@ public class AppPerfResults {
       return new AppPerfResults(this);
     }
 
-    Builder agent(Agent agent) {
-      this.agent = agent;
+    Builder distroConfig(DistroConfig distroConfig) {
+      this.distroConfig = distroConfig;
       return this;
     }
 

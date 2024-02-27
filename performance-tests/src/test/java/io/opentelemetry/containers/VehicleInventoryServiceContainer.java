@@ -5,8 +5,8 @@
 
 package io.opentelemetry.containers;
 
-import io.opentelemetry.agents.Agent;
-import io.opentelemetry.agents.AgentResolver;
+import io.opentelemetry.distros.DistroConfig;
+import io.opentelemetry.distros.AgentResolver;
 import io.opentelemetry.util.NamingConventions;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -24,28 +24,28 @@ import org.testcontainers.lifecycle.Startable;
 import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
 
-public class PetClinicRestContainer {
+public class VehicleInventoryServiceContainer {
 
-  private static final Logger logger = LoggerFactory.getLogger(PetClinicRestContainer.class);
+  private static final Logger logger = LoggerFactory.getLogger(VehicleInventoryServiceContainer.class);
   private static final int PETCLINIC_PORT = 9966;
   private final AgentResolver agentResolver = new AgentResolver();
 
   private final Network network;
   private final Startable collector;
-  private final Agent agent;
+  private final DistroConfig distroConfig;
   private final NamingConventions namingConventions;
 
-  public PetClinicRestContainer(
-      Network network, Startable collector, Agent agent, NamingConventions namingConventions) {
+  public VehicleInventoryServiceContainer(
+          Network network, Startable collector, DistroConfig distroConfig, NamingConventions namingConventions) {
     this.network = network;
     this.collector = collector;
-    this.agent = agent;
+    this.distroConfig = distroConfig;
     this.namingConventions = namingConventions;
   }
 
   public GenericContainer<?> build() throws Exception {
 
-    Optional<Path> agentJar = agentResolver.resolve(this.agent);
+    Optional<Path> agentJar = agentResolver.resolve(this.distroConfig);
 
     GenericContainer<?> container =
         new GenericContainer<>(
@@ -89,7 +89,7 @@ public class PetClinicRestContainer {
                 "-Dotel.exporter.otlp.insecure=true",
                 "-Dotel.exporter.otlp.endpoint=http://collector:4317",
                 "-Dotel.resource.attributes=service.name=petclinic-otel-overhead"));
-    result.addAll(this.agent.getAdditionalJvmArgs());
+    result.addAll(this.distroConfig.getAdditionalJvmArgs());
     agentJar.ifPresent(path -> result.add("-javaagent:/app/" + path.getFileName()));
 
     result.add("-jar");
