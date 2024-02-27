@@ -20,17 +20,6 @@ from amazon.utils.app_signals_constants import (
 )
 
 class Psychopg2Test(ContractTestBase):
-    @override
-    def setUp(self):
-        super().setUp()
-        container_id = self.application.get_container_id()
-        print(container_id)
-        client = docker.from_env()
-        network: Network = client.networks.get("psychopg2_db_network")
-        print(network.id)
-        network.connect(container_id)
-
-
 
     @override
     def get_application_image_name(self) -> str:
