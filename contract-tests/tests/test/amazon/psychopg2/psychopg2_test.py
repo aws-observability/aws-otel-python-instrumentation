@@ -54,6 +54,7 @@ class Psychopg2Test(ContractTestBase):
     ) -> None:
         address: str = self.application.get_container_host_ip()
         port: str = self.application.get_exposed_port(self.get_application_port())
+        print(port)
         url: str = f"http://{address}:{port}/{path}"
         response: Response = request(method, url, timeout=20)
 
