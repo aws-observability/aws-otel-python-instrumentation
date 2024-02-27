@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package io.opentelemetry.agents;
+package io.opentelemetry.distros;
 
 import static org.joox.JOOX.$;
 

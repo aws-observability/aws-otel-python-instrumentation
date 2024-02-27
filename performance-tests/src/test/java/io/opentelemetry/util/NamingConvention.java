@@ -5,7 +5,7 @@
 
 package io.opentelemetry.util;
 
-import io.opentelemetry.agents.Agent;
+import io.opentelemetry.distros.DistroConfig;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
@@ -25,28 +25,28 @@ public class NamingConvention {
   /**
    * Returns a path to the location of the k6 results json file.
    *
-   * @param agent The agent to get results file path for
+   * @param distroConfig The distroConfig to get results file path for
    */
-  public Path k6Results(Agent agent) {
-    return Paths.get(dir, "k6_out_" + agent.getName() + ".json");
+  public Path k6Results(DistroConfig distroConfig) {
+    return Paths.get(dir, "k6_out_" + distroConfig.getName() + ".json");
   }
 
   /**
-   * Returns a path to the location of the jfr output file for a given agent run.
+   * Returns a path to the location of the jfr output file for a given distroConfig run.
    *
-   * @param agent The agent to get the jfr file path for.
+   * @param distroConfig The distroConfig to get the jfr file path for.
    */
-  public Path jfrFile(Agent agent) {
-    return Paths.get(dir, "petclinic-" + agent.getName() + ".jfr");
+  public Path jfrFile(DistroConfig distroConfig) {
+    return Paths.get(dir, "petclinic-" + distroConfig.getName() + ".jfr");
   }
 
   /**
-   * Returns the path to the file that contains the startup duration for a given agent run.
+   * Returns the path to the file that contains the startup duration for a given distroConfig run.
    *
-   * @param agent The agent to get the startup duration for.
+   * @param distroConfig The distroConfig to get the startup duration for.
    */
-  public Path startupDurationFile(Agent agent) {
-    return Paths.get(dir, "startup-time-" + agent.getName() + ".txt");
+  public Path startupDurationFile(DistroConfig distroConfig) {
+    return Paths.get(dir, "startup-time-" + distroConfig.getName() + ".txt");
   }
 
   /** Returns the root path that this naming convention was configured with. */

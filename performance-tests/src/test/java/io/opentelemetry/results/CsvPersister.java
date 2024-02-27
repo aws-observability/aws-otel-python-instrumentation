@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
 
 class CsvPersister implements ResultsPersister {
 
-  // The fields as they are output, in order, but spread across agents
+  // The fields as they are output, in order, but spread across distroConfigs
   private static final List<FieldSpec> FIELDS =
       Arrays.asList(
           FieldSpec.of("startupDurationMs", r -> r.startupDurationMs),
@@ -53,9 +53,11 @@ class CsvPersister implements ResultsPersister {
 
     StringBuilder sb = new StringBuilder().append(System.currentTimeMillis() / 1000);
     // Don't be confused by the loop -- This generates a single long csv line.
-    // Each result is for a given agent run, and we want all the fields for all agents on the same
-    // line so that we can create a columnar structure that allows us to more easily compare agent
-    // to agent for a given run.
+    // Each result is for a given distroConfig run, and we want all the fields for all distroConfigs
+    // on the same
+    // line so that we can create a columnar structure that allows us to more easily compare
+    // distroConfig
+    // to distroConfig for a given run.
     for (FieldSpec field : FIELDS) {
       for (AppPerfResults result : results) {
         sb.append(",").append(field.getter.apply(result));
@@ -84,14 +86,17 @@ class CsvPersister implements ResultsPersister {
   private String createHeaderLine(List<AppPerfResults> results) {
     StringBuilder sb = new StringBuilder("timestamp");
     // Don't be confused by the loop -- This generates a single long csv line.
-    // Each result is for a given agent run, and we want all the fields for all agents on the same
-    // line so that we can create a columnar structure that allows us to more easily compare agent
-    // to agent for a given run.
+    // Each result is for a given distroConfig run, and we want all the fields for all distroConfigs
+    // on the same
+    // line so that we can create a columnar structure that allows us to more easily compare
+    // distroConfig
+    // to distroConfig for a given run.
 
-    List<String> agents = results.stream().map(r -> r.agent.getName()).collect(Collectors.toList());
+    List<String> distroConfigs =
+        results.stream().map(r -> r.distroConfig.getName()).collect(Collectors.toList());
     for (FieldSpec field : FIELDS) {
-      for (String agent : agents) {
-        sb.append(",").append(agent).append(':').append(field.name);
+      for (String distroConfig : distroConfigs) {
+        sb.append(",").append(distroConfig).append(':').append(field.name);
       }
     }
 
