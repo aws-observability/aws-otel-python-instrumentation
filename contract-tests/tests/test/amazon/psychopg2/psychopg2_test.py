@@ -31,6 +31,7 @@ class Psychopg2Test(ContractTestBase):
         return ["backend"]
 
     @override
+    @classmethod
     def set_up_dependency_container(cls):
         client = docker.from_env()
         client.containers.run(
