@@ -1,5 +1,7 @@
 from typing import List
 
+import docker
+from docker.models.networks import Network
 from requests import Response, request
 from typing_extensions import override
 from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
@@ -18,6 +20,17 @@ from amazon.utils.app_signals_constants import (
 )
 
 class Psychopg2Test(ContractTestBase):
+    @override
+    def setUp(self):
+        super().setUp()
+        with self.application:
+            container_id = self.application.get_container_id()
+            client = docker.from_env()
+            network: Network = client.networks.get("psychopg2_db_network")
+            network.connect(container_id)
+
+
+
     @override
     def get_application_image_name(self) -> str:
         return "aws-appsignals-tests-psychopg2-app"
