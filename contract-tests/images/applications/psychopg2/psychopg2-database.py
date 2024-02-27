@@ -82,7 +82,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                 cur.execute("SELECT id, name FROM test_table")
                 rows = cur.fetchall()
                 cur.close()
-                conn.close()
                 if len(rows) == 2:
                     status_code = 200
                 else:
@@ -98,7 +97,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             response: Response = request(method, url, timeout=20)
             status_code = response.status_code
         print("received a " + method + " request")
-        cur.close()
         conn.close()
         self.send_response_only(status_code)
         self.end_headers()
