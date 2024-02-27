@@ -43,7 +43,7 @@ def vehicle(request):
 
 
 @csrf_exempt
-def get_vehicle_by_id(request, vehicle_id):
+def vehicle_by_id(request, vehicle_id):
     if request.method == "GET":
         throttle_time = request.GET.get("throttle")
         if throttle_time:
@@ -119,7 +119,7 @@ def vehicle_purchase_history(request):
 
 
 @csrf_exempt
-def get_vehicle_purchase_history_by_id(request, vehicle_purchase_history_id):
+def vehicle_purchase_history_by_id(request, vehicle_purchase_history_id):
     if request.method == "GET":
         vehicle_purchase_history_object = VehiclePurchaseHistory.objects.filter(id=vehicle_purchase_history_id).values()
         if not vehicle_purchase_history_object:
@@ -146,7 +146,7 @@ def get_vehicle_from_vehicle_history(request, vehicle_purchase_history_id):
             return HttpResponseNotFound(
                 "VehiclePurchaseHistory with id=" + str(vehicle_purchase_history_id) + " is not found"
             )
-        vehicle_id = getattr(vehicle_purchase_history_object, "vehicle_id")
+        vehicle_id = getattr(vehicle_purchase_history_object, "vehicle")
         vehicle_objects = Vehicle.objects.filter(id=vehicle_id).values()
         if not vehicle_objects:
             return HttpResponseNotFound("Vehicle with id=" + str(vehicle_id) + " is not found")

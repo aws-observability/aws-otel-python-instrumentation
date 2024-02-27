@@ -13,6 +13,6 @@ class Vehicle(models.Model):
 
 class VehiclePurchaseHistory(models.Model):
     id = models.AutoField(primary_key=True)
-    vehicle_id = models.IntegerField()
+    vehicle = models.ForeignKey("Vehicle", on_delete=models.CASCADE)
     purchase_date = models.DateField(auto_now_add=True)
     purchase_price = models.IntegerField()
