@@ -8,13 +8,13 @@ package io.opentelemetry;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.DynamicTest.dynamicTest;
 
-import io.opentelemetry.agents.Agent;
 import io.opentelemetry.config.Configs;
 import io.opentelemetry.config.TestConfig;
 import io.opentelemetry.containers.CollectorContainer;
 import io.opentelemetry.containers.K6Container;
-import io.opentelemetry.containers.PetClinicRestContainer;
 import io.opentelemetry.containers.PostgresContainer;
+import io.opentelemetry.containers.VehicleInventoryServiceContainer;
+import io.opentelemetry.distros.DistroConfig;
 import io.opentelemetry.results.AppPerfResults;
 import io.opentelemetry.results.MainResultsPersister;
 import io.opentelemetry.results.ResultsCollector;
@@ -63,11 +63,11 @@ public class OverheadTests {
   void runTestConfig(TestConfig config) {
     runDurations.clear();
     config
-        .getAgents()
+        .getDistroConfigs()
         .forEach(
-            agent -> {
+            distroConfig -> {
               try {
-                runAppOnce(config, agent);
+                runAppOnce(config, distroConfig);
               } catch (Exception e) {
                 fail("Unhandled exception in " + config.getName(), e);
               }
@@ -77,40 +77,43 @@ public class OverheadTests {
     new MainResultsPersister(config).write(results);
   }
 
-  void runAppOnce(TestConfig config, Agent agent) throws Exception {
+  void runAppOnce(TestConfig config, DistroConfig distroConfig) throws Exception {
     GenericContainer<?> postgres = new PostgresContainer(NETWORK).build();
     postgres.start();
 
-    GenericContainer<?> petclinic =
-        new PetClinicRestContainer(NETWORK, collector, agent, namingConventions).build();
+    GenericContainer<?> vehicleInventoryService =
+        new VehicleInventoryServiceContainer(NETWORK, collector, distroConfig, namingConventions)
+            .build();
     long start = System.currentTimeMillis();
-    petclinic.start();
-    writeStartupTimeFile(agent, start);
+    vehicleInventoryService.start();
+    writeStartupTimeFile(distroConfig, start);
 
     if (config.getWarmupSeconds() > 0) {
-      doWarmupPhase(config, petclinic);
+      doWarmupPhase(config, vehicleInventoryService);
     }
 
     long testStart = System.currentTimeMillis();
-    startRecording(agent, petclinic);
+    startRecording(distroConfig, vehicleInventoryService);
 
-    GenericContainer<?> k6 = new K6Container(NETWORK, agent, config, namingConventions).build();
+    GenericContainer<?> k6 =
+        new K6Container(NETWORK, distroConfig, config, namingConventions).build();
     k6.start();
 
     long runDuration = System.currentTimeMillis() - testStart;
-    runDurations.put(agent.getName(), runDuration);
+    runDurations.put(distroConfig.getName(), runDuration);
 
     // This is required to get a graceful exit of the VM before testcontainers kills it forcibly.
     // Without it, our jfr file will be empty.
-    petclinic.execInContainer("kill", "1");
-    while (petclinic.isRunning()) {
+    vehicleInventoryService.execInContainer("kill", "1");
+    while (vehicleInventoryService.isRunning()) {
       TimeUnit.MILLISECONDS.sleep(500);
     }
     postgres.stop();
   }
 
-  private void startRecording(Agent agent, GenericContainer<?> petclinic) throws Exception {
-    Path outFile = namingConventions.container.jfrFile(agent);
+  private void startRecording(
+      DistroConfig distroConfig, GenericContainer<?> vehicleInventoryService) throws Exception {
+    Path outFile = namingConventions.container.jfrFile(distroConfig);
     String[] command = {
       "jcmd",
       "1",
@@ -120,10 +123,10 @@ public class OverheadTests {
       "name=petclinic",
       "filename=" + outFile
     };
-    petclinic.execInContainer(command);
+    vehicleInventoryService.execInContainer(command);
   }
 
-  private void doWarmupPhase(TestConfig testConfig, GenericContainer<?> petclinic)
+  private void doWarmupPhase(TestConfig testConfig, GenericContainer<?> vehicleInventoryService)
       throws IOException, InterruptedException {
     System.out.println(
         "Performing startup warming phase for " + testConfig.getWarmupSeconds() + " seconds...");
@@ -139,7 +142,7 @@ public class OverheadTests {
       "name=warmup",
       "filename=warmup.jfr"
     };
-    petclinic.execInContainer(startCommand);
+    vehicleInventoryService.execInContainer(startCommand);
 
     long deadline =
         System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(testConfig.getWarmupSeconds());
@@ -155,14 +158,14 @@ public class OverheadTests {
 
     System.out.println("Stopping disposable JFR warmup recording...");
     String[] stopCommand = {"jcmd", "1", "JFR.stop", "name=warmup"};
-    petclinic.execInContainer(stopCommand);
+    vehicleInventoryService.execInContainer(stopCommand);
 
     System.out.println("Warmup complete.");
   }
 
-  private void writeStartupTimeFile(Agent agent, long start) throws IOException {
+  private void writeStartupTimeFile(DistroConfig distroConfig, long start) throws IOException {
     long delta = System.currentTimeMillis() - start;
-    Path startupPath = namingConventions.local.startupDurationFile(agent);
+    Path startupPath = namingConventions.local.startupDurationFile(distroConfig);
     Files.writeString(startupPath, String.valueOf(delta));
   }
 }

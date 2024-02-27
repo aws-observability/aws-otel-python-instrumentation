@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package io.opentelemetry.agents;
+package io.opentelemetry.distros;
 
 import java.net.URL;
 import java.nio.file.Files;
@@ -20,17 +20,17 @@ public class AgentResolver {
 
   private final LatestAgentSnapshotResolver snapshotResolver = new LatestAgentSnapshotResolver();
 
-  public Optional<Path> resolve(Agent agent) throws Exception {
-    if (Agent.NONE.equals(agent)) {
+  public Optional<Path> resolve(DistroConfig distroConfig) throws Exception {
+    if (DistroConfig.NONE.equals(distroConfig)) {
       return Optional.empty();
     }
-    if (Agent.LATEST_SNAPSHOT.equals(agent)) {
+    if (DistroConfig.LATEST_SNAPSHOT.equals(distroConfig)) {
       return snapshotResolver.resolve();
     }
-    if (agent.hasUrl()) {
-      return Optional.of(downloadAgent(agent.getUrl()));
+    if (distroConfig.hasUrl()) {
+      return Optional.of(downloadAgent(distroConfig.getUrl()));
     }
-    throw new IllegalArgumentException("Unknown agent: " + agent);
+    throw new IllegalArgumentException("Unknown distroConfig: " + distroConfig);
   }
 
   private Path downloadAgent(URL agentUrl) throws Exception {
