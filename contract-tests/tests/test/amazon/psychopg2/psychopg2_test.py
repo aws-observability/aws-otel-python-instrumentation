@@ -23,7 +23,7 @@ NETWORK_NAME: str = "aws-appsignals-network"
 
 class Psychopg2Test(ContractTestBase):
     @override
-    def set_up_dependency_container(self):
+    def set_up_dependency_container(cls):
         client = docker.from_env()
         client.containers.run(
             "postgres:latest",
