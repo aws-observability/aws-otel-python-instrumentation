@@ -13,7 +13,7 @@ from MainService.models import Vehicle, VehiclePurchaseHistory
 load_dotenv()
 
 
-def health_check():
+def health_check(request):
     return HttpResponse("Vehicle Inventory Service up and running!")
 
 
@@ -42,6 +42,7 @@ def vehicle(request):
     return HttpResponseNotAllowed("Only GET/POST requests are allowed!")
 
 
+@csrf_exempt
 def get_vehicle_by_id(request, vehicle_id):
     if request.method == "GET":
         throttle_time = request.GET.get("throttle")
@@ -63,11 +64,11 @@ def get_vehicle_by_id(request, vehicle_id):
     return HttpResponseNotAllowed("Only GET/DELETE requests are allowed!")
 
 
-def get_vehicles_by_name(request, vehicles_name):
+def get_vehicles_by_make(request, vehicles_make):
     if request.method == "GET":
-        vehicles_objects = Vehicle.objects.filter(name=vehicles_name).values()
+        vehicles_objects = Vehicle.objects.filter(make=vehicles_make).values()
         if not vehicles_objects:
-            return HttpResponseNotFound("Couldn't find any vehicle with name=" + str(vehicles_name))
+            return HttpResponseNotFound("Couldn't find any vehicle with make=" + str(vehicles_make))
         return HttpResponse(vehicles_objects)
     return HttpResponseNotAllowed("Only GET requests are allowed!")
 
@@ -117,6 +118,7 @@ def vehicle_purchase_history(request):
     return HttpResponseNotAllowed("Only GET/POST requests are allowed!")
 
 
+@csrf_exempt
 def get_vehicle_purchase_history_by_id(request, vehicle_purchase_history_id):
     if request.method == "GET":
         vehicle_purchase_history_object = VehiclePurchaseHistory.objects.filter(id=vehicle_purchase_history_id).values()
@@ -135,6 +137,21 @@ def get_vehicle_purchase_history_by_id(request, vehicle_purchase_history_id):
         vehicle_purchase_history_object.delete()
         return HttpResponse("VehiclePurchaseHistory with id=" + str(vehicle_purchase_history_id) + " has been deleted")
     return HttpResponseNotAllowed("Only GET/DELETE requests are allowed!")
+
+
+def get_vehicle_from_vehicle_history(request, vehicle_purchase_history_id):
+    if request.method == "GET":
+        vehicle_purchase_history_object = VehiclePurchaseHistory.objects.filter(id=vehicle_purchase_history_id).first()
+        if not vehicle_purchase_history_object:
+            return HttpResponseNotFound(
+                "VehiclePurchaseHistory with id=" + str(vehicle_purchase_history_id) + " is not found"
+            )
+        vehicle_id = getattr(vehicle_purchase_history_object, "vehicle_id")
+        vehicle_objects = Vehicle.objects.filter(id=vehicle_id).values()
+        if not vehicle_objects:
+            return HttpResponseNotFound("Vehicle with id=" + str(vehicle_id) + " is not found")
+        return HttpResponse(vehicle_objects)
+    return HttpResponseNotAllowed("Only GET requests are allowed!")
 
 
 def build_image_url(image_name):
