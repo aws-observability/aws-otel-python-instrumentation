@@ -89,7 +89,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             elif self.in_path(_ERROR):
                 status_code = 400
             elif self.in_path(_FAULT):
-                status_code = 500
+                cur = conn.cursor()
+                cur.execute("SELECT id, name FROM invalid_table")
+                cur.close()
+                status_code = 200
             else:
                 status_code = 404
         else:
