@@ -12,36 +12,31 @@ _USER = 'user'
 _PASSWORD = 'password'
 _HOST = 'localhost'
 
-class RequestHandler(BaseHTTPRequestHandler):
 
-    def __init__(self, request, client_address, server):
-        print("psychopg init")
-        super().__init__(request, client_address, server)
-        self.prepare_database()
+def prepare_database() -> None:
+    conn = psycopg2.connect(dbname=_DBNAME, user=_USER, password=_PASSWORD, host=_HOST)
 
-    def prepare_database(self) -> None:
+    print("db connected")
 
-        conn = psycopg2.connect(dbname=_DBNAME, user=_USER, password=_PASSWORD, host=_HOST)
+    cur = conn.cursor()
 
-        print("db connected")
-
-        cur = conn.cursor()
-
-        cur.execute("""
+    cur.execute("""
         CREATE TEMPORARY TABLE test_table (
             id SERIAL PRIMARY KEY,
             name TEXT NOT NULL
         )
         """)
 
-        cur.execute("INSERT INTO test_table (name) VALUES (%s)", ("Alice",))
-        cur.execute("INSERT INTO test_table (name) VALUES (%s)", ("Bob",))
+    cur.execute("INSERT INTO test_table (name) VALUES (%s)", ("Alice",))
+    cur.execute("INSERT INTO test_table (name) VALUES (%s)", ("Bob",))
 
-        conn.commit()
+    conn.commit()
 
-        cur.close()
-        conn.close()
+    cur.close()
+    conn.close()
 
+
+class RequestHandler(BaseHTTPRequestHandler):
     @override
     # pylint: disable=invalid-name
     def do_GET(self):
@@ -66,7 +61,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             conn.close()
             self.send_response(200, "success")
 
-def main()->None:
+
+def main() -> None:
+    prepare_database()
     server_address: Tuple[str, int] = ("0.0.0.0", _PORT)
     request_handler_class: type = RequestHandler
     requests_server: ThreadingHTTPServer = ThreadingHTTPServer(server_address, request_handler_class)
@@ -75,6 +72,7 @@ def main()->None:
     server_thread.start()
     print("Psychopg2-Ready")
     server_thread.join()
+
 
 if __name__ == "__main__":
     main()

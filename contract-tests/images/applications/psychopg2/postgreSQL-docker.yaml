@@ -8,3 +8,9 @@ services:
       POSTGRES_PASSWORD: password
     ports:
       - "5432:5432"
+    networks:
+      - db-network
+
+networks:
+  db-network:
+    driver: bridge
