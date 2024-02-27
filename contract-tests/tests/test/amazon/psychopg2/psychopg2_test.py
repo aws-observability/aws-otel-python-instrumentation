@@ -23,6 +23,22 @@ NETWORK_NAME: str = "aws-appsignals-network"
 
 class Psychopg2Test(ContractTestBase):
     @override
+    def get_application_network_aliases(self) -> List[str]:
+        """
+        This will be the target hostname of the clients making http requests in the application image, so that they
+        don't use localhost.
+        """
+        return ["backend"]
+
+    @override
+    def get_application_extra_environment_variables(self) -> Dict[str, str]:
+        """
+        This does not appear to do anything, as it does not seem that OTEL supports peer service for Python. Keeping
+        for consistency with Java contract tests at this time.
+        """
+        return {"OTEL_INSTRUMENTATION_COMMON_PEER_SERVICE_MAPPING": "backend=backend:8080"}
+
+    @override
     def set_up_dependency_container(cls):
         client = docker.from_env()
         client.containers.run(

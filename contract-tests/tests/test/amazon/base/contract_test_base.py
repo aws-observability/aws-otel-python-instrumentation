@@ -53,7 +53,7 @@ class ContractTestBase(TestCase):
         )
         cls.mock_collector.start()
         wait_for_logs(cls.mock_collector, "Ready", timeout=20)
-        cls.set_up_dependency_container(cls)
+        cls.set_up_dependency_container()
 
     @classmethod
     def class_tear_down(cls) -> None:

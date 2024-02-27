@@ -4,12 +4,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from typing import Tuple
 
-from testcontainers.postgres import PostgresContainer
+from requests import Response, request
 from typing_extensions import override
 
 import psycopg2
 
 _PORT: int = 8080
+_NETWORK_ALIAS: str = "backend"
+_SUCCESS: str = "success"
+_ERROR: str = "error"
+_FAULT: str = "fault"
 
 
 def prepare_database(db_host, db_user, db_pass, db_name):
@@ -45,28 +49,50 @@ class RequestHandler(BaseHTTPRequestHandler):
         db_name = os.getenv('DB_NAME')
         self.handle_request(db_host, db_user, db_pass, db_name)
 
-    def handle_request(self, db_host, db_user, db_pass, db_name):
-        conn = psycopg2.connect(dbname=db_name, user=db_user, password=db_pass, host=db_host)
-        if "success" in self.path:
-            cur = conn.cursor()
-            cur.execute("SELECT id, name FROM test_table")
-            rows = cur.fetchall()
-            cur.close()
-            conn.close()
-            if len(rows) == 2:
-                print("sucess request triggered, responding")
-                self.send_response_only(200, "success")
-                self.end_headers()
+    # def handle_request(self, db_host, db_user, db_pass, db_name):
+    #     conn = psycopg2.connect(dbname=db_name, user=db_user, password=db_pass, host=db_host)
+    #     if "success" in self.path:
+    #         cur = conn.cursor()
+    #         cur.execute("SELECT id, name FROM test_table")
+    #         rows = cur.fetchall()
+    #         cur.close()
+    #         conn.close()
+    #         if len(rows) == 2:
+    #             print("sucess request triggered, responding")
+    #             self.send_response_only(200, "success")
+    #             self.end_headers()
+    #         else:
+    #             self.send_response_only(400, "failed")
+    #             self.end_headers()
+    #     elif "fault" in self.path:
+    #         cur = conn.cursor()
+    #         cur.execute("SELECT id, name FROM invalid_table")
+    #         cur.close()
+    #         conn.close()
+    #         self.send_response_only(200, "success")
+    #         self.end_headers()
+
+    def handle_request(self, method: str):
+        status_code: int
+        if self.in_path(_NETWORK_ALIAS):
+            if self.in_path(_SUCCESS):
+                status_code = 200
+            elif self.in_path(_ERROR):
+                status_code = 400
+            elif self.in_path(_FAULT):
+                status_code = 500
             else:
-                self.send_response_only(400, "failed")
-                self.end_headers()
-        elif "fault" in self.path:
-            cur = conn.cursor()
-            cur.execute("SELECT id, name FROM invalid_table")
-            cur.close()
-            conn.close()
-            self.send_response_only(200, "success")
-            self.end_headers()
+                status_code = 404
+        else:
+            url: str = f"http://{_NETWORK_ALIAS}:{_PORT}/{_NETWORK_ALIAS}{self.path}"
+            response: Response = request(method, url, timeout=20)
+            status_code = response.status_code
+        print("received a " + method + " request")
+        self.send_response_only(status_code)
+        self.end_headers()
+
+    def in_path(self, sub_path: str):
+        return sub_path in self.path
 
 
 def main() -> None:
