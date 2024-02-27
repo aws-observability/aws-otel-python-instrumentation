@@ -58,10 +58,12 @@ jobs:
           package_name: aws-opentelemetry-distro
           os: ubuntu-latest
 
+        # workaround: prefixing the short-sha with a 0 to create a valid
+        # wheel file name as per https://peps.python.org/pep-0427/#file-name-convention
       - name: Output Wheel File Name
         id: staging_wheel_output
         run: |
-          staging_wheel="aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION}}-${{ env.SHORT_SHA }}-py3-none-any.whl"
+          staging_wheel="aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION}}-0${{ env.SHORT_SHA }}-py3-none-any.whl"
           echo "STAGING_WHEEL=$staging_wheel" >> $GITHUB_OUTPUT
           cd ./dist
           cp aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION}}-py3-none-any.whl $staging_wheel
@@ -73,7 +75,7 @@ jobs:
       - name: Upload Wheel to GitHub Actions
         uses: actions/upload-artifact@v3
         with:
-          name: aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION}}-py3-none-any.whl
+          name: ${{ steps.staging_wheel_output.outputs.STAGING_WHEEL}}
           path: dist/${{ steps.staging_wheel_output.outputs.STAGING_WHEEL}}
 
       - name: Set up and run contract tests with pytest
