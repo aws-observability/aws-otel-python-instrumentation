@@ -47,7 +47,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         db_user = os.getenv('DB_USER')
         db_pass = os.getenv('DB_PASS')
         db_name = os.getenv('DB_NAME')
-        self.handle_request(db_host, db_user, db_pass, db_name)
+        self.handle_request("get", db_host, db_user, db_pass, db_name)
 
     # def handle_request(self, db_host, db_user, db_pass, db_name):
     #     conn = psycopg2.connect(dbname=db_name, user=db_user, password=db_pass, host=db_host)
@@ -72,7 +72,7 @@ class RequestHandler(BaseHTTPRequestHandler):
     #         self.send_response_only(200, "success")
     #         self.end_headers()
 
-    def handle_request(self, method: str):
+    def handle_request(self, method: str, db_host, db_user, db_pass, db_name):
         status_code: int
         if self.in_path(_NETWORK_ALIAS):
             if self.in_path(_SUCCESS):
