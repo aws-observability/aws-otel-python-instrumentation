@@ -9,8 +9,8 @@ services:
     ports:
       - "5432:5432"
     networks:
-      - db-network
+      - aws-appsignals-network
 
 networks:
-  db-network:
+  aws-appsignals-network:
     driver: bridge
