@@ -49,7 +49,7 @@ def get_vehicle_by_id(request, vehicle_id):
         if not vehicle_objects:
             return HttpResponseNotFound("Vehicle with id=" + str(vehicle_id) + " is not found")
         return HttpResponse(vehicle_objects)
-    elif request.method == "DELETE":
+    if request.method == "DELETE":
         vehicle_objects = Vehicle.objects.filter(id=vehicle_id)
         vehicle_objects_values = Vehicle.objects.filter(id=vehicle_id).values()
         if not vehicle_objects_values:
@@ -86,7 +86,7 @@ def image(request, image_name):
         if response.ok:
             return HttpResponse(response)
         return HttpResponseNotFound("Image with name: " + image_name + " is not found")
-    elif request.method == "POST":
+    if request.method == "POST":
         response = requests.post(build_image_url(image_name), timeout=10)
         if response.ok:
             return HttpResponse(response)
@@ -121,7 +121,7 @@ def get_vehicle_purchase_history_by_id(request, vehicle_purchase_history_id):
                 "VehiclePurchaseHistory with id=" + str(vehicle_purchase_history_id) + " is not found"
             )
         return HttpResponse(vehicle_purchase_history_object)
-    elif request.method == "DELETE":
+    if request.method == "DELETE":
         vehicle_purchase_history_object = VehiclePurchaseHistory.objects.filter(id=vehicle_purchase_history_id)
         vehicle_purchase_history_object_values = Vehicle.objects.filter(id=vehicle_purchase_history_id).values()
         if not vehicle_purchase_history_object_values:
