@@ -22,7 +22,7 @@ from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 from opentelemetry.util._once import Once
 
 SAMPLING_CLIENT_LOGGER_NAME = "amazon.opentelemetry.distro.sampler._aws_xray_sampling_client"
-sampling_client_logger = getLogger(SAMPLING_CLIENT_LOGGER_NAME)
+_sampling_client_logger = getLogger(SAMPLING_CLIENT_LOGGER_NAME)
 _logger = getLogger(__name__)
 
 TEST_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -41,7 +41,7 @@ class TestAwsXRaySamplingClient(TestCase):
     def test_get_invalid_responses(self, mock_post=None):
         mock_post.return_value.configure_mock(**{"json.return_value": {}})
         client = _AwsXRaySamplingClient("http://127.0.0.1:2000")
-        with self.assertLogs(sampling_client_logger, level="ERROR"):
+        with self.assertLogs(_sampling_client_logger, level="ERROR"):
             sampling_rules = client.get_sampling_rules()
             self.assertTrue(len(sampling_rules) == 0)
 
@@ -49,7 +49,7 @@ class TestAwsXRaySamplingClient(TestCase):
     def test_get_sampling_rule_missing_in_records(self, mock_post=None):
         mock_post.return_value.configure_mock(**{"json.return_value": {"SamplingRuleRecords": [{}]}})
         client = _AwsXRaySamplingClient("http://127.0.0.1:2000")
-        with self.assertLogs(sampling_client_logger, level="ERROR"):
+        with self.assertLogs(_sampling_client_logger, level="ERROR"):
             sampling_rules = client.get_sampling_rules()
             self.assertTrue(len(sampling_rules) == 0)
 
@@ -188,6 +188,8 @@ class TestAwsXRaySamplingClient(TestCase):
 
         span_list = memory_exporter.get_finished_spans()
         self.assertEqual(1, len(span_list))
+        span_http_url = span_list[0].attributes.get("http.url")
+        self.assertEqual(span_http_url, "http://this_is_a_fake_url:3849/GetSamplingRules")
 
         try:
             client.get_sampling_targets([])
@@ -196,11 +198,15 @@ class TestAwsXRaySamplingClient(TestCase):
 
         span_list = memory_exporter.get_finished_spans()
         self.assertEqual(2, len(span_list))
+        span_http_url = span_list[1].attributes.get("http.url")
+        self.assertEqual(span_http_url, "http://this_is_a_fake_url:3849/SamplingTargets")
 
         # Reload instrumentors, this time with Env Vars to exclude Sampling URLs for requests/urllib3
         urls_to_exclude_instr = (
             ",,,SamplingTargets,,endpoint1,endpoint2,,,GetSamplingRules,,SamplingTargets,GetSamplingRules"
         )
+
+        memory_exporter.clear()
         URLLib3Instrumentor().uninstrument()
         RequestsInstrumentor().uninstrument()
         os.environ.pop("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", None)
@@ -220,7 +226,7 @@ class TestAwsXRaySamplingClient(TestCase):
             pass
 
         span_list = memory_exporter.get_finished_spans()
-        self.assertEqual(2, len(span_list))
+        self.assertEqual(0, len(span_list))
 
         try:
             client.get_sampling_targets([])
@@ -228,7 +234,7 @@ class TestAwsXRaySamplingClient(TestCase):
             pass
 
         span_list = memory_exporter.get_finished_spans()
-        self.assertEqual(2, len(span_list))
+        self.assertEqual(0, len(span_list))
 
         URLLib3Instrumentor().uninstrument()
         RequestsInstrumentor().uninstrument()
