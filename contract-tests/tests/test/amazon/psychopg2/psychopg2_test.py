@@ -19,7 +19,28 @@ from amazon.utils.app_signals_constants import (
     LATENCY_METRIC,
 )
 
+NETWORK_NAME: str = "aws-appsignals-network"
+
 class Psychopg2Test(ContractTestBase):
+    @override
+    def set_up_dependency_container(self):
+        client = docker.from_env()
+        client.containers.run(
+            "postgres:latest",
+            environment={"POSTGRES_PASSWORD": "example"},
+            detach=True,
+            name="mydb",
+            network=NETWORK_NAME
+        )
+
+    @override
+    def get_application_extra_environment_variables(self):
+        return {
+            "DB_HOST": "mydb",
+            "DB_USER": "postgres",
+            "DB_PASS": "example",
+            "DB_NAME": "postgres"
+        }
 
     @override
     def get_application_image_name(self) -> str:

@@ -1,4 +1,5 @@
 import atexit
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from typing import Tuple
@@ -10,51 +11,66 @@ import psycopg2
 
 _PORT: int = 8080
 
+
+def prepare_database(db_host, db_user, db_pass, db_name):
+    conn = psycopg2.connect(dbname=db_name, user=db_user, password=db_pass, host=db_host)
+    print("db connected")
+    cur = conn.cursor()
+
+    cur.execute("""
+        CREATE TEMPORARY TABLE test_table (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL
+            )
+        """)
+
+    cur.execute("INSERT INTO test_table (name) VALUES (%s)", ("Alice",))
+    cur.execute("INSERT INTO test_table (name) VALUES (%s)", ("Bob",))
+
+    conn.commit()
+
+    cur.close()
+    conn.close()
+
+
+
 class RequestHandler(BaseHTTPRequestHandler):
 
     @override
     # pylint: disable=invalid-name
     def do_GET(self):
-        self.handle_request()
+        db_host = os.getenv('DB_HOST')
+        db_user = os.getenv('DB_USER')
+        db_pass = os.getenv('DB_PASS')
+        db_name = os.getenv('DB_NAME')
+        self.handle_request(db_host, db_user, db_pass, db_name)
 
-    def handle_request(self):
-        with PostgresContainer('postgres:latest') as postgres:
-            url = postgres.get_connection_url()
-            conn = psycopg2.connect(url)
-            print("db connected")
-
+    def handle_request(self, db_host, db_user, db_pass, db_name):
+        conn = psycopg2.connect(dbname=db_name, user=db_user, password=db_pass, host=db_host)
+        if "success" in self.path:
             cur = conn.cursor()
-
-            cur.execute("""
-            CREATE TEMPORARY TABLE test_table (
-                id SERIAL PRIMARY KEY,
-                name TEXT NOT NULL
-            )
-            """)
-
-            cur.execute("INSERT INTO test_table (name) VALUES (%s)", ("Alice",))
-            cur.execute("INSERT INTO test_table (name) VALUES (%s)", ("Bob",))
-
-            conn.commit()
-            if "success" in self.path:
-                cur = conn.cursor()
-                cur.execute("SELECT id, name FROM test_table")
-                rows = cur.fetchall()
-                cur.close()
-                conn.close()
-                if len(rows) == 2:
-                    self.send_response(200, "success")
-                else:
-                    self.send_response(400, "failed")
-            elif "fault" in self.path:
-                cur = conn.cursor()
-                cur.execute("SELECT id, name FROM invalid_table")
-                cur.close()
-                conn.close()
+            cur.execute("SELECT id, name FROM test_table")
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+            if len(rows) == 2:
                 self.send_response(200, "success")
+            else:
+                self.send_response(400, "failed")
+        elif "fault" in self.path:
+            cur = conn.cursor()
+            cur.execute("SELECT id, name FROM invalid_table")
+            cur.close()
+            conn.close()
+            self.send_response(200, "success")
 
 
 def main() -> None:
+    db_host = os.getenv('DB_HOST')
+    db_user = os.getenv('DB_USER')
+    db_pass = os.getenv('DB_PASS')
+    db_name = os.getenv('DB_NAME')
+    prepare_database(db_host, db_user, db_pass, db_name)
     server_address: Tuple[str, int] = ("0.0.0.0", _PORT)
     request_handler_class: type = RequestHandler
     requests_server: ThreadingHTTPServer = ThreadingHTTPServer(server_address, request_handler_class)
