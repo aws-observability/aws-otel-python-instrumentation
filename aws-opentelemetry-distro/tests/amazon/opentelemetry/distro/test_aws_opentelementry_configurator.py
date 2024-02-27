@@ -66,9 +66,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
     @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
     @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
     def test_import_xray_sampler_without_environment_arguments(self):
-        os.environ.pop(OTEL_TRACES_SAMPLER_ARG)
+        os.environ.pop(OTEL_TRACES_SAMPLER_ARG, None)
 
-        # May log http request error as xray sampler will attempt to fetch rules
         xray_sampler: Sampler = _custom_import_sampler("xray", resource=None)
         xray_client: _AwsXRaySamplingClient = xray_sampler._AwsXRayRemoteSampler__xray_client
         self.assertEqual(xray_sampler._AwsXRayRemoteSampler__polling_interval, 300)
@@ -79,10 +78,9 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
     @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
     @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
     def test_import_xray_sampler_with_valid_environment_arguments(self):
-        os.environ.pop(OTEL_TRACES_SAMPLER_ARG)
+        os.environ.pop(OTEL_TRACES_SAMPLER_ARG, None)
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "endpoint=http://localhost:2000,polling_interval=600")
 
-        # May log http request error as xray sampler will attempt to fetch rules
         xray_sampler: Sampler = _custom_import_sampler("xray", resource=None)
         xray_client: _AwsXRaySamplingClient = xray_sampler._AwsXRayRemoteSampler__xray_client
         self.assertEqual(xray_sampler._AwsXRayRemoteSampler__polling_interval, 600)
@@ -90,10 +88,9 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint, "http://localhost:2000/GetSamplingRules"
         )
 
-        os.environ.pop(OTEL_TRACES_SAMPLER_ARG)
+        os.environ.pop(OTEL_TRACES_SAMPLER_ARG, None)
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "polling_interval=123")
 
-        # May log http request error as xray sampler will attempt to fetch rules
         xray_sampler: Sampler = _custom_import_sampler("xray", resource=None)
         xray_client: _AwsXRaySamplingClient = xray_sampler._AwsXRayRemoteSampler__xray_client
         self.assertEqual(xray_sampler._AwsXRayRemoteSampler__polling_interval, 123)
@@ -101,10 +98,9 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint, "http://127.0.0.1:2000/GetSamplingRules"
         )
 
-        os.environ.pop(OTEL_TRACES_SAMPLER_ARG)
+        os.environ.pop(OTEL_TRACES_SAMPLER_ARG, None)
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "endpoint=http://cloudwatch-agent.amazon-cloudwatch:2000")
 
-        # May log http request error as xray sampler will attempt to fetch rules
         xray_sampler: Sampler = _custom_import_sampler("xray", resource=None)
         xray_client: _AwsXRaySamplingClient = xray_sampler._AwsXRayRemoteSampler__xray_client
         self.assertEqual(xray_sampler._AwsXRayRemoteSampler__polling_interval, 300)
@@ -116,10 +112,9 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
     @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
     @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
     def test_import_xray_sampler_with_invalid_environment_arguments(self):
-        os.environ.pop(OTEL_TRACES_SAMPLER_ARG)
+        os.environ.pop(OTEL_TRACES_SAMPLER_ARG, None)
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "endpoint=h=tt=p://=loca=lho=st:2000,polling_interval=FOOBAR")
 
-        # May log http request error as xray sampler will attempt to fetch rules
         xray_sampler: Sampler = _custom_import_sampler("xray", resource=None)
         xray_client: _AwsXRaySamplingClient = xray_sampler._AwsXRayRemoteSampler__xray_client
         self.assertEqual(xray_sampler._AwsXRayRemoteSampler__polling_interval, 300)
@@ -128,10 +123,9 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             "h=tt=p://=loca=lho=st:2000/GetSamplingRules",
         )
 
-        os.environ.pop(OTEL_TRACES_SAMPLER_ARG)
+        os.environ.pop(OTEL_TRACES_SAMPLER_ARG, None)
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, ",,=,==,,===,")
 
-        # May log http request error as xray sampler will attempt to fetch rules
         xray_sampler: Sampler = _custom_import_sampler("xray", resource=None)
         xray_client: _AwsXRaySamplingClient = xray_sampler._AwsXRayRemoteSampler__xray_client
         self.assertEqual(xray_sampler._AwsXRayRemoteSampler__polling_interval, 300)
@@ -139,13 +133,53 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint, "http://127.0.0.1:2000/GetSamplingRules"
         )
 
-        os.environ.pop(OTEL_TRACES_SAMPLER_ARG)
+        os.environ.pop(OTEL_TRACES_SAMPLER_ARG, None)
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "endpoint,polling_interval")
 
-        # May log http request error as xray sampler will attempt to fetch rules
         xray_sampler: Sampler = _custom_import_sampler("xray", resource=None)
         xray_client: _AwsXRaySamplingClient = xray_sampler._AwsXRayRemoteSampler__xray_client
         self.assertEqual(xray_sampler._AwsXRayRemoteSampler__polling_interval, 300)
         self.assertEqual(
             xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint, "http://127.0.0.1:2000/GetSamplingRules"
         )
+
+    def test_using_xray_sampler_sets_url_exclusion_env_vars(self):
+        targets_to_exclude = "SamplingTargets,GetSamplingRules"
+        os.environ.pop("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", None)
+        os.environ.pop("OTEL_PYTHON_URLLIB3_EXCLUDED_URLS", None)
+        self.assertEqual(os.environ.get("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", None), None)
+        self.assertEqual(os.environ.get("OTEL_PYTHON_URLLIB3_EXCLUDED_URLS", None), None)
+
+        _: Sampler = _custom_import_sampler("xray", resource=None)
+        self.assertEqual(os.environ.get("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", None), targets_to_exclude)
+        self.assertEqual(os.environ.get("OTEL_PYTHON_URLLIB3_EXCLUDED_URLS", None), targets_to_exclude)
+
+    def test_using_xray_sampler_appends_url_exclusion_env_vars(self):
+        targets_to_exclude = "SamplingTargets,GetSamplingRules"
+        os.environ.pop("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", None)
+        os.environ.pop("OTEL_PYTHON_URLLIB3_EXCLUDED_URLS", None)
+        self.assertEqual(os.environ.get("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", None), None)
+        self.assertEqual(os.environ.get("OTEL_PYTHON_URLLIB3_EXCLUDED_URLS", None), None)
+        os.environ.setdefault("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", ",,,target_A,target_B,,,")
+        os.environ.setdefault("OTEL_PYTHON_URLLIB3_EXCLUDED_URLS", "target_C,target_D")
+
+        _: Sampler = _custom_import_sampler("xray", resource=None)
+        self.assertTrue(targets_to_exclude in os.environ.get("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", None))
+        self.assertTrue(targets_to_exclude in os.environ.get("OTEL_PYTHON_URLLIB3_EXCLUDED_URLS", None))
+
+    def test_not_using_xray_sampler_does_not_modify_url_exclusion_env_vars(self):
+        os.environ.pop("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", None)
+        os.environ.pop("OTEL_PYTHON_URLLIB3_EXCLUDED_URLS", None)
+        self.assertEqual(os.environ.get("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", None), None)
+        self.assertEqual(os.environ.get("OTEL_PYTHON_URLLIB3_EXCLUDED_URLS", None), None)
+
+        _: Sampler = _custom_import_sampler("traceidratio", resource=None)
+        self.assertEqual(os.environ.get("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", None), None)
+        self.assertEqual(os.environ.get("OTEL_PYTHON_URLLIB3_EXCLUDED_URLS", None), None)
+
+        os.environ.setdefault("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", ",,,target_A,target_B,,,")
+        os.environ.setdefault("OTEL_PYTHON_URLLIB3_EXCLUDED_URLS", "target_C,target_D")
+
+        _: Sampler = _custom_import_sampler("traceidratio", resource=None)
+        self.assertEqual(os.environ.get("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", None), ",,,target_A,target_B,,,")
+        self.assertEqual(os.environ.get("OTEL_PYTHON_URLLIB3_EXCLUDED_URLS", None), "target_C,target_D")
