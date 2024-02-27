@@ -23,11 +23,12 @@ class Psychopg2Test(ContractTestBase):
     @override
     def setUp(self):
         super().setUp()
-        with self.application:
-            container_id = self.application.get_container_id()
-            client = docker.from_env()
-            network: Network = client.networks.get("psychopg2_db_network")
-            network.connect(container_id)
+        container_id = self.application.get_container_id()
+        print(container_id)
+        client = docker.from_env()
+        network: Network = client.networks.get("psychopg2_db_network")
+        print(network.id)
+        network.connect(container_id)
 
 
 
