@@ -18,7 +18,7 @@ def prepare_database(db_host, db_user, db_pass, db_name):
     cur = conn.cursor()
 
     cur.execute("""
-        CREATE TEMPORARY TABLE test_table (
+        CREATE TABLE test_table (
             id SERIAL PRIMARY KEY,
             name TEXT NOT NULL
             )
