@@ -270,9 +270,9 @@ def _get_db_statement_remote_operation(span: ReadableSpan, statement_key: str) -
 
 def _normalize_service_name(span: ReadableSpan, service_name: str) -> str:
     if is_aws_sdk_span(span): 
-      return "AWS.SDK." + service_name
+        return "AWS.SDK." + service_name
     
-    return service_name;
+    return service_name
 
 
 def _generate_remote_service(span: ReadableSpan) -> str:

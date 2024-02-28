@@ -675,7 +675,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.assertIsNotNone(dependency_attributes)
 
     def test_normalize_service_name_non_aws_sdk_span(self):
-        service_name: str = "non aws service";
+        service_name: str = "non aws service"
         self._mock_attribute([SpanAttributes.RPC_SERVICE], [service_name])
         self.span_mock.kind = SpanKind.CLIENT
 
@@ -685,10 +685,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.assertEqual(actual_attributes.get(AWS_REMOTE_SERVICE), service_name)
 
     def test_normalize_service_name_aws_sdk_span(self):
-        self._mock_attribute(
-            [SpanAttributes.RPC_SYSTEM, SpanAttributes.RPC_SERVICE],
-            ["aws-api", "EC2"]
-        )
+        self._mock_attribute([SpanAttributes.RPC_SYSTEM, SpanAttributes.RPC_SERVICE], ["aws-api", "EC2"])
         self.span_mock.kind = SpanKind.CLIENT
 
         actual_attributes: Attributes = _GENERATOR.generate_metric_attributes_dict_from_span(
