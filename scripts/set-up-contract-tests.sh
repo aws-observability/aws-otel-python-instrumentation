@@ -1,4 +1,10 @@
 #!/bin/bash
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Fail fast
+set -e
+
 # Check script is running in contract-tests
 current_path=`pwd`
 current_dir="${current_path##*/}"
