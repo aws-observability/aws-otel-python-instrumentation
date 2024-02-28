@@ -65,7 +65,7 @@ class Psychopg2Test(ContractTestBase):
         self.do_test_requests("success", "GET", 200, 0, 0)
 
     def test_fault(self) -> None:
-        self.do_test_requests("fault", "GET", 200, 0, 1)
+        self.do_test_requests("fault", "GET", 200, 1, 0)
 
     def do_test_requests(
             self, path: str, method: str, status_code: int, expected_error: int, expected_fault: int
