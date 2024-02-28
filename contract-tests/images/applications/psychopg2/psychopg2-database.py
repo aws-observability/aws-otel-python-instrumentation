@@ -20,7 +20,7 @@ def prepare_database(db_host, db_user, db_pass, db_name):
     conn = psycopg2.connect(dbname=db_name, user=db_user, password=db_pass, host=db_host)
     print("db connected")
     cur = conn.cursor()
-
+    cur.execute("DROP TABLE IF EXISTS test_table")
     cur.execute("""
         CREATE TABLE test_table (
             id SERIAL PRIMARY KEY,
@@ -90,7 +90,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                 status_code = 400
             elif self.in_path(_FAULT):
                 cur = conn.cursor()
-                cur.execute("SELECT id, name FROM invalid_table")
+                try:
+                    cur.execute("SELECT id, name FROM invalid_table")
+                except Exception as e:
+                    print("Exception occurred:", e)
                 cur.close()
                 status_code = 200
             else:
