@@ -44,6 +44,10 @@ def index(request):
     return HttpResponse("Hello, world LOL!")
 
 
+def health_check(request):
+    return HttpResponse("Image Service is up and running!")
+
+
 @csrf_exempt
 def handle_image(request, image_name):
     print(image_name)
