@@ -27,11 +27,11 @@ from amazon.opentelemetry.distro._aws_span_processing_util import (
     extract_api_path_value,
     get_egress_operation,
     get_ingress_operation,
+    is_aws_sdk_span,
     is_key_present,
     is_local_root,
     should_generate_dependency_metric_attributes,
     should_generate_service_metric_attributes,
-    is_aws_sdk_span,
 )
 from amazon.opentelemetry.distro.metric_attribute_generator import (
     DEPENDENCY_METRIC,
@@ -269,9 +269,9 @@ def _get_db_statement_remote_operation(span: ReadableSpan, statement_key: str) -
 
 
 def _normalize_service_name(span: ReadableSpan, service_name: str) -> str:
-    if is_aws_sdk_span(span): 
+    if is_aws_sdk_span(span):
         return "AWS.SDK." + service_name
-    
+
     return service_name
 
 
