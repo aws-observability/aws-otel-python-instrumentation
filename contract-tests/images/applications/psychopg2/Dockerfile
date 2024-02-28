@@ -12,4 +12,4 @@ RUN pip install --upgrade pip && pip install -r requirements.txt && pip install 
 RUN opentelemetry-bootstrap -a install
 
 # Without `-u`, logs will be buffered and `wait_for_logs` will never return.
-CMD ["opentelemetry-instrument", "python", "-u", "./psychopg2-database.py"]
+CMD ["opentelemetry-instrument", "python", "-u", "./psychopg2_database.py"]
