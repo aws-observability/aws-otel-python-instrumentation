@@ -9,7 +9,7 @@ package io.opentelemetry.util;
 public class NamingConventions {
 
   public final NamingConvention container = new NamingConvention("/results");
-  public final NamingConvention local = new NamingConvention(".");
+  public final NamingConvention local = new NamingConvention("./results");
 
   /**
    * @return Root path for the local naming convention (where results are output)

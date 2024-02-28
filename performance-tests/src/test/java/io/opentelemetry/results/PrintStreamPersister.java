@@ -48,8 +48,8 @@ class PrintStreamPersister implements ResultsPersister {
     display(results, "Avg. mch tot cpu %", res -> String.valueOf(res.averageMachineCpuTotal));
     display(results, "Startup time (ms)", res -> String.valueOf(res.startupDurationMs));
     display(results, "Total allocated MB", res -> format(res.getTotalAllocatedMB()));
-    display(results, "Min heap used (MB)", res -> format(res.getMinHeapUsedMB()));
-    display(results, "Max heap used (MB)", res -> format(res.getMaxHeapUsedMB()));
+    // display(results, "Min heap used (MB)", res -> format(res.getMinHeapUsedMB()));
+    // display(results, "Max heap used (MB)", res -> format(res.getMaxHeapUsedMB()));
     display(results, "Thread switch rate", res -> String.valueOf(res.maxThreadContextSwitchRate));
     display(results, "GC time (ms)", res -> String.valueOf(NANOSECONDS.toMillis(res.totalGCTime)));
     display(
