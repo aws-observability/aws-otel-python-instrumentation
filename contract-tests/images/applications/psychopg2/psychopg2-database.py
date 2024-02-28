@@ -49,33 +49,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         db_name = os.getenv('DB_NAME')
         self.handle_request("get", db_host, db_user, db_pass, db_name)
 
-    # def handle_request(self, db_host, db_user, db_pass, db_name):
-    #     conn = psycopg2.connect(dbname=db_name, user=db_user, password=db_pass, host=db_host)
-    #     if "success" in self.path:
-    #         cur = conn.cursor()
-    #         cur.execute("SELECT id, name FROM test_table")
-    #         rows = cur.fetchall()
-    #         cur.close()
-    #         conn.close()
-    #         if len(rows) == 2:
-    #             print("sucess request triggered, responding")
-    #             self.send_response_only(200, "success")
-    #             self.end_headers()
-    #         else:
-    #             self.send_response_only(400, "failed")
-    #             self.end_headers()
-    #     elif "fault" in self.path:
-    #         cur = conn.cursor()
-    #         cur.execute("SELECT id, name FROM invalid_table")
-    #         cur.close()
-    #         conn.close()
-    #         self.send_response_only(200, "success")
-    #         self.end_headers()
-
     def handle_request(self, method: str, db_host, db_user, db_pass, db_name):
         status_code: int
         conn = psycopg2.connect(dbname=db_name, user=db_user, password=db_pass, host=db_host)
-        print(self.path)
         if self.in_path(_NETWORK_ALIAS):
             if self.in_path(_SUCCESS):
                 cur = conn.cursor()
@@ -86,8 +62,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                     status_code = 200
                 else:
                     status_code = 400
-            elif self.in_path(_ERROR):
-                status_code = 400
             elif self.in_path(_FAULT):
                 cur = conn.cursor()
                 try:
