@@ -1,13 +1,12 @@
-from typing import List, Dict
+from typing import Dict, List
 
 import docker
 from docker.models.networks import Network
+from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
 from requests import Response, request
 from typing_extensions import override
-from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
 
 from amazon.base.contract_test_base import ContractTestBase
-
 from amazon.utils.app_signals_constants import (
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
@@ -18,13 +17,13 @@ from amazon.utils.app_signals_constants import (
     FAULT_METRIC,
     LATENCY_METRIC,
 )
-
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
 from opentelemetry.proto.metrics.v1.metrics_pb2 import ExponentialHistogramDataPoint, Metric
 from opentelemetry.proto.trace.v1.trace_pb2 import Span
 from opentelemetry.semconv.trace import SpanAttributes
 
 NETWORK_NAME: str = "aws-appsignals-network"
+
 
 class Psychopg2Test(ContractTestBase):
     @override
@@ -44,7 +43,7 @@ class Psychopg2Test(ContractTestBase):
             environment={"POSTGRES_PASSWORD": "example"},
             detach=True,
             name="mydb",
-            network=NETWORK_NAME
+            network=NETWORK_NAME,
         )
 
     @override
@@ -54,7 +53,7 @@ class Psychopg2Test(ContractTestBase):
             "DB_USER": "postgres",
             "DB_PASS": "example",
             "DB_NAME": "postgres",
-            "OTEL_INSTRUMENTATION_COMMON_PEER_SERVICE_MAPPING": "backend=backend:8080"
+            "OTEL_INSTRUMENTATION_COMMON_PEER_SERVICE_MAPPING": "backend=backend:8080",
         }
 
     @override
@@ -68,7 +67,7 @@ class Psychopg2Test(ContractTestBase):
         self.do_test_requests("fault", "GET", 500, 0, 1)
 
     def do_test_requests(
-            self, path: str, method: str, status_code: int, expected_error: int, expected_fault: int
+        self, path: str, method: str, status_code: int, expected_error: int, expected_fault: int
     ) -> None:
         address: str = self.application.get_container_host_ip()
         port: str = self.application.get_exposed_port(self.get_application_port())
@@ -90,7 +89,7 @@ class Psychopg2Test(ContractTestBase):
         self._assert_metric_attributes(metrics, method, path, FAULT_METRIC, expected_fault)
 
     def _assert_aws_span_attributes(
-            self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str
+        self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str
     ) -> None:
         target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
@@ -135,7 +134,7 @@ class Psychopg2Test(ContractTestBase):
         self.assertEqual(expected_value, actual_value.int_value)
 
     def _assert_semantic_conventions_span_attributes(
-            self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str, status_code: int
+        self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str, status_code: int
     ) -> None:
         target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
@@ -148,7 +147,7 @@ class Psychopg2Test(ContractTestBase):
         self._assert_semantic_conventions_attributes(target_spans[0].attributes, method, path, status_code)
 
     def _assert_semantic_conventions_attributes(
-            self, attributes_list: List[KeyValue], method: str, endpoint: str, status_code: int
+        self, attributes_list: List[KeyValue], method: str, endpoint: str, status_code: int
     ) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         # TODO: requests instrumentation is not populating net peer attributes
@@ -161,12 +160,12 @@ class Psychopg2Test(ContractTestBase):
         # self._assert_str_attribute(attributes_dict, SpanAttributes.PEER_SERVICE, "backend:8080")
 
     def _assert_metric_attributes(
-            self,
-            resource_scope_metrics: List[ResourceScopeMetric],
-            method: str,
-            path: str,
-            metric_name: str,
-            expected_sum: int,
+        self,
+        resource_scope_metrics: List[ResourceScopeMetric],
+        method: str,
+        path: str,
+        metric_name: str,
+        expected_sum: int,
     ) -> None:
         target_metrics: List[Metric] = []
         for resource_scope_metric in resource_scope_metrics:

@@ -4,10 +4,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from typing import Tuple
 
+import psycopg2
 from requests import Response, request
 from typing_extensions import override
-
-import psycopg2
 
 _PORT: int = 8080
 _NETWORK_ALIAS: str = "backend"
@@ -21,12 +20,14 @@ def prepare_database(db_host, db_user, db_pass, db_name):
     print("db connected")
     cur = conn.cursor()
     cur.execute("DROP TABLE IF EXISTS test_table")
-    cur.execute("""
+    cur.execute(
+        """
         CREATE TABLE test_table (
             id SERIAL PRIMARY KEY,
             name TEXT NOT NULL
             )
-        """)
+        """
+    )
 
     cur.execute("INSERT INTO test_table (name) VALUES (%s)", ("Alice",))
     cur.execute("INSERT INTO test_table (name) VALUES (%s)", ("Bob",))
@@ -37,16 +38,14 @@ def prepare_database(db_host, db_user, db_pass, db_name):
     conn.close()
 
 
-
 class RequestHandler(BaseHTTPRequestHandler):
-
     @override
     # pylint: disable=invalid-name
     def do_GET(self):
-        db_host = os.getenv('DB_HOST')
-        db_user = os.getenv('DB_USER')
-        db_pass = os.getenv('DB_PASS')
-        db_name = os.getenv('DB_NAME')
+        db_host = os.getenv("DB_HOST")
+        db_user = os.getenv("DB_USER")
+        db_pass = os.getenv("DB_PASS")
+        db_name = os.getenv("DB_NAME")
         self.handle_request("get", db_host, db_user, db_pass, db_name)
 
     def handle_request(self, method: str, db_host, db_user, db_pass, db_name):
@@ -89,10 +88,10 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    db_host = os.getenv('DB_HOST')
-    db_user = os.getenv('DB_USER')
-    db_pass = os.getenv('DB_PASS')
-    db_name = os.getenv('DB_NAME')
+    db_host = os.getenv("DB_HOST")
+    db_user = os.getenv("DB_USER")
+    db_pass = os.getenv("DB_PASS")
+    db_name = os.getenv("DB_NAME")
     prepare_database(db_host, db_user, db_pass, db_name)
     server_address: Tuple[str, int] = ("0.0.0.0", _PORT)
     request_handler_class: type = RequestHandler
@@ -100,7 +99,7 @@ def main() -> None:
     atexit.register(requests_server.shutdown)
     server_thread: Thread = Thread(target=requests_server.serve_forever)
     server_thread.start()
-    print("Psychopg2-Ready")
+    print("Ready")
     server_thread.join()
 
 
