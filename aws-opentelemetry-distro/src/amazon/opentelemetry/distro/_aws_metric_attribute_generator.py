@@ -31,6 +31,7 @@ from amazon.opentelemetry.distro._aws_span_processing_util import (
     is_local_root,
     should_generate_dependency_metric_attributes,
     should_generate_service_metric_attributes,
+    is_aws_sdk_span,
 )
 from amazon.opentelemetry.distro.metric_attribute_generator import (
     DEPENDENCY_METRIC,
@@ -268,11 +269,10 @@ def _get_db_statement_remote_operation(span: ReadableSpan, statement_key: str) -
 
 
 def _normalize_service_name(span: ReadableSpan, service_name: str) -> str:
-    """
-    TODO: Determine if problems in Java instrumentation are relevant here. Do we need normalization? If so, probably we
-     are looking for boto, not aws-sdk
-    """
-    return service_name
+    if is_aws_sdk_span(span): 
+      return "AWS.SDK." + service_name
+    
+    return service_name;
 
 
 def _generate_remote_service(span: ReadableSpan) -> str:
