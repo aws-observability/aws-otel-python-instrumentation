@@ -94,8 +94,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                     cur.execute("SELECT id, name FROM invalid_table")
                 except Exception as e:
                     print("Exception occurred:", e)
-                cur.close()
-                status_code = 200
+                    status_code = 500
+                else:
+                    status_code = 200
+                finally:
+                    cur.close()
             else:
                 status_code = 404
         else:
