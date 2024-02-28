@@ -55,8 +55,8 @@ class Psychopg2Test(ContractTestBase):
             container: Container = client.containers.get("mydb")
             container.stop()
             container.remove()
-        except:
-            print("error when cleaning docker resource")
+        except Exception as exception:
+            print("error when cleaning docker resource:", exception)
 
     @override
     def get_application_extra_environment_variables(self) -> Dict[str, str]:
