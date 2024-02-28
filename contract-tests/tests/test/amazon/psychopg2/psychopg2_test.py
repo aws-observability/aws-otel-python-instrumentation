@@ -1,7 +1,6 @@
 from typing import Dict, List
 
 import docker
-from docker.models.networks import Network
 from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
 from requests import Response, request
 from typing_extensions import override
