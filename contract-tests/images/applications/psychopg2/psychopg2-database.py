@@ -65,8 +65,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 cur = conn.cursor()
                 try:
                     cur.execute("SELECT id, name FROM invalid_table")
-                except Exception as e:
-                    print("Exception occurred:", e)
+                except Exception as exception:
+                    print("Exception occurred:", exception)
                     status_code = 500
                 else:
                     status_code = 200

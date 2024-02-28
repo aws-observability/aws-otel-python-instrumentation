@@ -1,6 +1,8 @@
 from typing import Dict, List
 
 import docker
+from docker import DockerClient
+from docker.models.containers import Container
 from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
 from requests import Response, request
 from typing_extensions import override
@@ -35,8 +37,8 @@ class Psychopg2Test(ContractTestBase):
 
     @override
     @classmethod
-    def set_up_dependency_container(cls):
-        client = docker.from_env()
+    def set_up_dependency_container(cls) -> None:
+        client: DockerClient = docker.from_env()
         client.containers.run(
             "postgres:latest",
             environment={"POSTGRES_PASSWORD": "example"},
@@ -46,7 +48,18 @@ class Psychopg2Test(ContractTestBase):
         )
 
     @override
-    def get_application_extra_environment_variables(self):
+    @classmethod
+    def tear_down_dependency_container(cls) -> None:
+        client = docker.from_env()
+        try:
+            container: Container = client.containers.get("mydb")
+            container.stop()
+            container.remove()
+        except:
+            print("error when cleaning docker resource")
+
+    @override
+    def get_application_extra_environment_variables(self) -> Dict[str, str]:
         return {
             "DB_HOST": "mydb",
             "DB_USER": "postgres",
