@@ -144,3 +144,4 @@ The following are the APIs and what they do:
    name in an SQS queue and not wait for the file to be created in S3. Instead, a long running thread will poll SQS 
    and then create the image file later. 
 17. `GET /image/remote-image`: makes a remote http call to google.com. 
+18. `GET /image/heatlh-check/`: returns 200 if the image service is up and running.
