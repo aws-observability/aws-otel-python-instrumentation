@@ -65,7 +65,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 cur = conn.cursor()
                 try:
                     cur.execute("SELECT id, name FROM invalid_table")
-                except Exception as exception:
+                except psycopg2.ProgrammingError as exception:
                     print("Exception occurred:", exception)
                     status_code = 500
                 else:

@@ -2,6 +2,7 @@ from typing import Dict, List
 
 import docker
 from docker import DockerClient
+from docker.errors import DockerException
 from docker.models.containers import Container
 from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
 from requests import Response, request
@@ -55,7 +56,7 @@ class Psychopg2Test(ContractTestBase):
             container: Container = client.containers.get("mydb")
             container.stop()
             container.remove()
-        except Exception as exception:
+        except DockerException as exception:
             print("error when cleaning docker resource:", exception)
 
     @override
