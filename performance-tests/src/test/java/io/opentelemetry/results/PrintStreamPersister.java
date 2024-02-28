@@ -33,7 +33,7 @@ class PrintStreamPersister implements ResultsPersister {
         config.getConcurrentConnections(), config.getTotalIterations());
     out.println("----------------------------------------------------------");
 
-    display(results, "Agent", appPerfResults -> appPerfResults.agent.getName());
+    display(results, "DistroConfig", appPerfResults -> appPerfResults.distroConfig.getName());
     display(
         results,
         "Run duration",
