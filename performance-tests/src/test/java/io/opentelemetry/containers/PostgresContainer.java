@@ -11,7 +11,6 @@ import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
-import org.testcontainers.utility.MountableFile;
 
 public class PostgresContainer {
 
@@ -35,12 +34,6 @@ public class PostgresContainer {
         .withUsername(USERNAME)
         .withPassword(PASSWORD)
         .withDatabaseName(DATABASE_NAME)
-        .withCopyFileToContainer(
-            MountableFile.forClasspathResource("initDB.sql"),
-            "/docker-entrypoint-initdb.d/initDB.sql")
-        .withCopyFileToContainer(
-            MountableFile.forClasspathResource("populateDB.sql"),
-            "/docker-entrypoint-initdb.d/populateDB.sql")
         .withReuse(false);
   }
 }

@@ -126,7 +126,7 @@ The following are the APIs and what they do:
    -d '{"make": "BMW","model": "M340","year": 2022,"image_name": "newCar.jpg"}'`
 4. `GET /vehicle-inventory/<int>`: returns vehicle entry with id = <int>
 5. `DELETE /vehicle-inventory/<int>`: deletes vehicle entry with id = <int>
-6. `GET /vehicle-inventory/name/<str>`: returns vehicle entries with name = <str>
+6. `GET /vehicle-inventory/make/<str>`: returns vehicle entries with make = <str>
 7. `GET /vehicle-inventory/<int>/image`: returns image file information from S3 for the specific vehicle by calling 
    the image microservice
 8. `GET /vehicle-inventory/image/<image_name>`: returns image information for <image_name> from S3 if present through 

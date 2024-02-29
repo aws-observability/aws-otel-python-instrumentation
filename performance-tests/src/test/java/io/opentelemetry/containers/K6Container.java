@@ -57,7 +57,7 @@ public class K6Container {
             String.valueOf(config.getMaxRequestRate()),
             "--summary-export",
             k6OutputFile.toString(),
-            "/app/basic.js")
+            "/app/performanceTest.js")
         .withStartupCheckStrategy(
             new OneShotStartupCheckStrategy().withTimeout(Duration.ofMinutes(15)));
   }

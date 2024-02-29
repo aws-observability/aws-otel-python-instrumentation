@@ -1,9 +1,0 @@
-INSERT INTO Vehicle VALUES (1, 'Toyota', 'Rav4', 2024, 'toy_rav_24.png') ON CONFLICT DO NOTHING;
-INSERT INTO Vehicle VALUES (2, 'Toyota', 'Rav4', 2023, 'toy_rav_23.png') ON CONFLICT DO NOTHING;
-INSERT INTO Vehicle VALUES (3, 'Honda', 'Odyssey', 2022, 'hon_ody_22.png') ON CONFLICT DO NOTHING;
-INSERT INTO Vehicle VALUES (4, 'Honda', 'Odyssey', 2024, 'hon_ody_24.png') ON CONFLICT DO NOTHING;
-
-INSERT INTO VehiclePurchaseHistory VALUES (1, '2024-01-29', 55999, 1) ON CONFLICT DO NOTHING;
-INSERT INTO VehiclePurchaseHistory VALUES (2, '2024-02-29', 54999, 1) ON CONFLICT DO NOTHING;
-INSERT INTO VehiclePurchaseHistory VALUES (3, '2023-12-14', 13999, 3) ON CONFLICT DO NOTHING;
-

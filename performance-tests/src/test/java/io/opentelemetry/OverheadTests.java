@@ -97,6 +97,8 @@ public class OverheadTests {
     vehicleInventoryService.start();
     writeStartupTimeFile(distroConfig, start);
 
+    populateDatabase();
+
     if (config.getWarmupSeconds() > 0) {
       // doWarmupPhase(config, vehicleInventoryService);
     }
@@ -166,6 +168,16 @@ public class OverheadTests {
     vehicleInventoryService.execInContainer(stopCommand);
 
     System.out.println("Warmup complete.");
+  }
+
+  private void populateDatabase() {
+    GenericContainer<?> k6 =
+        new GenericContainer<>(DockerImageName.parse("loadimpact/k6"))
+            .withNetwork(NETWORK)
+            .withCopyFileToContainer(MountableFile.forHostPath("./k6"), "/app")
+            .withCommand("run", "/app/setUp.js")
+            .withStartupCheckStrategy(new OneShotStartupCheckStrategy());
+    k6.start();
   }
 
   private void writeStartupTimeFile(DistroConfig distroConfig, long start) throws IOException {
