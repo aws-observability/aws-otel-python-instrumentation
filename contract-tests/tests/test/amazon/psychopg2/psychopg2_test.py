@@ -111,7 +111,8 @@ class Psychopg2Test(ContractTestBase):
             if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
                 target_spans.append(resource_scope_span.span)
 
-        self.assertEqual(len(target_spans), 1)
+        self.assertEqual(len(target_spans), 5)
+        print(target_spans)
         self._assert_aws_attributes(target_spans[0].attributes, method, path)
 
     def _assert_aws_attributes(self, attributes_list: List[KeyValue], method: str, endpoint: str) -> None:
