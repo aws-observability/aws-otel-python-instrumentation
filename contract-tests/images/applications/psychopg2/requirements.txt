@@ -3,5 +3,4 @@ opentelemetry-exporter-otlp-proto-grpc==1.22.0
 typing-extensions==4.9.0
 psycopg2-binary==2.9.9
 psutil
-requests==2.31.0
 testcontainers

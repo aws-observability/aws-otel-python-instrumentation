@@ -7,7 +7,6 @@ from threading import Thread
 from typing import Tuple
 
 import psycopg2
-from requests import Response, request
 from typing_extensions import override
 
 _PORT: int = 8080
@@ -53,33 +52,28 @@ class RequestHandler(BaseHTTPRequestHandler):
     def handle_request(self, method: str, db_host, db_user, db_pass, db_name):
         status_code: int
         conn = psycopg2.connect(dbname=db_name, user=db_user, password=db_pass, host=db_host)
-        if self.in_path(_NETWORK_ALIAS):
-            if self.in_path(_SUCCESS):
-                cur = conn.cursor()
-                cur.execute("SELECT id, name FROM test_table")
-                rows = cur.fetchall()
-                cur.close()
-                if len(rows) == 2:
-                    status_code = 200
-                else:
-                    status_code = 400
-            elif self.in_path(_FAULT):
-                cur = conn.cursor()
-                try:
-                    cur.execute("SELECT id, name FROM invalid_table")
-                except psycopg2.ProgrammingError as exception:
-                    print("Exception occurred:", exception)
-                    status_code = 500
-                else:
-                    status_code = 200
-                finally:
-                    cur.close()
+        if self.in_path(_SUCCESS):
+            cur = conn.cursor()
+            cur.execute("SELECT id, name FROM test_table")
+            rows = cur.fetchall()
+            cur.close()
+            if len(rows) == 2:
+                status_code = 200
             else:
-                status_code = 404
+                status_code = 400
+        elif self.in_path(_FAULT):
+            cur = conn.cursor()
+            try:
+                cur.execute("SELECT id, name FROM invalid_table")
+            except psycopg2.ProgrammingError as exception:
+                print("Exception occurred:", exception)
+                status_code = 500
+            else:
+                status_code = 200
+            finally:
+                cur.close()
         else:
-            url: str = f"http://{_NETWORK_ALIAS}:{_PORT}/{_NETWORK_ALIAS}{self.path}"
-            response: Response = request(method, url, timeout=20)
-            status_code = response.status_code
+            status_code = 404
         print("received a " + method + " request")
         conn.close()
         self.send_response_only(status_code)
@@ -95,7 +89,7 @@ def main() -> None:
     db_pass = os.getenv("DB_PASS")
     db_name = os.getenv("DB_NAME")
     prepare_database(db_host, db_user, db_pass, db_name)
-    server_address: Tuple[str, int] = ("0.0.0.0", _PORT)
+    server_address: Tuple[str, int] = ('', _PORT)
     request_handler_class: type = RequestHandler
     requests_server: ThreadingHTTPServer = ThreadingHTTPServer(server_address, request_handler_class)
     atexit.register(requests_server.shutdown)
