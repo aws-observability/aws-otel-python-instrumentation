@@ -114,7 +114,7 @@ class Psychopg2Test(ContractTestBase):
         self.assertEqual(len(target_spans), len(sql_commands))
         print(target_spans)
         for command in sql_commands:
-            self._assert_aws_attributes(target_spans[0].attributes, command, path)
+            self._assert_aws_attributes(target_spans[sql_commands.index(command)].attributes, command, path)
 
     def _assert_aws_attributes(self, attributes_list: List[KeyValue], command: str, endpoint: str) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
