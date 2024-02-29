@@ -76,13 +76,13 @@ class Psychopg2Test(ContractTestBase):
         return "aws-appsignals-tests-psychopg2-app"
 
     def test_success(self) -> None:
-        self.do_test_requests("success", "DROP TABLE", 200, 0, 0)
+        self.do_test_requests("success", "GET", ["DROP TABLE", "CREATE TABLE", "INSERT INTO", "INSERT INTO", "SELECT"], 200, 0, 0)
 
     def test_fault(self) -> None:
-        self.do_test_requests("fault", "DROP TABLE", 500, 0, 1)
+        self.do_test_requests("fault", "GET", ["DROP TABLE", "CREATE TABLE", "INSERT INTO", "INSERT INTO", "SELECT"], 500, 0, 1)
 
     def do_test_requests(
-        self, path: str, method: str, status_code: int, expected_error: int, expected_fault: int
+        self, path: str, method: str, sql_commands: List[str], status_code: int, expected_error: int, expected_fault: int
     ) -> None:
         address: str = self.application.get_container_host_ip()
         port: str = self.application.get_exposed_port(self.get_application_port())
@@ -92,7 +92,7 @@ class Psychopg2Test(ContractTestBase):
         self.assertEqual(status_code, response.status_code)
 
         resource_scope_spans: List[ResourceScopeSpan] = self.mock_collector_client.get_traces()
-        self._assert_aws_span_attributes(resource_scope_spans, method, path)
+        self._assert_aws_span_attributes(resource_scope_spans, sql_commands, path)
         self._assert_semantic_conventions_span_attributes(resource_scope_spans, method, path, status_code)
 
         metrics: List[ResourceScopeMetric] = self.mock_collector_client.get_metrics(
@@ -103,7 +103,7 @@ class Psychopg2Test(ContractTestBase):
         self._assert_metric_attributes(metrics, method, path, FAULT_METRIC, expected_fault)
 
     def _assert_aws_span_attributes(
-        self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str
+        self, resource_scope_spans: List[ResourceScopeSpan], sql_commands: List[str], path: str
     ) -> None:
         target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
@@ -111,18 +111,19 @@ class Psychopg2Test(ContractTestBase):
             if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
                 target_spans.append(resource_scope_span.span)
 
-        self.assertEqual(len(target_spans), 5)
+        self.assertEqual(len(target_spans), len(sql_commands))
         print(target_spans)
-        self._assert_aws_attributes(target_spans[0].attributes, method, path)
+        for command in sql_commands:
+            self._assert_aws_attributes(target_spans[0].attributes, command, path)
 
-    def _assert_aws_attributes(self, attributes_list: List[KeyValue], method: str, endpoint: str) -> None:
+    def _assert_aws_attributes(self, attributes_list: List[KeyValue], command: str, endpoint: str) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # InternalOperation as OTEL does not instrument the basic server we are using, so the client span is a local
         # root.
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_OPERATION, "InternalOperation")
         self._assert_str_attribute(attributes_dict, AWS_REMOTE_SERVICE, "postgresql")
-        self._assert_str_attribute(attributes_dict, AWS_REMOTE_OPERATION, f"{method}")
+        self._assert_str_attribute(attributes_dict, AWS_REMOTE_OPERATION, f"{command}")
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
         self._assert_str_attribute(attributes_dict, "db.system", "postgresql")
