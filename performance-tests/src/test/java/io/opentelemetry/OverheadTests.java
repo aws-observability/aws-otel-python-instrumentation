@@ -91,7 +91,7 @@ public class OverheadTests {
     imageService.start();
 
     GenericContainer<?> vehicleInventoryService =
-        new VehicleInventoryServiceContainer(NETWORK, collector, distroConfig).build();
+        new VehicleInventoryServiceContainer(NETWORK, collector, distroConfig, namingConventions).build();
     long start = System.currentTimeMillis();
     vehicleInventoryService.start();
     writeStartupTimeFile(distroConfig, start);
@@ -101,7 +101,7 @@ public class OverheadTests {
     }
 
     long testStart = System.currentTimeMillis();
-    // startRecording(distroConfig, vehicleInventoryService);
+    //startRecording(distroConfig, vehicleInventoryService);
 
     GenericContainer<?> k6 =
         new K6Container(NETWORK, distroConfig, config, namingConventions).build();
@@ -117,15 +117,10 @@ public class OverheadTests {
 
   private void startRecording(
       DistroConfig distroConfig, GenericContainer<?> vehicleInventoryService) throws Exception {
-    Path outFile = namingConventions.container.jfrFile(distroConfig);
     String[] command = {
-      "jcmd",
-      "1",
-      "JFR.start",
-      "settings=/app/overhead.jfc",
-      "dumponexit=true",
-      "name=petclinic",
-      "filename=" + outFile
+      "sh",
+            "executePerf.sh",
+            distroConfig.getName()
     };
     vehicleInventoryService.execInContainer(command);
   }
