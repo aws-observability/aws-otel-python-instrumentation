@@ -121,10 +121,13 @@ class Psychopg2Test(ContractTestBase):
         # InternalOperation as OTEL does not instrument the basic server we are using, so the client span is a local
         # root.
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_OPERATION, "InternalOperation")
-        self._assert_str_attribute(attributes_dict, AWS_REMOTE_SERVICE, "backend:8080")
-        self._assert_str_attribute(attributes_dict, AWS_REMOTE_OPERATION, f"{method} /backend")
+        self._assert_str_attribute(attributes_dict, AWS_REMOTE_SERVICE, "postgresql")
+        self._assert_str_attribute(attributes_dict, AWS_REMOTE_OPERATION, f"{method}")
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
+        self._assert_str_attribute(attributes_dict, "db.system", "postgresql")
+        self._assert_str_attribute(attributes_dict, "db.name", "postgresql")
+        self._assert_str_attribute(attributes_dict, "db.user", "postgres")
 
     def _get_attributes_dict(self, attributes_list: List[KeyValue]) -> Dict[str, AnyValue]:
         attributes_dict: Dict[str, AnyValue] = {}
