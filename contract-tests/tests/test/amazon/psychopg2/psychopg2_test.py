@@ -127,7 +127,7 @@ class Psychopg2Test(ContractTestBase):
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
         self._assert_str_attribute(attributes_dict, "db.system", "postgresql")
-        self._assert_str_attribute(attributes_dict, "db.name", "postgresql")
+        self._assert_str_attribute(attributes_dict, "db.name", "postgres")
         self._assert_str_attribute(attributes_dict, "db.user", "postgres")
 
     def _get_attributes_dict(self, attributes_list: List[KeyValue]) -> Dict[str, AnyValue]:
