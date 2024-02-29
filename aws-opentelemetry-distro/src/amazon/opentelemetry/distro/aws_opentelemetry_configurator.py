@@ -125,9 +125,6 @@ def _initialize_components():
         _init_logging(log_exporters, resource)
 
 
-# END The OpenTelemetry Authors code
-
-
 def _init_tracing(
     exporters: Dict[str, Type[SpanExporter]],
     id_generator: IdGenerator = None,
@@ -151,6 +148,9 @@ def _init_tracing(
     _customize_span_processors(trace_provider, resource)
 
     set_tracer_provider(trace_provider)
+
+
+# END The OpenTelemetry Authors code
 
 
 def _exclude_urls_for_instrumentations():
