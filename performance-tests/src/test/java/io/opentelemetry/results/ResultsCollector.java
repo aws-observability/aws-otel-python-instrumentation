@@ -44,7 +44,7 @@ public class ResultsCollector {
 
       builder = addStartupTime(builder, distroConfig);
       builder = addK6Results(builder, distroConfig);
-      builder = addJfrResults(builder, distroConfig);
+      // builder = addJfrResults(builder, distroConfig);
 
       return builder.build();
     } catch (IOException e) {

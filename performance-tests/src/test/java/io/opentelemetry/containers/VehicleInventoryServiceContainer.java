@@ -5,19 +5,12 @@
 
 package io.opentelemetry.containers;
 
-import io.opentelemetry.distros.AgentResolver;
 import io.opentelemetry.distros.DistroConfig;
-import io.opentelemetry.util.NamingConventions;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Optional;
-import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
+import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.lifecycle.Startable;
@@ -28,76 +21,53 @@ public class VehicleInventoryServiceContainer {
 
   private static final Logger logger =
       LoggerFactory.getLogger(VehicleInventoryServiceContainer.class);
-  private static final int PETCLINIC_PORT = 9966;
-  private final AgentResolver agentResolver = new AgentResolver();
+  private static final int PORT = 8001;
 
   private final Network network;
   private final Startable collector;
   private final DistroConfig distroConfig;
-  private final NamingConventions namingConventions;
 
   public VehicleInventoryServiceContainer(
-      Network network,
-      Startable collector,
-      DistroConfig distroConfig,
-      NamingConventions namingConventions) {
+      Network network, Startable collector, DistroConfig distroConfig) {
     this.network = network;
     this.collector = collector;
     this.distroConfig = distroConfig;
-    this.namingConventions = namingConventions;
   }
 
-  public GenericContainer<?> build() throws Exception {
-
-    Optional<Path> agentJar = agentResolver.resolve(this.distroConfig);
-
+  public GenericContainer<?> build() {
     GenericContainer<?> container =
-        new GenericContainer<>(
-                DockerImageName.parse(
-                    "ghcr.io/open-telemetry/opentelemetry-java-instrumentation/petclinic-rest-base:20230601125442"))
+        new GenericContainer<>(DockerImageName.parse("performance-test/vehicle-inventory-service"))
             .withNetwork(network)
-            .withNetworkAliases("petclinic")
+            .withNetworkAliases("vehicle-service")
             .withLogConsumer(new Slf4jLogConsumer(logger))
-            .withExposedPorts(PETCLINIC_PORT)
-            .withFileSystemBind(
-                namingConventions.localResults(), namingConventions.containerResults())
+            .withExposedPorts(PORT)
+            .waitingFor(Wait.forHttp("/vehicle-inventory/health-check").forPort(PORT))
             .withCopyFileToContainer(
-                MountableFile.forClasspathResource("overhead.jfc"), "/app/overhead.jfc")
-            .waitingFor(Wait.forHttp("/petclinic/actuator/health").forPort(PETCLINIC_PORT))
-            .withEnv("spring_profiles_active", "postgresql,spring-data-jpa")
-            .withEnv(
-                "spring_datasource_url",
-                "jdbc:postgresql://postgres:5432/" + PostgresContainer.DATABASE_NAME)
-            .withEnv("spring_datasource_username", PostgresContainer.USERNAME)
-            .withEnv("spring_datasource_password", PostgresContainer.PASSWORD)
-            .withEnv("spring_jpa_hibernate_ddl-auto", "none")
+                MountableFile.forClasspathResource("runVehicleInventory.sh"),
+                "vehicle-inventory-app/run.sh")
+            .withEnv("DJANGO_SETTINGS_MODULE", "VehicleInventoryApp.settings")
+            .withEnv("PORT", Integer.toString(PORT))
+            .withEnv("POSTGRES_DATABASE", PostgresContainer.DATABASE_NAME)
+            .withEnv("POSTGRES_USER", PostgresContainer.USERNAME)
+            .withEnv("POSTGRES_PASSWORD", PostgresContainer.PASSWORD)
+            .withEnv("DB_SERVICE_HOST", PostgresContainer.NETWORK_ALIAS)
+            .withEnv("DB_SERVICE_PORT", Integer.toString(PostgreSQLContainer.POSTGRESQL_PORT))
+            .withEnv("IMAGE_BACKEND_SERVICE_HOST", ImageServiceContainer.NETWORK_ALIAS)
+            .withEnv("IMAGE_BACKEND_SERVICE_PORT", Integer.toString(ImageServiceContainer.PORT))
+            .withEnv(distroConfig.getAdditionalEnvVars())
             .dependsOn(collector)
-            .withCommand(buildCommandline(agentJar));
+            .withCommand("bash run.sh");
 
-    agentJar.ifPresent(
-        agentPath ->
-            container.withCopyFileToContainer(
-                MountableFile.forHostPath(agentPath),
-                "/app/" + agentPath.getFileName().toString()));
+    if (distroConfig.doInstrument()) {
+      container
+          .withEnv("DO_INSTRUMENT", "true")
+          .withEnv("OTEL_TRACES_EXPORTER", "otlp")
+          .withEnv("OTEL_METRICS_EXPORTER", "none")
+          .withEnv("OTEL_IMR_EXPORT_INTERVAL", "5000")
+          .withEnv("OTEL_EXPORTER_OTLP_INSECURE", "true")
+          .withEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4317")
+          .withEnv("OTEL_RESOURCE_ATTRIBUTES", "service.name=vehicle_inventory_service");
+    }
     return container;
-  }
-
-  @NotNull
-  private String[] buildCommandline(Optional<Path> agentJar) {
-    List<String> result =
-        new ArrayList<>(
-            Arrays.asList(
-                "java",
-                "-Dotel.traces.exporter=otlp",
-                "-Dotel.imr.export.interval=5000",
-                "-Dotel.exporter.otlp.insecure=true",
-                "-Dotel.exporter.otlp.endpoint=http://collector:4317",
-                "-Dotel.resource.attributes=service.name=petclinic-otel-overhead"));
-    result.addAll(this.distroConfig.getAdditionalJvmArgs());
-    agentJar.ifPresent(path -> result.add("-javaagent:/app/" + path.getFileName()));
-
-    result.add("-jar");
-    result.add("/app/spring-petclinic-rest.jar");
-    return result.toArray(new String[] {});
   }
 }

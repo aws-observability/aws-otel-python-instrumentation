@@ -22,8 +22,8 @@ class CsvPersister implements ResultsPersister {
   private static final List<FieldSpec> FIELDS =
       Arrays.asList(
           FieldSpec.of("startupDurationMs", r -> r.startupDurationMs),
-          FieldSpec.of("minHeapUsed", r -> r.heapUsed.min),
-          FieldSpec.of("maxHeapUsed", r -> r.heapUsed.max),
+          // FieldSpec.of("minHeapUsed", r -> r.heapUsed.min),
+          // FieldSpec.of("maxHeapUsed", r -> r.heapUsed.max),
           FieldSpec.of("totalAllocatedMB", r -> r.getTotalAllocatedMB()),
           FieldSpec.of("totalGCTime", r -> r.totalGCTime),
           FieldSpec.of("maxThreadContextSwitchRate", r -> r.maxThreadContextSwitchRate),

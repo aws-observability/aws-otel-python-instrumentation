@@ -15,9 +15,10 @@ import org.testcontainers.utility.MountableFile;
 public class PostgresContainer {
 
   private static final Logger logger = LoggerFactory.getLogger(PostgresContainer.class);
-  public static final String PASSWORD = "petclinic";
-  public static final String USERNAME = "petclinic";
-  public static final String DATABASE_NAME = "petclinic";
+  public static final String PASSWORD = "password";
+  public static final String USERNAME = "djangouser";
+  public static final String DATABASE_NAME = "vehicle_inventory";
+  public static final String NETWORK_ALIAS = "postgres";
 
   private final Network network;
 
@@ -26,9 +27,9 @@ public class PostgresContainer {
   }
 
   public PostgreSQLContainer<?> build() throws Exception {
-    return new PostgreSQLContainer<>("postgres:9.6.22")
+    return new PostgreSQLContainer<>("postgres:14.0")
         .withNetwork(network)
-        .withNetworkAliases("postgres")
+        .withNetworkAliases(NETWORK_ALIAS)
         .withLogConsumer(new Slf4jLogConsumer(logger))
         .withUsername(USERNAME)
         .withPassword(PASSWORD)

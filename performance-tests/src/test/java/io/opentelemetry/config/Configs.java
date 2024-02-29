@@ -11,12 +11,11 @@ import java.util.stream.Stream;
 
 /** Defines all test configurations */
 public enum Configs {
-  RELEASE(
+  ALL(
       TestConfig.builder()
-          .name("release")
-          .description("compares no distro, latest stable, and latest snapshot distro")
-          .withDistroConfigs(
-              DistroConfig.NONE, DistroConfig.LATEST_RELEASE, DistroConfig.LATEST_SNAPSHOT)
+          .name("all")
+          .description("Compares all DistroConfigs")
+          .withDistroConfigs(DistroConfig.values())
           .warmupSeconds(60)
           .build());
 

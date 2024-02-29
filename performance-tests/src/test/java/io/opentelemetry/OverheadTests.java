@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.DynamicTest.dynamicTest;
 import io.opentelemetry.config.Configs;
 import io.opentelemetry.config.TestConfig;
 import io.opentelemetry.containers.CollectorContainer;
+import io.opentelemetry.containers.ImageServiceContainer;
 import io.opentelemetry.containers.K6Container;
 import io.opentelemetry.containers.PostgresContainer;
 import io.opentelemetry.containers.VehicleInventoryServiceContainer;
@@ -19,6 +20,7 @@ import io.opentelemetry.results.AppPerfResults;
 import io.opentelemetry.results.MainResultsPersister;
 import io.opentelemetry.results.ResultsCollector;
 import io.opentelemetry.util.NamingConventions;
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -46,6 +48,10 @@ public class OverheadTests {
 
   @BeforeAll
   static void setUp() {
+    // Ensure results folder exists, several intermediary results stored here, in addition to final
+    // results.
+    new File("./results").mkdirs();
+
     collector = CollectorContainer.build(NETWORK);
     collector.start();
   }
@@ -81,19 +87,21 @@ public class OverheadTests {
     GenericContainer<?> postgres = new PostgresContainer(NETWORK).build();
     postgres.start();
 
+    GenericContainer<?> imageService = new ImageServiceContainer(NETWORK).build();
+    imageService.start();
+
     GenericContainer<?> vehicleInventoryService =
-        new VehicleInventoryServiceContainer(NETWORK, collector, distroConfig, namingConventions)
-            .build();
+        new VehicleInventoryServiceContainer(NETWORK, collector, distroConfig).build();
     long start = System.currentTimeMillis();
     vehicleInventoryService.start();
     writeStartupTimeFile(distroConfig, start);
 
     if (config.getWarmupSeconds() > 0) {
-      doWarmupPhase(config, vehicleInventoryService);
+      // doWarmupPhase(config, vehicleInventoryService);
     }
 
     long testStart = System.currentTimeMillis();
-    startRecording(distroConfig, vehicleInventoryService);
+    // startRecording(distroConfig, vehicleInventoryService);
 
     GenericContainer<?> k6 =
         new K6Container(NETWORK, distroConfig, config, namingConventions).build();
@@ -102,12 +110,8 @@ public class OverheadTests {
     long runDuration = System.currentTimeMillis() - testStart;
     runDurations.put(distroConfig.getName(), runDuration);
 
-    // This is required to get a graceful exit of the VM before testcontainers kills it forcibly.
-    // Without it, our jfr file will be empty.
-    vehicleInventoryService.execInContainer("kill", "1");
-    while (vehicleInventoryService.isRunning()) {
-      TimeUnit.MILLISECONDS.sleep(500);
-    }
+    vehicleInventoryService.stop();
+    imageService.stop();
     postgres.stop();
   }
 
