@@ -8,6 +8,7 @@ from docker.errors import DockerException
 from docker.models.containers import Container
 from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
 from requests import Response, request
+from testcontainers.postgres import PostgresContainer
 from typing_extensions import override
 
 from amazon.base.contract_test_base import NETWORK_NAME, ContractTestBase
@@ -30,14 +31,15 @@ class Psycopg2Test(ContractTestBase):
     @override
     @classmethod
     def set_up_dependency_container(cls) -> None:
-        client: DockerClient = docker.from_env()
-        client.containers.run(
-            "postgres:latest",
-            environment={"POSTGRES_PASSWORD": "example"},
-            detach=True,
-            name="mydb",
-            network=NETWORK_NAME,
-        )
+        cls.container = PostgresContainer(password="example", dbname="mydb").with_kwargs(network=NETWORK_NAME)
+        # client: DockerClient = docker.from_env()
+        # client.containers.run(
+        #     "postgres:latest",
+        #     environment={"POSTGRES_PASSWORD": "example"},
+        #     detach=True,
+        #     name="mydb",
+        #     network=NETWORK_NAME,
+        # )
 
     @override
     @classmethod
