@@ -74,7 +74,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                 cur.close()
         else:
             status_code = 404
-        print("received a " + method + " request")
         conn.close()
         self.send_response_only(status_code)
         self.end_headers()
