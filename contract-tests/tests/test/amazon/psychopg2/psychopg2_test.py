@@ -112,7 +112,6 @@ class Psychopg2Test(ContractTestBase):
                 target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), len(sql_commands))
-        print(target_spans)
         for command in sql_commands:
             self._assert_aws_attributes(target_spans[sql_commands.index(command)].attributes, command)
 
@@ -144,6 +143,12 @@ class Psychopg2Test(ContractTestBase):
         self.assertIsNotNone(actual_value)
         self.assertEqual(expected_value, actual_value.string_value)
 
+    def _assert_int_attribute(self, attributes_dict: Dict[str, AnyValue], key: str, expected_value: int):
+        self.assertIn(key, attributes_dict)
+        actual_value: AnyValue = attributes_dict[key]
+        self.assertIsNotNone(actual_value)
+        self.assertEqual(expected_value, actual_value.string_value)
+
     def _assert_semantic_conventions_span_attributes(
         self, resource_scope_spans: List[ResourceScopeSpan], path: str, status_code: int, commands: List[str]
     ) -> None:
@@ -160,12 +165,13 @@ class Psychopg2Test(ContractTestBase):
             self._assert_semantic_conventions_attributes(target_spans[index].attributes, commands[index], path, status_code)
 
     def _assert_semantic_conventions_attributes(
-        self, attributes_list: List[KeyValue], method: str, endpoint: str, status_code: int
+        self, attributes_list: List[KeyValue], command: str, endpoint: str, status_code: int
     ) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         print(attributes_dict)
-        self._assert_str_attribute(attributes_dict, SpanAttributes.HTTP_URL, f"http://backend:8080/backend/{endpoint}")
-        self._assert_str_attribute(attributes_dict, SpanAttributes.HTTP_METHOD, method)
+        self._assert_str_attribute(attributes_dict, "net.peer.name", "mydb")
+        self._assert_int_attribute(attributes_dict, "net.peer.point", 5432)
+        self.assertTrue(attributes_dict.get("db.statement").string_value.startswith(command))
         self._assert_str_attribute(attributes_dict, "db.system", "postgresql")
         self._assert_str_attribute(attributes_dict, "db.name", "postgres")
         self._assert_str_attribute(attributes_dict, "db.user", "postgres")
