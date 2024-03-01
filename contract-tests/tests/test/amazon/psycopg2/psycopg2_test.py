@@ -67,12 +67,11 @@ class Psychopg2Test(ContractTestBase):
             "DB_USER": "postgres",
             "DB_PASS": "example",
             "DB_NAME": "postgres",
-            "OTEL_INSTRUMENTATION_COMMON_PEER_SERVICE_MAPPING": "backend=backend:8080",
         }
 
     @override
     def get_application_image_name(self) -> str:
-        return "aws-appsignals-tests-psychopg2-app"
+        return "aws-appsignals-tests-psycopg2-app"
 
     def test_success(self) -> None:
         self.do_test_requests(
