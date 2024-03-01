@@ -18,7 +18,7 @@ rm -rf dist/mock_collector*
 rm -rf dist/contract_tests*
 
 # Install python dependency for contract-test
-pip install sqlalchemy
+pip install sqlalchemy psycopg2
 
 # Create mock-collector image
 cd contract-tests/images/mock-collector
