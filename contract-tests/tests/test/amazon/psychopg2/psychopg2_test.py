@@ -93,7 +93,7 @@ class Psychopg2Test(ContractTestBase):
 
         resource_scope_spans: List[ResourceScopeSpan] = self.mock_collector_client.get_traces()
         self._assert_aws_span_attributes(resource_scope_spans, sql_commands, path)
-        self._assert_semantic_conventions_span_attributes(resource_scope_spans, path, status_code, sql_commands)
+        self._assert_semantic_conventions_span_attributes(resource_scope_spans, sql_commands)
 
         metrics: List[ResourceScopeMetric] = self.mock_collector_client.get_metrics(
             {LATENCY_METRIC, ERROR_METRIC, FAULT_METRIC}
@@ -150,7 +150,7 @@ class Psychopg2Test(ContractTestBase):
         self.assertEqual(expected_value, actual_value.int_value)
 
     def _assert_semantic_conventions_span_attributes(
-        self, resource_scope_spans: List[ResourceScopeSpan], path: str, status_code: int, commands: List[str]
+        self, resource_scope_spans: List[ResourceScopeSpan], commands: List[str]
     ) -> None:
         target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
@@ -162,14 +162,12 @@ class Psychopg2Test(ContractTestBase):
         for target_span in target_spans:
             index: int = target_spans.index(target_span)
             self.assertEqual(target_span.name, commands[index].split()[0])
-            self._assert_semantic_conventions_attributes(target_spans[index].attributes, commands[index], path, status_code)
+            self._assert_semantic_conventions_attributes(target_spans[index].attributes, commands[index])
 
     def _assert_semantic_conventions_attributes(
-        self, attributes_list: List[KeyValue], command: str, endpoint: str, status_code: int
+        self, attributes_list: List[KeyValue], command: str
     ) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
-        print(attributes_dict)
-        print("Command: ****:", command)
         self._assert_str_attribute(attributes_dict, "net.peer.name", "mydb")
         self._assert_int_attribute(attributes_dict, "net.peer.port", 5432)
         self.assertTrue(attributes_dict.get("db.statement").string_value.index(command) >= 0)
@@ -190,6 +188,7 @@ class Psychopg2Test(ContractTestBase):
             if resource_scope_metric.metric.name.lower() == metric_name.lower():
                 target_metrics.append(resource_scope_metric.metric)
 
+        print(target_metrics)
         self.assertEqual(len(target_metrics), 1)
         target_metric: Metric = target_metrics[0]
         dp_list: List[ExponentialHistogramDataPoint] = target_metric.exponential_histogram.data_points
