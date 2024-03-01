@@ -49,10 +49,10 @@ public class K6Container {
         .withCreateContainerCmdModifier(cmd -> cmd.withUser("root"))
         .withCommand(
             "run",
-            "-u",
+            "--vus",
             String.valueOf(config.getConcurrentConnections()),
-            "-i",
-            String.valueOf(config.getTotalIterations()),
+            "--duration",
+            String.valueOf(config.getDuration()),
             "--rps",
             String.valueOf(config.getMaxRequestRate()),
             "--summary-export",

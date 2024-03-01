@@ -29,9 +29,7 @@ class PrintStreamPersister implements ResultsPersister {
     out.println("----------------------------------------------------------");
     out.println(" Run at " + new Date());
     out.printf(" %s : %s\n", config.getName(), config.getDescription());
-    out.printf(
-        " %d users, %d iterations\n",
-        config.getConcurrentConnections(), config.getTotalIterations());
+    out.printf(" %d users, %s duration\n", config.getConcurrentConnections(), config.getDuration());
     out.println("----------------------------------------------------------");
 
     display(results, "DistroConfig", appPerfResults -> appPerfResults.distroConfig.getName());
@@ -68,10 +66,10 @@ class PrintStreamPersister implements ResultsPersister {
 
   private void display(
       List<AppPerfResults> results, String pref, Function<AppPerfResults, String> vs) {
-    out.printf("%-20s: ", pref);
+    out.printf("%-30s: ", pref);
     results.forEach(
         result -> {
-          out.printf("%17s", vs.apply(result));
+          out.printf("%25s", vs.apply(result));
         });
     out.println();
   }
