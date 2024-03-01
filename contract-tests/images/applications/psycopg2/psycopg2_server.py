@@ -46,15 +46,8 @@ class RequestHandler(BaseHTTPRequestHandler):
     @override
     # pylint: disable=invalid-name
     def do_GET(self):
-        db_host = os.getenv("DB_HOST")
-        db_user = os.getenv("DB_USER")
-        db_pass = os.getenv("DB_PASS")
-        db_name = os.getenv("DB_NAME")
-        self.handle_request("get", db_host, db_user, db_pass, db_name)
-
-    def handle_request(self, method: str, db_host, db_user, db_pass, db_name):
-        status_code: int
-        conn = psycopg2.connect(dbname=db_name, user=db_user, password=db_pass, host=db_host)
+        status_code: int = 200
+        conn = psycopg2.connect(dbname=_DB_NAME, user=_DB_USER, password=_DB_PASS, host=_DB_HOST)
         if self.in_path(_SUCCESS):
             cur = conn.cursor()
             cur.execute("SELECT id, name FROM test_table")
