@@ -34,6 +34,8 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.TestFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.startupcheck.OneShotStartupCheckStrategy;
@@ -42,6 +44,7 @@ import org.testcontainers.utility.MountableFile;
 
 public class OverheadTests {
 
+  private static final Logger logger = LoggerFactory.getLogger(OverheadTests.class);
   private static final Network NETWORK = Network.newNetwork();
   private static GenericContainer<?> collector;
   private final NamingConventions namingConventions = new NamingConventions();
@@ -68,11 +71,17 @@ public class OverheadTests {
   }
 
   void runTestConfig(TestConfig config) {
+    logger.warn(
+        String.format("Running test config %s: %s", config.getName(), config.getDescription()));
     runDurations.clear();
     config
         .getDistroConfigs()
         .forEach(
             distroConfig -> {
+              logger.warn(
+                  String.format(
+                      "Running distro config %s: %s (%s)",
+                      distroConfig.getName(), distroConfig.getDescription(), config.getName()));
               try {
                 runAppOnce(config, distroConfig);
               } catch (Exception e) {
