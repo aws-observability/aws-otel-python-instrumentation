@@ -47,7 +47,7 @@ public class RuntimeUtil {
   }
 
   private static int getCoreCountMac() throws Exception {
-    String command = "sysctl -n machdep.cpu.core_count";
+    String command = "sysctl -n hw.ncpu";
     String[] cmd = {"/bin/sh", "-c", command};
     Process process = Runtime.getRuntime().exec(cmd);
     BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
