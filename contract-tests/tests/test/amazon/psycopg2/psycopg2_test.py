@@ -44,14 +44,14 @@ class Psycopg2Test(ContractTestBase):
     @override
     @classmethod
     def tear_down_dependency_container(cls) -> None:
-        client = docker.from_env()
-        try:
-            container: Container = client.containers.get("mydb")
-            container.stop()
-            container.remove()
-        except DockerException as exception:
-            print("error when cleaning docker resource:", exception)
-
+        # client = docker.from_env()
+        # try:
+        #     container: Container = client.containers.get("mydb")
+        #     container.stop()
+        #     container.remove()
+        # except DockerException as exception:
+        #     print("error when cleaning docker resource:", exception)
+        cls.container.stop()
     @override
     def get_application_extra_environment_variables(self) -> Dict[str, str]:
         return {
