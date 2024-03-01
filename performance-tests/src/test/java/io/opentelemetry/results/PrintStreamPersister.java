@@ -43,34 +43,26 @@ class PrintStreamPersister implements ResultsPersister {
               "%02d:%02d:%02d",
               duration.toHours(), duration.toMinutesPart(), duration.toSecondsPart());
         });
-    display(results, "Avg. CPU (user) %", res -> String.valueOf(res.averageJvmUserCpu));
-    display(results, "Max. CPU (user) %", res -> String.valueOf(res.maxJvmUserCpu));
-    display(results, "Avg. mch tot cpu %", res -> String.valueOf(res.averageMachineCpuTotal));
+    display(results, "Avg. CPU %", res -> format(res.averageCpu));
+    display(results, "Max. CPU %", res -> format(res.maxCpu));
     display(results, "Startup time (ms)", res -> String.valueOf(res.startupDurationMs));
-    display(results, "Total allocated MB", res -> format(res.getTotalAllocatedMB()));
-    // display(results, "Min heap used (MB)", res -> format(res.getMinHeapUsedMB()));
-    // display(results, "Max heap used (MB)", res -> format(res.getMaxHeapUsedMB()));
-    display(results, "Thread switch rate", res -> String.valueOf(res.maxThreadContextSwitchRate));
-    display(results, "GC time (ms)", res -> String.valueOf(NANOSECONDS.toMillis(res.totalGCTime)));
-    display(
-        results,
-        "GC pause time (ms)",
-        res -> String.valueOf(NANOSECONDS.toMillis(res.totalGcPauseNanos)));
+    display(results, "Min Resident Mem (MB)", res -> format(res.getMinRSSMemMB()));
+    display(results, "Max Resident Mem (MB)", res -> format(res.getMaxRSSMemMB()));
+    display(results, "Min Virtual Mem (MB)", res -> format(res.getMinVMSMemMB()));
+    display(results, "Max Virtual Mem (MB)", res -> format(res.getMaxVMSMemMB()));
     display(results, "Req. mean (ms)", res -> format(res.requestAvg));
     display(results, "Req. p95 (ms)", res -> format(res.requestP95));
     display(results, "Iter. mean (ms)", res -> format(res.iterationAvg));
     display(results, "Iter. p95 (ms)", res -> format(res.iterationP95));
-    display(results, "Net read avg (bps)", res -> format(res.averageNetworkRead));
-    display(results, "Net write avg (bps)", res -> format(res.averageNetworkWrite));
     display(results, "Peak threads", res -> String.valueOf(res.peakThreadCount));
   }
 
   private void display(
       List<AppPerfResults> results, String pref, Function<AppPerfResults, String> vs) {
-    out.printf("%-20s: ", pref);
+    out.printf("%-22s: ", pref);
     results.forEach(
         result -> {
-          out.printf("%17s", vs.apply(result));
+          out.printf("%25s", vs.apply(result));
         });
     out.println();
   }

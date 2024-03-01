@@ -45,17 +45,16 @@ public class VehicleInventoryServiceContainer {
             .withLogConsumer(new Slf4jLogConsumer(logger))
             .withExposedPorts(PORT)
             .waitingFor(Wait.forHttp("/vehicle-inventory/health-check").forPort(PORT))
-                .withFileSystemBind(
-                        namingConventions.localResults(), namingConventions.containerResults())
+            .withFileSystemBind(namingConventions.localResults(), namingConventions.containerResults())
             .withCopyFileToContainer(
                 MountableFile.forClasspathResource("runVehicleInventory.sh"),
                 "vehicle-inventory-app/run.sh")
-                .withCopyFileToContainer(
-                        MountableFile.forClasspathResource("collect-metrics.py"),
-                        "vehicle-inventory-app/collect-metrics.py")
-                .withCopyFileToContainer(
-                        MountableFile.forClasspathResource("executePerf.sh"),
-                        "vehicle-inventory-app/executePerf.sh")
+            .withCopyFileToContainer(
+                MountableFile.forClasspathResource("profiler.py"),
+                "vehicle-inventory-app/profiler.py")
+            .withCopyFileToContainer(
+                MountableFile.forClasspathResource("executeProfiler.sh"),
+                "vehicle-inventory-app/executeProfiler.sh")
             .withEnv("DJANGO_SETTINGS_MODULE", "VehicleInventoryApp.settings")
             .withEnv("PORT", Integer.toString(PORT))
             .withEnv("POSTGRES_DATABASE", PostgresContainer.DATABASE_NAME)

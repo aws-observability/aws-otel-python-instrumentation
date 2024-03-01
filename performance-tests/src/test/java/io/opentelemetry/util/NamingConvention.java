@@ -36,8 +36,18 @@ public class NamingConvention {
    *
    * @param distroConfig The distroConfig to get the jfr file path for.
    */
+  // TODO: Clean up
   public Path jfrFile(DistroConfig distroConfig) {
     return Paths.get(dir, "petclinic-" + distroConfig.getName() + ".jfr");
+  }
+
+  /**
+   * Returns a path to the location of the jfr output file for a given distroConfig run.
+   *
+   * @param distroConfig The distroConfig to get the jfr file path for.
+   */
+  public Path performanceMetricsFile(DistroConfig distroConfig) {
+    return Paths.get(dir, "performance-metrics-" + distroConfig.getName() + ".json");
   }
 
   /**

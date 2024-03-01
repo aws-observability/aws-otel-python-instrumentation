@@ -101,7 +101,7 @@ public class OverheadTests {
     }
 
     long testStart = System.currentTimeMillis();
-    //startRecording(distroConfig, vehicleInventoryService);
+    startRecording(distroConfig, vehicleInventoryService);
 
     GenericContainer<?> k6 =
         new K6Container(NETWORK, distroConfig, config, namingConventions).build();
@@ -119,8 +119,8 @@ public class OverheadTests {
       DistroConfig distroConfig, GenericContainer<?> vehicleInventoryService) throws Exception {
     String[] command = {
       "sh",
-            "executePerf.sh",
-            distroConfig.getName()
+      "executeProfiler.sh",
+      distroConfig.getName()
     };
     vehicleInventoryService.execInContainer(command);
   }

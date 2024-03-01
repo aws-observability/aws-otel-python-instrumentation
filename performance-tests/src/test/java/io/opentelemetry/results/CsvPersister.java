@@ -22,23 +22,19 @@ class CsvPersister implements ResultsPersister {
   private static final List<FieldSpec> FIELDS =
       Arrays.asList(
           FieldSpec.of("startupDurationMs", r -> r.startupDurationMs),
-          // FieldSpec.of("minHeapUsed", r -> r.heapUsed.min),
-          // FieldSpec.of("maxHeapUsed", r -> r.heapUsed.max),
-          FieldSpec.of("totalAllocatedMB", r -> r.getTotalAllocatedMB()),
-          FieldSpec.of("totalGCTime", r -> r.totalGCTime),
+          FieldSpec.of("minResidentMemoryMB", r -> r.getMinRSSMemMB()),
+          FieldSpec.of("maxResidentMemoryMB", r -> r.getMaxRSSMemMB()),
+          FieldSpec.of("minVirtualMemoryMB", r -> r.getMinVMSMemMB()),
+          FieldSpec.of("maxVirtualMemoryMB", r -> r.getMaxVMSMemMB()),
           FieldSpec.of("maxThreadContextSwitchRate", r -> r.maxThreadContextSwitchRate),
           FieldSpec.of("iterationAvg", r -> r.iterationAvg),
           FieldSpec.of("iterationP95", r -> r.iterationP95),
           FieldSpec.of("requestAvg", r -> r.requestAvg),
           FieldSpec.of("requestP95", r -> r.requestP95),
-          FieldSpec.of("netReadAvg", r -> r.averageNetworkRead),
-          FieldSpec.of("netWriteAvg", r -> r.averageNetworkWrite),
           FieldSpec.of("peakThreadCount", r -> r.peakThreadCount),
-          FieldSpec.of("averageCpuUser", r -> r.averageJvmUserCpu),
-          FieldSpec.of("maxCpuUser", r -> r.maxJvmUserCpu),
-          FieldSpec.of("averageMachineCpuTotal", r -> r.averageMachineCpuTotal),
-          FieldSpec.of("runDurationMs", r -> r.runDurationMs),
-          FieldSpec.of("gcPauseMs", r -> NANOSECONDS.toMillis(r.totalGcPauseNanos)));
+          FieldSpec.of("averageCpu", r -> r.averageCpu),
+          FieldSpec.of("maxCpu", r -> r.maxCpu),
+          FieldSpec.of("runDurationMs", r -> r.runDurationMs));
 
   private final Path resultsFile;
 

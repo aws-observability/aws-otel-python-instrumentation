@@ -45,7 +45,6 @@ print("this is cpu count: " + str(psutil.cpu_count()))
 
 while True:
     with open(tmp_file_name, 'w') as tmp_file:
-        print("sleeping for one sec")
         time.sleep(1)
 
         curr_rss_mem = process.memory_info().rss # in bytes

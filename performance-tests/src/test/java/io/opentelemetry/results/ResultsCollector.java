@@ -44,7 +44,7 @@ public class ResultsCollector {
 
       builder = addStartupTime(builder, distroConfig);
       builder = addK6Results(builder, distroConfig);
-      // builder = addJfrResults(builder, distroConfig);
+      builder = addProfilerResults(builder, distroConfig);
 
       return builder.build();
     } catch (IOException e) {
@@ -80,6 +80,7 @@ public class ResultsCollector {
     return result.doubleValue();
   }
 
+  // TODO: Clean Up
   private AppPerfResults.Builder addJfrResults(
       AppPerfResults.Builder builder, DistroConfig distroConfig) throws IOException {
     Path jfrFile = namingConvention.jfrFile(distroConfig);
@@ -97,6 +98,29 @@ public class ResultsCollector {
         .totalGcPauseNanos(computeTotalGcPauseNanos(jfrFile));
   }
 
+  private AppPerfResults.Builder addProfilerResults(
+          AppPerfResults.Builder builder, DistroConfig distroConfig) throws IOException {
+    Path performanceMetricsFile = namingConvention.performanceMetricsFile(distroConfig);
+    String json = new String(Files.readAllBytes(performanceMetricsFile));
+    double peakThreads = read(json, "$.peak_threads");
+    double minRSSMem = read(json, "$.min_rss_mem");
+    double maxRSSMem = read(json, "$.max_rss_mem");
+    double minVMSMem = read(json, "$.min_vms_mem");
+    double maxVMSMem = read(json, "$.max_vms_mem");
+    double averageCpu = read(json, "$.avg_cpu");
+    double maxCPU = read(json, "$.max_cpu");
+
+    return builder
+        .peakThreadCount((long) peakThreads)
+        .minRSSMem((long) minRSSMem)
+        .maxRSSMem((long) maxRSSMem)
+        .minVMSMem((long) minVMSMem)
+        .maxVMSMem((long) maxVMSMem)
+        .averageCpu(averageCpu)
+        .maxCpu(maxCPU);
+  }
+
+  // TODO: Clean up.
   private long readTotalGCTime(Path jfrFile) throws IOException {
     return JFRUtils.sumLongEventValues(jfrFile, "jdk.G1GarbageCollection", "duration");
   }
