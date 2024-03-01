@@ -147,7 +147,7 @@ class Psychopg2Test(ContractTestBase):
         self.assertIn(key, attributes_dict)
         actual_value: AnyValue = attributes_dict[key]
         self.assertIsNotNone(actual_value)
-        self.assertEqual(expected_value, actual_value.string_value)
+        self.assertEqual(expected_value, actual_value.int_value)
 
     def _assert_semantic_conventions_span_attributes(
         self, resource_scope_spans: List[ResourceScopeSpan], path: str, status_code: int, commands: List[str]
