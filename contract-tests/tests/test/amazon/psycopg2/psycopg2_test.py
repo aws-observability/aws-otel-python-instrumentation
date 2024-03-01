@@ -31,6 +31,7 @@ class Psycopg2Test(ContractTestBase):
     @classmethod
     def set_up_dependency_container(cls) -> None:
         cls.container = PostgresContainer(user="postgres", password="example", dbname="postgres").with_kwargs(network=NETWORK_NAME)
+        cls.container.start()
         # client: DockerClient = docker.from_env()
         # client.containers.run(
         #     "postgres:latest",
