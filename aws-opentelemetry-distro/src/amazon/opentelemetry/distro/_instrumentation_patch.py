@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+# Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import importlib
 import ssl
 from urllib.request import Request, urlopen
@@ -110,6 +111,7 @@ def _apply_botocore_sqs_patch() -> None:
     _SqsExtension.extract_attributes = patch_extract_attributes
 
 
+# The OpenTelemetry Authors code
 def _lazy_load(module, cls):
     """Clone of upstream opentelemetry.instrumentation.botocore.extensions.lazy_load
 
@@ -121,6 +123,9 @@ def _lazy_load(module, cls):
         return getattr(imported_mod, cls, None)
 
     return loader
+
+
+# END The OpenTelemetry Authors code
 
 
 class _S3Extension(_AwsSdkExtension):

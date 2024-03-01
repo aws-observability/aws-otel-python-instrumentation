@@ -1,6 +1,7 @@
 /*
  * Copyright The OpenTelemetry Authors
  * SPDX-License-Identifier: Apache-2.0
+ * Modifications Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  */
 
 package io.opentelemetry.distros;
@@ -10,7 +11,7 @@ import java.util.Map;
 
 public enum DistroConfig {
   NONE("none", "no distro at all", false, Collections.EMPTY_MAP),
-  APPLICATION_SINGALS_DISABLED(
+  APPLICATION_SIGNALS_DISABLED(
       "app_signals_disabled",
       "ADOT distro with Application Signals disabled",
       true,
