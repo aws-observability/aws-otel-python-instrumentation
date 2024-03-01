@@ -98,9 +98,9 @@ class Psychopg2Test(ContractTestBase):
         metrics: List[ResourceScopeMetric] = self.mock_collector_client.get_metrics(
             {LATENCY_METRIC, ERROR_METRIC, FAULT_METRIC}
         )
-        self._assert_metric_attributes(metrics, method, path, LATENCY_METRIC, 5000)
-        self._assert_metric_attributes(metrics, method, path, ERROR_METRIC, expected_error)
-        self._assert_metric_attributes(metrics, method, path, FAULT_METRIC, expected_fault)
+        self._assert_metric_attribute_with_select(metrics, LATENCY_METRIC, 5000)
+        self._assert_metric_attribute_with_select(metrics, ERROR_METRIC, expected_error)
+        self._assert_metric_attribute_with_select(metrics, FAULT_METRIC, expected_fault)
 
     def _assert_aws_span_attributes(
         self, resource_scope_spans: List[ResourceScopeSpan], sql_commands: List[str], path: str
@@ -175,11 +175,9 @@ class Psychopg2Test(ContractTestBase):
         self._assert_str_attribute(attributes_dict, "db.name", "postgres")
         self._assert_str_attribute(attributes_dict, "db.user", "postgres")
 
-    def _assert_metric_attributes(
+    def _assert_metric_attribute_with_select(
         self,
         resource_scope_metrics: List[ResourceScopeMetric],
-        method: str,
-        path: str,
         metric_name: str,
         expected_sum: int,
     ) -> None:
@@ -194,12 +192,9 @@ class Psychopg2Test(ContractTestBase):
 
         self.assertEqual(len(dp_list), 2)
         dp: ExponentialHistogramDataPoint = dp_list[0]
-        print(dp_list)
-        print(dp)
         if len(dp_list[1].attributes) > len(dp_list[0].attributes):
             dp = dp_list[1]
         attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(dp.attributes)
-        print(attribute_dict)
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
