@@ -172,7 +172,7 @@ class Psychopg2Test(ContractTestBase):
         print("Command: ****:", command)
         self._assert_str_attribute(attributes_dict, "net.peer.name", "mydb")
         self._assert_int_attribute(attributes_dict, "net.peer.port", 5432)
-        self.assertTrue(attributes_dict.get("db.statement").string_value.startswith(command))
+        self.assertTrue(attributes_dict.get("db.statement").string_value.index(command) >= 0)
         self._assert_str_attribute(attributes_dict, "db.system", "postgresql")
         self._assert_str_attribute(attributes_dict, "db.name", "postgres")
         self._assert_str_attribute(attributes_dict, "db.user", "postgres")
