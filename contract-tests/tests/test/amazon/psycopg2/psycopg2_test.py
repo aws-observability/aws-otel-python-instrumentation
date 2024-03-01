@@ -2,10 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from typing import Dict, List
 
-import docker
-from docker import DockerClient
-from docker.errors import DockerException
-from docker.models.containers import Container
 from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
 from requests import Response, request
 from testcontainers.postgres import PostgresContainer
@@ -26,32 +22,23 @@ from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
 from opentelemetry.proto.metrics.v1.metrics_pb2 import ExponentialHistogramDataPoint, Metric
 from opentelemetry.proto.trace.v1.trace_pb2 import Span
 
+
 class Psycopg2Test(ContractTestBase):
     @override
     @classmethod
     def set_up_dependency_container(cls) -> None:
-        cls.container = PostgresContainer(user="postgres", password="example", dbname="postgres").with_kwargs(network=NETWORK_NAME).with_name("mydb")
+        cls.container = (
+            PostgresContainer(user="postgres", password="example", dbname="postgres")
+            .with_kwargs(network=NETWORK_NAME)
+            .with_name("mydb")
+        )
         cls.container.start()
-        # client: DockerClient = docker.from_env()
-        # client.containers.run(
-        #     "postgres:latest",
-        #     environment={"POSTGRES_PASSWORD": "example"},
-        #     detach=True,
-        #     name="mydb",
-        #     network=NETWORK_NAME,
-        # )
 
     @override
     @classmethod
     def tear_down_dependency_container(cls) -> None:
-        # client = docker.from_env()
-        # try:
-        #     container: Container = client.containers.get("mydb")
-        #     container.stop()
-        #     container.remove()
-        # except DockerException as exception:
-        #     print("error when cleaning docker resource:", exception)
         cls.container.stop()
+
     @override
     def get_application_extra_environment_variables(self) -> Dict[str, str]:
         return {
