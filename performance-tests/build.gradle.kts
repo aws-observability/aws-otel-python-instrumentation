@@ -6,7 +6,12 @@ plugins {
 spotless {
   java {
     googleJavaFormat()
+    licenseHeaderFile(rootProject.file("../scripts/spotless.modify_license.java"), "(package|import|public)")
+            .named("modify_license")
+            .onlyIfContentMatches("!.*RuntimeUtil.java")
     licenseHeaderFile(rootProject.file("../scripts/spotless.license.java"), "(package|import|public)")
+            .named("license")
+            .onlyIfContentMatches(".*RuntimeUtil.java")
     target("src/**/*.java")
   }
 }
