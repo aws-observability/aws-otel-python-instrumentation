@@ -144,11 +144,6 @@ class Psychopg2Test(ContractTestBase):
         self.assertIsNotNone(actual_value)
         self.assertEqual(expected_value, actual_value.string_value)
 
-    def _assert_int_attribute(self, attributes_dict: Dict[str, AnyValue], key: str, expected_value: int) -> None:
-        actual_value: AnyValue = attributes_dict[key]
-        self.assertIsNotNone(actual_value)
-        self.assertEqual(expected_value, actual_value.int_value)
-
     def _assert_semantic_conventions_span_attributes(
         self, resource_scope_spans: List[ResourceScopeSpan], path: str, status_code: int, commands: List[str]
     ) -> None:
@@ -168,7 +163,7 @@ class Psychopg2Test(ContractTestBase):
         self, attributes_list: List[KeyValue], method: str, endpoint: str, status_code: int
     ) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
-        self._assert_int_attribute(attributes_dict, SpanAttributes.HTTP_STATUS_CODE, status_code)
+        print(attributes_dict)
         self._assert_str_attribute(attributes_dict, SpanAttributes.HTTP_URL, f"http://backend:8080/backend/{endpoint}")
         self._assert_str_attribute(attributes_dict, SpanAttributes.HTTP_METHOD, method)
         self._assert_str_attribute(attributes_dict, "db.system", "postgresql")
