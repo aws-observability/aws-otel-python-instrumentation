@@ -13,10 +13,14 @@ public class AppPerfResults {
 
   final DistroConfig distroConfig;
   final TestConfig config;
-  final double iterationAvg;
-  final double iterationP95;
-  final double requestAvg;
-  final double requestP95;
+  final double requestCount;
+  final double requestRate;
+  final double requestLatencyAvg;
+  final double requestLatencyP0;
+  final double requestLatencyP50;
+  final double requestLatencyP90;
+  final double requestLatencyP99;
+  final double requestLatencyP100;
   final long totalGCTime;
   final long totalAllocated;
   final MinMax heapUsed;
@@ -34,10 +38,14 @@ public class AppPerfResults {
   private AppPerfResults(Builder builder) {
     this.distroConfig = builder.distroConfig;
     this.config = builder.config;
-    this.iterationAvg = builder.iterationAvg;
-    this.iterationP95 = builder.iterationP95;
-    this.requestAvg = builder.requestAvg;
-    this.requestP95 = builder.requestP95;
+    this.requestCount = builder.requestCount;
+    this.requestRate = builder.requestRate;
+    this.requestLatencyAvg = builder.requestLatencyAvg;
+    this.requestLatencyP0 = builder.requestLatencyP0;
+    this.requestLatencyP50 = builder.requestLatencyP50;
+    this.requestLatencyP90 = builder.requestLatencyP90;
+    this.requestLatencyP99 = builder.requestLatencyP99;
+    this.requestLatencyP100 = builder.requestLatencyP100;
     this.totalGCTime = builder.totalGCTime;
     this.totalAllocated = builder.totalAllocated;
     this.heapUsed = builder.heapUsed;
@@ -81,10 +89,14 @@ public class AppPerfResults {
     private long startupDurationMs;
     private DistroConfig distroConfig;
     private TestConfig config;
-    private double iterationAvg;
-    private double iterationP95;
-    private double requestAvg;
-    private double requestP95;
+    public double requestCount;
+    public double requestRate;
+    public double requestLatencyAvg;
+    public double requestLatencyP0;
+    public double requestLatencyP50;
+    public double requestLatencyP90;
+    public double requestLatencyP99;
+    public double requestLatencyP100;
     private long totalGCTime;
     private long totalAllocated;
     private MinMax heapUsed;
@@ -109,26 +121,6 @@ public class AppPerfResults {
 
     Builder config(TestConfig config) {
       this.config = config;
-      return this;
-    }
-
-    Builder iterationAvg(double iterationAvg) {
-      this.iterationAvg = iterationAvg;
-      return this;
-    }
-
-    Builder iterationP95(double iterationP95) {
-      this.iterationP95 = iterationP95;
-      return this;
-    }
-
-    Builder requestAvg(double requestAvg) {
-      this.requestAvg = requestAvg;
-      return this;
-    }
-
-    Builder requestP95(double requestP95) {
-      this.requestP95 = requestP95;
       return this;
     }
 

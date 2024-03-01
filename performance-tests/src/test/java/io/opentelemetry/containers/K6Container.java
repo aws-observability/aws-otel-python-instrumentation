@@ -57,6 +57,8 @@ public class K6Container {
             String.valueOf(config.getMaxRequestRate()),
             "--summary-export",
             k6OutputFile.toString(),
+            "--summary-trend-stats",
+            "avg,p(0),p(50),p(90),p(99),p(100),count",
             "/app/performanceTest.js")
         .withStartupCheckStrategy(
             new OneShotStartupCheckStrategy().withTimeout(Duration.ofMinutes(15)));
