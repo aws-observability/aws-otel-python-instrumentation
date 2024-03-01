@@ -10,15 +10,18 @@ import psycopg2
 from typing_extensions import override
 
 _PORT: int = 8080
-_NETWORK_ALIAS: str = "backend"
 _SUCCESS: str = "success"
 _ERROR: str = "error"
 _FAULT: str = "fault"
 
+_DB_HOST = os.getenv("DB_HOST")
+_DB_USER = os.getenv("DB_USER")
+_DB_PASS = os.getenv("DB_PASS")
+_DB_NAME = os.getenv("DB_NAME")
 
-def prepare_database(db_host, db_user, db_pass, db_name):
-    conn = psycopg2.connect(dbname=db_name, user=db_user, password=db_pass, host=db_host)
-    print("db connected")
+
+def prepare_database() -> None:
+    conn = psycopg2.connect(dbname=_DB_NAME, user=_DB_USER, password=_DB_PASS, host=_DB_HOST)
     cur = conn.cursor()
     cur.execute("DROP TABLE IF EXISTS test_table")
     cur.execute(
@@ -66,8 +69,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             try:
                 cur.execute("SELECT id, name FROM invalid_table")
             except psycopg2.ProgrammingError as exception:
-                print("Exception occurred:", exception)
+                print("Expected Exception with Invalid SQL occurred:", exception)
                 status_code = 500
+            except Exception as exception:  # pylint: disable=broad-except
+                print("Exception Occurred:", exception)
             else:
                 status_code = 200
             finally:
@@ -83,11 +88,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    db_host = os.getenv("DB_HOST")
-    db_user = os.getenv("DB_USER")
-    db_pass = os.getenv("DB_PASS")
-    db_name = os.getenv("DB_NAME")
-    prepare_database(db_host, db_user, db_pass, db_name)
+    prepare_database()
     server_address: Tuple[str, int] = ("", _PORT)
     request_handler_class: type = RequestHandler
     requests_server: ThreadingHTTPServer = ThreadingHTTPServer(server_address, request_handler_class)

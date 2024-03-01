@@ -10,7 +10,7 @@ from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
 from requests import Response, request
 from typing_extensions import override
 
-from amazon.base.contract_test_base import ContractTestBase
+from amazon.base.contract_test_base import NETWORK_NAME, ContractTestBase
 from amazon.utils.app_signals_constants import (
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
@@ -25,18 +25,8 @@ from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
 from opentelemetry.proto.metrics.v1.metrics_pb2 import ExponentialHistogramDataPoint, Metric
 from opentelemetry.proto.trace.v1.trace_pb2 import Span
 
-NETWORK_NAME: str = "aws-appsignals-network"
 
-
-class Psychopg2Test(ContractTestBase):
-    @override
-    def get_application_network_aliases(self) -> List[str]:
-        """
-        This will be the target hostname of the clients making http requests in the application image, so that they
-        don't use localhost.
-        """
-        return ["backend"]
-
+class Psycopg2Test(ContractTestBase):
     @override
     @classmethod
     def set_up_dependency_container(cls) -> None:
