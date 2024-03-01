@@ -30,7 +30,7 @@ class Psycopg2Test(ContractTestBase):
     @override
     @classmethod
     def set_up_dependency_container(cls) -> None:
-        cls.container = PostgresContainer(user="postgres", password="example", dbname="postgres").with_kwargs(network=NETWORK_NAME, name="mydb")
+        cls.container = PostgresContainer(user="postgres", password="example", dbname="postgres").with_kwargs(network=NETWORK_NAME).with_name("mydb")
         cls.container.start()
         # client: DockerClient = docker.from_env()
         # client.containers.run(
