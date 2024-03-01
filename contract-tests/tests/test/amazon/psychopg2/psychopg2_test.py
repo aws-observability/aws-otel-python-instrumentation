@@ -161,7 +161,7 @@ class Psychopg2Test(ContractTestBase):
         self.assertEqual(len(target_spans), len(commands))
         for target_span in target_spans:
             index: int = target_spans.index(target_span)
-            self.assertEqual(target_span.name, commands[index])
+            self.assertEqual(target_span.name, commands[index].split()[0])
             self._assert_semantic_conventions_attributes(target_spans[index].attributes, commands[index], path, status_code)
 
     def _assert_semantic_conventions_attributes(
