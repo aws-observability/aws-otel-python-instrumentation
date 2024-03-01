@@ -169,6 +169,7 @@ class Psychopg2Test(ContractTestBase):
     ) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         print(attributes_dict)
+        print("Command: ****:", command)
         self._assert_str_attribute(attributes_dict, "net.peer.name", "mydb")
         self._assert_int_attribute(attributes_dict, "net.peer.port", 5432)
         self.assertTrue(attributes_dict.get("db.statement").string_value.startswith(command))
