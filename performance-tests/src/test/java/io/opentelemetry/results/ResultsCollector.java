@@ -99,7 +99,7 @@ public class ResultsCollector {
   }
 
   private AppPerfResults.Builder addProfilerResults(
-          AppPerfResults.Builder builder, DistroConfig distroConfig) throws IOException {
+      AppPerfResults.Builder builder, DistroConfig distroConfig) throws IOException {
     Path performanceMetricsFile = namingConvention.performanceMetricsFile(distroConfig);
     String json = new String(Files.readAllBytes(performanceMetricsFile));
     double peakThreads = read(json, "$.peak_threads");

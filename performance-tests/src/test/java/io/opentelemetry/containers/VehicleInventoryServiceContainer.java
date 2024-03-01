@@ -30,7 +30,10 @@ public class VehicleInventoryServiceContainer {
   private final NamingConventions namingConventions;
 
   public VehicleInventoryServiceContainer(
-      Network network, Startable collector, DistroConfig distroConfig, NamingConventions namingConventions) {
+      Network network,
+      Startable collector,
+      DistroConfig distroConfig,
+      NamingConventions namingConventions) {
     this.network = network;
     this.collector = collector;
     this.distroConfig = distroConfig;
@@ -45,7 +48,8 @@ public class VehicleInventoryServiceContainer {
             .withLogConsumer(new Slf4jLogConsumer(logger))
             .withExposedPorts(PORT)
             .waitingFor(Wait.forHttp("/vehicle-inventory/health-check").forPort(PORT))
-            .withFileSystemBind(namingConventions.localResults(), namingConventions.containerResults())
+            .withFileSystemBind(
+                namingConventions.localResults(), namingConventions.containerResults())
             .withCopyFileToContainer(
                 MountableFile.forClasspathResource("runVehicleInventory.sh"),
                 "vehicle-inventory-app/run.sh")

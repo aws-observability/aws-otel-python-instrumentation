@@ -42,7 +42,8 @@ public class NamingConvention {
   }
 
   /**
-   * Returns a path to the location of the performance-metrics output file for a given distroConfig run.
+   * Returns a path to the location of the performance-metrics output file for a given distroConfig
+   * run.
    *
    * @param distroConfig The distroConfig to get the performance-metrics file path for.
    */

@@ -5,8 +5,6 @@
 
 package io.opentelemetry.results;
 
-import static java.util.concurrent.TimeUnit.NANOSECONDS;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;

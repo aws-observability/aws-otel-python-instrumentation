@@ -53,7 +53,7 @@ public class AppPerfResults {
     this.maxVMSMem = builder.maxVMSMem;
     this.averageCpu = builder.averageCpu;
     this.maxCpu = builder.maxCpu;
-    //TODO: cleanup
+    // TODO: cleanup
     this.totalGCTime = builder.totalGCTime;
     this.totalAllocated = builder.totalAllocated;
     this.heapUsed = builder.heapUsed;

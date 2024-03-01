@@ -91,7 +91,8 @@ public class OverheadTests {
     imageService.start();
 
     GenericContainer<?> vehicleInventoryService =
-        new VehicleInventoryServiceContainer(NETWORK, collector, distroConfig, namingConventions).build();
+        new VehicleInventoryServiceContainer(NETWORK, collector, distroConfig, namingConventions)
+            .build();
     long start = System.currentTimeMillis();
     vehicleInventoryService.start();
     writeStartupTimeFile(distroConfig, start);
@@ -117,11 +118,7 @@ public class OverheadTests {
 
   private void startRecording(
       DistroConfig distroConfig, GenericContainer<?> vehicleInventoryService) throws Exception {
-    String[] command = {
-      "sh",
-      "executeProfiler.sh",
-      distroConfig.getName()
-    };
+    String[] command = {"sh", "executeProfiler.sh", distroConfig.getName()};
     vehicleInventoryService.execInContainer(command);
   }
 

@@ -5,8 +5,6 @@
 
 package io.opentelemetry.results;
 
-import static java.util.concurrent.TimeUnit.NANOSECONDS;
-
 import io.opentelemetry.config.TestConfig;
 import java.io.PrintStream;
 import java.time.Duration;
