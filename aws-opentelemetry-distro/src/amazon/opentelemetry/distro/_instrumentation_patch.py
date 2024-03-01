@@ -14,9 +14,9 @@ from opentelemetry.semconv.trace import SpanAttributes
 
 
 def apply_instrumentation_patches() -> None:
-    """Apply patches to upstream libraries.
+    """Apply patches to upstream instrumentation libraries.
 
-    This method is invoked to apply changes to upstream libraries, typically when changes to upstream
+    This method is invoked to apply changes to upstream instrumentation libraries, typically when changes to upstream
     are required on a timeline that cannot wait for upstream release. Generally speaking, patches should be short-term
     local solutions that are comparable to long-term upstream solutions.
 
@@ -37,6 +37,7 @@ def _apply_botocore_instrumentation_patches() -> None:
     _apply_botocore_sqs_patch()
 
 
+# The OpenTelemetry Authors code
 def _apply_resource_detector_patches() -> None:
     """AWS Resource Detector patches for getting the following unreleased change (as of v2.0.1) in the upstream:
     https://github.com/open-telemetry/opentelemetry-python-contrib/commit/a5ec3f7f55494cb80b4b53c652e31c465b8d5e80
@@ -63,6 +64,9 @@ def _apply_resource_detector_patches() -> None:
 
     ec2_resource._aws_http_request = patch_ec2_aws_http_request
     eks_resource._aws_http_request = patch_eks_aws_http_request
+
+
+# END The OpenTelemetry Authors code
 
 
 def _apply_botocore_kinesis_patch() -> None:
