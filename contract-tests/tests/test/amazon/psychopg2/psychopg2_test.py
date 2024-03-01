@@ -188,21 +188,23 @@ class Psychopg2Test(ContractTestBase):
             if resource_scope_metric.metric.name.lower() == metric_name.lower():
                 target_metrics.append(resource_scope_metric.metric)
 
-        print(target_metrics)
-        self.assertEqual(len(target_metrics), 1)
-        target_metric: Metric = target_metrics[0]
+        self.assertEqual(len(target_metrics), 2)
+        target_metric: Metric = target_metrics[1]
         dp_list: List[ExponentialHistogramDataPoint] = target_metric.exponential_histogram.data_points
 
         self.assertEqual(len(dp_list), 2)
         dp: ExponentialHistogramDataPoint = dp_list[0]
+        print(dp_list)
+        print(dp)
         if len(dp_list[1].attributes) > len(dp_list[0].attributes):
             dp = dp_list[1]
         attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(dp.attributes)
+        print(attribute_dict)
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
-        self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, "backend:8080")
-        self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, f"{method} /backend")
+        self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, "postgresql")
+        self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, "CLIENT")
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "CLIENT")
 
         actual_sum: float = dp.sum
