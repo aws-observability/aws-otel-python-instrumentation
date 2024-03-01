@@ -93,7 +93,7 @@ class Psychopg2Test(ContractTestBase):
 
         resource_scope_spans: List[ResourceScopeSpan] = self.mock_collector_client.get_traces()
         self._assert_aws_span_attributes(resource_scope_spans, sql_commands, path)
-        self._assert_semantic_conventions_span_attributes(resource_scope_spans, method, path, status_code)
+        self._assert_semantic_conventions_span_attributes(resource_scope_spans, path, status_code, sql_commands)
 
         metrics: List[ResourceScopeMetric] = self.mock_collector_client.get_metrics(
             {LATENCY_METRIC, ERROR_METRIC, FAULT_METRIC}
@@ -114,9 +114,9 @@ class Psychopg2Test(ContractTestBase):
         self.assertEqual(len(target_spans), len(sql_commands))
         print(target_spans)
         for command in sql_commands:
-            self._assert_aws_attributes(target_spans[sql_commands.index(command)].attributes, command, path)
+            self._assert_aws_attributes(target_spans[sql_commands.index(command)].attributes, command)
 
-    def _assert_aws_attributes(self, attributes_list: List[KeyValue], command: str, endpoint: str) -> None:
+    def _assert_aws_attributes(self, attributes_list: List[KeyValue], command: str) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # InternalOperation as OTEL does not instrument the basic server we are using, so the client span is a local
@@ -126,9 +126,6 @@ class Psychopg2Test(ContractTestBase):
         self._assert_str_attribute(attributes_dict, AWS_REMOTE_OPERATION, f"{command}")
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
-        self._assert_str_attribute(attributes_dict, "db.system", "postgresql")
-        self._assert_str_attribute(attributes_dict, "db.name", "postgres")
-        self._assert_str_attribute(attributes_dict, "db.user", "postgres")
 
     def _get_attributes_dict(self, attributes_list: List[KeyValue]) -> Dict[str, AnyValue]:
         attributes_dict: Dict[str, AnyValue] = {}
@@ -153,7 +150,7 @@ class Psychopg2Test(ContractTestBase):
         self.assertEqual(expected_value, actual_value.int_value)
 
     def _assert_semantic_conventions_span_attributes(
-        self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str, status_code: int
+        self, resource_scope_spans: List[ResourceScopeSpan], path: str, status_code: int, commands: List[str]
     ) -> None:
         target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
@@ -161,22 +158,22 @@ class Psychopg2Test(ContractTestBase):
             if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
                 target_spans.append(resource_scope_span.span)
 
-        self.assertEqual(len(target_spans), 1)
-        self.assertEqual(target_spans[0].name, method)
-        self._assert_semantic_conventions_attributes(target_spans[0].attributes, method, path, status_code)
+        self.assertEqual(len(target_spans), len(commands))
+        for target_span in target_spans:
+            index: int = target_spans.index(target_span)
+            self.assertEqual(target_span.name, commands[index])
+            self._assert_semantic_conventions_attributes(target_spans[index].attributes, commands[index], path, status_code)
 
     def _assert_semantic_conventions_attributes(
         self, attributes_list: List[KeyValue], method: str, endpoint: str, status_code: int
     ) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
-        # TODO: requests instrumentation is not populating net peer attributes
-        # self._assert_str_attribute(attributes_dict, SpanAttributes.NET_PEER_NAME, "backend")
-        # self._assert_int_attribute(attributes_dict, SpanAttributes.NET_PEER_PORT, 8080)
         self._assert_int_attribute(attributes_dict, SpanAttributes.HTTP_STATUS_CODE, status_code)
         self._assert_str_attribute(attributes_dict, SpanAttributes.HTTP_URL, f"http://backend:8080/backend/{endpoint}")
         self._assert_str_attribute(attributes_dict, SpanAttributes.HTTP_METHOD, method)
-        # TODO: request instrumentation is not respecting PEER_SERVICE
-        # self._assert_str_attribute(attributes_dict, SpanAttributes.PEER_SERVICE, "backend:8080")
+        self._assert_str_attribute(attributes_dict, "db.system", "postgresql")
+        self._assert_str_attribute(attributes_dict, "db.name", "postgres")
+        self._assert_str_attribute(attributes_dict, "db.user", "postgres")
 
     def _assert_metric_attributes(
         self,
