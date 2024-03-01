@@ -26,12 +26,12 @@ from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
 from opentelemetry.proto.metrics.v1.metrics_pb2 import ExponentialHistogramDataPoint, Metric
 from opentelemetry.proto.trace.v1.trace_pb2 import Span
 
-
+_POSTGRES_CONTAINER: PostgresContainer
 class Psycopg2Test(ContractTestBase):
     @override
     @classmethod
     def set_up_dependency_container(cls) -> None:
-        cls.container = PostgresContainer(password="example", dbname="mydb").with_kwargs(network=NETWORK_NAME)
+        _POSTGRES_CONTAINER = PostgresContainer(user="postgres", password="example", dbname="postgres").with_kwargs(network=NETWORK_NAME)
         # client: DockerClient = docker.from_env()
         # client.containers.run(
         #     "postgres:latest",
@@ -55,7 +55,7 @@ class Psycopg2Test(ContractTestBase):
     @override
     def get_application_extra_environment_variables(self) -> Dict[str, str]:
         return {
-            "DB_HOST": "mydb",
+            "DB_HOST": _POSTGRES_CONTAINER.get_container_host_ip(),
             "DB_USER": "postgres",
             "DB_PASS": "example",
             "DB_NAME": "postgres",
