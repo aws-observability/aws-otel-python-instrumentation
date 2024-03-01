@@ -204,8 +204,8 @@ class Psychopg2Test(ContractTestBase):
         # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, "postgresql")
-        self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, "CLIENT")
-        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "CLIENT")
+        self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, "SELECT")
+        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
 
         actual_sum: float = dp.sum
         if metric_name is LATENCY_METRIC:
