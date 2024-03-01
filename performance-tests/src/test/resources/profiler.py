@@ -1,18 +1,21 @@
-import psutil
-import time
-import os
 import json
+import os
 import sys
+import time
+
+import psutil
+
 
 def get_pid(process_name):
     pid = 1
-    for proc in psutil.process_iter(['pid', 'name']):
+    for proc in psutil.process_iter(["pid", "name"]):
         print(proc.name())
         if process_name in proc.name():
             pid = proc.pid
             break
     print("Pid:", pid)
     return pid
+
 
 if len(sys.argv) < 2:
     sys.exit("Please provide file performance file suffix!")
@@ -44,11 +47,11 @@ max_cpu = avg_cpu
 print("this is cpu count: " + str(psutil.cpu_count()))
 
 while True:
-    with open(tmp_file_name, 'w') as tmp_file:
+    with open(tmp_file_name, "w") as tmp_file:
         time.sleep(1)
 
-        curr_rss_mem = process.memory_info().rss # in bytes
-        curr_vms_mem = process.memory_info().vms # in bytes
+        curr_rss_mem = process.memory_info().rss  # in bytes
+        curr_vms_mem = process.memory_info().vms  # in bytes
         curr_threads = process.num_threads()
         curr_cpu_perc = process.cpu_percent(0.1) / psutil.cpu_count()
 
@@ -77,6 +80,5 @@ while True:
 
         tmp_file.write(json_object)
         tmp_file.flush()
-        os.fsync(tmp_file.fileno())    
+        os.fsync(tmp_file.fileno())
         os.replace(tmp_file_name, file_name)
-    
