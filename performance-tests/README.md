@@ -78,7 +78,8 @@ An distroConfig is defined in code as a name, description, flag for instrumentat
 
 Pre-requirements:
 * Have `docker` installed and running - verify by running the `docker` command.
-* Export AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, and S3_BUCKET environment variables.
+* Export `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, and `S3_BUCKET` environment variables.
+* By default, each distroConfig runs for 10 seconds. To change this, export `DURATION` environment variable (e.g. `60m`).
 
 Steps:
 * From `aws-otel-python-instrumentation` dir, execute:
@@ -90,3 +91,5 @@ cd performance-tests
 ```
 
 The last step can be run or you can run from IDE (after setting environment variables appropriately).
+
+To diagnose test failures with `./gradlew -i test` or use `-d` for very fine details.
