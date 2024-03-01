@@ -1,7 +1,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import importlib
+import ssl
+from urllib.request import Request, urlopen
 
+import opentelemetry.sdk.extension.aws.resource.ec2 as ec2_resource
+import opentelemetry.sdk.extension.aws.resource.eks as eks_resource
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
 from opentelemetry.instrumentation.botocore.extensions.sqs import _SqsExtension
 from opentelemetry.instrumentation.botocore.extensions.types import _AttributeMapT, _AwsSdkExtension
@@ -9,15 +13,17 @@ from opentelemetry.semconv.trace import SpanAttributes
 
 
 def apply_instrumentation_patches() -> None:
-    """Apply patches to upstream instrumentation libraries.
+    """Apply patches to upstream libraries.
 
-    This method is invoked to apply changes to upstream instrumentation libraries, typically when changes to upstream
+    This method is invoked to apply changes to upstream libraries, typically when changes to upstream
     are required on a timeline that cannot wait for upstream release. Generally speaking, patches should be short-term
     local solutions that are comparable to long-term upstream solutions.
 
     Where possible, automated testing should be run to catch upstream changes resulting in broken patches
     """
     _apply_botocore_instrumentation_patches()
+
+    _apply_resource_detector_patches()
 
 
 def _apply_botocore_instrumentation_patches() -> None:
@@ -28,6 +34,34 @@ def _apply_botocore_instrumentation_patches() -> None:
     _apply_botocore_kinesis_patch()
     _apply_botocore_s3_patch()
     _apply_botocore_sqs_patch()
+
+
+def _apply_resource_detector_patches() -> None:
+    """AWS Resource Detector patches for getting the following unreleased change (as of v2.0.1) in the upstream:
+    https://github.com/open-telemetry/opentelemetry-python-contrib/commit/a5ec3f7f55494cb80b4b53c652e31c465b8d5e80
+    """
+
+    def patch_ec2_aws_http_request(method, path, headers):
+        with urlopen(
+            Request("http://169.254.169.254" + path, headers=headers, method=method),
+            timeout=5,
+        ) as response:
+            return response.read().decode("utf-8")
+
+    def patch_eks_aws_http_request(method, path, cred_value):
+        with urlopen(
+            Request(
+                "https://kubernetes.default.svc" + path,
+                headers={"Authorization": cred_value},
+                method=method,
+            ),
+            timeout=5,
+            context=ssl.create_default_context(cafile="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"),
+        ) as response:
+            return response.read().decode("utf-8")
+
+    ec2_resource._aws_http_request = patch_ec2_aws_http_request
+    eks_resource._aws_http_request = patch_eks_aws_http_request
 
 
 def _apply_botocore_kinesis_patch() -> None:
