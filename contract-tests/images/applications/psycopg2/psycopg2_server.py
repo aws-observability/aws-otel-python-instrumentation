@@ -60,7 +60,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif self.in_path(_FAULT):
             cur = conn.cursor()
             try:
-                cur.execute("SELECT id, name FROM invalid_table")
+                cur.execute("SELECT DISTINCT id, name FROM invalid_table")
             except psycopg2.ProgrammingError as exception:
                 print("Expected Exception with Invalid SQL occurred:", exception)
                 status_code = 500
