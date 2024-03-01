@@ -104,7 +104,7 @@ def _initialize_components():
     auto_resource = _customize_versions(auto_resource)
     resource = get_aggregated_resources(
         [
-            AwsEc2ResourceDetector(),
+            # AwsEc2ResourceDetector(),
             AwsEksResourceDetector(),
             AwsEcsResourceDetector(),
         ]
