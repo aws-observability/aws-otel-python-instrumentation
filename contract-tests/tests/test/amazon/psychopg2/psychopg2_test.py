@@ -24,7 +24,6 @@ from amazon.utils.app_signals_constants import (
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
 from opentelemetry.proto.metrics.v1.metrics_pb2 import ExponentialHistogramDataPoint, Metric
 from opentelemetry.proto.trace.v1.trace_pb2 import Span
-from opentelemetry.semconv.trace import SpanAttributes
 
 NETWORK_NAME: str = "aws-appsignals-network"
 
