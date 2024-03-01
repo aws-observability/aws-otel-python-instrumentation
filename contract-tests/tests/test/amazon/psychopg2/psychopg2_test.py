@@ -76,13 +76,23 @@ class Psychopg2Test(ContractTestBase):
         return "aws-appsignals-tests-psychopg2-app"
 
     def test_success(self) -> None:
-        self.do_test_requests("success", "GET", ["DROP TABLE", "CREATE TABLE", "INSERT INTO", "INSERT INTO", "SELECT"], 200, 0, 0)
+        self.do_test_requests(
+            "success", "GET", ["DROP TABLE", "CREATE TABLE", "INSERT INTO", "INSERT INTO", "SELECT"], 200, 0, 0
+        )
 
     def test_fault(self) -> None:
-        self.do_test_requests("fault", "GET", ["DROP TABLE", "CREATE TABLE", "INSERT INTO", "INSERT INTO", "SELECT"], 500, 0, 1)
+        self.do_test_requests(
+            "fault", "GET", ["DROP TABLE", "CREATE TABLE", "INSERT INTO", "INSERT INTO", "SELECT"], 500, 0, 1
+        )
 
     def do_test_requests(
-        self, path: str, method: str, sql_commands: List[str], status_code: int, expected_error: int, expected_fault: int
+        self,
+        path: str,
+        method: str,
+        sql_commands: List[str],
+        status_code: int,
+        expected_error: int,
+        expected_fault: int,
     ) -> None:
         address: str = self.application.get_container_host_ip()
         port: str = self.application.get_exposed_port(self.get_application_port())
@@ -164,9 +174,7 @@ class Psychopg2Test(ContractTestBase):
             self.assertEqual(target_span.name, commands[index].split()[0])
             self._assert_semantic_conventions_attributes(target_spans[index].attributes, commands[index])
 
-    def _assert_semantic_conventions_attributes(
-        self, attributes_list: List[KeyValue], command: str
-    ) -> None:
+    def _assert_semantic_conventions_attributes(self, attributes_list: List[KeyValue], command: str) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self._assert_str_attribute(attributes_dict, "net.peer.name", "mydb")
         self._assert_int_attribute(attributes_dict, "net.peer.port", 5432)

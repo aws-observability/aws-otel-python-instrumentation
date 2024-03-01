@@ -101,7 +101,7 @@ def _initialize_components(auto_instrumentation_version):
 
     resource = get_aggregated_resources(
         [
-            # AwsEc2ResourceDetector(),
+            AwsEc2ResourceDetector(),
             AwsEksResourceDetector(),
             AwsEcsResourceDetector(),
         ]

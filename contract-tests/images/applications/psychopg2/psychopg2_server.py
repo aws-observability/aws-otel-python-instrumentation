@@ -89,7 +89,7 @@ def main() -> None:
     db_pass = os.getenv("DB_PASS")
     db_name = os.getenv("DB_NAME")
     prepare_database(db_host, db_user, db_pass, db_name)
-    server_address: Tuple[str, int] = ('', _PORT)
+    server_address: Tuple[str, int] = ("", _PORT)
     request_handler_class: type = RequestHandler
     requests_server: ThreadingHTTPServer = ThreadingHTTPServer(server_address, request_handler_class)
     atexit.register(requests_server.shutdown)
