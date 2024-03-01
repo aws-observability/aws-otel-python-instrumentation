@@ -1,5 +1,5 @@
 [project]
-name = "psychopg2-server"
+name = "psycopg2-server"
 description = "Simple server that relies on psychopg2 library"
 version = "1.0.0"
 license = "Apache-2.0"
