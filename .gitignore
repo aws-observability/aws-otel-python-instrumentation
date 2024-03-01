@@ -58,3 +58,13 @@ _build/
 # mypy
 .mypy_cache/
 target
+
+# Gradle
+!**/gradle/wrapper/*
+.gradle
+**/build/
+**/generated/
+examples/**/build/
+
+# Performance test results
+**/performance-tests/results/

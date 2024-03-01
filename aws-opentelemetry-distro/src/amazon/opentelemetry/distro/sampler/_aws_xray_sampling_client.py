@@ -22,12 +22,14 @@ class _AwsXRaySamplingClient:
         self.__get_sampling_rules_endpoint = endpoint + "/GetSamplingRules"
         self.__get_sampling_targets_endpoint = endpoint + "/SamplingTargets"
 
+        self.__session = requests.Session()
+
     def get_sampling_rules(self) -> [_SamplingRule]:
         sampling_rules = []
         headers = {"content-type": "application/json"}
 
         try:
-            xray_response = requests.post(url=self.__get_sampling_rules_endpoint, headers=headers, timeout=20)
+            xray_response = self.__session.post(url=self.__get_sampling_rules_endpoint, headers=headers, timeout=20)
             if xray_response is None:
                 _logger.error("GetSamplingRules response is None")
                 return []
@@ -60,7 +62,7 @@ class _AwsXRaySamplingClient:
         )
         headers = {"content-type": "application/json"}
         try:
-            xray_response = requests.post(
+            xray_response = self.__session.post(
                 url=self.__get_sampling_targets_endpoint,
                 headers=headers,
                 timeout=20,
