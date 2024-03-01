@@ -55,10 +55,14 @@ class PrintStreamPersister implements ResultsPersister {
         results,
         "GC pause time (ms)",
         res -> String.valueOf(NANOSECONDS.toMillis(res.totalGcPauseNanos)));
-    display(results, "Req. mean (ms)", res -> format(res.requestAvg));
-    display(results, "Req. p95 (ms)", res -> format(res.requestP95));
-    display(results, "Iter. mean (ms)", res -> format(res.iterationAvg));
-    display(results, "Iter. p95 (ms)", res -> format(res.iterationP95));
+    display(results, "Req. Count", res -> format(res.requestCount));
+    display(results, "Req. Rate", res -> format(res.requestRate));
+    display(results, "Req. Lat. mean (ms)", res -> format(res.requestLatencyAvg));
+    display(results, "Req. Lat. p0 (ms)", res -> format(res.requestLatencyP0));
+    display(results, "Req. Lat. p50 (ms)", res -> format(res.requestLatencyP50));
+    display(results, "Req. Lat. p90 (ms)", res -> format(res.requestLatencyP90));
+    display(results, "Req. Lat. p99 (ms)", res -> format(res.requestLatencyP99));
+    display(results, "Req. Lat. p100 (ms)", res -> format(res.requestLatencyP100));
     display(results, "Net read avg (bps)", res -> format(res.averageNetworkRead));
     display(results, "Net write avg (bps)", res -> format(res.averageNetworkWrite));
     display(results, "Peak threads", res -> String.valueOf(res.peakThreadCount));

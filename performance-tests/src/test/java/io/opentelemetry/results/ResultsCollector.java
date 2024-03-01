@@ -64,15 +64,23 @@ public class ResultsCollector {
       AppPerfResults.Builder builder, DistroConfig distroConfig) throws IOException {
     Path k6File = namingConvention.k6Results(distroConfig);
     String json = new String(Files.readAllBytes(k6File));
-    double iterationAvg = read(json, "$.metrics.iteration_duration.avg");
-    double iterationP95 = read(json, "$.metrics.iteration_duration['p(95)']");
-    double requestAvg = read(json, "$.metrics.http_req_duration.avg");
-    double requestP95 = read(json, "$.metrics.http_req_duration['p(95)']");
-    return builder
-        .iterationAvg(iterationAvg)
-        .iterationP95(iterationP95)
-        .requestAvg(requestAvg)
-        .requestP95(requestP95);
+    double requestCount = read(json, "$.metrics.http_reqs.count");
+    double requestRate = read(json, "$.metrics.http_reqs.rate");
+    double requestLatencyAvg = read(json, "$.metrics.http_req_duration.avg");
+    double requestLatencyP0 = read(json, "$.metrics.http_req_duration['p(0)']");
+    double requestLatencyP50 = read(json, "$.metrics.http_req_duration['p(50)']");
+    double requestLatencyP90 = read(json, "$.metrics.http_req_duration['p(90)']");
+    double requestLatencyP99 = read(json, "$.metrics.http_req_duration['p(99)']");
+    double requestLatencyP100 = read(json, "$.metrics.http_req_duration['p(100)']");
+    builder.requestCount = requestCount;
+    builder.requestRate = requestRate;
+    builder.requestLatencyAvg = requestLatencyAvg;
+    builder.requestLatencyP0 = requestLatencyP0;
+    builder.requestLatencyP50 = requestLatencyP50;
+    builder.requestLatencyP90 = requestLatencyP90;
+    builder.requestLatencyP99 = requestLatencyP99;
+    builder.requestLatencyP100 = requestLatencyP100;
+    return builder;
   }
 
   private static double read(String json, String jsonPath) {
