@@ -30,7 +30,7 @@ class Psycopg2Test(ContractTestBase):
     @override
     @classmethod
     def set_up_dependency_container(cls) -> None:
-        cls.container = PostgresContainer(user="postgres", password="example", dbname="postgres").with_kwargs(network=NETWORK_NAME)
+        cls.container = PostgresContainer(user="postgres", password="example", dbname="postgres").with_kwargs(network=NETWORK_NAME, name="mydb")
         cls.container.start()
         # client: DockerClient = docker.from_env()
         # client.containers.run(
@@ -55,7 +55,7 @@ class Psycopg2Test(ContractTestBase):
     @override
     def get_application_extra_environment_variables(self) -> Dict[str, str]:
         return {
-            "DB_HOST": type(self).container.get_container_host_ip(),
+            "DB_HOST": "mydb",
             "DB_USER": "postgres",
             "DB_PASS": "example",
             "DB_NAME": "postgres",
