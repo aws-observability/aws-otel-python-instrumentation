@@ -8,29 +8,22 @@
 - [Setup and Usage](#setup-and-usage)
 - [Visualization](#visualization)
 
-This directory will contain tools and utilities
-that help us to measure the performance overhead introduced by
-the distro and to measure how this overhead changes over time.
+This directory will contain tools and utilities that help us to measure the performance overhead introduced by the distro and to measure how this overhead changes over time.
 
-The overhead tests here should be considered a "macro" benchmark. They serve to measure high-level
-overhead as perceived by the operator of a "typical" application. Tests are performed on a Java 11
-distribution from [Eclipse Temurin](https://projects.eclipse.org/projects/adoptium.temurin).
+The overhead tests here should be considered a "macro" benchmark. They serve to measure high-level overhead as perceived by the operator of a "typical" application. Tests are performed on Python 3.10.
 
 ## Process
 
-There is one dynamic test here called [OverheadTests](https://github.com/open-telemetry/opentelemetry-java-instrumentation/blob/main/benchmark-overhead/src/test/java/io/opentelemetry/OverheadTests.java).
-The `@TestFactory` method creates a test pass for each of the [defined configurations](https://github.com/open-telemetry/opentelemetry-java-instrumentation/blob/main/benchmark-overhead/src/test/java/io/opentelemetry/config/Configs.java).
-Before the tests run, a single collector instance is started. Each test pass has one or more distroConfigs and those are tested in series.
-For each distro defined in a configuration, the test runner (using [testcontainers](https://www.testcontainers.org/)) will:
+There is one dynamic test here called OverheadTests. The `@TestFactory` method creates a test pass for each of the defined configurations.  Before the tests run, a single collector instance is started. Each test pass has one or more distroConfigs and those are tested in series. For each distro defined in a configuration, the test runner (using [testcontainers](https://www.testcontainers.org/)) will:
 
 1. create a fresh postgres instance and populate it with initial data.
-2. create a fresh instance of [spring-petclinic-rest](https://github.com/spring-petclinic/spring-petclinic-rest) instrumented with the specified distroConfig
-3. measure the time until the petclinic app is marked "healthy" and then write it to a file.
-4. if configured, perform a warmup phase. During the warmup phase, a bit of traffic is generated in order to get the application into a steady state (primarily helping facilitate jit compilations). Currently, we use a 30 second warmup time.
-5. start a JFR recording by running `jcmd` inside the petclinic container
-6. run the [k6 test script](https://github.com/open-telemetry/opentelemetry-java-instrumentation/blob/main/benchmark-overhead/k6/basic.js) with the configured number of iterations through the file and the configured number of concurrent virtual users (VUs).
-7. after k6 completes, petclinic is shut down
-8. after petclinic is shut down, postgres is shut down
+2. create a fresh instance of vehicle inventory service instrumented with the specified distroConfig, and image service (not currently instrumented)
+3. measure the time until the app is marked "healthy" and then write it to a file.
+4. if configured, perform a warmup phase. During the warmup phase, a bit of traffic is generated in order to get the application into a steady state (primarily helping facilitate jit compilations).
+5. start a profiling recording by running a script that relies on psutils inside the application container
+6. run a k6 test script with the configured number of iterations through the file and the configured number of concurrent virtual users (VUs).
+7. after k6 completes, application is shut down
+8. after application is shut down, postgres is shut down
 
 And this repeats for every distro configured in each test configuration.
 
@@ -38,11 +31,12 @@ After all the tests are complete, the results are collected and committed back t
 
 ## What do we measure?
 
-For each test pass, we record the following metrics in order to compare distroConfigs and determine
-relative overhead.
+For each test pass, we record the following metrics in order to compare distroConfigs and determine relative overhead.
+
+// WIP: This list will change once we finalize the profiling script.
 
 | metric name              | units  | description                                                                  |
-| ------------------------ | ------ | ---------------------------------------------------------------------------- |
+|--------------------------| ------ |------------------------------------------------------------------------------|
 | Startup time             | ms     | How long it takes for the spring app to report "healthy"                     |
 | Total allocated mem      | bytes  | Across the life of the application                                           |
 | Heap (min)               | bytes  | Smallest observed heap size                                                  |
@@ -56,10 +50,10 @@ relative overhead.
 | Peak threads             | #      | Highest number of running threads in the VM, including distroConfig threads  |
 | Network read mean        | bits/s | Average network read rate                                                    |
 | Network write mean       | bits/s | Average network write rate                                                   |
-| Average JVM user CPU     | %      | Average observed user CPU (range 0.0-1.0)                                    |
-| Max JVM user CPU         | %      | Max observed user CPU used (range 0.0-1.0)                                   |
+| Average user CPU         | %      | Average observed user CPU (range 0.0-1.0)                                    |
+| Max user CPU             | %      | Max observed user CPU used (range 0.0-1.0)                                   |
 | Average machine tot. CPU | %      | Average percentage of machine CPU used (range 0.0-1.0)                       |
-| Total GC pause nanos     | ns     | JVM time spent paused due to GC                                              |
+| Total GC pause nanos     | ns     |  time spent paused due to GC                                                 |
 | Run duration ms          | ms     | Duration of the test run, in ms                                              |
 
 ## Config
@@ -74,41 +68,25 @@ Each config contains the following:
 - totalIterations - the number of passes to make through the k6 test script
 - warmupSeconds - how long to wait before starting conducting measurements
 
-Currently, we test:
-
-- no distro versus latest released distro
-- no distro versus latest snapshot
-- latest release vs. latest snapshot
-
 Additional configurations can be created by submitting a PR against the `Configs` class.
 
 ### DistroConfigs
 
-An distroConfig is defined in code as a name, description, optional URL, and optional additional
-arguments to be passed to the JVM (not including `-javaagent:`). New distroConfigs may be defined
-by creating new instances of the `Distro` class. The `AgentResolver` is used to download
-the relevant distroConfig jar for an `Distro` definition.
-
-## Automation
-
-The tests are run nightly via github actions. The results are collected and appended to
-a csv file, which is committed back to the repo in the `/results` subdirectory.
+An distroConfig is defined in code as a name, description, flag for instrumentation. and optional additional arguments to be passed to the application container. New distroConfigs may be defined by creating new instances of the `Distro` class. The `AgentResolver` is used to download the relevant distroConfig jar for an `Distro` definition.
 
 ## Setup and Usage
 
-The tests require docker to be running. Simply run `OverheadTests` in your IDE.
+Pre-requirements:
+* Have `docker` installed and running - verify by running the `docker` command.
+* Export AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, and S3_BUCKET environment variables.
 
-Alternatively, you can run the tests from
-the command line with gradle:
-
-```
-cd benchmark-overhead
+Steps:
+* From `aws-otel-python-instrumentation` dir, execute:
+```sh
+./scripts/build_and_install_distro.sh
+./scripts/set-up-performance-tests.sh
+cd performance-tests
 ./gradlew test
-
 ```
 
-## Visualization
-
-None yet. Help wanted! Our goal is to have the results and a rich UI running in the
-`gh-pages` branch similar to [earlier tools](https://breedx-splk.github.io/iguanodon/web/).
-Please help us make this happen.
+The last step can be run or you can run from IDE (after setting environment variables appropriately).

@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+# Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import os
 from logging import Logger, getLogger
 from typing import ClassVar, Dict, Type
@@ -84,6 +85,9 @@ class AwsOpenTelemetryConfigurator(_OTelSDKConfigurator):
         _initialize_components()
 
 
+# The OpenTelemetry Authors code
+# Long term, we wish to contribute this to upstream to improve initialization customizability and reduce dependency on
+# internal logic.
 def _initialize_components():
     trace_exporters, metric_exporters, log_exporters = _import_exporters(
         _get_exporter_names("traces"),
@@ -144,6 +148,9 @@ def _init_tracing(
     _customize_span_processors(trace_provider, resource)
 
     set_tracer_provider(trace_provider)
+
+
+# END The OpenTelemetry Authors code
 
 
 def _exclude_urls_for_instrumentations():
