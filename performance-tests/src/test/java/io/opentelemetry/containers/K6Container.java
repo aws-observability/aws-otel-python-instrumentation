@@ -9,6 +9,7 @@ package io.opentelemetry.containers;
 import io.opentelemetry.config.TestConfig;
 import io.opentelemetry.distros.DistroConfig;
 import io.opentelemetry.util.NamingConventions;
+import io.opentelemetry.util.RuntimeUtil;
 import java.nio.file.Path;
 import java.time.Duration;
 import org.slf4j.Logger;
@@ -49,15 +50,19 @@ public class K6Container {
         .withCreateContainerCmdModifier(cmd -> cmd.withUser("root"))
         .withCommand(
             "run",
-            "-u",
+            "--vus",
             String.valueOf(config.getConcurrentConnections()),
-            "-i",
-            String.valueOf(config.getTotalIterations()),
+            "--duration",
+            String.valueOf(config.getDuration()),
             "--rps",
             String.valueOf(config.getMaxRequestRate()),
             "--summary-export",
             k6OutputFile.toString(),
+            "--summary-trend-stats",
+            "avg,p(0),p(50),p(90),p(99),p(100),count",
             "/app/performanceTest.js")
+        .withCreateContainerCmdModifier(
+            cmd -> cmd.getHostConfig().withCpusetCpus(RuntimeUtil.getNonApplicationCores()))
         .withStartupCheckStrategy(
             new OneShotStartupCheckStrategy().withTimeout(Duration.ofMinutes(15)));
   }

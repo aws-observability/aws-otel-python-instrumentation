@@ -1,6 +1,5 @@
 /*
- * Copyright The OpenTelemetry Authors
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
- * Modifications Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  */
 

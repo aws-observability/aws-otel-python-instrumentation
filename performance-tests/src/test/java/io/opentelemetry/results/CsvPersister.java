@@ -6,6 +6,8 @@
 
 package io.opentelemetry.results;
 
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -21,19 +23,27 @@ class CsvPersister implements ResultsPersister {
   private static final List<FieldSpec> FIELDS =
       Arrays.asList(
           FieldSpec.of("startupDurationMs", r -> r.startupDurationMs),
-          FieldSpec.of("minResidentMemoryMB", r -> r.getMinRSSMemMB()),
-          FieldSpec.of("maxResidentMemoryMB", r -> r.getMaxRSSMemMB()),
-          FieldSpec.of("minVirtualMemoryMB", r -> r.getMinVMSMemMB()),
-          FieldSpec.of("maxVirtualMemoryMB", r -> r.getMaxVMSMemMB()),
+          // FieldSpec.of("minHeapUsed", r -> r.heapUsed.min),
+          // FieldSpec.of("maxHeapUsed", r -> r.heapUsed.max),
+          FieldSpec.of("totalAllocatedMB", r -> r.getTotalAllocatedMB()),
+          FieldSpec.of("totalGCTime", r -> r.totalGCTime),
           FieldSpec.of("maxThreadContextSwitchRate", r -> r.maxThreadContextSwitchRate),
-          FieldSpec.of("iterationAvg", r -> r.iterationAvg),
-          FieldSpec.of("iterationP95", r -> r.iterationP95),
-          FieldSpec.of("requestAvg", r -> r.requestAvg),
-          FieldSpec.of("requestP95", r -> r.requestP95),
+          FieldSpec.of("requestCount", r -> r.requestCount),
+          FieldSpec.of("requestRate", r -> r.requestRate),
+          FieldSpec.of("requestLatencyAvg", r -> r.requestLatencyAvg),
+          FieldSpec.of("requestLatencyP0", r -> r.requestLatencyP0),
+          FieldSpec.of("requestLatencyP50", r -> r.requestLatencyP50),
+          FieldSpec.of("requestLatencyP90", r -> r.requestLatencyP90),
+          FieldSpec.of("requestLatencyP99", r -> r.requestLatencyP99),
+          FieldSpec.of("requestLatencyP100", r -> r.requestLatencyP100),
+          FieldSpec.of("netReadAvg", r -> r.averageNetworkRead),
+          FieldSpec.of("netWriteAvg", r -> r.averageNetworkWrite),
           FieldSpec.of("peakThreadCount", r -> r.peakThreadCount),
-          FieldSpec.of("averageCpu", r -> r.averageCpu),
-          FieldSpec.of("maxCpu", r -> r.maxCpu),
-          FieldSpec.of("runDurationMs", r -> r.runDurationMs));
+          FieldSpec.of("averageCpuUser", r -> r.averageJvmUserCpu),
+          FieldSpec.of("maxCpuUser", r -> r.maxJvmUserCpu),
+          FieldSpec.of("averageMachineCpuTotal", r -> r.averageMachineCpuTotal),
+          FieldSpec.of("runDurationMs", r -> r.runDurationMs),
+          FieldSpec.of("gcPauseMs", r -> NANOSECONDS.toMillis(r.totalGcPauseNanos)));
 
   private final Path resultsFile;
 

@@ -12,12 +12,23 @@ import java.util.stream.Stream;
 
 /** Defines all test configurations */
 public enum Configs {
-  ALL(
+  ALL_100_TPS(
       TestConfig.builder()
-          .name("all")
-          .description("Compares all DistroConfigs")
+          .name("all-800-tps")
+          .description("Compares all DistroConfigs (100TPS test)")
           .withDistroConfigs(DistroConfig.values())
           .warmupSeconds(60)
+          .maxRequestRate(100)
+          .duration(System.getenv("DURATION"))
+          .build()),
+  ALL_800_TPS(
+      TestConfig.builder()
+          .name("all-800-tps")
+          .description("Compares all DistroConfigs (800TPS test)")
+          .withDistroConfigs(DistroConfig.values())
+          .warmupSeconds(60)
+          .maxRequestRate(800)
+          .duration(System.getenv("DURATION"))
           .build());
 
   public final TestConfig config;
