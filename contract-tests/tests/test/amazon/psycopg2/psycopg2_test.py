@@ -87,9 +87,9 @@ class Psycopg2Test(ContractTestBase):
         metrics: List[ResourceScopeMetric] = self.mock_collector_client.get_metrics(
             {LATENCY_METRIC, ERROR_METRIC, FAULT_METRIC}
         )
-        self._assert_metric_attribute_with_select(metrics, LATENCY_METRIC, 5000)
-        self._assert_metric_attribute_with_select(metrics, ERROR_METRIC, expected_error)
-        self._assert_metric_attribute_with_select(metrics, FAULT_METRIC, expected_fault)
+        self._assert_metric_attribute(metrics, LATENCY_METRIC, 5000, sql_command)
+        self._assert_metric_attribute(metrics, ERROR_METRIC, expected_error, sql_command)
+        self._assert_metric_attribute(metrics, FAULT_METRIC, expected_fault, sql_command)
 
     def _assert_aws_span_attributes(
         self, resource_scope_spans: List[ResourceScopeSpan], sql_command: str, path: str
@@ -157,11 +157,12 @@ class Psycopg2Test(ContractTestBase):
         self._assert_str_attribute(attributes_dict, "db.name", "postgres")
         self._assert_str_attribute(attributes_dict, "db.user", "postgres")
 
-    def _assert_metric_attribute_with_select(
+    def _assert_metric_attribute(
         self,
         resource_scope_metrics: List[ResourceScopeMetric],
         metric_name: str,
         expected_sum: int,
+        aws_remote_operation: str
     ) -> None:
         target_metrics: List[Metric] = []
         for resource_scope_metric in resource_scope_metrics:
@@ -181,7 +182,7 @@ class Psycopg2Test(ContractTestBase):
         # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, "postgresql")
-        self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, "SELECT")
+        self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, aws_remote_operation)
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "CLIENT")
 
         actual_sum: float = dp.sum
