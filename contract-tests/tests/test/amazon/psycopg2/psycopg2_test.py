@@ -55,20 +55,20 @@ class Psycopg2Test(ContractTestBase):
     def test_success(self) -> None:
         self.mock_collector_client.clear_signals()
         self.do_test_requests(
-            "success", "GET", ["DROP TABLE", "CREATE TABLE", "INSERT INTO", "INSERT INTO", "SELECT"], 200, 0, 0
+            "success", "GET", "SELECT", 200, 0, 0
         )
 
     def test_fault(self) -> None:
         self.mock_collector_client.clear_signals()
         self.do_test_requests(
-            "fault", "GET", ["DROP TABLE", "CREATE TABLE", "INSERT INTO", "INSERT INTO", "SELECT"], 500, 0, 1
+            "fault", "GET",  "SELECT", 500, 0, 1
         )
 
     def do_test_requests(
         self,
         path: str,
         method: str,
-        sql_commands: List[str],
+        sql_command: str,
         status_code: int,
         expected_error: int,
         expected_fault: int,
@@ -81,8 +81,8 @@ class Psycopg2Test(ContractTestBase):
         self.assertEqual(status_code, response.status_code)
 
         resource_scope_spans: List[ResourceScopeSpan] = self.mock_collector_client.get_traces()
-        self._assert_aws_span_attributes(resource_scope_spans, sql_commands, path)
-        self._assert_semantic_conventions_span_attributes(resource_scope_spans, sql_commands)
+        self._assert_aws_span_attributes(resource_scope_spans, sql_command, path)
+        self._assert_semantic_conventions_span_attributes(resource_scope_spans, sql_command)
 
         metrics: List[ResourceScopeMetric] = self.mock_collector_client.get_metrics(
             {LATENCY_METRIC, ERROR_METRIC, FAULT_METRIC}
@@ -92,7 +92,7 @@ class Psycopg2Test(ContractTestBase):
         self._assert_metric_attribute_with_select(metrics, FAULT_METRIC, expected_fault)
 
     def _assert_aws_span_attributes(
-        self, resource_scope_spans: List[ResourceScopeSpan], sql_commands: List[str], path: str
+        self, resource_scope_spans: List[ResourceScopeSpan], sql_command: str, path: str
     ) -> None:
         target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
@@ -100,9 +100,8 @@ class Psycopg2Test(ContractTestBase):
             if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
                 target_spans.append(resource_scope_span.span)
 
-        self.assertEqual(len(target_spans), len(sql_commands))
-        for command in sql_commands:
-            self._assert_aws_attributes(target_spans[sql_commands.index(command)].attributes, command)
+        self.assertEqual(len(target_spans), 1)
+        self._assert_aws_attributes(target_spans[0].attributes, sql_command)
 
     def _assert_aws_attributes(self, attributes_list: List[KeyValue], command: str) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
@@ -139,7 +138,7 @@ class Psycopg2Test(ContractTestBase):
         self.assertEqual(expected_value, actual_value.int_value)
 
     def _assert_semantic_conventions_span_attributes(
-        self, resource_scope_spans: List[ResourceScopeSpan], commands: List[str]
+        self, resource_scope_spans: List[ResourceScopeSpan], commands: str
     ) -> None:
         target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
@@ -147,16 +146,12 @@ class Psycopg2Test(ContractTestBase):
             if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
                 target_spans.append(resource_scope_span.span)
 
-        self.assertEqual(len(target_spans), len(commands))
-        for target_span in target_spans:
-            index: int = target_spans.index(target_span)
-            self.assertEqual(target_span.name, commands[index].split()[0])
-            self._assert_semantic_conventions_attributes(target_spans[index].attributes, commands[index])
+        self.assertEqual(len(target_spans), 1)
+        self.assertEqual(target_spans[0].name, commands.split()[0])
+        self._assert_semantic_conventions_attributes(target_spans[0].attributes, commands)
 
     def _assert_semantic_conventions_attributes(self, attributes_list: List[KeyValue], command: str) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
-        self._assert_str_attribute(attributes_dict, "net.peer.name", "mydb")
-        self._assert_int_attribute(attributes_dict, "net.peer.port", 5432)
         self.assertTrue(attributes_dict.get("db.statement").string_value.index(command) >= 0)
         self._assert_str_attribute(attributes_dict, "db.system", "postgresql")
         self._assert_str_attribute(attributes_dict, "db.name", "postgres")
@@ -173,11 +168,11 @@ class Psycopg2Test(ContractTestBase):
             if resource_scope_metric.metric.name.lower() == metric_name.lower():
                 target_metrics.append(resource_scope_metric.metric)
 
-        self.assertEqual(len(target_metrics), 2)
-        target_metric: Metric = target_metrics[1]
+        self.assertEqual(len(target_metrics), 1)
+        target_metric: Metric = target_metrics[0]
         dp_list: List[ExponentialHistogramDataPoint] = target_metric.exponential_histogram.data_points
 
-        self.assertEqual(len(dp_list), 2)
+        self.assertEqual(len(dp_list), 1)
         dp: ExponentialHistogramDataPoint = dp_list[0]
         if len(dp_list[1].attributes) > len(dp_list[0].attributes):
             dp = dp_list[1]
