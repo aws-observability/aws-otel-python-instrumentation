@@ -54,15 +54,11 @@ class Psycopg2Test(ContractTestBase):
 
     def test_success(self) -> None:
         self.mock_collector_client.clear_signals()
-        self.do_test_requests(
-            "success", "GET", "SELECT", 200, 0, 0
-        )
+        self.do_test_requests("success", "GET", "SELECT", 200, 0, 0)
 
     def test_fault(self) -> None:
         self.mock_collector_client.clear_signals()
-        self.do_test_requests(
-            "fault", "GET",  "SELECT DISTINCT", 500, 0, 1
-        )
+        self.do_test_requests("fault", "GET", "SELECT DISTINCT", 500, 0, 1)
 
     def do_test_requests(
         self,
@@ -162,7 +158,7 @@ class Psycopg2Test(ContractTestBase):
         resource_scope_metrics: List[ResourceScopeMetric],
         metric_name: str,
         expected_sum: int,
-        aws_remote_operation: str
+        aws_remote_operation: str,
     ) -> None:
         target_metrics: List[Metric] = []
         for resource_scope_metric in resource_scope_metrics:
