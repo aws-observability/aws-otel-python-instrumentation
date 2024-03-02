@@ -61,7 +61,7 @@ class Psycopg2Test(ContractTestBase):
     def test_fault(self) -> None:
         self.mock_collector_client.clear_signals()
         self.do_test_requests(
-            "fault", "GET",  "SELECT", 500, 0, 1
+            "fault", "GET",  "SELECT DISTINCT", 500, 0, 1
         )
 
     def do_test_requests(
@@ -172,7 +172,7 @@ class Psycopg2Test(ContractTestBase):
         target_metric: Metric = target_metrics[0]
         dp_list: List[ExponentialHistogramDataPoint] = target_metric.exponential_histogram.data_points
 
-        self.assertEqual(len(dp_list), 1)
+        self.assertEqual(len(dp_list), 2)
         dp: ExponentialHistogramDataPoint = dp_list[0]
         if len(dp_list[1].attributes) > len(dp_list[0].attributes):
             dp = dp_list[1]
