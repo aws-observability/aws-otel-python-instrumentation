@@ -189,5 +189,5 @@ class ContractTestBase(TestCase):
     def _assert_semantic_conventions_span_attributes(self, resource_scope_spans, method, path, status_code, **kwargs):
         pass
 
-    def _assert_metric_attribute(self, metrics, LATENCY_METRIC, param, **kwargs):
+    def _assert_metric_attribute(self, resource_scope_metrics, metric_name, param, **kwargs):
         pass
