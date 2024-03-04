@@ -13,11 +13,6 @@ from testcontainers.core.container import DockerContainer
 from testcontainers.core.waiting_utils import wait_for_logs
 from typing_extensions import override
 from amazon.utils.app_signals_constants import (
-    AWS_LOCAL_OPERATION,
-    AWS_LOCAL_SERVICE,
-    AWS_REMOTE_OPERATION,
-    AWS_REMOTE_SERVICE,
-    AWS_SPAN_KIND,
     ERROR_METRIC,
     FAULT_METRIC,
     LATENCY_METRIC,
