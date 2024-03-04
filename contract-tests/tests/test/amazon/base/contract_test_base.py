@@ -12,6 +12,7 @@ from requests import Response, request
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.waiting_utils import wait_for_logs
 from typing_extensions import override
+
 from amazon.utils.app_signals_constants import (
     ERROR_METRIC,
     FAULT_METRIC,
@@ -122,13 +123,13 @@ class ContractTestBase(TestCase):
         self.mock_collector_client.clear_signals()
 
     def do_test_requests(
-            self,
-            path: str,
-            method: str,
-            command: str,
-            status_code: int,
-            expected_error: int,
-            expected_fault: int,
+        self,
+        path: str,
+        method: str,
+        command: str,
+        status_code: int,
+        expected_error: int,
+        expected_fault: int,
     ) -> None:
         address: str = self.application.get_container_host_ip()
         port: str = self.application.get_exposed_port(self.get_application_port())
