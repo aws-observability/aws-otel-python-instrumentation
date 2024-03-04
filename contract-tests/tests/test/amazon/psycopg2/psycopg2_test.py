@@ -148,7 +148,7 @@ class Psycopg2Test(ContractTestBase):
 
     def _assert_semantic_conventions_attributes(self, attributes_list: List[KeyValue], command: str) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
-        self.assertTrue(attributes_dict.get("db.statement").string_value.index(command) >= 0)
+        self.assertTrue(attributes_dict.get("db.statement").string_value.startswith(command))
         self._assert_str_attribute(attributes_dict, "db.system", "postgresql")
         self._assert_str_attribute(attributes_dict, "db.name", "postgres")
 
