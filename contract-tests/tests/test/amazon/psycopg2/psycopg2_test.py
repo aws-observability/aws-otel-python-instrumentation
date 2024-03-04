@@ -111,7 +111,7 @@ class Psycopg2Test(ContractTestBase):
         self.assertTrue(attributes_dict.get("db.statement").string_value.startswith(command))
         self._assert_str_attribute(attributes_dict, "db.system", "postgresql")
         self._assert_str_attribute(attributes_dict, "db.name", "postgres")
-        self._assert_str_attributes(attributes_dict, "db.operation", command)
+        self._assert_str_attribute(attributes_dict, "db.operation", command)
 
     @override
     def _assert_metric_attribute(
