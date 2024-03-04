@@ -96,7 +96,7 @@ class Psycopg2Test(ContractTestBase):
 
     @override
     def _assert_semantic_conventions_span_attributes(
-        self, resource_scope_spans: List[ResourceScopeSpan], **kwargs
+        self, resource_scope_spans: List[ResourceScopeSpan], method, path, status_code, **kwargs
     ) -> None:
         target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
