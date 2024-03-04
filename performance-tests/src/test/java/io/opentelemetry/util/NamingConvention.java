@@ -50,14 +50,13 @@ public class NamingConvention {
    * @param distroConfig The distroConfig to get the performance-metrics file path for.
    */
   public Path performanceMetricsFile(DistroConfig distroConfig) {
-    return Paths.get(dir, perfMetricFileNameSuffix + distroConfig.getName() + ".json");
+    return Paths.get(dir, performanceMetricsFileWithoutPath(distroConfig));
   }
 
   /**
-   * Returns a path to the location of the performance-metrics output file for a given distroConfig
-   * run.
+   * Returns the name of performance-metrics output file for a given distroConfig run without the full path
    *
-   * @param distroConfig The distroConfig to get the performance-metrics file path for.
+   * @param distroConfig The distroConfig to get the performance-metrics file name for.
    */
   public String performanceMetricsFileWithoutPath(DistroConfig distroConfig) {
     return perfMetricFileNameSuffix + distroConfig.getName() + ".json";

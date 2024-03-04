@@ -50,7 +50,7 @@ cpu_usage = []
 network_bytes_sent = []
 network_bytes_recv = []
 
-# These counters return the commulative network bytes so need to get difference during each iteration by logging
+# These counters return the cumulative network bytes so need to get difference during each iteration by logging
 # the counters before and after the 1 sec sleep and then getting the difference between them.
 net_io_counters = psutil.net_io_counters()
 base_network_bytes_sent = net_io_counters.bytes_sent
@@ -105,4 +105,4 @@ while True:
         os.replace(tmp_file_name, file_name)
         later_time = time.time()
         difference = later_time - first_time
-        print(difference * 1000)
+        print(f'Performance sampling took {difference * 1000} seconds')

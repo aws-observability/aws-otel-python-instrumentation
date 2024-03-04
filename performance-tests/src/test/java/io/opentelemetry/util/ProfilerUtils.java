@@ -1,5 +1,5 @@
 /*
- * Copyright The OpenTelemetry Authors
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -24,8 +24,7 @@ public class ProfilerUtils {
     return support.average();
   }
 
-  public static long[] computeLongPercentiles(List<Number> values, double[] percentiles)
-      throws IOException {
+  public static long[] computeLongPercentiles(List<Number> values, double[] percentiles) {
     PercentileSupport support = new PercentileSupport();
     values.forEach(value -> support.add(value.longValue()));
     support.precompute();
@@ -36,10 +35,9 @@ public class ProfilerUtils {
     return percentileValues;
   }
 
-  public static double[] computeDoublePercentiles(List<Number> values, double[] percentiles)
-      throws IOException {
+  public static double[] computeDoublePercentiles(List<Number> values, double[] percentiles) {
     PercentileDoubleSupport support = new PercentileDoubleSupport();
-    values.forEach(value -> support.add(value.longValue()));
+    values.forEach(value -> support.add(value.doubleValue()));
     support.precompute();
     double[] percentileValues = new double[percentiles.length];
     for (int i = 0; i < percentiles.length; i++) {
@@ -65,7 +63,7 @@ public class ProfilerUtils {
   }
 
   static class AverageDoubleSupport {
-    long count;
+    double count;
     double total;
 
     AverageDoubleSupport add(double value) {
@@ -93,8 +91,8 @@ public class ProfilerUtils {
     }
 
     long percentile(double percentile) {
-      int index = (int) Math.ceil(percentile / 100.0 * longList.size());
-      return longList.get(Math.max(0, index - 1));
+      int index = (int) Math.max(0, Math.ceil(percentile / 100.0 * longList.size()) - 1);
+      return longList.get(index);
     }
   }
 
@@ -111,8 +109,8 @@ public class ProfilerUtils {
     }
 
     double percentile(double percentile) {
-      int index = (int) Math.ceil(percentile / 100.0 * doubleList.size());
-      return doubleList.get(Math.max(0, index - 1));
+      int index = (int) Math.max(0, Math.ceil(percentile / 100.0 * doubleList.size()) - 1);
+      return doubleList.get(index);
     }
   }
 }

@@ -152,7 +152,6 @@ public class ResultsCollector {
     builder.cpuP99 = cpuUsagePercentile[3];
     builder.cpuP100 = cpuUsagePercentile[4];
     builder.rssMemAvg = ProfilerUtils.computeLongAverage(rssMem);
-    ;
     builder.rssMemP0 = rssMemPercentile[0];
     builder.rssMemP50 = rssMemPercentile[1];
     builder.rssMemP90 = rssMemPercentile[2];

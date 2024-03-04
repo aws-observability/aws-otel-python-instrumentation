@@ -6,7 +6,7 @@
 # vehicleInventoryService.execInContainer(command);
 # is because execInContainer command is blocking. Profiler is running in an infinite while loop so it never returns.
 # The way around this would be to run it in the background with &. However, running with & directly, it runs
-# the command once and quits. This is just a hacky workaround. Also, reason we are
+# the command once and quits. This is just a simple workaround. Also, reason we are
 # outputting to output.txt is that output logs of the script can be checked during the run inside the container.
 
 file_name=$1
