@@ -60,33 +60,7 @@ class Psycopg2Test(ContractTestBase):
         self.mock_collector_client.clear_signals()
         self.do_test_requests("fault", "GET", "SELECT DISTINCT", 500, 0, 1)
 
-    def do_test_requests(
-        self,
-        path: str,
-        method: str,
-        sql_command: str,
-        status_code: int,
-        expected_error: int,
-        expected_fault: int,
-    ) -> None:
-        address: str = self.application.get_container_host_ip()
-        port: str = self.application.get_exposed_port(self.get_application_port())
-        url: str = f"http://{address}:{port}/{path}"
-        response: Response = request(method, url, timeout=20)
-
-        self.assertEqual(status_code, response.status_code)
-
-        resource_scope_spans: List[ResourceScopeSpan] = self.mock_collector_client.get_traces()
-        self._assert_aws_span_attributes(resource_scope_spans, sql_command, path)
-        self._assert_semantic_conventions_span_attributes(resource_scope_spans, sql_command)
-
-        metrics: List[ResourceScopeMetric] = self.mock_collector_client.get_metrics(
-            {LATENCY_METRIC, ERROR_METRIC, FAULT_METRIC}
-        )
-        self._assert_metric_attribute(metrics, LATENCY_METRIC, 5000, sql_command)
-        self._assert_metric_attribute(metrics, ERROR_METRIC, expected_error, sql_command)
-        self._assert_metric_attribute(metrics, FAULT_METRIC, expected_fault, sql_command)
-
+    @override
     def _assert_aws_span_attributes(
         self, resource_scope_spans: List[ResourceScopeSpan], sql_command: str, path: str
     ) -> None:
@@ -99,6 +73,7 @@ class Psycopg2Test(ContractTestBase):
         self.assertEqual(len(target_spans), 1)
         self._assert_aws_attributes(target_spans[0].attributes, sql_command)
 
+    @override
     def _assert_aws_attributes(self, attributes_list: List[KeyValue], command: str) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
@@ -133,6 +108,7 @@ class Psycopg2Test(ContractTestBase):
         self.assertIsNotNone(actual_value)
         self.assertEqual(expected_value, actual_value.int_value)
 
+    @override
     def _assert_semantic_conventions_span_attributes(
         self, resource_scope_spans: List[ResourceScopeSpan], commands: str
     ) -> None:
@@ -152,6 +128,7 @@ class Psycopg2Test(ContractTestBase):
         self._assert_str_attribute(attributes_dict, "db.system", "postgresql")
         self._assert_str_attribute(attributes_dict, "db.name", "postgres")
 
+    @override
     def _assert_metric_attribute(
         self,
         resource_scope_metrics: List[ResourceScopeMetric],

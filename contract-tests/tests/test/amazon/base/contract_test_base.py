@@ -7,10 +7,21 @@ from unittest import TestCase
 from docker import DockerClient
 from docker.models.networks import Network, NetworkCollection
 from docker.types import EndpointConfig
-from mock_collector_client import MockCollectorClient
+from mock_collector_client import MockCollectorClient, ResourceScopeMetric, ResourceScopeSpan
+from requests import Response, request
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.waiting_utils import wait_for_logs
 from typing_extensions import override
+from amazon.utils.app_signals_constants import (
+    AWS_LOCAL_OPERATION,
+    AWS_LOCAL_SERVICE,
+    AWS_REMOTE_OPERATION,
+    AWS_REMOTE_SERVICE,
+    AWS_SPAN_KIND,
+    ERROR_METRIC,
+    FAULT_METRIC,
+    LATENCY_METRIC,
+)
 
 NETWORK_NAME: str = "aws-appsignals-network"
 
@@ -115,6 +126,32 @@ class ContractTestBase(TestCase):
 
         self.mock_collector_client.clear_signals()
 
+    def do_test_requests(
+            self,
+            path: str,
+            method: str,
+            status_code: int,
+            expected_error: int,
+            expected_fault: int,
+    ) -> None:
+        address: str = self.application.get_container_host_ip()
+        port: str = self.application.get_exposed_port(self.get_application_port())
+        url: str = f"http://{address}:{port}/{path}"
+        response: Response = request(method, url, timeout=20)
+
+        self.assertEqual(status_code, response.status_code)
+
+        resource_scope_spans: List[ResourceScopeSpan] = self.mock_collector_client.get_traces()
+        self._assert_aws_span_attributes(resource_scope_spans, method, path)
+        self._assert_semantic_conventions_span_attributes(resource_scope_spans, method)
+
+        metrics: List[ResourceScopeMetric] = self.mock_collector_client.get_metrics(
+            {LATENCY_METRIC, ERROR_METRIC, FAULT_METRIC}
+        )
+        self._assert_metric_attribute(metrics, LATENCY_METRIC, 5000, method)
+        self._assert_metric_attribute(metrics, ERROR_METRIC, expected_error, method)
+        self._assert_metric_attribute(metrics, FAULT_METRIC, expected_fault, method)
+
     # pylint: disable=no-self-use
     # Methods that should be overridden in subclasses
     @classmethod
@@ -145,3 +182,12 @@ class ContractTestBase(TestCase):
 
     def get_application_otel_resource_attributes(self) -> str:
         return "service.name=" + self.get_application_otel_service_name()
+
+    def _assert_aws_span_attributes(self, resource_scope_spans, method, path):
+        pass
+
+    def _assert_semantic_conventions_span_attributes(self, resource_scope_spans, method):
+        pass
+
+    def _assert_metric_attribute(self, metrics, LATENCY_METRIC, param, method):
+        pass
