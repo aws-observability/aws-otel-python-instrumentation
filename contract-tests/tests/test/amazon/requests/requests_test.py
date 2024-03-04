@@ -157,4 +157,3 @@ class RequestsTest(ContractTestBase):
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
         self.check_sum(metric_name, service_dp.sum, expected_sum)
-
