@@ -84,7 +84,7 @@ class BotocoreTest(ContractTestBase):
         self._make_request("ddb/createtable/some-table")
 
     def test_dynamodb_put_item(self):
-        self._make_request("ddb/putitem/putitem-table/key")
+            self._make_request("ddb/putitem/putitem-table/key")
 
     def test_dynamodb_error(self):
         self._make_request("ddb/error")
