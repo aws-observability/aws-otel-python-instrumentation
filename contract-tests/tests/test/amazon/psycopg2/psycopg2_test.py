@@ -107,7 +107,8 @@ class Psycopg2Test(ContractTestBase):
             target_status = StatusCode.UNSET
         else:
             target_status = StatusCode.ERROR
-        self.assertEqual(target_spans[0]._status, target_status)
+        print(target_spans[0])
+        self.assertEqual(target_spans[0], {})
         self._assert_semantic_conventions_attributes(target_spans[0].attributes, kwargs.get("sql_command"))
 
     def _assert_semantic_conventions_attributes(self, attributes_list: List[KeyValue], command: str) -> None:
