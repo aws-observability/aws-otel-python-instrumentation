@@ -19,7 +19,7 @@ rm -rf dist/contract_tests*
 
 # Install python dependency for contract-test
 # To be clear, install binary for psycopg2 have no negative influence on otel here
-# since Otel-Instrumentation runing in container that install psycopg2 from source
+# since Otel-Instrumentation running in container that install psycopg2 from source
 pip install sqlalchemy psycopg2-binary
 
 # Create mock-collector image
