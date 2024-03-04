@@ -7,10 +7,14 @@ from unittest import TestCase
 from docker import DockerClient
 from docker.models.networks import Network, NetworkCollection
 from docker.types import EndpointConfig
-from mock_collector_client import MockCollectorClient
+from mock_collector_client import MockCollectorClient, ResourceScopeMetric, ResourceScopeSpan
+from requests import Response, request
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.waiting_utils import wait_for_logs
 from typing_extensions import override
+
+from amazon.utils.app_signals_constants import ERROR_METRIC, FAULT_METRIC, LATENCY_METRIC
+from opentelemetry.proto.common.v1.common_pb2 import AnyValue
 
 NETWORK_NAME: str = "aws-appsignals-network"
 
@@ -115,6 +119,45 @@ class ContractTestBase(TestCase):
 
         self.mock_collector_client.clear_signals()
 
+    def do_test_requests(
+        self, path: str, method: str, status_code: int, expected_error: int, expected_fault: int, **kwargs
+    ) -> None:
+        address: str = self.application.get_container_host_ip()
+        port: str = self.application.get_exposed_port(self.get_application_port())
+        url: str = f"http://{address}:{port}/{path}"
+        response: Response = request(method, url, timeout=20)
+
+        self.assertEqual(status_code, response.status_code)
+
+        resource_scope_spans: List[ResourceScopeSpan] = self.mock_collector_client.get_traces()
+        self._assert_aws_span_attributes(resource_scope_spans, path, **kwargs)
+        self._assert_semantic_conventions_span_attributes(resource_scope_spans, method, path, status_code, **kwargs)
+
+        metrics: List[ResourceScopeMetric] = self.mock_collector_client.get_metrics(
+            {LATENCY_METRIC, ERROR_METRIC, FAULT_METRIC}
+        )
+        self._assert_metric_attributes(metrics, LATENCY_METRIC, 5000, **kwargs)
+        self._assert_metric_attributes(metrics, ERROR_METRIC, expected_error, **kwargs)
+        self._assert_metric_attributes(metrics, FAULT_METRIC, expected_fault, **kwargs)
+
+    def _assert_str_attribute(self, attributes_dict: Dict[str, AnyValue], key: str, expected_value: str):
+        self.assertIn(key, attributes_dict)
+        actual_value: AnyValue = attributes_dict[key]
+        self.assertIsNotNone(actual_value)
+        self.assertEqual(expected_value, actual_value.string_value)
+
+    def _assert_int_attribute(self, attributes_dict: Dict[str, AnyValue], key: str, expected_value: int) -> None:
+        self.assertIn(key, attributes_dict)
+        actual_value: AnyValue = attributes_dict[key]
+        self.assertIsNotNone(actual_value)
+        self.assertEqual(expected_value, actual_value.int_value)
+
+    def check_sum(self, metric_name: str, actual_sum: float, expected_sum: float) -> None:
+        if metric_name is LATENCY_METRIC:
+            self.assertTrue(0 < actual_sum < expected_sum)
+        else:
+            self.assertEqual(actual_sum, expected_sum)
+
     # pylint: disable=no-self-use
     # Methods that should be overridden in subclasses
     @classmethod
@@ -145,3 +188,16 @@ class ContractTestBase(TestCase):
 
     def get_application_otel_resource_attributes(self) -> str:
         return "service.name=" + self.get_application_otel_service_name()
+
+    def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs):
+        self.fail("Tests must implement this function")
+
+    def _assert_semantic_conventions_span_attributes(
+        self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str, status_code: int, **kwargs
+    ):
+        self.fail("Tests must implement this function")
+
+    def _assert_metric_attributes(
+        self, resource_scope_metrics: List[ResourceScopeMetric], metric_name: str, expected_sum: int, **kwargs
+    ):
+        self.fail("Tests must implement this function")

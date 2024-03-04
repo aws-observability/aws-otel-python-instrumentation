@@ -2,9 +2,9 @@
 # Assumes existence of dist/aws_opentelemetry_distro-<pkg_version>-py3-none-any.whl.
 # Assumes filename of aws_opentelemetry_distro-<pkg_version>-py3-none-any.whl is passed in as "DISTRO" arg.
 FROM python:3.10
-WORKDIR /requests
-COPY ./dist/$DISTRO /requests
-COPY ./contract-tests/images/applications/requests /requests
+WORKDIR /psycopg2
+COPY ./dist/$DISTRO /psycopg2
+COPY ./contract-tests/images/applications/psycopg2 /psycopg2
 
 ENV PIP_ROOT_USER_ACTION=ignore
 ARG DISTRO
@@ -12,4 +12,4 @@ RUN pip install --upgrade pip && pip install -r requirements.txt && pip install 
 RUN opentelemetry-bootstrap -a install
 
 # Without `-u`, logs will be buffered and `wait_for_logs` will never return.
-CMD ["opentelemetry-instrument", "python", "-u", "./requests_server.py"]
+CMD ["opentelemetry-instrument", "python", "-u", "./psycopg2_server.py"]
