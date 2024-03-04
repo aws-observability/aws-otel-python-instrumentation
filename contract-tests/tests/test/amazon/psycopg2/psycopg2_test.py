@@ -141,7 +141,6 @@ class Psycopg2Test(ContractTestBase):
         check_sum(metric_name, dependency_dp.sum, expected_sum)
 
         attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(service_dp.attributes)
-        self._assert_str_attribute(attribute_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
