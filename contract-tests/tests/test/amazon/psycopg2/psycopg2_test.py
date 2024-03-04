@@ -132,7 +132,7 @@ class Psycopg2Test(ContractTestBase):
         resource_scope_metrics: List[ResourceScopeMetric],
         metric_name: str,
         expected_sum: int,
-        aws_remote_operation: str,
+        **kwargs
     ) -> None:
         target_metrics: List[Metric] = []
         for resource_scope_metric in resource_scope_metrics:
@@ -152,7 +152,7 @@ class Psycopg2Test(ContractTestBase):
         # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, "postgresql")
-        self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, aws_remote_operation)
+        self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, kwargs.get("sql_command"))
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "CLIENT")
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
 

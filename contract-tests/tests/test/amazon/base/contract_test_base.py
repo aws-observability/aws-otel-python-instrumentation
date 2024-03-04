@@ -147,7 +147,7 @@ class ContractTestBase(TestCase):
         )
         self._assert_metric_attribute(metrics, LATENCY_METRIC, 5000, **kwargs)
         self._assert_metric_attribute(metrics, ERROR_METRIC, expected_error, **kwargs)
-        self._assert_metric_attribute(metrics, FAULT_METRIC, expected_fault, kwargs)
+        self._assert_metric_attribute(metrics, FAULT_METRIC, expected_fault, **kwargs)
 
     # pylint: disable=no-self-use
     # Methods that should be overridden in subclasses
