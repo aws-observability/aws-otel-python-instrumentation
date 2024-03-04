@@ -14,7 +14,7 @@ import java.util.stream.Stream;
 public enum Configs {
   ALL_100_TPS(
       TestConfig.builder()
-          .name("all-800-tps")
+          .name("all-100-tps")
           .description("Compares all DistroConfigs (100TPS test)")
           .withDistroConfigs(DistroConfig.values())
           .warmupSeconds(60)
