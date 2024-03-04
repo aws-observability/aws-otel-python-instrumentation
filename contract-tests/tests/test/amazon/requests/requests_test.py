@@ -123,8 +123,6 @@ class RequestsTest(ContractTestBase):
     def _assert_metric_attributes(
         self,
         resource_scope_metrics: List[ResourceScopeMetric],
-        method: str,
-        path: str,
         metric_name: str,
         expected_sum: int,
         **kwargs,
@@ -145,6 +143,7 @@ class RequestsTest(ContractTestBase):
             dependency_dp = dp_list[1]
             service_dp = dp_list[0]
         attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(dependency_dp.attributes)
+        method: str = kwargs.get("request_method")
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
