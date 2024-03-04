@@ -13,7 +13,6 @@ from amazon.utils.app_signals_constants import (
     AWS_REMOTE_OPERATION,
     AWS_REMOTE_SERVICE,
     AWS_SPAN_KIND,
-    LATENCY_METRIC,
 )
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
 from opentelemetry.proto.metrics.v1.metrics_pb2 import ExponentialHistogramDataPoint, Metric
