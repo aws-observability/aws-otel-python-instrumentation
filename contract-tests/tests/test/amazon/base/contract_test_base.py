@@ -186,8 +186,12 @@ class ContractTestBase(TestCase):
     def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs):
         pass
 
-    def _assert_semantic_conventions_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str, status_code: int, **kwargs):
+    def _assert_semantic_conventions_span_attributes(
+        self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str, status_code: int, **kwargs
+    ):
         pass
 
-    def _assert_metric_attribute(self, resource_scope_metrics: List[ResourceScopeMetric], metric_name: str, expected_sum: int, **kwargs):
+    def _assert_metric_attribute(
+        self, resource_scope_metrics: List[ResourceScopeMetric], metric_name: str, expected_sum: int, **kwargs
+    ):
         pass
