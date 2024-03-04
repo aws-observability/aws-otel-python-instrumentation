@@ -130,7 +130,12 @@ public class OverheadTests {
 
   private void startRecording(
       DistroConfig distroConfig, GenericContainer<?> vehicleInventoryService) throws Exception {
-    String[] command = {"sh", "executeProfiler.sh", distroConfig.getName()};
+    String[] command = {
+      "sh",
+      "executeProfiler.sh",
+      namingConventions.container.performanceMetricsFileWithoutPath(distroConfig),
+      namingConventions.container.root()
+    };
     vehicleInventoryService.execInContainer(command);
   }
 
