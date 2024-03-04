@@ -104,8 +104,7 @@ class Psycopg2Test(ContractTestBase):
 
         self.assertEqual(target_spans[0].name, kwargs.get("sql_command").split()[0])
         if status_code == 200:
-            print(type(target_spans[0].status))
-            self.assertEqual(target_spans[0].status, [])
+            self.assertEqual(target_spans[0].status.code, StatusCode.UNSET.value)
         else:
             self.assertEqual(target_spans[0].status.code, StatusCode.ERROR.value)
 
