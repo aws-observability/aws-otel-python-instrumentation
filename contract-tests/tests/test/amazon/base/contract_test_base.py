@@ -184,14 +184,15 @@ class ContractTestBase(TestCase):
         return "service.name=" + self.get_application_otel_service_name()
 
     def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs):
-        pass
+        # To indicate that child class must implement this function, same for below
+        self.assertTrue(False)
 
     def _assert_semantic_conventions_span_attributes(
         self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str, status_code: int, **kwargs
     ):
-        pass
+        self.assertTrue(False)
 
     def _assert_metric_attribute(
         self, resource_scope_metrics: List[ResourceScopeMetric], metric_name: str, expected_sum: int, **kwargs
     ):
-        pass
+        self.assertTrue(False)

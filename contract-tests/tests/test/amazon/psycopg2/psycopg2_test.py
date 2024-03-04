@@ -138,15 +138,15 @@ class Psycopg2Test(ContractTestBase):
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, "postgresql")
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, kwargs.get("sql_command"))
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "CLIENT")
-        check_sum(metric_name, dependency_dp.sum, expected_sum)
+        self.check_sum(metric_name, dependency_dp.sum, expected_sum)
 
         attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(service_dp.attributes)
         # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
-        check_sum(metric_name, service_dp.sum, expected_sum)
+        self.check_sum(metric_name, service_dp.sum, expected_sum)
 
-    def check_sum(metric_name: str, actual_sum: float, expected_sum: float) -> None"
+    def check_sum(self, metric_name: str, actual_sum: float, expected_sum: float) -> None
         if metric_name is LATENCY_METRIC:
             self.assertTrue(0 < actual_sum < expected_sum)
         else:
