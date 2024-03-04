@@ -68,7 +68,7 @@ class Psycopg2Test(ContractTestBase):
                 target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
-        self._assert_aws_attributes(target_spans[0].attributes, kwargs.get("sql_command", "INVALID"))
+        self._assert_aws_attributes(target_spans[0].attributes, **kwargs)
 
     @override
     def _assert_aws_attributes(self, attributes_list: List[KeyValue], **kwargs) -> None:
