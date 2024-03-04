@@ -152,6 +152,12 @@ class ContractTestBase(TestCase):
         self.assertIsNotNone(actual_value)
         self.assertEqual(expected_value, actual_value.int_value)
 
+    def check_sum(self, metric_name: str, actual_sum: float, expected_sum: float) -> None:
+        if metric_name is LATENCY_METRIC:
+            self.assertTrue(0 < actual_sum < expected_sum)
+        else:
+            self.assertEqual(actual_sum, expected_sum)
+
     # pylint: disable=no-self-use
     # Methods that should be overridden in subclasses
     @classmethod

@@ -139,19 +139,23 @@ class RequestsTest(ContractTestBase):
         dp_list: List[ExponentialHistogramDataPoint] = target_metric.exponential_histogram.data_points
 
         self.assertEqual(len(dp_list), 2)
-        dp: ExponentialHistogramDataPoint = dp_list[0]
+        dependency_dp: ExponentialHistogramDataPoint = dp_list[0]
+        service_dp: ExponentialHistogramDataPoint = dp_list[1]
         if len(dp_list[1].attributes) > len(dp_list[0].attributes):
-            dp = dp_list[1]
-        attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(dp.attributes)
+            dependency_dp = dp_list[1]
+            service_dp = dp_list[0]
+        attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(dependency_dp.attributes)
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, "backend:8080")
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, f"{method} /backend")
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "CLIENT")
+        self.check_sum(metric_name, dependency_dp.sum, expected_sum)
 
-        actual_sum: float = dp.sum
-        if metric_name is LATENCY_METRIC:
-            self.assertTrue(0 < actual_sum < expected_sum)
-        else:
-            self.assertEqual(actual_sum, expected_sum)
+        attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(service_dp.attributes)
+        # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
+        self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
+        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
+        self.check_sum(metric_name, service_dp.sum, expected_sum)
+
