@@ -1,4 +1,10 @@
 #!/bin/bash
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Fail fast
+set -e
+
 # Check script is running in contract-tests
 current_path=`pwd`
 current_dir="${current_path##*/}"
@@ -10,6 +16,11 @@ fi
 # Remove old whl files (excluding distro whl)
 rm -rf dist/mock_collector*
 rm -rf dist/contract_tests*
+
+# Install python dependency for contract-test
+# To be clear, install binary for psycopg2 have no negative influence on otel here
+# since Otel-Instrumentation running in container that install psycopg2 from source
+pip install sqlalchemy psycopg2-binary
 
 # Create mock-collector image
 cd contract-tests/images/mock-collector

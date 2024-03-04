@@ -70,6 +70,7 @@ psql -h <rds_url> -d vehicle_inventory -U root
 
 alter user djangouser with encrypted password '<password_of_your_choosing>';
 grant all privileges on database vehicle_inventory to djangouser;
+ALTER DATABASE vehicle_inventory OWNER TO djangouser;
 
 aws s3 sync s3://<s3_bucket_that_has_python_code> .
 
@@ -83,7 +84,7 @@ POSTGRES_DATABASE=vehicle_inventory
 POSTGRES_USER=djangouser
 POSTGRES_PASSWORD=<password_from_this_step>
 DB_SERVICE_HOST=<RDS_DB_endpoint>
-DB_SERVICE_PORT=3306
+DB_SERVICE_PORT=5432
 IMAGE_BACKEND_SERVICE_HOST=<image-service_ec2_public_IP>
 IMAGE_BACKEND_SERVICE_PORT=8000
 
@@ -119,10 +120,28 @@ They should be accessible through `0.0.0.0:8000` for the image service and `0.0.
 ## APIs
 
 The following are the APIs and what they do:
-1. GET /vehicle-inventory/: returns all the vehicles entries for postgres db
-2. POST /vehicle-inventory/: puts vehicle into db. For example: `curl -X POST http://0.0.0.0:8001/vehicle-inventory/ -d '{"make": "BMW","model": "M340","year": 2022,"image_name": "newCar.jpg"}'`
-3. GET /vehicle-inventory/<int>: returns vehicle entry with id = <int>
-4. GET /vehicle-inventory/<int>/image: returns image file information from S3 for the specific vehicle by calling the image microservice
-5. GET /images/name/<image_name>: returns image information for <image_name> from S3 if present. 
-6. POST /images/name/<image_name>: creates an empty file in S3. This is an async endpoint since it will put image name in an SQS queue and not wait for the file to be created in S3. Instead, a long running thread will poll SQS and then create the image file later. 
-7. GET /image/remote-image: makes a remote http call to google.com. 
+1. `GET /vehicle-inventory/heatlh-check/`: returns 200 if the vehicle service is up and running.
+2. `GET /vehicle-inventory/`: returns all the vehicles entries for postgres db
+3. `POST /vehicle-inventory/`: puts vehicle into db. For example: `curl -X POST http://0.0.0.0:8001/vehicle-inventory/ 
+   -d '{"make": "BMW","model": "M340","year": 2022,"image_name": "newCar.jpg"}'`
+4. `GET /vehicle-inventory/<int>`: returns vehicle entry with id = <int>
+5. `DELETE /vehicle-inventory/<int>`: deletes vehicle entry with id = <int>
+6. `GET /vehicle-inventory/make/<str>`: returns vehicle entries with make = <str>
+7. `GET /vehicle-inventory/<int>/image`: returns image file information from S3 for the specific vehicle by calling 
+   the image microservice
+8. `GET /vehicle-inventory/image/<image_name>`: returns image information for <image_name> from S3 if present through 
+   the image service.
+9. `POST /vehicle-inventory/image/<image_name>`: Calls the image service API `POST /images/name/<image_name>`
+10. `GET /vehicle-inventory/history/`: returns all the vehicle purchase history entries from postgres db
+11. `POST /vehicle-inventory/history/`: puts vehicle purchase history into db. For example: `curl -X POST http://0.0.0.
+   0:8001/vehicle-inventory/history/ -d '{"vehicle_id": "1","purchase_price": "66000"}'`
+12. `GET /vehicle-inventory/history/<int>`: returns vehicle purchase history entry with id = <int>
+13. `DELETE /vehicle-inventory/history/<int>`: deletes vehicle purchase history entry with id = <int>
+14. `GET /vehicle-inventory/history/<int>/vehicle`: returns vehicle entry that is linked to vehicle purchase history 
+    with id = <int>
+15. `GET /images/name/<image_name>`: returns image information for <image_name> from S3 if present. 
+16. `POST /images/name/<image_name>`: creates an empty file in S3. This is an async endpoint since it will put image 
+   name in an SQS queue and not wait for the file to be created in S3. Instead, a long running thread will poll SQS 
+   and then create the image file later. 
+17. `GET /image/remote-image`: makes a remote http call to google.com. 
+18. `GET /image/heatlh-check/`: returns 200 if the image service is up and running.

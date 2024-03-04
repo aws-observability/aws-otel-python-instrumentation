@@ -1,4 +1,10 @@
 #!/bin/bash
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Fail fast
+set -e
+
 # Check script is running in contract-tests
 current_path=`pwd`
 current_dir="${current_path##*/}"
@@ -9,7 +15,7 @@ fi
 
 # Setup - update dependencies and create/empty dist dir
 pip install --upgrade pip setuptools wheel packaging build
-mkdir dist
+mkdir -p dist
 rm -rf dist/aws_opentelemetry_distro*
 
 # Build distro

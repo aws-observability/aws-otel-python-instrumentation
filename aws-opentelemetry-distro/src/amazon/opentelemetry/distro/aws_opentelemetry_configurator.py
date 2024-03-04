@@ -1,9 +1,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+# Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import os
 from logging import Logger, getLogger
-from typing import Dict, Type
+from typing import ClassVar, Dict, Type
 
+from importlib_metadata import version
 from typing_extensions import override
 
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
@@ -15,7 +17,8 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
-from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
+from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter as OTLPGrpcOTLPMetricExporter
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.sdk._configuration import (
     _get_exporter_names,
     _get_id_generator,
@@ -29,6 +32,8 @@ from opentelemetry.sdk._configuration import (
 )
 from opentelemetry.sdk.environment_variables import (
     _OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED,
+    OTEL_EXPORTER_OTLP_METRICS_PROTOCOL,
+    OTEL_EXPORTER_OTLP_PROTOCOL,
     OTEL_TRACES_SAMPLER_ARG,
 )
 from opentelemetry.sdk.extension.aws.resource.ec2 import AwsEc2ResourceDetector
@@ -55,6 +60,7 @@ from opentelemetry.trace import set_tracer_provider
 OTEL_AWS_APP_SIGNALS_ENABLED = "OTEL_AWS_APP_SIGNALS_ENABLED"
 OTEL_METRIC_EXPORT_INTERVAL = "OTEL_METRIC_EXPORT_INTERVAL"
 OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT = "OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT"
+OTEL_AWS_SMP_EXPORTER_ENDPOINT = "OTEL_AWS_SMP_EXPORTER_ENDPOINT"
 DEFAULT_METRIC_EXPORT_INTERVAL = 60000.0
 
 _logger: Logger = getLogger(__name__)
@@ -76,10 +82,13 @@ class AwsOpenTelemetryConfigurator(_OTelSDKConfigurator):
     # pylint: disable=no-self-use
     @override
     def _configure(self, **kwargs):
-        _initialize_components(kwargs.get("auto_instrumentation_version"))
+        _initialize_components()
 
 
-def _initialize_components(auto_instrumentation_version):
+# The OpenTelemetry Authors code
+# Long term, we wish to contribute this to upstream to improve initialization customizability and reduce dependency on
+# internal logic.
+def _initialize_components():
     trace_exporters, metric_exporters, log_exporters = _import_exporters(
         _get_exporter_names("traces"),
         _get_exporter_names("metrics"),
@@ -90,11 +99,9 @@ def _initialize_components(auto_instrumentation_version):
     id_generator = _import_id_generator(id_generator_name)
     # if env var OTEL_RESOURCE_ATTRIBUTES is given, it will read the service_name
     # from the env variable else defaults to "unknown_service"
-    auto_resource = {}
-    # populate version if using auto-instrumentation
-    if auto_instrumentation_version:
-        auto_resource[ResourceAttributes.TELEMETRY_AUTO_VERSION] = auto_instrumentation_version
 
+    auto_resource: Dict[str, any] = {}
+    auto_resource = _customize_versions(auto_resource)
     resource = get_aggregated_resources(
         [
             AwsEc2ResourceDetector(),
@@ -143,6 +150,25 @@ def _init_tracing(
     set_tracer_provider(trace_provider)
 
 
+# END The OpenTelemetry Authors code
+
+
+def _exclude_urls_for_instrumentations():
+    urls_to_exclude_instr = "SamplingTargets,GetSamplingRules"
+    requests_excluded_urls = os.environ.pop("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", "")
+    urllib3_excluded_urls = os.environ.pop("OTEL_PYTHON_URLLIB3_EXCLUDED_URLS", "")
+    if len(requests_excluded_urls) > 0:
+        requests_excluded_urls = ",".join([requests_excluded_urls, urls_to_exclude_instr])
+    else:
+        requests_excluded_urls = urls_to_exclude_instr
+    if len(urllib3_excluded_urls) > 0:
+        urllib3_excluded_urls = ",".join([urllib3_excluded_urls, urls_to_exclude_instr])
+    else:
+        urllib3_excluded_urls = urls_to_exclude_instr
+    os.environ.setdefault("OTEL_PYTHON_URLLIB3_EXCLUDED_URLS", requests_excluded_urls)
+    os.environ.setdefault("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", urllib3_excluded_urls)
+
+
 def _custom_import_sampler(sampler_name: str, resource: Resource) -> Sampler:
     if sampler_name == "xray":
         # Example env var value
@@ -164,6 +190,11 @@ def _custom_import_sampler(sampler_name: str, resource: Resource) -> Sampler:
                         polling_interval = int(key_value[1])
                     except ValueError as error:
                         _logger.error("polling_interval in OTEL_TRACES_SAMPLER_ARG must be a number: %s", error)
+        # Until `suppress_instrumentation` is available in next OTEL Python version (>=1.23.0/0.44b0),
+        # suppress recording of X-Ray sampler's Request POST calls via setting `exclude urls` Env Vars. This
+        # should be done in this class's `_configure()` method which is run before any instrumentation is loaded
+        # TODO: Replace usage of `exclude urls` by wrapping X-Ray sampler POST calls with `suppress_instrumentation`
+        _exclude_urls_for_instrumentations()
 
         _logger.debug("XRay Sampler Endpoint: %s", str(endpoint))
         _logger.debug("XRay Sampler Polling Interval: %s", str(polling_interval))
@@ -172,41 +203,28 @@ def _custom_import_sampler(sampler_name: str, resource: Resource) -> Sampler:
 
 
 def _customize_sampler(sampler: Sampler) -> Sampler:
-    if not is_smp_enabled():
+    if not is_app_signals_enabled():
         return sampler
     return AlwaysRecordSampler(sampler)
 
 
 def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> SpanExporter:
-    if not is_smp_enabled():
+    if not is_app_signals_enabled():
         return span_exporter
     return AwsMetricAttributesSpanExporterBuilder(span_exporter, resource).build()
 
 
 def _customize_span_processors(provider: TracerProvider, resource: Resource) -> None:
-    if not is_smp_enabled():
+    if not is_app_signals_enabled():
         return
 
     # Construct and set local and remote attributes span processor
     provider.add_span_processor(AttributePropagatingSpanProcessorBuilder().build())
 
     # Construct meterProvider
-    temporality_dict: Dict[type, AggregationTemporality] = {}
-    for typ in [
-        Counter,
-        UpDownCounter,
-        ObservableCounter,
-        ObservableCounter,
-        ObservableUpDownCounter,
-        ObservableGauge,
-        Histogram,
-    ]:
-        temporality_dict[typ] = AggregationTemporality.DELTA
-    _logger.info("Span Metrics Processor enabled")
-    smp_endpoint = os.environ.get(OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT, "http://localhost:4315")
-    otel_metric_exporter = OTLPMetricExporter(endpoint=smp_endpoint, preferred_temporality=temporality_dict)
+    _logger.info("AWS AppSignals enabled")
+    otel_metric_exporter = AppSignalsExporterProvider().create_exporter()
     export_interval_millis = float(os.environ.get(OTEL_METRIC_EXPORT_INTERVAL, DEFAULT_METRIC_EXPORT_INTERVAL))
-    _logger.debug("Span Metrics endpoint: %s", smp_endpoint)
     _logger.debug("Span Metrics export interval: %s", export_interval_millis)
     # Cap export interval to 60 seconds. This is currently required for metrics-trace correlation to work correctly.
     if export_interval_millis > DEFAULT_METRIC_EXPORT_INTERVAL:
@@ -216,11 +234,60 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource) -> 
         exporter=otel_metric_exporter, export_interval_millis=export_interval_millis
     )
     meter_provider: MeterProvider = MeterProvider(resource=resource, metric_readers=[periodic_exporting_metric_reader])
-    # Construct and set span metrics processor
+    # Construct and set AppSignals metrics processor
     provider.add_span_processor(AwsSpanMetricsProcessorBuilder(meter_provider, resource).build())
 
     return
 
 
-def is_smp_enabled():
+def _customize_versions(auto_resource: Dict[str, any]) -> Dict[str, any]:
+    distro_version = version("aws-opentelemetry-distro")
+    auto_resource[ResourceAttributes.TELEMETRY_AUTO_VERSION] = distro_version + "-aws"
+    _logger.debug("aws-opentelementry-distro - version: %s", auto_resource[ResourceAttributes.TELEMETRY_AUTO_VERSION])
+    return auto_resource
+
+
+def is_app_signals_enabled():
     return os.environ.get(OTEL_AWS_APP_SIGNALS_ENABLED, False)
+
+
+class AppSignalsExporterProvider:
+    _instance: ClassVar["AppSignalsExporterProvider"] = None
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    # pylint: disable=no-self-use
+    def create_exporter(self):
+        protocol = os.environ.get(
+            OTEL_EXPORTER_OTLP_METRICS_PROTOCOL, os.environ.get(OTEL_EXPORTER_OTLP_PROTOCOL, "grpc")
+        )
+        _logger.debug("AppSignals export protocol: %s", protocol)
+
+        app_signals_endpoint = os.environ.get(
+            OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT,
+            os.environ.get(OTEL_AWS_SMP_EXPORTER_ENDPOINT, "http://localhost:4315"),
+        )
+
+        _logger.debug("AppSignals export endpoint: %s", app_signals_endpoint)
+
+        temporality_dict: Dict[type, AggregationTemporality] = {}
+        for typ in [
+            Counter,
+            UpDownCounter,
+            ObservableCounter,
+            ObservableCounter,
+            ObservableUpDownCounter,
+            ObservableGauge,
+            Histogram,
+        ]:
+            temporality_dict[typ] = AggregationTemporality.DELTA
+
+        if protocol == "http/protobuf":
+            return OTLPHttpOTLPMetricExporter(endpoint=app_signals_endpoint, preferred_temporality=temporality_dict)
+        if protocol == "grpc":
+            return OTLPGrpcOTLPMetricExporter(endpoint=app_signals_endpoint, preferred_temporality=temporality_dict)
+
+        raise RuntimeError(f"Unsupported AppSignals export protocol: {protocol} ")
