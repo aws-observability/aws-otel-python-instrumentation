@@ -126,10 +126,10 @@ class ContractTestBase(TestCase):
         self,
         path: str,
         method: str,
-        command: str,
         status_code: int,
         expected_error: int,
         expected_fault: int,
+        **kwargs
     ) -> None:
         address: str = self.application.get_container_host_ip()
         port: str = self.application.get_exposed_port(self.get_application_port())
@@ -139,15 +139,15 @@ class ContractTestBase(TestCase):
         self.assertEqual(status_code, response.status_code)
 
         resource_scope_spans: List[ResourceScopeSpan] = self.mock_collector_client.get_traces()
-        self._assert_aws_span_attributes(resource_scope_spans, command, path)
-        self._assert_semantic_conventions_span_attributes(resource_scope_spans, command)
+        self._assert_aws_span_attributes(resource_scope_spans, path, **kwargs)
+        self._assert_semantic_conventions_span_attributes(resource_scope_spans, **kwargs)
 
         metrics: List[ResourceScopeMetric] = self.mock_collector_client.get_metrics(
             {LATENCY_METRIC, ERROR_METRIC, FAULT_METRIC}
         )
-        self._assert_metric_attribute(metrics, LATENCY_METRIC, 5000, command)
-        self._assert_metric_attribute(metrics, ERROR_METRIC, expected_error, command)
-        self._assert_metric_attribute(metrics, FAULT_METRIC, expected_fault, command)
+        self._assert_metric_attribute(metrics, LATENCY_METRIC, 5000, **kwargs)
+        self._assert_metric_attribute(metrics, ERROR_METRIC, expected_error, **kwargs)
+        self._assert_metric_attribute(metrics, FAULT_METRIC, expected_fault, kwargs)
 
     # pylint: disable=no-self-use
     # Methods that should be overridden in subclasses
@@ -180,11 +180,11 @@ class ContractTestBase(TestCase):
     def get_application_otel_resource_attributes(self) -> str:
         return "service.name=" + self.get_application_otel_service_name()
 
-    def _assert_aws_span_attributes(self, resource_scope_spans, command, path):
+    def _assert_aws_span_attributes(self, resource_scope_spans, path, **kwargs):
         pass
 
-    def _assert_semantic_conventions_span_attributes(self, resource_scope_spans, command):
+    def _assert_semantic_conventions_span_attributes(self, resource_scope_spans, **kwargs):
         pass
 
-    def _assert_metric_attribute(self, metrics, LATENCY_METRIC, param, command):
+    def _assert_metric_attribute(self, metrics, LATENCY_METRIC, param, **kwargs):
         pass

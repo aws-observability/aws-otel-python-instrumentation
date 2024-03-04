@@ -51,15 +51,15 @@ class Psycopg2Test(ContractTestBase):
 
     def test_success(self) -> None:
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("success", "GET", "SELECT", 200, 0, 0)
+        self.do_test_requests("success", "GET", 200, 0, 0, sql_command="SELECT")
 
     def test_fault(self) -> None:
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("fault", "GET", "SELECT DISTINCT", 500, 0, 1)
+        self.do_test_requests("fault", "GET", 500, 0, 1, sql_command="SELECT DISTINCT")
 
     @override
     def _assert_aws_span_attributes(
-        self, resource_scope_spans: List[ResourceScopeSpan], sql_command: str, path: str
+        self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs
     ) -> None:
         target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
@@ -68,16 +68,17 @@ class Psycopg2Test(ContractTestBase):
                 target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
-        self._assert_aws_attributes(target_spans[0].attributes, sql_command)
+        self._assert_aws_attributes(target_spans[0].attributes, kwargs.get("sql_command", "INVALID"))
 
     @override
-    def _assert_aws_attributes(self, attributes_list: List[KeyValue], command: str) -> None:
+    def _assert_aws_attributes(self, attributes_list: List[KeyValue], **kwargs) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # InternalOperation as OTEL does not instrument the basic server we are using, so the client span is a local
         # root.
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_OPERATION, "InternalOperation")
         self._assert_str_attribute(attributes_dict, AWS_REMOTE_SERVICE, "postgresql")
+        command: str = kwargs.get("sql_command")
         self._assert_str_attribute(attributes_dict, AWS_REMOTE_OPERATION, f"{command}")
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
@@ -107,7 +108,7 @@ class Psycopg2Test(ContractTestBase):
 
     @override
     def _assert_semantic_conventions_span_attributes(
-        self, resource_scope_spans: List[ResourceScopeSpan], commands: str
+        self, resource_scope_spans: List[ResourceScopeSpan], **kwargs
     ) -> None:
         target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
@@ -116,8 +117,8 @@ class Psycopg2Test(ContractTestBase):
                 target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
-        self.assertEqual(target_spans[0].name, commands.split()[0])
-        self._assert_semantic_conventions_attributes(target_spans[0].attributes, commands)
+        self.assertEqual(target_spans[0].name, kwargs.get("sql_command").split()[0])
+        self._assert_semantic_conventions_attributes(target_spans[0].attributes, kwargs.get("sql_command"))
 
     def _assert_semantic_conventions_attributes(self, attributes_list: List[KeyValue], command: str) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
