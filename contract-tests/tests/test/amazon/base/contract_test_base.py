@@ -183,11 +183,11 @@ class ContractTestBase(TestCase):
     def get_application_otel_resource_attributes(self) -> str:
         return "service.name=" + self.get_application_otel_service_name()
 
-    def _assert_aws_span_attributes(self, resource_scope_spans, path, **kwargs):
+    def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs):
         pass
 
-    def _assert_semantic_conventions_span_attributes(self, resource_scope_spans, method, path, status_code, **kwargs):
+    def _assert_semantic_conventions_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str, status_code: int, **kwargs):
         pass
 
-    def _assert_metric_attribute(self, resource_scope_metrics, metric_name, expected_sum, **kwargs):
+    def _assert_metric_attribute(self, resource_scope_metrics: List[ResourceScopeMetric], metric_name: str, expected_sum: int, **kwargs):
         pass
