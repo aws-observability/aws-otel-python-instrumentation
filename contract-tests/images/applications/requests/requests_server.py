@@ -55,7 +55,7 @@ def main() -> None:
     atexit.register(requests_server.shutdown)
     server_thread: Thread = Thread(target=requests_server.serve_forever)
     server_thread.start()
-    print("Request-Ready")
+    print("Ready")
     server_thread.join()
 
 

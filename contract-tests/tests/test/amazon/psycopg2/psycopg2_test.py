@@ -179,6 +179,7 @@ class Psycopg2Test(ContractTestBase):
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, "postgresql")
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, aws_remote_operation)
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "CLIENT")
+        self._assert_str_attribute(attribute_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
 
         actual_sum: float = dp.sum
         if metric_name is LATENCY_METRIC:
