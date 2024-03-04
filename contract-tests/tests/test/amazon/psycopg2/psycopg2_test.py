@@ -104,10 +104,9 @@ class Psycopg2Test(ContractTestBase):
 
         self.assertEqual(target_spans[0].name, kwargs.get("sql_command").split()[0])
         if status_code == 200:
-            self.assertEqual(target_spans[0].status, {})
+            self.assertEqual(target_spans[0].status, '')
         else:
-            self.assertEqual(target_spans[0].status.code, StatusCode.ERROR)
-        print(target_spans[0])
+            self.assertEqual(target_spans[0].status.code, StatusCode.ERROR.value)
 
         self._assert_semantic_conventions_attributes(target_spans[0].attributes, kwargs.get("sql_command"))
 
