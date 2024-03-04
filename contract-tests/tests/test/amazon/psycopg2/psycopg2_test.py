@@ -147,7 +147,7 @@ class Psycopg2Test(ContractTestBase):
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
         self.check_sum(metric_name, service_dp.sum, expected_sum)
 
-    def check_sum(self, metric_name: str, actual_sum: float, expected_sum: float) -> None
+    def check_sum(self, metric_name: str, actual_sum: float, expected_sum: float) -> None:
         if metric_name is LATENCY_METRIC:
             self.assertTrue(0 < actual_sum < expected_sum)
         else:
