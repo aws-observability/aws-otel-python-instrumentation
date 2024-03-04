@@ -45,25 +45,26 @@ class RequestsTest(ContractTestBase):
         return {"OTEL_INSTRUMENTATION_COMMON_PEER_SERVICE_MAPPING": "backend=backend:8080"}
 
     def test_success(self) -> None:
-        self.do_test_requests("success", "GET", 200, 0, 0)
+        self.do_test_requests("success", "GET", 200, 0, 0, method="GET")
 
     def test_error(self) -> None:
-        self.do_test_requests("error", "GET", 400, 1, 0)
+        self.do_test_requests("error", "GET", 400, 1, 0, method="GET")
 
     def test_fault(self) -> None:
-        self.do_test_requests("fault", "GET", 500, 0, 1)
+        self.do_test_requests("fault", "GET", 500, 0, 1, method="GET")
 
     def test_success_post(self) -> None:
-        self.do_test_requests("success/postmethod", "POST", 200, 0, 0)
+        self.do_test_requests("success/postmethod", "POST", 200, 0, 0, method="POST")
 
     def test_error_post(self) -> None:
-        self.do_test_requests("error/postmethod", "POST", 400, 1, 0)
+        self.do_test_requests("error/postmethod", "POST", 400, 1, 0, method="POST")
 
     def test_fault_post(self) -> None:
-        self.do_test_requests("fault/postmethod", "POST", 500, 0, 1)
+        self.do_test_requests("fault/postmethod", "POST", 500, 0, 1, method="POST")
 
+    @override
     def _assert_aws_span_attributes(
-        self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str
+        self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs
     ) -> None:
         target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
@@ -72,7 +73,7 @@ class RequestsTest(ContractTestBase):
                 target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
-        self._assert_aws_attributes(target_spans[0].attributes, method, path)
+        self._assert_aws_attributes(target_spans[0].attributes, kwargs.get("method"), path)
 
     def _assert_aws_attributes(self, attributes_list: List[KeyValue], method: str, endpoint: str) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
@@ -107,8 +108,9 @@ class RequestsTest(ContractTestBase):
         self.assertIsNotNone(actual_value)
         self.assertEqual(expected_value, actual_value.int_value)
 
+    @override
     def _assert_semantic_conventions_span_attributes(
-        self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str, status_code: int
+        self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str, status_code: int, **kwargs
     ) -> None:
         target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
@@ -133,6 +135,7 @@ class RequestsTest(ContractTestBase):
         # TODO: request instrumentation is not respecting PEER_SERVICE
         # self._assert_str_attribute(attributes_dict, SpanAttributes.PEER_SERVICE, "backend:8080")
 
+    @override
     def _assert_metric_attributes(
         self,
         resource_scope_metrics: List[ResourceScopeMetric],
@@ -140,6 +143,7 @@ class RequestsTest(ContractTestBase):
         path: str,
         metric_name: str,
         expected_sum: int,
+        **kwargs
     ) -> None:
         target_metrics: List[Metric] = []
         for resource_scope_metric in resource_scope_metrics:
