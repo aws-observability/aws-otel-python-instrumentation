@@ -6,6 +6,7 @@
 
 package io.opentelemetry.containers;
 
+import io.opentelemetry.util.RuntimeUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.Network;
@@ -34,6 +35,8 @@ public class PostgresContainer {
         .withUsername(USERNAME)
         .withPassword(PASSWORD)
         .withDatabaseName(DATABASE_NAME)
+        .withCreateContainerCmdModifier(
+            cmd -> cmd.getHostConfig().withCpusetCpus(RuntimeUtil.getNonApplicationCores()))
         .withReuse(false);
   }
 }

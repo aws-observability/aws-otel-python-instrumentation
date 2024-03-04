@@ -14,21 +14,23 @@ import java.util.stream.Stream;
 public enum Configs {
   ALL_100_TPS(
       TestConfig.builder()
-          .name("all-800-tps")
+          .name("all-100-tps")
           .description("Compares all DistroConfigs (100TPS test)")
           .withDistroConfigs(DistroConfig.values())
-          .warmupSeconds(60)
+          .warmupSeconds(10)
           .maxRequestRate(100)
           .duration(System.getenv("DURATION"))
+          .concurrentConnections(System.getenv("CONCURRENCY"))
           .build()),
   ALL_800_TPS(
       TestConfig.builder()
           .name("all-800-tps")
           .description("Compares all DistroConfigs (800TPS test)")
           .withDistroConfigs(DistroConfig.values())
-          .warmupSeconds(60)
+          .warmupSeconds(10)
           .maxRequestRate(800)
           .duration(System.getenv("DURATION"))
+          .concurrentConnections(System.getenv("CONCURRENCY"))
           .build());
 
   public final TestConfig config;

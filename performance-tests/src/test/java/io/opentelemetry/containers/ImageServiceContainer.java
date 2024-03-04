@@ -6,6 +6,7 @@
 
 package io.opentelemetry.containers;
 
+import io.opentelemetry.util.RuntimeUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.GenericContainer;
@@ -45,6 +46,8 @@ public class ImageServiceContainer {
         .withEnv("AWS_SECRET_ACCESS_KEY", System.getenv("AWS_SECRET_ACCESS_KEY"))
         .withEnv("AWS_SESSION_TOKEN", System.getenv("AWS_SESSION_TOKEN"))
         .withEnv("S3_BUCKET", System.getenv("S3_BUCKET"))
+        .withCreateContainerCmdModifier(
+            cmd -> cmd.getHostConfig().withCpusetCpus(RuntimeUtil.getNonApplicationCores()))
         .withCommand(String.format("python3 manage.py runserver 0.0.0.0:%s --noreload", PORT));
   }
 }

@@ -6,6 +6,7 @@
 
 package io.opentelemetry.containers;
 
+import io.opentelemetry.util.RuntimeUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.GenericContainer;
@@ -33,6 +34,8 @@ public class CollectorContainer {
         .waitingFor(Wait.forHttp("/health").forPort(COLLECTOR_HEALTH_CHECK_PORT))
         .withCopyFileToContainer(
             MountableFile.forClasspathResource("collector.yaml"), "/etc/otel.yaml")
+        .withCreateContainerCmdModifier(
+            cmd -> cmd.getHostConfig().withCpusetCpus(RuntimeUtil.getNonApplicationCores()))
         .withCommand("--config /etc/otel.yaml");
   }
 }

@@ -7,6 +7,7 @@
 package io.opentelemetry.containers;
 
 import io.opentelemetry.distros.DistroConfig;
+import io.opentelemetry.util.RuntimeUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.GenericContainer;
@@ -57,6 +58,8 @@ public class VehicleInventoryServiceContainer {
             .withEnv("IMAGE_BACKEND_SERVICE_PORT", Integer.toString(ImageServiceContainer.PORT))
             .withEnv(distroConfig.getAdditionalEnvVars())
             .dependsOn(collector)
+            .withCreateContainerCmdModifier(
+                cmd -> cmd.getHostConfig().withCpusetCpus(RuntimeUtil.getApplicationCores()))
             .withCommand("bash run.sh");
 
     if (distroConfig.doInstrument()) {
