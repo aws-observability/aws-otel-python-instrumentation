@@ -136,9 +136,9 @@ class ContractTestBase(TestCase):
         metrics: List[ResourceScopeMetric] = self.mock_collector_client.get_metrics(
             {LATENCY_METRIC, ERROR_METRIC, FAULT_METRIC}
         )
-        self._assert_metric_attribute(metrics, LATENCY_METRIC, 5000, **kwargs)
-        self._assert_metric_attribute(metrics, ERROR_METRIC, expected_error, **kwargs)
-        self._assert_metric_attribute(metrics, FAULT_METRIC, expected_fault, **kwargs)
+        self._assert_metric_attributes(metrics, LATENCY_METRIC, 5000, **kwargs)
+        self._assert_metric_attributes(metrics, ERROR_METRIC, expected_error, **kwargs)
+        self._assert_metric_attributes(metrics, FAULT_METRIC, expected_fault, **kwargs)
 
     def _assert_str_attribute(self, attributes_dict: Dict[str, AnyValue], key: str, expected_value: str):
         self.assertIn(key, attributes_dict)
