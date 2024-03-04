@@ -62,9 +62,7 @@ class RequestsTest(ContractTestBase):
         self.do_test_requests("fault/postmethod", "POST", 500, 0, 1, request_method="POST")
 
     @override
-    def _assert_aws_span_attributes(
-        self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs
-    ) -> None:
+    def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs) -> None:
         target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
@@ -131,7 +129,7 @@ class RequestsTest(ContractTestBase):
         path: str,
         metric_name: str,
         expected_sum: int,
-        **kwargs
+        **kwargs,
     ) -> None:
         target_metrics: List[Metric] = []
         for resource_scope_metric in resource_scope_metrics:

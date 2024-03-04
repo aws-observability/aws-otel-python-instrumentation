@@ -58,9 +58,7 @@ class Psycopg2Test(ContractTestBase):
         self.do_test_requests("fault", "GET", 500, 0, 1, sql_command="SELECT DISTINCT")
 
     @override
-    def _assert_aws_span_attributes(
-        self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs
-    ) -> None:
+    def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs) -> None:
         target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
@@ -116,11 +114,7 @@ class Psycopg2Test(ContractTestBase):
 
     @override
     def _assert_metric_attribute(
-        self,
-        resource_scope_metrics: List[ResourceScopeMetric],
-        metric_name: str,
-        expected_sum: int,
-        **kwargs
+        self, resource_scope_metrics: List[ResourceScopeMetric], metric_name: str, expected_sum: int, **kwargs
     ) -> None:
         target_metrics: List[Metric] = []
         for resource_scope_metric in resource_scope_metrics:

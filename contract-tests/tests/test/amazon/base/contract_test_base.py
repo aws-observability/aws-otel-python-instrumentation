@@ -8,17 +8,13 @@ from docker import DockerClient
 from docker.models.networks import Network, NetworkCollection
 from docker.types import EndpointConfig
 from mock_collector_client import MockCollectorClient, ResourceScopeMetric, ResourceScopeSpan
-from opentelemetry.proto.common.v1.common_pb2 import AnyValue
 from requests import Response, request
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.waiting_utils import wait_for_logs
 from typing_extensions import override
 
-from amazon.utils.app_signals_constants import (
-    ERROR_METRIC,
-    FAULT_METRIC,
-    LATENCY_METRIC,
-)
+from amazon.utils.app_signals_constants import ERROR_METRIC, FAULT_METRIC, LATENCY_METRIC
+from opentelemetry.proto.common.v1.common_pb2 import AnyValue
 
 NETWORK_NAME: str = "aws-appsignals-network"
 
@@ -124,13 +120,7 @@ class ContractTestBase(TestCase):
         self.mock_collector_client.clear_signals()
 
     def do_test_requests(
-        self,
-        path: str,
-        method: str,
-        status_code: int,
-        expected_error: int,
-        expected_fault: int,
-        **kwargs
+        self, path: str, method: str, status_code: int, expected_error: int, expected_fault: int, **kwargs
     ) -> None:
         address: str = self.application.get_container_host_ip()
         port: str = self.application.get_exposed_port(self.get_application_port())
