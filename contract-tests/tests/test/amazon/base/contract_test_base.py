@@ -8,6 +8,7 @@ from docker import DockerClient
 from docker.models.networks import Network, NetworkCollection
 from docker.types import EndpointConfig
 from mock_collector_client import MockCollectorClient, ResourceScopeMetric, ResourceScopeSpan
+from opentelemetry.proto.common.v1.common_pb2 import AnyValue
 from requests import Response, request
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.waiting_utils import wait_for_logs
@@ -148,6 +149,18 @@ class ContractTestBase(TestCase):
         self._assert_metric_attribute(metrics, LATENCY_METRIC, 5000, **kwargs)
         self._assert_metric_attribute(metrics, ERROR_METRIC, expected_error, **kwargs)
         self._assert_metric_attribute(metrics, FAULT_METRIC, expected_fault, **kwargs)
+
+    def _assert_str_attribute(self, attributes_dict: Dict[str, AnyValue], key: str, expected_value: str):
+        self.assertIn(key, attributes_dict)
+        actual_value: AnyValue = attributes_dict[key]
+        self.assertIsNotNone(actual_value)
+        self.assertEqual(expected_value, actual_value.string_value)
+
+    def _assert_int_attribute(self, attributes_dict: Dict[str, AnyValue], key: str, expected_value: int) -> None:
+        self.assertIn(key, attributes_dict)
+        actual_value: AnyValue = attributes_dict[key]
+        self.assertIsNotNone(actual_value)
+        self.assertEqual(expected_value, actual_value.int_value)
 
     # pylint: disable=no-self-use
     # Methods that should be overridden in subclasses

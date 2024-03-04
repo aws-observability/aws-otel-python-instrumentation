@@ -3,7 +3,6 @@
 from typing import Dict, List
 
 from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
-from requests import Response, request
 from typing_extensions import override
 
 from amazon.base.contract_test_base import ContractTestBase
@@ -45,22 +44,22 @@ class RequestsTest(ContractTestBase):
         return {"OTEL_INSTRUMENTATION_COMMON_PEER_SERVICE_MAPPING": "backend=backend:8080"}
 
     def test_success(self) -> None:
-        self.do_test_requests("success", "GET", 200, 0, 0, method="GET")
+        self.do_test_requests("success", "GET", 200, 0, 0, request_method="GET")
 
     def test_error(self) -> None:
-        self.do_test_requests("error", "GET", 400, 1, 0, method="GET")
+        self.do_test_requests("error", "GET", 400, 1, 0, request_method="GET")
 
     def test_fault(self) -> None:
-        self.do_test_requests("fault", "GET", 500, 0, 1, method="GET")
+        self.do_test_requests("fault", "GET", 500, 0, 1, request_method="GET")
 
     def test_success_post(self) -> None:
-        self.do_test_requests("success/postmethod", "POST", 200, 0, 0, method="POST")
+        self.do_test_requests("success/postmethod", "POST", 200, 0, 0, request_method="POST")
 
     def test_error_post(self) -> None:
-        self.do_test_requests("error/postmethod", "POST", 400, 1, 0, method="POST")
+        self.do_test_requests("error/postmethod", "POST", 400, 1, 0, request_method="POST")
 
     def test_fault_post(self) -> None:
-        self.do_test_requests("fault/postmethod", "POST", 500, 0, 1, method="POST")
+        self.do_test_requests("fault/postmethod", "POST", 500, 0, 1, request_method="POST")
 
     @override
     def _assert_aws_span_attributes(
@@ -73,7 +72,7 @@ class RequestsTest(ContractTestBase):
                 target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
-        self._assert_aws_attributes(target_spans[0].attributes, kwargs.get("method"), path)
+        self._assert_aws_attributes(target_spans[0].attributes, kwargs.get("request_method"), path)
 
     def _assert_aws_attributes(self, attributes_list: List[KeyValue], method: str, endpoint: str) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
@@ -96,17 +95,6 @@ class RequestsTest(ContractTestBase):
                 self.fail(f"Attribute {key} unexpectedly duplicated. Value 1: {old_value} Value 2: {value}")
             attributes_dict[key] = value
         return attributes_dict
-
-    def _assert_str_attribute(self, attributes_dict: Dict[str, AnyValue], key: str, expected_value: str):
-        self.assertIn(key, attributes_dict)
-        actual_value: AnyValue = attributes_dict[key]
-        self.assertIsNotNone(actual_value)
-        self.assertEqual(expected_value, actual_value.string_value)
-
-    def _assert_int_attribute(self, attributes_dict: Dict[str, AnyValue], key: str, expected_value: int) -> None:
-        actual_value: AnyValue = attributes_dict[key]
-        self.assertIsNotNone(actual_value)
-        self.assertEqual(expected_value, actual_value.int_value)
 
     @override
     def _assert_semantic_conventions_span_attributes(

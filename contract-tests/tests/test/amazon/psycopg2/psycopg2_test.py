@@ -94,18 +94,6 @@ class Psycopg2Test(ContractTestBase):
             attributes_dict[key] = value
         return attributes_dict
 
-    def _assert_str_attribute(self, attributes_dict: Dict[str, AnyValue], key: str, expected_value: str):
-        self.assertIn(key, attributes_dict)
-        actual_value: AnyValue = attributes_dict[key]
-        self.assertIsNotNone(actual_value)
-        self.assertEqual(expected_value, actual_value.string_value)
-
-    def _assert_int_attribute(self, attributes_dict: Dict[str, AnyValue], key: str, expected_value: int):
-        self.assertIn(key, attributes_dict)
-        actual_value: AnyValue = attributes_dict[key]
-        self.assertIsNotNone(actual_value)
-        self.assertEqual(expected_value, actual_value.int_value)
-
     @override
     def _assert_semantic_conventions_span_attributes(
         self, resource_scope_spans: List[ResourceScopeSpan], **kwargs
