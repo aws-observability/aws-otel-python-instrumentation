@@ -197,7 +197,7 @@ class ContractTestBase(TestCase):
     ):
         self.fail("Tests must implement this function")
 
-    def _assert_metric_attribute(
+    def _assert_metric_attributes(
         self, resource_scope_metrics: List[ResourceScopeMetric], metric_name: str, expected_sum: int, **kwargs
     ):
         self.fail("Tests must implement this function")

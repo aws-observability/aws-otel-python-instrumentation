@@ -114,7 +114,7 @@ class Psycopg2Test(ContractTestBase):
         self.assertTrue("db.operation" not in attributes_dict.keys())
 
     @override
-    def _assert_metric_attribute(
+    def _assert_metric_attributes(
         self, resource_scope_metrics: List[ResourceScopeMetric], metric_name: str, expected_sum: int, **kwargs
     ) -> None:
         target_metrics: List[Metric] = []
