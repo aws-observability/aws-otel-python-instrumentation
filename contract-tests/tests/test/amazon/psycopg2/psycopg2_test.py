@@ -3,7 +3,6 @@
 from typing import Dict, List
 
 from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
-from opentelemetry.trace import StatusCode
 from testcontainers.postgres import PostgresContainer
 from typing_extensions import override
 
@@ -18,6 +17,7 @@ from amazon.utils.app_signals_constants import (
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
 from opentelemetry.proto.metrics.v1.metrics_pb2 import ExponentialHistogramDataPoint, Metric
 from opentelemetry.proto.trace.v1.trace_pb2 import Span
+from opentelemetry.trace import StatusCode
 
 
 class Psycopg2Test(ContractTestBase):
