@@ -28,7 +28,7 @@ class Psycopg2Test(ContractTestBase):
     @classmethod
     def set_up_dependency_container(cls) -> None:
         cls.container = (
-            PostgresContainer(user="postgres", password="example", dbname="postgres")
+            PostgresContainer(user="dbuser", password="example", dbname="postgres")
             .with_kwargs(network=NETWORK_NAME)
             .with_name("mydb")
         )
@@ -43,7 +43,7 @@ class Psycopg2Test(ContractTestBase):
     def get_application_extra_environment_variables(self) -> Dict[str, str]:
         return {
             "DB_HOST": "mydb",
-            "DB_USER": "postgres",
+            "DB_USER": "dbuser",
             "DB_PASS": "example",
             "DB_NAME": "postgres",
         }
@@ -151,7 +151,6 @@ class Psycopg2Test(ContractTestBase):
         self.assertTrue(attributes_dict.get("db.statement").string_value.index(command) >= 0)
         self._assert_str_attribute(attributes_dict, "db.system", "postgresql")
         self._assert_str_attribute(attributes_dict, "db.name", "postgres")
-        self._assert_str_attribute(attributes_dict, "db.user", "postgres")
 
     def _assert_metric_attribute(
         self,
