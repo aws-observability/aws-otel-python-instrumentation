@@ -158,7 +158,7 @@ class BotocoreTest(ContractTestBase):
         # root.
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_OPERATION, "InternalOperation")
         self._assert_str_attribute(attributes_dict, AWS_REMOTE_SERVICE, service)
-        self._assert_str_attribute(attributes_dict, AWS_REMOTE_OPERATION, f"{operation} /backend")
+        self._assert_str_attribute(attributes_dict, AWS_REMOTE_OPERATION, f"{operation}")
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
 
