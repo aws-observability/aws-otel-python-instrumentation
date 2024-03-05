@@ -105,4 +105,4 @@ while True:
         os.replace(tmp_file_name, file_name)
         later_time = time.time()
         difference = later_time - first_time
-        print(f'Performance sampling took {difference * 1000} seconds')
+        print(f"Performance sampling took {difference * 1000} seconds")
