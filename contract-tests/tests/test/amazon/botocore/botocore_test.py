@@ -91,7 +91,7 @@ class BotocoreTest(ContractTestBase):
 
     def test_s3_get_object(self):
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("s3/getobject/get-object/some-object", "GET", 200, 0, 0, service="AWS.SDK.S3", operation="GetObject")
+        self.do_test_requests("s3/getobject/get-object/some-object", "GET", 200, 0, 0, service="AWS.SDK.S3", operation="GetObject", dp_list_count=3)
         # self._make_request("s3/getobject/get-object/some-object")
 
     def test_s3_error(self):
@@ -222,7 +222,7 @@ class BotocoreTest(ContractTestBase):
         self.assertEqual(len(target_metrics), 1)
         target_metric: Metric = target_metrics[0]
         dp_list: List[ExponentialHistogramDataPoint] = target_metric.exponential_histogram.data_points
-
+        dp_list_count: int = kwargs.get("dp_list_count", 2)
         self.assertEqual(len(dp_list), 2)
         dependency_dp: ExponentialHistogramDataPoint = dp_list[0]
         service_dp: ExponentialHistogramDataPoint = dp_list[1]

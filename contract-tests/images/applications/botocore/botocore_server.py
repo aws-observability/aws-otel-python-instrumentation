@@ -47,14 +47,16 @@ class RequestHandler(BaseHTTPRequestHandler):
         if self.in_path("error"):
             try:
                 s3_client.create_bucket(Bucket="-")
-            finally:
-                set_main_status(400)
+            except Exception as exception:
+                print("handled")
+            set_main_status(400)
         elif self.in_path("fault"):
             try:
                 s3_client: BaseClient = boto3.client('s3', endpoint_url="invalid:12345", region_name='ca-west-1')
                 s3_client.create_bucket(Bucket="valid-bucket-name")
-            finally:
-                set_main_status(500)
+            except Exception as exception:
+                print("handled")
+            set_main_status(500)
         elif self.in_path("createbucket/create-bucket"):
             s3_client.create_bucket(Bucket="test-bucket-name", CreateBucketConfiguration={
                 'LocationConstraint': _AWS_REGION})
