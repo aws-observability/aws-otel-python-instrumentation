@@ -161,38 +161,41 @@ def set_main_status(status: int) -> None:
     RequestHandler.main_status = status
 
 def prepare_aws_server()->None:
-    s3_client: BaseClient = boto3.client('s3', endpoint_url=_AWS_SDK_S3_ENDPOINT, region_name=_AWS_REGION)
-    s3_client.create_bucket(Bucket="test-put-object-bucket-name", CreateBucketConfiguration={
-        'LocationConstraint': _AWS_REGION})
-    s3_client.create_bucket(Bucket="test-get-object-bucket-name", CreateBucketConfiguration={
-        'LocationConstraint': _AWS_REGION})
-    with tempfile.NamedTemporaryFile(delete=True) as temp_file:
-        temp_file_name: str = temp_file.name
-        temp_file.write(b'This is temp file for S3 upload')
-        temp_file.flush()
-        s3_client.upload_file(temp_file_name, "test-get-object-bucket-name", "test_object")
-    ddb_client = boto3.client('dynamodb', endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
-    ddb_client.create_table(
-        TableName="put_test_table",
-        KeySchema=[
-            {
-                'AttributeName': 'id',
-                'KeyType': 'HASH'
-            }
-        ],
-        AttributeDefinitions=[
-            {
-                'AttributeName': 'id',
-                'AttributeType': 'S'
-            },
-        ],
-        BillingMode='PAY_PER_REQUEST',
-    )
-    sqs_client = boto3.client('sqs', endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
-    sqs_response = sqs_client.create_queue(QueueName="test_put_get_queue")
-    os.environ.setdefault("TEST_SQS_QUEUE_URL", sqs_response['QueueUrl'])
-    kinesis_client = boto3.client('kinesis', endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
-    kinesis_client.create_stream(StreamName="test_stream", ShardCount=1)
+    try:
+        s3_client: BaseClient = boto3.client('s3', endpoint_url=_AWS_SDK_S3_ENDPOINT, region_name=_AWS_REGION)
+        s3_client.create_bucket(Bucket="test-put-object-bucket-name", CreateBucketConfiguration={
+            'LocationConstraint': _AWS_REGION})
+        s3_client.create_bucket(Bucket="test-get-object-bucket-name", CreateBucketConfiguration={
+            'LocationConstraint': _AWS_REGION})
+        with tempfile.NamedTemporaryFile(delete=True) as temp_file:
+            temp_file_name: str = temp_file.name
+            temp_file.write(b'This is temp file for S3 upload')
+            temp_file.flush()
+            s3_client.upload_file(temp_file_name, "test-get-object-bucket-name", "test_object")
+        ddb_client = boto3.client('dynamodb', endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
+        ddb_client.create_table(
+            TableName="put_test_table",
+            KeySchema=[
+                {
+                    'AttributeName': 'id',
+                    'KeyType': 'HASH'
+                }
+            ],
+            AttributeDefinitions=[
+                {
+                    'AttributeName': 'id',
+                    'AttributeType': 'S'
+                },
+            ],
+            BillingMode='PAY_PER_REQUEST',
+        )
+        sqs_client = boto3.client('sqs', endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
+        sqs_response = sqs_client.create_queue(QueueName="test_put_get_queue")
+        os.environ.setdefault("TEST_SQS_QUEUE_URL", sqs_response['QueueUrl'])
+        kinesis_client = boto3.client('kinesis', endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
+        kinesis_client.create_stream(StreamName="test_stream", ShardCount=1)
+    except Exception as exception:
+        print("Exception occur", exception)
 
 
 
