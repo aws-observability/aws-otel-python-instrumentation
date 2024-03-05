@@ -137,14 +137,17 @@ class RequestHandler(BaseHTTPRequestHandler):
         self._end_request(self.main_status)
 
     def _handle_kinesis_request(self) -> None:
+        kinesis_client = boto3.client('kinesis', endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
         if self.in_path("error"):
-            set_main_status(400)
-            pass
+            kinesis_client.put_record(StreamName="invalid_stream", Data=b'test', PartitionKey="partition_key")
         if self.in_path("fault"):
-            set_main_status(500)
-            pass
+            kinesis_client = boto3.client('kinesis', endpoint_url="invalid_url:12345", region_name="ca-west-1")
+            kinesis_client.put_record(StreamName="test_stream", Data=b'test', PartitionKey="partition_key")
+        if self.in_path("putrecord/my-stream"):
+            kinesis_client.put_record(StreamName="test_stream", Data=b'test', PartitionKey="partition_key")
         else:
             self._end_request(404)
+        self._end_request(self.main_status)
 
     def _end_request(self, status_code: int):
         self.send_response_only(status_code)
@@ -182,6 +185,8 @@ def prepare_aws_server()->None:
     sqs_client = boto3.client('sqs', endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
     sqs_response = sqs_client.create_queue(QueueName="test_put_get_queue")
     os.environ.setdefault("TEST_SQS_QUEUE_URL", sqs_response['QueueUrl'])
+    kinesis_client = boto3.client('kinesis', endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
+    kinesis_client.create_stream(StreamName="test_stream", ShardCount=1)
 
 
 
