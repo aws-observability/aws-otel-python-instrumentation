@@ -101,6 +101,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                         'AttributeType': 'S'
                     },
                 ],
+                BillingMode='PAY_PER_REQUEST',
             )
             set_main_status(200)
         if self.in_path("putitem/putitem-table/key"):
@@ -184,6 +185,7 @@ def prepare_aws_server()->None:
                 'AttributeType': 'S'
             },
         ],
+        BillingMode='PAY_PER_REQUEST',
     )
     sqs_client = boto3.client('sqs', endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
     sqs_response = sqs_client.create_queue(QueueName="test_put_get_queue")
