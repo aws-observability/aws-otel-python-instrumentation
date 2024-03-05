@@ -129,12 +129,12 @@ class BotocoreTest(ContractTestBase):
     #
     def test_sqs_send_message(self):
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("sqs/publishqueue/some-queue", "GET", 200, 0, 0, service="AWS.SDK.SQS", operation="PublishQueue")
+        self.do_test_requests("sqs/publishqueue/some-queue", "GET", 200, 0, 0, service="AWS.SDK.SQS", operation="SendMessage")
     #     self._make_request("sqs/publishqueue/some-queue")
     #
     def test_sqs_receive_message(self):
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("sqs/consumequeue/some-queue", "GET", 200, 0, 0, service="AWS.SDK.SQS", operation="ConsumeQueue")
+        self.do_test_requests("sqs/consumequeue/some-queue", "GET", 200, 0, 0, service="AWS.SDK.SQS", operation="ReceiveMessage")
     #   self._make_request("sqs/consumequeue/some-queue")
     #
     # def test_sqs_error(self):
