@@ -168,7 +168,6 @@ def set_main_status(status: int) -> None:
 
 def prepare_aws_server()->None:
     try:
-        requests.Request(method='POST', url="http://localhost:4566/_localstack/state/reset")
         s3_client: BaseClient = boto3.client('s3', endpoint_url=_AWS_SDK_S3_ENDPOINT, region_name=_AWS_REGION)
         s3_client.create_bucket(Bucket="test-put-object-bucket-name", CreateBucketConfiguration={
             'LocationConstraint': _AWS_REGION})
