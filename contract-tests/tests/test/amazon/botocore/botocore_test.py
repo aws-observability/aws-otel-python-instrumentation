@@ -185,19 +185,20 @@ class BotocoreTest(ContractTestBase):
 
         self.assertEqual(len(target_spans), 1)
         self.assertEqual(target_spans[0].name, kwargs.get("service").split('.')[-1] + '.' + kwargs.get("operation"))
-        self._assert_semantic_conventions_attributes(target_spans[0].attributes, method, path, status_code)
+        self._assert_semantic_conventions_attributes(target_spans[0].attributes, kwargs.get("service"), kwargs.get("operation"), status_code)
 
     def _assert_semantic_conventions_attributes(
-            self, attributes_list: List[KeyValue], method: str, endpoint: str, status_code: int
+            self, attributes_list: List[KeyValue], service: str, operation: str, status_code: int
     ) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
-        # TODO: requests instrumentation is not populating net peer attributes
+        # TODO: botocore instrumentation is not populating net peer attributes
         # self._assert_str_attribute(attributes_dict, SpanAttributes.NET_PEER_NAME, "backend")
         # self._assert_int_attribute(attributes_dict, SpanAttributes.NET_PEER_PORT, 8080)
+        self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_METHOD, operation)
+        self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SYSTEM, "aws-api")
+        self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SERVICE, service.split('.')[-1])
         self._assert_int_attribute(attributes_dict, SpanAttributes.HTTP_STATUS_CODE, status_code)
-        self._assert_str_attribute(attributes_dict, SpanAttributes.HTTP_URL, f"http://backend:8080/backend/{endpoint}")
-        self._assert_str_attribute(attributes_dict, SpanAttributes.HTTP_METHOD, method)
-        # TODO: request instrumentation is not respecting PEER_SERVICE
+        # TODO: botocore instrumentation is not respecting PEER_SERVICE
         # self._assert_str_attribute(attributes_dict, SpanAttributes.PEER_SERVICE, "backend:8080")
 
     @override
@@ -224,12 +225,11 @@ class BotocoreTest(ContractTestBase):
             dependency_dp = dp_list[1]
             service_dp = dp_list[0]
         attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(dependency_dp.attributes)
-        method: str = kwargs.get("request_method")
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
-        self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, "backend:8080")
-        self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, f"{method} /backend")
+        self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, kwargs.get("service"))
+        self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, kwargs.get("operation"))
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "CLIENT")
         self.check_sum(metric_name, dependency_dp.sum, expected_sum)
 
