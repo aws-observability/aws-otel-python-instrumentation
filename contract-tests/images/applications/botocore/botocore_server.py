@@ -83,17 +83,23 @@ class RequestHandler(BaseHTTPRequestHandler):
             item: dict = {
                 'id': '1'
             }
-            table = ddb_client.Table("invalid_table")
-            table.put_item(Item=item)
-            set_main_status(400)
+            try:
+                ddb_client.put_item(TableName='invalid_table', Item = item)
+            except Exception as exception:
+                print("Expected Exception", exception)
+            finally:
+                set_main_status(400)
         elif self.in_path("fault"):
-            ddb_client = boto3.client('dynamodb', endpoint_url="invalid:12345", region_name="ca-west-1")
             item: dict = {
                 'id': '1'
             }
-            table = ddb_client.Table("put_test_table")
-            table.put_item(Item=item)
-            set_main_status(500)
+            try:
+                ddb_client = boto3.client('dynamodb', endpoint_url="invalid:12345", region_name="ca-west-1")
+                ddb_client.put_item(TableName='invalid_table', Item = item)
+            except Exception as exception:
+                print("Expected Exception", exception)
+            finally:
+                set_main_status(500)
         elif self.in_path("createtable/some-table"):
             ddb_client.create_table(
                 TableName="test_table",
@@ -116,8 +122,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             item: dict = {
                 'id': '1'
             }
-            table = ddb_client.Table("put_test_table")
-            table.put_item(Item=item)
+            ddb_client.put_item(TableName='put_test_table', Item = item)
             set_main_status(200)
         else:
             self._end_request(404)

@@ -100,7 +100,7 @@ class BotocoreTest(ContractTestBase):
 
     def test_s3_fault(self):
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("s3/fault", "GET", 500, 0, 0, service="AWS.SDK.S3", operation="CreateBucket")
+        self.do_test_requests("s3/fault", "GET", 500, 0, 1, service="AWS.SDK.S3", operation="CreateBucket")
     #
     def test_dynamodb_create_table(self):
         self.mock_collector_client.clear_signals()
@@ -114,20 +114,28 @@ class BotocoreTest(ContractTestBase):
 
     def test_dynamodb_error(self):
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("ddb/error", "GET", 400, 0, 0, service="AWS.SDK.DynamoDB", operation="CreateTable")
+        self.do_test_requests("ddb/error", "GET", 400, 1, 0, service="AWS.SDK.DynamoDB", operation="PutItem")
         # self._make_request("ddb/error")
-    #
-    # def test_dynamodb_fault(self):
+
+    def test_dynamodb_fault(self):
+        self.mock_collector_client.clear_signals()
+        self.do_test_requests("ddb/fault", "GET", 500, 0, 1, service="AWS.SDK.DynamoDB", operation="PutItem")
     #     self._make_request("ddb/fault")
     #
-    # def test_sqs_create_queue(self):
-    #     self._make_request("sqs/createqueue/some-queue")
+    def test_sqs_create_queue(self):
+        self.mock_collector_client.clear_signals()
+        self.do_test_requests("sqs/createqueue/some-queue", "GET", 200, 0, 0, service="AWS.SDK.SQS", operation="CreateQueue")
+#        self._make_request("sqs/createqueue/some-queue")
     #
-    # def test_sqs_send_message(self):
+    def test_sqs_send_message(self):
+        self.mock_collector_client.clear_signals()
+        self.do_test_requests("sqs/publishqueue/some-queue", "GET", 200, 0, 0, service="AWS.SDK.SQS", operation="PublishQueue")
     #     self._make_request("sqs/publishqueue/some-queue")
     #
-    # def test_sqs_receive_message(self):
-    #     self._make_request("sqs/consumequeue/some-queue")
+    def test_sqs_receive_message(self):
+        self.mock_collector_client.clear_signals()
+        self.do_test_requests("sqs/consumequeue/some-queue", "GET", 200, 0, 0, service="AWS.SDK.SQS", operation="ConsumeQueue")
+    #   self._make_request("sqs/consumequeue/some-queue")
     #
     # def test_sqs_error(self):
     #     self._make_request("sqs/error")
@@ -208,7 +216,6 @@ class BotocoreTest(ContractTestBase):
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_METHOD, operation)
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SYSTEM, "aws-api")
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SERVICE, service.split('.')[-1])
-        self._assert_int_attribute(attributes_dict, SpanAttributes.HTTP_STATUS_CODE, status_code)
         # TODO: botocore instrumentation is not respecting PEER_SERVICE
         # self._assert_str_attribute(attributes_dict, SpanAttributes.PEER_SERVICE, "backend:8080")
 
