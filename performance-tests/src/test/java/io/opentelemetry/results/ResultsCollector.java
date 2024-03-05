@@ -12,6 +12,7 @@ import io.opentelemetry.distros.DistroConfig;
 import io.opentelemetry.results.AppPerfResults.MinMax;
 import io.opentelemetry.util.JFRUtils;
 import io.opentelemetry.util.NamingConvention;
+import io.opentelemetry.util.ProfilerUtils;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -45,7 +46,7 @@ public class ResultsCollector {
 
       builder = addStartupTime(builder, distroConfig);
       builder = addK6Results(builder, distroConfig);
-      // builder = addJfrResults(builder, distroConfig);
+      builder = addProfilerResults(builder, distroConfig);
 
       return builder.build();
     } catch (IOException e) {
@@ -89,6 +90,12 @@ public class ResultsCollector {
     return result.doubleValue();
   }
 
+  private static List<Number> readArray(String json, String jsonPath) {
+    List<Number> result = JsonPath.read(json, jsonPath);
+    return result;
+  }
+
+  // TODO: Clean Up
   private AppPerfResults.Builder addJfrResults(
       AppPerfResults.Builder builder, DistroConfig distroConfig) throws IOException {
     Path jfrFile = namingConvention.jfrFile(distroConfig);
@@ -106,6 +113,61 @@ public class ResultsCollector {
         .totalGcPauseNanos(computeTotalGcPauseNanos(jfrFile));
   }
 
+  private AppPerfResults.Builder addProfilerResults(
+      AppPerfResults.Builder builder, DistroConfig distroConfig) throws IOException {
+    Path performanceMetricsFile = namingConvention.performanceMetricsFile(distroConfig);
+    String json = new String(Files.readAllBytes(performanceMetricsFile));
+    long peakThreads = (long) read(json, "$.peak_threads");
+    List<Number> networkBytesSent = readArray(json, "$.network_bytes_sent");
+    List<Number> networkBytesRecv = readArray(json, "$.network_bytes_recv");
+    List<Number> cpuUsage = readArray(json, "$.cpu_usage");
+    List<Number> rssMem = readArray(json, "$.rss_mem");
+    List<Number> vmsMem = readArray(json, "$.vms_mem");
+
+    double[] percentiles = new double[] {0, 50, 90, 99, 100};
+    long[] networkBytesSentPercentile =
+        ProfilerUtils.computeLongPercentiles(networkBytesSent, percentiles);
+    long[] networkBytesRecvPercentile =
+        ProfilerUtils.computeLongPercentiles(networkBytesRecv, percentiles);
+    double[] cpuUsagePercentile = ProfilerUtils.computeDoublePercentiles(cpuUsage, percentiles);
+    long[] rssMemPercentile = ProfilerUtils.computeLongPercentiles(rssMem, percentiles);
+    long[] vmsMemPercentile = ProfilerUtils.computeLongPercentiles(vmsMem, percentiles);
+
+    builder.networkBytesSentAvg = ProfilerUtils.computeLongAverage(networkBytesSent);
+    builder.networkBytesSentP0 = networkBytesSentPercentile[0];
+    builder.networkBytesSentP50 = networkBytesSentPercentile[1];
+    builder.networkBytesSentP90 = networkBytesSentPercentile[2];
+    builder.networkBytesSentP99 = networkBytesSentPercentile[3];
+    builder.networkBytesSentP100 = networkBytesSentPercentile[4];
+    builder.networkBytesRecvAvg = ProfilerUtils.computeLongAverage(networkBytesRecv);
+    builder.networkBytesRecvP0 = networkBytesRecvPercentile[0];
+    builder.networkBytesRecvP50 = networkBytesRecvPercentile[1];
+    builder.networkBytesRecvP90 = networkBytesRecvPercentile[2];
+    builder.networkBytesRecvP99 = networkBytesRecvPercentile[3];
+    builder.networkBytesRecvP100 = networkBytesRecvPercentile[4];
+    builder.cpuAvg = ProfilerUtils.computeDoubleAverage(cpuUsage);
+    builder.cpuP0 = cpuUsagePercentile[0];
+    builder.cpuP50 = cpuUsagePercentile[1];
+    builder.cpuP90 = cpuUsagePercentile[2];
+    builder.cpuP99 = cpuUsagePercentile[3];
+    builder.cpuP100 = cpuUsagePercentile[4];
+    builder.rssMemAvg = ProfilerUtils.computeLongAverage(rssMem);
+    builder.rssMemP0 = rssMemPercentile[0];
+    builder.rssMemP50 = rssMemPercentile[1];
+    builder.rssMemP90 = rssMemPercentile[2];
+    builder.rssMemP99 = rssMemPercentile[3];
+    builder.rssMemP100 = rssMemPercentile[4];
+    builder.vmsMemAvg = ProfilerUtils.computeLongAverage(vmsMem);
+    builder.vmsMemP0 = vmsMemPercentile[0];
+    builder.vmsMemP50 = vmsMemPercentile[1];
+    builder.vmsMemP90 = vmsMemPercentile[2];
+    builder.vmsMemP99 = vmsMemPercentile[3];
+    builder.vmsMemP100 = vmsMemPercentile[4];
+    builder.peakThreadCount = peakThreads;
+    return builder;
+  }
+
+  // TODO: Clean up.
   private long readTotalGCTime(Path jfrFile) throws IOException {
     return JFRUtils.sumLongEventValues(jfrFile, "jdk.G1GarbageCollection", "duration");
   }

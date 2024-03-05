@@ -18,6 +18,7 @@ import java.nio.file.Paths;
 public class NamingConvention {
 
   private final String dir;
+  private final String perfMetricFileNameSuffix = "performance-metrics-";
 
   public NamingConvention(String dir) {
     this.dir = dir;
@@ -37,8 +38,29 @@ public class NamingConvention {
    *
    * @param distroConfig The distroConfig to get the jfr file path for.
    */
+  // TODO: Cleanup
   public Path jfrFile(DistroConfig distroConfig) {
     return Paths.get(dir, "petclinic-" + distroConfig.getName() + ".jfr");
+  }
+
+  /**
+   * Returns a path to the location of the performance-metrics output file for a given distroConfig
+   * run.
+   *
+   * @param distroConfig The distroConfig to get the performance-metrics file path for.
+   */
+  public Path performanceMetricsFile(DistroConfig distroConfig) {
+    return Paths.get(dir, performanceMetricsFileWithoutPath(distroConfig));
+  }
+
+  /**
+   * Returns the name of performance-metrics output file for a given distroConfig run without the
+   * full path
+   *
+   * @param distroConfig The distroConfig to get the performance-metrics file name for.
+   */
+  public String performanceMetricsFileWithoutPath(DistroConfig distroConfig) {
+    return perfMetricFileNameSuffix + distroConfig.getName() + ".json";
   }
 
   /**
