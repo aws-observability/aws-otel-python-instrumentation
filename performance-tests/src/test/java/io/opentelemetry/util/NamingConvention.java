@@ -54,7 +54,8 @@ public class NamingConvention {
   }
 
   /**
-   * Returns the name of performance-metrics output file for a given distroConfig run without the full path
+   * Returns the name of performance-metrics output file for a given distroConfig run without the
+   * full path
    *
    * @param distroConfig The distroConfig to get the performance-metrics file name for.
    */
