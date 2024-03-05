@@ -91,25 +91,31 @@ class BotocoreTest(ContractTestBase):
 
     def test_s3_get_object(self):
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("s3/getobject/get-object/some-object", "GET", 200, 0, 0, service="AWS.SDK.S3", operation="GetObject", dp_list_count=3)
+        self.do_test_requests("s3/getobject/get-object/some-object", "GET", 200, 0, 0, service="AWS.SDK.S3", operation="GetObject")
         # self._make_request("s3/getobject/get-object/some-object")
 
     def test_s3_error(self):
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("s3/error", "GET", 400, 0, 0, service="AWS.SDK.S3", operation="CreateBucket")
+        self.do_test_requests("s3/error", "GET", 400, 1, 0, service="AWS.SDK.S3", operation="CreateBucket")
 
     def test_s3_fault(self):
         self.mock_collector_client.clear_signals()
         self.do_test_requests("s3/fault", "GET", 500, 0, 0, service="AWS.SDK.S3", operation="CreateBucket")
     #
-    # def test_dynamodb_create_table(self):
-    #     self._make_request("ddb/createtable/some-table")
-    #
-    # def test_dynamodb_put_item(self):
-    #         self._make_request("ddb/putitem/putitem-table/key")
-    #
-    # def test_dynamodb_error(self):
-    #     self._make_request("ddb/error")
+    def test_dynamodb_create_table(self):
+        self.mock_collector_client.clear_signals()
+        self.do_test_requests("ddb/createtable/some-table", "GET", 200, 0, 0, service="AWS.SDK.DynamoDB", operation="CreateTable")
+        # self._make_request("ddb/createtable/some-table")
+
+    def test_dynamodb_put_item(self):
+        self.mock_collector_client.clear_signals()
+        self.do_test_requests("ddb/putitem/putitem-table/key", "GET", 200, 0, 0, service="AWS.SDK.DynamoDB", operation="PutItem")
+        # self._make_request("ddb/putitem/putitem-table/key")
+
+    def test_dynamodb_error(self):
+        self.mock_collector_client.clear_signals()
+        self.do_test_requests("ddb/error", "GET", 400, 0, 0, service="AWS.SDK.DynamoDB", operation="CreateTable")
+        # self._make_request("ddb/error")
     #
     # def test_dynamodb_fault(self):
     #     self._make_request("ddb/fault")
