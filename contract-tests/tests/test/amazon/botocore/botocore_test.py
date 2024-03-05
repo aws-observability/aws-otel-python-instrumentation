@@ -184,7 +184,7 @@ class BotocoreTest(ContractTestBase):
                 target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
-        self.assertEqual(target_spans[0].name, method)
+        self.assertEqual(target_spans[0].name, kwargs.get("service").split('.')[-1] + '.' + kwargs.get("operation"))
         self._assert_semantic_conventions_attributes(target_spans[0].attributes, method, path, status_code)
 
     def _assert_semantic_conventions_attributes(
