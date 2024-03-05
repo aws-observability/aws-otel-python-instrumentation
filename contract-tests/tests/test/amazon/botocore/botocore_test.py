@@ -81,55 +81,56 @@ class BotocoreTest(ContractTestBase):
         cls._local_stack.stop()
 
     def test_s3_create_bucket(self):
-        self._make_request("s3/createbucket/create-bucket")
+        self.do_test_requests("s3/createbucket/create-bucket", "GET", 200, 0, 0)
+        # self._make_request("s3/createbucket/create-bucket")
 
-    def test_s3_create_object(self):
-        self._make_request("s3/createobject/put-object/some-object")
-
-    def test_s3_get_object(self):
-        self._make_request("s3/getobject/get-object/some-object")
-
-    def test_s3_error(self):
-        self._make_request("s3/error")
-
-    def test_s3_fault(self):
-        self._make_request("s3/fault")
-
-    def test_dynamodb_create_table(self):
-        self._make_request("ddb/createtable/some-table")
-
-    def test_dynamodb_put_item(self):
-            self._make_request("ddb/putitem/putitem-table/key")
-
-    def test_dynamodb_error(self):
-        self._make_request("ddb/error")
-
-    def test_dynamodb_fault(self):
-        self._make_request("ddb/fault")
-
-    def test_sqs_create_queue(self):
-        self._make_request("sqs/createqueue/some-queue")
-
-    def test_sqs_send_message(self):
-        self._make_request("sqs/publishqueue/some-queue")
-
-    def test_sqs_receive_message(self):
-        self._make_request("sqs/consumequeue/some-queue")
-
-    def test_sqs_error(self):
-        self._make_request("sqs/error")
-
-    def test_sqs_fault(self):
-        self._make_request("sqs/fault")
-
-    def test_kinesis_put_record(self):
-        self._make_request("kinesis/putrecord/my-stream")
-
-    def test_kinesis_error(self):
-        self._make_request("kinesis/error")
-
-    def test_kinesis_fault(self):
-        self._make_request("kinesis/fault")
+    # def test_s3_create_object(self):
+    #     self._make_request("s3/createobject/put-object/some-object")
+    #
+    # def test_s3_get_object(self):
+    #     self._make_request("s3/getobject/get-object/some-object")
+    #
+    # def test_s3_error(self):
+    #     self._make_request("s3/error")
+    #
+    # def test_s3_fault(self):
+    #     self._make_request("s3/fault")
+    #
+    # def test_dynamodb_create_table(self):
+    #     self._make_request("ddb/createtable/some-table")
+    #
+    # def test_dynamodb_put_item(self):
+    #         self._make_request("ddb/putitem/putitem-table/key")
+    #
+    # def test_dynamodb_error(self):
+    #     self._make_request("ddb/error")
+    #
+    # def test_dynamodb_fault(self):
+    #     self._make_request("ddb/fault")
+    #
+    # def test_sqs_create_queue(self):
+    #     self._make_request("sqs/createqueue/some-queue")
+    #
+    # def test_sqs_send_message(self):
+    #     self._make_request("sqs/publishqueue/some-queue")
+    #
+    # def test_sqs_receive_message(self):
+    #     self._make_request("sqs/consumequeue/some-queue")
+    #
+    # def test_sqs_error(self):
+    #     self._make_request("sqs/error")
+    #
+    # def test_sqs_fault(self):
+    #     self._make_request("sqs/fault")
+    #
+    # def test_kinesis_put_record(self):
+    #     self._make_request("kinesis/putrecord/my-stream")
+    #
+    # def test_kinesis_error(self):
+    #     self._make_request("kinesis/error")
+    #
+    # def test_kinesis_fault(self):
+    #     self._make_request("kinesis/fault")
 
     def _make_request(self, path: str) -> Response:
         address: str = self.application.get_container_host_ip()

@@ -52,7 +52,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             s3_client.create_bucket(Bucket="valid-bucket-name")
             set_main_status(500)
         if self.in_path("createbucket/create-bucket"):
-            s3_client.create_bucket(Bucket="test-bucket-name")
+            s3_client.create_bucket(Bucket="test-bucket-name", CreateBucketConfiguration={
+                'LocationConstraint': _AWS_REGION})
             set_main_status(200)
         if self.in_path("createobject/put-object/some-object"):
             with tempfile.NamedTemporaryFile(delete=True) as temp_file:
@@ -159,8 +160,10 @@ def set_main_status(status: int) -> None:
 
 def prepare_aws_server()->None:
     s3_client: BaseClient = boto3.client('s3', endpoint_url=_AWS_SDK_S3_ENDPOINT, region_name=_AWS_REGION)
-    s3_client.create_bucket(Bucket="test-put-object-bucket-name")
-    s3_client.create_bucket(Bucket="test-get-object-bucket-name")
+    s3_client.create_bucket(Bucket="test-put-object-bucket-name", CreateBucketConfiguration={
+        'LocationConstraint': _AWS_REGION})
+    s3_client.create_bucket(Bucket="test-get-object-bucket-name", CreateBucketConfiguration={
+        'LocationConstraint': _AWS_REGION})
     with tempfile.NamedTemporaryFile(delete=True) as temp_file:
         temp_file_name: str = temp_file.name
         temp_file.write(b'This is temp file for S3 upload')
