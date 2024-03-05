@@ -44,6 +44,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _handle_s3_request(self) -> None:
         s3_client: BaseClient = boto3.client('s3', endpoint_url=_AWS_SDK_S3_ENDPOINT, region_name=_AWS_REGION)
+        print("XXXXXXX path = ", self.path)
         if self.in_path("error"):
             s3_client.create_bucket(Bucket="-")
             set_main_status(400)
