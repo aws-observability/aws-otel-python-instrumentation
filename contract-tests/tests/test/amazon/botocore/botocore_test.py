@@ -81,6 +81,7 @@ class BotocoreTest(ContractTestBase):
         cls._local_stack.stop()
 
     def test_s3_create_bucket(self):
+        self.mock_collector_client.clear_signals()
         self.do_test_requests("s3/createbucket/create-bucket", "GET", 200, 0, 0)
         # self._make_request("s3/createbucket/create-bucket")
 
