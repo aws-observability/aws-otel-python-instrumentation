@@ -82,7 +82,7 @@ class BotocoreTest(ContractTestBase):
 
     def test_s3_create_bucket(self):
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("s3/createbucket/create-bucket", "GET", 200, 0, 0)
+        self.do_test_requests("s3/createbucket/create-bucket", "GET", 200, 0, 0, service="AWS.SDK.S3", operation="CreateBucket")
         # self._make_request("s3/createbucket/create-bucket")
 
     # def test_s3_create_object(self):
@@ -149,16 +149,16 @@ class BotocoreTest(ContractTestBase):
                 target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
-        self._assert_aws_attributes(target_spans[0].attributes, kwargs.get("request_method"), path)
+        self._assert_aws_attributes(target_spans[0].attributes, kwargs.get("service"), kwargs.get("operation"))
 
-    def _assert_aws_attributes(self, attributes_list: List[KeyValue], method: str, endpoint: str) -> None:
+    def _assert_aws_attributes(self, attributes_list: List[KeyValue], service: str, operation: str) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # InternalOperation as OTEL does not instrument the basic server we are using, so the client span is a local
         # root.
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_OPERATION, "InternalOperation")
-        self._assert_str_attribute(attributes_dict, AWS_REMOTE_SERVICE, "backend:8080")
-        self._assert_str_attribute(attributes_dict, AWS_REMOTE_OPERATION, f"{method} /backend")
+        self._assert_str_attribute(attributes_dict, AWS_REMOTE_SERVICE, service)
+        self._assert_str_attribute(attributes_dict, AWS_REMOTE_OPERATION, f"{operation} /backend")
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
 
