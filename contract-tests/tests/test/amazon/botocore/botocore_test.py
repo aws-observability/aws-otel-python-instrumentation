@@ -223,6 +223,7 @@ class BotocoreTest(ContractTestBase):
         target_metric: Metric = target_metrics[0]
         dp_list: List[ExponentialHistogramDataPoint] = target_metric.exponential_histogram.data_points
         dp_list_count: int = kwargs.get("dp_list_count", 2)
+        print(dp_list)
         self.assertEqual(len(dp_list), dp_list_count)
         dependency_dp: ExponentialHistogramDataPoint = dp_list[0]
         service_dp: ExponentialHistogramDataPoint = dp_list[1]
