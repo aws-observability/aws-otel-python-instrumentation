@@ -24,7 +24,7 @@ from opentelemetry.semconv.trace import SpanAttributes
 _logger: Logger = getLogger(__name__)
 _logger.setLevel(INFO)
 
-
+# pylint: disable=too-many-public-methods
 class BotocoreTest(ContractTestBase):
     _local_stack: LocalStackContainer
 
@@ -282,8 +282,6 @@ class BotocoreTest(ContractTestBase):
         if len(dp_list[1].attributes) > len(dp_list[0].attributes):
             dependency_dp = dp_list[1]
             service_dp = dp_list[0]
-        for dp in range(len(dp_list)):
-            print(dp_list[dp])
         attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(dependency_dp.attributes)
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
