@@ -5,7 +5,6 @@ from typing import Dict, List
 
 from docker.types import EndpointConfig
 from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
-from requests import Response, request
 from testcontainers.localstack import LocalStackContainer
 from typing_extensions import override
 
