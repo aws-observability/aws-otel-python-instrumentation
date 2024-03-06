@@ -24,6 +24,7 @@ from opentelemetry.semconv.trace import SpanAttributes
 _logger: Logger = getLogger(__name__)
 _logger.setLevel(INFO)
 
+
 # pylint: disable=too-many-public-methods
 class BotocoreTest(ContractTestBase):
     _local_stack: LocalStackContainer
