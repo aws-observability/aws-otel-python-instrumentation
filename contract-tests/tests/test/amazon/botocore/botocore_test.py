@@ -34,6 +34,7 @@ class BotocoreTest(ContractTestBase):
             "AWS_SDK_S3_ENDPOINT": "http://s3.localstack:4566",
             "AWS_SDK_ENDPOINT": "http://localstack:4566",
             "AWS_REGION": "us-west-2",
+            "OTEL_PYTHON_DISABLED_INSTRUMENTATIONS": "boto3sqs",
         }
 
     @override
