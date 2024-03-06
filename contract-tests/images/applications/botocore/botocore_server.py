@@ -135,12 +135,20 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _handle_sqs_request(self) -> None:
         sqs_client = boto3.client('sqs', endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
         if self.in_path("error"):
-            sqs_client.receive_message(QueueUrl="invalid_url", MaxNumberOfMessages=1)
-            set_main_status(400)
+            try:
+                sqs_client.receive_message(QueueUrl="invalid_url", MaxNumberOfMessages=1)
+            except Exception as exception:
+                print("Expected Exception", exception)
+            finally:
+                set_main_status(400)
         elif self.in_path("fault"):
-            sqs_client = boto3.client('sqs', endpoint_url="invalid:12345", region_name="ca-west-1")
-            sqs_client.create_queue(QueueName="invalid_test")
-            set_main_status(500)
+            try:
+                sqs_client = boto3.client('sqs', endpoint_url="invalid:12345", region_name="ca-west-1")
+                sqs_client.create_queue(QueueName="invalid_test")
+            except Exception as exception:
+                print("Expected Exception", exception)
+            finally:
+                set_main_status(500)
         elif self.in_path("createqueue/some-queue"):
             sqs_client.create_queue(QueueName="test_queue")
             set_main_status(200)
@@ -151,6 +159,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif self.in_path("sqs/consumequeue/some-queue"):
             queue_url: str = os.environ.get("TEST_SQS_QUEUE_URL", "invalid")
             sqs_client.receive_message(QueueUrl=queue_url, MaxNumberOfMessages=1)
+            set_main_status(200)
         else:
             self._end_request(404)
         self._end_request(self.main_status)
@@ -158,10 +167,20 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _handle_kinesis_request(self) -> None:
         kinesis_client = boto3.client('kinesis', endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
         if self.in_path("error"):
-            kinesis_client.put_record(StreamName="invalid_stream", Data=b'test', PartitionKey="partition_key")
+            try:
+                kinesis_client.put_record(StreamName="invalid_stream", Data=b'test', PartitionKey="partition_key")
+            except Exception as exception:
+                print("expected failure", exception)
+            finally:
+                set_main_status(400)
         elif self.in_path("fault"):
-            kinesis_client = boto3.client('kinesis', endpoint_url="invalid_url:12345", region_name="ca-west-1")
-            kinesis_client.put_record(StreamName="test_stream", Data=b'test', PartitionKey="partition_key")
+            try:
+                kinesis_client = boto3.client('kinesis', endpoint_url="invalid_url:12345", region_name="ca-west-1")
+                kinesis_client.put_record(StreamName="test_stream", Data=b'test', PartitionKey="partition_key")
+            except Exception as exception:
+                print("expected failure", exception)
+            finally:
+                set_main_status(500)
         elif self.in_path("putrecord/my-stream"):
             kinesis_client.put_record(StreamName="test_stream", Data=b'test', PartitionKey="partition_key")
         else:

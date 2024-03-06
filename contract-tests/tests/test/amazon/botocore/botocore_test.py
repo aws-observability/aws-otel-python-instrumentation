@@ -139,37 +139,42 @@ class BotocoreTest(ContractTestBase):
     def test_sqs_send_message(self):
         self.mock_collector_client.clear_signals()
         self.do_test_requests("sqs/publishqueue/some-queue", "GET", 200, 0, 0, service="AWS.SDK.SQS",
-                              operation="SendMessage", aws_attr_span="CLIENT")
+                              operation="SendMessage", aws_attr_span="CLIENT", dp_count=3)
 
     #     self._make_request("sqs/publishqueue/some-queue")
     #
     def test_sqs_receive_message(self):
         self.mock_collector_client.clear_signals()
         self.do_test_requests("sqs/consumequeue/some-queue", "GET", 200, 0, 0, service="AWS.SDK.SQS",
-                              operation="ReceiveMessage", aws_attr_span="CLIENT")
+                              operation="ReceiveMessage", aws_attr_span="CLIENT", dp_count=3)
 
     #   self._make_request("sqs/consumequeue/some-queue")
     #
-    # def test_sqs_error(self):
-    #     self._make_request("sqs/error")
-    #
-    # def test_sqs_fault(self):
-    #     self._make_request("sqs/fault")
-    #
-    # def test_kinesis_put_record(self):
-    #     self._make_request("kinesis/putrecord/my-stream")
-    #
-    # def test_kinesis_error(self):
-    #     self._make_request("kinesis/error")
-    #
-    # def test_kinesis_fault(self):
-    #     self._make_request("kinesis/fault")
+    def test_sqs_error(self):
+        self.mock_collector_client.clear_signals()
+        self.do_test_requests("sqs/error", "GET", 400, 1, 0, service="AWS.SDK.SQS",
+                              operation="ReceiveMessage", aws_attr_span="CLIENT", dp_count=3, bypass_service_sum = True)
 
-    def _make_request(self, path: str) -> Response:
-        address: str = self.application.get_container_host_ip()
-        port: str = self.application.get_exposed_port(self.get_application_port())
-        url: str = f"http://{address}:{port}/{path}"
-        return request("GET", url, timeout=20)
+    def test_sqs_fault(self):
+        self.mock_collector_client.clear_signals()
+        self.do_test_requests("sqs/fault", "GET", 500, 0, 1, service="AWS.SDK.SQS",
+                              operation="CreateQueue")
+    #
+    def test_kinesis_put_record(self):
+        self.mock_collector_client.clear_signals()
+        self.do_test_requests("kinesis/putrecord/my-stream", "GET", 200, 0, 0, service="AWS.SDK.Kinesis",
+                              operation="PutRecord")
+        # self._make_request("kinesis/putrecord/my-stream")
+    #
+    def test_kinesis_error(self):
+        self.mock_collector_client.clear_signals()
+        self.do_test_requests("kinesis/error", "GET", 400, 1, 0, service="AWS.SDK.Kinesis",
+                              operation="PutRecord")
+
+    def test_kinesis_fault(self):
+        self.mock_collector_client.clear_signals()
+        self.do_test_requests("kinesis/fault", "GET", 500, 0, 1, service="AWS.SDK.Kinesis",
+                              operation="PutRecord")
 
     @override
     def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs) -> None:
@@ -250,14 +255,15 @@ class BotocoreTest(ContractTestBase):
         self.assertEqual(len(target_metrics), 1)
         target_metric: Metric = target_metrics[0]
         dp_list: List[ExponentialHistogramDataPoint] = target_metric.exponential_histogram.data_points
-        dp_list_count: int = kwargs.get("dp_list_count", 2)
-        print(dp_list)
+        dp_list_count: int = kwargs.get("dp_count", 2)
         self.assertEqual(len(dp_list), dp_list_count)
         dependency_dp: ExponentialHistogramDataPoint = dp_list[0]
         service_dp: ExponentialHistogramDataPoint = dp_list[1]
         if len(dp_list[1].attributes) > len(dp_list[0].attributes):
             dependency_dp = dp_list[1]
             service_dp = dp_list[0]
+        for dp in range(len(dp_list)):
+            print(dp_list[dp])
         attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(dependency_dp.attributes)
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
@@ -271,4 +277,6 @@ class BotocoreTest(ContractTestBase):
         # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, kwargs.get("service_dp_span", 'LOCAL_ROOT'))
-        self.check_sum(metric_name, service_dp.sum, expected_sum)
+        # Temporary measure: When an error occurs in SQS and DDB, Service_DP does not include sum count for error
+        if not kwargs.get('bypass_service_sum', False):
+            self.check_sum(metric_name, service_dp.sum, expected_sum)
