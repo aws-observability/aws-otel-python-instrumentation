@@ -21,7 +21,7 @@ _FAULT: str = "fault"
 _AWS_SDK_S3_ENDPOINT: str = os.environ.get("AWS_SDK_S3_ENDPOINT")
 _AWS_SDK_ENDPOINT: str = os.environ.get("AWS_SDK_ENDPOINT")
 _AWS_REGION: str = os.environ.get("AWS_REGION")
-_NO_RETRY_CONFIG: Config = Config(retries = {'max_attempts':0})
+_NO_RETRY_CONFIG: Config = Config(retries={'max_attempts': 0}, connect_timeout=3, read_timeout=3)
 
 
 # pylint: disable=broad-exception-caught
@@ -51,14 +51,15 @@ class RequestHandler(BaseHTTPRequestHandler):
             try:
                 s3_client.create_bucket(Bucket="-")
             except Exception as exception:
-                print("handled")
+                print("Exception occured", exception)
             set_main_status(400)
         elif self.in_path("fault"):
             try:
-                s3_client: BaseClient = boto3.client('s3', endpoint_url="invalid:12345", region_name='ca-west-1', config = _NO_RETRY_CONFIG)
+                s3_client: BaseClient = boto3.client('s3', endpoint_url="http://s3.test:8080", region_name='us-west-2',
+                                                     config=_NO_RETRY_CONFIG)
                 s3_client.create_bucket(Bucket="valid-bucket-name")
             except Exception as exception:
-                print("handled", exception)
+                print("Exception occured", exception)
             set_main_status(500)
         elif self.in_path("createbucket/create-bucket"):
             s3_client.create_bucket(Bucket="test-bucket-name", CreateBucketConfiguration={
@@ -76,7 +77,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             set_main_status(200)
         else:
             self._end_request(404)
-        print("ended request by code", self.main_status)
         self._end_request(self.main_status)
 
     def _handle_ddb_request(self) -> None:
@@ -88,9 +88,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                 }
             }
             try:
-                ddb_client.put_item(TableName='invalid_table', Item = item)
+                ddb_client.put_item(TableName='invalid_table', Item=item)
             except Exception as exception:
-                print("Expected Exception", exception)
+                print("Exception occured", exception)
             finally:
                 set_main_status(400)
         elif self.in_path("fault"):
@@ -100,10 +100,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                 }
             }
             try:
-                ddb_client = boto3.client('dynamodb', endpoint_url="invalid:12345", region_name="ca-west-1", config = _NO_RETRY_CONFIG)
-                ddb_client.put_item(TableName='invalid_table', Item = item)
+                ddb_client = boto3.client('dynamodb', endpoint_url="http://ddb.test:8080", region_name="us-west-2",
+                                          config=_NO_RETRY_CONFIG)
+                ddb_client.put_item(TableName='invalid_table', Item=item)
             except Exception as exception:
-                print("Expected Exception", exception)
+                print("Exception occured", exception)
             finally:
                 set_main_status(500)
         elif self.in_path("createtable/some-table"):
@@ -130,7 +131,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     'S': '1'
                 }
             }
-            ddb_client.put_item(TableName='put_test_table', Item = item)
+            ddb_client.put_item(TableName='put_test_table', Item=item)
             set_main_status(200)
         else:
             self._end_request(404)
@@ -142,27 +143,28 @@ class RequestHandler(BaseHTTPRequestHandler):
             try:
                 sqs_client.receive_message(QueueUrl="invalid_url", MaxNumberOfMessages=1)
             except Exception as exception:
-                print("Expected Exception", exception)
+                print("Exception occured", exception)
             finally:
                 set_main_status(400)
         elif self.in_path("fault"):
             try:
-                sqs_client = boto3.client('sqs', endpoint_url="invalid:12345", region_name="ca-west-1", config = _NO_RETRY_CONFIG)
+                sqs_client = boto3.client('sqs', endpoint_url="http://sqs.test:8080", region_name="us-west-2",
+                                          config=_NO_RETRY_CONFIG)
                 sqs_client.create_queue(QueueName="invalid_test")
             except Exception as exception:
-                print("Expected Exception", exception)
+                print("Exception occured", exception)
             finally:
                 set_main_status(500)
         elif self.in_path("createqueue/some-queue"):
             sqs_client.create_queue(QueueName="test_queue")
             set_main_status(200)
         elif self.in_path("publishqueue/some-queue"):
-            queue_url: str = os.environ.get("TEST_SQS_QUEUE_URL", "invalid")
-            sqs_client.send_message(QueueUrl=queue_url, MessageBody="test_message")
+            sqs_client.send_message(QueueUrl='http://localstack:4566/000000000000/test_put_get_queue',
+                                    MessageBody="test_message")
             set_main_status(200)
         elif self.in_path("sqs/consumequeue/some-queue"):
-            queue_url: str = os.environ.get("TEST_SQS_QUEUE_URL", "invalid")
-            sqs_client.receive_message(QueueUrl=queue_url, MaxNumberOfMessages=1)
+            sqs_client.receive_message(QueueUrl='http://localstack:4566/000000000000/test_put_get_queue',
+                                       MaxNumberOfMessages=1)
             set_main_status(200)
         else:
             self._end_request(404)
@@ -174,15 +176,16 @@ class RequestHandler(BaseHTTPRequestHandler):
             try:
                 kinesis_client.put_record(StreamName="invalid_stream", Data=b'test', PartitionKey="partition_key")
             except Exception as exception:
-                print("expected failure", exception)
+                print("Exception occured", exception)
             finally:
                 set_main_status(400)
         elif self.in_path("fault"):
             try:
-                kinesis_client = boto3.client('kinesis', endpoint_url="invalid_url:12345", region_name="ca-west-1", config = _NO_RETRY_CONFIG)
+                kinesis_client = boto3.client('kinesis', endpoint_url="http://kinesis.test:8080",
+                                              region_name="us-west-2", config=_NO_RETRY_CONFIG)
                 kinesis_client.put_record(StreamName="test_stream", Data=b'test', PartitionKey="partition_key")
             except Exception as exception:
-                print("expected failure", exception)
+                print("Exception occured", exception)
             finally:
                 set_main_status(500)
         elif self.in_path("putrecord/my-stream"):
@@ -199,7 +202,8 @@ class RequestHandler(BaseHTTPRequestHandler):
 def set_main_status(status: int) -> None:
     RequestHandler.main_status = status
 
-def prepare_aws_server()->None:
+
+def prepare_aws_server() -> None:
     requests.Request(method='POST', url="http://localhost:4566/_localstack/state/reset")
     os.environ.setdefault("AWS_ACCESS_KEY_ID", "testcontainers-localstack")
     os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testcontainers-localstack")
@@ -214,7 +218,7 @@ def prepare_aws_server()->None:
             temp_file.write(b'This is temp file for S3 upload')
             temp_file.flush()
             s3_client.upload_file(temp_file_name, "test-get-object-bucket-name", "test_object")
-        ddb_client = boto3.client('dynamodb', endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
+        ddb_client: BaseClient = boto3.client('dynamodb', endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
         ddb_client.create_table(
             TableName="put_test_table",
             KeySchema=[
@@ -231,15 +235,12 @@ def prepare_aws_server()->None:
             ],
             BillingMode='PAY_PER_REQUEST',
         )
-        sqs_client = boto3.client('sqs', endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
-        sqs_response = sqs_client.create_queue(QueueName="test_put_get_queue")
-        print(sqs_response)
-        os.environ.setdefault("TEST_SQS_QUEUE_URL", sqs_response['QueueUrl'])
-        kinesis_client = boto3.client('kinesis', endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
+        sqs_client: BaseClient = boto3.client('sqs', endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
+        sqs_client.create_queue(QueueName="test_put_get_queue")
+        kinesis_client: BaseClient = boto3.client('kinesis', endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
         kinesis_client.create_stream(StreamName="test_stream", ShardCount=1)
     except Exception as exception:
         print("Exception occur", exception)
-
 
 
 def main() -> None:
@@ -256,40 +257,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-    # if self.in_path("examplebucket"):
-    #     print(self.address_string())
-    #     print("object")
-    #     self._end_request(self.main_status)
-    # elif self.in_path("error"):
-    #     print("error")
-    #     set_main_status(400)
-    #     cfg: Config = C
-    #     set_main_status(500onfig(retries={"max_attempts": 1})
-    #     s3_client = boto3.client("s3", region_name="us-west-2", endpoint_url="http://localhost:8080", config=cfg)
-    #     try:
-    #         s3_client.get_object(
-    #             Bucket="examplebucket",
-    #             Key="HappyFace.jpg",
-    #         )
-    #     except Exception:
-    #         pass
-    #     self._end_request(400)
-    # elif self.in_path("fault"):
-    #     print("fault")
-    #     set_main_status(500)
-    #     cfg: Config = Config(retries={"max_attempts": 1})
-    #     s3_client = boto3.client("s3", region_name="us-west-2", endpoint_url="http://fault.test:8080", config=cfg)
-    #     try:
-    #         s3_client.get_object(
-    #             Bucket="examplebucket",
-    #             Key="HappyFace.jpg",
-    #         )
-    #     except Exception:
-    #         pass
-    #     self._end_request(500)
-    # else:
-    #     print("general = " + self.path)
-    #     s3_client = boto3.client("s3", region_name="us-west-2", endpoint_url="http://s3.localstack:4566")
-    #     s3_client.list_buckets()
-    #     self._end_request(200)

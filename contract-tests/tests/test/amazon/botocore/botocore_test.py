@@ -89,13 +89,11 @@ class BotocoreTest(ContractTestBase):
         self.mock_collector_client.clear_signals()
         self.do_test_requests("s3/createobject/put-object/some-object", "GET", 200, 0, 0, service="AWS.SDK.S3",
                               operation="PutObject")
-        # self._make_request("s3/createobject/put-object/some-object")
 
     def test_s3_get_object(self):
         self.mock_collector_client.clear_signals()
         self.do_test_requests("s3/getobject/get-object/some-object", "GET", 200, 0, 0, service="AWS.SDK.S3",
                               operation="GetObject")
-        # self._make_request("s3/getobject/get-object/some-object")
 
     def test_s3_error(self):
         self.mock_collector_client.clear_signals()
@@ -110,46 +108,35 @@ class BotocoreTest(ContractTestBase):
         self.mock_collector_client.clear_signals()
         self.do_test_requests("ddb/createtable/some-table", "GET", 200, 0, 0, service="AWS.SDK.DynamoDB",
                               operation="CreateTable")
-        # self._make_request("ddb/createtable/some-table")
 
     def test_dynamodb_put_item(self):
         self.mock_collector_client.clear_signals()
         self.do_test_requests("ddb/putitem/putitem-table/key", "GET", 200, 0, 0, service="AWS.SDK.DynamoDB",
                               operation="PutItem")
-        # self._make_request("ddb/putitem/putitem-table/key")
 
     def test_dynamodb_error(self):
         self.mock_collector_client.clear_signals()
         self.do_test_requests("ddb/error", "GET", 400, 1, 0, service="AWS.SDK.DynamoDB", operation="PutItem")
-        # self._make_request("ddb/error")
 
     def test_dynamodb_fault(self):
         self.mock_collector_client.clear_signals()
         self.do_test_requests("ddb/fault", "GET", 500, 0, 1, service="AWS.SDK.DynamoDB", operation="PutItem")
 
-    #     self._make_request("ddb/fault")
-    #
     def test_sqs_create_queue(self):
         self.mock_collector_client.clear_signals()
         self.do_test_requests("sqs/createqueue/some-queue", "GET", 200, 0, 0, service="AWS.SDK.SQS",
                               operation="CreateQueue")
 
-    #        self._make_request("sqs/createqueue/some-queue")
-    #
     def test_sqs_send_message(self):
         self.mock_collector_client.clear_signals()
         self.do_test_requests("sqs/publishqueue/some-queue", "GET", 200, 0, 0, service="AWS.SDK.SQS",
                               operation="SendMessage", aws_attr_span="CLIENT", dp_count=3)
 
-    #     self._make_request("sqs/publishqueue/some-queue")
-    #
     def test_sqs_receive_message(self):
         self.mock_collector_client.clear_signals()
         self.do_test_requests("sqs/consumequeue/some-queue", "GET", 200, 0, 0, service="AWS.SDK.SQS",
                               operation="ReceiveMessage", aws_attr_span="CLIENT", dp_count=3)
 
-    #   self._make_request("sqs/consumequeue/some-queue")
-    #
     def test_sqs_error(self):
         self.mock_collector_client.clear_signals()
         self.do_test_requests("sqs/error", "GET", 400, 1, 0, service="AWS.SDK.SQS",
@@ -159,13 +146,12 @@ class BotocoreTest(ContractTestBase):
         self.mock_collector_client.clear_signals()
         self.do_test_requests("sqs/fault", "GET", 500, 0, 1, service="AWS.SDK.SQS",
                               operation="CreateQueue")
-    #
+
     def test_kinesis_put_record(self):
         self.mock_collector_client.clear_signals()
         self.do_test_requests("kinesis/putrecord/my-stream", "GET", 200, 0, 0, service="AWS.SDK.Kinesis",
                               operation="PutRecord")
-        # self._make_request("kinesis/putrecord/my-stream")
-    #
+
     def test_kinesis_error(self):
         self.mock_collector_client.clear_signals()
         self.do_test_requests("kinesis/error", "GET", 400, 1, 0, service="AWS.SDK.Kinesis",
