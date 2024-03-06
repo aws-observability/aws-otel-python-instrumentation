@@ -46,7 +46,7 @@ class RequestHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         # 设置HTTP响应头
         self.send_response(400)  # 设置状态码为400
-        self.send_header('Content-type', 'text/xml')  # 设置内容类型为text/xml
+        self.send_header("Content-type", "text/xml")  # 设置内容类型为text/xml
         self.end_headers()
 
         # 定义一个简单的XML错误响应
@@ -147,9 +147,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             set_main_status(400)
             try:
                 sqs_client = boto3.client("sqs", endpoint_url="http://error.test:8080", region_name=_AWS_REGION)
-                sqs_client.send_message(
-                    QueueUrl="http://error.test:8080", MessageBody="error"
-                )
+                sqs_client.send_message(QueueUrl="http://error.test:8080", MessageBody="error")
             except Exception as exception:
                 print("Exception occurred", exception)
         elif self.in_path("fault"):

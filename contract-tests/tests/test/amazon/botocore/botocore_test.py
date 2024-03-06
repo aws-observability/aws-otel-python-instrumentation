@@ -34,7 +34,7 @@ class BotocoreTest(ContractTestBase):
             "AWS_SDK_S3_ENDPOINT": "http://s3.localstack:4566",
             "AWS_SDK_ENDPOINT": "http://localstack:4566",
             "AWS_REGION": "us-west-2",
-            "OTEL_PYTHON_DISABLED_INSTRUMENTATIONS": "boto3sqs",
+            "OTEL_PYTHON_DISABLED_INSTRUMENTATIONS": "boto3",
         }
 
     @override
@@ -134,44 +134,18 @@ class BotocoreTest(ContractTestBase):
     def test_sqs_send_message(self):
         self.mock_collector_client.clear_signals()
         self.do_test_requests(
-            "sqs/publishqueue/some-queue",
-            "GET",
-            200,
-            0,
-            0,
-            service="AWS.SDK.SQS",
-            operation="SendMessage",
-            aws_attr_span="CLIENT",
-            dp_count=3,
+            "sqs/publishqueue/some-queue", "GET", 200, 0, 0, service="AWS.SDK.SQS", operation="SendMessage"
         )
 
     def test_sqs_receive_message(self):
         self.mock_collector_client.clear_signals()
         self.do_test_requests(
-            "sqs/consumequeue/some-queue",
-            "GET",
-            200,
-            0,
-            0,
-            service="AWS.SDK.SQS",
-            operation="ReceiveMessage",
-            aws_attr_span="CLIENT",
-            dp_count=3,
+            "sqs/consumequeue/some-queue", "GET", 200, 0, 0, service="AWS.SDK.SQS", operation="ReceiveMessage"
         )
 
     def test_sqs_error(self):
         self.mock_collector_client.clear_signals()
-        self.do_test_requests(
-            "sqs/error",
-            "GET",
-            400,
-            1,
-            0,
-            service="AWS.SDK.SQS",
-            operation="SendMessage",
-            aws_attr_span="CLIENT",
-            dp_count=3,
-        )
+        self.do_test_requests("sqs/error", "GET", 400, 1, 0, service="AWS.SDK.SQS", operation="SendMessage")
 
     def test_sqs_fault(self):
         self.mock_collector_client.clear_signals()
@@ -204,7 +178,7 @@ class BotocoreTest(ContractTestBase):
             target_spans[0].attributes,
             kwargs.get("service"),
             kwargs.get("operation"),
-            kwargs.get("aws_attr_span", "LOCAL_ROOT"),
+            "LOCAL_ROOT",
         )
 
     def _assert_aws_attributes(
