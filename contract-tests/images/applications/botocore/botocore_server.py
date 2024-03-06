@@ -9,6 +9,7 @@ from threading import Thread
 import boto3
 import requests
 from botocore.client import BaseClient
+from botocore.config import Config
 from typing_extensions import override
 
 _PORT: int = 8080
@@ -20,6 +21,7 @@ _FAULT: str = "fault"
 _AWS_SDK_S3_ENDPOINT: str = os.environ.get("AWS_SDK_S3_ENDPOINT")
 _AWS_SDK_ENDPOINT: str = os.environ.get("AWS_SDK_ENDPOINT")
 _AWS_REGION: str = os.environ.get("AWS_REGION")
+_NO_RETRY_CONFIG: Config = Config(retries = {'max_attempts':0})
 
 
 # pylint: disable=broad-exception-caught
@@ -53,7 +55,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             set_main_status(400)
         elif self.in_path("fault"):
             try:
-                s3_client: BaseClient = boto3.client('s3', endpoint_url="invalid:12345", region_name='ca-west-1')
+                s3_client: BaseClient = boto3.client('s3', endpoint_url="invalid:12345", region_name='ca-west-1', config = _NO_RETRY_CONFIG)
                 s3_client.create_bucket(Bucket="valid-bucket-name")
             except Exception as exception:
                 print("handled", exception)
@@ -81,7 +83,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         ddb_client = boto3.client('dynamodb', endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
         if self.in_path("error"):
             item: dict = {
-                'id': '1'
+                'id': {
+                    'S': '1'
+                }
             }
             try:
                 ddb_client.put_item(TableName='invalid_table', Item = item)
@@ -96,7 +100,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 }
             }
             try:
-                ddb_client = boto3.client('dynamodb', endpoint_url="invalid:12345", region_name="ca-west-1")
+                ddb_client = boto3.client('dynamodb', endpoint_url="invalid:12345", region_name="ca-west-1", config = _NO_RETRY_CONFIG)
                 ddb_client.put_item(TableName='invalid_table', Item = item)
             except Exception as exception:
                 print("Expected Exception", exception)
@@ -143,7 +147,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 set_main_status(400)
         elif self.in_path("fault"):
             try:
-                sqs_client = boto3.client('sqs', endpoint_url="invalid:12345", region_name="ca-west-1")
+                sqs_client = boto3.client('sqs', endpoint_url="invalid:12345", region_name="ca-west-1", config = _NO_RETRY_CONFIG)
                 sqs_client.create_queue(QueueName="invalid_test")
             except Exception as exception:
                 print("Expected Exception", exception)
@@ -175,7 +179,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 set_main_status(400)
         elif self.in_path("fault"):
             try:
-                kinesis_client = boto3.client('kinesis', endpoint_url="invalid_url:12345", region_name="ca-west-1")
+                kinesis_client = boto3.client('kinesis', endpoint_url="invalid_url:12345", region_name="ca-west-1", config = _NO_RETRY_CONFIG)
                 kinesis_client.put_record(StreamName="test_stream", Data=b'test', PartitionKey="partition_key")
             except Exception as exception:
                 print("expected failure", exception)
