@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import time
 from typing import Dict, List
 
 from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
@@ -51,10 +52,12 @@ class Psycopg2Test(ContractTestBase):
 
     def test_success(self) -> None:
         self.mock_collector_client.clear_signals()
+        time.sleep(3)
         self.do_test_requests("success", "GET", 200, 0, 0, sql_command="SELECT")
 
     def test_fault(self) -> None:
         self.mock_collector_client.clear_signals()
+        time.sleep(3)
         self.do_test_requests("fault", "GET", 500, 0, 1, sql_command="SELECT DISTINCT")
 
     @override

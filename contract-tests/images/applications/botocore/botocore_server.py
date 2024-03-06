@@ -42,6 +42,27 @@ class RequestHandler(BaseHTTPRequestHandler):
         else:
             self._end_request(404)
 
+    # pylint: disable=invalid-name
+    def do_POST(self):
+        # 设置HTTP响应头
+        self.send_response(400)  # 设置状态码为400
+        self.send_header('Content-type', 'text/xml')  # 设置内容类型为text/xml
+        self.end_headers()
+
+        # 定义一个简单的XML错误响应
+        xml_response = """<?xml version="1.0"?>
+                        <ErrorResponse>
+                            <Error>
+                                <Type>Sender</Type>
+                                <Code>InvalidAction</Code>
+                                <Message>The action or operation requested is invalid.</Message>
+                                <Detail/>
+                            </Error>
+                        </ErrorResponse>"""
+
+        # 发送XML响应体
+        self.wfile.write(xml_response.encode())
+
     def in_path(self, sub_path: str) -> bool:
         return sub_path in self.path
 
@@ -123,12 +144,14 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _handle_sqs_request(self) -> None:
         sqs_client = boto3.client("sqs", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
         if self.in_path("error"):
+            set_main_status(400)
             try:
-                sqs_client.receive_message(QueueUrl="invalid_url", MaxNumberOfMessages=1)
+                sqs_client = boto3.client("sqs", endpoint_url="http://error.test:8080", region_name=_AWS_REGION)
+                sqs_client.send_message(
+                    QueueUrl="http://error.test:8080", MessageBody="error"
+                )
             except Exception as exception:
                 print("Exception occurred", exception)
-            finally:
-                set_main_status(400)
         elif self.in_path("fault"):
             try:
                 sqs_client = boto3.client(
@@ -147,7 +170,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 QueueUrl="http://localstack:4566/000000000000/test_put_get_queue", MessageBody="test_message"
             )
             set_main_status(200)
-        elif self.in_path("sqs/consumequeue/some-queue"):
+        elif self.in_path("consumequeue/some-queue"):
             sqs_client.receive_message(
                 QueueUrl="http://localstack:4566/000000000000/test_put_get_queue", MaxNumberOfMessages=1
             )

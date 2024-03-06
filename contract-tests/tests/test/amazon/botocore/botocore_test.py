@@ -167,10 +167,9 @@ class BotocoreTest(ContractTestBase):
             1,
             0,
             service="AWS.SDK.SQS",
-            operation="ReceiveMessage",
+            operation="SendMessage",
             aws_attr_span="CLIENT",
             dp_count=3,
-            bypass_service_sum=True,
         )
 
     def test_sqs_fault(self):
@@ -297,5 +296,4 @@ class BotocoreTest(ContractTestBase):
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, kwargs.get("service_dp_span", "LOCAL_ROOT"))
         # Temporary measure: When an error occurs in SQS and DDB, Service_DP does not include sum count for error
-        if not kwargs.get("bypass_service_sum", False):
-            self.check_sum(metric_name, service_dp.sum, expected_sum)
+        self.check_sum(metric_name, service_dp.sum, expected_sum)
