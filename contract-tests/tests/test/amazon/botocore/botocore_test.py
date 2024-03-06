@@ -4,15 +4,12 @@ from logging import INFO, Logger, getLogger
 from typing import Dict, List
 
 from docker.types import EndpointConfig
-from requests import request, Response
-from testcontainers.localstack import LocalStackContainer
-
-from amazon.base.contract_test_base import NETWORK_NAME, ContractTestBase
-
 from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
+from requests import Response, request
+from testcontainers.localstack import LocalStackContainer
 from typing_extensions import override
 
-from amazon.base.contract_test_base import ContractTestBase
+from amazon.base.contract_test_base import NETWORK_NAME, ContractTestBase
 from amazon.utils.app_signals_constants import (
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
@@ -36,7 +33,7 @@ class BotocoreTest(ContractTestBase):
         return {
             "AWS_SDK_S3_ENDPOINT": "http://s3.localstack:4566",
             "AWS_SDK_ENDPOINT": "http://localstack:4566",
-            "AWS_REGION": "us-west-2"
+            "AWS_REGION": "us-west-2",
         }
 
     @override
@@ -82,18 +79,21 @@ class BotocoreTest(ContractTestBase):
 
     def test_s3_create_bucket(self):
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("s3/createbucket/create-bucket", "GET", 200, 0, 0, service="AWS.SDK.S3",
-                              operation="CreateBucket")
+        self.do_test_requests(
+            "s3/createbucket/create-bucket", "GET", 200, 0, 0, service="AWS.SDK.S3", operation="CreateBucket"
+        )
 
     def test_s3_create_object(self):
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("s3/createobject/put-object/some-object", "GET", 200, 0, 0, service="AWS.SDK.S3",
-                              operation="PutObject")
+        self.do_test_requests(
+            "s3/createobject/put-object/some-object", "GET", 200, 0, 0, service="AWS.SDK.S3", operation="PutObject"
+        )
 
     def test_s3_get_object(self):
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("s3/getobject/get-object/some-object", "GET", 200, 0, 0, service="AWS.SDK.S3",
-                              operation="GetObject")
+        self.do_test_requests(
+            "s3/getobject/get-object/some-object", "GET", 200, 0, 0, service="AWS.SDK.S3", operation="GetObject"
+        )
 
     def test_s3_error(self):
         self.mock_collector_client.clear_signals()
@@ -106,13 +106,15 @@ class BotocoreTest(ContractTestBase):
     #
     def test_dynamodb_create_table(self):
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("ddb/createtable/some-table", "GET", 200, 0, 0, service="AWS.SDK.DynamoDB",
-                              operation="CreateTable")
+        self.do_test_requests(
+            "ddb/createtable/some-table", "GET", 200, 0, 0, service="AWS.SDK.DynamoDB", operation="CreateTable"
+        )
 
     def test_dynamodb_put_item(self):
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("ddb/putitem/putitem-table/key", "GET", 200, 0, 0, service="AWS.SDK.DynamoDB",
-                              operation="PutItem")
+        self.do_test_requests(
+            "ddb/putitem/putitem-table/key", "GET", 200, 0, 0, service="AWS.SDK.DynamoDB", operation="PutItem"
+        )
 
     def test_dynamodb_error(self):
         self.mock_collector_client.clear_signals()
@@ -124,43 +126,70 @@ class BotocoreTest(ContractTestBase):
 
     def test_sqs_create_queue(self):
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("sqs/createqueue/some-queue", "GET", 200, 0, 0, service="AWS.SDK.SQS",
-                              operation="CreateQueue")
+        self.do_test_requests(
+            "sqs/createqueue/some-queue", "GET", 200, 0, 0, service="AWS.SDK.SQS", operation="CreateQueue"
+        )
 
     def test_sqs_send_message(self):
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("sqs/publishqueue/some-queue", "GET", 200, 0, 0, service="AWS.SDK.SQS",
-                              operation="SendMessage", aws_attr_span="CLIENT", dp_count=3)
+        self.do_test_requests(
+            "sqs/publishqueue/some-queue",
+            "GET",
+            200,
+            0,
+            0,
+            service="AWS.SDK.SQS",
+            operation="SendMessage",
+            aws_attr_span="CLIENT",
+            dp_count=3,
+        )
 
     def test_sqs_receive_message(self):
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("sqs/consumequeue/some-queue", "GET", 200, 0, 0, service="AWS.SDK.SQS",
-                              operation="ReceiveMessage", aws_attr_span="CLIENT", dp_count=3)
+        self.do_test_requests(
+            "sqs/consumequeue/some-queue",
+            "GET",
+            200,
+            0,
+            0,
+            service="AWS.SDK.SQS",
+            operation="ReceiveMessage",
+            aws_attr_span="CLIENT",
+            dp_count=3,
+        )
 
     def test_sqs_error(self):
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("sqs/error", "GET", 400, 1, 0, service="AWS.SDK.SQS",
-                              operation="ReceiveMessage", aws_attr_span="CLIENT", dp_count=3, bypass_service_sum = True)
+        self.do_test_requests(
+            "sqs/error",
+            "GET",
+            400,
+            1,
+            0,
+            service="AWS.SDK.SQS",
+            operation="ReceiveMessage",
+            aws_attr_span="CLIENT",
+            dp_count=3,
+            bypass_service_sum=True,
+        )
 
     def test_sqs_fault(self):
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("sqs/fault", "GET", 500, 0, 1, service="AWS.SDK.SQS",
-                              operation="CreateQueue")
+        self.do_test_requests("sqs/fault", "GET", 500, 0, 1, service="AWS.SDK.SQS", operation="CreateQueue")
 
     def test_kinesis_put_record(self):
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("kinesis/putrecord/my-stream", "GET", 200, 0, 0, service="AWS.SDK.Kinesis",
-                              operation="PutRecord")
+        self.do_test_requests(
+            "kinesis/putrecord/my-stream", "GET", 200, 0, 0, service="AWS.SDK.Kinesis", operation="PutRecord"
+        )
 
     def test_kinesis_error(self):
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("kinesis/error", "GET", 400, 1, 0, service="AWS.SDK.Kinesis",
-                              operation="PutRecord")
+        self.do_test_requests("kinesis/error", "GET", 400, 1, 0, service="AWS.SDK.Kinesis", operation="PutRecord")
 
     def test_kinesis_fault(self):
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("kinesis/fault", "GET", 500, 0, 1, service="AWS.SDK.Kinesis",
-                              operation="PutRecord")
+        self.do_test_requests("kinesis/fault", "GET", 500, 0, 1, service="AWS.SDK.Kinesis", operation="PutRecord")
 
     @override
     def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs) -> None:
@@ -171,11 +200,16 @@ class BotocoreTest(ContractTestBase):
                 target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
-        self._assert_aws_attributes(target_spans[0].attributes, kwargs.get("service"), kwargs.get("operation"),
-                                    kwargs.get('aws_attr_span', 'LOCAL_ROOT'))
+        self._assert_aws_attributes(
+            target_spans[0].attributes,
+            kwargs.get("service"),
+            kwargs.get("operation"),
+            kwargs.get("aws_attr_span", "LOCAL_ROOT"),
+        )
 
-    def _assert_aws_attributes(self, attributes_list: List[KeyValue], service: str, operation: str,
-                               span_kind: str) -> None:
+    def _assert_aws_attributes(
+        self, attributes_list: List[KeyValue], service: str, operation: str, span_kind: str
+    ) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # InternalOperation as OTEL does not instrument the basic server we are using, so the client span is a local
@@ -199,7 +233,7 @@ class BotocoreTest(ContractTestBase):
 
     @override
     def _assert_semantic_conventions_span_attributes(
-            self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str, status_code: int, **kwargs
+        self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str, status_code: int, **kwargs
     ) -> None:
         target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
@@ -208,12 +242,13 @@ class BotocoreTest(ContractTestBase):
                 target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
-        self.assertEqual(target_spans[0].name, kwargs.get("service").split('.')[-1] + '.' + kwargs.get("operation"))
-        self._assert_semantic_conventions_attributes(target_spans[0].attributes, kwargs.get("service"),
-                                                     kwargs.get("operation"), status_code)
+        self.assertEqual(target_spans[0].name, kwargs.get("service").split(".")[-1] + "." + kwargs.get("operation"))
+        self._assert_semantic_conventions_attributes(
+            target_spans[0].attributes, kwargs.get("service"), kwargs.get("operation"), status_code
+        )
 
     def _assert_semantic_conventions_attributes(
-            self, attributes_list: List[KeyValue], service: str, operation: str, status_code: int
+        self, attributes_list: List[KeyValue], service: str, operation: str, status_code: int
     ) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         # TODO: botocore instrumentation is not populating net peer attributes
@@ -221,17 +256,17 @@ class BotocoreTest(ContractTestBase):
         # self._assert_int_attribute(attributes_dict, SpanAttributes.NET_PEER_PORT, 8080)
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_METHOD, operation)
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SYSTEM, "aws-api")
-        self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SERVICE, service.split('.')[-1])
+        self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SERVICE, service.split(".")[-1])
         # TODO: botocore instrumentation is not respecting PEER_SERVICE
         # self._assert_str_attribute(attributes_dict, SpanAttributes.PEER_SERVICE, "backend:8080")
 
     @override
     def _assert_metric_attributes(
-            self,
-            resource_scope_metrics: List[ResourceScopeMetric],
-            metric_name: str,
-            expected_sum: int,
-            **kwargs,
+        self,
+        resource_scope_metrics: List[ResourceScopeMetric],
+        metric_name: str,
+        expected_sum: int,
+        **kwargs,
     ) -> None:
         target_metrics: List[Metric] = []
         for resource_scope_metric in resource_scope_metrics:
@@ -262,7 +297,7 @@ class BotocoreTest(ContractTestBase):
         attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(service_dp.attributes)
         # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
-        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, kwargs.get("service_dp_span", 'LOCAL_ROOT'))
+        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, kwargs.get("service_dp_span", "LOCAL_ROOT"))
         # Temporary measure: When an error occurs in SQS and DDB, Service_DP does not include sum count for error
-        if not kwargs.get('bypass_service_sum', False):
+        if not kwargs.get("bypass_service_sum", False):
             self.check_sum(metric_name, service_dp.sum, expected_sum)
