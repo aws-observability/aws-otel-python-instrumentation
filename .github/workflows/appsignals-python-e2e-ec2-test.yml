@@ -42,7 +42,7 @@ jobs:
           ref: ec2_e2e_python
 
       - name: Set CW Agent RPM environment variable
-        run: echo GET_CW_AGENT_RPM_COMMAND="wget -O cw-agent.rpm https://amazoncloudwatch-agent-${{ env.AWS_DEFAULT_REGION }}.s3.${{ env.AWS_DEFAULT_REGION }}.amazonaws.com/amazon_linux/amd64/1.300031.0b313/amazon-cloudwatch-agent.rpm" >> $GITHUB_ENV
+        run: echo GET_CW_AGENT_RPM_COMMAND="wget -O cw-agent.rpm https://amazoncloudwatch-agent-${{ inputs.aws-region }}.s3.${{ inputs.aws-region }}.amazonaws.com/amazon_linux/amd64/1.300031.0b313/amazon-cloudwatch-agent.rpm" >> $GITHUB_ENV
 
       - name: Generate testing id
         run: echo TESTING_ID="${{ github.run_id }}-${{ github.run_number }}" >> $GITHUB_ENV
@@ -57,18 +57,18 @@ jobs:
         uses: aws-actions/aws-secretsmanager-get-secrets@v1
         with:
           secret-ids:
-            ACCOUNT_ID, region-account/${{ env.AWS_DEFAULT_REGION }}
+            ACCOUNT_ID, region-account/${{ inputs.aws-region }}
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::339713035518:role/${{ secrets.E2E_TEST_ROLE_ARN }}
-          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+          aws-region: ${{ inputs.aws-region }}
 
       - name: Set Get ADOT Wheel command environment variable
         working-directory: terraform/python/ec2
         run: |
-          echo GET_ADOT_WHEEL_COMMAND="aws s3 cp s3://aws-appsignals-sample-app-prod-${{ env.AWS_DEFAULT_REGION }}/${{ env.ADOT_WHEEL_NAME }} ./${{ env.ADOT_WHEEL_NAME }} && python3.9 -m pip install ${{ env.ADOT_WHEEL_NAME }}" >> $GITHUB_ENV
+          echo GET_ADOT_WHEEL_COMMAND="aws s3 cp s3://aws-appsignals-sample-app-prod-${{ inputs.aws-region }}/${{ env.ADOT_WHEEL_NAME }} ./${{ env.ADOT_WHEEL_NAME }} && python3.9 -m pip install ${{ env.ADOT_WHEEL_NAME }}" >> $GITHUB_ENV
 
       - name: Set up terraform
         uses: hashicorp/setup-terraform@v3
@@ -91,7 +91,7 @@ jobs:
             echo "Attempt $retry_counter"
             deployment_failed=0
             terraform apply -auto-approve \
-              -var="aws_region=${{ env.AWS_DEFAULT_REGION }}" \
+              -var="aws_region=${{ inputs.aws-region }}" \
               -var="test_id=${{ env.TESTING_ID }}" \
               -var="sample_app_zip=${{ env.SAMPLE_APP_ZIP }}" \
               -var="get_cw_agent_rpm_command=${{ env.GET_CW_AGENT_RPM_COMMAND }}" \
@@ -168,7 +168,7 @@ jobs:
           --testing-id ${{ env.TESTING_ID }}
           --endpoint http://${{ env.MAIN_SERVICE_ENDPOINT }}
           --remote-service-deployment-name ${{ env.REMOTE_SERVICE_IP }}:8001
-          --region ${{ env.AWS_DEFAULT_REGION }}
+          --region ${{ inputs.aws-region }}
           --account-id ${{ env.ACCOUNT_ID }}
           --metric-namespace ${{ env.METRIC_NAMESPACE }}
           --log-group ${{ env.LOG_GROUP_NAME }}
@@ -185,7 +185,7 @@ jobs:
           --testing-id ${{ env.TESTING_ID }}
           --endpoint http://${{ env.MAIN_SERVICE_ENDPOINT }}
           --remote-service-deployment-name ${{ env.REMOTE_SERVICE_IP }}:8001
-          --region ${{ env.AWS_DEFAULT_REGION }}
+          --region ${{ inputs.aws-region }}
           --account-id ${{ env.ACCOUNT_ID }}
           --metric-namespace ${{ env.METRIC_NAMESPACE }}
           --log-group ${{ env.LOG_GROUP_NAME }}
@@ -202,7 +202,7 @@ jobs:
           --testing-id ${{ env.TESTING_ID }}
           --endpoint http://${{ env.MAIN_SERVICE_ENDPOINT }}
           --remote-service-deployment-name ${{ env.REMOTE_SERVICE_IP }}:8001
-          --region ${{ env.AWS_DEFAULT_REGION }}
+          --region ${{ inputs.aws-region }}
           --account-id ${{ env.ACCOUNT_ID }}
           --metric-namespace ${{ env.METRIC_NAMESPACE }}
           --log-group ${{ env.LOG_GROUP_NAME }}
@@ -220,13 +220,13 @@ jobs:
             --metric-name Failure \
             --dimensions repository=${{ github.repository }},branch=${{ github.ref_name }},workflow=${{ inputs.caller-workflow-name }} \
             --value 0.0 \
-            --region ${{ env.AWS_DEFAULT_REGION }}
+            --region ${{ inputs.aws-region }}
           else
             aws cloudwatch put-metric-data --namespace 'ADOT/GitHubActions' \
             --metric-name Failure \
             --dimensions repository=${{ github.repository }},branch=${{ github.ref_name }},workflow=${{ inputs.caller-workflow-name }} \
             --value 1.0 \
-            --region ${{ env.AWS_DEFAULT_REGION }}
+            --region ${{ inputs.aws-region }}
           fi
 
       # Clean up Procedures
