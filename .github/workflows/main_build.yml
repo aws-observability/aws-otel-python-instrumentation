@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "release/v*"
+      - eks_e2e_python_workflow
 env:
   AWS_DEFAULT_REGION: us-east-1
   STAGING_ECR_REGISTRY: 637423224110.dkr.ecr.us-east-1.amazonaws.com
@@ -23,6 +24,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     outputs:
+      aws_default_region: ${{ steps.python_output.outputs.awsDefaultRegion}}
+      staging_url: ${{ secrets.TEMP_TEST_ADOT_PYTHON_IMAGE }}
       python_image_tag: ${{ steps.python_output.outputs.python_image_tag}}
       staging_image: ${{ steps.python_output.outputs.stagingImage}}
       staging_registry: ${{ steps.python_output.outputs.stagingRegistry}}
@@ -40,6 +43,7 @@ jobs:
           shortsha="$(git rev-parse --short HEAD)"
           echo "SHORT_SHA=$shortsha" >> $GITHUB_ENV
           python_distro_tag=$pkg_version-$shortsha
+          echo "awsDefaultRegion=${{ env.AWS_DEFAULT_REGION }}" >> $GITHUB_OUTPUT
           echo "python_image_tag=$python_distro_tag" >> $GITHUB_OUTPUT
           echo "stagingRegistry=${{ env.STAGING_ECR_REGISTRY }}" >> $GITHUB_OUTPUT
           echo "stagingRepository=${{ env.STAGING_ECR_REPOSITORY }}" >> $GITHUB_OUTPUT
@@ -84,4 +88,17 @@ jobs:
           pip install pytest
           pytest contract-tests/tests
 
-#  TODO: Add E2E tests
+  # AppSignals specific e2e eks tests
+  appsignals-e2e-eks-test:
+    concurrency:
+      group: e2e-adot-test
+      cancel-in-progress: false
+    needs: [build]
+    uses: ./.github/workflows/appsignals-python-e2e-eks-test.yml
+    secrets: inherit
+    with:
+      aws-region: ${{ needs.build.outputs.aws_default_region }}
+      test-cluster-name: e2e-python-adot-test
+      caller-workflow-name: 'appsignals-python-e2e-eks-canary-test'
+      appsignals-adot-image: ${{ needs.build.outputs.staging_url }} #${{ needs.build.outputs.staging_registry }}/${{ needs.build.outputs.staging_image }}
+      appsignals-adot-image-tag: latest #${{ needs.build.outputs.python_image_tag }}
