@@ -13,7 +13,7 @@ inputs:
     required: true
     description: "Image Registry"
   snapshot-ecr-role:
-    require: true
+    required: true
     description: "IAM Role used for pushing to snapshot ecr"
   push_image:
     required: true

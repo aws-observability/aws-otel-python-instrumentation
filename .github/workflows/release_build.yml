@@ -1,16 +1,19 @@
-#This Release Build workflow is not fully ready yet, will be tested as Beta release when it is ready.
 name: Release Build
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: The version to tag the release with, e.g., 1.2.0, 1.2.1-alpha.1
+        description: The version to tag the release with, e.g., 1.2.0
         required: true
 
 env:
   AWS_DEFAULT_REGION: us-east-1
-  ECR_REGISTRY: 637423224110.dkr.ecr.us-east-1.amazonaws.com
-  PRIVATE_ECR_REPOSITORY: eks/observability/adot-autoinstrumentation-python
+  AWS_PUBLIC_ECR_REGION: us-east-1
+  AWS_PRIVATE_ECR_REGION: us-west-2
+  RELEASE_PUBLIC_REPOSITORY: public.ecr.aws/aws-observability/adot-autoinstrumentation-python
+  RELEASE_PRIVATE_REPOSITORY: 020628701572.dkr.ecr.us-west-2.amazonaws.com/adot-autoinstrumentation-python
+  RELEASE_PRIVATE_REGISTRY: 020628701572.dkr.ecr.us-west-2.amazonaws.com
+  PACKAGE_NAME: aws-opentelemetry-distro
 
 permissions:
   id-token: write
@@ -23,62 +26,98 @@ jobs:
       - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@v4
 
+      # NOTE: do not set push_image to true for this step.
+      # Some of the required params below are set to dummy values
+      # as they are only used in the artifacts_build action when push_image is true,
+      # and setting them to some legit value might cause confusion
+      # to readers.
       - name: Build Wheel and Image Files
         uses: ./.github/actions/artifacts_build
         with:
           aws-region: ${{ env.AWS_DEFAULT_REGION }}
-          image_uri_with_tag: ${{ env.ECR_REGISTRY }}/${{ env.PRIVATE_ECR_REPOSITORY }}:v${{ github.event.inputs.version }}
-          image_registry: ${{ env.ECR_REGISTRY }}
-          snapshot-ecr-role: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
+          image_uri_with_tag: "adot-autoinstrumentation-python:test"
+          image_registry: "dummy-registry"
+          snapshot-ecr-role: "dummy-role"
           push_image: false
           load_image: false
           python_version: "3.10"
           package_name: aws-opentelemetry-distro
           os: ubuntu-latest
 
-      - name: Get PyPI secrets by name and ARN
+      # TODO: Add some sort of smoke/integration testing before we go
+      # release the artifacts. adot java for reference:
+      # https://github.com/aws-observability/aws-otel-java-instrumentation/tree/93870a550ac30988fbdd5d3bf1e8f9f1b37916f5/smoke-tests
+
+      - name: Configure AWS credentials for PyPI secrets
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_PYPI_RELEASE }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+      
+      - name: Get PyPI secrets
         uses: aws-actions/aws-secretsmanager-get-secrets@v1
         id: pypi_secrets
         with:
           secret-ids: |
-            PROD_PYPI_TOKEN,arn:aws:secretsmanager:us-east-1:637423224110:secret:prod/PyPI/apiToken-W2a9ny
-            TEST_PYPI_TOKEN,arn:aws:secretsmanager:us-east-1:637423224110:secret:test/PyPI/apiToken-z5iqc6
+            PROD_PYPI_TOKEN,${{ secrets.PYPI_PROD_TOKEN_SECRET_ARN }}
+            TEST_PYPI_TOKEN,${{ secrets.PYPI_TEST_TOKEN_SECRET_ARN }}
+          parse-json-secrets: true
 
-      - name: Export distro version
-        id: distro_version
-        shell: bash
-        run: |
-          pkg_version=$(grep '__version__' ./aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py | awk -F '"' '{print $2}')
-          echo "ADOT_PYTHON_VERSION=$pkg_version" >> $GITHUB_OUTPUT
+      - name: Configure AWS credentials for private ECR
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_ECR_RELEASE }}
+          aws-region: ${{ env.AWS_PRIVATE_ECR_REGION }}
+
+      - name: Log in to AWS private ECR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.RELEASE_PRIVATE_REGISTRY }}
+
+      - name: Configure AWS credentials for public ECR
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_ECR_RELEASE }}
+          aws-region: ${{ env.AWS_PUBLIC_ECR_REGION }}
+
+      - name: Log in to AWS public ECR
+        uses: docker/login-action@v3
+        with:
+          registry: public.ecr.aws
 
       # The step below publishes to testpypi in order to catch any issues
       # with the package configuration that would cause a failure to upload to pypi.
+      - name: Install twine
+        run: pip install twine
+      
       - name: Publish to TestPyPI
         env:
           TWINE_USERNAME: '__token__'
-          TWINE_PASSWORD: ${{ steps.pypi_secrets.outputs.TEST_PYPI_TOKEN }}
+          TWINE_PASSWORD: ${{ env.TEST_PYPI_TOKEN_API_TOKEN }}
         run: |
-          pip install --upgrade twine
-          twine upload --repository testpypi --skip-existing --verbose dist/aws_opentelemetry_distro-${{ steps.distro_version.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl
+          twine upload --repository testpypi --skip-existing --verbose dist/aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
 
-      - name: Push release image
+      # The following step publish to ECR
+      - name: Build and push images
         uses: docker/build-push-action@v5
         with:
           push: true
           context: .
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
-          tags: ${{ env.ECR_REGISTRY }}/${{ env.PRIVATE_ECR_REPOSITORY }}:v${{ github.event.inputs.version }}
+          tags: |
+            ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ github.event.inputs.version }}
+            ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ github.event.inputs.version }}
 
-#TODO: Uncomment "Publish to PyPI" after test release_build workflow.
-#      - name: Publish to PyPI
-#        env:
-#          TWINE_USERNAME: '__token__'
-#          TWINE_PASSWORD: ${{ steps.pypi_secrets.outputs.PROD_PYPI_TOKEN }}
-#        run: |
-#          twine upload --skip-existing --verbose dist/aws_opentelemetry_distro-${{ steps.distro_version.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl
+      # Publish to prod PyPI
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: '__token__'
+          TWINE_PASSWORD: ${{ env.PROD_PYPI_TOKEN_API_TOKEN }}
+        run: |
+          twine upload --skip-existing --verbose dist/aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
 
-      - name: Create release
+      - name: Create GH release
         id: create_release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
@@ -87,4 +126,4 @@ jobs:
              --title "Release v${{ github.event.inputs.version }}" \
              --draft \
              "v${{ github.event.inputs.version }}" \
-             dist/aws_opentelemetry_distro-${{ steps.distro_version.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl
+             dist/aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
