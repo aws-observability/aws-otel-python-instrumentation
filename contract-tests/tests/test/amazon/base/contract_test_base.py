@@ -128,6 +128,7 @@ class ContractTestBase(TestCase):
         response: Response = request(method, url, timeout=20)
 
         self.assertEqual(status_code, response.status_code)
+
         resource_scope_spans: List[ResourceScopeSpan] = self.mock_collector_client.get_traces()
         self._assert_aws_span_attributes(resource_scope_spans, path, **kwargs)
         self._assert_semantic_conventions_span_attributes(resource_scope_spans, method, path, status_code, **kwargs)

@@ -22,7 +22,7 @@ from opentelemetry.proto.metrics.v1.metrics_pb2 import Metric, ResourceMetrics, 
 from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans, ScopeSpans, Span
 
 _logger: Logger = getLogger(__name__)
-_TIMEOUT_DELAY: timedelta = timedelta(seconds=60)
+_TIMEOUT_DELAY: timedelta = timedelta(seconds=20)
 _WAIT_INTERVAL_SEC: float = 0.1
 T: TypeVar = TypeVar("T")
 
