@@ -91,6 +91,9 @@ jobs:
 
       # The step below publishes to testpypi in order to catch any issues
       # with the package configuration that would cause a failure to upload to pypi.
+      - name: Install twine
+        run: pip install twine
+      
       - name: Publish to TestPyPI
         env:
           TWINE_USERNAME: '__token__'
