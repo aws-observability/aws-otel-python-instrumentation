@@ -1,5 +1,9 @@
 name: Release Build
 on:
+  #TODO: remove the on-push and hard-coded version after testing
+  push:
+    branches:
+      - release-wf
   workflow_dispatch:
     inputs:
       version:
@@ -92,7 +96,7 @@ jobs:
           TWINE_USERNAME: '__token__'
           TWINE_PASSWORD: ${{ env.TEST_PYPI_TOKEN_API_TOKEN }}
         run: |
-          twine upload --repository testpypi --skip-existing --verbose dist/aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
+          twine upload --repository testpypi --skip-existing --verbose dist/aws_opentelemetry_distro-0.0.0-py3-none-any.whl
 
       # TODO: uncomment once tested
 #      - name: Publish to PyPI
@@ -120,7 +124,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
         run: |
           gh release create --target "$GITHUB_REF_NAME" \
-             --title "Release v${{ github.event.inputs.version }}" \
+             --title "Release v0.0.0" \
              --draft \
-             "v${{ github.event.inputs.version }}" \
-             dist/aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
+             "v0.0.0" \
+             dist/aws_opentelemetry_distro-0.0.0-py3-none-any.whl
