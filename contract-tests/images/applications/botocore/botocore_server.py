@@ -91,7 +91,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                 set_main_status(400)
         elif self.in_path("fault"):
             item: dict = {
-                'id': '1'
+                'id': {
+                    'S': '1'
+                }
             }
             try:
                 ddb_client = boto3.client('dynamodb', endpoint_url="invalid:12345", region_name="ca-west-1")
@@ -120,7 +122,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             set_main_status(200)
         elif self.in_path("putitem/putitem-table/key"):
             item: dict = {
-                'id': '1'
+                'id': {
+                    'S': '1'
+                }
             }
             ddb_client.put_item(TableName='put_test_table', Item = item)
             set_main_status(200)
@@ -206,6 +210,7 @@ def prepare_aws_server()->None:
         )
         sqs_client = boto3.client('sqs', endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
         sqs_response = sqs_client.create_queue(QueueName="test_put_get_queue")
+        print(sqs_response)
         os.environ.setdefault("TEST_SQS_QUEUE_URL", sqs_response['QueueUrl'])
         kinesis_client = boto3.client('kinesis', endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
         kinesis_client.create_stream(StreamName="test_stream", ShardCount=1)
