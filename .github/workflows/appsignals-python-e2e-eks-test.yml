@@ -101,9 +101,13 @@ jobs:
           --region ${{ inputs.aws-region }} \
           --approve
 
+      # TODO: This step is used for custom pre-release instrumentation
+      # It is a temporary measure until the cw add-on is released with python support
       - name: Setup Helm
         uses: azure/setup-helm@v3
 
+      # TODO: This step is used for custom pre-release instrumentation
+      # It is a temporary measure until the cw add-on is released with python support
       - name: Checkout Amazon Cloudwatch Agent Operator
         uses: actions/checkout@v4
         with:
@@ -112,6 +116,8 @@ jobs:
           ref: abf75babe672412cb63c56cbcf1c5ce2d8c97a1c
           path: amazon-cloudwatch-agent-operator
 
+      # TODO: This step is used for custom pre-release instrumentation
+      # It is a temporary measure until the cw add-on is released with python support
       - name: Edit Helm values for Amazon Cloudwatch Agent Operator
         working-directory: amazon-cloudwatch-agent-operator/helm/
         run: |
@@ -130,6 +136,8 @@ jobs:
             sed -i 's/tag: 0.43b0/tag: latest/g' values.yaml
           fi
 
+      # TODO: This step is used for custom pre-release instrumentation
+      # It is a temporary measure until the cw add-on is released with python support
       - name: Create CWA Operator Namespace file
         working-directory: amazon-cloudwatch-agent-operator/
         run: |
@@ -187,6 +195,8 @@ jobs:
 
               echo "Installing app signals to the sample app"
 
+              # TODO: The next 7 lines are used for custom pre-release instrumentation
+              # It is a temporary measure until the cw add-on is released with python support
               cd ${{ github.workspace }}/amazon-cloudwatch-agent-operator/
               kubectl apply -f namespace.yaml
               helm template amazon-cloudwatch-observability ./helm --include-crds --namespace amazon-cloudwatch | kubectl apply --namespace amazon-cloudwatch --server-side --force-conflicts -f -
