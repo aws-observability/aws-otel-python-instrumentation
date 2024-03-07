@@ -31,13 +31,13 @@ inputs:
     required: true
     description: "The os"
   e2e_secret_test_role_arn:
-    required: true
+    required: false
     description: "Test account Assume Role part 1"
   python_e2e_test_role_arn:
-    required: true
+    required: false
     description: "Test account Assume Role part 2"
   test_image_uri_with_tag:
-    required: true
+    required: false
     description: "Test Image URI with Tag"
 
 runs:
@@ -66,25 +66,32 @@ runs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
+    # TODO: The next 5 steps are temporary until Python ADOT image is publicly released.
+    # They will be removed then
     - name: Configure AWS Credentials
+      if: ${{ inputs.e2e_secret_test_role_arn != "" }}
       uses: aws-actions/configure-aws-credentials@v4
       with:
         role-to-assume: ${{ inputs.e2e_secret_test_role_arn }}
         aws-region: us-east-1
     - name: Retrieve account
+      if: ${{ inputs.e2e_secret_test_role_arn != "" }}
       uses: aws-actions/aws-secretsmanager-get-secrets@v1
       with:
         secret-ids:
           ACCOUNT_ID, region-account/${{ inputs.aws-region }}
     - name: Configure AWS Credentials
+      if: ${{ inputs.e2e_secret_test_role_arn != "" }} && ${{ inputs.python_e2e_test_role_arn != "" }}
       uses: aws-actions/configure-aws-credentials@v4
       with:
         role-to-assume: arn:aws:iam::${{ env.ACCOUNT_ID }}:role/${{ inputs.python_e2e_test_role_arn }}
         aws-region: ${{ inputs.aws-region }}
     - name: Login to Amazon ECR
+      if: ${{ inputs.e2e_secret_test_role_arn != "" }} && ${{ inputs.python_e2e_test_role_arn != "" }}
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
     - name: Build and push image according to input
+      if: ${{ inputs.e2e_secret_test_role_arn != "" }} && ${{ inputs.python_e2e_test_role_arn != "" }} && ${{ inputs.test_image_uri_with_tag != "" }}
       uses: docker/build-push-action@v5
       with:
         push: ${{ inputs.push_image }}
