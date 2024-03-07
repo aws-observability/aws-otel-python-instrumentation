@@ -94,14 +94,14 @@ jobs:
         run: |
           echo "aws_default_region=${{ env.AWS_DEFAULT_REGION }}" >> $GITHUB_OUTPUT
 
- # AppSignals specific e2e tests for ec2
-#  appsignals-python-e2e-ec2-test:
-#    needs: [ build, default-region-output ]
-#    uses: ./.github/workflows/appsignals-python-main-e2e-ec2-test.yml
-#    secrets: inherit
-#    with:
-#      aws-region: ${{ needs.default-region-output.outputs.aws_default_region }}
-#      staging_wheel_name: ${{ needs.build.outputs.staging_wheel_file }}
-#      caller-workflow-name: 'main-build'
+#  AppSignals specific e2e tests for ec2
+  appsignals-python-e2e-ec2-test:
+    needs: [ build, default-region-output ]
+    uses: ./.github/workflows/appsignals-python-main-e2e-ec2-test.yml
+    secrets: inherit
+    with:
+      aws-region: ${{ needs.default-region-output.outputs.aws_default_region }}
+      staging_wheel_name: ${{ needs.build.outputs.staging_wheel_file }}
+      caller-workflow-name: 'main-build'
 
 #  TODO: Add E2E tests
