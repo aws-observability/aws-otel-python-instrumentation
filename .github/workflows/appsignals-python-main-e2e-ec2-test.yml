@@ -17,7 +17,6 @@ on:
       caller-workflow-name:
         required: true
         type: string
-  push:
 
 permissions:
   id-token: write
