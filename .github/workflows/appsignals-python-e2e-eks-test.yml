@@ -47,7 +47,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: aws-observability/aws-application-signals-test-framework
-          ref: eks_e2e_python
+          ref: main
           fetch-depth: 0
 
       - name: Generate testing id
