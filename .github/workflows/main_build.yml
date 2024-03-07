@@ -24,7 +24,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     outputs:
-      staging_url: ${{ steps.python_output.outputs.staging_url }}
       aws_default_region: ${{ steps.python_output.outputs.awsDefaultRegion}}
       python_image_tag: ${{ steps.python_output.outputs.python_image_tag}}
       staging_image: ${{ steps.python_output.outputs.stagingImage}}
@@ -56,6 +55,9 @@ jobs:
           image_uri_with_tag: ${{ steps.python_output.outputs.stagingImage}}
           image_registry: ${{ env.STAGING_ECR_REGISTRY }}
           snapshot-ecr-role: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
+          e2e_secret_test_role_arn: ${{ secrets.E2E_SECRET_TEST_ROLE_ARN }}
+          python_e2e_test_role_arn: ${{ secrets.PYTHON_E2E_TEST_ROLE_ARN }}
+          test_image_uri_with_tag: ${{ secrets.TEMP_TEST_ADOT_PYTHON_IMAGE }}:latest
           push_image: true
           load_image: false
           python_version: "3.10"
@@ -93,12 +95,13 @@ jobs:
     concurrency:
       group: e2e-adot-test
       cancel-in-progress: false
-    # needs: [build]
+    needs: [build]
     uses: ./.github/workflows/appsignals-python-e2e-eks-test.yml
     secrets: inherit
     with:
-      aws-region: us-east-1 #${{ needs.build.outputs.aws_default_region }}
+      aws-region: ${{ needs.build.outputs.aws_default_region }}
       test-cluster-name: e2e-python-adot-test
       caller-workflow-name: 'appsignals-python-e2e-eks-canary-test'
-      appsignals-adot-image: 654654176582.dkr.ecr.us-east-1.amazonaws.com/pre-beta-adot-python-image #${{ needs.build.outputs.staging_registry }}/${{ needs.build.outputs.staging_image }}
-      appsignals-adot-image-tag: latest #${{ needs.build.outputs.python_image_tag }}
+      # TODO - use staging images
+      # appsignals-adot-image: ${{ needs.build.outputs.staging_registry }}/${{ needs.build.outputs.staging_image }}
+      # appsignals-adot-image-tag: ${{ needs.build.outputs.python_image_tag }}

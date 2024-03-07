@@ -123,6 +123,10 @@ jobs:
             echo "Using appsignals-adot-image"
             sed -i 's~repository: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-python~repository: ${{ inputs.appsignals-adot-image }}~g' values.yaml
             sed -i 's/tag: 0.43b0/tag: ${{ inputs.appsignals-adot-image-tag }}/g' values.yaml
+          else
+            echo "appsignals-adot-image is empty"
+            sed -i 's~repository: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-python~repository: ${{ secrets.TEMP_TEST_ADOT_PYTHON_IMAGE }}~g' values.yaml
+            sed -i 's/tag: 0.43b0/tag: latest/g' values.yaml
           fi
 
       - name: Create CWA Operator Namespace file
