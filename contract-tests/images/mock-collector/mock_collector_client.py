@@ -69,7 +69,7 @@ class MockCollectorClient:
             List of `ResourceScopeSpan` which is essentially a flat list containing all the spans and their related
             scope and resources.
         """
-
+        print("hit_get_trace")
         def get_export() -> List[ExportTraceServiceRequest]:
             response: GetTracesResponse = self.client.get_traces(GetTracesRequest())
             serialized_traces: RepeatedScalarFieldContainer[bytes] = response.traces
