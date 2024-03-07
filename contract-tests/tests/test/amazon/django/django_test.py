@@ -33,23 +33,30 @@ class DjangoTest(ContractTestBase):
         return {'DJANGO_SETTINGS_MODULE': 'django_server.settings'}
 
     def test_success(self) -> None:
-        self.do_test_requests("success", "GET", 200, 0, 0, request_method="GET")
+        self.mock_collector_client.clear_signals()
+        self.do_test_requests("success", "GET", 200, 0, 0, request_method="GET", local_operation="GET /success")
+
+    def test_route(self) -> None:
+        self.mock_collector_client.clear_signals()
+        self.do_test_requests("users/userId/orders/orderId", "GET", 200, 0, 0, request_method="GET", local_operation="GET /users/userId/orders/orderId")
 
     def test_error(self) -> None:
-        self.do_test_requests("invalid", "GET", 404, 1, 0, request_method="GET")
+        self.mock_collector_client.clear_signals()
+        self.do_test_requests("error", "GET", 400, 1, 0, request_method="GET", local_operation="GET /error")
 
     def test_fault(self) -> None:
-        self.do_test_requests("fault", "GET", 500, 0, 1, request_method="GET")
+        self.mock_collector_client.clear_signals()
+        self.do_test_requests("fault", "GET", 500, 0, 1, request_method="GET", local_operation="GET /fault")
 
     @override
     def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs) -> None:
         target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
-            if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
+            if resource_scope_span.span.kind == Span.SPAN_KIND_SERVER:
                 target_spans.append(resource_scope_span.span)
 
-        self.assertEqual(len(target_spans), 2)
+        self.assertEqual(len(target_spans), 1)
         self._assert_aws_attributes(target_spans[0].attributes, kwargs.get("request_method"), path)
 
     def _assert_aws_attributes(self, attributes_list: List[KeyValue], method: str, endpoint: str) -> None:
@@ -57,9 +64,7 @@ class DjangoTest(ContractTestBase):
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # InternalOperation as OTEL does not instrument the basic server we are using, so the client span is a local
         # root.
-        self._assert_str_attribute(attributes_dict, AWS_LOCAL_OPERATION, "InternalOperation")
-        self._assert_str_attribute(attributes_dict, AWS_REMOTE_SERVICE, "sqlite")
-        self._assert_str_attribute(attributes_dict, AWS_REMOTE_OPERATION, "SELECT")
+        self._assert_str_attribute(attributes_dict, AWS_LOCAL_OPERATION, method + ' /' + endpoint)
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
 
@@ -81,26 +86,21 @@ class DjangoTest(ContractTestBase):
         target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
-            if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
+            if resource_scope_span.span.kind == Span.SPAN_KIND_SERVER:
                 target_spans.append(resource_scope_span.span)
 
-        self.assertEqual(len(target_spans), 2)
-        print(target_spans)
-        self.assertEqual(target_spans[0].name, method)
+        self.assertEqual(len(target_spans), 1)
+        self.assertEqual(target_spans[0].name, method + ' /' + path)
         self._assert_semantic_conventions_attributes(target_spans[0].attributes, method, path, status_code)
 
     def _assert_semantic_conventions_attributes(
         self, attributes_list: List[KeyValue], method: str, endpoint: str, status_code: int
     ) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
-        # TODO: requests instrumentation is not populating net peer attributes
-        # self._assert_str_attribute(attributes_dict, SpanAttributes.NET_PEER_NAME, "backend")
-        # self._assert_int_attribute(attributes_dict, SpanAttributes.NET_PEER_PORT, 8080)
+        self._assert_int_attribute(attributes_dict, SpanAttributes.NET_HOST_PORT, 8080)
         self._assert_int_attribute(attributes_dict, SpanAttributes.HTTP_STATUS_CODE, status_code)
-        self._assert_str_attribute(attributes_dict, SpanAttributes.HTTP_URL, f"http://backend:8080/backend/{endpoint}")
+        self.assertTrue(attributes_dict.get(SpanAttributes.HTTP_URL).string_value.endswith(endpoint))
         self._assert_str_attribute(attributes_dict, SpanAttributes.HTTP_METHOD, method)
-        # TODO: request instrumentation is not respecting PEER_SERVICE
-        # self._assert_str_attribute(attributes_dict, SpanAttributes.PEER_SERVICE, "backend:8080")
 
     @override
     def _assert_metric_attributes(
@@ -119,24 +119,12 @@ class DjangoTest(ContractTestBase):
         target_metric: Metric = target_metrics[0]
         dp_list: List[ExponentialHistogramDataPoint] = target_metric.exponential_histogram.data_points
 
-        self.assertEqual(len(dp_list), 2)
-        dependency_dp: ExponentialHistogramDataPoint = dp_list[0]
-        service_dp: ExponentialHistogramDataPoint = dp_list[1]
-        if len(dp_list[1].attributes) > len(dp_list[0].attributes):
-            dependency_dp = dp_list[1]
-            service_dp = dp_list[0]
-        attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(dependency_dp.attributes)
-        method: str = kwargs.get("request_method")
-        self._assert_str_attribute(attribute_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
-        # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
-        self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
-        self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, "backend:8080")
-        self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, f"{method} /backend")
-        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "CLIENT")
-        self.check_sum(metric_name, dependency_dp.sum, expected_sum)
+        self.assertEqual(len(dp_list), 1)
+        service_dp: ExponentialHistogramDataPoint = dp_list[0]
 
         attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(service_dp.attributes)
         # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
-        self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
+        self._assert_str_attribute(attribute_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
+        self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, kwargs.get("local_operation"))
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
         self.check_sum(metric_name, service_dp.sum, expected_sum)

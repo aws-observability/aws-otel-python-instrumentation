@@ -17,11 +17,12 @@ Including another URLconf
 
 from django.contrib import admin
 from django.urls import path
-from api.views import success, fault, error
+from api.views import success, fault, error, user_order
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path('success/', success),
-    path('fault/', fault),
-    path('error/', error),
+    path('success', success),
+    path('fault', fault),
+    path('error', error),
+    path('users/<str:userId>/orders/<str:orderId>', user_order),
 ]
