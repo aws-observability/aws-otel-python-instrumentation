@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 jobs:
-  e2e-test:
+  python-e2e-ec2-test:
     strategy:
       fail-fast: false
       matrix:
