@@ -30,7 +30,6 @@ env:
   ADOT_WHEEL_NAME: ${{ secrets.ADOT_WHEEL_NAME }}
 
 
-
 jobs:
   python-e2e-ec2-test:
     runs-on: ubuntu-latest
