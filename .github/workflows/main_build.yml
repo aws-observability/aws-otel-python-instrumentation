@@ -103,9 +103,10 @@ jobs:
     with:
       aws-region: ${{ needs.build.outputs.aws_default_region }}
       test-cluster-name: e2e-python-adot-test
-      caller-workflow-name: 'appsignals-python-e2e-eks-canary-test'
+      caller-workflow-name: 'main_build'
       appsignals-adot-image: ${{ needs.build.outputs.test_staging_image }}
       appsignals-adot-image-tag: ${{ needs.build.outputs.python_image_tag }}
+      test-cluster-is-canary: false
       # TODO - use staging images
       # appsignals-adot-image: ${{ needs.build.outputs.staging_registry }}/${{ needs.build.outputs.staging_image }}
       # appsignals-adot-image-tag: ${{ needs.build.outputs.python_image_tag }}

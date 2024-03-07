@@ -14,6 +14,9 @@ on:
       test-cluster-name:
         required: true
         type: string
+      test-cluster-is-canary:
+        required: true
+        type: boolean
       appsignals-adot-image:
         required: false
         type: string
@@ -33,8 +36,6 @@ env:
   # It is not redundant
   AWS_DEFAULT_REGION: ${{ inputs.aws-region }}
   PYTHON_SAMPLE_APP_NAMESPACE: python-app-namespace
-  PYTHON_SAMPLE_APP_FRONTEND_SERVICE_IMAGE: ${{ secrets.APP_SIGNALS_E2E_TEST_ACC }}.dkr.ecr.${{ inputs.aws-region }}.amazonawss.com/${{ secrets.APP_SIGNALS_E2E_FE_SA_IMG }}
-  PYTHON_SAMPLE_APP_REMOTE_SERVICE_IMAGE: ${{ secrets.APP_SIGNALS_E2E_TEST_ACC }}.dkr.ecr.${{ inputs.aws-region }}.amazonawss.com/${{ secrets.APP_SIGNALS_E2E_RE_SA_IMG }}
   METRIC_NAMESPACE: AppSignals
   LOG_GROUP_NAME: /aws/appsignals/eks
   TEST_RESOURCES_FOLDER: /home/runner/work/aws-otel-python-instrumentation/aws-otel-python-instrumentation
@@ -67,7 +68,7 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ env.ACCOUNT_ID }}:role/${{ secrets.PYTHON_E2E_TEST_ROLE_ARN }}
+          role-to-assume: arn:aws:iam::${{ env.ACCOUNT_ID }}:role/${{ inputs['test-cluster-is-canary'] && secrets.E2E_TEST_ROLE_ARN || secrets.PYTHON_E2E_TEST_ROLE_ARN }}
           aws-region: ${{ inputs.aws-region }}
 
       # local directory to store the kubernetes config
