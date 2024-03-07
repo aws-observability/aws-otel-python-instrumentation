@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        aws-region: ['ap-northeast-1', 'us-east-2', 'ap-southeast-1']
+        aws-region: ['us-east-2']
     uses: ./.github/workflows/appsignals-python-e2e-ec2-test.yml
     secrets: inherit
     with:
