@@ -30,7 +30,6 @@ env:
   ADOT_WHEEL_NAME: ${{ secrets.ADOT_WHEEL_NAME }}
 
 
-
 jobs:
   python-e2e-ec2-test:
     runs-on: ubuntu-latest
@@ -68,7 +67,7 @@ jobs:
       - name: Set Get ADOT Wheel command environment variable
         working-directory: terraform/python/ec2
         run: |
-          echo GET_ADOT_WHEEL_COMMAND="aws s3 cp s3://aws-appsignals-sample-app-prod-${{ inputs.aws-region }}/${{ env.ADOT_WHEEL_NAME }} ./${{ env.ADOT_WHEEL_NAME }} && python3.9 -m pip install ${{ env.ADOT_WHEEL_NAME }}" >> $GITHUB_ENV
+          echo GET_ADOT_WHEEL_COMMAND="python3.9 -m pip install aws-opentelemetry-distro" >> $GITHUB_ENV
 
       - name: Set up terraform
         uses: hashicorp/setup-terraform@v3
