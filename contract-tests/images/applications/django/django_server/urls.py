@@ -15,7 +15,7 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
-from api.views import error, fault, success, user_order
+from api.views import error, fault, success, user_order, post_success
 from django.contrib import admin
 from django.urls import path
 
@@ -25,4 +25,5 @@ urlpatterns = [
     path("fault", fault),
     path("error", error),
     path("users/<str:userId>/orders/<str:orderId>", user_order),
+    path("post_success", post_success),
 ]

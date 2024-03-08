@@ -30,6 +30,10 @@ class DjangoTest(ContractTestBase):
         self.mock_collector_client.clear_signals()
         self.do_test_requests("success", "GET", 200, 0, 0, request_method="GET", local_operation="GET success")
 
+    def test_post_success(self) -> None:
+        self.mock_collector_client.clear_signals()
+        self.do_test_requests("post_success", "POST", 201, 0, 0, request_method="POST", local_operation="POST post_success")
+
     def test_route(self) -> None:
         self.mock_collector_client.clear_signals()
         self.do_test_requests(
@@ -63,25 +67,11 @@ class DjangoTest(ContractTestBase):
             target_spans[0].attributes, kwargs.get("request_method"), kwargs.get("local_operation")
         )
 
-    def _assert_aws_attributes(self, attributes_list: List[KeyValue], method: str, endpoint: str) -> None:
+    def _assert_aws_attributes(self, attributes_list: List[KeyValue], method: str, local_operation: str) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
-        # InternalOperation as OTEL does not instrument the basic server we are using, so the client span is a local
-        # root.
-        self._assert_str_attribute(attributes_dict, AWS_LOCAL_OPERATION, endpoint)
-        # See comment above AWS_LOCAL_OPERATION
+        self._assert_str_attribute(attributes_dict, AWS_LOCAL_OPERATION, local_operation)
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
-
-    def _get_attributes_dict(self, attributes_list: List[KeyValue]) -> Dict[str, AnyValue]:
-        attributes_dict: Dict[str, AnyValue] = {}
-        for attribute in attributes_list:
-            key: str = attribute.key
-            value: AnyValue = attribute.value
-            if key in attributes_dict:
-                old_value: AnyValue = attributes_dict[key]
-                self.fail(f"Attribute {key} unexpectedly duplicated. Value 1: {old_value} Value 2: {value}")
-            attributes_dict[key] = value
-        return attributes_dict
 
     @override
     def _assert_semantic_conventions_span_attributes(
@@ -101,10 +91,10 @@ class DjangoTest(ContractTestBase):
         self, attributes_list: List[KeyValue], method: str, endpoint: str, status_code: int
     ) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
-        self._assert_int_attribute(attributes_dict, SpanAttributes.NET_HOST_PORT, 8080)
         self._assert_int_attribute(attributes_dict, SpanAttributes.HTTP_STATUS_CODE, status_code)
         self.assertTrue(attributes_dict.get(SpanAttributes.HTTP_URL).string_value.endswith(endpoint))
         self._assert_str_attribute(attributes_dict, SpanAttributes.HTTP_METHOD, method)
+        self.assertTrue(SpanAttributes.HTTP_TARGET not in attributes_dict)
 
     @override
     def _assert_metric_attributes(
@@ -127,7 +117,6 @@ class DjangoTest(ContractTestBase):
         service_dp: ExponentialHistogramDataPoint = dp_list[0]
 
         attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(service_dp.attributes)
-        # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, kwargs.get("local_operation"))
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "LOCAL_ROOT")

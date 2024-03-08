@@ -1,5 +1,7 @@
 # Create your views here.
 from django.http import HttpResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
 
 
 def success(request):
@@ -17,3 +19,9 @@ def error(request):
 def user_order(request, userId, orderId):
     request.GET.get("filter", None)
     return HttpResponse("Routed", status=200)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def post_success(request):
+    return HttpResponse("Create Success", status=201)

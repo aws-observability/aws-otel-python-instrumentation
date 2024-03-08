@@ -5,7 +5,6 @@ FROM python:3.10
 WORKDIR /django
 COPY ./dist/$DISTRO /django
 COPY ./contract-tests/images/applications/django /django
-EXPOSE 8080
 
 ENV PIP_ROOT_USER_ACTION=ignore
 ARG DISTRO

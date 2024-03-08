@@ -14,7 +14,7 @@ from testcontainers.core.waiting_utils import wait_for_logs
 from typing_extensions import override
 
 from amazon.utils.app_signals_constants import ERROR_METRIC, FAULT_METRIC, LATENCY_METRIC
-from opentelemetry.proto.common.v1.common_pb2 import AnyValue
+from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
 
 NETWORK_NAME: str = "aws-appsignals-network"
 
@@ -126,7 +126,6 @@ class ContractTestBase(TestCase):
         port: str = self.application.get_exposed_port(self.get_application_port())
         url: str = f"http://{address}:{port}/{path}"
         response: Response = request(method, url, timeout=20)
-        print("get a response", response)
         self.assertEqual(status_code, response.status_code)
 
         resource_scope_spans: List[ResourceScopeSpan] = self.mock_collector_client.get_traces()
@@ -139,6 +138,17 @@ class ContractTestBase(TestCase):
         self._assert_metric_attributes(metrics, LATENCY_METRIC, 5000, **kwargs)
         self._assert_metric_attributes(metrics, ERROR_METRIC, expected_error, **kwargs)
         self._assert_metric_attributes(metrics, FAULT_METRIC, expected_fault, **kwargs)
+
+    def _get_attributes_dict(self, attributes_list: List[KeyValue]) -> Dict[str, AnyValue]:
+        attributes_dict: Dict[str, AnyValue] = {}
+        for attribute in attributes_list:
+            key: str = attribute.key
+            value: AnyValue = attribute.value
+            if key in attributes_dict:
+                old_value: AnyValue = attributes_dict[key]
+                self.fail(f"Attribute {key} unexpectedly duplicated. Value 1: {old_value} Value 2: {value}")
+            attributes_dict[key] = value
+        return attributes_dict
 
     def _assert_str_attribute(self, attributes_dict: Dict[str, AnyValue], key: str, expected_value: str):
         self.assertIn(key, attributes_dict)
