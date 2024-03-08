@@ -21,6 +21,8 @@ _FAULT: str = "fault"
 _AWS_SDK_S3_ENDPOINT: str = os.environ.get("AWS_SDK_S3_ENDPOINT")
 _AWS_SDK_ENDPOINT: str = os.environ.get("AWS_SDK_ENDPOINT")
 _AWS_REGION: str = os.environ.get("AWS_REGION")
+os.environ.setdefault("AWS_ACCESS_KEY_ID", "testcontainers-localstack")
+os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testcontainers-localstack")
 _NO_RETRY_CONFIG: Config = Config(retries={"max_attempts": 0}, connect_timeout=3, read_timeout=3)
 
 
@@ -40,16 +42,14 @@ class RequestHandler(BaseHTTPRequestHandler):
         if self.in_path("kinesis"):
             self._handle_kinesis_request()
         else:
-            self._end_request(404)
+            set_main_status(404)
 
     # pylint: disable=invalid-name
     def do_POST(self):
-        # 设置HTTP响应头
-        self.send_response(400)  # 设置状态码为400
-        self.send_header("Content-type", "text/xml")  # 设置内容类型为text/xml
+        self.send_response(400)
+        self.send_header("Content-type", "text/xml")
         self.end_headers()
 
-        # 定义一个简单的XML错误响应
         xml_response = """<?xml version="1.0"?>
                         <ErrorResponse>
                             <Error>
@@ -60,7 +60,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                             </Error>
                         </ErrorResponse>"""
 
-        # 发送XML响应体
         self.wfile.write(xml_response.encode())
 
     def in_path(self, sub_path: str) -> bool:
@@ -68,16 +67,16 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _handle_s3_request(self) -> None:
         s3_client: BaseClient = boto3.client("s3", endpoint_url=_AWS_SDK_S3_ENDPOINT, region_name=_AWS_REGION)
-        if self.in_path("error"):
+        if self.in_path(_ERROR):
             try:
                 s3_client.create_bucket(Bucket="-")
             except Exception as exception:
                 print("Exception occurred", exception)
             set_main_status(400)
-        elif self.in_path("fault"):
+        elif self.in_path(_FAULT):
             try:
                 s3_client: BaseClient = boto3.client(
-                    "s3", endpoint_url="http://s3.test:8080", region_name="us-west-2", config=_NO_RETRY_CONFIG
+                    "s3", endpoint_url="http://s3.test:8080", region_name=_AWS_REGION, config=_NO_RETRY_CONFIG
                 )
                 s3_client.create_bucket(Bucket="valid-bucket-name")
             except Exception as exception:
@@ -99,12 +98,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             s3_client.get_object(Bucket="test-get-object-bucket-name", Key="test_object")
             set_main_status(200)
         else:
-            self._end_request(404)
+            set_main_status(404)
         self._end_request(self.main_status)
 
     def _handle_ddb_request(self) -> None:
         ddb_client = boto3.client("dynamodb", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
-        if self.in_path("error"):
+        if self.in_path(_ERROR):
             item: dict = {"id": {"S": "1"}}
             try:
                 ddb_client.put_item(TableName="invalid_table", Item=item)
@@ -112,7 +111,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 print("Exception occurred", exception)
             finally:
                 set_main_status(400)
-        elif self.in_path("fault"):
+        elif self.in_path(_FAULT):
             item: dict = {"id": {"S": "1"}}
             try:
                 ddb_client = boto3.client(
@@ -138,19 +137,19 @@ class RequestHandler(BaseHTTPRequestHandler):
             ddb_client.put_item(TableName="put_test_table", Item=item)
             set_main_status(200)
         else:
-            self._end_request(404)
+            set_main_status(404)
         self._end_request(self.main_status)
 
     def _handle_sqs_request(self) -> None:
         sqs_client = boto3.client("sqs", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
-        if self.in_path("error"):
+        if self.in_path(_ERROR):
             set_main_status(400)
             try:
                 sqs_client = boto3.client("sqs", endpoint_url="http://error.test:8080", region_name=_AWS_REGION)
-                sqs_client.send_message(QueueUrl="http://error.test:8080", MessageBody="error")
+                sqs_client.send_message(QueueUrl="http://error.test:8080", MessageBody=_ERROR)
             except Exception as exception:
                 print("Exception occurred", exception)
-        elif self.in_path("fault"):
+        elif self.in_path(_FAULT):
             try:
                 sqs_client = boto3.client(
                     "sqs", endpoint_url="http://sqs.test:8080", region_name="us-west-2", config=_NO_RETRY_CONFIG
@@ -174,19 +173,19 @@ class RequestHandler(BaseHTTPRequestHandler):
             )
             set_main_status(200)
         else:
-            self._end_request(404)
+            set_main_status(404)
         self._end_request(self.main_status)
 
     def _handle_kinesis_request(self) -> None:
         kinesis_client = boto3.client("kinesis", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
-        if self.in_path("error"):
+        if self.in_path(_ERROR):
             try:
                 kinesis_client.put_record(StreamName="invalid_stream", Data=b"test", PartitionKey="partition_key")
             except Exception as exception:
                 print("Exception occurred", exception)
             finally:
                 set_main_status(400)
-        elif self.in_path("fault"):
+        elif self.in_path(_FAULT):
             try:
                 kinesis_client = boto3.client(
                     "kinesis", endpoint_url="http://kinesis.test:8080", region_name="us-west-2", config=_NO_RETRY_CONFIG
@@ -199,7 +198,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif self.in_path("putrecord/my-stream"):
             kinesis_client.put_record(StreamName="test_stream", Data=b"test", PartitionKey="partition_key")
         else:
-            self._end_request(404)
+            set_main_status(404)
         self._end_request(self.main_status)
 
     def _end_request(self, status_code: int):
@@ -213,8 +212,6 @@ def set_main_status(status: int) -> None:
 
 def prepare_aws_server() -> None:
     requests.Request(method="POST", url="http://localhost:4566/_localstack/state/reset")
-    os.environ.setdefault("AWS_ACCESS_KEY_ID", "testcontainers-localstack")
-    os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testcontainers-localstack")
     try:
         s3_client: BaseClient = boto3.client("s3", endpoint_url=_AWS_SDK_S3_ENDPOINT, region_name=_AWS_REGION)
         s3_client.create_bucket(

@@ -225,9 +225,6 @@ class BotocoreTest(ContractTestBase):
         self, attributes_list: List[KeyValue], service: str, operation: str, status_code: int
     ) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
-        # TODO: botocore instrumentation is not populating net peer attributes
-        # self._assert_str_attribute(attributes_dict, SpanAttributes.NET_PEER_NAME, "backend")
-        # self._assert_int_attribute(attributes_dict, SpanAttributes.NET_PEER_PORT, 8080)
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_METHOD, operation)
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SYSTEM, "aws-api")
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SERVICE, service.split(".")[-1])
@@ -269,6 +266,5 @@ class BotocoreTest(ContractTestBase):
         attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(service_dp.attributes)
         # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
-        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, kwargs.get("service_dp_span", "LOCAL_ROOT"))
-        # Temporary measure: When an error occurs in SQS and DDB, Service_DP does not include sum count for error
+        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
         self.check_sum(metric_name, service_dp.sum, expected_sum)
