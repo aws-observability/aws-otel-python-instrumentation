@@ -10,6 +10,7 @@ on:
   schedule:
     - cron: '*/15 * * * *' # run the workflow every 15 minutes
   workflow_dispatch: # be able to run the workflow on demand
+  push:
 
 permissions:
   id-token: write
@@ -28,5 +29,4 @@ jobs:
     secrets: inherit
     with:
       aws-region: ${{ matrix.aws-region }}
-      staging_wheel_name: 'default'
       caller-workflow-name: 'appsignals-python-e2e-ec2-canary-test'

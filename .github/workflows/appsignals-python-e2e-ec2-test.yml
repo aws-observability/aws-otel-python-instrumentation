@@ -12,7 +12,8 @@ on:
         required: true
         type: string
       staging_wheel_name:
-        required: true
+        required: false
+        default: 'aws-opentelemetry-distro'
         type: string
       caller-workflow-name:
         required: true
