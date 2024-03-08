@@ -95,12 +95,12 @@ jobs:
       aws-region: ${{ needs.build.outputs.aws_default_region }}
       test-cluster-name: e2e-python-adot-test
       caller-workflow-name: 'main-build'
-      appsignals-adot-image: ${{ needs.build.outputs.staging_registry }}
+      appsignals-adot-image-registry: ${{ needs.build.outputs.staging_registry }}
       appsignals-adot-image-tag: ${{ needs.build.outputs.python_image_tag }}
 
   # AppSignals specific e2e tests for ec2
   appsignals-python-e2e-ec2-test:
-    needs: [ build, default-region-output ]
+    needs: [ build ]
     uses: ./.github/workflows/appsignals-python-e2e-ec2-test.yml
     secrets: inherit
     with:
