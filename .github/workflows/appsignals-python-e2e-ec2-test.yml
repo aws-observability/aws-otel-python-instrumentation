@@ -67,6 +67,15 @@ jobs:
           role-to-assume: arn:aws:iam::${{ env.ACCOUNT_ID }}:role/${{ secrets.E2E_TEST_ROLE_ARN }}
           aws-region: ${{ inputs.aws-region }}
 
+      - uses: actions/download-artifact@v3
+        if: inputs.caller-workflow-name == 'main-build'
+        with:
+          name: ${{ inputs.staging_wheel_name }}
+
+      - name: Upload main-build adot.whl to s3
+        if: inputs.caller-workflow-name == 'main-build'
+        run: aws s3 cp ${{ inputs.staging_wheel_name }} s3://adot-main-build-staging-jar/${{ env.ADOT_WHEEL_NAME }}
+
       - name: Set Get ADOT Wheel command environment variable
         working-directory: terraform/python/ec2
         run: |
