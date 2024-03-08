@@ -23,6 +23,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     outputs:
+      aws_default_region: ${{ steps.python_output.outputs.awsDefaultRegion}}
       python_image_tag: ${{ steps.python_output.outputs.python_image_tag}}
       staging_image: ${{ steps.python_output.outputs.stagingImage}}
       staging_registry: ${{ steps.python_output.outputs.stagingRegistry}}
@@ -40,6 +41,7 @@ jobs:
           shortsha="$(git rev-parse --short HEAD)"
           echo "SHORT_SHA=$shortsha" >> $GITHUB_ENV
           python_distro_tag=$pkg_version-$shortsha
+          echo "awsDefaultRegion=${{ env.AWS_DEFAULT_REGION }}" >> $GITHUB_OUTPUT
           echo "python_image_tag=$python_distro_tag" >> $GITHUB_OUTPUT
           echo "stagingRegistry=${{ env.STAGING_ECR_REGISTRY }}" >> $GITHUB_OUTPUT
           echo "stagingRepository=${{ env.STAGING_ECR_REPOSITORY }}" >> $GITHUB_OUTPUT
@@ -84,22 +86,24 @@ jobs:
           pip install pytest
           pytest contract-tests/tests
 
-  default-region-output:
-    runs-on: ubuntu-latest
-    outputs:
-      aws_default_region: ${{ steps.default_region_output.outputs.aws_default_region }}
-    steps:
-      - name: Set default region output
-        id: default_region_output
-        run: |
-          echo "aws_default_region=${{ env.AWS_DEFAULT_REGION }}" >> $GITHUB_OUTPUT
+  # AppSignals specific e2e eks tests
+  appsignals-e2e-eks-test:
+    needs: [build]
+    uses: ./.github/workflows/appsignals-python-e2e-eks-test.yml
+    secrets: inherit
+    with:
+      aws-region: ${{ needs.build.outputs.aws_default_region }}
+      test-cluster-name: e2e-python-adot-test
+      caller-workflow-name: 'main-build'
+      appsignals-adot-image: ${{ needs.build.outputs.staging_registry }}
+      appsignals-adot-image-tag: ${{ needs.build.outputs.python_image_tag }}
 
-#  AppSignals specific e2e tests for ec2
+  # AppSignals specific e2e tests for ec2
   appsignals-python-e2e-ec2-test:
     needs: [ build, default-region-output ]
     uses: ./.github/workflows/appsignals-python-e2e-ec2-test.yml
     secrets: inherit
     with:
-      aws-region: ${{ needs.default-region-output.outputs.aws_default_region }}
+      aws-region: ${{ needs.build.outputs.aws_default_region }}
       staging_wheel_name: ${{ needs.build.outputs.staging_wheel_file }}
       caller-workflow-name: 'main-build'
