@@ -14,7 +14,7 @@ on:
       test-cluster-name:
         required: true
         type: string
-      appsignals-adot-image:
+      appsignals-adot-image-registry:
         required: false
         type: string
       appsignals-adot-image-tag:
@@ -125,9 +125,9 @@ jobs:
           sed -i 's/repository: cloudwatch-agent-operator/repository: cwagent-operator-pre-release/g' values.yaml
           sed -i 's/tag: 1.0.2/tag: latest/g' values.yaml
           sed -i '0,/public: public.ecr.aws\/cloudwatch-agent/s//public: ${{ secrets.TEST_CW_AGENT_REPO }}/' values.yaml
-          if [ ${{ inputs.appsignals-adot-image }} != "" ]; then
+          if [ ${{ inputs.appsignals-adot-image-registry }} != "" ]; then
             echo "Using provided AppSignals ADOT image"
-            sed -i 's~repository: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-python~repository: ${{ inputs.appsignals-adot-image }}/aws-observability/adot-autoinstrumentation-python-staging~g' values.yaml
+            sed -i 's~repository: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-python~repository: ${{ inputs.appsignals-adot-image-registry }}/aws-observability/adot-autoinstrumentation-python-staging~g' values.yaml
           else
             echo "AppSignals ADOT image is not provided"
             sed -i 's~repository: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-python~repository: ${{ secrets.TEMP_TEST_ADOT_PYTHON_IMAGE }}~g' values.yaml
