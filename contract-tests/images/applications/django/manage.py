@@ -1,5 +1,5 @@
-# pylint: disable=import-outside-toplevel, missing-header
 #!/usr/bin/env python
+# pylint: disable=import-outside-toplevel, missing-header
 """Django's command-line utility for administrative tasks."""
 import os
 import sys
