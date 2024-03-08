@@ -7,6 +7,8 @@
 package io.opentelemetry.containers;
 
 import io.opentelemetry.distros.DistroConfig;
+import io.opentelemetry.util.NamingConventions;
+import io.opentelemetry.util.RuntimeUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.GenericContainer;
@@ -27,12 +29,17 @@ public class VehicleInventoryServiceContainer {
   private final Network network;
   private final Startable collector;
   private final DistroConfig distroConfig;
+  private final NamingConventions namingConventions;
 
   public VehicleInventoryServiceContainer(
-      Network network, Startable collector, DistroConfig distroConfig) {
+      Network network,
+      Startable collector,
+      DistroConfig distroConfig,
+      NamingConventions namingConventions) {
     this.network = network;
     this.collector = collector;
     this.distroConfig = distroConfig;
+    this.namingConventions = namingConventions;
   }
 
   public GenericContainer<?> build() {
@@ -43,9 +50,17 @@ public class VehicleInventoryServiceContainer {
             .withLogConsumer(new Slf4jLogConsumer(logger))
             .withExposedPorts(PORT)
             .waitingFor(Wait.forHttp("/vehicle-inventory/health-check").forPort(PORT))
+            .withFileSystemBind(
+                namingConventions.localResults(), namingConventions.containerResults())
             .withCopyFileToContainer(
                 MountableFile.forClasspathResource("runVehicleInventory.sh"),
                 "vehicle-inventory-app/run.sh")
+            .withCopyFileToContainer(
+                MountableFile.forClasspathResource("profiler.py"),
+                "vehicle-inventory-app/profiler.py")
+            .withCopyFileToContainer(
+                MountableFile.forClasspathResource("executeProfiler.sh"),
+                "vehicle-inventory-app/executeProfiler.sh")
             .withEnv("DJANGO_SETTINGS_MODULE", "VehicleInventoryApp.settings")
             .withEnv("PORT", Integer.toString(PORT))
             .withEnv("POSTGRES_DATABASE", PostgresContainer.DATABASE_NAME)
@@ -57,6 +72,8 @@ public class VehicleInventoryServiceContainer {
             .withEnv("IMAGE_BACKEND_SERVICE_PORT", Integer.toString(ImageServiceContainer.PORT))
             .withEnv(distroConfig.getAdditionalEnvVars())
             .dependsOn(collector)
+            .withCreateContainerCmdModifier(
+                cmd -> cmd.getHostConfig().withCpusetCpus(RuntimeUtil.getApplicationCores()))
             .withCommand("bash run.sh");
 
     if (distroConfig.doInstrument()) {

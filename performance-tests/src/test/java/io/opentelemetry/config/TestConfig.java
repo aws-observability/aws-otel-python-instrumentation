@@ -98,8 +98,10 @@ public class TestConfig {
       return this;
     }
 
-    Builder concurrentConnections(int concurrentConnections) {
-      this.concurrentConnections = concurrentConnections;
+    Builder concurrentConnections(String concurrentConnections) {
+      if (concurrentConnections != null && !concurrentConnections.isEmpty()) {
+        this.concurrentConnections = Integer.parseInt(concurrentConnections);
+      }
       return this;
     }
 

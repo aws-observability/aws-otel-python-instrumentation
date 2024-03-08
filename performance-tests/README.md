@@ -80,6 +80,7 @@ Pre-requirements:
 * Have `docker` installed and running - verify by running the `docker` command.
 * Export `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, and `S3_BUCKET` environment variables.
 * By default, each distroConfig runs for 10 seconds. To change this, export `DURATION` environment variable (e.g. `60m`).
+* By default, each distroConfig runs with a concurrency (VUs) of 5. To change this, export `CONCURRENCY` environment variable (e.g. `10`).
 
 Steps:
 * From `aws-otel-python-instrumentation` dir, execute:
@@ -87,9 +88,9 @@ Steps:
 ./scripts/build_and_install_distro.sh
 ./scripts/set-up-performance-tests.sh
 cd performance-tests
-./gradlew test
+./gradlew clean test
 ```
 
 The last step can be run or you can run from IDE (after setting environment variables appropriately).
 
-To diagnose test failures with `./gradlew -i test` or use `-d` for very fine details.
+To diagnose test failures with `./gradlew -i clean test` or use `-d` for very fine details.

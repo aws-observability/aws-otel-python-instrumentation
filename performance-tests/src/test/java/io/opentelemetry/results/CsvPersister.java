@@ -6,8 +6,6 @@
 
 package io.opentelemetry.results;
 
-import static java.util.concurrent.TimeUnit.NANOSECONDS;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -23,11 +21,6 @@ class CsvPersister implements ResultsPersister {
   private static final List<FieldSpec> FIELDS =
       Arrays.asList(
           FieldSpec.of("startupDurationMs", r -> r.startupDurationMs),
-          // FieldSpec.of("minHeapUsed", r -> r.heapUsed.min),
-          // FieldSpec.of("maxHeapUsed", r -> r.heapUsed.max),
-          FieldSpec.of("totalAllocatedMB", r -> r.getTotalAllocatedMB()),
-          FieldSpec.of("totalGCTime", r -> r.totalGCTime),
-          FieldSpec.of("maxThreadContextSwitchRate", r -> r.maxThreadContextSwitchRate),
           FieldSpec.of("requestCount", r -> r.requestCount),
           FieldSpec.of("requestRate", r -> r.requestRate),
           FieldSpec.of("requestLatencyAvg", r -> r.requestLatencyAvg),
@@ -36,14 +29,44 @@ class CsvPersister implements ResultsPersister {
           FieldSpec.of("requestLatencyP90", r -> r.requestLatencyP90),
           FieldSpec.of("requestLatencyP99", r -> r.requestLatencyP99),
           FieldSpec.of("requestLatencyP100", r -> r.requestLatencyP100),
-          FieldSpec.of("netReadAvg", r -> r.averageNetworkRead),
-          FieldSpec.of("netWriteAvg", r -> r.averageNetworkWrite),
+          FieldSpec.of("networkBytesSentAvg", r -> r.networkBytesSentAvg),
+          FieldSpec.of("networkBytesSentP0", r -> r.networkBytesSentP0),
+          FieldSpec.of("networkBytesSentP50", r -> r.networkBytesSentP50),
+          FieldSpec.of("networkBytesSentP90", r -> r.networkBytesSentP90),
+          FieldSpec.of("networkBytesSentP99", r -> r.networkBytesSentP99),
+          FieldSpec.of("networkBytesSentP100", r -> r.networkBytesSentP100),
+          FieldSpec.of("networkBytesRecvAvg", r -> r.networkBytesRecvAvg),
+          FieldSpec.of("networkBytesRecvP0", r -> r.networkBytesRecvP0),
+          FieldSpec.of("networkBytesRecvP50", r -> r.networkBytesRecvP50),
+          FieldSpec.of("networkBytesRecvP90", r -> r.networkBytesRecvP90),
+          FieldSpec.of("networkBytesRecvP99", r -> r.networkBytesRecvP99),
+          FieldSpec.of("networkBytesRecvP100", r -> r.networkBytesRecvP100),
+          FieldSpec.of("cpuAvg", r -> r.cpuAvg),
+          FieldSpec.of("cpuP0", r -> r.cpuP0),
+          FieldSpec.of("cpuP50", r -> r.cpuP50),
+          FieldSpec.of("cpuP90", r -> r.cpuP90),
+          FieldSpec.of("cpuP99", r -> r.cpuP99),
+          FieldSpec.of("cpuP100", r -> r.cpuP100),
+          FieldSpec.of("cpuAvg", r -> r.cpuAvg),
+          FieldSpec.of("cpuP0", r -> r.cpuP0),
+          FieldSpec.of("cpuP50", r -> r.cpuP50),
+          FieldSpec.of("cpuP90", r -> r.cpuP90),
+          FieldSpec.of("cpuP99", r -> r.cpuP99),
+          FieldSpec.of("cpuP100", r -> r.cpuP100),
+          FieldSpec.of("rssMemAvg", r -> r.rssMemAvg),
+          FieldSpec.of("rssMemP0", r -> r.rssMemP0),
+          FieldSpec.of("rssMemP50", r -> r.rssMemP50),
+          FieldSpec.of("rssMemP90", r -> r.rssMemP90),
+          FieldSpec.of("rssMemP99", r -> r.rssMemP99),
+          FieldSpec.of("rssMemP100", r -> r.rssMemP100),
+          FieldSpec.of("vmsMemAvg", r -> r.vmsMemAvg),
+          FieldSpec.of("vmsMemP0", r -> r.vmsMemP0),
+          FieldSpec.of("vmsMemP50", r -> r.vmsMemP50),
+          FieldSpec.of("vmsMemP90", r -> r.vmsMemP90),
+          FieldSpec.of("vmsMemP99", r -> r.vmsMemP99),
+          FieldSpec.of("vmsMemP100", r -> r.vmsMemP100),
           FieldSpec.of("peakThreadCount", r -> r.peakThreadCount),
-          FieldSpec.of("averageCpuUser", r -> r.averageJvmUserCpu),
-          FieldSpec.of("maxCpuUser", r -> r.maxJvmUserCpu),
-          FieldSpec.of("averageMachineCpuTotal", r -> r.averageMachineCpuTotal),
-          FieldSpec.of("runDurationMs", r -> r.runDurationMs),
-          FieldSpec.of("gcPauseMs", r -> NANOSECONDS.toMillis(r.totalGcPauseNanos)));
+          FieldSpec.of("runDurationMs", r -> r.runDurationMs));
 
   private final Path resultsFile;
 

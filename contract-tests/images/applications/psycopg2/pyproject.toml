@@ -1,0 +1,6 @@
+[project]
+name = "psycopg2-server"
+description = "Simple server that relies on psycopg2 library"
+version = "1.0.0"
+license = "Apache-2.0"
+requires-python = ">=3.8"

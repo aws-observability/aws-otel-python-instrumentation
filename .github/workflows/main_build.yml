@@ -93,9 +93,6 @@ jobs:
 
   # AppSignals specific e2e eks tests
   appsignals-e2e-eks-test:
-    concurrency:
-      group: e2e-adot-test
-      cancel-in-progress: false
     needs: [build]
     uses: ./.github/workflows/appsignals-python-e2e-eks-test.yml
     secrets: inherit
@@ -107,3 +104,23 @@ jobs:
       test-cluster-is-canary: false
       # TODO - use staging image from staging account instead from test account
       # appsignals-adot-image: ${{ needs.build.outputs.staging_registry }}/${{ needs.build.outputs.staging_image }}
+
+  default-region-output:
+    runs-on: ubuntu-latest
+    outputs:
+      aws_default_region: ${{ steps.default_region_output.outputs.aws_default_region }}
+    steps:
+      - name: Set default region output
+        id: default_region_output
+        run: |
+          echo "aws_default_region=${{ env.AWS_DEFAULT_REGION }}" >> $GITHUB_OUTPUT
+
+  # AppSignals specific e2e tests for ec2
+  appsignals-python-e2e-ec2-test:
+    needs: [ build, default-region-output ]
+    uses: ./.github/workflows/appsignals-python-main-e2e-ec2-test.yml
+    secrets: inherit
+    with:
+      aws-region: ${{ needs.default-region-output.outputs.aws_default_region }}
+      staging_wheel_name: ${{ needs.build.outputs.staging_wheel_file }}
+      caller-workflow-name: 'main-build'

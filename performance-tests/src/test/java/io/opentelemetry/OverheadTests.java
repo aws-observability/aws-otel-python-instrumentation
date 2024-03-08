@@ -25,10 +25,10 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -101,19 +101,21 @@ public class OverheadTests {
     imageService.start();
 
     GenericContainer<?> vehicleInventoryService =
-        new VehicleInventoryServiceContainer(NETWORK, collector, distroConfig).build();
+        new VehicleInventoryServiceContainer(NETWORK, collector, distroConfig, namingConventions)
+            .build();
     long start = System.currentTimeMillis();
     vehicleInventoryService.start();
     writeStartupTimeFile(distroConfig, start);
 
     populateDatabase();
 
-    if (config.getWarmupSeconds() > 0) {
-      // doWarmupPhase(config, vehicleInventoryService);
+    int warmupSeconds = config.getWarmupSeconds();
+    if (warmupSeconds > 0) {
+      doWarmupPhase(warmupSeconds);
     }
 
     long testStart = System.currentTimeMillis();
-    // startRecording(distroConfig, vehicleInventoryService);
+    startRecording(distroConfig, vehicleInventoryService);
 
     GenericContainer<?> k6 =
         new K6Container(NETWORK, distroConfig, config, namingConventions).build();
@@ -129,53 +131,31 @@ public class OverheadTests {
 
   private void startRecording(
       DistroConfig distroConfig, GenericContainer<?> vehicleInventoryService) throws Exception {
-    Path outFile = namingConventions.container.jfrFile(distroConfig);
     String[] command = {
-      "jcmd",
-      "1",
-      "JFR.start",
-      "settings=/app/overhead.jfc",
-      "dumponexit=true",
-      "name=petclinic",
-      "filename=" + outFile
+      "sh",
+      "executeProfiler.sh",
+      namingConventions.container.performanceMetricsFileWithoutPath(distroConfig),
+      namingConventions.container.root()
     };
     vehicleInventoryService.execInContainer(command);
   }
 
-  private void doWarmupPhase(TestConfig testConfig, GenericContainer<?> vehicleInventoryService)
-      throws IOException, InterruptedException {
-    System.out.println(
-        "Performing startup warming phase for " + testConfig.getWarmupSeconds() + " seconds...");
-
-    // excluding the JFR recording from the warmup causes strange inconsistencies in the results
-    System.out.println("Starting disposable JFR warmup recording...");
-    String[] startCommand = {
-      "jcmd",
-      "1",
-      "JFR.start",
-      "settings=/app/overhead.jfc",
-      "dumponexit=true",
-      "name=warmup",
-      "filename=warmup.jfr"
-    };
-    vehicleInventoryService.execInContainer(startCommand);
-
-    long deadline =
-        System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(testConfig.getWarmupSeconds());
-    while (System.currentTimeMillis() < deadline) {
-      GenericContainer<?> k6 =
-          new GenericContainer<>(DockerImageName.parse("loadimpact/k6"))
-              .withNetwork(NETWORK)
-              .withCopyFileToContainer(MountableFile.forHostPath("./k6"), "/app")
-              .withCommand("run", "-u", "5", "-i", "200", "/app/basic.js")
-              .withStartupCheckStrategy(new OneShotStartupCheckStrategy());
-      k6.start();
+  private void doWarmupPhase(int seconds) {
+    System.out.println("Performing warm up phase for " + seconds + " seconds.");
+    GenericContainer<?> k6 =
+        new GenericContainer<>(DockerImageName.parse("loadimpact/k6"))
+            .withNetwork(NETWORK)
+            .withCopyFileToContainer(MountableFile.forHostPath("./k6"), "/app")
+            .withCommand("run", "-u", "5", "-d", seconds + "s", "/app/performanceTest.js")
+            .withStartupCheckStrategy(
+                new OneShotStartupCheckStrategy().withTimeout(Duration.ofSeconds(seconds * 2L)));
+    k6.start();
+    sleep(seconds);
+    System.out.println("Awaiting warmup phase end.");
+    while (k6.isRunning()) {
+      System.out.println("Warmup still running.");
+      sleep(1);
     }
-
-    System.out.println("Stopping disposable JFR warmup recording...");
-    String[] stopCommand = {"jcmd", "1", "JFR.stop", "name=warmup"};
-    vehicleInventoryService.execInContainer(stopCommand);
-
     System.out.println("Warmup complete.");
   }
 
@@ -193,5 +173,13 @@ public class OverheadTests {
     long delta = System.currentTimeMillis() - start;
     Path startupPath = namingConventions.local.startupDurationFile(distroConfig);
     Files.writeString(startupPath, String.valueOf(delta));
+  }
+
+  private static void sleep(int seconds) {
+    try {
+      Thread.sleep(seconds * 1000L);
+    } catch (InterruptedException e) {
+      throw new RuntimeException(e);
+    }
   }
 }
