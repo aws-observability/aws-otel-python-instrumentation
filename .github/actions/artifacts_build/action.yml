@@ -32,10 +32,10 @@ inputs:
     description: "The os"
   e2e_secret_test_role_arn:
     required: false
-    description: "Test account Assume Role part 1"
+    description: "Secret Role used to assume role to access e2e test cluster"
   python_e2e_test_role_arn:
     required: false
-    description: "Test account Assume Role part 2"
+    description: "Role to access e2e test cluster"
   test_image_uri_with_tag:
     required: false
     description: "Test Image URI with Tag"

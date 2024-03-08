@@ -38,7 +38,6 @@ env:
   PYTHON_SAMPLE_APP_NAMESPACE: python-app-namespace
   METRIC_NAMESPACE: AppSignals
   LOG_GROUP_NAME: /aws/appsignals/eks
-  TEST_RESOURCES_FOLDER: /home/runner/work/aws-otel-python-instrumentation/aws-otel-python-instrumentation
 
 jobs:
   python-e2e-eks-test:
@@ -82,8 +81,9 @@ jobs:
         run: aws eks update-kubeconfig --name ${{ inputs.test-cluster-name }} --region ${{ inputs.aws-region }}
 
       - name: Install eksctl
+        working-directory: .github/
         run: |
-          source ${{ env.TEST_RESOURCES_FOLDER }}/.github/workflows/util/execute_and_retry.sh
+          source ./workflows/util/execute_and_retry.sh
           mkdir ${{ github.workspace }}/eksctl
           curl -sLO "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz"
           execute_and_retry 2 "tar -xzf eksctl_Linux_amd64.tar.gz -C ${{ github.workspace }}/eksctl && rm eksctl_Linux_amd64.tar.gz"

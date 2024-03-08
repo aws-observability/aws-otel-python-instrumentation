@@ -105,5 +105,5 @@ jobs:
       caller-workflow-name: 'main_build'
       appsignals-adot-image-tag: ${{ needs.build.outputs.python_image_tag }}
       test-cluster-is-canary: false
-      # TODO - use staging images
+      # TODO - use staging image from staging account instead from test account
       # appsignals-adot-image: ${{ needs.build.outputs.staging_registry }}/${{ needs.build.outputs.staging_image }}
