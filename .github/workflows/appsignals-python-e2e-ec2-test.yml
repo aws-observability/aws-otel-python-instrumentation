@@ -11,6 +11,9 @@ on:
       aws-region:
         required: true
         type: string
+      staging_wheel_name:
+        required: true
+        type: string
       caller-workflow-name:
         required: true
         type: string
@@ -27,7 +30,7 @@ env:
   SAMPLE_APP_ZIP: s3://${{ secrets.E2E_TEST_BUCKET }}-prod-${{ inputs.aws-region }}/python-sample-app.zip
   METRIC_NAMESPACE: AppSignals
   LOG_GROUP_NAME: /aws/appsignals/generic
-  ADOT_WHEEL_NAME: ${{ secrets.ADOT_WHEEL_NAME }}
+  ADOT_WHEEL_NAME: ${{ inputs.staging_wheel_name }}
 
 
 jobs:

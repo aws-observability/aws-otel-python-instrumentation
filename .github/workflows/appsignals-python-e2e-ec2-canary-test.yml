@@ -28,4 +28,5 @@ jobs:
     secrets: inherit
     with:
       aws-region: ${{ matrix.aws-region }}
+      staging_wheel_name: 'default'
       caller-workflow-name: 'appsignals-python-e2e-ec2-canary-test'
