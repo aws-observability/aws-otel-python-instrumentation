@@ -82,8 +82,8 @@ disable=missing-docstring,
       import-error, # needed as a workaround as reported here: https://github.com/open-telemetry/opentelemetry-python-contrib/issues/290
       cyclic-import,
       E0611, # disabled since pylint use wrong path because of project folder structure divergence
-      import-outside-toplevel, # For Django
-      missing-header, # There is a number of Django file, header are not apply to them
+      E1234,
+      C0415
 
 # Enable the message, report, category or checker with the given id(s). You can
 # either give multiple identifier separated by comma (,) or put this option
