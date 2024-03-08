@@ -32,7 +32,9 @@ class DjangoTest(ContractTestBase):
 
     def test_post_success(self) -> None:
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("post_success", "POST", 201, 0, 0, request_method="POST", local_operation="POST post_success")
+        self.do_test_requests(
+            "post_success", "POST", 201, 0, 0, request_method="POST", local_operation="POST post_success"
+        )
 
     def test_route(self) -> None:
         self.mock_collector_client.clear_signals()
