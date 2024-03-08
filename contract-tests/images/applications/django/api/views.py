@@ -1,5 +1,3 @@
-from django.shortcuts import render
-
 # Create your views here.
 from django.http import HttpResponse
 
@@ -17,5 +15,5 @@ def error(request):
 
 
 def user_order(request, userId, orderId):
-    request.GET.get('filter', None)
+    request.GET.get("filter", None)
     return HttpResponse("Routed", status=200)
