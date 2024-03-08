@@ -6,13 +6,7 @@ from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
 from typing_extensions import override
 
 from amazon.base.contract_test_base import ContractTestBase
-from amazon.utils.app_signals_constants import (
-    AWS_LOCAL_OPERATION,
-    AWS_LOCAL_SERVICE,
-    AWS_REMOTE_OPERATION,
-    AWS_REMOTE_SERVICE,
-    AWS_SPAN_KIND,
-)
+from amazon.utils.app_signals_constants import AWS_LOCAL_OPERATION, AWS_LOCAL_SERVICE, AWS_SPAN_KIND
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
 from opentelemetry.proto.metrics.v1.metrics_pb2 import ExponentialHistogramDataPoint, Metric
 from opentelemetry.proto.trace.v1.trace_pb2 import Span
@@ -30,23 +24,31 @@ class DjangoTest(ContractTestBase):
 
     @override
     def get_application_extra_environment_variables(self):
-        return {'DJANGO_SETTINGS_MODULE': 'django_server.settings'}
+        return {"DJANGO_SETTINGS_MODULE": "django_server.settings"}
 
     def test_success(self) -> None:
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("success", "GET", 200, 0, 0, request_method="GET", local_operation="GET /success")
+        self.do_test_requests("success", "GET", 200, 0, 0, request_method="GET", local_operation="GET success")
 
     def test_route(self) -> None:
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("users/userId/orders/orderId", "GET", 200, 0, 0, request_method="GET", local_operation="GET /users/userId/orders/orderId")
+        self.do_test_requests(
+            "users/userId/orders/orderId",
+            "GET",
+            200,
+            0,
+            0,
+            request_method="GET",
+            local_operation="GET users/<str:userId>/orders/<str:orderId>",
+        )
 
     def test_error(self) -> None:
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("error", "GET", 400, 1, 0, request_method="GET", local_operation="GET /error")
+        self.do_test_requests("error", "GET", 400, 1, 0, request_method="GET", local_operation="GET error")
 
     def test_fault(self) -> None:
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("fault", "GET", 500, 0, 1, request_method="GET", local_operation="GET /fault")
+        self.do_test_requests("fault", "GET", 500, 0, 1, request_method="GET", local_operation="GET fault")
 
     @override
     def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs) -> None:
@@ -57,14 +59,14 @@ class DjangoTest(ContractTestBase):
                 target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
-        self._assert_aws_attributes(target_spans[0].attributes, kwargs.get("request_method"), path)
+        self._assert_aws_attributes(target_spans[0].attributes, kwargs.get("request_method"), kwargs.get("local_operation"))
 
     def _assert_aws_attributes(self, attributes_list: List[KeyValue], method: str, endpoint: str) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # InternalOperation as OTEL does not instrument the basic server we are using, so the client span is a local
         # root.
-        self._assert_str_attribute(attributes_dict, AWS_LOCAL_OPERATION, method + ' /' + endpoint)
+        self._assert_str_attribute(attributes_dict, AWS_LOCAL_OPERATION, endpoint)
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
 
@@ -90,7 +92,7 @@ class DjangoTest(ContractTestBase):
                 target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
-        self.assertEqual(target_spans[0].name, method + ' /' + path)
+        self.assertEqual(target_spans[0].name, kwargs.get("local_operation"))
         self._assert_semantic_conventions_attributes(target_spans[0].attributes, method, path, status_code)
 
     def _assert_semantic_conventions_attributes(

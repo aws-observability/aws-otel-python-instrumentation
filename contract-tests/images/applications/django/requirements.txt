@@ -2,5 +2,3 @@ opentelemetry-distro==0.43b0
 opentelemetry-exporter-otlp-proto-grpc==1.22.0
 typing-extensions==4.9.0
 django==5.0.3
-opentelemetry-instrumentation-django
-opentelemetry.instrumentation.wsgi

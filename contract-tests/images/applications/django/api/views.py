@@ -13,7 +13,6 @@ def fault(request):
 
 
 def error(request):
-    print("hit", request)
     return HttpResponse("Bad Request", status=400)
 
 
