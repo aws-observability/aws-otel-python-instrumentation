@@ -13,8 +13,6 @@ from botocore.config import Config
 from typing_extensions import override
 
 _PORT: int = 8080
-_NETWORK_ALIAS: str = "backend"
-_SUCCESS: str = "success"
 _ERROR: str = "error"
 _FAULT: str = "fault"
 
@@ -71,7 +69,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             try:
                 s3_client.create_bucket(Bucket="-")
             except Exception as exception:
-                print("Exception occurred", exception)
+                print("Expected exception occurred", exception)
             set_main_status(400)
         elif self.in_path(_FAULT):
             try:
@@ -80,7 +78,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 )
                 s3_client.create_bucket(Bucket="valid-bucket-name")
             except Exception as exception:
-                print("Exception occurred", exception)
+                print("Expected exception occurred", exception)
             set_main_status(500)
         elif self.in_path("createbucket/create-bucket"):
             s3_client.create_bucket(
@@ -108,7 +106,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             try:
                 ddb_client.put_item(TableName="invalid_table", Item=item)
             except Exception as exception:
-                print("Exception occurred", exception)
+                print("Expected exception occurred", exception)
             finally:
                 set_main_status(400)
         elif self.in_path(_FAULT):
@@ -119,7 +117,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 )
                 ddb_client.put_item(TableName="invalid_table", Item=item)
             except Exception as exception:
-                print("Exception occurred", exception)
+                print("Expected exception occurred", exception)
             finally:
                 set_main_status(500)
         elif self.in_path("createtable/some-table"):
@@ -148,7 +146,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 sqs_client = boto3.client("sqs", endpoint_url="http://error.test:8080", region_name=_AWS_REGION)
                 sqs_client.send_message(QueueUrl="http://error.test:8080", MessageBody=_ERROR)
             except Exception as exception:
-                print("Exception occurred", exception)
+                print("Expected exception occurred", exception)
         elif self.in_path(_FAULT):
             try:
                 sqs_client = boto3.client(
@@ -156,7 +154,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 )
                 sqs_client.create_queue(QueueName="invalid_test")
             except Exception as exception:
-                print("Exception occurred", exception)
+                print("Expected exception occurred", exception)
             finally:
                 set_main_status(500)
         elif self.in_path("createqueue/some-queue"):
@@ -182,7 +180,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             try:
                 kinesis_client.put_record(StreamName="invalid_stream", Data=b"test", PartitionKey="partition_key")
             except Exception as exception:
-                print("Exception occurred", exception)
+                print("Expected exception occurred", exception)
             finally:
                 set_main_status(400)
         elif self.in_path(_FAULT):
@@ -192,7 +190,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 )
                 kinesis_client.put_record(StreamName="test_stream", Data=b"test", PartitionKey="partition_key")
             except Exception as exception:
-                print("Exception occurred", exception)
+                print("Expected exception occurred", exception)
             finally:
                 set_main_status(500)
         elif self.in_path("putrecord/my-stream"):
@@ -213,6 +211,7 @@ def set_main_status(status: int) -> None:
 def prepare_aws_server() -> None:
     requests.Request(method="POST", url="http://localhost:4566/_localstack/state/reset")
     try:
+        # Set up S3 so tests can access buckets and retrieve a file.
         s3_client: BaseClient = boto3.client("s3", endpoint_url=_AWS_SDK_S3_ENDPOINT, region_name=_AWS_REGION)
         s3_client.create_bucket(
             Bucket="test-put-object-bucket-name", CreateBucketConfiguration={"LocationConstraint": _AWS_REGION}
@@ -225,6 +224,8 @@ def prepare_aws_server() -> None:
             temp_file.write(b"This is temp file for S3 upload")
             temp_file.flush()
             s3_client.upload_file(temp_file_name, "test-get-object-bucket-name", "test_object")
+
+        # Set up DDB so tests can access a table.
         ddb_client: BaseClient = boto3.client("dynamodb", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
         ddb_client.create_table(
             TableName="put_test_table",
@@ -234,12 +235,16 @@ def prepare_aws_server() -> None:
             ],
             BillingMode="PAY_PER_REQUEST",
         )
+
+        # Set up SQS so tests can access a queue.
         sqs_client: BaseClient = boto3.client("sqs", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
         sqs_client.create_queue(QueueName="test_put_get_queue")
+
+        # Set up Kinesis so tests can access a stream.
         kinesis_client: BaseClient = boto3.client("kinesis", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
         kinesis_client.create_stream(StreamName="test_stream", ShardCount=1)
     except Exception as exception:
-        print("Exception occur", exception)
+        print("Unexpected exception occurred", exception)
 
 
 def main() -> None:

@@ -34,6 +34,7 @@ class BotocoreTest(ContractTestBase):
             "AWS_SDK_S3_ENDPOINT": "http://s3.localstack:4566",
             "AWS_SDK_ENDPOINT": "http://localstack:4566",
             "AWS_REGION": "us-west-2",
+            # To avoid boto3 instrumentation influence SQS test
             "OTEL_PYTHON_DISABLED_INSTRUMENTATIONS": "boto3",
         }
 
@@ -104,7 +105,6 @@ class BotocoreTest(ContractTestBase):
         self.mock_collector_client.clear_signals()
         self.do_test_requests("s3/fault", "GET", 500, 0, 1, service="AWS.SDK.S3", operation="CreateBucket")
 
-    #
     def test_dynamodb_create_table(self):
         self.mock_collector_client.clear_signals()
         self.do_test_requests(
