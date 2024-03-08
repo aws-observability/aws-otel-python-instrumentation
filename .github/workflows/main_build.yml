@@ -97,7 +97,7 @@ jobs:
 #  AppSignals specific e2e tests for ec2
   appsignals-python-e2e-ec2-test:
     needs: [ build, default-region-output ]
-    uses: ./.github/workflows/appsignals-python-main-e2e-ec2-test.yml
+    uses: ./.github/workflows/appsignals-python-e2e-ec2-test.yml
     secrets: inherit
     with:
       aws-region: ${{ needs.default-region-output.outputs.aws_default_region }}
