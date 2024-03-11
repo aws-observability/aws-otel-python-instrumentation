@@ -51,7 +51,7 @@ class Psycopg2Test(ContractTestBase):
 
     def test_success(self) -> None:
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("success", "GET", 200, 0, 0, sql_command="SELECT")
+        self.do_test_requests("success", "GET", 200, 0, 0, sql_command="DROP TABLE")
 
     def test_fault(self) -> None:
         self.mock_collector_client.clear_signals()
