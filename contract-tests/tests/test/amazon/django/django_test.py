@@ -96,8 +96,8 @@ class DjangoTest(ContractTestBase):
         self._assert_int_attribute(attributes_dict, SpanAttributes.HTTP_STATUS_CODE, status_code)
         address: str = self.application.get_container_host_ip()
         port: str = self.application.get_exposed_port(self.get_application_port())
-        self.assertEqual(
-            attributes_dict.get(SpanAttributes.HTTP_URL).string_value, "http://" + address + ":" + port + "/" + endpoint
+        self._assert_str_attribute(
+            attributes_dict, SpanAttributes.HTTP_URL, "http://" + address + ":" + port + "/" + endpoint
         )
         self._assert_str_attribute(attributes_dict, SpanAttributes.HTTP_METHOD, method)
         self.assertNotIn(SpanAttributes.HTTP_TARGET, attributes_dict)
