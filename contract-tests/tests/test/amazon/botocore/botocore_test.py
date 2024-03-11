@@ -14,6 +14,7 @@ from amazon.utils.app_signals_constants import (
     AWS_LOCAL_SERVICE,
     AWS_REMOTE_OPERATION,
     AWS_REMOTE_SERVICE,
+    AWS_REMOTE_TARGET,
     AWS_SPAN_KIND,
 )
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
@@ -40,7 +41,7 @@ class BotocoreTest(ContractTestBase):
 
     @override
     def get_application_network_aliases(self) -> List[str]:
-        return ["error-bucket.s3.test", "fault-bucket.s3.test", "error.test", "fault.test"]
+        return ["error.test", "fault.test"]
 
     @override
     def get_application_image_name(self) -> str:
@@ -55,9 +56,6 @@ class BotocoreTest(ContractTestBase):
                 aliases=[
                     "localstack",
                     "s3.localstack",
-                    "create-bucket.s3.localstack",
-                    "put-object.s3.localstack",
-                    "get-object.s3.localstack",
                 ],
             )
         }
@@ -190,7 +188,8 @@ class BotocoreTest(ContractTestBase):
         # root.
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_OPERATION, "InternalOperation")
         self._assert_str_attribute(attributes_dict, AWS_REMOTE_SERVICE, service)
-        self._assert_str_attribute(attributes_dict, AWS_REMOTE_OPERATION, f"{operation}")
+        self._assert_str_attribute(attributes_dict, AWS_REMOTE_OPERATION, operation)
+        self.assertNotIn(AWS_REMOTE_TARGET, attributes_list)
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, span_kind)
 
@@ -228,6 +227,7 @@ class BotocoreTest(ContractTestBase):
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_METHOD, operation)
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SYSTEM, "aws-api")
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SERVICE, service.split(".")[-1])
+        self._assert_int_attribute(attributes_dict, SpanAttributes.HTTP_STATUS_CODE, status_code)
         # TODO: botocore instrumentation is not respecting PEER_SERVICE
         # self._assert_str_attribute(attributes_dict, SpanAttributes.PEER_SERVICE, "backend:8080")
 
