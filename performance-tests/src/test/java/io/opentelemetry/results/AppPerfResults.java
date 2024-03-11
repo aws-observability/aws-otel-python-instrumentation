@@ -21,18 +21,49 @@ public class AppPerfResults {
   final double requestLatencyP90;
   final double requestLatencyP99;
   final double requestLatencyP100;
+  final long networkBytesSentAvg;
+  final long networkBytesSentP0;
+  final long networkBytesSentP50;
+  final long networkBytesSentP90;
+  final long networkBytesSentP99;
+  final long networkBytesSentP100;
+  final long networkBytesRecvAvg;
+  final long networkBytesRecvP0;
+  final long networkBytesRecvP50;
+  final long networkBytesRecvP90;
+  final long networkBytesRecvP99;
+  final long networkBytesRecvP100;
+  final double cpuAvg;
+  final double cpuP0;
+  final double cpuP50;
+  final double cpuP90;
+  final double cpuP99;
+  final double cpuP100;
+  final long rssMemAvg;
+  final long rssMemP0;
+  final long rssMemP50;
+  final long rssMemP90;
+  final long rssMemP99;
+  final long rssMemP100;
+  final long vmsMemAvg;
+  final long vmsMemP0;
+  final long vmsMemP50;
+  final long vmsMemP90;
+  final long vmsMemP99;
+  final long vmsMemP100;
+  final long peakThreadCount;
+  final long startupDurationMs;
+  final long runDurationMs;
+  // TODO: cleanup
   final long totalGCTime;
   final long totalAllocated;
   final MinMax heapUsed;
   final float maxThreadContextSwitchRate;
-  final long startupDurationMs;
-  final long peakThreadCount;
   final long averageNetworkRead;
   final long averageNetworkWrite;
   final float averageJvmUserCpu;
   final float maxJvmUserCpu;
   final float averageMachineCpuTotal;
-  final long runDurationMs;
   final long totalGcPauseNanos;
 
   private AppPerfResults(Builder builder) {
@@ -46,18 +77,48 @@ public class AppPerfResults {
     this.requestLatencyP90 = builder.requestLatencyP90;
     this.requestLatencyP99 = builder.requestLatencyP99;
     this.requestLatencyP100 = builder.requestLatencyP100;
+    this.networkBytesSentAvg = builder.networkBytesSentAvg;
+    this.networkBytesSentP0 = builder.networkBytesSentP0;
+    this.networkBytesSentP50 = builder.networkBytesSentP50;
+    this.networkBytesSentP90 = builder.networkBytesSentP90;
+    this.networkBytesSentP99 = builder.networkBytesSentP99;
+    this.networkBytesSentP100 = builder.networkBytesSentP100;
+    this.networkBytesRecvAvg = builder.networkBytesRecvAvg;
+    this.networkBytesRecvP0 = builder.networkBytesRecvP0;
+    this.networkBytesRecvP50 = builder.networkBytesRecvP50;
+    this.networkBytesRecvP90 = builder.networkBytesRecvP90;
+    this.networkBytesRecvP99 = builder.networkBytesRecvP99;
+    this.networkBytesRecvP100 = builder.networkBytesRecvP100;
+    this.cpuAvg = builder.cpuAvg;
+    this.cpuP0 = builder.cpuP0;
+    this.cpuP50 = builder.cpuP50;
+    this.cpuP90 = builder.cpuP90;
+    this.cpuP99 = builder.cpuP99;
+    this.cpuP100 = builder.cpuP100;
+    this.rssMemAvg = builder.rssMemAvg;
+    this.rssMemP0 = builder.rssMemP0;
+    this.rssMemP50 = builder.rssMemP50;
+    this.rssMemP90 = builder.rssMemP90;
+    this.rssMemP99 = builder.rssMemP99;
+    this.rssMemP100 = builder.rssMemP100;
+    this.vmsMemAvg = builder.vmsMemAvg;
+    this.vmsMemP0 = builder.vmsMemP0;
+    this.vmsMemP50 = builder.vmsMemP50;
+    this.vmsMemP90 = builder.vmsMemP90;
+    this.vmsMemP99 = builder.vmsMemP99;
+    this.vmsMemP100 = builder.vmsMemP100;
+    this.peakThreadCount = builder.peakThreadCount;
+    this.startupDurationMs = builder.startupDurationMs;
+    this.runDurationMs = builder.runDurationMs;
     this.totalGCTime = builder.totalGCTime;
     this.totalAllocated = builder.totalAllocated;
     this.heapUsed = builder.heapUsed;
     this.maxThreadContextSwitchRate = builder.maxThreadContextSwitchRate;
-    this.startupDurationMs = builder.startupDurationMs;
-    this.peakThreadCount = builder.peakThreadCount;
     this.averageNetworkRead = builder.averageNetworkRead;
     this.averageNetworkWrite = builder.averageNetworkWrite;
     this.averageJvmUserCpu = builder.averageJvmUserCpu;
     this.maxJvmUserCpu = builder.maxJvmUserCpu;
     this.averageMachineCpuTotal = builder.averageMachineCpuTotal;
-    this.runDurationMs = builder.runDurationMs;
     this.totalGcPauseNanos = builder.totalGcPauseNanos;
   }
 
@@ -73,7 +134,7 @@ public class AppPerfResults {
     return bytesToMegs(this.heapUsed.max);
   }
 
-  private double bytesToMegs(long x) {
+  public double bytesToMegs(long x) {
     return x / (1024.0 * 1024.0);
   }
 
@@ -97,17 +158,48 @@ public class AppPerfResults {
     public double requestLatencyP90;
     public double requestLatencyP99;
     public double requestLatencyP100;
+    public long networkBytesSentAvg;
+    public long networkBytesSentP0;
+    public long networkBytesSentP50;
+    public long networkBytesSentP90;
+    public long networkBytesSentP99;
+    public long networkBytesSentP100;
+    public long networkBytesRecvAvg;
+    public long networkBytesRecvP0;
+    public long networkBytesRecvP50;
+    public long networkBytesRecvP90;
+    public long networkBytesRecvP99;
+    public long networkBytesRecvP100;
+    public double cpuAvg;
+    public double cpuP0;
+    public double cpuP50;
+    public double cpuP90;
+    public double cpuP99;
+    public double cpuP100;
+    public long rssMemAvg;
+    public long rssMemP0;
+    public long rssMemP50;
+    public long rssMemP90;
+    public long rssMemP99;
+    public long rssMemP100;
+    public long vmsMemAvg;
+    public long vmsMemP0;
+    public long vmsMemP50;
+    public long vmsMemP90;
+    public long vmsMemP99;
+    public long vmsMemP100;
+    public long peakThreadCount;
+    public long runDurationMs;
+    // TODO: cleanup
     private long totalGCTime;
     private long totalAllocated;
     private MinMax heapUsed;
     private float maxThreadContextSwitchRate;
-    private long peakThreadCount;
     public long averageNetworkRead;
     public long averageNetworkWrite;
     public float averageJvmUserCpu;
     public float maxJvmUserCpu;
     public float averageMachineCpuTotal;
-    public long runDurationMs;
     public long totalGcPauseNanos;
 
     AppPerfResults build() {
@@ -124,6 +216,7 @@ public class AppPerfResults {
       return this;
     }
 
+    // TODO: cleanup
     Builder totalGCTime(long totalGCTime) {
       this.totalGCTime = totalGCTime;
       return this;

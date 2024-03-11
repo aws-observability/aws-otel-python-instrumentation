@@ -20,4 +20,5 @@ COPY ./sample-applications/vehicle-dealership-sample-app/VehicleInventoryApp /ve
 COPY ./dist/$DISTRO /vehicle-inventory-app/
 
 # Install dependencies and distro
-RUN pip install --upgrade pip && pip install -r requirements.txt && pip install ${DISTRO} --force-reinstall
+RUN pip install --upgrade pip && pip install -r requirements.txt && pip install psutil && pip install ${DISTRO} \
+    --force-reinstall
