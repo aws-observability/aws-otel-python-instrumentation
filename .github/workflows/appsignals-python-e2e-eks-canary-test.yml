@@ -1,0 +1,37 @@
+## Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+## SPDX-License-Identifier: Apache-2.0
+
+## This workflow aims to run the Application Signals Python end-to-end tests as a canary to
+## test the artifacts for App Signals enablement. It will deploy a sample app and remote
+## service onto an EKS cluster, call the APIs, and validate the generated telemetry,
+## including logs, metrics, and traces.
+name: App Signals Enablement - Python E2E EKS Canary Testing
+on:
+#  schedule:
+#    - cron: '*/15 * * * *' # run the workflow every 15 minutes
+  workflow_dispatch: # be able to run the workflow on demand
+  push:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+
+jobs:
+  python-e2e-eks-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        aws-region: ['us-west-1','us-east-1','us-east-2']
+    uses: ./.github/workflows/appsignals-python-e2e-eks-test.yml
+    secrets: inherit
+    with:
+      aws-region: ${{ matrix.aws-region }}
+      test-cluster-name: 'e2e-python-canary-test'
+      caller-workflow-name: 'appsignals-python-e2e-eks-canary-test'
+      appsignals-adot-image: public.ecr.aws/aws-observability/adot-autoinstrumentation-python
+      appsignals-adot-image-tag: v0.0.1

@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "release/v*"
+      - eks_e2e_canary
 env:
   AWS_DEFAULT_REGION: us-east-1
   STAGING_ECR_REGISTRY: 637423224110.dkr.ecr.us-east-1.amazonaws.com
@@ -95,7 +96,7 @@ jobs:
       aws-region: ${{ needs.build.outputs.aws_default_region }}
       test-cluster-name: e2e-python-adot-test
       caller-workflow-name: 'main-build'
-      appsignals-adot-image-registry: ${{ needs.build.outputs.staging_registry }}
+      appsignals-adot-image: ${{ needs.build.outputs.staging_registry }}/aws-observability/adot-autoinstrumentation-python-staging
       appsignals-adot-image-tag: ${{ needs.build.outputs.python_image_tag }}
 
   # AppSignals specific e2e tests for ec2
