@@ -19,29 +19,6 @@ _DB_USER = os.getenv("DB_USER")
 _DB_PASS = os.getenv("DB_PASS")
 _DB_NAME = os.getenv("DB_NAME")
 
-
-def prepare_database() -> None:
-    conn = psycopg2.connect(dbname=_DB_NAME, user=_DB_USER, password=_DB_PASS, host=_DB_HOST)
-    cur = conn.cursor()
-    cur.execute("DROP TABLE IF EXISTS test_table")
-    cur.execute(
-        """
-        CREATE TABLE test_table (
-            id SERIAL PRIMARY KEY,
-            name TEXT NOT NULL
-            )
-        """
-    )
-
-    cur.execute("INSERT INTO test_table (name) VALUES (%s)", ("Alice",))
-    cur.execute("INSERT INTO test_table (name) VALUES (%s)", ("Bob",))
-
-    conn.commit()
-
-    cur.close()
-    conn.close()
-
-
 class RequestHandler(BaseHTTPRequestHandler):
     @override
     # pylint: disable=invalid-name
@@ -50,13 +27,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         conn = psycopg2.connect(dbname=_DB_NAME, user=_DB_USER, password=_DB_PASS, host=_DB_HOST)
         if self.in_path(_SUCCESS):
             cur = conn.cursor()
-            cur.execute("SELECT id, name FROM test_table")
-            rows = cur.fetchall()
+            cur.execute("DROP TABLE IF EXISTS test_table")
             cur.close()
-            if len(rows) == 2:
-                status_code = 200
-            else:
-                status_code = 400
+            status_code = 200
         elif self.in_path(_FAULT):
             cur = conn.cursor()
             try:
@@ -81,7 +54,6 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    prepare_database()
     server_address: Tuple[str, int] = ("0.0.0.0", _PORT)
     request_handler_class: type = RequestHandler
     requests_server: ThreadingHTTPServer = ThreadingHTTPServer(server_address, request_handler_class)
