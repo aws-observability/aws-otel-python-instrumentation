@@ -1,3 +1,5 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
 """
 This application is created by "python manage.py startapp api"
 Modified views.py and ../django_server/urls.py to listen on specific endpoint.
