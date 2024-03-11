@@ -17,7 +17,7 @@ def error(request):
     return HttpResponse("Bad Request", status=400)
 
 
-def user_order(request, userId, orderId):
+def user_order(request, user_id, order_id):
     request.GET.get("filter", None)
     return HttpResponse("Routed", status=200)
 

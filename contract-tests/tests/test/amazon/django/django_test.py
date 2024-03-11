@@ -45,7 +45,7 @@ class DjangoTest(ContractTestBase):
             0,
             0,
             request_method="GET",
-            local_operation="GET users/<str:userId>/orders/<str:orderId>",
+            local_operation="GET users/<str:user_id>/orders/<str:order_id>",
         )
 
     def test_error(self) -> None:
@@ -94,9 +94,13 @@ class DjangoTest(ContractTestBase):
     ) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self._assert_int_attribute(attributes_dict, SpanAttributes.HTTP_STATUS_CODE, status_code)
-        self.assertTrue(attributes_dict.get(SpanAttributes.HTTP_URL).string_value.endswith(endpoint))
+        address: str = self.application.get_container_host_ip()
+        port: str = self.application.get_exposed_port(self.get_application_port())
+        self.assertEqual(
+            attributes_dict.get(SpanAttributes.HTTP_URL).string_value, "http://" + address + ":" + port + "/" + endpoint
+        )
         self._assert_str_attribute(attributes_dict, SpanAttributes.HTTP_METHOD, method)
-        self.assertTrue(SpanAttributes.HTTP_TARGET not in attributes_dict)
+        self.assertNotIn(SpanAttributes.HTTP_TARGET, attributes_dict)
 
     @override
     def _assert_metric_attributes(

@@ -26,6 +26,6 @@ urlpatterns = [
     path("success", success),
     path("fault", fault),
     path("error", error),
-    path("users/<str:userId>/orders/<str:orderId>", user_order),
+    path("users/<str:user_id>/orders/<str:order_id>", user_order),
     path("post_success", post_success),
 ]
