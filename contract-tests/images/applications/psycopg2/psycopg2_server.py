@@ -19,6 +19,7 @@ _DB_USER = os.getenv("DB_USER")
 _DB_PASS = os.getenv("DB_PASS")
 _DB_NAME = os.getenv("DB_NAME")
 
+
 class RequestHandler(BaseHTTPRequestHandler):
     @override
     # pylint: disable=invalid-name
