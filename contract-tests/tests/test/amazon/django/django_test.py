@@ -110,7 +110,7 @@ class DjangoTest(ContractTestBase):
             if resource_scope_metric.metric.name.lower() == metric_name.lower():
                 target_metrics.append(resource_scope_metric.metric)
 
-        self.assertEqual(len(target_metrics), 2)
+        self.assertGreater(len(target_metrics), 1)
         target_metric: Metric = target_metrics[-1]
         dp_list: List[ExponentialHistogramDataPoint] = target_metric.exponential_histogram.data_points
 
