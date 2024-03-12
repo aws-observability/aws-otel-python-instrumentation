@@ -27,17 +27,14 @@ class DjangoTest(ContractTestBase):
         return {"DJANGO_SETTINGS_MODULE": "django_server.settings"}
 
     def test_success(self) -> None:
-        self.mock_collector_client.clear_signals()
         self.do_test_requests("success", "GET", 200, 0, 0, request_method="GET", local_operation="GET success")
 
     def test_post_success(self) -> None:
-        self.mock_collector_client.clear_signals()
         self.do_test_requests(
             "post_success", "POST", 201, 0, 0, request_method="POST", local_operation="POST post_success"
         )
 
     def test_route(self) -> None:
-        self.mock_collector_client.clear_signals()
         self.do_test_requests(
             "users/userId/orders/orderId",
             "GET",
@@ -49,11 +46,9 @@ class DjangoTest(ContractTestBase):
         )
 
     def test_error(self) -> None:
-        self.mock_collector_client.clear_signals()
         self.do_test_requests("error", "GET", 400, 1, 0, request_method="GET", local_operation="GET error")
 
     def test_fault(self) -> None:
-        self.mock_collector_client.clear_signals()
         self.do_test_requests("fault", "GET", 500, 0, 1, request_method="GET", local_operation="GET fault")
 
     @override
@@ -115,8 +110,8 @@ class DjangoTest(ContractTestBase):
             if resource_scope_metric.metric.name.lower() == metric_name.lower():
                 target_metrics.append(resource_scope_metric.metric)
 
-        self.assertEqual(len(target_metrics), 1)
-        target_metric: Metric = target_metrics[0]
+        self.assertEqual(len(target_metrics), 2)
+        target_metric: Metric = target_metrics[-1]
         dp_list: List[ExponentialHistogramDataPoint] = target_metric.exponential_histogram.data_points
 
         self.assertEqual(len(dp_list), 1)
