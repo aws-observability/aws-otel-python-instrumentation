@@ -151,7 +151,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             set_main_status(400)
             try:
                 error_client = boto3.client("sqs", endpoint_url=_ERROR_ENDPOINT + "/sqserror", region_name=_AWS_REGION)
-                error_client.send_message(QueueUrl="http://error.test:8080/sqserror", MessageBody=_ERROR)
+                error_client.send_message(QueueUrl="http://error.test:8080/000000000000/sqserror", MessageBody=_ERROR)
             except Exception as exception:
                 print("Expected exception occurred", exception)
         elif self.in_path(_FAULT):

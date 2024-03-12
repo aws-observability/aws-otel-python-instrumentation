@@ -282,8 +282,9 @@ class BotocoreTest(ContractTestBase):
             0,
             remote_service="AWS.SDK.SQS",
             remote_operation="SendMessage",
+            remote_target="::sqs::000000000000:sqserror",
             request_specific_attributes={
-                _AWS_QUEUE_URL: "http://error.test:8080/sqserror",
+                _AWS_QUEUE_URL: "http://error.test:8080/000000000000/sqserror",
             },
             span_name="SQS.SendMessage",
         )
