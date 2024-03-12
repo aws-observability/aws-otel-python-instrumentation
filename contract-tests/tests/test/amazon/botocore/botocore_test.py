@@ -376,8 +376,6 @@ class BotocoreTest(ContractTestBase):
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # InternalOperation as OTEL does not instrument the basic server we are using, so the client span is a local
         # root.
-        print(attributes_dict)
-        print(service)
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_OPERATION, "InternalOperation")
         self._assert_str_attribute(attributes_dict, AWS_REMOTE_SERVICE, service)
         self._assert_str_attribute(attributes_dict, AWS_REMOTE_OPERATION, operation)
