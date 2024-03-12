@@ -384,17 +384,6 @@ class BotocoreTest(ContractTestBase):
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, span_kind)
 
-    def _get_attributes_dict(self, attributes_list: List[KeyValue]) -> Dict[str, AnyValue]:
-        attributes_dict: Dict[str, AnyValue] = {}
-        for attribute in attributes_list:
-            key: str = attribute.key
-            value: AnyValue = attribute.value
-            if key in attributes_dict:
-                old_value: AnyValue = attributes_dict[key]
-                self.fail(f"Attribute {key} unexpectedly duplicated. Value 1: {old_value} Value 2: {value}")
-            attributes_dict[key] = value
-        return attributes_dict
-
     @override
     def _assert_semantic_conventions_span_attributes(
         self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str, status_code: int, **kwargs
