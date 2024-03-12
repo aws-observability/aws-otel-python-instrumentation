@@ -82,7 +82,6 @@ class BotocoreTest(ContractTestBase):
         cls._local_stack.stop()
 
     def test_s3_create_bucket(self):
-        self.mock_collector_client.clear_signals()
         self.do_test_requests(
             "s3/createbucket/create-bucket",
             "GET",
@@ -98,7 +97,6 @@ class BotocoreTest(ContractTestBase):
         )
 
     def test_s3_create_object(self):
-        self.mock_collector_client.clear_signals()
         self.do_test_requests(
             "s3/createobject/put-object/some-object",
             "GET",
@@ -114,7 +112,6 @@ class BotocoreTest(ContractTestBase):
         )
 
     def test_s3_get_object(self):
-        self.mock_collector_client.clear_signals()
         self.do_test_requests(
             "s3/getobject/get-object/some-object",
             "GET",
@@ -130,7 +127,6 @@ class BotocoreTest(ContractTestBase):
         )
 
     def test_s3_error(self):
-        self.mock_collector_client.clear_signals()
         self.do_test_requests(
             "s3/error",
             "GET",
@@ -146,7 +142,6 @@ class BotocoreTest(ContractTestBase):
         )
 
     def test_s3_fault(self):
-        self.mock_collector_client.clear_signals()
         self.do_test_requests(
             "s3/fault",
             "GET",
@@ -162,7 +157,6 @@ class BotocoreTest(ContractTestBase):
         )
 
     def test_dynamodb_create_table(self):
-        self.mock_collector_client.clear_signals()
         self.do_test_requests(
             "ddb/createtable/some-table",
             "GET",
@@ -178,7 +172,6 @@ class BotocoreTest(ContractTestBase):
         )
 
     def test_dynamodb_put_item(self):
-        self.mock_collector_client.clear_signals()
         self.do_test_requests(
             "ddb/putitem/putitem-table/key",
             "GET",
@@ -194,7 +187,6 @@ class BotocoreTest(ContractTestBase):
         )
 
     def test_dynamodb_error(self):
-        self.mock_collector_client.clear_signals()
         self.do_test_requests(
             "ddb/error",
             "GET",
@@ -210,7 +202,6 @@ class BotocoreTest(ContractTestBase):
         )
 
     def test_dynamodb_fault(self):
-        self.mock_collector_client.clear_signals()
         self.do_test_requests(
             "ddb/fault",
             "GET",
@@ -226,7 +217,6 @@ class BotocoreTest(ContractTestBase):
         )
 
     def test_sqs_create_queue(self):
-        self.mock_collector_client.clear_signals()
         self.do_test_requests(
             "sqs/createqueue/some-queue",
             "GET",
@@ -242,7 +232,6 @@ class BotocoreTest(ContractTestBase):
         )
 
     def test_sqs_send_message(self):
-        self.mock_collector_client.clear_signals()
         self.do_test_requests(
             "sqs/publishqueue/some-queue",
             "GET",
@@ -258,7 +247,6 @@ class BotocoreTest(ContractTestBase):
         )
 
     def test_sqs_receive_message(self):
-        self.mock_collector_client.clear_signals()
         self.do_test_requests(
             "sqs/consumequeue/some-queue",
             "GET",
@@ -274,7 +262,6 @@ class BotocoreTest(ContractTestBase):
         )
 
     def test_sqs_error(self):
-        self.mock_collector_client.clear_signals()
         self.do_test_requests(
             "sqs/error",
             "GET",
@@ -289,7 +276,6 @@ class BotocoreTest(ContractTestBase):
         )
 
     def test_sqs_fault(self):
-        self.mock_collector_client.clear_signals()
         self.do_test_requests(
             "sqs/fault",
             "GET",
@@ -305,7 +291,6 @@ class BotocoreTest(ContractTestBase):
         )
 
     def test_kinesis_put_record(self):
-        self.mock_collector_client.clear_signals()
         self.do_test_requests(
             "kinesis/putrecord/my-stream",
             "GET",
@@ -321,7 +306,6 @@ class BotocoreTest(ContractTestBase):
         )
 
     def test_kinesis_error(self):
-        self.mock_collector_client.clear_signals()
         self.do_test_requests(
             "kinesis/error",
             "GET",
@@ -337,7 +321,6 @@ class BotocoreTest(ContractTestBase):
         )
 
     def test_kinesis_fault(self):
-        self.mock_collector_client.clear_signals()
         self.do_test_requests(
             "kinesis/fault",
             "GET",
