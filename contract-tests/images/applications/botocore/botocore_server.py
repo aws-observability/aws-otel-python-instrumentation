@@ -47,7 +47,7 @@ class RequestHandler(BaseHTTPRequestHandler):
     # pylint: disable=invalid-name
     def do_POST(self):
         if self.in_path("sqserror"):
-            self.send_response(400)
+            self.send_response(self.main_status)
             self.send_header("Content-type", "text/xml")
             self.end_headers()
 
@@ -158,7 +158,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             set_main_status(500)
             try:
                 fault_client = boto3.client(
-                    "sqs", endpoint_url=_FAULT_ENDPOINT, region_name="us-west-2", config=_NO_RETRY_CONFIG
+                    "sqs", endpoint_url=_FAULT_ENDPOINT, region_name=_AWS_REGION, config=_NO_RETRY_CONFIG
                 )
                 fault_client.create_queue(QueueName="invalid_test")
             except Exception as exception:
