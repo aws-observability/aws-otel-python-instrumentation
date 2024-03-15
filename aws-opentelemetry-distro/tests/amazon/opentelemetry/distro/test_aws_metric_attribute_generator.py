@@ -306,7 +306,9 @@ class TestAwsMetricAttributeGenerator(TestCase):
     def test_server_span_with_span_name_with_http_url(self):
         self._update_resource_with_service_name()
         self.span_mock.name = "POST"
-        self._mock_attribute([SpanAttributes.HTTP_METHOD, SpanAttributes.HTTP_URL], ["POST", "http://127.0.0.1:8000/payment/123"])
+        self._mock_attribute(
+            [SpanAttributes.HTTP_METHOD, SpanAttributes.HTTP_URL], ["POST", "http://127.0.0.1:8000/payment/123"]
+        )
 
         expected_attributes: Attributes = {
             AWS_SPAN_KIND: SpanKind.SERVER.name,
@@ -319,8 +321,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
 
     def test_server_span_with_http_url_with_no_path(self):
         # http.url with no path should result in local operation to be "POST /"
-        self._mock_attribute([SpanAttributes.HTTP_METHOD, SpanAttributes.HTTP_URL],
-                             ["POST", "http://www.example.com"])
+        self._mock_attribute([SpanAttributes.HTTP_METHOD, SpanAttributes.HTTP_URL], ["POST", "http://www.example.com"])
 
         expected_attributes: Attributes = {
             AWS_SPAN_KIND: SpanKind.SERVER.name,
@@ -333,8 +334,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
 
     def test_server_span_with_http_url_as_none(self):
         # if http.url is none, local operation should default to UnknownOperation
-        self._mock_attribute([SpanAttributes.HTTP_METHOD, SpanAttributes.HTTP_URL],
-                             ["POST", None])
+        self._mock_attribute([SpanAttributes.HTTP_METHOD, SpanAttributes.HTTP_URL], ["POST", None])
 
         expected_attributes: Attributes = {
             AWS_SPAN_KIND: SpanKind.SERVER.name,
@@ -347,8 +347,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
 
     def test_server_span_with_http_url_as_empty(self):
         # if http.url is empty, local operation should default to UnknownOperation
-        self._mock_attribute([SpanAttributes.HTTP_METHOD, SpanAttributes.HTTP_URL],
-                             ["POST", ""])
+        self._mock_attribute([SpanAttributes.HTTP_METHOD, SpanAttributes.HTTP_URL], ["POST", ""])
 
         expected_attributes: Attributes = {
             AWS_SPAN_KIND: SpanKind.SERVER.name,
@@ -361,8 +360,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
 
     def test_server_span_with_http_url_as_invalid(self):
         # if http.url is invalid, local operation should default to UnknownOperation
-        self._mock_attribute([SpanAttributes.HTTP_METHOD, SpanAttributes.HTTP_URL],
-                             ["POST", "invalid_url"])
+        self._mock_attribute([SpanAttributes.HTTP_METHOD, SpanAttributes.HTTP_URL], ["POST", "invalid_url"])
 
         expected_attributes: Attributes = {
             AWS_SPAN_KIND: SpanKind.SERVER.name,
