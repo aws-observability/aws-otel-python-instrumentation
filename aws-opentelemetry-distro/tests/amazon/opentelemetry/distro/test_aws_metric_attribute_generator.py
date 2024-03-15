@@ -317,6 +317,62 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(SpanAttributes.HTTP_METHOD, None)
         self._mock_attribute(SpanAttributes.HTTP_URL, None)
 
+    def test_server_span_with_http_url_with_no_path(self):
+        # http.url with no path should result in local operation to be "POST /"
+        self._mock_attribute([SpanAttributes.HTTP_METHOD, SpanAttributes.HTTP_URL],
+                             ["POST", "http://www.example.com"])
+
+        expected_attributes: Attributes = {
+            AWS_SPAN_KIND: SpanKind.SERVER.name,
+            AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
+            AWS_LOCAL_OPERATION: "POST /",
+        }
+        self._validate_attributes_produced_for_non_local_root_span_of_kind(expected_attributes, SpanKind.SERVER)
+        self._mock_attribute(SpanAttributes.HTTP_METHOD, None)
+        self._mock_attribute(SpanAttributes.HTTP_URL, None)
+
+    def test_server_span_with_http_url_as_none(self):
+        # if http.url is none, local operation should default to UnknownOperation
+        self._mock_attribute([SpanAttributes.HTTP_METHOD, SpanAttributes.HTTP_URL],
+                             ["POST", None])
+
+        expected_attributes: Attributes = {
+            AWS_SPAN_KIND: SpanKind.SERVER.name,
+            AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
+            AWS_LOCAL_OPERATION: _UNKNOWN_OPERATION,
+        }
+        self._validate_attributes_produced_for_non_local_root_span_of_kind(expected_attributes, SpanKind.SERVER)
+        self._mock_attribute(SpanAttributes.HTTP_METHOD, None)
+        self._mock_attribute(SpanAttributes.HTTP_URL, None)
+
+    def test_server_span_with_http_url_as_empty(self):
+        # if http.url is empty, local operation should default to UnknownOperation
+        self._mock_attribute([SpanAttributes.HTTP_METHOD, SpanAttributes.HTTP_URL],
+                             ["POST", ""])
+
+        expected_attributes: Attributes = {
+            AWS_SPAN_KIND: SpanKind.SERVER.name,
+            AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
+            AWS_LOCAL_OPERATION: _UNKNOWN_OPERATION,
+        }
+        self._validate_attributes_produced_for_non_local_root_span_of_kind(expected_attributes, SpanKind.SERVER)
+        self._mock_attribute(SpanAttributes.HTTP_METHOD, None)
+        self._mock_attribute(SpanAttributes.HTTP_URL, None)
+
+    def test_server_span_with_http_url_as_invalid(self):
+        # if http.url is invalid, local operation should default to UnknownOperation
+        self._mock_attribute([SpanAttributes.HTTP_METHOD, SpanAttributes.HTTP_URL],
+                             ["POST", "invalid_url"])
+
+        expected_attributes: Attributes = {
+            AWS_SPAN_KIND: SpanKind.SERVER.name,
+            AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
+            AWS_LOCAL_OPERATION: _UNKNOWN_OPERATION,
+        }
+        self._validate_attributes_produced_for_non_local_root_span_of_kind(expected_attributes, SpanKind.SERVER)
+        self._mock_attribute(SpanAttributes.HTTP_METHOD, None)
+        self._mock_attribute(SpanAttributes.HTTP_URL, None)
+
     def test_producer_span_with_attributes(self):
         self._update_resource_with_service_name()
         self._mock_attribute(
