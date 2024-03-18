@@ -43,6 +43,17 @@ runs:
         os: ${{ inputs.os }}
         run_unit_tests: true
 
+    - name: Configure AWS credentials for public ECR
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ inputs.snapshot-ecr-role }}
+        aws-region: ${{ inputs.aws-region }}
+
+    - name: Log in to AWS public ECR
+      uses: docker/login-action@v3
+      with:
+        registry: public.ecr.aws
+
     - name: Configure AWS Credentials
       if: ${{ inputs.push_image == true || inputs.push_image == 'true' }}
       uses: aws-actions/configure-aws-credentials@v4
