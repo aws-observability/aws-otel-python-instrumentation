@@ -137,8 +137,6 @@ jobs:
             echo "appsignals-adot-image-tag is empty"
             sed -i 's/tag: 0.43b0/tag: latest/g' values.yaml
           fi
-          echo "Modified values.yaml:"
-          cat values.yaml
 
       # TODO: This step is used for custom pre-release instrumentation
       # It is a temporary measure until the cw add-on is released with python support
