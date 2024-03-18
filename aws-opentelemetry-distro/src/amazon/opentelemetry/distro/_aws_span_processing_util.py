@@ -162,22 +162,22 @@ def _is_valid_operation(span: ReadableSpan, operation: str) -> bool:
 
 def _generate_ingress_operation(span: ReadableSpan) -> str:
     """
-    When span name is not meaningful(null, unknown or http_method value) as operation name for http use cases. Will try
-    to extract the operation name from target string if http.target is present otherwise from http.url
+    When span name is not meaningful, this method is invoked to try to extract the operation name from either
+    `http.target`, if present, or from `http.url`, and combine with `http.method`.
     """
     operation: str = UNKNOWN_OPERATION
-    http_target: str = None
+    http_path: str = None
     if is_key_present(span, SpanAttributes.HTTP_TARGET):
-        http_target = span.attributes.get(SpanAttributes.HTTP_TARGET)
+        http_path = span.attributes.get(SpanAttributes.HTTP_TARGET)
     elif is_key_present(span, SpanAttributes.HTTP_URL):
         http_url = span.attributes.get(SpanAttributes.HTTP_URL)
         url: ParseResult = urlparse(http_url)
-        http_target = url.path
+        http_path = url.path
 
     # get the first part from API path string as operation value
     # the more levels/parts we get from API path the higher chance for getting high cardinality data
-    if http_target is not None:
-        operation = extract_api_path_value(http_target)
+    if http_path is not None:
+        operation = extract_api_path_value(http_path)
         if is_key_present(span, SpanAttributes.HTTP_METHOD):
             http_method: str = span.attributes.get(SpanAttributes.HTTP_METHOD)
             if http_method is not None:

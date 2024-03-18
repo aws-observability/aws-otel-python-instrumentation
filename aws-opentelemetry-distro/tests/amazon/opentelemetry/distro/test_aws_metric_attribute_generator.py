@@ -306,6 +306,25 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(SpanAttributes.HTTP_METHOD, None)
         self._mock_attribute(SpanAttributes.HTTP_TARGET, None)
 
+    def test_server_span_with_span_name_with_target_and_url(self):
+        # when http.target & http.url are present, the local operation should be derived from the http.target
+        self._update_resource_with_service_name()
+        self.span_mock.name = "POST"
+        self._mock_attribute(
+            [SpanAttributes.HTTP_METHOD, SpanAttributes.HTTP_TARGET, SpanAttributes.HTTP_URL],
+            ["POST", "/my-target/09876", "http://127.0.0.1:8000/payment/123"],
+        )
+
+        expected_attributes: Attributes = {
+            AWS_SPAN_KIND: SpanKind.SERVER.name,
+            AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
+            AWS_LOCAL_OPERATION: "POST /my-target",
+        }
+        self._validate_attributes_produced_for_non_local_root_span_of_kind(expected_attributes, SpanKind.SERVER)
+        self._mock_attribute(SpanAttributes.HTTP_METHOD, None)
+        self._mock_attribute(SpanAttributes.HTTP_TARGET, None)
+        self._mock_attribute(SpanAttributes.HTTP_URL, None)
+
     def test_server_span_with_span_name_with_http_url(self):
         self._update_resource_with_service_name()
         self.span_mock.name = "POST"
