@@ -17,7 +17,7 @@ ADD aws-opentelemetry-distro/ ./aws-opentelemetry-distro/
 
 RUN mkdir workspace && pip install --target workspace ./aws-opentelemetry-distro
 
-FROM busybox
+FROM public.ecr.aws/amazonlinux/amazonlinux:minimal
 
 COPY --from=build /operator-build/workspace /autoinstrumentation
 
