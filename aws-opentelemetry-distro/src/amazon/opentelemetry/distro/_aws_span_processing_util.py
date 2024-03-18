@@ -4,6 +4,7 @@
 import json
 import os
 from typing import Dict, List
+from urllib.parse import ParseResult, urlparse
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND, AWS_LOCAL_OPERATION
 from opentelemetry.sdk.trace import InstrumentationScope, ReadableSpan
@@ -161,19 +162,25 @@ def _is_valid_operation(span: ReadableSpan, operation: str) -> bool:
 
 def _generate_ingress_operation(span: ReadableSpan) -> str:
     """
-    When span name is not meaningful(null, unknown or http_method value) as operation name for http use cases. Will try
-    to extract the operation name from http target string
+    When span name is not meaningful, this method is invoked to try to extract the operation name from either
+    `http.target`, if present, or from `http.url`, and combine with `http.method`.
     """
     operation: str = UNKNOWN_OPERATION
+    http_path: str = None
     if is_key_present(span, SpanAttributes.HTTP_TARGET):
-        http_target: str = span.attributes.get(SpanAttributes.HTTP_TARGET)
-        # get the first part from API path string as operation value
-        # the more levels/parts we get from API path the higher chance for getting high cardinality data
-        if http_target is not None:
-            operation = extract_api_path_value(http_target)
-            if is_key_present(span, SpanAttributes.HTTP_METHOD):
-                http_method: str = span.attributes.get(SpanAttributes.HTTP_METHOD)
-                if http_method is not None:
-                    operation = http_method + " " + operation
+        http_path = span.attributes.get(SpanAttributes.HTTP_TARGET)
+    elif is_key_present(span, SpanAttributes.HTTP_URL):
+        http_url = span.attributes.get(SpanAttributes.HTTP_URL)
+        url: ParseResult = urlparse(http_url)
+        http_path = url.path
+
+    # get the first part from API path string as operation value
+    # the more levels/parts we get from API path the higher chance for getting high cardinality data
+    if http_path is not None:
+        operation = extract_api_path_value(http_path)
+        if is_key_present(span, SpanAttributes.HTTP_METHOD):
+            http_method: str = span.attributes.get(SpanAttributes.HTTP_METHOD)
+            if http_method is not None:
+                operation = http_method + " " + operation
 
     return operation
