@@ -40,7 +40,7 @@ jobs:
 
       - name: Update version in file
         run: |
-          sed -i "s/__version__ = ".*"/__version__ = "${VERSION}"/" aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py
+          sed -i "s/__version__ = \".*\"/__version__ = \\\"${VERSION}\\\"/" aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py
           git commit -am "Update version to ${VERSION}"
           git push origin "${VERSION}_release"
 
