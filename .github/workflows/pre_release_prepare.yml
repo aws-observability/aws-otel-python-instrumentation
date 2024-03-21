@@ -1,0 +1,50 @@
+name: Update Version and Create PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 1.0.1)'
+        required: true
+
+jobs:
+  update-version-and-create-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v2
+        with:
+          ref: 'main'
+
+      - name: Setup Git
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+      - name: Create branches
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          MAJOR_MINOR=$(echo $VERSION | sed -E 's/([0-9]+\.[0-9]+)\.[0-9]+/\1/')
+          git checkout -b "release/${MAJOR_MINOR}.x"
+          git push origin "release/${MAJOR_MINOR}.x"
+          git checkout -b "${VERSION}_release"
+          git push origin "${VERSION}_release"
+
+      - name: Update version in file
+        run: |
+          sed -i 's/__version__ = ".*"/__version__ = "${{ github.event.inputs.version }}"/' aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py
+          git commit -am "Update version to ${{ github.event.inputs.version }}"
+          git push origin "${{ github.event.inputs.version }}_release"
+
+      - name: Create Pull Request
+        uses: repo-sync/pull-request@v2
+        with:
+          source_branch: "${{ github.event.inputs.version }}_release"
+          destination_branch: "release/${MAJOR_MINOR}.x"
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          pr_title: "Pre-release: Update version to ${{ github.event.inputs.version }}"
+          pr_body: |
+            ## Description
+            This PR updates the version to ${{ github.event.inputs.version }}.
+            
+            By submitting this pull request, I confirm that you can use, modify, copy, and redistribute this contribution, under the terms of your choice.
