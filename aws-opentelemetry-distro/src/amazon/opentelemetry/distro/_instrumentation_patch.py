@@ -40,6 +40,6 @@ def _is_installed(req: str) -> bool:
     try:
         pkg_resources.get_distribution(req)
     except Exception as exc:  # pylint: disable=broad-except
-        _logger.debug("An error occurred while checking if package %s is installed: %s", req, exc)
+        _logger.debug("Skipping instrumentation patch: package %s, exception: %s", req, exc)
         return False
     return True
