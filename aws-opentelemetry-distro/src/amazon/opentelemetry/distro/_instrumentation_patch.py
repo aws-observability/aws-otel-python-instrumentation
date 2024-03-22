@@ -3,17 +3,12 @@
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import sys
 from logging import Logger, getLogger
-from typing import Dict, List, Optional
 
 import pkg_resources
 
 from amazon.opentelemetry.distro._resource_detector_patches import _apply_resource_detector_patches
 
 _logger: Logger = getLogger(__name__)
-
-patch_libraries: Dict[str, List[str]] = {
-    "botocore": ["botocore ~= 1.0"],
-}
 
 
 def apply_instrumentation_patches() -> None:
@@ -26,23 +21,16 @@ def apply_instrumentation_patches() -> None:
     Where possible, automated testing should be run to catch upstream changes resulting in broken patches
     """
 
-    if _check_patches("botocore"):
+    if _is_installed("botocore ~= 1.0"):
         # pylint: disable=import-outside-toplevel
         # Delay import to only occur if patches are detected from the system.
         from amazon.opentelemetry.distro._botocore_patches import _apply_botocore_instrumentation_patches
 
         _apply_botocore_instrumentation_patches()
 
+    # No need to check if library is installed as this patches opentelemetry.sdk,
+    # which must be installed for the distro to work at all.
     _apply_resource_detector_patches()
-
-
-def _check_patches(patch_name) -> bool:
-    if patch_name not in patch_libraries:
-        return False
-    for patch_lib in patch_libraries[patch_name]:
-        if not _is_installed(patch_lib):
-            return False
-    return True
 
 
 def _is_installed(req: str) -> bool:
@@ -51,19 +39,7 @@ def _is_installed(req: str) -> bool:
 
     try:
         pkg_resources.get_distribution(req)
-    except pkg_resources.DistributionNotFound:
-        return False
-    except pkg_resources.VersionConflict as exc:
-        required_version: Optional[str] = (
-            pkg_resources.parse_version(exc.req.specs[0][1])
-            if isinstance(exc.req, pkg_resources.Requirement) and exc.req.specs
-            else None
-        )
-        _logger.debug(
-            "instrumentation for package %s version %s is available but version %s is installed. Skipping.",
-            exc.req,
-            required_version,
-            exc.dist,  # pylint: disable=no-member
-        )
+    except Exception as exc:  # pylint: disable=broad-except
+        _logger.debug("An error occurred while checking if package %s is installed: %s", req, exc)
         return False
     return True
