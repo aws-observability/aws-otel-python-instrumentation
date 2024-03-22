@@ -27,9 +27,7 @@ def _apply_botocore_kinesis_patch() -> None:
     the `aws.kinesis.stream_name` attribute, to be used to generate RemoteTarget and achieve parity with the Java
     instrumentation.
     """
-    print("_apply_botocore_kinesis_patch!!!!!")
     _KNOWN_EXTENSIONS["kinesis"] = _lazy_load(".", "_KinesisExtension")
-    print(_KNOWN_EXTENSIONS)
 
 
 def _apply_botocore_s3_patch() -> None:
