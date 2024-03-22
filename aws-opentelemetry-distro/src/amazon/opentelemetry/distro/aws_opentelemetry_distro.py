@@ -16,7 +16,6 @@ _logger: Logger = getLogger(__name__)
 patch_libraries: List[Dict[str, str]] = [
     {
         "library": "botocore ~= 1.0",
-        "instrumentation": "opentelemetry-instrumentation-botocore==0.44b0.dev",
     },
 ]
 
