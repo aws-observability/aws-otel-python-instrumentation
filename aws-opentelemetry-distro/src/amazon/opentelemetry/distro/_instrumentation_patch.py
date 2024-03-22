@@ -54,7 +54,11 @@ def _is_installed(req: str) -> bool:
     except pkg_resources.DistributionNotFound:
         return False
     except pkg_resources.VersionConflict as exc:
-        required_version: Optional[str] = pkg_resources.parse_version(exc.req.specs[0][1]) if isinstance(exc.req, pkg_resources.Requirement) and exc.req.specs else None
+        required_version: Optional[str] = (
+            pkg_resources.parse_version(exc.req.specs[0][1])
+            if isinstance(exc.req, pkg_resources.Requirement) and exc.req.specs
+            else None
+        )
         _logger.debug(
             "instrumentation for package %s version %s is available but version %s is installed. Skipping.",
             exc.req,
