@@ -3,6 +3,7 @@
 import os
 import sys
 from logging import Logger, getLogger
+from typing import Dict, List
 
 import pkg_resources
 
@@ -12,7 +13,7 @@ from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_METRICS_D
 
 _logger: Logger = getLogger(__name__)
 
-patch_libraries = [
+patch_libraries: List[Dict[str, str]] = [
     {
         "library": "botocore ~= 1.0",
         "instrumentation": "opentelemetry-instrumentation-botocore==0.44b0.dev",
@@ -54,7 +55,7 @@ def _check_patches():
     return True
 
 
-def _is_installed(req):
+def _is_installed(req: str):
     if req in sys.modules:
         return True
 
