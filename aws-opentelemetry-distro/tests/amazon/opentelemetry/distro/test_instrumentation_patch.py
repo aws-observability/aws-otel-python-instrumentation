@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 from typing import Dict
 from unittest import TestCase
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+
+import pkg_resources
 
 from amazon.opentelemetry.distro._instrumentation_patch import apply_instrumentation_patches
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
@@ -15,9 +17,42 @@ _QUEUE_URL: str = "queueUrl"
 
 
 class TestInstrumentationPatch(TestCase):
-    def test_apply_instrumentation_patches(self):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.mock_get_distribution = patch(
+            "amazon.opentelemetry.distro._instrumentation_patch.pkg_resources.get_distribution"
+        ).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        cls.mock_get_distribution.stop()
+
+    def test_botocore_not_installed(self):
+        # Test scenario 1: Botocore package not installed
+        self.mock_get_distribution.side_effect = pkg_resources.DistributionNotFound
+        apply_instrumentation_patches()
+        with patch(
+            "amazon.opentelemetry.distro._botocore_patches._apply_botocore_instrumentation_patches"
+        ) as mock_apply_patches:
+            mock_apply_patches.assert_not_called()
+
+    def test_botocore_installed_wrong_version(self):
+        # Test scenario 2: Botocore package installed with wrong version
+        self.mock_get_distribution.side_effect = pkg_resources.VersionConflict("botocore==1.0.0", "botocore==0.0.1")
+        apply_instrumentation_patches()
+        with patch(
+            "amazon.opentelemetry.distro._botocore_patches._apply_botocore_instrumentation_patches"
+        ) as mock_apply_patches:
+            mock_apply_patches.assert_not_called()
+
+    def test_botocore_installed_correct_version(self):
+        # Test scenario 3: Botocore package installed with correct version
         # Validate unpatched upstream behaviour - important to detect upstream changes that may break instrumentation
         self._validate_unpatched_botocore_instrumentation()
+
+        self.mock_get_distribution.return_value = "CorrectDistributionObject"
 
         # Apply patches
         apply_instrumentation_patches()

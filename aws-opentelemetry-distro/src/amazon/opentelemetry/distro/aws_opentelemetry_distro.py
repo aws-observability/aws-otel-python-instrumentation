@@ -1,23 +1,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import os
-import sys
-from logging import Logger, getLogger
-from typing import Dict, List
 
-import pkg_resources
-
+from amazon.opentelemetry.distro._instrumentation_patch import apply_instrumentation_patches
 from opentelemetry.distro import OpenTelemetryDistro
 from opentelemetry.environment_variables import OTEL_PROPAGATORS, OTEL_PYTHON_ID_GENERATOR
 from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION
-
-_logger: Logger = getLogger(__name__)
-
-patch_libraries: List[Dict[str, str]] = [
-    {
-        "library": "botocore ~= 1.0",
-    },
-]
 
 
 class AwsOpenTelemetryDistro(OpenTelemetryDistro):
@@ -39,34 +27,5 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
         os.environ.setdefault(OTEL_PYTHON_ID_GENERATOR, "xray")
 
         # Apply patches to upstream instrumentation - usually stopgap measures until we can contribute long-term changes
-        if kwargs.get("apply_patches", True) and _check_patches():
-            # pylint: disable=import-outside-toplevel
-            # Delay import to only occur if patches are detected from the system.
-            from amazon.opentelemetry.distro._instrumentation_patch import apply_instrumentation_patches
-
+        if kwargs.get("apply_patches", True):
             apply_instrumentation_patches()
-
-
-def _check_patches():
-    for lib in patch_libraries:
-        if not _is_installed(lib["library"]):
-            return False
-    return True
-
-
-def _is_installed(req: str):
-    if req in sys.modules:
-        return True
-
-    try:
-        pkg_resources.get_distribution(req)
-    except pkg_resources.DistributionNotFound:
-        return False
-    except pkg_resources.VersionConflict as exc:
-        _logger.warning(
-            "instrumentation for package %s is available but version %s is installed. Skipping.",
-            exc.req,
-            exc.dist.as_requirement(),  # pylint: disable=no-member
-        )
-        return False
-    return True
