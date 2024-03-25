@@ -21,7 +21,7 @@ class TestInstrumentationPatch(TestCase):
     def setUpClass(cls):
         super().setUpClass()
         cls.mock_get_distribution = patch(
-            "amazon.opentelemetry.distro._instrumentation_patch.pkg_resources.get_distribution"
+            "amazon.opentelemetry.distro.patches._instrumentation_patch.pkg_resources.get_distribution"
         ).start()
 
     @classmethod
@@ -34,7 +34,7 @@ class TestInstrumentationPatch(TestCase):
         self.mock_get_distribution.side_effect = pkg_resources.DistributionNotFound
         apply_instrumentation_patches()
         with patch(
-            "amazon.opentelemetry.distro._botocore_patches._apply_botocore_instrumentation_patches"
+            "amazon.opentelemetry.distro.patches._botocore_patches._apply_botocore_instrumentation_patches"
         ) as mock_apply_patches:
             mock_apply_patches.assert_not_called()
 
@@ -43,7 +43,7 @@ class TestInstrumentationPatch(TestCase):
         self.mock_get_distribution.side_effect = pkg_resources.VersionConflict("botocore==1.0.0", "botocore==0.0.1")
         apply_instrumentation_patches()
         with patch(
-            "amazon.opentelemetry.distro._botocore_patches._apply_botocore_instrumentation_patches"
+            "amazon.opentelemetry.distro.patches._botocore_patches._apply_botocore_instrumentation_patches"
         ) as mock_apply_patches:
             mock_apply_patches.assert_not_called()
 
