@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pkg_resources
 
-from amazon.opentelemetry.distro._instrumentation_patch import apply_instrumentation_patches
+from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_instrumentation_patches
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
 from opentelemetry.semconv.trace import SpanAttributes
 

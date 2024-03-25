@@ -6,7 +6,7 @@ from logging import Logger, getLogger
 
 import pkg_resources
 
-from amazon.opentelemetry.distro._resource_detector_patches import _apply_resource_detector_patches
+from amazon.opentelemetry.distro.patches._resource_detector_patches import _apply_resource_detector_patches
 
 _logger: Logger = getLogger(__name__)
 
@@ -23,8 +23,8 @@ def apply_instrumentation_patches() -> None:
 
     if _is_installed("botocore ~= 1.0"):
         # pylint: disable=import-outside-toplevel
-        # Delay import to only occur if patches are detected from the system.
-        from amazon.opentelemetry.distro._botocore_patches import _apply_botocore_instrumentation_patches
+        # Delay import to only occur if patches is safe to apply (e.g. the instrumented library is installed).
+        from amazon.opentelemetry.distro.patches._botocore_patches import _apply_botocore_instrumentation_patches
 
         _apply_botocore_instrumentation_patches()
 
