@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
 
-from amazon.opentelemetry.distro._instrumentation_patch import apply_instrumentation_patches
+from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_instrumentation_patches
 from opentelemetry.distro import OpenTelemetryDistro
 from opentelemetry.environment_variables import OTEL_PROPAGATORS, OTEL_PYTHON_ID_GENERATOR
 from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION
