@@ -57,8 +57,7 @@ jobs:
             scripts/eks/appsignals/clean-app-signals.sh
           sparse-checkout-cone-mode: false
 
-      # TODO: remove this step next Monday and update validator with appropriate changes
-      - name: Temporary override addon version
+      - name: Use the latest addon version
         working-directory: enablement-script/scripts/eks/appsignals
         run: |
           sed -i 's/aws eks create-addon \\/aws eks create-addon \\\n        --resolve-conflicts OVERWRITE \\/' enable-app-signals.sh
