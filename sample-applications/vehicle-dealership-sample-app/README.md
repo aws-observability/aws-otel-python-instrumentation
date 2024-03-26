@@ -61,7 +61,10 @@ To deploy to EC2, you will have to go through the following steps.
 ```
 sudo dnf install python3.11
 sudo dnf install python3.11-pip
+sudo dnf install python3.11-devel
 sudo dnf install postgresql15
+sudo dnf install postgresql-devel
+sudo dnf install gcc*
 
 createdb vehicle_inventory -h <rds_url> -U root
 createuser djangouser -h <rds_url> -U root
@@ -95,6 +98,10 @@ python3.11 manage.py migrate --noinput && python3.11 manage.py runserver 0.0.0.0
 ```
 sudo dnf install python3.11
 sudo dnf install python3.11-pip
+sudo dnf install python3.11-devel
+sudo dnf install postgresql15
+sudo dnf install postgresql-devel
+sudo dnf install gcc*
 
 aws s3 sync s3://<s3_bucket_that_has_python_code> .
 
@@ -103,6 +110,12 @@ cd to the image microservice directory and run:
 python3.11 -m pip install -r requirements.txt
 
 Create a .env file with the following: 
+POSTGRES_ROOT_PASSWORD=<password_from_RDS_setup>
+POSTGRES_DATABASE=vehicle_inventory
+POSTGRES_USER=djangouser
+POSTGRES_PASSWORD=<password_from_this_step>
+DB_SERVICE_HOST=<RDS_DB_endpoint>
+DB_SERVICE_PORT=5432
 S3_BUCKET=<s3_bucket_to_host_images>
 
 python3.11 manage.py migrate --noinput && python3.11 manage.py runserver 0.0.0.0:8000
