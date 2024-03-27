@@ -53,12 +53,12 @@ class TestAwsMetricAttributeGenerator(TestCase):
     def setUp(self):
         self.attributes_mock: Attributes = MagicMock()
         self.instrumentation_scope_info_mock: InstrumentationScope = MagicMock()
-        self.instrumentation_scope_info_mock._name = "Scope name"
+        self.instrumentation_scope_info_mock.name = "Scope name"
         self.span_mock: ReadableSpan = MagicMock()
         self.span_mock.name = None
         self.span_mock.attributes = self.attributes_mock
         self.attributes_mock.get.return_value = None
-        self.span_mock._instrumentation_scope = self.instrumentation_scope_info_mock
+        self.span_mock.instrumentation_scope = self.instrumentation_scope_info_mock
         self.span_mock.get_span_context.return_value = MagicMock()
         self.parent_span_context: SpanContext = MagicMock()
         self.parent_span_context.is_valid = True
@@ -737,40 +737,38 @@ class TestAwsMetricAttributeGenerator(TestCase):
         ).get(DEPENDENCY_METRIC)
         self.assertEqual(actual_attributes.get(AWS_REMOTE_SERVICE), "TestString")
 
-    def test_no_metric_when_consumer_process_with_consumer_parent(self):
-        self._mock_attribute(
-            [AWS_CONSUMER_PARENT_SPAN_KIND, SpanAttributes.MESSAGING_OPERATION],
-            [SpanKind.CONSUMER, MessagingOperationValues.PROCESS],
-        )
-        self.span_mock.kind = SpanKind.CONSUMER
+    def test_local_root_boto3_span(self):
+        self._update_resource_with_service_name()
+        self.parent_span_context.is_valid = False
+        self.span_mock.kind = SpanKind.PRODUCER
+        self.span_mock.instrumentation_scope.name = "opentelemetry.instrumentation.boto3sqs"
 
-        attribute_map: {str: Attributes} = _GENERATOR.generate_metric_attributes_dict_from_span(
+        actual_attributes: Attributes = _GENERATOR.generate_metric_attributes_dict_from_span(
             self.span_mock, self.resource
         )
+        service_attributes: Attributes = actual_attributes.get(SERVICE_METRIC)
+        dependency_attributes: Attributes = actual_attributes.get(DEPENDENCY_METRIC)
 
-        service_attributes: Attributes = attribute_map.get(SERVICE_METRIC)
-        dependency_attributes: Attributes = attribute_map.get(DEPENDENCY_METRIC)
-
+        # boto3sqs spans shouldn't generate aws service attributes even local root
         self.assertIsNone(service_attributes)
+        # boto3sqs spans shouldn't generate aws dependency attributes
         self.assertIsNone(dependency_attributes)
 
-    def test_both_metric_when_local_root_consumer_process(self):
-        self._mock_attribute(
-            [AWS_CONSUMER_PARENT_SPAN_KIND, SpanAttributes.MESSAGING_OPERATION],
-            [SpanKind.CONSUMER, MessagingOperationValues.PROCESS],
-        )
+    def test_non_local_root_boto3_span(self):
+        self._update_resource_with_service_name()
         self.span_mock.kind = SpanKind.CONSUMER
-        self.parent_span_context.is_valid = False
+        self.span_mock.instrumentation_scope.name = "opentelemetry.instrumentation.boto3sqs"
 
-        attribute_map: {str: Attributes} = _GENERATOR.generate_metric_attributes_dict_from_span(
+        actual_attributes: Attributes = _GENERATOR.generate_metric_attributes_dict_from_span(
             self.span_mock, self.resource
         )
+        service_attributes: Attributes = actual_attributes.get(SERVICE_METRIC)
+        dependency_attributes: Attributes = actual_attributes.get(DEPENDENCY_METRIC)
 
-        service_attributes: Attributes = attribute_map.get(SERVICE_METRIC)
-        dependency_attributes: Attributes = attribute_map.get(DEPENDENCY_METRIC)
-
-        self.assertIsNotNone(service_attributes)
-        self.assertIsNotNone(dependency_attributes)
+        # boto3sqs spans shouldn't generate aws service attributes
+        self.assertIsNone(service_attributes)
+        # boto3sqs spans shouldn't generate aws dependency attributes
+        self.assertIsNone(dependency_attributes)
 
     def test_normalize_service_name_non_aws_sdk_span(self):
         service_name: str = "non aws service"
