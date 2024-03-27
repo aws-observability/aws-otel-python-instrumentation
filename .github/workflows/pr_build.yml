@@ -43,6 +43,14 @@ jobs:
           pip install pytest
           pytest contract-tests/tests
 
+      - name: Upload Coverage to Codecov
+        if: ${{ matrix.python-version == '3.11' }}
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./aws-opentelemetry-distro/tests/.coverage
+          verbose: true
+
+
   lint:
     runs-on: ubuntu-latest
     strategy:
