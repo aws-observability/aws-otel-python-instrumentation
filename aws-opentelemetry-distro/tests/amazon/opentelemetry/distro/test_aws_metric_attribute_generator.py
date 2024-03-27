@@ -8,6 +8,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
+    AWS_CONSUMER_PARENT_SPAN_KIND,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_QUEUE_NAME,
@@ -24,7 +25,7 @@ from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.sdk.resources import _DEFAULT_RESOURCE, SERVICE_NAME
 from opentelemetry.sdk.trace import ReadableSpan, Resource
 from opentelemetry.sdk.util.instrumentation import InstrumentationScope
-from opentelemetry.semconv.trace import SpanAttributes
+from opentelemetry.semconv.trace import MessagingOperationValues, SpanAttributes
 from opentelemetry.trace import SpanContext, SpanKind
 from opentelemetry.util.types import Attributes
 
@@ -735,6 +736,41 @@ class TestAwsMetricAttributeGenerator(TestCase):
             self.span_mock, self.resource
         ).get(DEPENDENCY_METRIC)
         self.assertEqual(actual_attributes.get(AWS_REMOTE_SERVICE), "TestString")
+
+    def test_no_metric_when_consumer_process_with_consumer_parent(self):
+        self._mock_attribute(
+            [AWS_CONSUMER_PARENT_SPAN_KIND, SpanAttributes.MESSAGING_OPERATION],
+            [SpanKind.CONSUMER, MessagingOperationValues.PROCESS],
+        )
+        self.span_mock.kind = SpanKind.CONSUMER
+
+        attribute_map: {str: Attributes} = _GENERATOR.generate_metric_attributes_dict_from_span(
+            self.span_mock, self.resource
+        )
+
+        service_attributes: Attributes = attribute_map.get(SERVICE_METRIC)
+        dependency_attributes: Attributes = attribute_map.get(DEPENDENCY_METRIC)
+
+        self.assertIsNone(service_attributes)
+        self.assertIsNone(dependency_attributes)
+
+    def test_both_metric_when_local_root_consumer_process(self):
+        self._mock_attribute(
+            [AWS_CONSUMER_PARENT_SPAN_KIND, SpanAttributes.MESSAGING_OPERATION],
+            [SpanKind.CONSUMER, MessagingOperationValues.PROCESS],
+        )
+        self.span_mock.kind = SpanKind.CONSUMER
+        self.parent_span_context.is_valid = False
+
+        attribute_map: {str: Attributes} = _GENERATOR.generate_metric_attributes_dict_from_span(
+            self.span_mock, self.resource
+        )
+
+        service_attributes: Attributes = attribute_map.get(SERVICE_METRIC)
+        dependency_attributes: Attributes = attribute_map.get(DEPENDENCY_METRIC)
+
+        self.assertIsNotNone(service_attributes)
+        self.assertIsNotNone(dependency_attributes)
 
     def test_local_root_boto3_span(self):
         self._update_resource_with_service_name()

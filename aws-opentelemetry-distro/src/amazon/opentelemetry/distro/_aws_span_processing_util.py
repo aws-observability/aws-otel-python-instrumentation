@@ -119,10 +119,17 @@ def is_local_root(span: ReadableSpan) -> bool:
 
 def _is_boto3sqs_span(span: ReadableSpan) -> bool:
     """
-    To identify if the span produced is from the boto3sqs instrumentation
+    To identify if the span produced is from the boto3sqs instrumentation.
+    We use this to identify the boto3sqs spans and not generate metrics from the since we will generate
+    the same metrics from botocore spans.
     """
+    # TODO: Evaluate if we can bring the boto3sqs spans back to generate metrics and not have to suppress them.
     instrumentation_scope: InstrumentationScope = span.instrumentation_scope
-    return _BOTO3SQS_INSTRUMENTATION_SCOPE.casefold() == instrumentation_scope.name.casefold()
+    return (
+        instrumentation_scope is not None
+        and instrumentation_scope.name is not None
+        and _BOTO3SQS_INSTRUMENTATION_SCOPE.casefold() == instrumentation_scope.name.casefold()
+    )
 
 
 def _is_dependency_consumer_span(span: ReadableSpan) -> bool:
