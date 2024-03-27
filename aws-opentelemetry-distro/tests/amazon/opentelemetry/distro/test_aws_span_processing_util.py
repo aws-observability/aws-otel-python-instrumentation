@@ -371,11 +371,3 @@ class TestAwsSpanProcessingUtil(TestCase):
         keywords: List[str] = _get_dialect_keywords()
         for keyword in keywords:
             self.assertLessEqual(len(keyword), MAX_KEYWORD_LENGTH)
-
-
-def _attributes_get_side_effect_messaging_operation(
-    self, key: str, value: MessagingOperationValues
-) -> MessagingOperationValues | None:
-    if key == SpanAttributes.MESSAGING_OPERATION:
-        return value
-    return None

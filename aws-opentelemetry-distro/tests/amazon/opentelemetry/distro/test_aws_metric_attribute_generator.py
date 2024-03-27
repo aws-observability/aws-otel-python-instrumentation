@@ -8,7 +8,6 @@ from unittest import TestCase
 from unittest.mock import MagicMock
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
-    AWS_CONSUMER_PARENT_SPAN_KIND,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_QUEUE_NAME,
@@ -25,7 +24,7 @@ from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.sdk.resources import _DEFAULT_RESOURCE, SERVICE_NAME
 from opentelemetry.sdk.trace import ReadableSpan, Resource
 from opentelemetry.sdk.util.instrumentation import InstrumentationScope
-from opentelemetry.semconv.trace import MessagingOperationValues, SpanAttributes
+from opentelemetry.semconv.trace import SpanAttributes
 from opentelemetry.trace import SpanContext, SpanKind
 from opentelemetry.util.types import Attributes
 
