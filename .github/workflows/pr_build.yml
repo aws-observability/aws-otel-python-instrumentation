@@ -5,10 +5,6 @@ on:
       - main
       - "release/v*"
 
-env:
-  AWS_DEFAULT_REGION: us-east-1
-  TEST_TAG: 637423224110.dkr.ecr.us-east-1.amazonaws.com/eks/observability/adot-autoinstrumentation-python:test
-
 permissions:
   id-token: write
   contents: read
@@ -27,10 +23,7 @@ jobs:
       - name: Build Wheel and Image Files
         uses: ./.github/actions/artifacts_build
         with:
-          aws-region: ${{ env.AWS_DEFAULT_REGION }}
-          image_uri_with_tag: ${{ env.TEST_TAG }}
-          image_registry: 637423224110.dkr.ecr.us-east-1.amazonaws.com
-          snapshot-ecr-role: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
+          image_uri_with_tag: pr_build
           push_image: false
           load_image: true
           python_version: ${{ matrix.python-version }}

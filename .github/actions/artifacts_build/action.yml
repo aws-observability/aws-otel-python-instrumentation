@@ -4,17 +4,17 @@ description: |
 
 inputs:
   aws-region:
-    required: true
-    description: "AWS Region"
+    required: false
+    description: "AWS Region, required only if push_image is true"
   image_uri_with_tag:
     required: true
     description: "Image URI with Tag"
   image_registry:
-    required: true
-    description: "Image Registry"
+    required: false
+    description: "Image Registry, required only if push_image is true"
   snapshot-ecr-role:
-    required: true
-    description: "IAM Role used for pushing to snapshot ecr"
+    required: false
+    description: "IAM Role used for pushing to snapshot ecr, required only if push_image is true"
   push_image:
     required: true
     description: "Whether push image to ECR"
