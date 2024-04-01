@@ -8,10 +8,6 @@ understanding of the underlying internals.
 
 ## Notices
 
-### Performance
-
-Enabling ADOT auto-instrumentation on Python applications could lead to an increase in API latencies at upper percentiles (P90), and is more noticeable in high throughput APIs or at high trace sampling rates. For more information, please contact app-signals-feedback@amazon.com.
-
 ### Python Version Support
 This project ensures compatibility with the following supported Python versions: 3.8, 3.9, 3.10, 3.11
 
