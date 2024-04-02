@@ -203,19 +203,19 @@ def _custom_import_sampler(sampler_name: str, resource: Resource) -> Sampler:
 
 
 def _customize_sampler(sampler: Sampler) -> Sampler:
-    if not is_app_signals_enabled():
+    if not _is_app_signals_enabled():
         return sampler
     return AlwaysRecordSampler(sampler)
 
 
 def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> SpanExporter:
-    if not is_app_signals_enabled():
+    if not _is_app_signals_enabled():
         return span_exporter
     return AwsMetricAttributesSpanExporterBuilder(span_exporter, resource).build()
 
 
 def _customize_span_processors(provider: TracerProvider, resource: Resource) -> None:
-    if not is_app_signals_enabled():
+    if not _is_app_signals_enabled():
         return
 
     # Construct and set local and remote attributes span processor
@@ -247,8 +247,8 @@ def _customize_versions(auto_resource: Dict[str, any]) -> Dict[str, any]:
     return auto_resource
 
 
-def is_app_signals_enabled():
-    return os.environ.get(OTEL_AWS_APP_SIGNALS_ENABLED, False)
+def _is_app_signals_enabled():
+    return os.environ.get(OTEL_AWS_APP_SIGNALS_ENABLED, "false").lower() == "true"
 
 
 class AppSignalsExporterProvider:
