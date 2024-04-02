@@ -46,6 +46,29 @@ jobs:
           ref: main
           fetch-depth: 0
 
+      - name: Download enablement script
+        uses: actions/checkout@v4
+        with:
+          repository: aws-observability/application-signals-demo
+          ref: main
+          path: enablement-script
+          sparse-checkout: |
+            scripts/eks/appsignals/enable-app-signals.sh
+            scripts/eks/appsignals/clean-app-signals.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve Add-on configuration conflict
+        working-directory: enablement-script/scripts/eks/appsignals
+        run: |
+          sed -i 's/aws eks create-addon \\/aws eks create-addon \\\n        --resolve-conflicts OVERWRITE \\/' enable-app-signals.sh
+
+      - name: Remove log group deletion command
+        if: always()
+        working-directory: enablement-script/scripts/eks/appsignals
+        run: |
+          delete_log_group="aws logs delete-log-group --log-group-name '${{ env.LOG_GROUP_NAME }}' --region \$REGION"
+          sed -i "s#$delete_log_group##g" clean-app-signals.sh
+
       - name: Generate testing id
         run: echo TESTING_ID="${{ inputs.aws-region }}-${{ github.run_id }}-${{ github.run_number }}" >> $GITHUB_ENV
 
@@ -100,58 +123,6 @@ jobs:
           --region ${{ inputs.aws-region }} \
           --approve
 
-      # TODO: This step is used for custom pre-release instrumentation
-      # It is a temporary measure until the cw add-on is released with python support
-      - name: Setup Helm
-        uses: azure/setup-helm@v3
-
-      # TODO: This step is used for custom pre-release instrumentation
-      # It is a temporary measure until the cw add-on is released with python support
-      - name: Checkout Amazon Cloudwatch Agent Operator
-        uses: actions/checkout@v4
-        with:
-          repository: aws/amazon-cloudwatch-agent-operator
-          # SHA as of March 4
-          ref: abf75babe672412cb63c56cbcf1c5ce2d8c97a1c
-          path: amazon-cloudwatch-agent-operator
-
-      # TODO: This step is used for custom pre-release instrumentation
-      # It is a temporary measure until the cw add-on is released with python support
-      - name: Edit Helm values for Amazon Cloudwatch Agent Operator
-        working-directory: amazon-cloudwatch-agent-operator/helm/
-        run: |
-          sed -i 's/clusterName:/clusterName: ${{ inputs.test-cluster-name }}/g' values.yaml
-          sed -i 's/region:/region: ${{ inputs.aws-region }}/g' values.yaml
-          sed -i 's/tag: 1.0.2/tag: 1.1.0/g' values.yaml
-          if [ ${{ inputs.appsignals-adot-image }} != "" ]; then
-            echo "Using provided AppSignals ADOT image"
-            sed -i 's~repository: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-python~repository: ${{ inputs.appsignals-adot-image }}~g' values.yaml
-          else
-            echo "AppSignals ADOT image is not provided"
-            sed -i 's~repository: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-python~repository: ${{ secrets.TEMP_TEST_ADOT_PYTHON_IMAGE }}~g' values.yaml
-          fi
-          if [ ${{ inputs.appsignals-adot-image-tag }} != "" ]; then
-            echo "Using appsignals-adot-image-tag"
-            sed -i 's/tag: 0.43b0/tag: ${{ inputs.appsignals-adot-image-tag }}/g' values.yaml
-          else
-            echo "appsignals-adot-image-tag is empty"
-            sed -i 's/tag: 0.43b0/tag: latest/g' values.yaml
-          fi
-
-      # TODO: This step is used for custom pre-release instrumentation
-      # It is a temporary measure until the cw add-on is released with python support
-      - name: Create CWA Operator Namespace file
-        working-directory: amazon-cloudwatch-agent-operator/
-        run: |
-          cat <<EOF > ./namespace.yaml
-          apiVersion: v1
-          kind: Namespace
-          metadata:
-            name: amazon-cloudwatch
-            labels:
-              name: amazon-cloudwatch
-          EOF
-
       - name: Set up terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -192,21 +163,24 @@ jobs:
             # If the deployment_failed is still 0, then the terraform deployment succeeded and now try to connect to the endpoint 
             # after installing App Signals. Attempts to connect will be made for up to 10 minutes
             if [ $deployment_failed -eq 0 ]; then          
-
               kubectl wait --for=condition=Ready pod --all -n ${{ env.PYTHON_SAMPLE_APP_NAMESPACE }}
 
               echo "Installing app signals to the sample app"
+              source ${GITHUB_WORKSPACE}/.github/workflows/util/execute_and_retry.sh
+              execute_and_retry 2 \
+              "${GITHUB_WORKSPACE}/enablement-script/scripts/eks/appsignals/enable-app-signals.sh \
+              ${{ inputs.test-cluster-name }} \
+              ${{ inputs.aws-region }} \
+              ${{ env.PYTHON_SAMPLE_APP_NAMESPACE }}" \
+              "${GITHUB_WORKSPACE}/enablement-script/scripts/eks/appsignals/clean-app-signals.sh \
+              ${{ inputs.test-cluster-name }} \
+              ${{ inputs.aws-region }} \
+              ${{ env.PYTHON_SAMPLE_APP_NAMESPACE }} && \
+              aws eks update-kubeconfig --name ${{ inputs.test-cluster-name }} --region ${{ inputs.aws-region }}"
 
-              # TODO: The next 7 lines are used for custom pre-release instrumentation
-              # It is a temporary measure until the cw add-on is released with python support
-              cd ${{ github.workspace }}/amazon-cloudwatch-agent-operator/
-              kubectl apply -f namespace.yaml
-              helm template amazon-cloudwatch-observability ./helm --include-crds --namespace amazon-cloudwatch | kubectl apply --namespace amazon-cloudwatch --server-side --force-conflicts -f -
 
-              kubectl wait --for=condition=Ready pod --all -n amazon-cloudwatch
-              kubectl delete pods --all -n ${{ env.PYTHON_SAMPLE_APP_NAMESPACE }}
-              kubectl wait --for=condition=Ready pod --all -n ${{ env.PYTHON_SAMPLE_APP_NAMESPACE }}
-              cd ${{ github.workspace }}/terraform/python/eks
+              execute_and_retry 2 "kubectl delete pods --all -n ${{ env.PYTHON_SAMPLE_APP_NAMESPACE }}"
+              execute_and_retry 2 "kubectl wait --for=condition=Ready --request-timeout '5m' pod --all -n ${{ env.PYTHON_SAMPLE_APP_NAMESPACE }}"
 
               echo "Attempting to connect to the endpoint"
               python_app_endpoint=http://$(terraform output python_app_endpoint)
@@ -374,9 +348,12 @@ jobs:
       - name: Clean Up App Signals
         if: always()
         continue-on-error: true
-        working-directory: amazon-cloudwatch-agent-operator/
+        working-directory: enablement-script/scripts/eks/appsignals
         run: |
-          kubectl delete -f ./namespace.yaml
+          ./clean-app-signals.sh \
+          ${{ inputs.test-cluster-name }} \
+          ${{ inputs.aws-region }} \
+          ${{ env.PYTHON_SAMPLE_APP_NAMESPACE }}
 
       # This step also deletes lingering resources from previous test runs
       - name: Delete all sample app resources
