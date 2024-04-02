@@ -60,7 +60,6 @@ from opentelemetry.trace import set_tracer_provider
 OTEL_AWS_APP_SIGNALS_ENABLED = "OTEL_AWS_APP_SIGNALS_ENABLED"
 OTEL_METRIC_EXPORT_INTERVAL = "OTEL_METRIC_EXPORT_INTERVAL"
 OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT = "OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT"
-OTEL_AWS_SMP_EXPORTER_ENDPOINT = "OTEL_AWS_SMP_EXPORTER_ENDPOINT"
 DEFAULT_METRIC_EXPORT_INTERVAL = 60000.0
 
 _logger: Logger = getLogger(__name__)
@@ -266,10 +265,7 @@ class AppSignalsExporterProvider:
         )
         _logger.debug("AppSignals export protocol: %s", protocol)
 
-        app_signals_endpoint = os.environ.get(
-            OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT,
-            os.environ.get(OTEL_AWS_SMP_EXPORTER_ENDPOINT, "http://localhost:4315"),
-        )
+        app_signals_endpoint = os.environ.get(OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT, "http://localhost:4315")
 
         _logger.debug("AppSignals export endpoint: %s", app_signals_endpoint)
 
