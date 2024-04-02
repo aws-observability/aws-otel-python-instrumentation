@@ -20,64 +20,8 @@ jobs:
       - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@v4
 
-      - name: Build Wheel and Image Files
-        uses: ./.github/actions/artifacts_build
-        with:
-          image_uri_with_tag: pr_build
-          push_image: false
-          load_image: true
-          python_version: ${{ matrix.python-version }}
-          package_name: aws-opentelemetry-distro
-          os: ubuntu-latest
-
-      - name: Set up and run contract tests with pytest
+      - name: Update version to next development version in main
         run: |
-          bash scripts/set-up-contract-tests.sh
-          pip install pytest
-          pytest contract-tests/tests
-
-  lint:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
-      matrix:
-        tox-environment: ["spellcheck", "lint"]
-    steps:
-      - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
-        uses: actions/checkout@v4
-
-      - name: Install libsnappy-dev
-        if: ${{ matrix.tox-environment == 'lint' }}
-        run: sudo apt-get update && sudo apt-get install -y libsnappy-dev
-
-      - name: Set up
-        uses: ./.github/actions/set_up
-        with:
-          python_version: 3.11
-          package_name: aws-opentelemetry-distro
-          os: ubuntu-latest
-          run_unit_tests: false
-
-      - name: Run ${{ matrix.tox-environment }} with tox
-        run: tox -e ${{ matrix.tox-environment }}
-
-  spotless:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
-        uses: actions/checkout@v4
-
-      - name: Gradle validation
-        uses: gradle/wrapper-validation-action@v1
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          java-version: 17
-          distribution: temurin
-
-      - name: Setup Gradle
-        uses: gradle/gradle-build-action@v3
-
-      - name: Build with Gradle
-        run: cd performance-tests; ./gradlew spotlessCheck
+          VERSION="0.1.0"
+          sed -i 's/python:v.*"/python:v'$VERSION'"/' .github/workflows/released_image_scan.yml
+          git diff

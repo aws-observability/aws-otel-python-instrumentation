@@ -1,0 +1,71 @@
+## Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+## SPDX-License-Identifier: Apache-2.0
+name: Released image scan
+description: |
+  Performs a daily scan of the latest released ADOT Python image. Publishes results to CloudWatch Metrics.
+on:
+  schedule:
+    - cron: '0 12 * * *' # scheduled to run at 12:00 UTC every day
+  workflow_dispatch: # be able to run the workflow on demand
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  scan_and_report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Perform high scan
+        id: high_scan
+        uses: ./.github/actions/image_scan
+        with:
+          public-image: true
+          image-ref: "public.ecr.aws/aws-observability/adot-autoinstrumentation-python:v0.0.1"
+          severity: 'CRITICAL,HIGH'
+
+      - name: Perform low scan
+        if: always()
+        id: low_scan
+        uses: ./.github/actions/image_scan
+        with:
+          public-image: true
+          image-ref: "public.ecr.aws/aws-observability/adot-autoinstrumentation-python:v0.0.1"
+          severity: 'MEDIUM,LOW,UNKNOWN'
+
+      - name: Configure AWS Credentials
+        if: always()
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.E2E_SECRET_TEST_ROLE_ARN }}
+          aws-region: us-east-1
+          role-duration-seconds: 21600
+
+      - name: Publish high scan status success
+        if: steps.high_scan.outcome == "success'
+        run: |
+          aws cloudwatch put-metric-data --namespace 'ADOT/GitHubActions' \
+            --metric-name Success \
+            --dimensions repository=${{ github.repository }},branch=${{ github.ref_name }},workflow=released_image_scan_high \
+            --value 1.0
+      - name: Publish high scan status failure
+        if: steps.high_scan.outcome != 'success'
+        run: |
+          aws cloudwatch put-metric-data --namespace 'ADOT/GitHubActions' \
+            --metric-name Success \
+            --dimensions repository=${{ github.repository }},branch=${{ github.ref_name }},workflow=released_image_scan_high \
+            --value 0.0
+      - name: Publish low scan status success
+        if: steps.low_scan.outcome == "success'
+        run: |
+          aws cloudwatch put-metric-data --namespace 'ADOT/GitHubActions' \
+            --metric-name Success \
+            --dimensions repository=${{ github.repository }},branch=${{ github.ref_name }},workflow=released_image_scan_low \
+            --value 1.0
+      - name: Publish low scan status failure
+        if: steps.low_scan.outcome != 'success'
+        run: |
+          aws cloudwatch put-metric-data --namespace 'ADOT/GitHubActions' \
+            --metric-name Success \
+            --dimensions repository=${{ github.repository }},branch=${{ github.ref_name }},workflow=released_image_scan_low \
+            --value 0.0
