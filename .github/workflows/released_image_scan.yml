@@ -1,8 +1,7 @@
 ## Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 ## SPDX-License-Identifier: Apache-2.0
+# Performs a daily scan of the latest released ADOT Python image. Publishes results to CloudWatch Metrics.
 name: Released image scan
-description: |
-  Performs a daily scan of the latest released ADOT Python image. Publishes results to CloudWatch Metrics.
 
 on:
   schedule:
