@@ -40,7 +40,10 @@ jobs:
         run: |
           DEV_VERSION="${{ github.event.inputs.version }}.dev0"
           sed -i 's/__version__ = ".*"/__version__ = "'$DEV_VERSION'"/' aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py
+          VERSION="${{ github.event.inputs.version }}"
+          sed -i 's/python:v.*"/python:v'$VERSION'"/' .github/workflows/released_image_scan.yml
           git add aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py
+          git add .github/workflows/released_image_scan.yml
           git commit -m "Prepare main for next development cycle: Update version to $DEV_VERSION"
           git push --set-upstream origin "prepare-main-for-next-dev-cycle-${VERSION}"
 
@@ -50,7 +53,7 @@ jobs:
         run: |
           DEV_VERSION="${{ github.event.inputs.version }}.dev0"
           gh pr create --title "Post release $VERSION: Update version to $DEV_VERSION" \
-                       --body "This PR prepares the main branch for the next development cycle by updating the version to $DEV_VERSION.
+                       --body "This PR prepares the main branch for the next development cycle by updating the version to $DEV_VERSION and updating the image version to be scanned to the latest released.
           
           This PR should only be merge when release for version v$VERSION is success.
           

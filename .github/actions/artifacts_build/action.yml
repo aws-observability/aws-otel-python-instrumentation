@@ -1,6 +1,7 @@
 name: Build and Push aws-opentelemetry-distro
 description: |
-  This action assumes that the repo was checked out. Builds and pushes/loads wheel and image files.
+  This action assumes that the repo was checked out. Builds and pushes/loads wheel and image files. Also performs scan
+  of the resultant image.
 
 inputs:
   aws-region:
@@ -91,3 +92,9 @@ runs:
         platforms: linux/amd64
         tags: ${{ inputs.image_uri_with_tag }}
         load: ${{ inputs.load_image }}
+
+    - name: Perform image scan
+      uses: ./.github/actions/image_scan
+      with:
+        image-ref: ${{ inputs.image_uri_with_tag }}
+        severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'
