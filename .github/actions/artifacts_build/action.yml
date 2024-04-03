@@ -96,6 +96,5 @@ runs:
     - name: Perform image scan
       uses: ./.github/actions/image_scan
       with:
-        public-image: false
         image-ref: ${{ inputs.image_uri_with_tag }}
         severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'

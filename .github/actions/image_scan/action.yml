@@ -5,9 +5,6 @@ description: |
   This action performs a scan of a provided (local or public ECR remote) image, using Trivy.
 
 inputs:
-  public-image:
-    required: true
-    description: "True if the image to be scanned is in a public ECR"
   image-ref:
     required: true
     description: "Reference for the image to be scanned"
@@ -25,7 +22,6 @@ runs:
   # ensure we can make unauthenticated call. This is important for making the pr_build workflow run on
   # PRs created from forked repos.
   - name: Logout of public AWS ECR
-    if: ${{ inputs.public-image == true || inputs.public-image == 'true' }}
     shell: bash
     run: docker logout public.ecr.aws
 
@@ -33,5 +29,5 @@ runs:
     uses: aquasecurity/trivy-action@master
     with:
       image-ref: ${{ inputs.image-ref }}
-      severity: 'CRITICAL,HIGH'
+      severity: ${{ inputs.severity }}
       exit-code: '1'
