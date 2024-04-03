@@ -25,7 +25,7 @@ from opentelemetry.sdk.environment_variables import OTEL_TRACES_SAMPLER, OTEL_TR
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Span, SpanProcessor, Tracer, TracerProvider
 from opentelemetry.sdk.trace.export import SpanExporter
-from opentelemetry.sdk.trace.sampling import Sampler
+from opentelemetry.sdk.trace.sampling import DEFAULT_ON, Sampler
 from opentelemetry.trace import get_tracer_provider
 
 
@@ -152,6 +152,14 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(
             xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint, "http://127.0.0.1:2000/GetSamplingRules"
         )
+
+    def test_import_default_sampler_when_env_var_is_not_set(self):
+        os.environ.pop(OTEL_TRACES_SAMPLER, None)
+        default_sampler: Sampler = _custom_import_sampler(None, resource=None)
+
+        self.assertIsNotNone(default_sampler)
+        self.assertEqual(default_sampler.get_description(), DEFAULT_ON.get_description())
+        # DEFAULT_ON is a ParentBased(ALWAYS_ON) sampler
 
     def test_using_xray_sampler_sets_url_exclusion_env_vars(self):
         targets_to_exclude = "SamplingTargets,GetSamplingRules"
