@@ -113,7 +113,7 @@ jobs:
       - name: Publish low scan status
         if: always()
         run: |
-          value="${{ steps.low_scan.outcome == 'success' && steps.dep_scan.outcome == 'success' && 1.0 || 0.0}}"
+          value="${{ steps.low_scan.outcome == 'success' && steps.dep_scan.outcome == 'success' && '1.0' || '0.0'}}"
           aws cloudwatch put-metric-data --namespace 'ADOT/GitHubActions' \
             --metric-name Success \
             --dimensions repository=${{ github.repository }},branch=${{ github.ref_name }},workflow=daily_scan_low \
