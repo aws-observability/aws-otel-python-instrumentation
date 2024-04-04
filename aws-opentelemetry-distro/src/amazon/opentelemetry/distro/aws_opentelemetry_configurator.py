@@ -169,6 +169,14 @@ def _exclude_urls_for_instrumentations():
 
 
 def _custom_import_sampler(sampler_name: str, resource: Resource) -> Sampler:
+    # sampler_name from _get_sampler() can be None if `OTEL_TRACES_SAMPLER` is unset. Upstream TracerProvider is able to
+    # accept None as sampler, however we require the sampler to be not None to create `AlwaysRecordSampler` beforehand.
+    # Default value of `OTEL_TRACES_SAMPLER` should be `parentbased_always_on`.
+    # https://opentelemetry.io/docs/languages/sdk-configuration/general/#otel_traces_sampler
+    # Ideally, _get_sampler() should default to `parentbased_always_on` in upstream.
+    if sampler_name is None:
+        sampler_name = "parentbased_always_on"
+
     if sampler_name == "xray":
         # Example env var value
         # OTEL_TRACES_SAMPLER_ARG=endpoint=http://localhost:2000,polling_interval=360
