@@ -87,7 +87,7 @@ jobs:
           pytest contract-tests/tests
 
   # AppSignals specific e2e eks tests
-  appsignals-e2e-eks-test:
+  appsignals-python-e2e-eks-test:
     needs: [build]
     uses: ./.github/workflows/appsignals-python-e2e-eks-test.yml
     secrets: inherit
