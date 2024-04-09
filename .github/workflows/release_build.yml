@@ -109,17 +109,7 @@ jobs:
           tags: |
             ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ github.event.inputs.version }}
 
-      # Publish to private ECR
-      - name: Build and push private ECR image
-        uses: docker/build-push-action@v5
-        with:
-          push: true
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ github.event.inputs.version }}
-
+      # Publish to GitHub releases
       - name: Create GH release
         id: create_release
         env:
@@ -130,3 +120,14 @@ jobs:
              --draft \
              "v${{ github.event.inputs.version }}" \
              dist/aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
+
+      # Publish to private ECR
+      - name: Build and push private ECR image
+        uses: docker/build-push-action@v5
+        with:
+          push: true
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ github.event.inputs.version }}
