@@ -12,8 +12,36 @@ permissions:
   pull-requests: write
 
 jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v2
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Extract Major.Minor Version and setup Env variable
+        run: |
+          echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_ENV
+          echo "MAJOR_MINOR=$(echo ${{ github.event.inputs.version }} | sed -E 's/([0-9]+\.[0-9]+)\.[0-9]+/\1/')" >> $GITHUB_ENV
+
+      - name: Get current major.minor version from main branch
+        id: get_version
+        run: |
+          CURRENT_VERSION=$(grep '__version__' aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py | sed -E 's/__version__ = "([0-9]+\.[0-9]+)\.[0-9]+.*"/\1/')
+          echo "CURRENT_MAJOR_MINOR_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
+          
+      - name: Compare major.minor version and skip if behind
+        if: env.CURRENT_MAJOR_MINOR_VERSION < env.MAJOR_MINOR
+        run: |
+          echo "Input version behind main's current major.minor version, don't need to update major version"
+          exit 1
+          
+
   prepare-main:
     runs-on: ubuntu-latest
+    needs: check-version
     steps:
       - name: Setup Git
         uses: actions/checkout@v2
