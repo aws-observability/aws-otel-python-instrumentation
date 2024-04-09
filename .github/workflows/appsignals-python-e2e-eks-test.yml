@@ -208,7 +208,7 @@ jobs:
             # resources created from terraform and try again.
             if [ $deployment_failed -eq 1 ]; then
               echo "Cleaning up App Signal"
-              "${GITHUB_WORKSPACE}/enablement-script/clean-app-signals.sh \
+              ${GITHUB_WORKSPACE}/enablement-script/clean-app-signals.sh \
               ${{ inputs.test-cluster-name }} \
               ${{ inputs.aws-region }} \
               ${{ env.PYTHON_SAMPLE_APP_NAMESPACE }}
