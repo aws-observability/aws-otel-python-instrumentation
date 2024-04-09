@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+    <!--False positive: opentelemetry-exporter-otlp-proto-grpc incorrectly maps to grpc-->
+    <suppress>
+        <notes><![CDATA[file name: opentelemetry-exporter-otlp-proto-grpc:1.22.0]]></notes>
+        <packageUrl regex="true">^pkg:pypi/opentelemetry\-exporter\-otlp\-proto\-grpc@.*$</packageUrl>
+        <cpe>cpe:/a:grpc:grpc</cpe>
+    </suppress>
+</suppressions>

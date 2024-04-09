@@ -4,6 +4,7 @@
 import json
 import os
 from typing import Dict, List
+from urllib.parse import ParseResult, urlparse
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND, AWS_LOCAL_OPERATION
 from opentelemetry.sdk.trace import InstrumentationScope, ReadableSpan
@@ -19,8 +20,7 @@ INTERNAL_OPERATION: str = "InternalOperation"
 LOCAL_ROOT: str = "LOCAL_ROOT"
 
 # Useful constants
-_SQS_RECEIVE_MESSAGE_SPAN_NAME: str = "Sqs.ReceiveMessage"
-_AWS_SDK_INSTRUMENTATION_SCOPE_PREFIX: str = "io.opentelemetry.aws-sdk-"
+_BOTO3SQS_INSTRUMENTATION_SCOPE: str = "opentelemetry.instrumentation.boto3sqs"
 
 # Max keyword length supported by parsing into remote_operation from DB_STATEMENT
 MAX_KEYWORD_LENGTH = 27
@@ -86,14 +86,14 @@ def is_aws_sdk_span(span: ReadableSpan) -> bool:
 
 
 def should_generate_service_metric_attributes(span: ReadableSpan) -> bool:
-    return (is_local_root(span) and not _is_sqs_receive_message_consumer_span(span)) or SpanKind.SERVER == span.kind
+    return (is_local_root(span) and not _is_boto3sqs_span(span)) or SpanKind.SERVER == span.kind
 
 
 def should_generate_dependency_metric_attributes(span: ReadableSpan) -> bool:
     return (
         SpanKind.CLIENT == span.kind
-        or SpanKind.PRODUCER == span.kind
-        or (_is_dependency_consumer_span(span) and not _is_sqs_receive_message_consumer_span(span))
+        or (SpanKind.PRODUCER == span.kind and not _is_boto3sqs_span(span))
+        or (_is_dependency_consumer_span(span) and not _is_boto3sqs_span(span))
     )
 
 
@@ -117,17 +117,18 @@ def is_local_root(span: ReadableSpan) -> bool:
     return span.parent is None or not span.parent.is_valid or span.parent.is_remote
 
 
-def _is_sqs_receive_message_consumer_span(span: ReadableSpan) -> bool:
-    """To identify the SQS consumer spans produced by AWS SDK instrumentation"""
-    messaging_operation: str = span.attributes.get(SpanAttributes.MESSAGING_OPERATION)
+def _is_boto3sqs_span(span: ReadableSpan) -> bool:
+    """
+    To identify if the span produced is from the boto3sqs instrumentation.
+    We use this to identify the boto3sqs spans and not generate metrics from the since we will generate
+    the same metrics from botocore spans.
+    """
+    # TODO: Evaluate if we can bring the boto3sqs spans back to generate metrics and not have to suppress them.
     instrumentation_scope: InstrumentationScope = span.instrumentation_scope
-
     return (
-        (span.name is not None and _SQS_RECEIVE_MESSAGE_SPAN_NAME.casefold() == span.name.casefold())
-        and SpanKind.CONSUMER == span.kind
-        and instrumentation_scope is not None
-        and instrumentation_scope.name.startswith(_AWS_SDK_INSTRUMENTATION_SCOPE_PREFIX)
-        and (messaging_operation is None or messaging_operation == MessagingOperationValues.PROCESS)
+        instrumentation_scope is not None
+        and instrumentation_scope.name is not None
+        and _BOTO3SQS_INSTRUMENTATION_SCOPE.casefold() == instrumentation_scope.name.casefold()
     )
 
 
@@ -161,19 +162,25 @@ def _is_valid_operation(span: ReadableSpan, operation: str) -> bool:
 
 def _generate_ingress_operation(span: ReadableSpan) -> str:
     """
-    When span name is not meaningful(null, unknown or http_method value) as operation name for http use cases. Will try
-    to extract the operation name from http target string
+    When span name is not meaningful, this method is invoked to try to extract the operation name from either
+    `http.target`, if present, or from `http.url`, and combine with `http.method`.
     """
     operation: str = UNKNOWN_OPERATION
+    http_path: str = None
     if is_key_present(span, SpanAttributes.HTTP_TARGET):
-        http_target: str = span.attributes.get(SpanAttributes.HTTP_TARGET)
-        # get the first part from API path string as operation value
-        # the more levels/parts we get from API path the higher chance for getting high cardinality data
-        if http_target is not None:
-            operation = extract_api_path_value(http_target)
-            if is_key_present(span, SpanAttributes.HTTP_METHOD):
-                http_method: str = span.attributes.get(SpanAttributes.HTTP_METHOD)
-                if http_method is not None:
-                    operation = http_method + " " + operation
+        http_path = span.attributes.get(SpanAttributes.HTTP_TARGET)
+    elif is_key_present(span, SpanAttributes.HTTP_URL):
+        http_url = span.attributes.get(SpanAttributes.HTTP_URL)
+        url: ParseResult = urlparse(http_url)
+        http_path = url.path
+
+    # get the first part from API path string as operation value
+    # the more levels/parts we get from API path the higher chance for getting high cardinality data
+    if http_path is not None:
+        operation = extract_api_path_value(http_path)
+        if is_key_present(span, SpanAttributes.HTTP_METHOD):
+            http_method: str = span.attributes.get(SpanAttributes.HTTP_METHOD)
+            if http_method is not None:
+                operation = http_method + " " + operation
 
     return operation

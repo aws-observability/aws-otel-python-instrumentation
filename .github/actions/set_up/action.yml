@@ -41,4 +41,4 @@ runs:
     - name: Run unit tests/benchmarks with tox
       if: ${{ inputs.run_unit_tests == 'true' }}
       shell: bash
-      run: tox -f ${{ inputs.python_version }}-${{ inputs.package_name }} -- -ra --benchmark-json=${{ inputs.python_version }}-${{ inputs.package_name }}-${{ inputs.os }}-benchmark.json
+      run: tox -f ${{ inputs.python_version }}-${{ inputs.package_name }} -- -ra

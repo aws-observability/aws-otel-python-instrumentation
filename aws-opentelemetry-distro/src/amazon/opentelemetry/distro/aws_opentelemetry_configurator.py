@@ -60,7 +60,6 @@ from opentelemetry.trace import set_tracer_provider
 OTEL_AWS_APP_SIGNALS_ENABLED = "OTEL_AWS_APP_SIGNALS_ENABLED"
 OTEL_METRIC_EXPORT_INTERVAL = "OTEL_METRIC_EXPORT_INTERVAL"
 OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT = "OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT"
-OTEL_AWS_SMP_EXPORTER_ENDPOINT = "OTEL_AWS_SMP_EXPORTER_ENDPOINT"
 DEFAULT_METRIC_EXPORT_INTERVAL = 60000.0
 
 _logger: Logger = getLogger(__name__)
@@ -170,6 +169,14 @@ def _exclude_urls_for_instrumentations():
 
 
 def _custom_import_sampler(sampler_name: str, resource: Resource) -> Sampler:
+    # sampler_name from _get_sampler() can be None if `OTEL_TRACES_SAMPLER` is unset. Upstream TracerProvider is able to
+    # accept None as sampler, however we require the sampler to be not None to create `AlwaysRecordSampler` beforehand.
+    # Default value of `OTEL_TRACES_SAMPLER` should be `parentbased_always_on`.
+    # https://opentelemetry.io/docs/languages/sdk-configuration/general/#otel_traces_sampler
+    # Ideally, _get_sampler() should default to `parentbased_always_on` in upstream.
+    if sampler_name is None:
+        sampler_name = "parentbased_always_on"
+
     if sampler_name == "xray":
         # Example env var value
         # OTEL_TRACES_SAMPLER_ARG=endpoint=http://localhost:2000,polling_interval=360
@@ -203,19 +210,19 @@ def _custom_import_sampler(sampler_name: str, resource: Resource) -> Sampler:
 
 
 def _customize_sampler(sampler: Sampler) -> Sampler:
-    if not is_app_signals_enabled():
+    if not _is_app_signals_enabled():
         return sampler
     return AlwaysRecordSampler(sampler)
 
 
 def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> SpanExporter:
-    if not is_app_signals_enabled():
+    if not _is_app_signals_enabled():
         return span_exporter
     return AwsMetricAttributesSpanExporterBuilder(span_exporter, resource).build()
 
 
 def _customize_span_processors(provider: TracerProvider, resource: Resource) -> None:
-    if not is_app_signals_enabled():
+    if not _is_app_signals_enabled():
         return
 
     # Construct and set local and remote attributes span processor
@@ -247,8 +254,8 @@ def _customize_versions(auto_resource: Dict[str, any]) -> Dict[str, any]:
     return auto_resource
 
 
-def is_app_signals_enabled():
-    return os.environ.get(OTEL_AWS_APP_SIGNALS_ENABLED, False)
+def _is_app_signals_enabled():
+    return os.environ.get(OTEL_AWS_APP_SIGNALS_ENABLED, "false").lower() == "true"
 
 
 class AppSignalsExporterProvider:
@@ -266,10 +273,7 @@ class AppSignalsExporterProvider:
         )
         _logger.debug("AppSignals export protocol: %s", protocol)
 
-        app_signals_endpoint = os.environ.get(
-            OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT,
-            os.environ.get(OTEL_AWS_SMP_EXPORTER_ENDPOINT, "http://localhost:4315"),
-        )
+        app_signals_endpoint = os.environ.get(OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT, "http://localhost:4315")
 
         _logger.debug("AppSignals export endpoint: %s", app_signals_endpoint)
 

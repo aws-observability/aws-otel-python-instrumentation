@@ -51,7 +51,7 @@ class Psycopg2Test(ContractTestBase):
 
     def test_success(self) -> None:
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("success", "GET", 200, 0, 0, sql_command="SELECT")
+        self.do_test_requests("success", "GET", 200, 0, 0, sql_command="DROP TABLE")
 
     def test_fault(self) -> None:
         self.mock_collector_client.clear_signals()
@@ -80,17 +80,6 @@ class Psycopg2Test(ContractTestBase):
         self._assert_str_attribute(attributes_dict, AWS_REMOTE_OPERATION, f"{command}")
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
-
-    def _get_attributes_dict(self, attributes_list: List[KeyValue]) -> Dict[str, AnyValue]:
-        attributes_dict: Dict[str, AnyValue] = {}
-        for attribute in attributes_list:
-            key: str = attribute.key
-            value: AnyValue = attribute.value
-            if key in attributes_dict:
-                old_value: AnyValue = attributes_dict[key]
-                self.fail(f"Attribute {key} unexpectedly duplicated. Value 1: {old_value} Value 2: {value}")
-            attributes_dict[key] = value
-        return attributes_dict
 
     @override
     def _assert_semantic_conventions_span_attributes(

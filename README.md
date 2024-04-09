@@ -6,7 +6,9 @@ This project provide AWS Distro base on [OpenTelemetry Python Contrib](https://g
 preconfigured for use with AWS services. Please check out that project too to get a better
 understanding of the underlying internals.
 
-## Python Version Support
+## Notices
+
+### Python Version Support
 This project ensures compatibility with the following supported Python versions: 3.8, 3.9, 3.10, 3.11
 
 ## Code Style Check

@@ -23,7 +23,7 @@ public enum DistroConfig {
       Map.of(
           "OTEL_AWS_APP_SIGNALS_ENABLED",
           "true",
-          "OTEL_AWS_SMP_EXPORTER_ENDPOINT",
+          "OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT",
           "http://collector:4317",
           "OTEL_TRACES_SAMPLER",
           "always_off")),
@@ -34,7 +34,7 @@ public enum DistroConfig {
       Map.of(
           "OTEL_AWS_APP_SIGNALS_ENABLED",
           "true",
-          "OTEL_AWS_SMP_EXPORTER_ENDPOINT",
+          "OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT",
           "http://collector:4317",
           "OTEL_TRACES_SAMPLER",
           "xray"));

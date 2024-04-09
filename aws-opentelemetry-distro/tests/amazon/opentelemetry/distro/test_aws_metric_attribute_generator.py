@@ -1,5 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+
+# pylint: disable=too-many-lines
+
 from typing import Dict, List, Optional
 from unittest import TestCase
 from unittest.mock import MagicMock
@@ -50,12 +53,12 @@ class TestAwsMetricAttributeGenerator(TestCase):
     def setUp(self):
         self.attributes_mock: Attributes = MagicMock()
         self.instrumentation_scope_info_mock: InstrumentationScope = MagicMock()
-        self.instrumentation_scope_info_mock._name = "Scope name"
+        self.instrumentation_scope_info_mock.name = "Scope name"
         self.span_mock: ReadableSpan = MagicMock()
         self.span_mock.name = None
         self.span_mock.attributes = self.attributes_mock
         self.attributes_mock.get.return_value = None
-        self.span_mock._instrumentation_scope = self.instrumentation_scope_info_mock
+        self.span_mock.instrumentation_scope = self.instrumentation_scope_info_mock
         self.span_mock.get_span_context.return_value = MagicMock()
         self.parent_span_context: SpanContext = MagicMock()
         self.parent_span_context.is_valid = True
@@ -302,6 +305,101 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._validate_attributes_produced_for_non_local_root_span_of_kind(expected_attributes, SpanKind.SERVER)
         self._mock_attribute(SpanAttributes.HTTP_METHOD, None)
         self._mock_attribute(SpanAttributes.HTTP_TARGET, None)
+
+    def test_server_span_with_span_name_with_target_and_url(self):
+        # when http.target & http.url are present, the local operation should be derived from the http.target
+        self._update_resource_with_service_name()
+        self.span_mock.name = "POST"
+        self._mock_attribute(
+            [SpanAttributes.HTTP_METHOD, SpanAttributes.HTTP_TARGET, SpanAttributes.HTTP_URL],
+            ["POST", "/my-target/09876", "http://127.0.0.1:8000/payment/123"],
+        )
+
+        expected_attributes: Attributes = {
+            AWS_SPAN_KIND: SpanKind.SERVER.name,
+            AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
+            AWS_LOCAL_OPERATION: "POST /my-target",
+        }
+        self._validate_attributes_produced_for_non_local_root_span_of_kind(expected_attributes, SpanKind.SERVER)
+        self._mock_attribute(SpanAttributes.HTTP_METHOD, None)
+        self._mock_attribute(SpanAttributes.HTTP_TARGET, None)
+        self._mock_attribute(SpanAttributes.HTTP_URL, None)
+
+    def test_server_span_with_span_name_with_http_url(self):
+        self._update_resource_with_service_name()
+        self.span_mock.name = "POST"
+        self._mock_attribute(
+            [SpanAttributes.HTTP_METHOD, SpanAttributes.HTTP_URL], ["POST", "http://127.0.0.1:8000/payment/123"]
+        )
+
+        expected_attributes: Attributes = {
+            AWS_SPAN_KIND: SpanKind.SERVER.name,
+            AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
+            AWS_LOCAL_OPERATION: "POST /payment",
+        }
+        self._validate_attributes_produced_for_non_local_root_span_of_kind(expected_attributes, SpanKind.SERVER)
+        self._mock_attribute(SpanAttributes.HTTP_METHOD, None)
+        self._mock_attribute(SpanAttributes.HTTP_URL, None)
+
+    def test_server_span_with_http_url_with_no_path(self):
+        # http.url with no path should result in local operation to be "POST /"
+        self._update_resource_with_service_name()
+        self.span_mock.name = "POST"
+        self._mock_attribute([SpanAttributes.HTTP_METHOD, SpanAttributes.HTTP_URL], ["POST", "http://www.example.com"])
+
+        expected_attributes: Attributes = {
+            AWS_SPAN_KIND: SpanKind.SERVER.name,
+            AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
+            AWS_LOCAL_OPERATION: "POST /",
+        }
+        self._validate_attributes_produced_for_non_local_root_span_of_kind(expected_attributes, SpanKind.SERVER)
+        self._mock_attribute(SpanAttributes.HTTP_METHOD, None)
+        self._mock_attribute(SpanAttributes.HTTP_URL, None)
+
+    def test_server_span_with_http_url_as_none(self):
+        # if http.url is none, local operation should default to UnknownOperation
+        self._update_resource_with_service_name()
+        self.span_mock.name = "POST"
+        self._mock_attribute([SpanAttributes.HTTP_METHOD, SpanAttributes.HTTP_URL], ["POST", None])
+
+        expected_attributes: Attributes = {
+            AWS_SPAN_KIND: SpanKind.SERVER.name,
+            AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
+            AWS_LOCAL_OPERATION: _UNKNOWN_OPERATION,
+        }
+        self._validate_attributes_produced_for_non_local_root_span_of_kind(expected_attributes, SpanKind.SERVER)
+        self._mock_attribute(SpanAttributes.HTTP_METHOD, None)
+        self._mock_attribute(SpanAttributes.HTTP_URL, None)
+
+    def test_server_span_with_http_url_as_empty(self):
+        # if http.url is empty, local operation should default to "POST /"
+        self._update_resource_with_service_name()
+        self.span_mock.name = "POST"
+        self._mock_attribute([SpanAttributes.HTTP_METHOD, SpanAttributes.HTTP_URL], ["POST", ""])
+
+        expected_attributes: Attributes = {
+            AWS_SPAN_KIND: SpanKind.SERVER.name,
+            AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
+            AWS_LOCAL_OPERATION: "POST /",
+        }
+        self._validate_attributes_produced_for_non_local_root_span_of_kind(expected_attributes, SpanKind.SERVER)
+        self._mock_attribute(SpanAttributes.HTTP_METHOD, None)
+        self._mock_attribute(SpanAttributes.HTTP_URL, None)
+
+    def test_server_span_with_http_url_as_invalid(self):
+        # if http.url is invalid, local operation should default to "POST /"
+        self._update_resource_with_service_name()
+        self.span_mock.name = "POST"
+        self._mock_attribute([SpanAttributes.HTTP_METHOD, SpanAttributes.HTTP_URL], ["POST", "invalid_url"])
+
+        expected_attributes: Attributes = {
+            AWS_SPAN_KIND: SpanKind.SERVER.name,
+            AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
+            AWS_LOCAL_OPERATION: "POST /",
+        }
+        self._validate_attributes_produced_for_non_local_root_span_of_kind(expected_attributes, SpanKind.SERVER)
+        self._mock_attribute(SpanAttributes.HTTP_METHOD, None)
+        self._mock_attribute(SpanAttributes.HTTP_URL, None)
 
     def test_producer_span_with_attributes(self):
         self._update_resource_with_service_name()
@@ -673,6 +771,39 @@ class TestAwsMetricAttributeGenerator(TestCase):
 
         self.assertIsNotNone(service_attributes)
         self.assertIsNotNone(dependency_attributes)
+
+    def test_local_root_boto3_span(self):
+        self._update_resource_with_service_name()
+        self.parent_span_context.is_valid = False
+        self.span_mock.kind = SpanKind.PRODUCER
+        self.span_mock.instrumentation_scope.name = "opentelemetry.instrumentation.boto3sqs"
+
+        actual_attributes: Attributes = _GENERATOR.generate_metric_attributes_dict_from_span(
+            self.span_mock, self.resource
+        )
+        service_attributes: Attributes = actual_attributes.get(SERVICE_METRIC)
+        dependency_attributes: Attributes = actual_attributes.get(DEPENDENCY_METRIC)
+
+        # boto3sqs spans shouldn't generate aws service attributes even local root
+        self.assertIsNone(service_attributes)
+        # boto3sqs spans shouldn't generate aws dependency attributes
+        self.assertIsNone(dependency_attributes)
+
+    def test_non_local_root_boto3_span(self):
+        self._update_resource_with_service_name()
+        self.span_mock.kind = SpanKind.CONSUMER
+        self.span_mock.instrumentation_scope.name = "opentelemetry.instrumentation.boto3sqs"
+
+        actual_attributes: Attributes = _GENERATOR.generate_metric_attributes_dict_from_span(
+            self.span_mock, self.resource
+        )
+        service_attributes: Attributes = actual_attributes.get(SERVICE_METRIC)
+        dependency_attributes: Attributes = actual_attributes.get(DEPENDENCY_METRIC)
+
+        # boto3sqs spans shouldn't generate aws service attributes
+        self.assertIsNone(service_attributes)
+        # boto3sqs spans shouldn't generate aws dependency attributes
+        self.assertIsNone(dependency_attributes)
 
     def test_normalize_service_name_non_aws_sdk_span(self):
         service_name: str = "non aws service"

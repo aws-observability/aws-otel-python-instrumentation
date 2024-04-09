@@ -1,0 +1,56 @@
+name: Pre Release Prepare - Update Version and Create PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 1.0.1)'
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+
+jobs:
+  update-version-and-create-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v3
+        with:
+          ref: 'main'
+
+      - name: Setup Git
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+      - name: Extract Major.Minor Version and setup Env variable
+        run: |
+          echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_ENV
+          echo "MAJOR_MINOR=$(echo ${{ github.event.inputs.version }} | sed -E 's/([0-9]+\.[0-9]+)\.[0-9]+/\1/')" >> $GITHUB_ENV
+
+      - name: Create branches
+        run: |
+          git checkout -b "release/${MAJOR_MINOR}.x"
+          git push origin "release/${MAJOR_MINOR}.x"
+          git checkout -b "${VERSION}_release"
+          git push origin "${VERSION}_release"
+
+      - name: Update version in file
+        run: |
+          sed -i "s/__version__ = \".*\"/__version__ = \\\"${VERSION}\\\"/" aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py
+          git commit -am "Update version to ${VERSION}"
+          git push origin "${VERSION}_release"
+
+      - name: Create pull request against the release branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr create --title "Pre-release: Update version to ${VERSION}" \
+                       --body "This PR updates the version to ${VERSION}.
+          
+          By submitting this pull request, I confirm that you can use, modify, copy, and redistribute this contribution, under the terms of your choice." \
+                       --head ${{ github.event.inputs.version }}_release \
+                       --base release/${MAJOR_MINOR}.x
