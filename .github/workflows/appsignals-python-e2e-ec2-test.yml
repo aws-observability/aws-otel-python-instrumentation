@@ -99,7 +99,7 @@ jobs:
       - name: Initiate Terraform
         uses: ./.github/workflows/actions/execute_and_retry
         with:
-          command: "cd ${{ env.TEST_RESOURCES_FOLDER }}/terraform/ec2 && terraform init && terraform validate"
+          command: "cd terraform/python/ec2 && terraform init && terraform validate"
           cleanup: "rm -rf .terraform && rm -rf .terraform.lock.hcl"
 
       - name: Deploy sample app via terraform and wait for endpoint to come online
