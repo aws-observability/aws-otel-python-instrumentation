@@ -56,11 +56,6 @@ jobs:
           cleanup: "rm -f enable-app-signals.sh && rm -f clean-app-signals.sh"
           post-command: "chmod +x enable-app-signals.sh && chmod +x clean-app-signals.sh"
 
-#      - name: Resolve Add-on configuration conflict
-#        working-directory: enablement-script/scripts/eks/appsignals
-#        run: |
-#          sed -i 's/aws eks create-addon \\/aws eks create-addon \\\n        --resolve-conflicts OVERWRITE \\/' enable-app-signals.sh
-
       - name: Remove log group deletion command
         if: always()
         working-directory: enablement-script
@@ -239,20 +234,6 @@ jobs:
               exit 1
             fi
           done
-#
-#          # Attach policies to cluster node group roles that are required for AppSignals
-#          aws eks list-nodegroups --cluster-name ${{ inputs.test-cluster-name }} --region ${{ inputs.aws-region }} |\
-#          jq -r '.nodegroups[]' |\
-#          while read -r node_group;
-#          do
-#            node_role=$(\
-#              aws eks describe-nodegroup  --cluster-name ${{ inputs.test-cluster-name }} --nodegroup-name $node_group --region ${{ inputs.aws-region }} |\
-#              jq -r '.nodegroup.nodeRole' |\
-#              cut -d'/' -f2
-#            )
-#            aws iam attach-role-policy --role-name $node_role --policy-arn arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy --region ${{ inputs.aws-region }}
-#            aws iam attach-role-policy --role-name $node_role --policy-arn arn:aws:iam::aws:policy/AWSXRayWriteOnlyAccess --region ${{ inputs.aws-region }}
-#          done
 
       - name: Get remote service pod name and IP
         run: |

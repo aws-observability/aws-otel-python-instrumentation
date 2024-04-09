@@ -34,8 +34,6 @@ env:
   ADOT_WHEEL_NAME: ${{ inputs.staging_wheel_name }}
   TEST_RESOURCES_FOLDER: /home/runner/work/aws-application-signals-test-framework/aws-application-signals-test-framework
 
-
-
 jobs:
   python-e2e-ec2-test:
     runs-on: ubuntu-latest
