@@ -105,8 +105,6 @@ jobs:
       - name: Deploy sample app via terraform and wait for endpoint to come online
         working-directory: terraform/python/ec2
         run: |
-          terraform init
-          terraform validate
           # Attempt to deploy the sample app on an EC2 instance and wait for its endpoint to come online. 
           # There may be occasional failures due to transitivity issues, so try up to 2 times. 
           # deployment_failed of 0 indicates that both the terraform deployment and the endpoint are running, while 1 indicates
