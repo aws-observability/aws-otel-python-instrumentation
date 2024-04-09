@@ -33,8 +33,15 @@ jobs:
 
       - name: Create branches
         run: |
+          if git ls-remote --heads origin release/${MAJOR_MINOR}.x; then
+          echo "Branch release/${MAJOR_MINOR}.x already exists, checking out."
+          git checkout "release/${MAJOR_MINOR}.x"
+          else
+          echo "Creating branch release/${MAJOR_MINOR}.x."
           git checkout -b "release/${MAJOR_MINOR}.x"
           git push origin "release/${MAJOR_MINOR}.x"
+          fi
+          
           git checkout -b "${VERSION}_release"
           git push origin "${VERSION}_release"
 
