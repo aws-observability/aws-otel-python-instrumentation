@@ -90,8 +90,27 @@ jobs:
         run: |
           twine upload --repository testpypi --skip-existing --verbose dist/aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
 
-      # The following step publish to ECR
-      - name: Build and push images
+      # Publish to prod PyPI
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: '__token__'
+          TWINE_PASSWORD: ${{ env.PROD_PYPI_TOKEN_API_TOKEN }}
+        run: |
+          twine upload --skip-existing --verbose dist/aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
+
+      # Publish to public ECR
+      - name: Build and push public ECR image
+        uses: docker/build-push-action@v5
+        with:
+          push: true
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ github.event.inputs.version }}
+
+      # Publish to private ECR
+      - name: Build and push private ECR image
         uses: docker/build-push-action@v5
         with:
           push: true
@@ -100,15 +119,6 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: |
             ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ github.event.inputs.version }}
-            ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ github.event.inputs.version }}
-
-      # Publish to prod PyPI
-      - name: Publish to PyPI
-        env:
-          TWINE_USERNAME: '__token__'
-          TWINE_PASSWORD: ${{ env.PROD_PYPI_TOKEN_API_TOKEN }}
-        run: |
-          twine upload --skip-existing --verbose dist/aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
 
       - name: Create GH release
         id: create_release
