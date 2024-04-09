@@ -63,7 +63,7 @@ jobs:
 
       - name: Remove log group deletion command
         if: always()
-        working-directory: enablement-script/scripts/eks/appsignals
+        working-directory: enablement-script
         run: |
           delete_log_group="aws logs delete-log-group --log-group-name '${{ env.LOG_GROUP_NAME }}' --region \$REGION"
           sed -i "s#$delete_log_group##g" clean-app-signals.sh
@@ -174,11 +174,11 @@ jobs:
               echo "Installing app signals to the sample app"
               source ${GITHUB_WORKSPACE}/.github/workflows/util/execute_and_retry.sh
               execute_and_retry 2 \
-              "${GITHUB_WORKSPACE}/enablement-script/scripts/eks/appsignals/enable-app-signals.sh \
+              "${GITHUB_WORKSPACE}/enablement-script/enable-app-signals.sh \
               ${{ inputs.test-cluster-name }} \
               ${{ inputs.aws-region }} \
               ${{ env.PYTHON_SAMPLE_APP_NAMESPACE }}" \
-              "${GITHUB_WORKSPACE}/enablement-script/scripts/eks/appsignals/clean-app-signals.sh \
+              "${GITHUB_WORKSPACE}/enablement-script/clean-app-signals.sh \
               ${{ inputs.test-cluster-name }} \
               ${{ inputs.aws-region }} \
               ${{ env.PYTHON_SAMPLE_APP_NAMESPACE }} && \
@@ -208,7 +208,7 @@ jobs:
             # resources created from terraform and try again.
             if [ $deployment_failed -eq 1 ]; then
               echo "Cleaning up App Signal"
-              "${GITHUB_WORKSPACE}/enablement-script/scripts/eks/appsignals/clean-app-signals.sh \
+              "${GITHUB_WORKSPACE}/enablement-script/clean-app-signals.sh \
               ${{ inputs.test-cluster-name }} \
               ${{ inputs.aws-region }} \
               ${{ env.PYTHON_SAMPLE_APP_NAMESPACE }}
@@ -357,7 +357,7 @@ jobs:
       - name: Clean Up App Signals
         if: always()
         continue-on-error: true
-        working-directory: enablement-script/scripts/eks/appsignals
+        working-directory: enablement-script
         run: |
           ./clean-app-signals.sh \
           ${{ inputs.test-cluster-name }} \
