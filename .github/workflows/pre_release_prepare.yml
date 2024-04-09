@@ -35,6 +35,7 @@ jobs:
         run: |
           if git ls-remote --heads origin release/${MAJOR_MINOR}.x; then
           echo "Branch release/${MAJOR_MINOR}.x already exists, checking out."
+          git fetch origin release/${MAJOR_MINOR}.x
           git checkout "release/${MAJOR_MINOR}.x"
           else
           echo "Creating branch release/${MAJOR_MINOR}.x."

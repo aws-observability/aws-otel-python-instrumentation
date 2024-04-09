@@ -33,7 +33,7 @@ jobs:
           echo "CURRENT_MAJOR_MINOR_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
           
       - name: Compare major.minor version and skip if behind
-        if: env.CURRENT_MAJOR_MINOR_VERSION < env.MAJOR_MINOR
+        if: env.CURRENT_MAJOR_MINOR_VERSION > env.MAJOR_MINOR
         run: |
           echo "Input version behind main's current major.minor version, don't need to update major version"
           exit 1
