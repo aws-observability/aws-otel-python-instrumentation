@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 """
-Constants for attributes and metric names defined in AppSignals.
+Constants for attributes and metric names defined in Application Signals.
 """
 
 # Metric names

@@ -57,9 +57,11 @@ from opentelemetry.sdk.trace.sampling import Sampler
 from opentelemetry.semconv.resource import ResourceAttributes
 from opentelemetry.trace import set_tracer_provider
 
-OTEL_AWS_APP_SIGNALS_ENABLED = "OTEL_AWS_APP_SIGNALS_ENABLED"
-OTEL_METRIC_EXPORT_INTERVAL = "OTEL_METRIC_EXPORT_INTERVAL"
-OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT = "OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT"
+APP_SIGNALS_ENABLED_CONFIG = "OTEL_AWS_APP_SIGNALS_ENABLED"
+APPLICATION_SIGNALS_ENABLED_CONFIG = "OTEL_AWS_APPLICATION_SIGNALS_ENABLED"
+APP_SIGNALS_EXPORTER_ENDPOINT_CONFIG = "OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT"
+APPLICATION_SIGNALS_EXPORTER_ENDPOINT_CONFIG = "OTEL_AWS_APPLICATION_SIGNALS_EXPORTER_ENDPOINT"
+METRIC_EXPORT_INTERVAL_CONFIG = "OTEL_METRIC_EXPORT_INTERVAL"
 DEFAULT_METRIC_EXPORT_INTERVAL = 60000.0
 
 _logger: Logger = getLogger(__name__)
@@ -74,8 +76,8 @@ class AwsOpenTelemetryConfigurator(_OTelSDKConfigurator):
     - Add AttributePropagatingSpanProcessor to propagate span attributes from parent to child spans.
     - Add AwsMetricAttributesSpanExporter to add more attributes to all spans.
 
-    You can control when these customizations are applied using the environment variable OTEL_AWS_APP_SIGNALS_ENABLED.
-    This flag is disabled by default.
+    You can control when these customizations are applied using the environment variable
+    OTEL_AWS_APPLICATION_SIGNALS_ENABLED. This flag is disabled by default.
     """
 
     # pylint: disable=no-self-use
@@ -210,38 +212,38 @@ def _custom_import_sampler(sampler_name: str, resource: Resource) -> Sampler:
 
 
 def _customize_sampler(sampler: Sampler) -> Sampler:
-    if not _is_app_signals_enabled():
+    if not _is_application_signals_enabled():
         return sampler
     return AlwaysRecordSampler(sampler)
 
 
 def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> SpanExporter:
-    if not _is_app_signals_enabled():
+    if not _is_application_signals_enabled():
         return span_exporter
     return AwsMetricAttributesSpanExporterBuilder(span_exporter, resource).build()
 
 
 def _customize_span_processors(provider: TracerProvider, resource: Resource) -> None:
-    if not _is_app_signals_enabled():
+    if not _is_application_signals_enabled():
         return
 
     # Construct and set local and remote attributes span processor
     provider.add_span_processor(AttributePropagatingSpanProcessorBuilder().build())
 
     # Construct meterProvider
-    _logger.info("AWS AppSignals enabled")
-    otel_metric_exporter = AppSignalsExporterProvider().create_exporter()
-    export_interval_millis = float(os.environ.get(OTEL_METRIC_EXPORT_INTERVAL, DEFAULT_METRIC_EXPORT_INTERVAL))
+    _logger.info("AWS Application Signals enabled")
+    otel_metric_exporter = ApplicationSignalsExporterProvider().create_exporter()
+    export_interval_millis = float(os.environ.get(METRIC_EXPORT_INTERVAL_CONFIG, DEFAULT_METRIC_EXPORT_INTERVAL))
     _logger.debug("Span Metrics export interval: %s", export_interval_millis)
     # Cap export interval to 60 seconds. This is currently required for metrics-trace correlation to work correctly.
     if export_interval_millis > DEFAULT_METRIC_EXPORT_INTERVAL:
         export_interval_millis = DEFAULT_METRIC_EXPORT_INTERVAL
-        _logger.info("AWS AppSignals metrics export interval capped to %s", export_interval_millis)
+        _logger.info("AWS Application Signals metrics export interval capped to %s", export_interval_millis)
     periodic_exporting_metric_reader = PeriodicExportingMetricReader(
         exporter=otel_metric_exporter, export_interval_millis=export_interval_millis
     )
     meter_provider: MeterProvider = MeterProvider(resource=resource, metric_readers=[periodic_exporting_metric_reader])
-    # Construct and set AppSignals metrics processor
+    # Construct and set application signals metrics processor
     provider.add_span_processor(AwsSpanMetricsProcessorBuilder(meter_provider, resource).build())
 
     return
@@ -254,12 +256,15 @@ def _customize_versions(auto_resource: Dict[str, any]) -> Dict[str, any]:
     return auto_resource
 
 
-def _is_app_signals_enabled():
-    return os.environ.get(OTEL_AWS_APP_SIGNALS_ENABLED, "false").lower() == "true"
+def _is_application_signals_enabled():
+    return (
+        os.environ.get(APPLICATION_SIGNALS_ENABLED_CONFIG, os.environ.get(APP_SIGNALS_ENABLED_CONFIG, "false")).lower()
+        == "true"
+    )
 
 
-class AppSignalsExporterProvider:
-    _instance: ClassVar["AppSignalsExporterProvider"] = None
+class ApplicationSignalsExporterProvider:
+    _instance: ClassVar["ApplicationSignalsExporterProvider"] = None
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
@@ -271,11 +276,14 @@ class AppSignalsExporterProvider:
         protocol = os.environ.get(
             OTEL_EXPORTER_OTLP_METRICS_PROTOCOL, os.environ.get(OTEL_EXPORTER_OTLP_PROTOCOL, "grpc")
         )
-        _logger.debug("AppSignals export protocol: %s", protocol)
+        _logger.debug("AWS Application Signals export protocol: %s", protocol)
 
-        app_signals_endpoint = os.environ.get(OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT, "http://localhost:4315")
+        application_signals_endpoint = os.environ.get(
+            APPLICATION_SIGNALS_EXPORTER_ENDPOINT_CONFIG,
+            os.environ.get(APP_SIGNALS_EXPORTER_ENDPOINT_CONFIG, "http://localhost:4315"),
+        )
 
-        _logger.debug("AppSignals export endpoint: %s", app_signals_endpoint)
+        _logger.debug("AWS Application Signals export endpoint: %s", application_signals_endpoint)
 
         temporality_dict: Dict[type, AggregationTemporality] = {}
         for typ in [
@@ -290,8 +298,12 @@ class AppSignalsExporterProvider:
             temporality_dict[typ] = AggregationTemporality.DELTA
 
         if protocol == "http/protobuf":
-            return OTLPHttpOTLPMetricExporter(endpoint=app_signals_endpoint, preferred_temporality=temporality_dict)
+            return OTLPHttpOTLPMetricExporter(
+                endpoint=application_signals_endpoint, preferred_temporality=temporality_dict
+            )
         if protocol == "grpc":
-            return OTLPGrpcOTLPMetricExporter(endpoint=app_signals_endpoint, preferred_temporality=temporality_dict)
+            return OTLPGrpcOTLPMetricExporter(
+                endpoint=application_signals_endpoint, preferred_temporality=temporality_dict
+            )
 
-        raise RuntimeError(f"Unsupported AppSignals export protocol: {protocol} ")
+        raise RuntimeError(f"Unsupported AWS Application Signals export protocol: {protocol} ")

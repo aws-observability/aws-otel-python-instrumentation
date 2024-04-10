@@ -1,10 +1,10 @@
 ## Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 ## SPDX-License-Identifier: Apache-2.0
 
-# This is a reusable workflow for running the Python E2E Canary test for App Signals.
+# This is a reusable workflow for running the Python E2E Canary test for Application Signals.
 # It is meant to be called from another workflow.
 # Read more about reusable workflows: https://docs.github.com/en/actions/using-workflows/reusing-workflows#overview
-name: App Signals Enablement E2E Testing - Python EC2 Use Case
+name: Application Signals Enablement E2E Testing - Python EC2 Use Case
 on:
   workflow_call:
     inputs:

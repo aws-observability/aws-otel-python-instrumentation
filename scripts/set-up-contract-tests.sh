@@ -24,7 +24,7 @@ pip install sqlalchemy psycopg2-binary
 
 # Create mock-collector image
 cd contract-tests/images/mock-collector
-docker build . -t aws-appsignals-mock-collector-python
+docker build . -t aws-application-signals-mock-collector-python
 if [ $? = 1 ]; then
   echo "Docker build for mock collector failed"
   exit 1
@@ -43,7 +43,7 @@ cd ..
 for dir in contract-tests/images/applications/*
 do
   application="${dir##*/}"
-  docker build . -t aws-appsignals-tests-${application}-app -f ${dir}/Dockerfile --build-arg="DISTRO=${DISTRO}"
+  docker build . -t aws-application-signals-tests-${application}-app -f ${dir}/Dockerfile --build-arg="DISTRO=${DISTRO}"
   if [ $? = 1 ]; then
     echo "Docker build for ${application} application failed"
     exit 1
