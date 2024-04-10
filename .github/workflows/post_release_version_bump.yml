@@ -32,11 +32,22 @@ jobs:
           CURRENT_VERSION=$(grep '__version__' aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py | sed -E 's/__version__ = "([0-9]+\.[0-9]+)\.[0-9]+.*"/\1/')
           echo "CURRENT_MAJOR_MINOR_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
           
-      - name: Compare major.minor version and skip if behind
-        if: env.CURRENT_MAJOR_MINOR_VERSION > env.MAJOR_MINOR
+      - name: Set major and minor for current version
         run: |
-          echo "Input version behind main's current major.minor version, don't need to update major version"
-          exit 1
+          echo "CURRENT_MAJOR=$(echo $CURRENT_MAJOR_MINOR_VERSION | cut -d. -f1)" >> $GITHUB_ENV
+          echo "CURRENT_MINOR=$(echo $CURRENT_MAJOR_MINOR_VERSION | cut -d. -f2)" >> $GITHUB_ENV
+
+      - name: Set major and minor for input version
+        run: |
+          echo "INPUT_MAJOR=$(echo $MAJOR_MINOR | cut -d. -f1)" >> $GITHUB_ENV
+          echo "INPUT_MINOR=$(echo $MAJOR_MINOR | cut -d. -f2)" >> $GITHUB_ENV
+
+      - name: Compare major.minor version and skip if behind
+        run: |
+          if [ "$CURRENT_MAJOR" -gt "$INPUT_MAJOR" ] || { [ "$CURRENT_MAJOR" -eq "$INPUT_MAJOR" ] && [ "$CURRENT_MINOR" -gt "$INPUT_MINOR" ]; }; then
+            echo "Input version is behind main's current major.minor version, don't need to update major version"
+            exit 1
+          fi
           
 
   prepare-main:
