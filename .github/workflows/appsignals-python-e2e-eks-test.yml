@@ -185,8 +185,8 @@ jobs:
                 -p='[{"op": \"replace\", \"path\": \"/spec/template/spec/containers/0/args/0\", \"value\": \"--auto-instrumentation-python-image=${{ inputs.appsignals-adot-image }}:${{ inputs.appsignals-adot-image-tag }}\"}]'"
                 execute_and_retry 2 "kubectl delete pods --all -n amazon-cloudwatch"
                 execute_and_retry 2 "kubectl wait --for=condition=Ready pod --all -n amazon-cloudwatch"
-                echo ${{ inputs.appsignals-adot-image }}:${{ inputs.appsignals-adot-image-tag }}
               fi
+              
               execute_and_retry 2 "kubectl delete pods --all -n ${{ env.PYTHON_SAMPLE_APP_NAMESPACE }}"
               execute_and_retry 2 "kubectl wait --for=condition=Ready --request-timeout '5m' pod --all -n ${{ env.PYTHON_SAMPLE_APP_NAMESPACE }}"
 
