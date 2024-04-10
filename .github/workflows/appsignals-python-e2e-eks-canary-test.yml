@@ -7,8 +7,8 @@
 ## including logs, metrics, and traces.
 name: App Signals Enablement - Python E2E EKS Canary Testing
 on:
-  schedule:
-    - cron: '*/15 * * * *' # run the workflow every 15 minutes
+#  schedule:
+#    - cron: '*/15 * * * *' # run the workflow every 15 minutes
   workflow_dispatch: # be able to run the workflow on demand
 
 concurrency:

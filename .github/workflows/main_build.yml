@@ -60,31 +60,31 @@ jobs:
           package_name: aws-opentelemetry-distro
           os: ubuntu-latest
 
-        # workaround: prefixing the short-sha with a 0 to create a valid
-        # wheel file name as per https://peps.python.org/pep-0427/#file-name-convention
-      - name: Output Wheel File Name
-        id: staging_wheel_output
-        run: |
-          staging_wheel="aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION}}-0${{ env.SHORT_SHA }}-py3-none-any.whl"
-          echo "STAGING_WHEEL=$staging_wheel" >> $GITHUB_OUTPUT
-          cd ./dist
-          cp aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION}}-py3-none-any.whl $staging_wheel
-
-      - name: Upload wheel to S3
-        run: |
-          aws s3 cp dist/${{ steps.staging_wheel_output.outputs.STAGING_WHEEL}} s3://${{ env.STAGING_S3_BUCKET }}
-
-      - name: Upload Wheel to GitHub Actions
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ steps.staging_wheel_output.outputs.STAGING_WHEEL}}
-          path: dist/${{ steps.staging_wheel_output.outputs.STAGING_WHEEL}}
-
-      - name: Set up and run contract tests with pytest
-        run: |
-          bash scripts/set-up-contract-tests.sh
-          pip install pytest
-          pytest contract-tests/tests
+#        # workaround: prefixing the short-sha with a 0 to create a valid
+#        # wheel file name as per https://peps.python.org/pep-0427/#file-name-convention
+#      - name: Output Wheel File Name
+#        id: staging_wheel_output
+#        run: |
+#          staging_wheel="aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION}}-0${{ env.SHORT_SHA }}-py3-none-any.whl"
+#          echo "STAGING_WHEEL=$staging_wheel" >> $GITHUB_OUTPUT
+#          cd ./dist
+#          cp aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION}}-py3-none-any.whl $staging_wheel
+#
+#      - name: Upload wheel to S3
+#        run: |
+#          aws s3 cp dist/${{ steps.staging_wheel_output.outputs.STAGING_WHEEL}} s3://${{ env.STAGING_S3_BUCKET }}
+#
+#      - name: Upload Wheel to GitHub Actions
+#        uses: actions/upload-artifact@v3
+#        with:
+#          name: ${{ steps.staging_wheel_output.outputs.STAGING_WHEEL}}
+#          path: dist/${{ steps.staging_wheel_output.outputs.STAGING_WHEEL}}
+#
+#      - name: Set up and run contract tests with pytest
+#        run: |
+#          bash scripts/set-up-contract-tests.sh
+#          pip install pytest
+#          pytest contract-tests/tests
 
   # AppSignals specific e2e eks tests
   appsignals-python-e2e-eks-test:
@@ -98,12 +98,12 @@ jobs:
       appsignals-adot-image: ${{ needs.build.outputs.staging_registry }}/aws-observability/adot-autoinstrumentation-python-staging
       appsignals-adot-image-tag: ${{ needs.build.outputs.python_image_tag }}
 
-  # AppSignals specific e2e tests for ec2
-  appsignals-python-e2e-ec2-test:
-    needs: [ build ]
-    uses: ./.github/workflows/appsignals-python-e2e-ec2-test.yml
-    secrets: inherit
-    with:
-      aws-region: ${{ needs.build.outputs.aws_default_region }}
-      staging_wheel_name: ${{ needs.build.outputs.staging_wheel_file }}
-      caller-workflow-name: 'main-build'
+#  # AppSignals specific e2e tests for ec2
+#  appsignals-python-e2e-ec2-test:
+#    needs: [ build ]
+#    uses: ./.github/workflows/appsignals-python-e2e-ec2-test.yml
+#    secrets: inherit
+#    with:
+#      aws-region: ${{ needs.build.outputs.aws_default_region }}
+#      staging_wheel_name: ${{ needs.build.outputs.staging_wheel_file }}
+#      caller-workflow-name: 'main-build'

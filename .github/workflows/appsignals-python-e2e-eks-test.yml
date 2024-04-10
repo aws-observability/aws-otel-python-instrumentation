@@ -179,6 +179,12 @@ jobs:
               ${{ env.PYTHON_SAMPLE_APP_NAMESPACE }} && \
               aws eks update-kubeconfig --name ${{ inputs.test-cluster-name }} --region ${{ inputs.aws-region }}"
 
+              if [ "${{ inputs.caller-workflow-name }}" == "main-build" ]; then
+                execute_and_retry 2 "kubectl patch deploy -namazon-cloudwatch amazon-cloudwatch-observability-controller-manager --type='json' \
+                -p='[{"op": \"replace\", \"path\": \"/spec/template/spec/containers/0/args/0\", \"value\": \"--auto-instrumentation-python-image=${{ inputs.appsignals-adot-image }}:${{ inputs.appsignals-adot-image-tag }}\"}]'"
+                echo "Patched staging adot image:"
+                echo ${{ inputs.appsignals-adot-image }}:${{ inputs.appsignals-adot-image-tag }}
+              fi
               execute_and_retry 2 "kubectl delete pods --all -n ${{ env.PYTHON_SAMPLE_APP_NAMESPACE }}"
               execute_and_retry 2 "kubectl wait --for=condition=Ready --request-timeout '5m' pod --all -n ${{ env.PYTHON_SAMPLE_APP_NAMESPACE }}"
 
