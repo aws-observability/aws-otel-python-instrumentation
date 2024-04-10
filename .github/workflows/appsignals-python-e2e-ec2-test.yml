@@ -32,7 +32,7 @@ env:
   METRIC_NAMESPACE: AppSignals
   LOG_GROUP_NAME: /aws/appsignals/generic
   ADOT_WHEEL_NAME: ${{ inputs.staging_wheel_name }}
-
+  TEST_RESOURCES_FOLDER: /home/runner/work/aws-application-signals-test-framework/aws-application-signals-test-framework
 
 jobs:
   python-e2e-ec2-test:
@@ -88,15 +88,21 @@ jobs:
           fi
 
       - name: Set up terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: ./.github/workflows/actions/execute_and_retry
         with:
-          terraform_wrapper: false
+          command: "wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg"
+          post-command: 'echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+          && sudo apt update && sudo apt install terraform'
+
+      - name: Initiate Terraform
+        uses: ./.github/workflows/actions/execute_and_retry
+        with:
+          command: "cd terraform/python/ec2 && terraform init && terraform validate"
+          cleanup: "rm -rf .terraform && rm -rf .terraform.lock.hcl"
 
       - name: Deploy sample app via terraform and wait for endpoint to come online
         working-directory: terraform/python/ec2
         run: |
-          terraform init
-          terraform validate
           # Attempt to deploy the sample app on an EC2 instance and wait for its endpoint to come online. 
           # There may be occasional failures due to transitivity issues, so try up to 2 times. 
           # deployment_failed of 0 indicates that both the terraform deployment and the endpoint are running, while 1 indicates
