@@ -35,5 +35,3 @@ jobs:
       aws-region: ${{ matrix.aws-region }}
       test-cluster-name: 'e2e-python-canary-test'
       caller-workflow-name: 'appsignals-python-e2e-eks-canary-test'
-      appsignals-adot-image: public.ecr.aws/aws-observability/adot-autoinstrumentation-python
-      appsignals-adot-image-tag: v0.0.1
