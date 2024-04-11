@@ -197,6 +197,8 @@ class TestAwsXRaySamplingClient(TestCase):
             pass
 
         span_list = memory_exporter.get_finished_spans()
+        for span in span_list:
+            print(span.to_json())
         self.assertEqual(2, len(span_list))
         span_http_url = span_list[1].attributes.get("http.url")
         self.assertEqual(span_http_url, "http://this_is_a_fake_url:3849/SamplingTargets")

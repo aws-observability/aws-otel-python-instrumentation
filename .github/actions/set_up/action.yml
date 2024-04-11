@@ -41,4 +41,9 @@ runs:
     - name: Run unit tests/benchmarks with tox
       if: ${{ inputs.run_unit_tests == 'true' }}
       shell: bash
-      run: tox -f ${{ inputs.python_version }}-${{ inputs.package_name }} -- -ra
+      run: |
+        tox -f ${{ inputs.python_version }}-${{ inputs.package_name }} -- -ra
+        tox -f ${{ inputs.python_version }}-${{ inputs.package_name }} -- -ra
+        tox -f ${{ inputs.python_version }}-${{ inputs.package_name }} -- -ra
+        tox -f ${{ inputs.python_version }}-${{ inputs.package_name }} -- -ra
+        tox -f ${{ inputs.python_version }}-${{ inputs.package_name }} -- -ra
