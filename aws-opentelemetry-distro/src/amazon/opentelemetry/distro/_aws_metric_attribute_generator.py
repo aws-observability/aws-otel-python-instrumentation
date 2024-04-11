@@ -11,8 +11,9 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_QUEUE_NAME,
     AWS_QUEUE_URL,
     AWS_REMOTE_OPERATION,
+    AWS_REMOTE_RESOURCE_IDENTIFIER,
+    AWS_REMOTE_RESOURCE_TYPE,
     AWS_REMOTE_SERVICE,
-    AWS_REMOTE_TARGET,
     AWS_SPAN_KIND,
     AWS_STREAM_NAME,
 )
@@ -65,6 +66,12 @@ _RPC_SERVICE: str = SpanAttributes.RPC_SERVICE
 _AWS_TABLE_NAMES: str = SpanAttributes.AWS_DYNAMODB_TABLE_NAMES
 _AWS_BUCKET_NAME: str = SpanAttributes.AWS_S3_BUCKET
 
+# Normalized remote service names for supported AWS services
+_NORMALIZED_DYNAMO_DB_SERVICE_NAME: str = "AWS::DynamoDB"
+_NORMALIZED_KINESIS_SERVICE_NAME: str = "AWS::Kinesis"
+_NORMALIZED_S3_SERVICE_NAME: str = "AWS::S3"
+_NORMALIZED_SQS_SERVICE_NAME: str = "AWS::SQS"
+
 # Special DEPENDENCY attribute value if GRAPHQL_OPERATION_TYPE attribute key is present.
 _GRAPHQL: str = "graphql"
 
@@ -110,7 +117,7 @@ def _generate_dependency_metric_attributes(span: ReadableSpan, resource: Resourc
     _set_service(resource, span, attributes)
     _set_egress_operation(span, attributes)
     _set_remote_service_and_operation(span, attributes)
-    _set_remote_target(span, attributes)
+    _set_remote_type_and_identifier(span, attributes)
     _set_span_kind_for_dependency(span, attributes)
     return attributes
 
@@ -198,7 +205,7 @@ def _set_remote_service_and_operation(span: ReadableSpan, attributes: BoundedAtt
         remote_service = _get_remote_service(span, AWS_REMOTE_SERVICE)
         remote_operation = _get_remote_operation(span, AWS_REMOTE_OPERATION)
     elif is_key_present(span, _RPC_SERVICE) or is_key_present(span, _RPC_METHOD):
-        remote_service = _normalize_service_name(span, _get_remote_service(span, _RPC_SERVICE))
+        remote_service = _normalize_remote_service_name(span, _get_remote_service(span, _RPC_SERVICE))
         remote_operation = _get_remote_operation(span, _RPC_METHOD)
     elif is_key_present(span, _DB_SYSTEM) or is_key_present(span, _DB_OPERATION) or is_key_present(span, _DB_STATEMENT):
         remote_service = _get_remote_service(span, _DB_SYSTEM)
@@ -268,10 +275,14 @@ def _get_db_statement_remote_operation(span: ReadableSpan, statement_key: str) -
     return remote_operation
 
 
-def _normalize_service_name(span: ReadableSpan, service_name: str) -> str:
+def _normalize_remote_service_name(span: ReadableSpan, service_name: str) -> str:
+    """
+    If the span is an AWS SDK span, normalize the name to align with <a
+    href="https://docs.aws.amazon.com/cloudcontrolapi/latest/userguide/supported-resources.html">AWS Cloud Control
+    resource format</a> as much as possible. Long term, we would like to normalize service name in the upstream.
+    """
     if is_aws_sdk_span(span):
-        return "AWS.SDK." + service_name
-
+        return "AWS::" + service_name
     return service_name
 
 
@@ -320,38 +331,39 @@ def _generate_remote_operation(span: ReadableSpan) -> str:
     return remote_operation
 
 
-def _set_remote_target(span: ReadableSpan, attributes: BoundedAttributes) -> None:
-    remote_target: Optional[str] = _get_remote_target(span)
-    if remote_target is not None:
-        attributes[AWS_REMOTE_TARGET] = remote_target
-
-
-def _get_remote_target(span: ReadableSpan) -> Optional[str]:
+def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttributes) -> None:
     """
-    RemoteTarget attribute AWS_REMOTE_TARGET is used to store the resource
-    name of the remote invokes, such as S3 bucket name, mysql table name, etc.
-    TODO: currently only support AWS resource name, will be extended to support
-    the general remote targets, such as ActiveMQ name, etc.
+    Remote resource attributes {@link AwsAttributeKeys#AWS_REMOTE_RESOURCE_TYPE} and {@link
+    AwsAttributeKeys#AWS_REMOTE_RESOURCE_IDENTIFIER} are used to store information about the resource associated with
+    the remote invocation, such as S3 bucket name, etc. We should only ever set both type and identifier or neither.
+
+    AWS resources type and identifier adhere to <a
+    href="https://docs.aws.amazon.com/cloudcontrolapi/latest/userguide/supported-resources.html">AWS Cloud Control
+    resource format</a>.
     """
-    if is_key_present(span, _AWS_BUCKET_NAME):
-        return "::s3:::" + span.attributes.get(_AWS_BUCKET_NAME)
-
-    if is_key_present(span, AWS_QUEUE_URL):
-        arn = SqsUrlParser.get_sqs_remote_target(span.attributes.get(AWS_QUEUE_URL))
-        if arn:
-            return arn
-
-    if is_key_present(span, AWS_QUEUE_NAME):
-        return "::sqs:::" + span.attributes.get(AWS_QUEUE_NAME)
-
-    if is_key_present(span, AWS_STREAM_NAME):
-        return "::kinesis:::stream/" + span.attributes.get(AWS_STREAM_NAME)
+    remote_resource_type: Optional[str] = None
+    remote_resource_identifier: Optional[str] = None
 
     # Only extract the table name when _AWS_TABLE_NAMES has size equals to one
     if is_key_present(span, _AWS_TABLE_NAMES) and len(span.attributes.get(_AWS_TABLE_NAMES)) == 1:
-        return "::dynamodb:::table/" + span.attributes.get(_AWS_TABLE_NAMES)[0]
+        remote_resource_type = _NORMALIZED_DYNAMO_DB_SERVICE_NAME + "::Table"
+        remote_resource_identifier = span.attributes.get(_AWS_TABLE_NAMES)[0]
+    elif is_key_present(span, AWS_STREAM_NAME):
+        remote_resource_type = _NORMALIZED_KINESIS_SERVICE_NAME + "::Stream"
+        remote_resource_identifier = span.attributes.get(AWS_STREAM_NAME)
+    elif is_key_present(span, _AWS_BUCKET_NAME):
+        remote_resource_type = _NORMALIZED_S3_SERVICE_NAME + "::Bucket"
+        remote_resource_identifier = span.attributes.get(_AWS_BUCKET_NAME)
+    elif is_key_present(span, AWS_QUEUE_NAME):
+        remote_resource_type = _NORMALIZED_SQS_SERVICE_NAME + "::Queue"
+        remote_resource_identifier = span.attributes.get(AWS_QUEUE_NAME)
+    elif is_key_present(span, AWS_QUEUE_URL):
+        remote_resource_type = _NORMALIZED_SQS_SERVICE_NAME + "::Queue"
+        remote_resource_identifier = SqsUrlParser.get_queue_name(span.attributes.get(AWS_QUEUE_URL))
 
-    return None
+    if remote_resource_type is not None and remote_resource_identifier is not None:
+        attributes[AWS_REMOTE_RESOURCE_TYPE] = remote_resource_type
+        attributes[AWS_REMOTE_RESOURCE_IDENTIFIER] = remote_resource_identifier
 
 
 def _set_span_kind_for_dependency(span: ReadableSpan, attributes: BoundedAttributes) -> None:
