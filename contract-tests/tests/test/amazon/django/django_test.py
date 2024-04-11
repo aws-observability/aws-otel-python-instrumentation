@@ -6,7 +6,7 @@ from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
 from typing_extensions import override
 
 from amazon.base.contract_test_base import ContractTestBase
-from amazon.utils.app_signals_constants import AWS_LOCAL_OPERATION, AWS_LOCAL_SERVICE, AWS_SPAN_KIND
+from amazon.utils.application_signals_constants import AWS_LOCAL_OPERATION, AWS_LOCAL_SERVICE, AWS_SPAN_KIND
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
 from opentelemetry.proto.metrics.v1.metrics_pb2 import ExponentialHistogramDataPoint, Metric
 from opentelemetry.proto.trace.v1.trace_pb2 import Span
@@ -16,7 +16,7 @@ from opentelemetry.semconv.trace import SpanAttributes
 class DjangoTest(ContractTestBase):
     @override
     def get_application_image_name(self) -> str:
-        return "aws-appsignals-tests-django-app"
+        return "aws-application-signals-tests-django-app"
 
     @override
     def get_application_wait_pattern(self) -> str:

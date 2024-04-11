@@ -2,7 +2,7 @@
 #  https://help.github.com/en/articles/about-code-owners
 
 # Default owners for the entire repo
-* @aws-observability/aws-appsignals-team
+* @aws-observability/aws-application-signals-team
 
 # Owners for aws-otel-distro folder
 /aws-otel-distro/ @zzhlogin @thpierce @srprash @AsakerMohd
