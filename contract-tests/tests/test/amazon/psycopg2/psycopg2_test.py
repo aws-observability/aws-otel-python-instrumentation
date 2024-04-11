@@ -7,7 +7,7 @@ from testcontainers.postgres import PostgresContainer
 from typing_extensions import override
 
 from amazon.base.contract_test_base import NETWORK_NAME, ContractTestBase
-from amazon.utils.app_signals_constants import (
+from amazon.utils.application_signals_constants import (
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_REMOTE_OPERATION,
@@ -47,7 +47,7 @@ class Psycopg2Test(ContractTestBase):
 
     @override
     def get_application_image_name(self) -> str:
-        return "aws-appsignals-tests-psycopg2-app"
+        return "aws-application-signals-tests-psycopg2-app"
 
     def test_success(self) -> None:
         self.mock_collector_client.clear_signals()

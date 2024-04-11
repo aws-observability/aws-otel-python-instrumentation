@@ -6,6 +6,10 @@ on:
       version:
         description: 'Version number (e.g., 1.0.1)'
         required: true
+      is_patch:
+        description: 'Is this a patch? (true or false)'
+        required: true
+        default: 'false'
 
 permissions:
   contents: write
@@ -33,8 +37,35 @@ jobs:
 
       - name: Create branches
         run: |
-          git checkout -b "release/${MAJOR_MINOR}.x"
-          git push origin "release/${MAJOR_MINOR}.x"
+          IS_PATCH=${{ github.event.inputs.is_patch }}
+          if [[ "$IS_PATCH" != "true" && "$IS_PATCH" != "false" ]]; then
+            echo "Invalid input for IS_PATCH. Must be 'true' or 'false'."
+            exit 1
+          fi
+          
+          
+          if git ls-remote --heads origin release/${MAJOR_MINOR}.x | grep -q "release/${MAJOR_MINOR}.x"; then
+            if [ "$IS_PATCH" = "true" ]; then
+              git fetch origin release/${MAJOR_MINOR}.x
+              echo "Branch release/${MAJOR_MINOR}.x already exists, checking out."
+              git checkout "release/${MAJOR_MINOR}.x"
+            else 
+              echo "Error, release series branch release/${MAJOR_MINOR}.x exist for non-patch release"
+              echo "Check your input or branch"
+              exit 1
+            fi
+          else
+            if [ "$IS_PATCH" = "true" ]; then
+              echo "Error, release series branch release/${MAJOR_MINOR}.x NOT exist for patch release"
+              echo "Check your input or branch"
+              exit 1
+            else 
+              echo "Creating branch release/${MAJOR_MINOR}.x."
+              git checkout -b "release/${MAJOR_MINOR}.x"
+              git push origin "release/${MAJOR_MINOR}.x"
+            fi
+          fi
+          
           git checkout -b "${VERSION}_release"
           git push origin "${VERSION}_release"
 

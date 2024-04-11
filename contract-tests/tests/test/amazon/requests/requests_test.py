@@ -6,7 +6,7 @@ from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
 from typing_extensions import override
 
 from amazon.base.contract_test_base import ContractTestBase
-from amazon.utils.app_signals_constants import (
+from amazon.utils.application_signals_constants import (
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_REMOTE_OPERATION,
@@ -22,7 +22,7 @@ from opentelemetry.semconv.trace import SpanAttributes
 class RequestsTest(ContractTestBase):
     @override
     def get_application_image_name(self) -> str:
-        return "aws-appsignals-tests-requests-app"
+        return "aws-application-signals-tests-requests-app"
 
     @override
     def get_application_network_aliases(self) -> List[str]:

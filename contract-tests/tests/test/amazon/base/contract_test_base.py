@@ -14,15 +14,15 @@ from testcontainers.core.container import DockerContainer
 from testcontainers.core.waiting_utils import wait_for_logs
 from typing_extensions import override
 
-from amazon.utils.app_signals_constants import ERROR_METRIC, FAULT_METRIC, LATENCY_METRIC
+from amazon.utils.application_signals_constants import ERROR_METRIC, FAULT_METRIC, LATENCY_METRIC
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
 
-NETWORK_NAME: str = "aws-appsignals-network"
+NETWORK_NAME: str = "aws-application-signals-network"
 
 _logger: Logger = getLogger(__name__)
 _logger.setLevel(INFO)
 _MOCK_COLLECTOR_ALIAS: str = "collector"
-_MOCK_COLLECTOR_NAME: str = "aws-appsignals-mock-collector-python"
+_MOCK_COLLECTOR_NAME: str = "aws-application-signals-mock-collector-python"
 _MOCK_COLLECTOR_PORT: int = 4315
 
 
@@ -88,10 +88,10 @@ class ContractTestBase(TestCase):
             DockerContainer(self.get_application_image_name())
             .with_exposed_ports(self.get_application_port())
             .with_env("OTEL_METRIC_EXPORT_INTERVAL", "50")
-            .with_env("OTEL_AWS_APP_SIGNALS_ENABLED", "true")
+            .with_env("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "true")
             .with_env("OTEL_METRICS_EXPORTER", "none")
             .with_env("OTEL_BSP_SCHEDULE_DELAY", "1")
-            .with_env("OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT", f"http://collector:{_MOCK_COLLECTOR_PORT}")
+            .with_env("OTEL_AWS_APPLICATION_SIGNALS_EXPORTER_ENDPOINT", f"http://collector:{_MOCK_COLLECTOR_PORT}")
             .with_env("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", f"http://collector:{_MOCK_COLLECTOR_PORT}")
             .with_env("OTEL_RESOURCE_ATTRIBUTES", self.get_application_otel_resource_attributes())
             .with_env("OTEL_TRACES_SAMPLER", "always_on")

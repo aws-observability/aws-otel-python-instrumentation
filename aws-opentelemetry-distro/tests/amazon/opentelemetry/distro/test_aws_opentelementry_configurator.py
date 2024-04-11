@@ -14,7 +14,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _customize_exporter,
     _customize_sampler,
     _customize_span_processors,
-    _is_app_signals_enabled,
+    _is_application_signals_enabled,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
@@ -202,50 +202,50 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(os.environ.get("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", None), ",,,target_A,target_B,,,")
         self.assertEqual(os.environ.get("OTEL_PYTHON_URLLIB3_EXCLUDED_URLS", None), "target_C,target_D")
 
-    def test_is_app_signals_enabled(self):
-        os.environ.setdefault("OTEL_AWS_APP_SIGNALS_ENABLED", "True")
-        self.assertTrue(_is_app_signals_enabled())
-        os.environ.pop("OTEL_AWS_APP_SIGNALS_ENABLED", None)
+    def test_is_application_signals_enabled(self):
+        os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
+        self.assertTrue(_is_application_signals_enabled())
+        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
 
-        os.environ.setdefault("OTEL_AWS_APP_SIGNALS_ENABLED", "False")
-        self.assertFalse(_is_app_signals_enabled())
-        os.environ.pop("OTEL_AWS_APP_SIGNALS_ENABLED", None)
-        self.assertFalse(_is_app_signals_enabled())
+        os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "False")
+        self.assertFalse(_is_application_signals_enabled())
+        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
+        self.assertFalse(_is_application_signals_enabled())
 
     def test_customize_sampler(self):
         mock_sampler: Sampler = MagicMock()
         customized_sampler: Sampler = _customize_sampler(mock_sampler)
         self.assertEqual(mock_sampler, customized_sampler)
 
-        os.environ.setdefault("OTEL_AWS_APP_SIGNALS_ENABLED", "True")
+        os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
         customized_sampler = _customize_sampler(mock_sampler)
         self.assertNotEqual(mock_sampler, customized_sampler)
         self.assertIsInstance(customized_sampler, AlwaysRecordSampler)
         self.assertEqual(mock_sampler, customized_sampler._root_sampler)
-        os.environ.pop("OTEL_AWS_APP_SIGNALS_ENABLED", None)
+        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
 
     def test_customize_exporter(self):
         mock_exporter: SpanExporter = MagicMock()
         customized_exporter: SpanExporter = _customize_exporter(mock_exporter, Resource.get_empty())
         self.assertEqual(mock_exporter, customized_exporter)
 
-        os.environ.setdefault("OTEL_AWS_APP_SIGNALS_ENABLED", "True")
+        os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
         customized_exporter = _customize_exporter(mock_exporter, Resource.get_empty())
         self.assertNotEqual(mock_exporter, customized_exporter)
         self.assertIsInstance(customized_exporter, AwsMetricAttributesSpanExporter)
         self.assertEqual(mock_exporter, customized_exporter._delegate)
-        os.environ.pop("OTEL_AWS_APP_SIGNALS_ENABLED", None)
+        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
 
     def test_customize_span_processors(self):
         mock_tracer_provider: TracerProvider = MagicMock()
         _customize_span_processors(mock_tracer_provider, Resource.get_empty())
         self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 0)
 
-        os.environ.setdefault("OTEL_AWS_APP_SIGNALS_ENABLED", "True")
+        os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
         _customize_span_processors(mock_tracer_provider, Resource.get_empty())
         self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 2)
         first_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
         self.assertIsInstance(first_processor, AttributePropagatingSpanProcessor)
         second_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[1].args[0]
         self.assertIsInstance(second_processor, AwsSpanMetricsProcessor)
-        os.environ.pop("OTEL_AWS_APP_SIGNALS_ENABLED", None)
+        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)

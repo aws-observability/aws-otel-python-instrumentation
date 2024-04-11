@@ -9,7 +9,7 @@ from testcontainers.localstack import LocalStackContainer
 from typing_extensions import override
 
 from amazon.base.contract_test_base import NETWORK_NAME, ContractTestBase
-from amazon.utils.app_signals_constants import (
+from amazon.utils.application_signals_constants import (
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_REMOTE_OPERATION,
@@ -49,7 +49,7 @@ class BotocoreTest(ContractTestBase):
 
     @override
     def get_application_image_name(self) -> str:
-        return "aws-appsignals-tests-botocore-app"
+        return "aws-application-signals-tests-botocore-app"
 
     @classmethod
     @override
