@@ -331,7 +331,7 @@ jobs:
       - name: Publish metric on test result
         if: always()
         run: |
-          if [[ "${{ steps.log-validation.outcome }}" == "success" && "${{ steps.metric-validation.outcome }}" == "success" && "${{ steps.trace-validation.outcome }}" == "success" ]]; then
+          if [ "${{ steps.log-validation.outcome }}" = "success" ] && [ "${{ steps.metric-validation.outcome }}" = "success" ] && [ "${{ steps.trace-validation.outcome }}" = "success" ]; then
             aws cloudwatch put-metric-data --namespace 'ADOT/GitHubActions' \
             --metric-name Failure \
             --dimensions repository=${{ github.repository }},branch=${{ github.ref_name }},workflow=${{ inputs.caller-workflow-name }} \
