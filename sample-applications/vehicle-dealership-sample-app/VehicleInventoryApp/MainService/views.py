@@ -3,6 +3,7 @@
 import json
 import os
 import time
+from html import escape
 
 import requests
 from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseNotAllowed, HttpResponseNotFound
@@ -52,15 +53,15 @@ def vehicle_by_id(request, vehicle_id):
 
         vehicle_objects = Vehicle.objects.filter(id=vehicle_id).values()
         if not vehicle_objects:
-            return HttpResponseNotFound("Vehicle with id=" + str(vehicle_id) + " is not found")
+            return HttpResponseNotFound("Vehicle with id=" + escape(str(vehicle_id)) + " is not found")
         return HttpResponse(vehicle_objects)
     if request.method == "DELETE":
         vehicle_objects = Vehicle.objects.filter(id=vehicle_id)
         vehicle_objects_values = Vehicle.objects.filter(id=vehicle_id).values()
         if not vehicle_objects_values:
-            return HttpResponseNotFound("Vehicle with id=" + str(vehicle_id) + " is not found")
+            return HttpResponseNotFound("Vehicle with id=" + escape(str(vehicle_id)) + " is not found")
         vehicle_objects.delete()
-        return HttpResponse("Vehicle with id=" + str(vehicle_id) + " has been deleted")
+        return HttpResponse("Vehicle with id=" + escape(str(vehicle_id)) + " has been deleted")
     return HttpResponseNotAllowed("Only GET/DELETE requests are allowed!")
 
 
@@ -68,7 +69,7 @@ def get_vehicles_by_make(request, vehicles_make):
     if request.method == "GET":
         vehicles_objects = Vehicle.objects.filter(make=vehicles_make).values()
         if not vehicles_objects:
-            return HttpResponseNotFound("Couldn't find any vehicle with make=" + str(vehicles_make))
+            return HttpResponseNotFound("Couldn't find any vehicle with make=" + escape(str(vehicles_make)))
         return HttpResponse(vehicles_objects)
     return HttpResponseNotAllowed("Only GET requests are allowed!")
 
@@ -77,7 +78,7 @@ def get_vehicle_image(request, vehicle_id):
     if request.method == "GET":
         vehicle_object = Vehicle.objects.filter(id=vehicle_id).first()
         if not vehicle_object:
-            return HttpResponseNotFound("Vehicle with id=" + str(vehicle_id) + " is not found")
+            return HttpResponseNotFound("Vehicle with id=" + escape(str(vehicle_id)) + " is not found")
         image_name = getattr(vehicle_object, "image_name")
         return HttpResponse(requests.get(build_image_url(image_name), timeout=10))
     return HttpResponseNotAllowed("Only GET requests are allowed!")
@@ -85,17 +86,16 @@ def get_vehicle_image(request, vehicle_id):
 
 @csrf_exempt
 def image(request, image_name):
-    print(image_name)
     if request.method == "GET":
         response = requests.get(build_image_url(image_name), timeout=10)
         if response.ok:
             return HttpResponse(response)
-        return HttpResponseNotFound("Image with name: " + image_name + " is not found")
+        return HttpResponseNotFound("Image with name: " + escape(image_name) + " is not found")
     if request.method == "POST":
         response = requests.post(build_image_url(image_name), timeout=10)
         if response.ok:
             return HttpResponse(response)
-        return HttpResponseNotFound("Image with name: " + image_name + " failed to saved")
+        return HttpResponseNotFound("Image with name: " + escape(image_name) + " failed to saved")
     return HttpResponseNotAllowed("Only GET/POST requests are allowed!")
 
 
@@ -124,7 +124,7 @@ def vehicle_purchase_history_by_id(request, vehicle_purchase_history_id):
         vehicle_purchase_history_object = VehiclePurchaseHistory.objects.filter(id=vehicle_purchase_history_id).values()
         if not vehicle_purchase_history_object:
             return HttpResponseNotFound(
-                "VehiclePurchaseHistory with id=" + str(vehicle_purchase_history_id) + " is not found"
+                "VehiclePurchaseHistory with id=" + escape(str(vehicle_purchase_history_id)) + " is not found"
             )
         return HttpResponse(vehicle_purchase_history_object)
     if request.method == "DELETE":
@@ -132,10 +132,12 @@ def vehicle_purchase_history_by_id(request, vehicle_purchase_history_id):
         vehicle_purchase_history_object_values = Vehicle.objects.filter(id=vehicle_purchase_history_id).values()
         if not vehicle_purchase_history_object_values:
             return HttpResponseNotFound(
-                "VehiclePurchaseHistory with id=" + str(vehicle_purchase_history_id) + " is not found"
+                "VehiclePurchaseHistory with id=" + escape(str(vehicle_purchase_history_id)) + " is not found"
             )
         vehicle_purchase_history_object.delete()
-        return HttpResponse("VehiclePurchaseHistory with id=" + str(vehicle_purchase_history_id) + " has been deleted")
+        return HttpResponse(
+            "VehiclePurchaseHistory with id=" + escape(str(vehicle_purchase_history_id)) + " has been deleted"
+        )
     return HttpResponseNotAllowed("Only GET/DELETE requests are allowed!")
 
 
@@ -144,12 +146,12 @@ def get_vehicle_from_vehicle_history(request, vehicle_purchase_history_id):
         vehicle_purchase_history_object = VehiclePurchaseHistory.objects.filter(id=vehicle_purchase_history_id).first()
         if not vehicle_purchase_history_object:
             return HttpResponseNotFound(
-                "VehiclePurchaseHistory with id=" + str(vehicle_purchase_history_id) + " is not found"
+                "VehiclePurchaseHistory with id=" + escape(str(vehicle_purchase_history_id)) + " is not found"
             )
         vehicle_id = getattr(vehicle_purchase_history_object, "vehicle_id")
         vehicle_objects = Vehicle.objects.filter(id=vehicle_id).values()
         if not vehicle_objects:
-            return HttpResponseNotFound("Vehicle with id=" + str(vehicle_id) + " is not found")
+            return HttpResponseNotFound("Vehicle with id=" + escape(str(vehicle_id)) + " is not found")
         return HttpResponse(vehicle_objects)
     return HttpResponseNotAllowed("Only GET requests are allowed!")
 
