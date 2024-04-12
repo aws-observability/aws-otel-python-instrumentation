@@ -68,7 +68,7 @@ jobs:
       - name: Generate testing id and python sample app namespace
         run: |
           echo TESTING_ID="${{ inputs.aws-region }}-${{ github.run_id }}-${{ github.run_number }}" >> $GITHUB_ENV
-          echo PYTHON_SAMPLE_APP_NAMESPACE="python-app-namespace-${{ github.run_id }}-${{ github.run_number }}" >> $GITHUB_ENV
+          echo PYTHON_SAMPLE_APP_NAMESPACE="python-app-ns-${{ github.run_id }}-${{ github.run_number }}" >> $GITHUB_ENV
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
