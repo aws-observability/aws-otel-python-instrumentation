@@ -32,7 +32,6 @@ env:
   METRIC_NAMESPACE: AppSignals
   LOG_GROUP_NAME: /aws/appsignals/generic
   ADOT_WHEEL_NAME: ${{ inputs.staging_wheel_name }}
-#  TEST_RESOURCES_FOLDER: /home/runner/work/aws-application-signals-test-framework/aws-application-signals-test-framework
 
 jobs:
   python-e2e-ec2-test:
@@ -88,13 +87,6 @@ jobs:
           else
             echo GET_ADOT_WHEEL_COMMAND="python3.9 -m pip install aws-opentelemetry-distro" >> $GITHUB_ENV
           fi
-
-#      - name: Set up terraform
-#        uses: ./.github/workflows/actions/execute_and_retry
-#        with:
-#          command: "wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg"
-#          post-command: 'echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
-#          && sudo apt update && sudo apt install terraform'
 
       - name: Initiate Terraform
         uses: ./.github/workflows/actions/execute_and_retry
