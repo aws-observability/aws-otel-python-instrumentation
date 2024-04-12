@@ -6,14 +6,14 @@ from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
 from typing_extensions import override
 
 from amazon.base.contract_test_base import ContractTestBase
-from amazon.utils.app_signals_constants import AWS_LOCAL_OPERATION, AWS_LOCAL_SERVICE, AWS_SPAN_KIND
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
 from opentelemetry.proto.metrics.v1.metrics_pb2 import ExponentialHistogramDataPoint, Metric
 from opentelemetry.proto.trace.v1.trace_pb2 import Span
-from opentelemetry.semconv.trace import SpanAttributes
 from requests import Response, request
 
 from amazon.utils.app_signals_constants import ERROR_METRIC, FAULT_METRIC, LATENCY_METRIC
+
+import re
 
 
 class ResourceAttributesTest(ContractTestBase):
@@ -71,29 +71,3 @@ class ResourceAttributesTest(ContractTestBase):
             for key, value in self._get_k8s_attributes():
                 self.assertEqual(metric_attributes_dict[key], value)
             self.assertEqual(metric_attributes_dict["service.name"], service_name)
-
-    def test_success(self) -> None:
-        self.do_test_requests("success", "GET", 200, 0, 0, request_method="GET", local_operation="GET success")
-
-    def test_post_success(self) -> None:
-        self.do_test_requests(
-            "post_success", "POST", 201, 0, 0, request_method="POST", local_operation="POST post_success"
-        )
-
-    def test_route(self) -> None:
-        self.do_test_requests(
-            "users/userId/orders/orderId",
-            "GET",
-            200,
-            0,
-            0,
-            request_method="GET",
-            local_operation="GET users/<str:user_id>/orders/<str:order_id>",
-        )
-
-    def test_error(self) -> None:
-        self.do_test_requests("error", "GET", 400, 1, 0, request_method="GET", local_operation="GET error")
-
-    def test_fault(self) -> None:
-        self.do_test_requests("fault", "GET", 500, 0, 1, request_method="GET", local_operation="GET fault")
-
