@@ -32,7 +32,7 @@ env:
   # The precense of this env var is required for use by terraform and AWS CLI commands
   # It is not redundant
   AWS_DEFAULT_REGION: ${{ inputs.aws-region }}
-  PYTHON_SAMPLE_APP_NAMESPACE: python-app-namespace
+#  PYTHON_SAMPLE_APP_NAMESPACE: python-app-namespace
   METRIC_NAMESPACE: AppSignals
   LOG_GROUP_NAME: /aws/appsignals/eks
 #  TEST_RESOURCES_FOLDER: /__w/aws-application-signals-test-framework/aws-application-signals-test-framework
@@ -65,8 +65,10 @@ jobs:
           delete_log_group="aws logs delete-log-group --log-group-name '${{ env.LOG_GROUP_NAME }}' --region \$REGION"
           sed -i "s#$delete_log_group##g" clean-app-signals.sh
 
-      - name: Generate testing id
-        run: echo TESTING_ID="${{ inputs.aws-region }}-${{ github.run_id }}-${{ github.run_number }}" >> $GITHUB_ENV
+      - name: Generate testing id and python sample app namespace
+        run: |
+          echo TESTING_ID="${{ inputs.aws-region }}-${{ github.run_id }}-${{ github.run_number }}" >> $GITHUB_ENV
+          echo PYTHON_SAMPLE_APP_NAMESPACE="python-app-namespace-${{ github.run_id }}-${{ github.run_number }}" >> $GITHUB_ENV
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -365,6 +367,7 @@ jobs:
       - name: Terraform destroy
         if: always()
         continue-on-error: true
+        timeout-minutes: 5
         working-directory: terraform/python/eks
         run: |
           terraform destroy -auto-approve \
