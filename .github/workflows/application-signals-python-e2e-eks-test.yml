@@ -35,11 +35,13 @@ env:
   PYTHON_SAMPLE_APP_NAMESPACE: python-app-namespace
   METRIC_NAMESPACE: AppSignals
   LOG_GROUP_NAME: /aws/appsignals/eks
-  TEST_RESOURCES_FOLDER: /home/runner/work/aws-application-signals-test-framework/aws-application-signals-test-framework
+#  TEST_RESOURCES_FOLDER: /__w/aws-application-signals-test-framework/aws-application-signals-test-framework
 
 jobs:
   python-e2e-eks-test:
     runs-on: ubuntu-latest
+    container:
+      image: public.ecr.aws/h6o3z5z9/aws-application-signals-test-framework-workflow-container:latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -86,23 +88,23 @@ jobs:
           role-to-assume: arn:aws:iam::${{ env.ACCOUNT_ID }}:role/${{ inputs['caller-workflow-name'] == 'main-build' && secrets.ADOT_E2E_TEST_ROLE_ARN || secrets.E2E_TEST_ROLE_ARN }}
           aws-region: ${{ inputs.aws-region }}
 
-      # local directory to store the kubernetes config
-      - name: Create kubeconfig directory
-        run: mkdir -p ${{ github.workspace }}/.kube
+#      # local directory to store the kubernetes config
+#      - name: Create kubeconfig directory
+#        run: mkdir -p ${{ github.workspace }}/.kube
 
-      - name: Set KUBECONFIG environment variable
-        run: echo KUBECONFIG="${{ github.workspace }}/.kube/config" >> $GITHUB_ENV
+#      - name: Set KUBECONFIG environment variable
+#        run: echo KUBECONFIG="${{ github.workspace }}/.kube/config" >> $GITHUB_ENV
 
       - name: Set up kubeconfig
         run: aws eks update-kubeconfig --name ${{ inputs.test-cluster-name }} --region ${{ inputs.aws-region }}
 
-      - name: Install eksctl
-        uses: ./.github/workflows/actions/execute_and_retry
-        with:
-          pre-command: 'mkdir ${{ github.workspace }}/eksctl'
-          command: 'curl -sLO "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz" 
-                  && tar -xzf eksctl_Linux_amd64.tar.gz -C ${{ github.workspace }}/eksctl && rm eksctl_Linux_amd64.tar.gz'
-          cleanup: 'rm -f eksctl_Linux_amd64.tar.gz'
+#      - name: Install eksctl
+#        uses: ./.github/workflows/actions/execute_and_retry
+#        with:
+#          pre-command: 'mkdir ${{ github.workspace }}/eksctl'
+#          command: 'curl -sLO "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz"
+#                  && tar -xzf eksctl_Linux_amd64.tar.gz -C ${{ github.workspace }}/eksctl && rm eksctl_Linux_amd64.tar.gz'
+#          cleanup: 'rm -f eksctl_Linux_amd64.tar.gz'
 
       - name: Add eksctl to Github Path
         run: |
@@ -121,12 +123,12 @@ jobs:
           --region ${{ inputs.aws-region }} \
           --approve"
 
-      - name: Set up terraform
-        uses: ./.github/workflows/actions/execute_and_retry
-        with:
-          command: "wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg"
-          post-command: 'echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
-          && sudo apt update && sudo apt install terraform'
+#      - name: Set up terraform
+#        uses: ./.github/workflows/actions/execute_and_retry
+#        with:
+#          command: "wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg"
+#          post-command: 'echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+#          && sudo apt update && sudo apt install terraform'
 
       - name: Initiate Terraform
         uses: ./.github/workflows/actions/execute_and_retry
@@ -167,7 +169,7 @@ jobs:
             # after installing Application Signals. Attempts to connect will be made for up to 10 minutes
             if [ $deployment_failed -eq 0 ]; then          
               echo "Installing application signals to the sample app"
-              source ${GITHUB_WORKSPACE}/.github/workflows/util/execute_and_retry.sh
+              . ${GITHUB_WORKSPACE}/.github/workflows/util/execute_and_retry.sh
               execute_and_retry 2 \
               "${GITHUB_WORKSPACE}/enablement-script/enable-app-signals.sh \
               ${{ inputs.test-cluster-name }} \
