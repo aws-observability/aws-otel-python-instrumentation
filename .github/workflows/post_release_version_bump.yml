@@ -71,7 +71,7 @@ jobs:
 
       - name: Determine release branch and checkout
         run: |
-          RELEASE_BRANCH="release/${MAJOR_MINOR}.x"
+          RELEASE_BRANCH="release/v${MAJOR_MINOR}.x"
           git fetch origin $RELEASE_BRANCH
           git checkout -b "prepare-main-for-next-dev-cycle-${VERSION}" origin/$RELEASE_BRANCH
 
