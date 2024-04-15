@@ -32,7 +32,7 @@ jobs:
         with:
           image_uri_with_tag: "adot-autoinstrumentation-python:test"
           push_image: false
-          load_image: false
+          load_image: true
           python_version: "3.10"
           package_name: aws-opentelemetry-distro
           os: ubuntu-latest
