@@ -44,39 +44,27 @@ class ResourceAttributesTest(ContractTestBase):
 
     def assert_resource_attributes(self, service_name):
         resource_scope_spans: List[ResourceScopeSpan] = self.mock_collector_client.get_traces()
-        print("Scope_Span from Resource Span")
-        print(resource_scope_spans[0].scope_spans)
-        print("Resource_Span from Resource Span")
-        print(resource_scope_spans[0].resource_spans)
         metrics: List[ResourceScopeMetric] = self.mock_collector_client.get_metrics(
             {LATENCY_METRIC, ERROR_METRIC, FAULT_METRIC}
         )
         target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
-            print("Span under resource_span.span")
-            print(resource_scope_span.span)
             # pylint: disable=no-member
             if resource_scope_span.span.name == "GET success":
-                target_spans.append(resource_scope_span.span)
+                target_spans.append(resource_scope_span.resource_spans)
 
         self.assertEqual(len(target_spans), 1)
-        attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(target_spans[0].attributes)
-        # for key, value in self._get_k8s_attributes().items():
-        #     self.assertEqual(attributes_dict[key], value)
-        # self.assertEqual(attributes_dict["service.name"], service_name)
+        attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(target_spans[0].resource.attributes)
+        for key, value in self._get_k8s_attributes().items():
+            self._assert_str_attribute(attributes_dict, key, value)
+        self._assert_str_attribute(attributes_dict, "service.name", service_name)
 
         target_metrics: List[Metric] = []
         for resource_scope_metric in metrics:
-            print(resource_scope_metric.metric)
-            if resource_scope_metric.metric.name.lower() in ["Error", "Fault", "Latency"]:
-                target_metrics.append(resource_scope_metric.metric)
+            if resource_scope_metric.metric.name in ["Error", "Fault", "Latency"]:
+                target_metrics.append(resource_scope_metric.resource_metrics)
         for target_metric in target_metrics:
-            dp_list: List[ExponentialHistogramDataPoint] = target_metric.exponential_histogram.data_points
-            self.assertEqual(len(dp_list), 1)
-            metric_attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(dp_list[0].attributes)
-            print("Metric Attribute Dict from metric.exp_his.dp[0].attributes")
-            print(metric_attributes_dict)
+            metric_attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(target_metric.resource.attributes)
             for key, value in self._get_k8s_attributes().items():
-                self.assertEqual(metric_attributes_dict[key], value)
-            self.assertEqual(metric_attributes_dict["service.name"], service_name)
-        self.assertTrue(False)
+                self._assert_str_attribute(metric_attributes_dict, key, value)
+            self._assert_str_attribute(metric_attributes_dict, "service.name", service_name)

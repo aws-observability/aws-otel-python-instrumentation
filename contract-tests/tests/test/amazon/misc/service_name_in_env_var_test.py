@@ -16,12 +16,15 @@ from requests import Response, request
 class ServiceNameInResourceAttributesTest(ResourceAttributesTest):
 
     @override
+    def get_application_extra_environment_variables(self) -> str:
+        return {"DJANGO_SETTINGS_MODULE": "django_server.settings"}
+
+    @override
     def get_application_otel_resource_attributes(self):
         pairlist = []
         for key, value in self._get_k8s_attributes().items():
             pairlist.append(key + "=" + value)
-        pairlist.append("service.name=service-name")
         return ','.join(pairlist)
 
     def test_service(self):
-        self.do_misc_test_request("service-name")
+        self.do_misc_test_request("unknown_service")
