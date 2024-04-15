@@ -94,6 +94,7 @@ runs:
         load: ${{ inputs.load_image }}
 
     - name: Perform image scan
+      if: ${{ inputs.push_image == true || inputs.push_image == 'true' }}
       uses: ./.github/actions/image_scan
       with:
         image-ref: ${{ inputs.image_uri_with_tag }}
