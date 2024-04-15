@@ -3,17 +3,22 @@
 from typing import Dict, List
 
 from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
+from requests import Response, request
 from typing_extensions import override
 
 from amazon.base.contract_test_base import ContractTestBase
-from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
-from opentelemetry.proto.metrics.v1.metrics_pb2 import ExponentialHistogramDataPoint, Metric
-from opentelemetry.proto.trace.v1.trace_pb2 import Span
-from requests import Response, request
-
 from amazon.utils.app_signals_constants import ERROR_METRIC, FAULT_METRIC, LATENCY_METRIC
+from opentelemetry.proto.common.v1.common_pb2 import AnyValue
+from opentelemetry.proto.metrics.v1.metrics_pb2 import Metric
+from opentelemetry.proto.trace.v1.trace_pb2 import Span
 
-import re
+
+def _get_k8s_attributes():
+    return {
+        "k8s.namespace.name": "namespace-name",
+        "k8s.pod.name": "pod-name",
+        "k8s.deployment.name": "deployment-name",
+    }
 
 
 class ResourceAttributesTest(ContractTestBase):
@@ -28,11 +33,6 @@ class ResourceAttributesTest(ContractTestBase):
     @override
     def get_application_extra_environment_variables(self):
         return {"DJANGO_SETTINGS_MODULE": "django_server.settings"}
-
-    def _get_k8s_attributes(self):
-        return {"k8s.namespace.name": "namespace-name",
-                "k8s.pod.name": "pod-name",
-                "k8s.deployment.name": "deployment-name"}
 
     def do_misc_test_request(self, pattern):
         address: str = self.application.get_container_host_ip()
@@ -55,7 +55,7 @@ class ResourceAttributesTest(ContractTestBase):
 
         self.assertEqual(len(target_spans), 1)
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(target_spans[0].resource.attributes)
-        for key, value in self._get_k8s_attributes().items():
+        for key, value in _get_k8s_attributes().items():
             self._assert_str_attribute(attributes_dict, key, value)
         self._assert_str_attribute(attributes_dict, "service.name", service_name)
 
@@ -65,6 +65,6 @@ class ResourceAttributesTest(ContractTestBase):
                 target_metrics.append(resource_scope_metric.resource_metrics)
         for target_metric in target_metrics:
             metric_attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(target_metric.resource.attributes)
-            for key, value in self._get_k8s_attributes().items():
+            for key, value in _get_k8s_attributes().items():
                 self._assert_str_attribute(metric_attributes_dict, key, value)
             self._assert_str_attribute(metric_attributes_dict, "service.name", service_name)
