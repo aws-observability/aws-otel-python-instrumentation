@@ -247,7 +247,7 @@ jobs:
         continue-on-error: true
         run: |
           curl -S -s -o /dev/null http://${{ env.APP_ENDPOINT }}/outgoing-http-call
-          curl -S -s -o /dev/null http://${{ env.APP_ENDPOINT }}/aws-sdk-call
+          curl -S -s -o /dev/null http://${{ env.APP_ENDPOINT }}/aws-sdk-call?testingId=${{ env.TESTING_ID }}
           curl -S -s -o /dev/null http://${{ env.APP_ENDPOINT }}/remote-service?ip=${{ env.REMOTE_SERVICE_POD_IP }}
           curl -S -s -o /dev/null http://${{ env.APP_ENDPOINT }}/client-call
 
@@ -284,7 +284,7 @@ jobs:
           --service-name python-application-${{ env.TESTING_ID }}
           --remote-service-name python-remote-application-${{ env.TESTING_ID }}
           --remote-service-deployment-name ${{ env.REMOTE_SERVICE_DEPLOYMENT_NAME }}
-          --request-body ip=${{ env.REMOTE_SERVICE_POD_IP }}
+          --request-body ip=${{ env.REMOTE_SERVICE_POD_IP }}&testingId=${{ env.TESTING_ID }}
           --rollup'
 
       - name: Call endpoints and validate generated traces
