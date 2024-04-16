@@ -7,7 +7,7 @@ from requests import Response, request
 from typing_extensions import override
 
 from amazon.base.contract_test_base import ContractTestBase
-from amazon.utils.app_signals_constants import ERROR_METRIC, FAULT_METRIC, LATENCY_METRIC
+from amazon.utils.application_signals_constants import ERROR_METRIC, FAULT_METRIC, LATENCY_METRIC
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue
 from opentelemetry.proto.metrics.v1.metrics_pb2 import Metric
 from opentelemetry.proto.trace.v1.trace_pb2 import Span

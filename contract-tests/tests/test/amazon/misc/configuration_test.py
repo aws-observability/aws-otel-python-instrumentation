@@ -47,8 +47,7 @@ class ResourceAttributesTest(ContractTestBase):
                 )
 
     def test_xray_id_format(self):
-        global seen
-        seen = []
+        seen: List[str] = []
         for _ in range(20):
             address: str = self.application.get_container_host_ip()
             port: str = self.application.get_exposed_port(self.get_application_port())
