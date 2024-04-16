@@ -162,7 +162,7 @@ jobs:
               if [ "${{ inputs.caller-workflow-name }}" == "main-build" ]; then
                 echo "Patching staging adot image for main build:"
                 execute_and_retry 2 "kubectl patch deploy -namazon-cloudwatch amazon-cloudwatch-observability-controller-manager --type='json' \
-                -p='[{"op": \"replace\", \"path\": \"/spec/template/spec/containers/0/args/0\", \"value\": \"--auto-instrumentation-python-image=${{ inputs.application-signals-adot-image }}:${{ inputs.application-signals-adot-image-tag }}\"}]'"
+                -p='[{"op": \"replace\", \"path\": \"/spec/template/spec/containers/0/args/2\", \"value\": \"--auto-instrumentation-python-image=${{ inputs.application-signals-adot-image }}:${{ inputs.application-signals-adot-image-tag }}\"}]'"
                 execute_and_retry 2 "kubectl delete pods --all -n amazon-cloudwatch"
                 execute_and_retry 2 "kubectl wait --for=condition=Ready pod --all -n amazon-cloudwatch"
               fi
