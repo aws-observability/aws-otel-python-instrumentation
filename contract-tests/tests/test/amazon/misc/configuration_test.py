@@ -15,7 +15,7 @@ from opentelemetry.sdk.metrics.export import AggregationTemporality
 class ResourceAttributesTest(ContractTestBase):
     @override
     def get_application_image_name(self) -> str:
-        return "aws-appsignals-tests-django-app"
+        return "aws-application-signals-tests-django-app"
 
     @override
     def get_application_wait_pattern(self) -> str:

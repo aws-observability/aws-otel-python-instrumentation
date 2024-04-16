@@ -24,7 +24,7 @@ def _get_k8s_attributes():
 class ResourceAttributesTest(ContractTestBase):
     @override
     def get_application_image_name(self) -> str:
-        return "aws-appsignals-tests-django-app"
+        return "aws-application-signals-tests-django-app"
 
     @override
     def get_application_wait_pattern(self) -> str:
