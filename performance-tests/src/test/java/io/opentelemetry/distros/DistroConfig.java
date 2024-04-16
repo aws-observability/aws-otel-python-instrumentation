@@ -12,29 +12,29 @@ import java.util.Map;
 public enum DistroConfig {
   NONE("none", "no distro at all", false, Collections.EMPTY_MAP),
   APPLICATION_SIGNALS_DISABLED(
-      "app_signals_disabled",
+      "application_signals_disabled",
       "ADOT distro with Application Signals disabled",
       true,
-      Map.of("OTEL_AWS_APP_SIGNALS_ENABLED", "false", "OTEL_TRACES_SAMPLER", "xray")),
+      Map.of("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "false", "OTEL_TRACES_SAMPLER", "xray")),
   APPLICATION_SIGNALS_NO_TRACES(
-      "app_signals_no_traces",
+      "application_signals_no_traces",
       "ADOT distro with Application Signals enabled and no tracing",
       true,
       Map.of(
-          "OTEL_AWS_APP_SIGNALS_ENABLED",
+          "OTEL_AWS_APPLICATION_SIGNALS_ENABLED",
           "true",
-          "OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT",
+          "OTEL_AWS_APPLICATION_SIGNALS_EXPORTER_ENDPOINT",
           "http://collector:4317",
           "OTEL_TRACES_SAMPLER",
           "always_off")),
   APPLICATION_SIGNALS_TRACES(
-      "app_signals_traces",
+      "application_signals_traces",
       "ADOT distro with Application Signals enabled and tracing",
       true,
       Map.of(
-          "OTEL_AWS_APP_SIGNALS_ENABLED",
+          "OTEL_AWS_APPLICATION_SIGNALS_ENABLED",
           "true",
-          "OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT",
+          "OTEL_AWS_APPLICATION_SIGNALS_EXPORTER_ENDPOINT",
           "http://collector:4317",
           "OTEL_TRACES_SAMPLER",
           "xray"));
