@@ -1,10 +1,10 @@
 ## Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 ## SPDX-License-Identifier: Apache-2.0
 
-# This is a reusable workflow for running the E2E test for App Signals.
+# This is a reusable workflow for running the E2E test for Application Signals.
 # It is meant to be called from another workflow.
 # Read more about reusable workflows: https://docs.github.com/en/actions/using-workflows/reusing-workflows#overview
-name: App Signals Enablement E2E Testing - Python EKS
+name: Application Signals Enablement E2E Testing - Python EKS
 on:
   workflow_call:
     inputs:
@@ -14,10 +14,10 @@ on:
       test-cluster-name:
         required: true
         type: string
-      appsignals-adot-image:
+      application-signals-adot-image:
         required: false
         type: string
-      appsignals-adot-image-tag:
+      application-signals-adot-image-tag:
         required: false
         type: string
       caller-workflow-name:
@@ -32,14 +32,14 @@ env:
   # The precense of this env var is required for use by terraform and AWS CLI commands
   # It is not redundant
   AWS_DEFAULT_REGION: ${{ inputs.aws-region }}
-  PYTHON_SAMPLE_APP_NAMESPACE: python-app-namespace
   METRIC_NAMESPACE: AppSignals
   LOG_GROUP_NAME: /aws/appsignals/eks
-  TEST_RESOURCES_FOLDER: /home/runner/work/aws-application-signals-test-framework/aws-application-signals-test-framework
 
 jobs:
   python-e2e-eks-test:
     runs-on: ubuntu-latest
+    container:
+      image: public.ecr.aws/h6o3z5z9/aws-application-signals-test-framework-workflow-container:latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,8 +63,10 @@ jobs:
           delete_log_group="aws logs delete-log-group --log-group-name '${{ env.LOG_GROUP_NAME }}' --region \$REGION"
           sed -i "s#$delete_log_group##g" clean-app-signals.sh
 
-      - name: Generate testing id
-        run: echo TESTING_ID="${{ inputs.aws-region }}-${{ github.run_id }}-${{ github.run_number }}" >> $GITHUB_ENV
+      - name: Generate testing id and python sample app namespace
+        run: |
+          echo TESTING_ID="${{ inputs.aws-region }}-${{ github.run_id }}-${{ github.run_number }}" >> $GITHUB_ENV
+          echo PYTHON_SAMPLE_APP_NAMESPACE="ns-${{ github.run_id }}-${{ github.run_number }}" >> $GITHUB_ENV
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -86,23 +88,8 @@ jobs:
           role-to-assume: arn:aws:iam::${{ env.ACCOUNT_ID }}:role/${{ inputs['caller-workflow-name'] == 'main-build' && secrets.ADOT_E2E_TEST_ROLE_ARN || secrets.E2E_TEST_ROLE_ARN }}
           aws-region: ${{ inputs.aws-region }}
 
-      # local directory to store the kubernetes config
-      - name: Create kubeconfig directory
-        run: mkdir -p ${{ github.workspace }}/.kube
-
-      - name: Set KUBECONFIG environment variable
-        run: echo KUBECONFIG="${{ github.workspace }}/.kube/config" >> $GITHUB_ENV
-
       - name: Set up kubeconfig
         run: aws eks update-kubeconfig --name ${{ inputs.test-cluster-name }} --region ${{ inputs.aws-region }}
-
-      - name: Install eksctl
-        uses: ./.github/workflows/actions/execute_and_retry
-        with:
-          pre-command: 'mkdir ${{ github.workspace }}/eksctl'
-          command: 'curl -sLO "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz" 
-                  && tar -xzf eksctl_Linux_amd64.tar.gz -C ${{ github.workspace }}/eksctl && rm eksctl_Linux_amd64.tar.gz'
-          cleanup: 'rm -f eksctl_Linux_amd64.tar.gz'
 
       - name: Add eksctl to Github Path
         run: |
@@ -120,13 +107,6 @@ jobs:
           --attach-policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess \
           --region ${{ inputs.aws-region }} \
           --approve"
-
-      - name: Set up terraform
-        uses: ./.github/workflows/actions/execute_and_retry
-        with:
-          command: "wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg"
-          post-command: 'echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
-          && sudo apt update && sudo apt install terraform'
 
       - name: Initiate Terraform
         uses: ./.github/workflows/actions/execute_and_retry
@@ -164,10 +144,10 @@ jobs:
             fi
 
             # If the deployment_failed is still 0, then the terraform deployment succeeded and now try to connect to the endpoint 
-            # after installing App Signals. Attempts to connect will be made for up to 10 minutes
+            # after installing Application Signals. Attempts to connect will be made for up to 10 minutes
             if [ $deployment_failed -eq 0 ]; then          
-              echo "Installing app signals to the sample app"
-              source ${GITHUB_WORKSPACE}/.github/workflows/util/execute_and_retry.sh
+              echo "Installing application signals to the sample app"
+              . ${GITHUB_WORKSPACE}/.github/workflows/util/execute_and_retry.sh
               execute_and_retry 2 \
               "${GITHUB_WORKSPACE}/enablement-script/enable-app-signals.sh \
               ${{ inputs.test-cluster-name }} \
@@ -182,7 +162,7 @@ jobs:
               if [ "${{ inputs.caller-workflow-name }}" == "main-build" ]; then
                 echo "Patching staging adot image for main build:"
                 execute_and_retry 2 "kubectl patch deploy -namazon-cloudwatch amazon-cloudwatch-observability-controller-manager --type='json' \
-                -p='[{"op": \"replace\", \"path\": \"/spec/template/spec/containers/0/args/0\", \"value\": \"--auto-instrumentation-python-image=${{ inputs.appsignals-adot-image }}:${{ inputs.appsignals-adot-image-tag }}\"}]'"
+                -p='[{"op": \"replace\", \"path\": \"/spec/template/spec/containers/0/args/0\", \"value\": \"--auto-instrumentation-python-image=${{ inputs.application-signals-adot-image }}:${{ inputs.application-signals-adot-image-tag }}\"}]'"
                 execute_and_retry 2 "kubectl delete pods --all -n amazon-cloudwatch"
                 execute_and_retry 2 "kubectl wait --for=condition=Ready pod --all -n amazon-cloudwatch"
               fi
@@ -210,7 +190,7 @@ jobs:
             # If the deployment_failed is 1 then either the terraform deployment or the endpoint connection failed, so first destroy the
             # resources created from terraform and try again.
             if [ $deployment_failed -eq 1 ]; then
-              echo "Cleaning up App Signal"
+              echo "Cleaning up Application Signal"
               ${GITHUB_WORKSPACE}/enablement-script/clean-app-signals.sh \
               ${{ inputs.test-cluster-name }} \
               ${{ inputs.aws-region }} \
@@ -271,7 +251,7 @@ jobs:
           curl -S -s -o /dev/null http://${{ env.APP_ENDPOINT }}/remote-service?ip=${{ env.REMOTE_SERVICE_POD_IP }}
           curl -S -s -o /dev/null http://${{ env.APP_ENDPOINT }}/client-call
 
-      # Validation for app signals telemetry data
+      # Validation for application signals telemetry data
       - name: Call endpoint and validate generated EMF logs
         id: log-validation
         if: steps.deploy-python-app.outcome == 'success' && !cancelled()
@@ -327,7 +307,7 @@ jobs:
       - name: Publish metric on test result
         if: always()
         run: |
-          if [[ "${{ steps.log-validation.outcome }}" == "success" && "${{ steps.metric-validation.outcome }}" == "success" && "${{ steps.trace-validation.outcome }}" == "success" ]]; then
+          if [ "${{ steps.log-validation.outcome }}" = "success" ] && [ "${{ steps.metric-validation.outcome }}" = "success" ] && [ "${{ steps.trace-validation.outcome }}" = "success" ]; then
             aws cloudwatch put-metric-data --namespace 'ADOT/GitHubActions' \
             --metric-name Failure \
             --dimensions repository=${{ github.repository }},branch=${{ github.ref_name }},workflow=${{ inputs.caller-workflow-name }} \
@@ -343,7 +323,7 @@ jobs:
 
       # Clean up Procedures
 
-      - name: Clean Up App Signals
+      - name: Clean Up Application Signals
         if: always()
         continue-on-error: true
         working-directory: enablement-script
@@ -363,6 +343,7 @@ jobs:
       - name: Terraform destroy
         if: always()
         continue-on-error: true
+        timeout-minutes: 5
         working-directory: terraform/python/eks
         run: |
           terraform destroy -auto-approve \

@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import time
 from importlib import reload
 from logging import getLogger
 from unittest import TestCase
@@ -186,7 +187,11 @@ class TestAwsXRaySamplingClient(TestCase):
         except requests.exceptions.RequestException:
             pass
 
+        timeout = time.time() + 1
         span_list = memory_exporter.get_finished_spans()
+        while len(span_list) != 1 and timeout > time.time():
+            span_list = memory_exporter.get_finished_spans()
+            time.sleep(0.1)
         self.assertEqual(1, len(span_list))
         span_http_url = span_list[0].attributes.get("http.url")
         self.assertEqual(span_http_url, "http://this_is_a_fake_url:3849/GetSamplingRules")
@@ -196,7 +201,11 @@ class TestAwsXRaySamplingClient(TestCase):
         except requests.exceptions.RequestException:
             pass
 
+        timeout = time.time() + 1
         span_list = memory_exporter.get_finished_spans()
+        while len(span_list) != 2 and timeout > time.time():
+            span_list = memory_exporter.get_finished_spans()
+            time.sleep(0.1)
         self.assertEqual(2, len(span_list))
         span_http_url = span_list[1].attributes.get("http.url")
         self.assertEqual(span_http_url, "http://this_is_a_fake_url:3849/SamplingTargets")
