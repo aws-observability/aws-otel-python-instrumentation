@@ -8,7 +8,7 @@ from requests import Response, request
 from typing_extensions import override
 
 from amazon.base.contract_test_base import ContractTestBase
-from amazon.utils.app_signals_constants import ERROR_METRIC, FAULT_METRIC, LATENCY_METRIC
+from amazon.utils.application_signals_constants import ERROR_METRIC, FAULT_METRIC, LATENCY_METRIC
 from opentelemetry.sdk.metrics.export import AggregationTemporality
 
 
