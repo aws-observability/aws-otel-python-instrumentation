@@ -12,7 +12,7 @@ on:
   workflow_dispatch: # be able to run the workflow on demand
 
 concurrency:
-  group: ${{ github.workflow }}
+  group: 'parallel'
   cancel-in-progress: false
 
 permissions:
