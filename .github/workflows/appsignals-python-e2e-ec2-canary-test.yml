@@ -28,4 +28,4 @@ jobs:
     secrets: inherit
     with:
       aws-region: ${{ matrix.aws-region }}
-      caller-workflow-name: 'appsignals-python-e2e-ec2-canary-test-second'
+      caller-workflow-name: 'appsignals-python-e2e-ec2-canary-test'
