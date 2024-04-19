@@ -32,7 +32,13 @@ jobs:
           fetch-depth: 0
 
       - name: Echo GITHUB_WORKSPACE
-        run: echo $GITHUB_WORKSPACE
+        run: |
+          echo "GITHUB_WORKSPACE"
+          echo $GITHUB_WORKSPACE
+          echo "pwd"
+          echo pwd
+          echo "ls"
+          echo ls
 #jobs:
 #  python-e2e-eks-test:
 #    strategy:
