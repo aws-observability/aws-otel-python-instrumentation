@@ -20,16 +20,26 @@ permissions:
   id-token: write
   contents: read
 
-
 jobs:
   python-e2e-eks-test:
-    strategy:
-      fail-fast: false
-      matrix:
-        aws-region: ['af-south-1']
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/application-signals-python-e2e-eks-test.yml@python_e2e_migration
-    secrets: inherit
-    with:
-      aws-region: ${{ matrix.aws-region }}
-      test-cluster-name: 'e2e-python-canary-test'
-      caller-workflow-name: 'appsignals-remote-eks-canary-test'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Echo GITHUB_WORKSPACE
+        run: echo $GITHUB_WORKSPACE
+#jobs:
+#  python-e2e-eks-test:
+#    strategy:
+#      fail-fast: false
+#      matrix:
+#        aws-region: ['af-south-1']
+#    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/application-signals-python-e2e-eks-test.yml@python_e2e_migration
+#    secrets: inherit
+#    with:
+#      aws-region: ${{ matrix.aws-region }}
+#      test-cluster-name: 'e2e-python-canary-test'
+#      caller-workflow-name: 'appsignals-remote-eks-canary-test'
