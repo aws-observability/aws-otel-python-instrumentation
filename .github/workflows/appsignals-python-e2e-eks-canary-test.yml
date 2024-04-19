@@ -32,4 +32,3 @@ jobs:
       aws-region: ${{ matrix.aws-region }}
       test-cluster-name: 'e2e-python-canary-test'
       caller-workflow-name: 'appsignals-remote-eks-canary-test'
-      test-resource-folder: ${GITHUB_WORKSPACE}
