@@ -36,9 +36,9 @@ jobs:
           echo "GITHUB_WORKSPACE"
           echo $GITHUB_WORKSPACE
           echo "pwd"
-          echo pwd
+          pwd
           echo "ls"
-          echo ls
+          ls
 #jobs:
 #  python-e2e-eks-test:
 #    strategy:
