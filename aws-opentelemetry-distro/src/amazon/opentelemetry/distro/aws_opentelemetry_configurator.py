@@ -17,6 +17,7 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
+from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter as OTLPGrpcOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.sdk._configuration import (
     _get_exporter_names,
@@ -301,12 +302,6 @@ class ApplicationSignalsExporterProvider:
                 endpoint=application_signals_endpoint, preferred_temporality=temporality_dict
             )
         if protocol == "grpc":
-            # pylint: disable=import-outside-toplevel
-            # Delay import to only occur if grpc required.
-            from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
-                OTLPMetricExporter as OTLPGrpcOTLPMetricExporter,
-            )
-
             return OTLPGrpcOTLPMetricExporter(
                 endpoint=application_signals_endpoint, preferred_temporality=temporality_dict
             )
