@@ -16,8 +16,6 @@ WORKDIR /operator-build
 ADD aws-opentelemetry-distro/ ./aws-opentelemetry-distro/
 
 RUN mkdir workspace && pip install --target workspace ./aws-opentelemetry-distro
-RUN pip uninstall opentelemetry-exporter-otlp-proto-grpc -y
-RUN pip uninstall grpcio -y
 
 FROM public.ecr.aws/amazonlinux/amazonlinux:minimal
 
