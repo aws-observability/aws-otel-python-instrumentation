@@ -9,6 +9,7 @@ from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSample
 from amazon.opentelemetry.distro.attribute_propagating_span_processor import AttributePropagatingSpanProcessor
 from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsMetricAttributesSpanExporter
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
+    ApplicationSignalsExporterProvider,
     AwsOpenTelemetryConfigurator,
     _custom_import_sampler,
     _customize_exporter,
@@ -21,6 +22,9 @@ from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetric
 from amazon.opentelemetry.distro.sampler._aws_xray_sampling_client import _AwsXRaySamplingClient
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from opentelemetry.environment_variables import OTEL_LOGS_EXPORTER, OTEL_METRICS_EXPORTER, OTEL_TRACES_EXPORTER
+from opentelemetry.exporter.otlp.proto.common._internal.metrics_encoder import OTLPMetricExporterMixin
+from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter as OTLPGrpcOTLPMetricExporter
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.sdk.environment_variables import OTEL_TRACES_SAMPLER, OTEL_TRACES_SAMPLER_ARG
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Span, SpanProcessor, Tracer, TracerProvider
@@ -29,18 +33,28 @@ from opentelemetry.sdk.trace.sampling import DEFAULT_ON, Sampler
 from opentelemetry.trace import get_tracer_provider
 
 
-# This class setup Tracer Provider Globally, which can only set once
-# if there is another setup for tracer provider, may cause issue
 class TestAwsOpenTelemetryConfigurator(TestCase):
+    """Tests AwsOpenTelemetryConfigurator and AwsOpenTelemetryDistro
+
+    NOTE: This class setup Tracer Provider Globally, which can only be set once. If there is another setup for tracer
+    provider, it may cause issues for those tests.
+    """
+
     @classmethod
     def setUpClass(cls):
-        os.environ.setdefault(OTEL_TRACES_EXPORTER, "none")
-        os.environ.setdefault(OTEL_METRICS_EXPORTER, "none")
-        os.environ.setdefault(OTEL_LOGS_EXPORTER, "none")
-        os.environ.setdefault(OTEL_TRACES_SAMPLER, "traceidratio")
-        os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "0.01")
+        # Run AwsOpenTelemetryDistro to set up environment, then validate expected env values.
         aws_open_telemetry_distro: AwsOpenTelemetryDistro = AwsOpenTelemetryDistro()
         aws_open_telemetry_distro.configure(apply_patches=False)
+        validate_distro_environ()
+
+        # Overwrite exporter configs to keep tests clean, set sampler configs for tests
+        os.environ[OTEL_TRACES_EXPORTER] = "none"
+        os.environ[OTEL_METRICS_EXPORTER] = "none"
+        os.environ[OTEL_LOGS_EXPORTER] = "none"
+        os.environ[OTEL_TRACES_SAMPLER] = "traceidratio"
+        os.environ[OTEL_TRACES_SAMPLER_ARG] = "0.01"
+
+        # Run configurator and get trace provider
         aws_otel_configurator: AwsOpenTelemetryConfigurator = AwsOpenTelemetryConfigurator()
         aws_otel_configurator.configure()
         cls.tracer_provider: TracerProvider = get_tracer_provider()
@@ -249,3 +263,40 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         second_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[1].args[0]
         self.assertIsInstance(second_processor, AwsSpanMetricsProcessor)
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
+
+    def test_application_signals_exporter_provider(self):
+        # Check default protocol - HTTP, as specified by AwsOpenTelemetryDistro
+        exporter: OTLPMetricExporterMixin = ApplicationSignalsExporterProvider().create_exporter()
+        self.assertIsInstance(exporter, OTLPHttpOTLPMetricExporter)
+        self.assertEqual("http://localhost:4316", exporter._endpoint)
+
+        # Overwrite protocol to gRPC. Note that this causes `http://` to be stripped from endpoint
+        os.environ["OTEL_EXPORTER_OTLP_PROTOCOL"] = "grpc"
+        exporter: SpanExporter = ApplicationSignalsExporterProvider().create_exporter()
+        self.assertIsInstance(exporter, OTLPGrpcOTLPMetricExporter)
+        self.assertEqual("localhost:4316", exporter._endpoint)
+
+        # Overwrite protocol back to HTTP. Note that `http://` comes back to endpoint
+        os.environ["OTEL_EXPORTER_OTLP_PROTOCOL"] = "http/protobuf"
+        exporter: SpanExporter = ApplicationSignalsExporterProvider().create_exporter()
+        self.assertIsInstance(exporter, OTLPHttpOTLPMetricExporter)
+        self.assertEqual("http://localhost:4316", exporter._endpoint)
+
+
+def validate_distro_environ():
+    tc: TestCase = TestCase()
+    # Set by OpenTelemetryDistro
+    tc.assertEqual("otlp", os.environ.get("OTEL_TRACES_EXPORTER"))
+    tc.assertEqual("otlp", os.environ.get("OTEL_METRICS_EXPORTER"))
+
+    # Set by AwsOpenTelemetryDistro
+    tc.assertEqual("http/protobuf", os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL"))
+    tc.assertEqual(
+        "base2_exponential_bucket_histogram", os.environ.get("OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION")
+    )
+    tc.assertEqual("xray,tracecontext,b3,b3multi", os.environ.get("OTEL_PROPAGATORS"))
+    tc.assertEqual("xray", os.environ.get("OTEL_PYTHON_ID_GENERATOR"))
+
+    # Not set
+    tc.assertEqual(None, os.environ.get("OTEL_TRACES_SAMPLER"))
+    tc.assertEqual(None, os.environ.get("OTEL_TRACES_SAMPLER_ARG"))
