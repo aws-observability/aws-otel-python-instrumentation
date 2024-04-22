@@ -16,8 +16,10 @@ RUN mkdir workspace && pip install --target workspace ./aws-opentelemetry-distro
 # will complain that grpc is not installed, which is more understandable. References:
 # * https://github.com/open-telemetry/opentelemetry-operator/blob/b5bb0ae34720d4be2d229dafecb87b61b37699b0/autoinstrumentation/python/requirements.txt#L2
 # * https://github.com/MicrosoftDocs/azure-docs/blob/main/articles/azure-functions/recover-python-functions.md#troubleshoot-cannot-import-cygrpc
-RUN pip uninstall opentelemetry-exporter-otlp-proto-grpc -y
-RUN pip uninstall grpcio -y
+# Note that we cannot uninstall from target, we need to manually delete files: https://stackoverflow.com/questions/31237379/pip-uninstalling-package-from-specific-directory
+RUN rm -rf workspace/grpc
+RUN rm -rf workspace/grpcio-*
+RUN rm -rf workspace/opentelemetry_exporter_otlp_proto_grpc-*
 
 FROM public.ecr.aws/amazonlinux/amazonlinux:minimal
 
