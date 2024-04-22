@@ -265,22 +265,22 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
 
     def test_application_signals_exporter_provider(self):
-        # Check default protocol - HTTP, as specified by AwsOpenTelemetryDistro
+        # Check default protocol - HTTP, as specified by AwsOpenTelemetryDistro.
         exporter: OTLPMetricExporterMixin = ApplicationSignalsExporterProvider().create_exporter()
         self.assertIsInstance(exporter, OTLPHttpOTLPMetricExporter)
-        self.assertEqual("http://localhost:4316", exporter._endpoint)
+        self.assertEqual("http://localhost:4316/v1/metrics", exporter._endpoint)
 
-        # Overwrite protocol to gRPC. Note that this causes `http://` to be stripped from endpoint
+        # Overwrite protocol to gRPC.
         os.environ["OTEL_EXPORTER_OTLP_PROTOCOL"] = "grpc"
         exporter: SpanExporter = ApplicationSignalsExporterProvider().create_exporter()
         self.assertIsInstance(exporter, OTLPGrpcOTLPMetricExporter)
-        self.assertEqual("localhost:4316", exporter._endpoint)
+        self.assertEqual("localhost:4315", exporter._endpoint)
 
-        # Overwrite protocol back to HTTP. Note that `http://` comes back to endpoint
+        # Overwrite protocol back to HTTP.
         os.environ["OTEL_EXPORTER_OTLP_PROTOCOL"] = "http/protobuf"
         exporter: SpanExporter = ApplicationSignalsExporterProvider().create_exporter()
         self.assertIsInstance(exporter, OTLPHttpOTLPMetricExporter)
-        self.assertEqual("http://localhost:4316", exporter._endpoint)
+        self.assertEqual("http://localhost:4316/v1/metrics", exporter._endpoint)
 
 
 def validate_distro_environ():

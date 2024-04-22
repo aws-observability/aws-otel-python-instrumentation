@@ -277,13 +277,6 @@ class ApplicationSignalsExporterProvider:
         )
         _logger.debug("AWS Application Signals export protocol: %s", protocol)
 
-        application_signals_endpoint = os.environ.get(
-            APPLICATION_SIGNALS_EXPORTER_ENDPOINT_CONFIG,
-            os.environ.get(APP_SIGNALS_EXPORTER_ENDPOINT_CONFIG, "http://localhost:4316"),
-        )
-
-        _logger.debug("AWS Application Signals export endpoint: %s", application_signals_endpoint)
-
         temporality_dict: Dict[type, AggregationTemporality] = {}
         for typ in [
             Counter,
@@ -297,6 +290,11 @@ class ApplicationSignalsExporterProvider:
             temporality_dict[typ] = AggregationTemporality.DELTA
 
         if protocol == "http/protobuf":
+            application_signals_endpoint = os.environ.get(
+                APPLICATION_SIGNALS_EXPORTER_ENDPOINT_CONFIG,
+                os.environ.get(APP_SIGNALS_EXPORTER_ENDPOINT_CONFIG, "http://localhost:4316/v1/metrics"),
+            )
+            _logger.debug("AWS Application Signals export endpoint: %s", application_signals_endpoint)
             return OTLPHttpOTLPMetricExporter(
                 endpoint=application_signals_endpoint, preferred_temporality=temporality_dict
             )
@@ -308,6 +306,11 @@ class ApplicationSignalsExporterProvider:
                 OTLPMetricExporter as OTLPGrpcOTLPMetricExporter,
             )
 
+            application_signals_endpoint = os.environ.get(
+                APPLICATION_SIGNALS_EXPORTER_ENDPOINT_CONFIG,
+                os.environ.get(APP_SIGNALS_EXPORTER_ENDPOINT_CONFIG, "localhost:4315"),
+            )
+            _logger.debug("AWS Application Signals export endpoint: %s", application_signals_endpoint)
             return OTLPGrpcOTLPMetricExporter(
                 endpoint=application_signals_endpoint, preferred_temporality=temporality_dict
             )
