@@ -90,6 +90,7 @@ class ContractTestBase(TestCase):
             .with_env("OTEL_METRIC_EXPORT_INTERVAL", "50")
             .with_env("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "true")
             .with_env("OTEL_METRICS_EXPORTER", "none")
+            .with_env("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
             .with_env("OTEL_BSP_SCHEDULE_DELAY", "1")
             .with_env("OTEL_AWS_APPLICATION_SIGNALS_EXPORTER_ENDPOINT", f"http://collector:{_MOCK_COLLECTOR_PORT}")
             .with_env("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", f"http://collector:{_MOCK_COLLECTOR_PORT}")
