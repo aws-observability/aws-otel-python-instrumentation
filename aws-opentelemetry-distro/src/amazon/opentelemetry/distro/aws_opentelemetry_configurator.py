@@ -17,7 +17,6 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
-from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter as OTLPGrpcOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.sdk._configuration import (
     _get_exporter_names,
@@ -274,16 +273,9 @@ class ApplicationSignalsExporterProvider:
     # pylint: disable=no-self-use
     def create_exporter(self):
         protocol = os.environ.get(
-            OTEL_EXPORTER_OTLP_METRICS_PROTOCOL, os.environ.get(OTEL_EXPORTER_OTLP_PROTOCOL, "grpc")
+            OTEL_EXPORTER_OTLP_METRICS_PROTOCOL, os.environ.get(OTEL_EXPORTER_OTLP_PROTOCOL, "http/protobuf")
         )
         _logger.debug("AWS Application Signals export protocol: %s", protocol)
-
-        application_signals_endpoint = os.environ.get(
-            APPLICATION_SIGNALS_EXPORTER_ENDPOINT_CONFIG,
-            os.environ.get(APP_SIGNALS_EXPORTER_ENDPOINT_CONFIG, "http://localhost:4315"),
-        )
-
-        _logger.debug("AWS Application Signals export endpoint: %s", application_signals_endpoint)
 
         temporality_dict: Dict[type, AggregationTemporality] = {}
         for typ in [
@@ -298,10 +290,27 @@ class ApplicationSignalsExporterProvider:
             temporality_dict[typ] = AggregationTemporality.DELTA
 
         if protocol == "http/protobuf":
+            application_signals_endpoint = os.environ.get(
+                APPLICATION_SIGNALS_EXPORTER_ENDPOINT_CONFIG,
+                os.environ.get(APP_SIGNALS_EXPORTER_ENDPOINT_CONFIG, "http://localhost:4316/v1/metrics"),
+            )
+            _logger.debug("AWS Application Signals export endpoint: %s", application_signals_endpoint)
             return OTLPHttpOTLPMetricExporter(
                 endpoint=application_signals_endpoint, preferred_temporality=temporality_dict
             )
         if protocol == "grpc":
+            # pylint: disable=import-outside-toplevel
+            # Delay import to only occur if gRPC specifically requested. Vended Docker image will not have gRPC bundled,
+            # so importing it at the class level can cause runtime failures.
+            from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
+                OTLPMetricExporter as OTLPGrpcOTLPMetricExporter,
+            )
+
+            application_signals_endpoint = os.environ.get(
+                APPLICATION_SIGNALS_EXPORTER_ENDPOINT_CONFIG,
+                os.environ.get(APP_SIGNALS_EXPORTER_ENDPOINT_CONFIG, "localhost:4315"),
+            )
+            _logger.debug("AWS Application Signals export endpoint: %s", application_signals_endpoint)
             return OTLPGrpcOTLPMetricExporter(
                 endpoint=application_signals_endpoint, preferred_temporality=temporality_dict
             )
