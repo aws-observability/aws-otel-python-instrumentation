@@ -90,7 +90,7 @@ jobs:
   # Application Signals specific e2e eks tests
   application-signals-python-e2e-eks-test:
     needs: [build]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/application-signals-python-e2e-eks-test.yml@python_e2e_migration
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/application-signals-python-e2e-eks-test.yml@main
     secrets: inherit
     with:
       aws-region: ${{ needs.build.outputs.aws_default_region }}
@@ -102,7 +102,7 @@ jobs:
   # Application Signals specific e2e tests for ec2
   application-signals-python-e2e-ec2-test:
     needs: [ build ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/application-signals-python-e2e-ec2-test.yml@python_e2e_migration
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/application-signals-python-e2e-ec2-test.yml@main
     secrets: inherit
     with:
       aws-region: ${{ needs.build.outputs.aws_default_region }}
