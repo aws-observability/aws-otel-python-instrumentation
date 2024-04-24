@@ -46,6 +46,19 @@ class ConfigurationTest(ContractTestBase):
             )
 
     def test_xray_id_format(self):
+
+        # We are testing here that the X-Ray id format is always used by inspecting the traceid that
+        # was in the span received by the collector, which should be consistent across multiple spans.
+        # We are testing the following properties:
+        # 1. Traceid is random
+        # 2. First 32 bits of traceid is a timestamp
+        # It is important to remember that the X-Ray traceId format had to be adapted to fit into the
+        # definition of the OpenTelemetry traceid:
+        # https://opentelemetry.io/docs/specs/otel/trace/api/#retrieving-the-traceid-and-spanid
+        # Specifically for an X-Ray traceid to be a valid Otel traceId, the version digit had to be
+        # dropped. Reference:
+        # https://github.com/open-telemetry/opentelemetry-java-contrib/blob/main/aws-xray/src/main/java/io/opentelemetry/contrib/awsxray/AwsXrayIdGenerator.java#L45
+
         seen: List[str] = []
         for _ in range(100):
             address: str = self.application.get_container_host_ip()
@@ -54,6 +67,8 @@ class ConfigurationTest(ContractTestBase):
             response: Response = request("GET", url, timeout=20)
             self.assertEqual(200, response.status_code)
 
+            # Since we just made the request, the time in epoch registered in the traceid should be
+            # approximate equal to the current time in the test, since both run on the same host.
             start_time_sec: int = int(time.time())
 
             resource_scope_spans: List[ResourceScopeSpan] = self.mock_collector_client.get_traces()
@@ -62,6 +77,9 @@ class ConfigurationTest(ContractTestBase):
 
             self.assertTrue(target_span.span.trace_id.hex() not in seen)
             seen.append(target_span.span.trace_id.hex())
+
+            # trace_id is bytes, so we convert it to hex string and pick the first 8 byte
+            # that represent the timestamp, then convert it to int for timestamp in second
 
             trace_id_time_stamp_int: int = int(target_span.span.trace_id.hex()[:8], 16)
             self.assertGreater(trace_id_time_stamp_int, start_time_sec - 60)

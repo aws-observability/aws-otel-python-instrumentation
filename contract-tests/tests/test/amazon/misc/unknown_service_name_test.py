@@ -10,11 +10,6 @@ class UnknownServiceNameTest(ResourceAttributesTest):
 
     @override
     # pylint: disable=no-self-use
-    def get_application_extra_environment_variables(self) -> str:
-        return {"DJANGO_SETTINGS_MODULE": "django_server.settings", "OTEL_SERVICE_NAME": "service-name-test"}
-
-    @override
-    # pylint: disable=no-self-use
     def get_application_otel_resource_attributes(self) -> str:
         pairlist: List[str] = []
         for key, value in _get_k8s_attributes().items():
@@ -22,4 +17,4 @@ class UnknownServiceNameTest(ResourceAttributesTest):
         return ",".join(pairlist)
 
     def test_service(self) -> None:
-        self.do_test_resource_attributes("service-name-test")
+        self.do_test_resource_attributes("unknown_service")
