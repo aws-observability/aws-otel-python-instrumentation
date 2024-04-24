@@ -54,6 +54,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: check-version
     steps:
+      - name: Configure AWS credentials for Bot Access Token
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_PYPI_RELEASE }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+
       - name: Setup Git
         uses: actions/checkout@v2
         with:
