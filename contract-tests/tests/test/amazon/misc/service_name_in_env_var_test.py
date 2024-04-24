@@ -6,7 +6,7 @@ from resource_attributes_test_base import ResourceAttributesTest, _get_k8s_attri
 from typing_extensions import override
 
 
-class ServiceNameInResourceAttributesTest(ResourceAttributesTest):
+class ServiceNameInEnvVarTest(ResourceAttributesTest):
 
     @override
     # pylint: disable=no-self-use
@@ -17,4 +17,4 @@ class ServiceNameInResourceAttributesTest(ResourceAttributesTest):
         return ",".join(pairlist)
 
     def test_service(self) -> None:
-        self.do_misc_test_request("unknown_service")
+        self.do_test_resource_attributes("unknown_service")

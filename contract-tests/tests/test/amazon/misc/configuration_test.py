@@ -11,8 +11,10 @@ from amazon.base.contract_test_base import ContractTestBase
 from amazon.utils.application_signals_constants import ERROR_METRIC, FAULT_METRIC, LATENCY_METRIC
 from opentelemetry.sdk.metrics.export import AggregationTemporality
 
+# Tests in this class are supposed to validate that the SDK was configured in the correct way: It
+# uses the X-Ray ID format. Metrics are deltaPreferred. Type of the metrics are exponentialHistogram
 
-class ResourceAttributesTest(ContractTestBase):
+class ConfigurationTest(ContractTestBase):
     @override
     def get_application_image_name(self) -> str:
         return "aws-application-signals-tests-django-app"
@@ -34,21 +36,18 @@ class ResourceAttributesTest(ContractTestBase):
         metrics: List[ResourceScopeMetric] = self.mock_collector_client.get_metrics(
             {LATENCY_METRIC, ERROR_METRIC, FAULT_METRIC}
         )
-        self._assert_metric_configuration(metrics, metric_name="Error")
-        self._assert_metric_configuration(metrics, metric_name="Fault")
-        self._assert_metric_configuration(metrics, metric_name="Latency")
+        self._assert_metric_configuration(metrics)
 
-    def _assert_metric_configuration(self, metrics: List[ResourceScopeMetric], metric_name: str):
+    def _assert_metric_configuration(self, metrics: List[ResourceScopeMetric]):
         for metric in metrics:
-            if metric.metric.name == metric_name:
-                self.assertIsNotNone(metric.metric.exponential_histogram)
-                self.assertEqual(
-                    metric.metric.exponential_histogram.aggregation_temporality, AggregationTemporality.DELTA
-                )
+            self.assertIsNotNone(metric.metric.exponential_histogram)
+            self.assertEqual(
+                metric.metric.exponential_histogram.aggregation_temporality, AggregationTemporality.DELTA
+            )
 
     def test_xray_id_format(self):
         seen: List[str] = []
-        for _ in range(20):
+        for _ in range(100):
             address: str = self.application.get_container_host_ip()
             port: str = self.application.get_exposed_port(self.get_application_port())
             url: str = f"http://{address}:{port}/success"

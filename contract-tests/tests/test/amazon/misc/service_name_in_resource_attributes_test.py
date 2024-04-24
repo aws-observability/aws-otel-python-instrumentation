@@ -18,4 +18,4 @@ class ServiceNameInResourceAttributesTest(ResourceAttributesTest):
         return ",".join(pairlist)
 
     def test_service(self) -> None:
-        self.do_misc_test_request("service-name")
+        self.do_test_resource_attributes("service-name")

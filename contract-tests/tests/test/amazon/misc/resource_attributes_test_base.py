@@ -21,6 +21,12 @@ def _get_k8s_attributes():
     }
 
 
+# Tests consuming this class are supposed to validate that the agent is able to get the resource
+# attributes through the environment variables OTEL_RESOURCE_ATTRIBUTES and OTEL_SERVICE_NAME
+#
+# These tests are structured with nested classes since it is only possible to change the
+# resource attributes during the initialiation of the OpenTelemetry SDK.
+
 class ResourceAttributesTest(ContractTestBase):
     @override
     def get_application_image_name(self) -> str:
@@ -34,13 +40,13 @@ class ResourceAttributesTest(ContractTestBase):
     def get_application_extra_environment_variables(self):
         return {"DJANGO_SETTINGS_MODULE": "django_server.settings"}
 
-    def do_misc_test_request(self, pattern):
+    def do_test_resource_attributes(self, service_name):
         address: str = self.application.get_container_host_ip()
         port: str = self.application.get_exposed_port(self.get_application_port())
         url: str = f"http://{address}:{port}/success"
         response: Response = request("GET", url, timeout=20)
         self.assertEqual(200, response.status_code)
-        self.assert_resource_attributes(pattern)
+        self.assert_resource_attributes(service_name)
 
     def assert_resource_attributes(self, service_name):
         resource_scope_spans: List[ResourceScopeSpan] = self.mock_collector_client.get_traces()
@@ -63,6 +69,7 @@ class ResourceAttributesTest(ContractTestBase):
         for resource_scope_metric in metrics:
             if resource_scope_metric.metric.name in ["Error", "Fault", "Latency"]:
                 target_metrics.append(resource_scope_metric.resource_metrics)
+        self.assertEqual(len(target_metrics), 3)
         for target_metric in target_metrics:
             metric_attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(target_metric.resource.attributes)
             for key, value in _get_k8s_attributes().items():
