@@ -14,6 +14,7 @@ from opentelemetry.sdk.metrics.export import AggregationTemporality
 # Tests in this class are supposed to validate that the SDK was configured in the correct way: It
 # uses the X-Ray ID format. Metrics are deltaPreferred. Type of the metrics are exponentialHistogram
 
+
 class ConfigurationTest(ContractTestBase):
     @override
     def get_application_image_name(self) -> str:
@@ -41,9 +42,7 @@ class ConfigurationTest(ContractTestBase):
     def _assert_metric_configuration(self, metrics: List[ResourceScopeMetric]):
         for metric in metrics:
             self.assertIsNotNone(metric.metric.exponential_histogram)
-            self.assertEqual(
-                metric.metric.exponential_histogram.aggregation_temporality, AggregationTemporality.DELTA
-            )
+            self.assertEqual(metric.metric.exponential_histogram.aggregation_temporality, AggregationTemporality.DELTA)
 
     def test_xray_id_format(self):
 

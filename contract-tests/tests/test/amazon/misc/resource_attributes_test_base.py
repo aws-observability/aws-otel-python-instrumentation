@@ -25,7 +25,8 @@ def _get_k8s_attributes():
 # attributes through the environment variables OTEL_RESOURCE_ATTRIBUTES and OTEL_SERVICE_NAME
 #
 # These tests are structured with nested classes since it is only possible to change the
-# resource attributes during the initialiation of the OpenTelemetry SDK.
+# resource attributes during the initialization of the OpenTelemetry SDK.
+
 
 class ResourceAttributesTest(ContractTestBase):
     @override
