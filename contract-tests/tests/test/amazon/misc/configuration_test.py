@@ -37,26 +37,26 @@ class ConfigurationTest(ContractTestBase):
         metrics: List[ResourceScopeMetric] = self.mock_collector_client.get_metrics(
             {LATENCY_METRIC, ERROR_METRIC, FAULT_METRIC}
         )
-        self._assert_metric_configuration(metrics)
 
-    def _assert_metric_configuration(self, metrics: List[ResourceScopeMetric]):
+        self.assertEqual(len(metrics), 3)
         for metric in metrics:
             self.assertIsNotNone(metric.metric.exponential_histogram)
             self.assertEqual(metric.metric.exponential_histogram.aggregation_temporality, AggregationTemporality.DELTA)
 
     def test_xray_id_format(self):
-
-        # We are testing here that the X-Ray id format is always used by inspecting the traceid that
-        # was in the span received by the collector, which should be consistent across multiple spans.
-        # We are testing the following properties:
-        # 1. Traceid is random
-        # 2. First 32 bits of traceid is a timestamp
-        # It is important to remember that the X-Ray traceId format had to be adapted to fit into the
-        # definition of the OpenTelemetry traceid:
-        # https://opentelemetry.io/docs/specs/otel/trace/api/#retrieving-the-traceid-and-spanid
-        # Specifically for an X-Ray traceid to be a valid Otel traceId, the version digit had to be
-        # dropped. Reference:
-        # https://github.com/open-telemetry/opentelemetry-java-contrib/blob/main/aws-xray/src/main/java/io/opentelemetry/contrib/awsxray/AwsXrayIdGenerator.java#L45
+        """
+        We are testing here that the X-Ray id format is always used by inspecting the traceid that
+        was in the span received by the collector, which should be consistent across multiple spans.
+        We are testing the following properties:
+        1. Traceid is random
+        2. First 32 bits of traceid is a timestamp
+        It is important to remember that the X-Ray traceId format had to be adapted to fit into the
+        definition of the OpenTelemetry traceid:
+        https://opentelemetry.io/docs/specs/otel/trace/api/#retrieving-the-traceid-and-spanid
+        Specifically for an X-Ray traceid to be a valid Otel traceId, the version digit had to be
+        dropped. Reference:
+        https://github.com/open-telemetry/opentelemetry-python-contrib/blob/main/sdk-extension/opentelemetry-sdk-extension-aws/src/opentelemetry/sdk/extension/aws/trace/aws_xray_id_generator.py
+        """
 
         seen: List[str] = []
         for _ in range(100):
@@ -79,8 +79,9 @@ class ConfigurationTest(ContractTestBase):
 
             # trace_id is bytes, so we convert it to hex string and pick the first 8 byte
             # that represent the timestamp, then convert it to int for timestamp in second
-
             trace_id_time_stamp_int: int = int(target_span.span.trace_id.hex()[:8], 16)
+
+            # Give 2 minutes time range of tolerance for the trace timestamp
             self.assertGreater(trace_id_time_stamp_int, start_time_sec - 60)
             self.assertGreater(start_time_sec + 60, trace_id_time_stamp_int)
             self.mock_collector_client.clear_signals()
