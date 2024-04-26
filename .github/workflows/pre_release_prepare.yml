@@ -27,7 +27,7 @@ jobs:
       - name: Configure AWS credentials for BOT secrets
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN_PYPI_RELEASE }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_SECRETS_MANAGER }}
           aws-region: ${{ env.AWS_DEFAULT_REGION }}
 
       - name: Get Bot secrets
