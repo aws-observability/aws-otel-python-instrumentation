@@ -11,11 +11,7 @@ import static org.junit.jupiter.api.DynamicTest.dynamicTest;
 
 import io.opentelemetry.config.Configs;
 import io.opentelemetry.config.TestConfig;
-import io.opentelemetry.containers.CollectorContainer;
-import io.opentelemetry.containers.ImageServiceContainer;
-import io.opentelemetry.containers.K6Container;
-import io.opentelemetry.containers.PostgresContainer;
-import io.opentelemetry.containers.VehicleInventoryServiceContainer;
+import io.opentelemetry.containers.*;
 import io.opentelemetry.distros.DistroConfig;
 import io.opentelemetry.results.AppPerfResults;
 import io.opentelemetry.results.MainResultsPersister;
@@ -25,7 +21,6 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,9 +33,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
-import org.testcontainers.containers.startupcheck.OneShotStartupCheckStrategy;
-import org.testcontainers.utility.DockerImageName;
-import org.testcontainers.utility.MountableFile;
 
 public class OverheadTests {
 
@@ -94,28 +86,15 @@ public class OverheadTests {
   }
 
   void runAppOnce(TestConfig config, DistroConfig distroConfig) throws Exception {
-    GenericContainer<?> postgres = new PostgresContainer(NETWORK).build();
-    postgres.start();
-
-    GenericContainer<?> imageService = new ImageServiceContainer(NETWORK).build();
-    imageService.start();
-
-    GenericContainer<?> vehicleInventoryService =
-        new VehicleInventoryServiceContainer(NETWORK, collector, distroConfig, namingConventions)
+    GenericContainer<?> simpleRequestsService =
+        new SimpleRequestsServiceContainer(NETWORK, collector, distroConfig, namingConventions)
             .build();
     long start = System.currentTimeMillis();
-    vehicleInventoryService.start();
+    simpleRequestsService.start();
     writeStartupTimeFile(distroConfig, start);
 
-    populateDatabase();
-
-    int warmupSeconds = config.getWarmupSeconds();
-    if (warmupSeconds > 0) {
-      doWarmupPhase(warmupSeconds);
-    }
-
     long testStart = System.currentTimeMillis();
-    startRecording(distroConfig, vehicleInventoryService);
+    startRecording(distroConfig, simpleRequestsService);
 
     GenericContainer<?> k6 =
         new K6Container(NETWORK, distroConfig, config, namingConventions).build();
@@ -124,49 +103,18 @@ public class OverheadTests {
     long runDuration = System.currentTimeMillis() - testStart;
     runDurations.put(distroConfig.getName(), runDuration);
 
-    vehicleInventoryService.stop();
-    imageService.stop();
-    postgres.stop();
+    simpleRequestsService.stop();
   }
 
-  private void startRecording(
-      DistroConfig distroConfig, GenericContainer<?> vehicleInventoryService) throws Exception {
+  private void startRecording(DistroConfig distroConfig, GenericContainer<?> service)
+      throws Exception {
     String[] command = {
       "sh",
       "executeProfiler.sh",
       namingConventions.container.performanceMetricsFileWithoutPath(distroConfig),
       namingConventions.container.root()
     };
-    vehicleInventoryService.execInContainer(command);
-  }
-
-  private void doWarmupPhase(int seconds) {
-    System.out.println("Performing warm up phase for " + seconds + " seconds.");
-    GenericContainer<?> k6 =
-        new GenericContainer<>(DockerImageName.parse("loadimpact/k6"))
-            .withNetwork(NETWORK)
-            .withCopyFileToContainer(MountableFile.forHostPath("./k6"), "/app")
-            .withCommand("run", "-u", "5", "-d", seconds + "s", "/app/performanceTest.js")
-            .withStartupCheckStrategy(
-                new OneShotStartupCheckStrategy().withTimeout(Duration.ofSeconds(seconds * 2L)));
-    k6.start();
-    sleep(seconds);
-    System.out.println("Awaiting warmup phase end.");
-    while (k6.isRunning()) {
-      System.out.println("Warmup still running.");
-      sleep(1);
-    }
-    System.out.println("Warmup complete.");
-  }
-
-  private void populateDatabase() {
-    GenericContainer<?> k6 =
-        new GenericContainer<>(DockerImageName.parse("loadimpact/k6"))
-            .withNetwork(NETWORK)
-            .withCopyFileToContainer(MountableFile.forHostPath("./k6"), "/app")
-            .withCommand("run", "/app/setUp.js")
-            .withStartupCheckStrategy(new OneShotStartupCheckStrategy());
-    k6.start();
+    service.execInContainer(command);
   }
 
   private void writeStartupTimeFile(DistroConfig distroConfig, long start) throws IOException {

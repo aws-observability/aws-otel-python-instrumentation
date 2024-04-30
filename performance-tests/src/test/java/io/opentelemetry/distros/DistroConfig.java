@@ -10,53 +10,65 @@ import java.util.Collections;
 import java.util.Map;
 
 public enum DistroConfig {
-  NONE("none", "no distro at all", false, Collections.EMPTY_MAP),
-  APPLICATION_SIGNALS_DISABLED(
-      "application_signals_disabled",
-      "ADOT distro with Application Signals disabled",
+  NONE(
+      "no distro at all",
+      false,
+      Collections.EMPTY_MAP,
+      "performance-test/simple-requests-service-adot"),
+  OTEL_100(
+      "OTEL distro with 100% sampling",
       true,
-      Map.of("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "false", "OTEL_TRACES_SAMPLER", "xray")),
-  APPLICATION_SIGNALS_NO_TRACES(
-      "application_signals_no_traces",
-      "ADOT distro with Application Signals enabled and no tracing",
+      Map.of("OTEL_TRACES_SAMPLER", "traceidratio", "OTEL_TRACES_SAMPLER_ARG", "1"),
+      "performance-test/simple-requests-service-otel"),
+  ADOT_100(
+      "ADOT distro with Application Signals disabled, 100% sampling",
       true,
       Map.of(
+          "OTEL_TRACES_SAMPLER",
+          "traceidratio",
+          "OTEL_TRACES_SAMPLER_ARG",
+          "1",
+          "OTEL_PYTHON_DISTRO",
+          "aws_distro",
+          "OTEL_PYTHON_CONFIGURATOR",
+          "aws_configurator"),
+      "performance-test/simple-requests-service-adot"),
+  AS_100(
+      "ADOT distro with Application Signals enabled, 100% sampling",
+      true,
+      Map.of(
+          "OTEL_TRACES_SAMPLER",
+          "traceidratio",
+          "OTEL_TRACES_SAMPLER_ARG",
+          "1",
+          "OTEL_PYTHON_DISTRO",
+          "aws_distro",
+          "OTEL_PYTHON_CONFIGURATOR",
+          "aws_configurator",
           "OTEL_AWS_APPLICATION_SIGNALS_ENABLED",
           "true",
           "OTEL_AWS_APPLICATION_SIGNALS_EXPORTER_ENDPOINT",
-          "http://collector:4317",
-          "OTEL_TRACES_SAMPLER",
-          "always_off")),
-  APPLICATION_SIGNALS_TRACES(
-      "application_signals_traces",
-      "ADOT distro with Application Signals enabled and tracing",
-      true,
-      Map.of(
-          "OTEL_AWS_APPLICATION_SIGNALS_ENABLED",
-          "true",
-          "OTEL_AWS_APPLICATION_SIGNALS_EXPORTER_ENDPOINT",
-          "http://collector:4317",
-          "OTEL_TRACES_SAMPLER",
-          "xray"));
+          "http://collector:4317"),
+      "performance-test/simple-requests-service-adot");
 
-  private final String name;
   private final String description;
   private final boolean doInstrument;
   private final Map<String, String> additionalEnvVars;
+  private final String imageName;
 
   DistroConfig(
-      String name,
       String description,
       boolean doInstrument,
-      Map<String, String> additionalEnvVars) {
-    this.name = name;
+      Map<String, String> additionalEnvVars,
+      String imageName) {
     this.description = description;
     this.doInstrument = doInstrument;
     this.additionalEnvVars = additionalEnvVars;
+    this.imageName = imageName;
   }
 
   public String getName() {
-    return name;
+    return this.name();
   }
 
   public String getDescription() {
@@ -69,5 +81,9 @@ public enum DistroConfig {
 
   public Map<String, String> getAdditionalEnvVars() {
     return Collections.unmodifiableMap(additionalEnvVars);
+  }
+
+  public String getImageName() {
+    return imageName;
   }
 }

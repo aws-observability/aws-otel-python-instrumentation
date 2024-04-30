@@ -93,8 +93,9 @@ public class TestConfig {
       return this;
     }
 
-    Builder maxRequestRate(int maxRequestRate) {
-      this.maxRequestRate = maxRequestRate;
+    Builder maxRequestRate(String maxRequestRate) {
+      if (maxRequestRate != null && !maxRequestRate.isEmpty())
+        this.maxRequestRate = Integer.parseInt(maxRequestRate);
       return this;
     }
 

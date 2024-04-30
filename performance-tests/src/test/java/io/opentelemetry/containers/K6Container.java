@@ -64,6 +64,7 @@ public class K6Container {
         .withCreateContainerCmdModifier(
             cmd -> cmd.getHostConfig().withCpusetCpus(RuntimeUtil.getNonApplicationCores()))
         .withStartupCheckStrategy(
-            new OneShotStartupCheckStrategy().withTimeout(Duration.ofMinutes(15)));
+            new OneShotStartupCheckStrategy()
+                .withTimeout(Duration.ofMinutes(90))); // set 90 mins (>1 hour) as timeout
   }
 }

@@ -1,0 +1,14 @@
+# Meant to be run from aws-otel-python-instrumentation
+# Assumes existence of dist/aws_opentelemetry_distro-<pkg_version>-py3-none-any.whl.
+# Assumes filename of aws_opentelemetry_distro-<pkg_version>-py3-none-any.whl is passed in as "DISTRO" arg.
+FROM python:3.10
+WORKDIR /requests
+COPY ./dist/$DISTRO /requests
+COPY ./sample-applications/simple-requests-service /requests
+
+ENV PIP_ROOT_USER_ACTION=ignore
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+ARG DISTRO
+RUN pip install --upgrade pip && pip install -r requirements.txt && pip install psutil && pip install ${DISTRO} --force-reinstall
+RUN opentelemetry-bootstrap -a install

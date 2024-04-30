@@ -13,14 +13,6 @@ if [ "$current_dir" != "aws-otel-python-instrumentation" ]; then
   exit
 fi
 
-# Check for expected env variables
-for var in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN S3_BUCKET; do
-    if [[ -z "${!var}" ]]; then
-        echo "Variable $var not set, please ensure all of AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, and S3_BUCKET are set."
-        exit 1
-    fi
-done
-
 # Find and store aws_opentelemetry_distro whl file
 cd dist
 DISTRO=(aws_opentelemetry_distro-*-py3-none-any.whl)
@@ -31,14 +23,14 @@ fi
 
 # Create application images
 cd ..
-docker build . -t performance-test/vehicle-inventory-service -f performance-tests/Dockerfile-VehicleInventoryService-base --build-arg="DISTRO=${DISTRO}"
+docker build . -t performance-test/simple-requests-service-adot -f sample-applications/simple-requests-service/Dockerfile-ADOT --build-arg="DISTRO=${DISTRO}"
 if [ $? = 1 ]; then
-  echo "Docker build for VehicleInventoryService failed"
+  echo "Docker build for SimpleRequestsService-ADOT failed"
   exit 1
 fi
 
-docker build . -t performance-test/image-service -f performance-tests/Dockerfile-ImageService-base
+docker build . -t performance-test/simple-requests-service-otel -f sample-applications/simple-requests-service/Dockerfile-OTEL
 if [ $? = 1 ]; then
-  echo "Docker build for ImageService failed"
+  echo "Docker build for SimpleRequestsService-OTEL failed"
   exit 1
 fi
