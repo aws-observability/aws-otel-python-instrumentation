@@ -6,6 +6,7 @@
 
 package io.opentelemetry.containers;
 
+import com.github.dockerjava.api.model.Capability;
 import io.opentelemetry.distros.DistroConfig;
 import io.opentelemetry.util.NamingConventions;
 import io.opentelemetry.util.RuntimeUtil;
@@ -59,14 +60,19 @@ public class SimpleRequestsServiceContainer {
                 MountableFile.forClasspathResource("executeProfiler.sh"),
                 "requests/executeProfiler.sh")
             .withEnv(distroConfig.getAdditionalEnvVars())
+            .withEnv("TEST_NAME", distroConfig.getName())
+            .withEnv("DURATION", System.getenv("DURATION"))
             .dependsOn(collector)
             .withCreateContainerCmdModifier(
-                cmd -> cmd.getHostConfig().withCpusetCpus(RuntimeUtil.getApplicationCores()))
+                cmd -> cmd.getHostConfig()
+                    .withCpusetCpus(RuntimeUtil.getApplicationCores())
+                    .withCapAdd(Capability.SYS_PTRACE))
             .withCommand("bash run.sh");
 
     if (distroConfig.doInstrument()) {
       container
           .withEnv("DO_INSTRUMENT", "true")
+          .withEnv("IMAGE_NAME", distroConfig.getImageName())
           .withEnv("OTEL_TRACES_EXPORTER", "otlp")
           .withEnv("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
           .withEnv("OTEL_METRICS_EXPORTER", "none")

@@ -8,5 +8,5 @@ COPY ./sample-applications/simple-requests-service /requests
 ENV PIP_ROOT_USER_ACTION=ignore
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
-RUN pip install --upgrade pip && pip install -r requirements.txt && pip install psutil opentelemetry-distro opentelemetry-exporter-otlp --force-reinstall
+RUN pip install --upgrade pip && pip install -r requirements.txt && pip install psutil py-spy opentelemetry-distro opentelemetry-exporter-otlp --force-reinstall
 RUN opentelemetry-bootstrap -a install

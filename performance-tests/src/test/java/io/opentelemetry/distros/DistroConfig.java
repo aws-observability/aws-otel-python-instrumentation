@@ -15,11 +15,11 @@ public enum DistroConfig {
       false,
       Collections.EMPTY_MAP,
       "performance-test/simple-requests-service-adot"),
-  OTEL_100(
-      "OTEL distro with 100% sampling",
-      true,
-      Map.of("OTEL_TRACES_SAMPLER", "traceidratio", "OTEL_TRACES_SAMPLER_ARG", "1"),
-      "performance-test/simple-requests-service-otel"),
+//  OTEL_100(
+//      "OTEL distro with 100% sampling",
+//      true,
+//      Map.of("OTEL_TRACES_SAMPLER", "traceidratio", "OTEL_TRACES_SAMPLER_ARG", "1"),
+//      "performance-test/simple-requests-service-otel"),
   ADOT_100(
       "ADOT distro with Application Signals disabled, 100% sampling",
       true,

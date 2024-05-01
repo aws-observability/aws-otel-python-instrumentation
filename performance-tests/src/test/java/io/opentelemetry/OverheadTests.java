@@ -33,6 +33,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
+import org.testcontainers.containers.wait.strategy.LogMessageWaitStrategy;
+import org.testcontainers.containers.wait.strategy.Wait;
 
 public class OverheadTests {
 
@@ -102,6 +104,17 @@ public class OverheadTests {
 
     long runDuration = System.currentTimeMillis() - testStart;
     runDurations.put(distroConfig.getName(), runDuration);
+
+    int counter = 0;
+    while(counter++ < 120) {
+      if (simpleRequestsService.getLogs().contains("Wrote flamegraph data")) {
+        logger.info("Flamegraph done.");
+        break;
+      } else {
+          logger.info("Waiting for flamegraph.");
+          sleep(1);
+      }
+    }
 
     simpleRequestsService.stop();
   }

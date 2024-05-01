@@ -27,7 +27,7 @@ public enum Configs {
         .withDistroConfigs(DistroConfig.values())
         .warmupSeconds(10)
         .maxRequestRate(tps)
-        .duration(System.getenv("DURATION"))
+        .duration(System.getenv("DURATION") + "s")
         .concurrentConnections(System.getenv("CONCURRENCY"))
         .build();
   }
