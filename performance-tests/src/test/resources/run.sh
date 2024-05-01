@@ -6,11 +6,16 @@
 set -e
 
 # If a distro is not provided, run service normally. If it is, run the service with instrumentation.
-if [[ -z "${DO_INSTRUMENT}" ]]; then
-    python3 -u ./requests_server.py &
-else
+if [[ "${DO_INSTRUMENT}" == "true" ]]; then
     opentelemetry-instrument python3 -u ./requests_server.py &
+else
+    python3 -u ./requests_server.py &
 fi
-PID=$!
-sleep 3
-py-spy record -d $DURATION -r 33 -o /results/profile-$TEST_NAME.svg --pid $PID
+
+if [[ "${PROFILE}" == "true"  ]]; then
+    PID=$!
+    sleep 3
+    py-spy record -d $DURATION -r 33 -o /results/profile-$TEST_NAME.svg --pid $PID
+fi
+
+wait

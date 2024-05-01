@@ -48,7 +48,7 @@ public enum DistroConfig {
           "OTEL_AWS_APPLICATION_SIGNALS_ENABLED",
           "true",
           "OTEL_AWS_APPLICATION_SIGNALS_EXPORTER_ENDPOINT",
-          "http://collector:4317"),
+          "http://collector:4318"),
       "performance-test/simple-requests-service-adot");
 
   private final String description;

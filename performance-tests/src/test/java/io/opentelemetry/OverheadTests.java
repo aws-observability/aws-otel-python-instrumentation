@@ -107,7 +107,9 @@ public class OverheadTests {
 
     int counter = 0;
     while(counter++ < 120) {
-      if (simpleRequestsService.getLogs().contains("Wrote flamegraph data")) {
+      if (!"true".equals(System.getenv("PROFILE"))) {
+        break;
+      } else if (simpleRequestsService.getLogs().contains("Wrote flamegraph data")) {
         logger.info("Flamegraph done.");
         break;
       } else {

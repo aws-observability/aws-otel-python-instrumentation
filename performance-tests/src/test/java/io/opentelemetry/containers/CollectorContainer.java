@@ -18,7 +18,7 @@ import org.testcontainers.utility.MountableFile;
 
 public class CollectorContainer {
 
-  static final int COLLECTOR_PORT = 4317;
+  static final int COLLECTOR_PORT = 4318;
   static final int COLLECTOR_HEALTH_CHECK_PORT = 13133;
 
   private static final Logger logger = LoggerFactory.getLogger(CollectorContainer.class);

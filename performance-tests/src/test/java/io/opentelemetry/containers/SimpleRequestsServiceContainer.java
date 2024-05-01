@@ -61,6 +61,7 @@ public class SimpleRequestsServiceContainer {
                 "requests/executeProfiler.sh")
             .withEnv(distroConfig.getAdditionalEnvVars())
             .withEnv("TEST_NAME", distroConfig.getName())
+            .withEnv("PROFILE", System.getenv("PROFILE"))
             .withEnv("DURATION", System.getenv("DURATION"))
             .dependsOn(collector)
             .withCreateContainerCmdModifier(
@@ -72,13 +73,12 @@ public class SimpleRequestsServiceContainer {
     if (distroConfig.doInstrument()) {
       container
           .withEnv("DO_INSTRUMENT", "true")
-          .withEnv("IMAGE_NAME", distroConfig.getImageName())
           .withEnv("OTEL_TRACES_EXPORTER", "otlp")
-          .withEnv("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
+          .withEnv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
           .withEnv("OTEL_METRICS_EXPORTER", "none")
           .withEnv("OTEL_IMR_EXPORT_INTERVAL", "5000")
           .withEnv("OTEL_EXPORTER_OTLP_INSECURE", "true")
-          .withEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4317")
+          .withEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318")
           .withEnv("OTEL_RESOURCE_ATTRIBUTES", "service.name=requests_server");
     }
     return container;

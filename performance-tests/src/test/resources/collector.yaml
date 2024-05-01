@@ -4,7 +4,7 @@ extensions:
 receivers:
   otlp:
     protocols:
-      grpc:
+      http:
 
 processors:
   batch:
