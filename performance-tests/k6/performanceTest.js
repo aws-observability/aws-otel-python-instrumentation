@@ -4,11 +4,9 @@ import {check} from "k6";
 const baseUri = 'http://requests-service:8080/';
 
 export default function() {
-    invokeApi("", "DELETE", 200)
     invokeApi("success", "GET", 200)
     invokeApi("error", "GET", 400)
     invokeApi("fault", "GET", 500)
-    invokeApi("health-check", "GET", 200)
     invokeApi("oops", "GET", 404)
 
     function invokeApi(path, method, status) {

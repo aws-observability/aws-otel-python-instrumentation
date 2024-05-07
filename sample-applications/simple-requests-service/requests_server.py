@@ -41,8 +41,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                 status_code = 404
         else:
             url: str = f"http://{_NETWORK_ALIAS}:{_PORT}/{_NETWORK_ALIAS}{self.path}"
-            response: Response = request(method, url, timeout=20)
-            status_code = response.status_code
+            try:
+                response: Response = request(method, url, timeout=0.01)
+                status_code = response.status_code
+            except:
+                status_code = 500
         self.send_response_only(status_code)
         self.end_headers()
 
