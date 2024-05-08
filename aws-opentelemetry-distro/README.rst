@@ -1,4 +1,4 @@
-AWS OpenTelemetry Distro
+AWS Distro For OpenTelemetry Python Distro
 ========================================
 
 Installation
@@ -9,7 +9,7 @@ Installation
     pip install aws-opentelemetry-distro
 
 
-This package provides AWS OpenTelemetry Python Distro, which allows for auto-instrumentation of Python applications.
+This package provides Amazon Web Services distribution of the OpenTelemetry Python Instrumentation, which allows for auto-instrumentation of Python applications.
 
 References
 ----------
