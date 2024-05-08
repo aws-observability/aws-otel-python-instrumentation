@@ -1,44 +1,15 @@
 # Contributing Guidelines
 
-Thank you for your interest in contributing to our project. Whether it's a bug report, new feature, correction, or additional
-documentation, we greatly value feedback and contributions from our community.
+Thanks a lot for your interest in contributing to our project. Whether it's a bug report, new feature, correction, or additional
+documentation, we really appreciate your help. Take a look through this document to make sure we can give you a great
+experience with your contribution.
 
-Please read through this document before submitting any issues or pull requests to ensure we have all the necessary
-information to effectively respond to your bug report or contribution.
-
-## Build and install distro locally
-From `aws-otel-python-instrumentation` dir, execute:
-```sh
-./scripts/build_and_install_distro.sh
-```
-
-## Test a sample App
-1. Setup env and install project dependencies
-```sh
-mkdir auto_instrumentation
-virtualenv auto_instrumentation
-source auto_instrumentation/bin/activate
-pip install flask requests boto3 opentelemetry-instrumentation-flask opentelemetry-instrumentation-botocore opentelemetry-instrumentation
-```
-2. Install the project pkg by following "Build a Wheel file locally" step above. Please make sure to install “aws-opentelemetry-distro” by following steps instead of install "opentelemetry-distro” directly.
-3. Add AWS test account credential into the terminal, setup environment variable and run sample server:
-```sh
-export OTEL_PYTHON_DISTRO="aws_distro"
-export OTEL_PYTHON_CONFIGURATOR="aws_configurator"
-opentelemetry-instrument python ./sample-applications/simple-client-server/server_automatic_s3client.py
-```
-4. Prepare a client.py, an example is `./tests/client.py`, open a new terminal and run sample client:
-```sh
-python ./sample-applications/simple-client-server/client.py testing
-```
-The span content will be output into terminal console
 
 ## Reporting Bugs/Feature Requests
 
-We welcome you to use the GitHub issue tracker to report bugs or suggest features.
+We're always happy to hear about any bugs or features requests using GitHub issues.
 
-When filing an issue, please check existing open, or recently closed, issues to make sure somebody else hasn't already
-reported the issue. Please try to include as much information as you can. Details like these are incredibly useful:
+When filing an issue, please try to include as much information as you can. Details like these are incredibly useful:
 
 * A reproducible test case or series of steps
 * The version of our code being used
@@ -65,9 +36,64 @@ To send us a pull request, please:
 GitHub provides additional document on [forking a repository](https://help.github.com/articles/fork-a-repo/) and
 [creating a pull request](https://help.github.com/articles/creating-a-pull-request/).
 
+The following sections provide some guidance that will help you make contributions.
+
+### Build and install distro locally
+From `aws-otel-python-instrumentation` dir, execute:
+```sh
+./scripts/build_and_install_distro.sh
+```
+
+### Test a sample App
+1. Setup env and install project dependencies
+```sh
+mkdir auto_instrumentation
+virtualenv auto_instrumentation
+source auto_instrumentation/bin/activate
+pip install flask requests boto3 opentelemetry-instrumentation-flask opentelemetry-instrumentation-botocore opentelemetry-instrumentation
+```
+2. Install the project pkg by following "Build a Wheel file locally" step above. Please make sure to install “aws-opentelemetry-distro” by following steps instead of install "opentelemetry-distro” directly.
+3. Add AWS test account credential into the terminal, setup environment variable and run sample server:
+```sh
+export OTEL_PYTHON_DISTRO="aws_distro"
+export OTEL_PYTHON_CONFIGURATOR="aws_configurator"
+opentelemetry-instrument python ./sample-applications/simple-client-server/server_automatic_s3client.py
+```
+4. Prepare a client.py, an example is `./tests/client.py`, open a new terminal and run sample client:
+```sh
+python ./sample-applications/simple-client-server/client.py testing
+```
+The span content will be output into terminal console
+
+### Code Style Check
+
+This package applies code style check automatically when created a push/pull request to the project repository. You can apply style check locally before submitting the PR by following:
+1. Install related packages:
+```sh
+pip install isort pylint black flake8 codespell readme_renderer
+```
+2. Check code style errors using codespell and lint:
+```sh
+codespell
+python scripts/eachdist.py lint --check-only
+```
+3. Apply the fix for the errors automatically:
+```sh
+codespell . --write-changes
+python scripts/eachdist.py lint
+```
+
+### Unit test
+This package detects all the unit tests defined in folder with naming "tests"/"test" under the same directory as pyproject.toml file. Please make sure to add unit test every time a new feature added.
+The workflow will run the test tox environment automatically whenever there is a push/pull request. Please make sure you install the related package needed for the unit tests in `commands_pre`.
+
+If you want to test a specific component/feature, please add a new environment in tox.ini file, and add related workflow as needed.
+
 
 ## Finding contributions to work on
-Looking at the existing issues is a great way to find something to contribute on. As our projects, by default, use the default GitHub issue labels (enhancement/bug/duplicate/help wanted/invalid/question/wontfix), looking at any 'help wanted' issues is a great place to start.
+Looking at the existing issues is a great way to find something to contribute on. As this is a repository for experimenting
+and trying out new integrations, there may be few open issues filed but we're always happy to add more test apps for
+different frameworks.
 
 
 ## Code of Conduct
@@ -82,4 +108,5 @@ If you discover a potential security issue in this project we ask that you notif
 
 ## Licensing
 
-See the [LICENSE](LICENSE) file for our project's licensing. We will ask you to confirm the licensing of your contribution.
+See the [LICENSE](LICENSE) file for our project's licensing. When contributing code, make sure there are no copyright
+headers - the code is available for users to copy into their own apps.

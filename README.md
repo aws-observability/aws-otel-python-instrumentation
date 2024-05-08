@@ -1,41 +1,38 @@
-# AWS Distro for OpenTelemetry Python Instrumentation
+# AWS Distro for OpenTelemetry - Instrumentation for Python
 
 ## Introduction
 
-This project provide AWS Distro base on [OpenTelemetry Python Contrib](https://github.com/open-telemetry/opentelemetry-python-contrib),
+This project is a redistribution of the [OpenTelemetry Distro for Python](https://github.com/open-telemetry/opentelemetry-python-contrib/tree/main/opentelemetry-distro),
 preconfigured for use with AWS services. Please check out that project too to get a better
-understanding of the underlying internals.
+understanding of the underlying internals. You won't see much code in this repository since we only
+apply some small configuration changes, and our OpenTelemetry friends takes care of the rest. The 
+exception to this is support for Application Signals.
 
-## Notices
+We provided a Python agent that can be attached to any application using a supported Python version and dynamically injects
+bytecode to capture telemetry from a number of popular libraries and frameworks. The telemetry data
+can be exported in a variety of formats. In addition, the agent and exporter can be configured via
+command line arguments or environment variables. The net result is the ability to gather telemetry
+data from a Python application without any code changes.
 
-### Python Version Support
-This project ensures compatibility with the following supported Python versions: 3.8, 3.9, 3.10, 3.11
+## Getting Started
 
-## Code Style Check
+Check out the [getting started documentation](https://aws-otel.github.io/docs/getting-started/python-sdk/auto-instr).
 
-This package applies code style check automatically when created a push/pull request to the project repository. You can apply style check locally before submitting the PR by following:
-1. Install related packages:
-```sh
-pip install isort pylint black flake8 codespell readme_renderer
-```
-2. Check code style errors using codespell and lint:
-```sh
-codespell
-python scripts/eachdist.py lint --check-only
-```
-3. Apply the fix for the errors automatically:
-```sh
-codespell . --write-changes
-python scripts/eachdist.py lint
-```
+## Supported Python libraries and frameworks
+For the complete list of supported frameworks, please refer to the [OpenTelemetry for Python documentation](https://github.com/open-telemetry/opentelemetry-python-contrib/blob/main/instrumentation/README.md).
 
-## Unit test
-This package detects all the unit tests defined in folder with naming "tests"/"test" under the same directory as pyproject.toml file. Please make sure to add unit test every time a new feature added. 
-The workflow will run the test tox environment automatically whenever there is a push/pull request. Please make sure you install the related package needed for the unit tests in `commands_pre`.
+## Support
 
-If you want to test a specific component/feature, please add a new environment in tox.ini file, and add related workflow as needed.
+Please note that as per policy, we're providing support via GitHub on a best effort basis. However, if you have AWS Enterprise Support you can create a ticket and we will provide direct support within the respective SLAs.
+
+## Security issue notifications
+If you discover a potential security issue in this project we ask that you notify AWS/Amazon Security via our [vulnerability reporting page](http://aws.amazon.com/security/vulnerability-reporting/). Please do **not** create a public github issue.
 
 ## License
 
 This project is licensed under the Apache-2.0 License.
 
+## Notices
+
+### Python Version Support
+This project ensures compatibility with the following supported Python versions: 3.8, 3.9, 3.10, 3.11
