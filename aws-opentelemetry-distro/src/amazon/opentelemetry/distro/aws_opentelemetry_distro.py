@@ -1,6 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import os
+import sys
+from logging import Logger, getLogger
 
 from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_instrumentation_patches
 from opentelemetry.distro import OpenTelemetryDistro
@@ -9,6 +11,8 @@ from opentelemetry.sdk.environment_variables import (
     OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION,
     OTEL_EXPORTER_OTLP_PROTOCOL,
 )
+
+_logger: Logger = getLogger(__name__)
 
 
 class AwsOpenTelemetryDistro(OpenTelemetryDistro):
@@ -36,6 +40,21 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION environment variable. Need to work with upstream to
             make it to be configurable.
         """
+
+        # Issue: https://github.com/open-telemetry/opentelemetry-python-contrib/issues/2495
+        # mimicking what is done here: https://tinyurl.com/54mvzmte
+        # For handling applications like django running in containers, we are setting the current working directory
+        # to the sys.path for the django application to find its executables.
+        #
+        # Note that we are updating the sys.path and not the PYTHONPATH env var, because once sys.path is
+        # loaded upon process start, it doesn't refresh from the PYTHONPATH value.
+        #
+        # To be removed once the issue has been fixed in https://github.com/open-telemetry/opentelemetry-python-contrib
+        cwd_path = os.getcwd()
+        _logger.debug("Current working directory path: %s", cwd_path)
+        if cwd_path not in sys.path:
+            sys.path.insert(0, cwd_path)
+
         os.environ.setdefault(OTEL_EXPORTER_OTLP_PROTOCOL, "http/protobuf")
 
         super(AwsOpenTelemetryDistro, self)._configure()
