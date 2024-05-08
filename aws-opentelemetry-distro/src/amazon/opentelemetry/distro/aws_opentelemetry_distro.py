@@ -41,7 +41,7 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             make it to be configurable.
         """
 
-        # related issue: https://github.com/open-telemetry/opentelemetry-python-contrib/issues/2495
+        # Issue: https://github.com/open-telemetry/opentelemetry-python-contrib/issues/2495
         # mimicking what is done here: https://tinyurl.com/54mvzmte
         # For handling applications like django running in containers, we are setting the current working directory
         # to the sys.path for the django application to find its executables.
@@ -49,7 +49,7 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
         # Note that we are updating the sys.path and not the PYTHONPATH env var, because once sys.path is
         # loaded upon process start, it doesn't refresh from the PYTHONPATH value.
         #
-        # To be removed once the change has been contributed to upstream.
+        # To be removed once the issue has been fixed in https://github.com/open-telemetry/opentelemetry-python-contrib
         cwd_path = os.getcwd()
         _logger.debug("Current working directory path: %s", cwd_path)
         if cwd_path not in sys.path:
