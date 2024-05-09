@@ -13,8 +13,9 @@ from amazon.utils.application_signals_constants import (
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_REMOTE_OPERATION,
+    AWS_REMOTE_RESOURCE_IDENTIFIER,
+    AWS_REMOTE_RESOURCE_TYPE,
     AWS_REMOTE_SERVICE,
-    AWS_REMOTE_TARGET,
     AWS_SPAN_KIND,
 )
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
@@ -88,9 +89,10 @@ class BotocoreTest(ContractTestBase):
             200,
             0,
             0,
-            remote_service="AWS.SDK.S3",
+            remote_service="AWS::S3",
             remote_operation="CreateBucket",
-            remote_target="::s3:::test-bucket-name",
+            remote_resource_type="AWS::S3::Bucket",
+            remote_resource_identifier="test-bucket-name",
             request_specific_attributes={
                 SpanAttributes.AWS_S3_BUCKET: "test-bucket-name",
             },
@@ -104,9 +106,10 @@ class BotocoreTest(ContractTestBase):
             200,
             0,
             0,
-            remote_service="AWS.SDK.S3",
+            remote_service="AWS::S3",
             remote_operation="PutObject",
-            remote_target="::s3:::test-put-object-bucket-name",
+            remote_resource_type="AWS::S3::Bucket",
+            remote_resource_identifier="test-put-object-bucket-name",
             request_specific_attributes={
                 SpanAttributes.AWS_S3_BUCKET: "test-put-object-bucket-name",
             },
@@ -120,9 +123,10 @@ class BotocoreTest(ContractTestBase):
             200,
             0,
             0,
-            remote_service="AWS.SDK.S3",
+            remote_service="AWS::S3",
             remote_operation="GetObject",
-            remote_target="::s3:::test-get-object-bucket-name",
+            remote_resource_type="AWS::S3::Bucket",
+            remote_resource_identifier="test-get-object-bucket-name",
             request_specific_attributes={
                 SpanAttributes.AWS_S3_BUCKET: "test-get-object-bucket-name",
             },
@@ -136,9 +140,10 @@ class BotocoreTest(ContractTestBase):
             400,
             1,
             0,
-            remote_service="AWS.SDK.S3",
+            remote_service="AWS::S3",
             remote_operation="CreateBucket",
-            remote_target="::s3:::-",
+            remote_resource_type="AWS::S3::Bucket",
+            remote_resource_identifier="-",
             request_specific_attributes={
                 SpanAttributes.AWS_S3_BUCKET: "-",
             },
@@ -152,9 +157,10 @@ class BotocoreTest(ContractTestBase):
             500,
             0,
             1,
-            remote_service="AWS.SDK.S3",
+            remote_service="AWS::S3",
             remote_operation="CreateBucket",
-            remote_target="::s3:::valid-bucket-name",
+            remote_resource_type="AWS::S3::Bucket",
+            remote_resource_identifier="valid-bucket-name",
             request_specific_attributes={
                 SpanAttributes.AWS_S3_BUCKET: "valid-bucket-name",
             },
@@ -168,9 +174,10 @@ class BotocoreTest(ContractTestBase):
             200,
             0,
             0,
-            remote_service="AWS.SDK.DynamoDB",
+            remote_service="AWS::DynamoDB",
             remote_operation="CreateTable",
-            remote_target="::dynamodb:::table/test_table",
+            remote_resource_type="AWS::DynamoDB::Table",
+            remote_resource_identifier="test_table",
             request_specific_attributes={
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["test_table"],
             },
@@ -184,9 +191,10 @@ class BotocoreTest(ContractTestBase):
             200,
             0,
             0,
-            remote_service="AWS.SDK.DynamoDB",
+            remote_service="AWS::DynamoDB",
             remote_operation="PutItem",
-            remote_target="::dynamodb:::table/put_test_table",
+            remote_resource_type="AWS::DynamoDB::Table",
+            remote_resource_identifier="put_test_table",
             request_specific_attributes={
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["put_test_table"],
             },
@@ -200,9 +208,10 @@ class BotocoreTest(ContractTestBase):
             400,
             1,
             0,
-            remote_service="AWS.SDK.DynamoDB",
+            remote_service="AWS::DynamoDB",
             remote_operation="PutItem",
-            remote_target="::dynamodb:::table/invalid_table",
+            remote_resource_type="AWS::DynamoDB::Table",
+            remote_resource_identifier="invalid_table",
             request_specific_attributes={
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["invalid_table"],
             },
@@ -216,9 +225,10 @@ class BotocoreTest(ContractTestBase):
             500,
             0,
             1,
-            remote_service="AWS.SDK.DynamoDB",
+            remote_service="AWS::DynamoDB",
             remote_operation="PutItem",
-            remote_target="::dynamodb:::table/invalid_table",
+            remote_resource_type="AWS::DynamoDB::Table",
+            remote_resource_identifier="invalid_table",
             request_specific_attributes={
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["invalid_table"],
             },
@@ -232,9 +242,10 @@ class BotocoreTest(ContractTestBase):
             200,
             0,
             0,
-            remote_service="AWS.SDK.SQS",
+            remote_service="AWS::SQS",
             remote_operation="CreateQueue",
-            remote_target="::sqs:::test_queue",
+            remote_resource_type="AWS::SQS::Queue",
+            remote_resource_identifier="test_queue",
             request_specific_attributes={
                 _AWS_QUEUE_NAME: "test_queue",
             },
@@ -248,9 +259,10 @@ class BotocoreTest(ContractTestBase):
             200,
             0,
             0,
-            remote_service="AWS.SDK.SQS",
+            remote_service="AWS::SQS",
             remote_operation="SendMessage",
-            remote_target="::sqs::000000000000:test_put_get_queue",
+            remote_resource_type="AWS::SQS::Queue",
+            remote_resource_identifier="test_put_get_queue",
             request_specific_attributes={
                 _AWS_QUEUE_URL: "http://localstack:4566/000000000000/test_put_get_queue",
             },
@@ -264,9 +276,10 @@ class BotocoreTest(ContractTestBase):
             200,
             0,
             0,
-            remote_service="AWS.SDK.SQS",
+            remote_service="AWS::SQS",
             remote_operation="ReceiveMessage",
-            remote_target="::sqs::000000000000:test_put_get_queue",
+            remote_resource_type="AWS::SQS::Queue",
+            remote_resource_identifier="test_put_get_queue",
             request_specific_attributes={
                 _AWS_QUEUE_URL: "http://localstack:4566/000000000000/test_put_get_queue",
             },
@@ -280,9 +293,10 @@ class BotocoreTest(ContractTestBase):
             400,
             1,
             0,
-            remote_service="AWS.SDK.SQS",
+            remote_service="AWS::SQS",
             remote_operation="SendMessage",
-            remote_target="::sqs::000000000000:sqserror",
+            remote_resource_type="AWS::SQS::Queue",
+            remote_resource_identifier="sqserror",
             request_specific_attributes={
                 _AWS_QUEUE_URL: "http://error.test:8080/000000000000/sqserror",
             },
@@ -296,9 +310,10 @@ class BotocoreTest(ContractTestBase):
             500,
             0,
             1,
-            remote_service="AWS.SDK.SQS",
+            remote_service="AWS::SQS",
             remote_operation="CreateQueue",
-            remote_target="::sqs:::invalid_test",
+            remote_resource_type="AWS::SQS::Queue",
+            remote_resource_identifier="invalid_test",
             request_specific_attributes={
                 _AWS_QUEUE_NAME: "invalid_test",
             },
@@ -312,9 +327,10 @@ class BotocoreTest(ContractTestBase):
             200,
             0,
             0,
-            remote_service="AWS.SDK.Kinesis",
+            remote_service="AWS::Kinesis",
             remote_operation="PutRecord",
-            remote_target="::kinesis:::stream/test_stream",
+            remote_resource_type="AWS::Kinesis::Stream",
+            remote_resource_identifier="test_stream",
             request_specific_attributes={
                 _AWS_STREAM_NAME: "test_stream",
             },
@@ -328,9 +344,10 @@ class BotocoreTest(ContractTestBase):
             400,
             1,
             0,
-            remote_service="AWS.SDK.Kinesis",
+            remote_service="AWS::Kinesis",
             remote_operation="PutRecord",
-            remote_target="::kinesis:::stream/invalid_stream",
+            remote_resource_type="AWS::Kinesis::Stream",
+            remote_resource_identifier="invalid_stream",
             request_specific_attributes={
                 _AWS_STREAM_NAME: "invalid_stream",
             },
@@ -344,9 +361,10 @@ class BotocoreTest(ContractTestBase):
             500,
             0,
             1,
-            remote_service="AWS.SDK.Kinesis",
+            remote_service="AWS::Kinesis",
             remote_operation="PutRecord",
-            remote_target="::kinesis:::stream/test_stream",
+            remote_resource_type="AWS::Kinesis::Stream",
+            remote_resource_identifier="test_stream",
             request_specific_attributes={
                 _AWS_STREAM_NAME: "test_stream",
             },
@@ -367,11 +385,18 @@ class BotocoreTest(ContractTestBase):
             kwargs.get("remote_service"),
             kwargs.get("remote_operation"),
             "LOCAL_ROOT",
-            kwargs.get("remote_target", "None"),
+            kwargs.get("remote_resource_type", "None"),
+            kwargs.get("remote_resource_identifier", "None"),
         )
 
     def _assert_aws_attributes(
-        self, attributes_list: List[KeyValue], service: str, operation: str, span_kind: str, remote_target: str
+        self,
+        attributes_list: List[KeyValue],
+        service: str,
+        operation: str,
+        span_kind: str,
+        remote_resource_type: str,
+        remote_resource_identifier: str,
     ) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
@@ -380,8 +405,10 @@ class BotocoreTest(ContractTestBase):
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_OPERATION, "InternalOperation")
         self._assert_str_attribute(attributes_dict, AWS_REMOTE_SERVICE, service)
         self._assert_str_attribute(attributes_dict, AWS_REMOTE_OPERATION, operation)
-        if remote_target != "None":
-            self._assert_str_attribute(attributes_dict, AWS_REMOTE_TARGET, remote_target)
+        if remote_resource_type != "None":
+            self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_TYPE, remote_resource_type)
+        if remote_resource_identifier != "None":
+            self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, span_kind)
 
@@ -417,7 +444,7 @@ class BotocoreTest(ContractTestBase):
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_METHOD, operation)
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SYSTEM, "aws-api")
-        self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SERVICE, service.split(".")[-1])
+        self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SERVICE, service.split("::")[-1])
         self._assert_int_attribute(attributes_dict, SpanAttributes.HTTP_STATUS_CODE, status_code)
         # TODO: botocore instrumentation is not respecting PEER_SERVICE
         # self._assert_str_attribute(attributes_dict, SpanAttributes.PEER_SERVICE, "backend:8080")
@@ -459,9 +486,12 @@ class BotocoreTest(ContractTestBase):
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, kwargs.get("remote_service"))
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, kwargs.get("remote_operation"))
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "CLIENT")
-        remote_target = kwargs.get("remote_target", "None")
-        if remote_target != "None":
-            self._assert_str_attribute(attribute_dict, AWS_REMOTE_TARGET, remote_target)
+        remote_resource_type = kwargs.get("remote_resource_type", "None")
+        remote_resource_identifier = kwargs.get("remote_resource_identifier", "None")
+        if remote_resource_type != "None":
+            self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_TYPE, remote_resource_type)
+        if remote_resource_identifier != "None":
+            self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
         self.check_sum(metric_name, dependency_dp.sum, expected_sum)
 
         attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(service_dp.attributes)
