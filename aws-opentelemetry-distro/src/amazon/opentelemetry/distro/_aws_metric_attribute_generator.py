@@ -379,9 +379,6 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
 
 def _get_db_remote_resource_identifier(span: ReadableSpan) -> str:
     db_remote_resource_identifier: str = ""
-    print("SPAN!!!!!!!!!!!!!!!")
-    print(span)
-    print("================================")
     if is_key_present(span, _DB_NAME):
         db_remote_resource_identifier += span.attributes.get(_DB_NAME) + "|"
 
@@ -392,11 +389,11 @@ def _get_db_remote_resource_identifier(span: ReadableSpan) -> str:
     if is_key_present(span, _SERVER_ADDRESS):
         db_remote_resource_identifier += span.attributes.get(_SERVER_ADDRESS) + ":"
         if is_key_present(span, _SERVER_PORT):
-            db_remote_resource_identifier += span.attributes.get(_SERVER_PORT) + "/"
+            db_remote_resource_identifier += str(span.attributes.get(_SERVER_PORT)) + "/"
     elif is_key_present(span, _NET_PEER_NAME):
         db_remote_resource_identifier += span.attributes.get(_NET_PEER_NAME) + ":"
         if is_key_present(span, _NET_PEER_PORT):
-            db_remote_resource_identifier += span.attributes.get(_NET_PEER_PORT) + "/"
+            db_remote_resource_identifier += str(span.attributes.get(_NET_PEER_PORT)) + "/"
 
     return db_remote_resource_identifier[:-1] if db_remote_resource_identifier else None
 

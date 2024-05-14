@@ -42,7 +42,8 @@ fi
 cd ..
 for dir in contract-tests/images/applications/*
 do
-  application="${dir##*/}"
+#  application="${dir##*/}"
+  application="psycopg2"
   docker build . -t aws-application-signals-tests-${application}-app -f ${dir}/Dockerfile --build-arg="DISTRO=${DISTRO}"
   if [ $? = 1 ]; then
     echo "Docker build for ${application} application failed"
