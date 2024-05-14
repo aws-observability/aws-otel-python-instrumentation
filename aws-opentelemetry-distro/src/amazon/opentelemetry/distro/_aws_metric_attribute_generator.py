@@ -49,6 +49,7 @@ _SERVICE_NAME: str = ResourceAttributes.SERVICE_NAME
 _DB_OPERATION: str = SpanAttributes.DB_OPERATION
 _DB_STATEMENT: str = SpanAttributes.DB_STATEMENT
 _DB_SYSTEM: str = SpanAttributes.DB_SYSTEM
+_DB_NAME: str = SpanAttributes.DB_NAME
 _FAAS_INVOKED_NAME: str = SpanAttributes.FAAS_INVOKED_NAME
 _FAAS_TRIGGER: str = SpanAttributes.FAAS_TRIGGER
 _GRAPHQL_OPERATION_TYPE: str = SpanAttributes.GRAPHQL_OPERATION_TYPE
@@ -65,6 +66,9 @@ _RPC_METHOD: str = SpanAttributes.RPC_METHOD
 _RPC_SERVICE: str = SpanAttributes.RPC_SERVICE
 _AWS_TABLE_NAMES: str = SpanAttributes.AWS_DYNAMODB_TABLE_NAMES
 _AWS_BUCKET_NAME: str = SpanAttributes.AWS_S3_BUCKET
+_SERVER_PORT: str = SpanAttributes.SERVER_PORT
+_SERVER_ADDRESS: str = SpanAttributes.SERVER_ADDRESS
+_DB_CONNECTION_STRING: str = SpanAttributes.DB_CONNECTION_STRING
 
 # Normalized remote service names for supported AWS services
 _NORMALIZED_DYNAMO_DB_SERVICE_NAME: str = "AWS::DynamoDB"
@@ -344,10 +348,17 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
     remote_resource_type: Optional[str] = None
     remote_resource_identifier: Optional[str] = None
 
-    # Only extract the table name when _AWS_TABLE_NAMES has size equals to one
-    if is_key_present(span, _AWS_TABLE_NAMES) and len(span.attributes.get(_AWS_TABLE_NAMES)) == 1:
-        remote_resource_type = _NORMALIZED_DYNAMO_DB_SERVICE_NAME + "::Table"
-        remote_resource_identifier = span.attributes.get(_AWS_TABLE_NAMES)[0]
+    # Only extract remote_resource_type and remote_resource_identifier
+    # when remote_service and remote_operation is also using _DB_SYSTEM
+    if (
+        is_key_present(span, _DB_SYSTEM)
+        and not is_key_present(span, AWS_REMOTE_SERVICE)
+        and not is_key_present(span, AWS_REMOTE_OPERATION)
+        and not is_key_present(span, _RPC_SERVICE)
+        and not is_key_present(span, _RPC_METHOD)
+    ):
+        remote_resource_type = "DB::Endpoint"
+        remote_resource_identifier = _get_db_remote_resource_identifier(span)
     elif is_key_present(span, AWS_STREAM_NAME):
         remote_resource_type = _NORMALIZED_KINESIS_SERVICE_NAME + "::Stream"
         remote_resource_identifier = span.attributes.get(AWS_STREAM_NAME)
@@ -364,6 +375,31 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
     if remote_resource_type is not None and remote_resource_identifier is not None:
         attributes[AWS_REMOTE_RESOURCE_TYPE] = remote_resource_type
         attributes[AWS_REMOTE_RESOURCE_IDENTIFIER] = remote_resource_identifier
+
+
+def _get_db_remote_resource_identifier(span: ReadableSpan) -> str:
+    db_remote_resource_identifier: str = ""
+    if is_key_present(span, _DB_NAME):
+        db_remote_resource_identifier += span.attributes.get(AWS_STREAM_NAME) + "|"
+
+    if is_key_present(span, _DB_CONNECTION_STRING):
+        db_remote_resource_identifier += span.attributes.get(_DB_CONNECTION_STRING)
+        return db_remote_resource_identifier
+
+    if is_key_present(span, _SERVER_ADDRESS):
+        db_remote_resource_identifier += span.attributes.get(_SERVER_ADDRESS) + "|"
+    elif is_key_present(span, _NET_PEER_NAME):
+        db_remote_resource_identifier += span.attributes.get(_NET_PEER_NAME) + "|"
+
+    if not db_remote_resource_identifier:
+        return None
+
+    if is_key_present(span, _SERVER_PORT):
+        db_remote_resource_identifier += span.attributes.get(_SERVER_PORT) + "|"
+    elif is_key_present(span, _NET_PEER_PORT):
+        db_remote_resource_identifier += span.attributes.get(_NET_PEER_PORT) + "|"
+
+    return db_remote_resource_identifier[:-1]
 
 
 def _set_span_kind_for_dependency(span: ReadableSpan, attributes: BoundedAttributes) -> None:

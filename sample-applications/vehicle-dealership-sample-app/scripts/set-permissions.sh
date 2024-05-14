@@ -10,11 +10,7 @@ OPERATION=${3:-"attach"}
 
 
 POLICY_ARNS=(
-  "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
-  "arn:aws:iam::aws:policy/AWSXrayWriteOnlyAccess"
-  "arn:aws:iam::aws:policy/CloudWatchLogsFullAccess"
-  "arn:aws:iam::aws:policy/AmazonS3FullAccess"
-  "arn:aws:iam::aws:policy/AmazonEC2FullAccess"
+  "arn:aws:iam::aws:policy/AdministratorAccess"
 )
 
 NODE_GROUP=$(aws eks list-nodegroups --cluster-name "$CLUSTER_NAME" --region "$REGION" --output text | awk '{print $2}')
