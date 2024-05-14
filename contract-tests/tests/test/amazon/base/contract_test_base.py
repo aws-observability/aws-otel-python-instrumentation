@@ -125,6 +125,9 @@ class ContractTestBase(TestCase):
 
         self.mock_collector_client.clear_signals()
 
+self.do_test_requests("fault", "GET", 500, 0, 1, sql_command="SELECT DISTINCT")
+
+
     def do_test_requests(
         self, path: str, method: str, status_code: int, expected_error: int, expected_fault: int, **kwargs
     ) -> None:
