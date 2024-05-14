@@ -357,8 +357,9 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         and not is_key_present(span, _RPC_SERVICE)
         and not is_key_present(span, _RPC_METHOD)
     ):
-        remote_resource_type = "DB::Endpoint"
         remote_resource_identifier = _get_db_remote_resource_identifier(span)
+        if remote_resource_identifier:
+            remote_resource_type = "DB::Endpoint"
     elif is_key_present(span, AWS_STREAM_NAME):
         remote_resource_type = _NORMALIZED_KINESIS_SERVICE_NAME + "::Stream"
         remote_resource_identifier = span.attributes.get(AWS_STREAM_NAME)
@@ -378,6 +379,15 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
 
 
 def _get_db_remote_resource_identifier(span: ReadableSpan) -> str:
+    """
+    Generates AWS_REMOTE_RESOURCE_IDENTIFIER for a database span using rules:
+    - Add db.name if available.
+    - Add server endpoint and port using the following priority
+        * db.connection_string
+        * server.address:server.port
+        * network.peer.address:network.peer.port
+    - Return None if all above not found in span.
+    """
     db_remote_resource_identifier: str = ""
     if is_key_present(span, _DB_NAME):
         db_remote_resource_identifier += span.attributes.get(_DB_NAME) + "|"
