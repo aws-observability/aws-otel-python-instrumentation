@@ -387,19 +387,15 @@ def _get_db_remote_resource_identifier(span: ReadableSpan) -> str:
         return db_remote_resource_identifier
 
     if is_key_present(span, _SERVER_ADDRESS):
-        db_remote_resource_identifier += span.attributes.get(_SERVER_ADDRESS) + "|"
+        db_remote_resource_identifier += span.attributes.get(_SERVER_ADDRESS) + ":"
+        if is_key_present(span, _SERVER_PORT):
+            db_remote_resource_identifier += span.attributes.get(_SERVER_PORT) + "/"
     elif is_key_present(span, _NET_PEER_NAME):
-        db_remote_resource_identifier += span.attributes.get(_NET_PEER_NAME) + "|"
+        db_remote_resource_identifier += span.attributes.get(_NET_PEER_NAME) + ":"
+        if is_key_present(span, _NET_PEER_PORT):
+            db_remote_resource_identifier += span.attributes.get(_NET_PEER_PORT) + "/"
 
-    if not db_remote_resource_identifier:
-        return None
-
-    if is_key_present(span, _SERVER_PORT):
-        db_remote_resource_identifier += span.attributes.get(_SERVER_PORT) + "|"
-    elif is_key_present(span, _NET_PEER_PORT):
-        db_remote_resource_identifier += span.attributes.get(_NET_PEER_PORT) + "|"
-
-    return db_remote_resource_identifier[:-1]
+    return db_remote_resource_identifier[:-1] if db_remote_resource_identifier else None
 
 
 def _set_span_kind_for_dependency(span: ReadableSpan, attributes: BoundedAttributes) -> None:
