@@ -946,7 +946,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         # 1. SpanAttributes.DB_CONNECTION_STRING available.
         self._mock_attribute(
             [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_NAME, SpanAttributes.DB_CONNECTION_STRING],
-            [["DB system", "db_name", "www.connection_string.com:8000"]],
+            ["DB system", "db_name", "www.connection_string.com:8000"],
         )
         self._validate_remote_resource_attributes("DB::Endpoint", "db_name|www.connection_string.com:8000")
         self._mock_attribute(
@@ -961,7 +961,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
                 SpanAttributes.SERVER_ADDRESS,
                 SpanAttributes.SERVER_PORT,
             ],
-            [["DB system", "db_name", "www.example_server_address.com", "8001"]],
+            ["DB system", "db_name", "www.example_server_address.com", "8001"],
         )
         self._validate_remote_resource_attributes("DB::Endpoint", "db_name|www.example_server_address.com:8001")
         self._mock_attribute(
@@ -982,7 +982,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
                 SpanAttributes.NET_PEER_NAME,
                 SpanAttributes.NET_PEER_PORT,
             ],
-            [["DB system", "db_name", "www.example_net_address.com", "8002"]],
+            ["DB system", "db_name", "www.example_net_address.com", "8002"],
         )
         self._validate_remote_resource_attributes("DB::Endpoint", "db_name|www.example_net_address.com:8002")
         self._mock_attribute(
@@ -996,7 +996,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         )
 
         # 4. Only SpanAttributes.DB_NAME available available.
-        self._mock_attribute([SpanAttributes.DB_SYSTEM, SpanAttributes.DB_NAME], [["DB system", "db_name"]])
+        self._mock_attribute([SpanAttributes.DB_SYSTEM, SpanAttributes.DB_NAME], ["DB system", "db_name"])
         self._validate_remote_resource_attributes("DB::Endpoint", "db_name")
         self._mock_attribute([SpanAttributes.DB_SYSTEM, SpanAttributes.DB_NAME], [None, None])
 
@@ -1004,7 +1004,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         # 1. SpanAttributes.DB_CONNECTION_STRING available.
         self._mock_attribute(
             [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_CONNECTION_STRING],
-            [["DB system", "www.connection_string.com:8000"]],
+            ["DB system", "www.connection_string.com:8000"],
         )
         self._validate_remote_resource_attributes("DB::Endpoint", "www.connection_string.com:8000")
         self._mock_attribute([SpanAttributes.DB_SYSTEM, SpanAttributes.DB_CONNECTION_STRING], [None, None])
@@ -1012,7 +1012,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         # 2. SpanAttributes.SERVER_ADDRESS and SpanAttributes.SERVER_PORT available.
         self._mock_attribute(
             [SpanAttributes.DB_SYSTEM, SpanAttributes.SERVER_ADDRESS, SpanAttributes.SERVER_PORT],
-            [["DB system", "www.example_server_address.com", "8001"]],
+            ["DB system", "www.example_server_address.com", "8001"],
         )
         self._validate_remote_resource_attributes("DB::Endpoint", "www.example_server_address.com:8001")
         self._mock_attribute(
@@ -1022,7 +1022,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         # 3. SpanAttributes.NET_PEER_NAME and SpanAttributes.NET_PEER_PORT available.
         self._mock_attribute(
             [SpanAttributes.DB_SYSTEM, SpanAttributes.NET_PEER_NAME, SpanAttributes.NET_PEER_PORT],
-            [["DB system", "www.example_net_address.com", "8002"]],
+            ["DB system", "www.example_net_address.com", "8002"],
         )
         self._validate_remote_resource_attributes("DB::Endpoint", "www.example_net_address.com:8002")
         self._mock_attribute(
