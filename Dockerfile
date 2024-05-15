@@ -19,7 +19,7 @@ RUN sed -i "/opentelemetry-exporter-otlp-proto-grpc/d" ./aws-opentelemetry-distr
 RUN mkdir workspace && pip install --target workspace ./aws-opentelemetry-distro
 
 
-FROM scratch
+FROM busybox
 
 # Required to copy attribute files to distributed docker images
 ADD THIRD-PARTY-LICENSES ./THIRD-PARTY-LICENSES
