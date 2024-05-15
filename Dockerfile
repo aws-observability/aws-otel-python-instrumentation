@@ -19,9 +19,45 @@ RUN sed -i "/opentelemetry-exporter-otlp-proto-grpc/d" ./aws-opentelemetry-distr
 RUN mkdir workspace && pip install --target workspace ./aws-opentelemetry-distro
 
 
-FROM busybox
+#RUN chmod -R go+r /autoinstrumentation
+
+
+# Stage 1: Build the cp-utility binary
+FROM rust:1.75 as builder
+
+WORKDIR /usr/src/cp-utility
+COPY ./tools/cp-utility .
+
+## TARGETARCH is defined by buildx
+# https://docs.docker.com/engine/reference/builder/#automatic-platform-args-in-the-global-scope
+ARG TARGETARCH
+
+# Run validations and audit only on amd64 bacause it is faster and those two steps
+# are only used to validate the source code and don't require anything that is
+# architecture specific.
+
+# Validations
+## Validate formatting
+RUN if [ $TARGETARCH = "amd64" ]; then rustup component add rustfmt && cargo fmt --check ; fi
+
+## Audit dependencies
+RUN if [ $TARGETARCH = "amd64" ]; then cargo install cargo-audit && cargo audit ; fi
+
+
+# Cross-compile based on the target platform.
+RUN if [ $TARGETARCH = "amd64" ]; then export ARCH="x86_64" ; \
+    elif [ $TARGETARCH = "arm64" ]; then export ARCH="aarch64" ; \
+    else false; \
+    fi \
+    && rustup target add ${ARCH}-unknown-linux-musl \
+    && cargo test  --target ${ARCH}-unknown-linux-musl \
+    && cargo install --target ${ARCH}-unknown-linux-musl --path . --root .
+
+FROM scratch
 
 # Required to copy attribute files to distributed docker images
 ADD THIRD-PARTY-LICENSES ./THIRD-PARTY-LICENSES
 
+COPY --from=builder /usr/src/cp-utility/bin/cp-utility /bin/cp
 COPY --from=build /operator-build/workspace /autoinstrumentation
+
