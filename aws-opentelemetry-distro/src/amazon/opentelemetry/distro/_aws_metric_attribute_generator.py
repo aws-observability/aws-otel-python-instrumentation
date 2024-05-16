@@ -436,7 +436,7 @@ def _build_db_connection_string(connection_string: str) -> Optional[str]:
     try:
         port = uri.port
     except ValueError:
-        return None
+        port = None
 
     if address is None:
         return None
