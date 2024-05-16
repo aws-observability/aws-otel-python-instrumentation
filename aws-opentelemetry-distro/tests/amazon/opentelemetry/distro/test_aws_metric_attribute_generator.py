@@ -920,9 +920,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         ]
         self._mock_attribute(keys, values)
         # Validate behaviour of aws bucket name attribute, then remove it.
-        self._mock_attribute(
-            [SpanAttributes.AWS_S3_BUCKET, SpanAttributes.RPC_SYSTEM], ["aws_s3_bucket_name", "aws-api"], keys, values
-        )
+        self._mock_attribute([SpanAttributes.AWS_S3_BUCKET], ["aws_s3_bucket_name"], keys, values)
         self._validate_remote_resource_attributes("AWS::S3::Bucket", "aws_s3_bucket_name")
         self._mock_attribute([SpanAttributes.AWS_S3_BUCKET], [None])
 

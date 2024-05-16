@@ -405,7 +405,7 @@ def _get_db_connection(span: ReadableSpan) -> None:
 
     if is_key_present(span, _SERVER_ADDRESS):
         server_address: Optional[str] = span.attributes.get(_SERVER_ADDRESS)
-        server_port: Optional[str] = span.attributes.get(_SERVER_PORT)
+        server_port: Optional[int] = span.attributes.get(_SERVER_PORT)
         db_connection = _build_db_connection(server_address, server_port)
     elif is_key_present(span, _NET_PEER_NAME):
         network_peer_address: Optional[str] = span.attributes.get(_NET_PEER_NAME)
@@ -430,9 +430,12 @@ def _build_db_connection(address: str, port: int) -> Optional[str]:
 
 
 def _build_db_connection_string(connection_string: str) -> Optional[str]:
-    uri = urlparse(connection_string)
-    address = uri.hostname
-    port = uri.port
+    try:
+        uri = urlparse(connection_string)
+        address = uri.hostname
+        port = uri.port
+    except ValueError:
+        return None
 
     if address is None:
         return None
