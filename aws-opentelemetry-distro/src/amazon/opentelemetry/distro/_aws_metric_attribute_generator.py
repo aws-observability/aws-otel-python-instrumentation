@@ -373,4 +373,5 @@ def _set_span_kind_for_dependency(span: ReadableSpan, attributes: BoundedAttribu
 
 def _log_unknown_attribute(attribute_key: str, span: ReadableSpan) -> None:
     message: str = "No valid %s value found for %s span %s"
-    _logger.log(DEBUG, message, attribute_key, span.kind.name, str(span.context.span_id))
+    if _logger.isEnabledFor(DEBUG):
+        _logger.log(DEBUG, message, attribute_key, span.kind.name, str(span.context.span_id))
