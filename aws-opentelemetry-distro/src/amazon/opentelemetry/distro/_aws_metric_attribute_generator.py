@@ -357,19 +357,19 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         # Only extract the table name when _AWS_TABLE_NAMES has size equals to one
         if is_key_present(span, _AWS_TABLE_NAMES) and len(span.attributes.get(_AWS_TABLE_NAMES)) == 1:
             remote_resource_type = _NORMALIZED_DYNAMO_DB_SERVICE_NAME + "::Table"
-            remote_resource_identifier = span.attributes.get(_AWS_TABLE_NAMES)[0]
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(_AWS_TABLE_NAMES)[0])
         elif is_key_present(span, AWS_STREAM_NAME):
             remote_resource_type = _NORMALIZED_KINESIS_SERVICE_NAME + "::Stream"
-            remote_resource_identifier = span.attributes.get(AWS_STREAM_NAME)
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_STREAM_NAME))
         elif is_key_present(span, _AWS_BUCKET_NAME):
             remote_resource_type = _NORMALIZED_S3_SERVICE_NAME + "::Bucket"
-            remote_resource_identifier = span.attributes.get(_AWS_BUCKET_NAME)
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(_AWS_BUCKET_NAME))
         elif is_key_present(span, AWS_QUEUE_NAME):
             remote_resource_type = _NORMALIZED_SQS_SERVICE_NAME + "::Queue"
-            remote_resource_identifier = span.attributes.get(AWS_QUEUE_NAME)
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_QUEUE_NAME))
         elif is_key_present(span, AWS_QUEUE_URL):
             remote_resource_type = _NORMALIZED_SQS_SERVICE_NAME + "::Queue"
-            remote_resource_identifier = SqsUrlParser.get_queue_name(span.attributes.get(AWS_QUEUE_URL))
+            remote_resource_identifier = _escape_delimiters(SqsUrlParser.get_queue_name(span.attributes.get(AWS_QUEUE_URL)))
     elif is_db_span(span):
         remote_resource_type = _DB_CONNECTION_STRING_TYPE
         remote_resource_identifier = _get_db_connection(span)
