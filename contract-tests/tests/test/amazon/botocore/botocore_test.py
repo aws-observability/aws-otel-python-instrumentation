@@ -176,6 +176,8 @@ class BotocoreTest(ContractTestBase):
             0,
             remote_service="AWS::DynamoDB",
             remote_operation="CreateTable",
+            remote_resource_type="AWS::DynamoDB::Table",
+            remote_resource_identifier="test_table",
             request_specific_attributes={
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["test_table"],
             },
@@ -191,6 +193,8 @@ class BotocoreTest(ContractTestBase):
             0,
             remote_service="AWS::DynamoDB",
             remote_operation="PutItem",
+            remote_resource_type="AWS::DynamoDB::Table",
+            remote_resource_identifier="put_test_table",
             request_specific_attributes={
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["put_test_table"],
             },
@@ -206,6 +210,8 @@ class BotocoreTest(ContractTestBase):
             0,
             remote_service="AWS::DynamoDB",
             remote_operation="PutItem",
+            remote_resource_type="AWS::DynamoDB::Table",
+            remote_resource_identifier="invalid_table",
             request_specific_attributes={
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["invalid_table"],
             },
@@ -221,6 +227,8 @@ class BotocoreTest(ContractTestBase):
             1,
             remote_service="AWS::DynamoDB",
             remote_operation="PutItem",
+            remote_resource_type="AWS::DynamoDB::Table",
+            remote_resource_identifier="invalid_table",
             request_specific_attributes={
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["invalid_table"],
             },

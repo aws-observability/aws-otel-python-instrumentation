@@ -29,6 +29,7 @@ from amazon.opentelemetry.distro._aws_span_processing_util import (
     get_egress_operation,
     get_ingress_operation,
     is_aws_sdk_span,
+    is_db_span,
     is_key_present,
     is_local_root,
     should_generate_dependency_metric_attributes,
@@ -46,10 +47,11 @@ from opentelemetry.semconv.trace import SpanAttributes
 
 # Pertinent OTEL attribute keys
 _SERVICE_NAME: str = ResourceAttributes.SERVICE_NAME
+_DB_CONNECTION_STRING: str = SpanAttributes.DB_CONNECTION_STRING
+_DB_NAME: str = SpanAttributes.DB_NAME
 _DB_OPERATION: str = SpanAttributes.DB_OPERATION
 _DB_STATEMENT: str = SpanAttributes.DB_STATEMENT
 _DB_SYSTEM: str = SpanAttributes.DB_SYSTEM
-_DB_NAME: str = SpanAttributes.DB_NAME
 _FAAS_INVOKED_NAME: str = SpanAttributes.FAAS_INVOKED_NAME
 _FAAS_TRIGGER: str = SpanAttributes.FAAS_TRIGGER
 _GRAPHQL_OPERATION_TYPE: str = SpanAttributes.GRAPHQL_OPERATION_TYPE
@@ -64,17 +66,19 @@ _NET_SOCK_PEER_PORT: str = SpanAttributes.NET_SOCK_PEER_PORT
 _PEER_SERVICE: str = SpanAttributes.PEER_SERVICE
 _RPC_METHOD: str = SpanAttributes.RPC_METHOD
 _RPC_SERVICE: str = SpanAttributes.RPC_SERVICE
+_SERVER_ADDRESS: str = SpanAttributes.SERVER_ADDRESS
+_SERVER_PORT: str = SpanAttributes.SERVER_PORT
+_SERVER_SOCKET_ADDRESS: str = SpanAttributes.SERVER_SOCKET_ADDRESS
+_SERVER_SOCKET_PORT: str = SpanAttributes.SERVER_SOCKET_PORT
 _AWS_TABLE_NAMES: str = SpanAttributes.AWS_DYNAMODB_TABLE_NAMES
 _AWS_BUCKET_NAME: str = SpanAttributes.AWS_S3_BUCKET
-_SERVER_PORT: str = SpanAttributes.SERVER_PORT
-_SERVER_ADDRESS: str = SpanAttributes.SERVER_ADDRESS
-_DB_CONNECTION_STRING: str = SpanAttributes.DB_CONNECTION_STRING
 
 # Normalized remote service names for supported AWS services
 _NORMALIZED_DYNAMO_DB_SERVICE_NAME: str = "AWS::DynamoDB"
 _NORMALIZED_KINESIS_SERVICE_NAME: str = "AWS::Kinesis"
 _NORMALIZED_S3_SERVICE_NAME: str = "AWS::S3"
 _NORMALIZED_SQS_SERVICE_NAME: str = "AWS::SQS"
+_DB_CONNECTION_STRING_TYPE: str = "DB::Connection"
 
 # Special DEPENDENCY attribute value if GRAPHQL_OPERATION_TYPE attribute key is present.
 _GRAPHQL: str = "graphql"
@@ -211,7 +215,7 @@ def _set_remote_service_and_operation(span: ReadableSpan, attributes: BoundedAtt
     elif is_key_present(span, _RPC_SERVICE) or is_key_present(span, _RPC_METHOD):
         remote_service = _normalize_remote_service_name(span, _get_remote_service(span, _RPC_SERVICE))
         remote_operation = _get_remote_operation(span, _RPC_METHOD)
-    elif is_key_present(span, _DB_SYSTEM) or is_key_present(span, _DB_OPERATION) or is_key_present(span, _DB_STATEMENT):
+    elif is_db_span(span):
         remote_service = _get_remote_service(span, _DB_SYSTEM)
         if is_key_present(span, _DB_OPERATION):
             remote_operation = _get_remote_operation(span, _DB_OPERATION)
@@ -348,64 +352,97 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
     remote_resource_type: Optional[str] = None
     remote_resource_identifier: Optional[str] = None
 
-    # Only extract remote_resource_type and remote_resource_identifier
-    # when remote_service and remote_operation is also using _DB_SYSTEM
-    if (
-        is_key_present(span, _DB_SYSTEM)
-        and not is_key_present(span, AWS_REMOTE_SERVICE)
-        and not is_key_present(span, AWS_REMOTE_OPERATION)
-        and not is_key_present(span, _RPC_SERVICE)
-        and not is_key_present(span, _RPC_METHOD)
-    ):
-        remote_resource_identifier = _get_db_remote_resource_identifier(span)
-        if remote_resource_identifier:
-            remote_resource_type = "DB::Endpoint"
-    elif is_key_present(span, AWS_STREAM_NAME):
-        remote_resource_type = _NORMALIZED_KINESIS_SERVICE_NAME + "::Stream"
-        remote_resource_identifier = span.attributes.get(AWS_STREAM_NAME)
-    elif is_key_present(span, _AWS_BUCKET_NAME):
-        remote_resource_type = _NORMALIZED_S3_SERVICE_NAME + "::Bucket"
-        remote_resource_identifier = span.attributes.get(_AWS_BUCKET_NAME)
-    elif is_key_present(span, AWS_QUEUE_NAME):
-        remote_resource_type = _NORMALIZED_SQS_SERVICE_NAME + "::Queue"
-        remote_resource_identifier = span.attributes.get(AWS_QUEUE_NAME)
-    elif is_key_present(span, AWS_QUEUE_URL):
-        remote_resource_type = _NORMALIZED_SQS_SERVICE_NAME + "::Queue"
-        remote_resource_identifier = SqsUrlParser.get_queue_name(span.attributes.get(AWS_QUEUE_URL))
+    if is_aws_sdk_span(span):
+        # Only extract the table name when _AWS_TABLE_NAMES has size equals to one
+        if is_key_present(span, _AWS_TABLE_NAMES) and len(span.attributes.get(_AWS_TABLE_NAMES)) == 1:
+            remote_resource_type = _NORMALIZED_DYNAMO_DB_SERVICE_NAME + "::Table"
+            remote_resource_identifier = span.attributes.get(_AWS_TABLE_NAMES)[0]
+        elif is_key_present(span, AWS_STREAM_NAME):
+            remote_resource_type = _NORMALIZED_KINESIS_SERVICE_NAME + "::Stream"
+            remote_resource_identifier = span.attributes.get(AWS_STREAM_NAME)
+        elif is_key_present(span, _AWS_BUCKET_NAME):
+            remote_resource_type = _NORMALIZED_S3_SERVICE_NAME + "::Bucket"
+            remote_resource_identifier = span.attributes.get(_AWS_BUCKET_NAME)
+        elif is_key_present(span, AWS_QUEUE_NAME):
+            remote_resource_type = _NORMALIZED_SQS_SERVICE_NAME + "::Queue"
+            remote_resource_identifier = span.attributes.get(AWS_QUEUE_NAME)
+        elif is_key_present(span, AWS_QUEUE_URL):
+            remote_resource_type = _NORMALIZED_SQS_SERVICE_NAME + "::Queue"
+            remote_resource_identifier = SqsUrlParser.get_queue_name(span.attributes.get(AWS_QUEUE_URL))
+    elif is_db_span(span):
+        remote_resource_type = _DB_CONNECTION_STRING_TYPE
+        remote_resource_identifier = _get_db_connection(span)
 
     if remote_resource_type is not None and remote_resource_identifier is not None:
         attributes[AWS_REMOTE_RESOURCE_TYPE] = remote_resource_type
         attributes[AWS_REMOTE_RESOURCE_IDENTIFIER] = remote_resource_identifier
 
 
-def _get_db_remote_resource_identifier(span: ReadableSpan) -> str:
+def _get_db_connection(span: ReadableSpan) -> None:
     """
-    Generates AWS_REMOTE_RESOURCE_IDENTIFIER for a database span using rules:
-    - Add db.name if available.
-    - Add server endpoint and port using the following priority
-        * db.connection_string
-        * server.address:server.port
-        * network.peer.address:network.peer.port
-    - Return None if all above not found in span.
-    """
-    db_remote_resource_identifier: str = ""
-    if is_key_present(span, _DB_NAME):
-        db_remote_resource_identifier += span.attributes.get(_DB_NAME) + "|"
+    RemoteResourceIdentifier is populated with rule:
+        ^[{db.name}|]?{address}[|{port}]?
 
-    if is_key_present(span, _DB_CONNECTION_STRING):
-        db_remote_resource_identifier += span.attributes.get(_DB_CONNECTION_STRING)
-        return db_remote_resource_identifier
+    {address} attribute is retrieved in priority order:
+    - {SpanAttributes.SERVER_ADDRESS},
+    - {SpanAttributes.NET_PEER_NAME},
+    - {SpanAttributes.SERVER_SOCKET_ADDRESS},
+    - {SpanAttributes.DB_CONNECTION_STRING}-Hostname
+
+    {port} attribute is retrieved in priority order:
+    - {SpanAttributes.SERVER_PORT},
+    - {SpanAttributes.NET_PEER_PORT},
+    - {SpanAttributes.SERVER_SOCKET_PORT},
+    - {SpanAttributes.DB_CONNECTION_STRING}-Port
+
+    If address is not present, neither RemoteResourceType nor RemoteResourceIdentifier will be provided.
+    If any attribute contains | or ^ , they will be replaced with ^| or ^^
+    """
+    db_name: Optional[str] = span.attributes.get(_DB_NAME)
+    db_connection: Optional[str] = None
 
     if is_key_present(span, _SERVER_ADDRESS):
-        db_remote_resource_identifier += span.attributes.get(_SERVER_ADDRESS) + ":"
-        if is_key_present(span, _SERVER_PORT):
-            db_remote_resource_identifier += str(span.attributes.get(_SERVER_PORT)) + "/"
+        server_address: Optional[str] = span.attributes.get(_SERVER_ADDRESS)
+        server_port: Optional[str] = span.attributes.get(_SERVER_PORT)
+        db_connection = _build_db_connection(server_address, server_port)
     elif is_key_present(span, _NET_PEER_NAME):
-        db_remote_resource_identifier += span.attributes.get(_NET_PEER_NAME) + ":"
-        if is_key_present(span, _NET_PEER_PORT):
-            db_remote_resource_identifier += str(span.attributes.get(_NET_PEER_PORT)) + "/"
+        network_peer_address: Optional[str] = span.attributes.get(_NET_PEER_NAME)
+        network_peer_port: Optional[str] = span.attributes.get(_NET_PEER_PORT)
+        db_connection = _build_db_connection(network_peer_address, network_peer_port)
+    elif is_key_present(span, _SERVER_SOCKET_ADDRESS):
+        server_socket_address: Optional[str] = span.attributes.get(_SERVER_SOCKET_ADDRESS)
+        server_socket_port: Optional[str] = span.attributes.get(_SERVER_SOCKET_PORT)
+        db_connection = _build_db_connection(server_socket_address, server_socket_port)
+    elif is_key_present(span, _DB_CONNECTION_STRING):
+        connection_string: Optional[str] = span.get_attributes().get(_DB_CONNECTION_STRING)
+        db_connection = _build_db_connection_string(connection_string)
 
-    return db_remote_resource_identifier[:-1] if db_remote_resource_identifier else None
+    if db_connection and db_name:
+        db_connection = _escape_delimiters(db_name) + "|" + db_connection
+
+    return db_connection
+
+
+def _build_db_connection(address: str, port: int) -> Optional[str]:
+    return _escape_delimiters(address) + ("|" + str(port) if port else "")
+
+
+def _build_db_connection_string(connection_string: str) -> Optional[str]:
+    uri = urlparse(connection_string)
+    address = uri.hostname
+    port = uri.port
+
+    if address is None:
+        return None
+
+    port_str = "|" + str(port) if port is not None and port != -1 else ""
+    return _escape_delimiters(address) + port_str
+
+
+def _escape_delimiters(input_str: str) -> Optional[str]:
+    if input_str is None:
+        return None
+    return input_str.replace("^", "^^").replace("|", "^|")
 
 
 def _set_span_kind_for_dependency(span: ReadableSpan, attributes: BoundedAttributes) -> None:

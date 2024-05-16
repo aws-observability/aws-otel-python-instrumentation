@@ -85,6 +85,15 @@ def is_aws_sdk_span(span: ReadableSpan) -> bool:
     return "aws-api" == span.attributes.get(SpanAttributes.RPC_SYSTEM)
 
 
+# Check if the current Span adheres to database semantic conventions
+def is_db_span(span: ReadableSpan) -> bool:
+    return (
+        is_key_present(span, SpanAttributes.DB_SYSTEM)
+        or is_key_present(span, SpanAttributes.DB_OPERATION)
+        or is_key_present(span, SpanAttributes.DB_STATEMENT)
+    )
+
+
 def should_generate_service_metric_attributes(span: ReadableSpan) -> bool:
     return (is_local_root(span) and not _is_boto3sqs_span(span)) or SpanKind.SERVER == span.kind
 

@@ -912,6 +912,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute([remote_service_key, SpanAttributes.PEER_SERVICE], [None, None])
 
     def test_client_span_with_remote_resource_attributes(self):
+        self._mock_attribute([SpanAttributes.RPC_SYSTEM], ["aws-api"])
         # Validate behaviour of aws bucket name attribute, then remove it.
         self._mock_attribute([SpanAttributes.AWS_S3_BUCKET], ["aws_s3_bucket_name"])
         self._validate_remote_resource_attributes("AWS::S3::Bucket", "aws_s3_bucket_name")
@@ -941,92 +942,250 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._validate_remote_resource_attributes("AWS::Kinesis::Stream", "aws_stream_name")
         self._mock_attribute([AWS_STREAM_NAME], [None])
 
-        # Validate behaviour of SpanAttributes.DB_SYSTEM.
-        # A. Validate SpanAttributes.DB_NAME available
-        # 1. SpanAttributes.DB_CONNECTION_STRING available.
+        # Validate behaviour of SpanAttributes.AWS_DYNAMODB_TABLE_NAMES attribute with one table name, then remove it.
+        self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [["aws_table_name"]])
+        self._validate_remote_resource_attributes("AWS::DynamoDB::Table", "aws_table_name")
+        self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [None])
+
+        # Validate behaviour of SpanAttributes.AWS_DYNAMODB_TABLE_NAMES attribute with no table name, then remove it.
+        self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [[]])
+        self._validate_remote_resource_attributes(None, None)
+        self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [None])
+
+        # Validate behaviour of SpanAttributes.AWS_DYNAMODB_TABLE_NAMES attribute with two table names, then remove it.
+        self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [["aws_table_name1", "aws_table_name1"]])
+        self._validate_remote_resource_attributes(None, None)
+        self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [None])
+
+        self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None])
+
+    def test_client_db_span_with_remote_resource_attributes(self):
+        self._mock_attribute([SpanAttributes.DB_SYSTEM], ["mysql"])
+        # Validate behaviour of DB_NAME, SERVER_ADDRESS and SERVER_PORT exist, then remove it.
         self._mock_attribute(
-            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_NAME, SpanAttributes.DB_CONNECTION_STRING],
-            ["DB system", "db_name", "www.connection_string.com:8000"],
+            [SpanAttributes.DB_NAME, SpanAttributes.SERVER_ADDRESS, SpanAttributes.SERVER_PORT],
+            ["db_name", "abc.com", 3306],
         )
-        self._validate_remote_resource_attributes("DB::Endpoint", "db_name|www.connection_string.com:8000")
+        self._validate_remote_resource_attributes("DB::Connection", "db_name|abc.com|3306")
         self._mock_attribute(
-            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_NAME, SpanAttributes.DB_CONNECTION_STRING], [None, None, None]
+            [SpanAttributes.DB_NAME, SpanAttributes.SERVER_ADDRESS, SpanAttributes.SERVER_PORT],
+            [None, None, None],
         )
 
-        # 2. SpanAttributes.SERVER_ADDRESS and SpanAttributes.SERVER_PORT available.
+        # Validate behaviour of DB_NAME with '|' char, SERVER_ADDRESS and SERVER_PORT exist, then remove it.
         self._mock_attribute(
-            [
-                SpanAttributes.DB_SYSTEM,
-                SpanAttributes.DB_NAME,
-                SpanAttributes.SERVER_ADDRESS,
-                SpanAttributes.SERVER_PORT,
-            ],
-            ["DB system", "db_name", "www.example_server_address.com", "8001"],
+            [SpanAttributes.DB_NAME, SpanAttributes.SERVER_ADDRESS, SpanAttributes.SERVER_PORT],
+            ["db_name|special", "abc.com", 3306],
         )
-        self._validate_remote_resource_attributes("DB::Endpoint", "db_name|www.example_server_address.com:8001")
+        self._validate_remote_resource_attributes("DB::Connection", "db_name^|special|abc.com|3306")
         self._mock_attribute(
-            [
-                SpanAttributes.DB_SYSTEM,
-                SpanAttributes.DB_NAME,
-                SpanAttributes.SERVER_ADDRESS,
-                SpanAttributes.SERVER_PORT,
-            ],
-            [None, None, None, None],
+            [SpanAttributes.DB_NAME, SpanAttributes.SERVER_ADDRESS, SpanAttributes.SERVER_PORT],
+            [None, None, None],
         )
 
-        # 3. SpanAttributes.NET_PEER_NAME and SpanAttributes.NET_PEER_PORT available.
+        # Validate behaviour of DB_NAME with '^' char, SERVER_ADDRESS and SERVER_PORT exist, then remove it.
         self._mock_attribute(
-            [
-                SpanAttributes.DB_SYSTEM,
-                SpanAttributes.DB_NAME,
-                SpanAttributes.NET_PEER_NAME,
-                SpanAttributes.NET_PEER_PORT,
-            ],
-            ["DB system", "db_name", "www.example_net_address.com", "8002"],
+            [SpanAttributes.DB_NAME, SpanAttributes.SERVER_ADDRESS, SpanAttributes.SERVER_PORT],
+            ["db_name^special", "abc.com", 3306],
         )
-        self._validate_remote_resource_attributes("DB::Endpoint", "db_name|www.example_net_address.com:8002")
+        self._validate_remote_resource_attributes("DB::Connection", "db_name^^special|abc.com|3306")
         self._mock_attribute(
-            [
-                SpanAttributes.DB_SYSTEM,
-                SpanAttributes.DB_NAME,
-                SpanAttributes.NET_PEER_NAME,
-                SpanAttributes.NET_PEER_PORT,
-            ],
-            [None, None, None, None],
+            [SpanAttributes.DB_NAME, SpanAttributes.SERVER_ADDRESS, SpanAttributes.SERVER_PORT],
+            [None, None, None],
         )
 
-        # 4. Only SpanAttributes.DB_NAME available available.
-        self._mock_attribute([SpanAttributes.DB_SYSTEM, SpanAttributes.DB_NAME], ["DB system", "db_name"])
-        self._validate_remote_resource_attributes("DB::Endpoint", "db_name")
-        self._mock_attribute([SpanAttributes.DB_SYSTEM, SpanAttributes.DB_NAME], [None, None])
-
-        # B. Validate SpanAttributes.DB_NAME is not available
-        # 1. SpanAttributes.DB_CONNECTION_STRING available.
+        # Validate behaviour of DB_NAME, SERVER_ADDRESS exist, then remove it.
         self._mock_attribute(
-            [SpanAttributes.DB_SYSTEM, SpanAttributes.DB_CONNECTION_STRING],
-            ["DB system", "www.connection_string.com:8000"],
+            [SpanAttributes.DB_NAME, SpanAttributes.SERVER_ADDRESS],
+            ["db_name", "abc.com"],
         )
-        self._validate_remote_resource_attributes("DB::Endpoint", "www.connection_string.com:8000")
-        self._mock_attribute([SpanAttributes.DB_SYSTEM, SpanAttributes.DB_CONNECTION_STRING], [None, None])
-
-        # 2. SpanAttributes.SERVER_ADDRESS and SpanAttributes.SERVER_PORT available.
+        self._validate_remote_resource_attributes("DB::Connection", "db_name|abc.com")
         self._mock_attribute(
-            [SpanAttributes.DB_SYSTEM, SpanAttributes.SERVER_ADDRESS, SpanAttributes.SERVER_PORT],
-            ["DB system", "www.example_server_address.com", "8001"],
-        )
-        self._validate_remote_resource_attributes("DB::Endpoint", "www.example_server_address.com:8001")
-        self._mock_attribute(
-            [SpanAttributes.DB_SYSTEM, SpanAttributes.SERVER_ADDRESS, SpanAttributes.SERVER_PORT], [None, None, None]
+            [SpanAttributes.DB_NAME, SpanAttributes.SERVER_ADDRESS],
+            [None, None],
         )
 
-        # 3. SpanAttributes.NET_PEER_NAME and SpanAttributes.NET_PEER_PORT available.
+        # Validate behaviour of SERVER_ADDRESS exist, then remove it.
         self._mock_attribute(
-            [SpanAttributes.DB_SYSTEM, SpanAttributes.NET_PEER_NAME, SpanAttributes.NET_PEER_PORT],
-            ["DB system", "www.example_net_address.com", "8002"],
+            [SpanAttributes.SERVER_ADDRESS],
+            ["abc.com"],
         )
-        self._validate_remote_resource_attributes("DB::Endpoint", "www.example_net_address.com:8002")
+        self._validate_remote_resource_attributes("DB::Connection", "abc.com")
         self._mock_attribute(
-            [SpanAttributes.DB_SYSTEM, SpanAttributes.NET_PEER_NAME, SpanAttributes.NET_PEER_PORT], [None, None, None]
+            [SpanAttributes.SERVER_ADDRESS],
+            [None],
+        )
+
+        # Validate behaviour of SERVER_PORT exist, then remove it.
+        self._mock_attribute(
+            [SpanAttributes.SERVER_PORT],
+            [3306],
+        )
+        self.span_mock.kind = SpanKind.CLIENT
+        actual_attributes_map: Dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
+            self.span_mock, self.resource
+        ).get(DEPENDENCY_METRIC)
+        self.assertNotIn(AWS_REMOTE_RESOURCE_TYPE, actual_attributes_map)
+        self.assertNotIn(AWS_REMOTE_RESOURCE_IDENTIFIER, actual_attributes_map)
+        self._mock_attribute(
+            [SpanAttributes.SERVER_PORT],
+            [None],
+        )
+
+        # Validate behaviour of DB_NAME, NET_PEER_NAME and NET_PEER_PORT exist, then remove it.
+        self._mock_attribute(
+            [SpanAttributes.DB_NAME, SpanAttributes.NET_PEER_NAME, SpanAttributes.NET_PEER_PORT],
+            ["db_name", "abc.com", 3306],
+        )
+        self._validate_remote_resource_attributes("DB::Connection", "db_name|abc.com|3306")
+        self._mock_attribute(
+            [SpanAttributes.DB_NAME, SpanAttributes.NET_PEER_NAME, SpanAttributes.NET_PEER_PORT],
+            [None, None, None],
+        )
+
+        # Validate behaviour of DB_NAME, NET_PEER_NAME exist, then remove it.
+        self._mock_attribute(
+            [SpanAttributes.DB_NAME, SpanAttributes.NET_PEER_NAME],
+            ["db_name", "abc.com"],
+        )
+        self._validate_remote_resource_attributes("DB::Connection", "db_name|abc.com")
+        self._mock_attribute(
+            [SpanAttributes.DB_NAME, SpanAttributes.NET_PEER_NAME],
+            [None, None],
+        )
+
+        # Validate behaviour of NET_PEER_NAME exist, then remove it.
+        self._mock_attribute(
+            [SpanAttributes.NET_PEER_NAME],
+            ["abc.com"],
+        )
+        self._validate_remote_resource_attributes("DB::Connection", "abc.com")
+        self._mock_attribute(
+            [SpanAttributes.NET_PEER_NAME],
+            [None],
+        )
+
+        # Validate behaviour of NET_PEER_PORT exist, then remove it.
+        self._mock_attribute(
+            [SpanAttributes.NET_PEER_PORT],
+            [3306],
+        )
+        self.span_mock.kind = SpanKind.CLIENT
+        actual_attributes_map: Dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
+            self.span_mock, self.resource
+        ).get(DEPENDENCY_METRIC)
+        self.assertNotIn(AWS_REMOTE_RESOURCE_TYPE, actual_attributes_map)
+        self.assertNotIn(AWS_REMOTE_RESOURCE_IDENTIFIER, actual_attributes_map)
+        self._mock_attribute(
+            [SpanAttributes.NET_PEER_PORT],
+            [None],
+        )
+
+        # Validate behaviour of DB_NAME, SERVER_SOCKET_ADDRESS and SERVER_SOCKET_PORT exist, then
+        # remove it.
+        self._mock_attribute(
+            [SpanAttributes.DB_NAME, SpanAttributes.SERVER_SOCKET_ADDRESS, SpanAttributes.SERVER_SOCKET_PORT],
+            ["db_name", "abc.com", 3306],
+        )
+        self._validate_remote_resource_attributes("DB::Connection", "db_name|abc.com|3306")
+        self._mock_attribute(
+            [SpanAttributes.DB_NAME, SpanAttributes.SERVER_SOCKET_ADDRESS, SpanAttributes.SERVER_SOCKET_PORT],
+            [None, None, None],
+        )
+
+        # Validate behaviour of DB_NAME, SERVER_SOCKET_ADDRESS exist, then remove it.
+        self._mock_attribute(
+            [SpanAttributes.DB_NAME, SpanAttributes.SERVER_SOCKET_ADDRESS],
+            ["db_name", "abc.com"],
+        )
+        self._validate_remote_resource_attributes("DB::Connection", "db_name|abc.com")
+        self._mock_attribute(
+            [SpanAttributes.DB_NAME, SpanAttributes.SERVER_SOCKET_ADDRESS],
+            [None, None],
+        )
+
+        # Validate behaviour of SERVER_SOCKET_PORT exist, then remove it.
+        self._mock_attribute(
+            [SpanAttributes.SERVER_SOCKET_PORT],
+            [3306],
+        )
+        self.span_mock.kind = SpanKind.CLIENT
+        actual_attributes_map: Dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
+            self.span_mock, self.resource
+        ).get(DEPENDENCY_METRIC)
+        self.assertNotIn(AWS_REMOTE_RESOURCE_TYPE, actual_attributes_map)
+        self.assertNotIn(AWS_REMOTE_RESOURCE_IDENTIFIER, actual_attributes_map)
+        self._mock_attribute(
+            [SpanAttributes.SERVER_SOCKET_PORT],
+            [None],
+        )
+
+        # Validate behaviour of only DB_NAME exist, then remove it.
+        self._mock_attribute(
+            [SpanAttributes.DB_NAME],
+            ["db_name"],
+        )
+        actual_attributes_map: Dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
+            self.span_mock, self.resource
+        ).get(DEPENDENCY_METRIC)
+        self.assertNotIn(AWS_REMOTE_RESOURCE_TYPE, actual_attributes_map)
+        self.assertNotIn(AWS_REMOTE_RESOURCE_IDENTIFIER, actual_attributes_map)
+        self._mock_attribute(
+            [SpanAttributes.DB_NAME],
+            [None],
+        )
+
+        # Validate behaviour of DB_NAME and DB_CONNECTION_STRING exist, then remove it.
+        self._mock_attribute(
+            [SpanAttributes.DB_NAME, SpanAttributes.DB_CONNECTION_STRING],
+            ["db_name", "mysql://test-apm.cluster-cnrw3s3ddo7n.us-east-1.rds.amazonaws.com:3306/petclinic"],
+        )
+        self._validate_remote_resource_attributes(
+            "DB::Connection", "db_name|test-apm.cluster-cnrw3s3ddo7n.us-east-1.rds.amazonaws.com|3306"
+        )
+        self._mock_attribute(
+            [SpanAttributes.DB_NAME, SpanAttributes.DB_CONNECTION_STRING],
+            [None, None],
+        )
+
+        # Validate behaviour of DB_CONNECTION_STRING exist, then remove it.
+        self._mock_attribute(
+            [SpanAttributes.DB_CONNECTION_STRING],
+            ["mysql://test-apm.cluster-cnrw3s3ddo7n.us-east-1.rds.amazonaws.com:3306/petclinic"],
+        )
+        self._validate_remote_resource_attributes(
+            "DB::Connection", "test-apm.cluster-cnrw3s3ddo7n.us-east-1.rds.amazonaws.com|3306"
+        )
+        self._mock_attribute(
+            [SpanAttributes.DB_CONNECTION_STRING],
+            [None],
+        )
+
+        # Validate behaviour of DB_CONNECTION_STRING exist without port, then remove it.
+        self._mock_attribute(
+            [SpanAttributes.DB_CONNECTION_STRING],
+            ["http://dbserver"],
+        )
+        self._validate_remote_resource_attributes("DB::Connection", "dbserver")
+        self._mock_attribute(
+            [SpanAttributes.DB_CONNECTION_STRING],
+            [None],
+        )
+
+        # Validate behaviour of DB_NAME and invalid DB_CONNECTION_STRING exist, then remove it.
+        self._mock_attribute(
+            [SpanAttributes.DB_NAME, SpanAttributes.DB_CONNECTION_STRING],
+            ["db_name", "hsqldb:mem:"],
+        )
+        self.span_mock.kind = SpanKind.CLIENT
+        actual_attributes_map: Dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
+            self.span_mock, self.resource
+        ).get(DEPENDENCY_METRIC)
+        self.assertNotIn(AWS_REMOTE_RESOURCE_TYPE, actual_attributes_map)
+        self.assertNotIn(AWS_REMOTE_RESOURCE_IDENTIFIER, actual_attributes_map)
+        self._mock_attribute(
+            [SpanAttributes.DB_NAME, SpanAttributes.DB_CONNECTION_STRING],
+            [None, None],
         )
 
     def _validate_remote_resource_attributes(self, expected_type: str, expected_identifier: str) -> None:
