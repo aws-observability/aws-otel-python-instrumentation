@@ -344,6 +344,7 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
     Remote resource attributes {@link AwsAttributeKeys#AWS_REMOTE_RESOURCE_TYPE} and {@link
     AwsAttributeKeys#AWS_REMOTE_RESOURCE_IDENTIFIER} are used to store information about the resource associated with
     the remote invocation, such as S3 bucket name, etc. We should only ever set both type and identifier or neither.
+    If any identifier value contains | or ^ , they will be replaced with ^| or ^^.
 
     AWS resources type and identifier adhere to <a
     href="https://docs.aws.amazon.com/cloudcontrolapi/latest/userguide/supported-resources.html">AWS Cloud Control
@@ -396,7 +397,6 @@ def _get_db_connection(span: ReadableSpan) -> None:
     - {SpanAttributes.DB_CONNECTION_STRING}-Port
 
     If address is not present, neither RemoteResourceType nor RemoteResourceIdentifier will be provided.
-    If any attribute contains | or ^ , they will be replaced with ^| or ^^
     """
     db_name: Optional[str] = span.attributes.get(_DB_NAME)
     db_connection: Optional[str] = None
@@ -414,7 +414,7 @@ def _get_db_connection(span: ReadableSpan) -> None:
         server_socket_port: Optional[str] = span.attributes.get(_SERVER_SOCKET_PORT)
         db_connection = _build_db_connection(server_socket_address, server_socket_port)
     elif is_key_present(span, _DB_CONNECTION_STRING):
-        connection_string: Optional[str] = span.get_attributes().get(_DB_CONNECTION_STRING)
+        connection_string: Optional[str] = span.attributes.get(_DB_CONNECTION_STRING)
         db_connection = _build_db_connection_string(connection_string)
 
     if db_connection and db_name:

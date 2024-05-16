@@ -911,15 +911,23 @@ class TestAwsMetricAttributeGenerator(TestCase):
 
         self._mock_attribute([remote_service_key, SpanAttributes.PEER_SERVICE], [None, None])
 
-    def test_client_span_with_remote_resource_attributes(self):
-        self._mock_attribute([SpanAttributes.RPC_SYSTEM], ["aws-api"])
+    def test_sdk_client_span_with_remote_resource_attributes(self):
+        keys: List[str] = [
+            SpanAttributes.RPC_SYSTEM,
+        ]
+        values: List[str] = [
+            "aws-api",
+        ]
+        self._mock_attribute(keys, values)
         # Validate behaviour of aws bucket name attribute, then remove it.
-        self._mock_attribute([SpanAttributes.AWS_S3_BUCKET], ["aws_s3_bucket_name"])
+        self._mock_attribute(
+            [SpanAttributes.AWS_S3_BUCKET, SpanAttributes.RPC_SYSTEM], ["aws_s3_bucket_name", "aws-api"], keys, values
+        )
         self._validate_remote_resource_attributes("AWS::S3::Bucket", "aws_s3_bucket_name")
         self._mock_attribute([SpanAttributes.AWS_S3_BUCKET], [None])
 
         # Validate behaviour of AWS_QUEUE_NAME attribute, then remove it
-        self._mock_attribute([AWS_QUEUE_NAME], ["aws_queue_name"])
+        self._mock_attribute([AWS_QUEUE_NAME], ["aws_queue_name"], keys, values)
         self._validate_remote_resource_attributes("AWS::SQS::Queue", "aws_queue_name")
         self._mock_attribute([AWS_QUEUE_NAME], [None])
 
@@ -928,43 +936,65 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(
             [AWS_QUEUE_URL, AWS_QUEUE_NAME],
             ["https://sqs.us-east-2.amazonaws.com/123456789012/Queue", "aws_queue_name"],
+            keys,
+            values,
         )
         self._validate_remote_resource_attributes("AWS::SQS::Queue", "aws_queue_name")
         self._mock_attribute([AWS_QUEUE_URL, AWS_QUEUE_NAME], [None, None])
 
         # Valid queue name with invalid queue URL, we should default to using the queue name.
-        self._mock_attribute([AWS_QUEUE_URL, AWS_QUEUE_NAME], ["invalidUrl", "aws_queue_name"])
+        self._mock_attribute([AWS_QUEUE_URL, AWS_QUEUE_NAME], ["invalidUrl", "aws_queue_name"], keys, values)
         self._validate_remote_resource_attributes("AWS::SQS::Queue", "aws_queue_name")
         self._mock_attribute([AWS_QUEUE_URL, AWS_QUEUE_NAME], [None, None])
 
         # Validate behaviour of AWS_STREAM_NAME attribute, then remove it.
-        self._mock_attribute([AWS_STREAM_NAME], ["aws_stream_name"])
+        self._mock_attribute([AWS_STREAM_NAME], ["aws_stream_name"], keys, values)
         self._validate_remote_resource_attributes("AWS::Kinesis::Stream", "aws_stream_name")
         self._mock_attribute([AWS_STREAM_NAME], [None])
 
         # Validate behaviour of SpanAttributes.AWS_DYNAMODB_TABLE_NAMES attribute with one table name, then remove it.
-        self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [["aws_table_name"]])
+        self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [["aws_table_name"]], keys, values)
         self._validate_remote_resource_attributes("AWS::DynamoDB::Table", "aws_table_name")
         self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [None])
 
         # Validate behaviour of SpanAttributes.AWS_DYNAMODB_TABLE_NAMES attribute with no table name, then remove it.
-        self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [[]])
+        self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [[]], keys, values)
         self._validate_remote_resource_attributes(None, None)
         self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [None])
 
         # Validate behaviour of SpanAttributes.AWS_DYNAMODB_TABLE_NAMES attribute with two table names, then remove it.
-        self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [["aws_table_name1", "aws_table_name1"]])
+        self._mock_attribute(
+            [SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [["aws_table_name1", "aws_table_name1"]], keys, values
+        )
         self._validate_remote_resource_attributes(None, None)
+        self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [None])
+
+        # Validate behaviour of AWS_TABLE_NAME attribute with special chars(|), then remove it.
+        self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [["aws_table|name"]], keys, values)
+        self._validate_remote_resource_attributes("AWS::DynamoDB::Table", "aws_table^|name")
+        self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [None])
+
+        # Validate behaviour of AWS_TABLE_NAME attribute with special chars(^), then remove it.
+        self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [["aws_table^name"]], keys, values)
+        self._validate_remote_resource_attributes("AWS::DynamoDB::Table", "aws_table^^name")
         self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [None])
 
         self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None])
 
     def test_client_db_span_with_remote_resource_attributes(self):
-        self._mock_attribute([SpanAttributes.DB_SYSTEM], ["mysql"])
+        keys: List[str] = [
+            SpanAttributes.DB_SYSTEM,
+        ]
+        values: List[str] = [
+            "mysql",
+        ]
+        self._mock_attribute(keys, values)
         # Validate behaviour of DB_NAME, SERVER_ADDRESS and SERVER_PORT exist, then remove it.
         self._mock_attribute(
             [SpanAttributes.DB_NAME, SpanAttributes.SERVER_ADDRESS, SpanAttributes.SERVER_PORT],
             ["db_name", "abc.com", 3306],
+            keys,
+            values,
         )
         self._validate_remote_resource_attributes("DB::Connection", "db_name|abc.com|3306")
         self._mock_attribute(
@@ -976,6 +1006,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(
             [SpanAttributes.DB_NAME, SpanAttributes.SERVER_ADDRESS, SpanAttributes.SERVER_PORT],
             ["db_name|special", "abc.com", 3306],
+            keys,
+            values,
         )
         self._validate_remote_resource_attributes("DB::Connection", "db_name^|special|abc.com|3306")
         self._mock_attribute(
@@ -987,6 +1019,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(
             [SpanAttributes.DB_NAME, SpanAttributes.SERVER_ADDRESS, SpanAttributes.SERVER_PORT],
             ["db_name^special", "abc.com", 3306],
+            keys,
+            values,
         )
         self._validate_remote_resource_attributes("DB::Connection", "db_name^^special|abc.com|3306")
         self._mock_attribute(
@@ -998,6 +1032,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(
             [SpanAttributes.DB_NAME, SpanAttributes.SERVER_ADDRESS],
             ["db_name", "abc.com"],
+            keys,
+            values,
         )
         self._validate_remote_resource_attributes("DB::Connection", "db_name|abc.com")
         self._mock_attribute(
@@ -1009,6 +1045,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(
             [SpanAttributes.SERVER_ADDRESS],
             ["abc.com"],
+            keys,
+            values,
         )
         self._validate_remote_resource_attributes("DB::Connection", "abc.com")
         self._mock_attribute(
@@ -1020,6 +1058,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(
             [SpanAttributes.SERVER_PORT],
             [3306],
+            keys,
+            values,
         )
         self.span_mock.kind = SpanKind.CLIENT
         actual_attributes_map: Dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
@@ -1036,6 +1076,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(
             [SpanAttributes.DB_NAME, SpanAttributes.NET_PEER_NAME, SpanAttributes.NET_PEER_PORT],
             ["db_name", "abc.com", 3306],
+            keys,
+            values,
         )
         self._validate_remote_resource_attributes("DB::Connection", "db_name|abc.com|3306")
         self._mock_attribute(
@@ -1047,6 +1089,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(
             [SpanAttributes.DB_NAME, SpanAttributes.NET_PEER_NAME],
             ["db_name", "abc.com"],
+            keys,
+            values,
         )
         self._validate_remote_resource_attributes("DB::Connection", "db_name|abc.com")
         self._mock_attribute(
@@ -1058,6 +1102,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(
             [SpanAttributes.NET_PEER_NAME],
             ["abc.com"],
+            keys,
+            values,
         )
         self._validate_remote_resource_attributes("DB::Connection", "abc.com")
         self._mock_attribute(
@@ -1069,6 +1115,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(
             [SpanAttributes.NET_PEER_PORT],
             [3306],
+            keys,
+            values,
         )
         self.span_mock.kind = SpanKind.CLIENT
         actual_attributes_map: Dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
@@ -1086,6 +1134,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(
             [SpanAttributes.DB_NAME, SpanAttributes.SERVER_SOCKET_ADDRESS, SpanAttributes.SERVER_SOCKET_PORT],
             ["db_name", "abc.com", 3306],
+            keys,
+            values,
         )
         self._validate_remote_resource_attributes("DB::Connection", "db_name|abc.com|3306")
         self._mock_attribute(
@@ -1097,6 +1147,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(
             [SpanAttributes.DB_NAME, SpanAttributes.SERVER_SOCKET_ADDRESS],
             ["db_name", "abc.com"],
+            keys,
+            values,
         )
         self._validate_remote_resource_attributes("DB::Connection", "db_name|abc.com")
         self._mock_attribute(
@@ -1108,6 +1160,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(
             [SpanAttributes.SERVER_SOCKET_PORT],
             [3306],
+            keys,
+            values,
         )
         self.span_mock.kind = SpanKind.CLIENT
         actual_attributes_map: Dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
@@ -1124,6 +1178,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(
             [SpanAttributes.DB_NAME],
             ["db_name"],
+            keys,
+            values,
         )
         actual_attributes_map: Dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
             self.span_mock, self.resource
@@ -1139,6 +1195,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(
             [SpanAttributes.DB_NAME, SpanAttributes.DB_CONNECTION_STRING],
             ["db_name", "mysql://test-apm.cluster-cnrw3s3ddo7n.us-east-1.rds.amazonaws.com:3306/petclinic"],
+            keys,
+            values,
         )
         self._validate_remote_resource_attributes(
             "DB::Connection", "db_name|test-apm.cluster-cnrw3s3ddo7n.us-east-1.rds.amazonaws.com|3306"
@@ -1152,6 +1210,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(
             [SpanAttributes.DB_CONNECTION_STRING],
             ["mysql://test-apm.cluster-cnrw3s3ddo7n.us-east-1.rds.amazonaws.com:3306/petclinic"],
+            keys,
+            values,
         )
         self._validate_remote_resource_attributes(
             "DB::Connection", "test-apm.cluster-cnrw3s3ddo7n.us-east-1.rds.amazonaws.com|3306"
@@ -1165,6 +1225,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(
             [SpanAttributes.DB_CONNECTION_STRING],
             ["http://dbserver"],
+            keys,
+            values,
         )
         self._validate_remote_resource_attributes("DB::Connection", "dbserver")
         self._mock_attribute(
@@ -1176,6 +1238,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(
             [SpanAttributes.DB_NAME, SpanAttributes.DB_CONNECTION_STRING],
             ["db_name", "hsqldb:mem:"],
+            keys,
+            values,
         )
         self.span_mock.kind = SpanKind.CLIENT
         actual_attributes_map: Dict[str, BoundedAttributes] = _GENERATOR.generate_metric_attributes_dict_from_span(
@@ -1186,6 +1250,11 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(
             [SpanAttributes.DB_NAME, SpanAttributes.DB_CONNECTION_STRING],
             [None, None],
+        )
+
+        self._mock_attribute(
+            [SpanAttributes.DB_SYSTEM],
+            [None],
         )
 
     def _validate_remote_resource_attributes(self, expected_type: str, expected_identifier: str) -> None:
@@ -1218,6 +1287,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         )
         self.assertNotIn(AWS_REMOTE_RESOURCE_TYPE, actual_attributes)
         self.assertNotIn(AWS_REMOTE_RESOURCE_IDENTIFIER, actual_attributes)
+
+        self._mock_attribute([SpanAttributes.DB_SYSTEM], [None])
 
     def _validate_attributes_produced_for_non_local_root_span_of_kind(
         self, expected_attributes: Attributes, kind: SpanKind
