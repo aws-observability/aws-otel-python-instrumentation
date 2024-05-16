@@ -369,7 +369,9 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_QUEUE_NAME))
         elif is_key_present(span, AWS_QUEUE_URL):
             remote_resource_type = _NORMALIZED_SQS_SERVICE_NAME + "::Queue"
-            remote_resource_identifier = _escape_delimiters(SqsUrlParser.get_queue_name(span.attributes.get(AWS_QUEUE_URL)))
+            remote_resource_identifier = _escape_delimiters(
+                SqsUrlParser.get_queue_name(span.attributes.get(AWS_QUEUE_URL))
+            )
     elif is_db_span(span):
         remote_resource_type = _DB_CONNECTION_STRING_TYPE
         remote_resource_identifier = _get_db_connection(span)
