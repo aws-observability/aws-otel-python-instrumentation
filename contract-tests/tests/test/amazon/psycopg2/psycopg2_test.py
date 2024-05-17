@@ -108,6 +108,10 @@ class Psycopg2Test(ContractTestBase):
         self.assertTrue(attributes_dict.get("db.statement").string_value.startswith(command))
         self._assert_str_attribute(attributes_dict, "db.system", "postgresql")
         self._assert_str_attribute(attributes_dict, "db.name", "postgres")
+        self._assert_str_attribute(attributes_dict, "net.peer.name", "mydb")
+        self._assert_int_attribute(attributes_dict, "net.peer.port", 5432)
+        self.assertTrue("server.address" not in attributes_dict)
+        self.assertTrue("server.port" not in attributes_dict)
         self.assertTrue("db.operation" not in attributes_dict)
 
     @override
