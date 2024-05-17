@@ -11,10 +11,10 @@ from amazon.utils.application_signals_constants import (
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_REMOTE_OPERATION,
+    AWS_REMOTE_RESOURCE_IDENTIFIER,
+    AWS_REMOTE_RESOURCE_TYPE,
     AWS_REMOTE_SERVICE,
     AWS_SPAN_KIND,
-    AWS_REMOTE_RESOURCE_TYPE,
-    AWS_REMOTE_RESOURCE_IDENTIFIER,
 )
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
 from opentelemetry.proto.metrics.v1.metrics_pb2 import ExponentialHistogramDataPoint, Metric
@@ -135,8 +135,8 @@ class Psycopg2Test(ContractTestBase):
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, "postgresql")
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, kwargs.get("sql_command"))
-        self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_TYPE, "DB::Connection")
-        self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, "postgres|mydb|5432")
+        self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_TYPE, "DB::Connection")
+        self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, "postgres|mydb|5432")
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "CLIENT")
         self.check_sum(metric_name, dependency_dp.sum, expected_sum)
 
