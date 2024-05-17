@@ -11,6 +11,8 @@ from amazon.utils.application_signals_constants import (
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_REMOTE_OPERATION,
+    AWS_REMOTE_RESOURCE_IDENTIFIER,
+    AWS_REMOTE_RESOURCE_TYPE,
     AWS_REMOTE_SERVICE,
     AWS_SPAN_KIND,
 )
@@ -78,6 +80,8 @@ class Psycopg2Test(ContractTestBase):
         self._assert_str_attribute(attributes_dict, AWS_REMOTE_SERVICE, "postgresql")
         command: str = kwargs.get("sql_command")
         self._assert_str_attribute(attributes_dict, AWS_REMOTE_OPERATION, f"{command}")
+        self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_TYPE, "DB::Connection")
+        self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, "postgres|mydb|5432")
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
 
@@ -104,6 +108,10 @@ class Psycopg2Test(ContractTestBase):
         self.assertTrue(attributes_dict.get("db.statement").string_value.startswith(command))
         self._assert_str_attribute(attributes_dict, "db.system", "postgresql")
         self._assert_str_attribute(attributes_dict, "db.name", "postgres")
+        self._assert_str_attribute(attributes_dict, "net.peer.name", "mydb")
+        self._assert_int_attribute(attributes_dict, "net.peer.port", 5432)
+        self.assertTrue("server.address" not in attributes_dict)
+        self.assertTrue("server.port" not in attributes_dict)
         self.assertTrue("db.operation" not in attributes_dict)
 
     @override
@@ -131,6 +139,8 @@ class Psycopg2Test(ContractTestBase):
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, "postgresql")
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, kwargs.get("sql_command"))
+        self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_TYPE, "DB::Connection")
+        self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, "postgres|mydb|5432")
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "CLIENT")
         self.check_sum(metric_name, dependency_dp.sum, expected_sum)
 
