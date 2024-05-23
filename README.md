@@ -12,7 +12,7 @@ We provided a Python agent that can be attached to any application using a suppo
 bytecode to capture telemetry from a number of popular libraries and frameworks. The telemetry data
 can be exported in a variety of formats. In addition, the agent and exporter can be configured via
 command line arguments or environment variables. The net result is the ability to gather telemetry
-data from a Python application without any code changes.
+data from a Python application without any code changes. 
 
 ## Getting Started
 
