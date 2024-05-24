@@ -25,7 +25,7 @@ jobs:
         with:
           image_uri_with_tag: pr_build/${{ matrix.python-version }}
           push_image: false
-          load_image: false
+          load_image: true
           python_version: ${{ matrix.python-version }}
           package_name: aws-opentelemetry-distro
           os: ubuntu-latest
