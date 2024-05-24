@@ -36,6 +36,12 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # Either push_image or load_image must be true.
+    - name: Action verification
+      if: ${{ (inputs.load_image == false || inputs.load_image == 'false') && (inputs.push_image == false || inputs.push_image == 'false') }}
+      shell: bash
+      run: exit 1
+
     - name: Set up
       uses: ./.github/actions/set_up
       with:
