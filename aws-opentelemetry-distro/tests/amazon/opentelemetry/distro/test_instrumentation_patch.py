@@ -14,6 +14,7 @@ _STREAM_NAME: str = "streamName"
 _BUCKET_NAME: str = "bucketName"
 _QUEUE_NAME: str = "queueName"
 _QUEUE_URL: str = "queueUrl"
+_TOPIC_ARN: str = "topicArn"
 
 
 class TestInstrumentationPatch(TestCase):
@@ -69,10 +70,17 @@ class TestInstrumentationPatch(TestCase):
 
         # SQS
         self.assertTrue("sqs" in _KNOWN_EXTENSIONS, "Upstream has removed the SQS extension")
-        attributes: Dict[str, str] = _do_extract_sqs_attributes()
-        self.assertTrue("aws.queue_url" in attributes)
-        self.assertFalse("aws.sqs.queue_url" in attributes)
-        self.assertFalse("aws.sqs.queue_name" in attributes)
+        sqs_attributes: Dict[str, str] = _do_extract_sqs_attributes()
+        self.assertTrue("aws.queue_url" in sqs_attributes)
+        self.assertFalse("aws.sqs.queue_url" in sqs_attributes)
+        self.assertFalse("aws.sqs.queue_name" in sqs_attributes)
+
+        # SNS
+        self.assertTrue("sns" in _KNOWN_EXTENSIONS, "Upstream has removed the SNS extension")
+        sns_attributes: Dict[str, str] = _do_extract_sns_attributes()
+        self.assertTrue(SpanAttributes.MESSAGING_SYSTEM in sns_attributes)
+        self.assertEqual(sns_attributes[SpanAttributes.MESSAGING_SYSTEM], "aws.sns")
+        self.assertFalse("aws.sns.topic_arn" in sns_attributes)
 
     def _validate_patched_botocore_instrumentation(self):
         # Kinesis
@@ -96,6 +104,12 @@ class TestInstrumentationPatch(TestCase):
         self.assertTrue("aws.sqs.queue_name" in sqs_attributes)
         self.assertEqual(sqs_attributes["aws.sqs.queue_name"], _QUEUE_NAME)
 
+        # SNS
+        self.assertTrue("sns" in _KNOWN_EXTENSIONS)
+        sns_attributes: Dict[str, str] = _do_extract_sns_attributes()
+        self.assertTrue("aws.sns.topic_arn" in sns_attributes)
+        self.assertEqual(sns_attributes["aws.sns.topic_arn"], _TOPIC_ARN)
+
 
 def _do_extract_kinesis_attributes() -> Dict[str, str]:
     service_name: str = "kinesis"
@@ -112,6 +126,12 @@ def _do_extract_s3_attributes() -> Dict[str, str]:
 def _do_extract_sqs_attributes() -> Dict[str, str]:
     service_name: str = "sqs"
     params: Dict[str, str] = {"QueueUrl": _QUEUE_URL, "QueueName": _QUEUE_NAME}
+    return _do_extract_attributes(service_name, params)
+
+
+def _do_extract_sns_attributes() -> Dict[str, str]:
+    service_name: str = "sns"
+    params: Dict[str, str] = {"TopicArn": _TOPIC_ARN}
     return _do_extract_attributes(service_name, params)
 
 

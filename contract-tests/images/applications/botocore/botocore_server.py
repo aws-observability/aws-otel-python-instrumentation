@@ -41,12 +41,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._handle_sqs_request()
         if self.in_path("kinesis"):
             self._handle_kinesis_request()
+        if self.in_path("sns"):
+            self._handle_sns_request()
 
         self._end_request(self.main_status)
 
     # pylint: disable=invalid-name
     def do_POST(self):
-        if self.in_path("sqserror"):
+        if self.in_path("sqserror") or self.in_path("snserror"):
             self.send_response(self.main_status)
             self.send_header("Content-type", "text/xml")
             self.end_headers()
@@ -203,6 +205,47 @@ class RequestHandler(BaseHTTPRequestHandler):
         else:
             set_main_status(404)
 
+    def _handle_sns_request(self) -> None:
+        sns_client: BaseClient = boto3.client("sns", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
+        if self.in_path(_ERROR):
+            set_main_status(400)
+            try:
+                error_client: BaseClient = boto3.client(
+                    "sns", endpoint_url=_ERROR_ENDPOINT + "/snserror", region_name=_AWS_REGION
+                )
+                topic_arn = "arn:aws:sns:us-west-2:000000000000:test_topic/snserror"
+                message = "Hello from Amazon SNS!"
+                subject = "Test Message"
+                message_attributes = {"Attribute1": {"DataType": "String", "StringValue": "Value1"}}
+                error_client.publish(
+                    TopicArn=topic_arn, Message=message, Subject=subject, MessageAttributes=message_attributes
+                )
+            except Exception as exception:
+                print("Expected exception occurred", exception)
+        elif self.in_path(_FAULT):
+            set_main_status(500)
+            try:
+                fault_client: BaseClient = boto3.client(
+                    "sns", endpoint_url=_FAULT_ENDPOINT, region_name=_AWS_REGION, config=_NO_RETRY_CONFIG
+                )
+                fault_client.get_topic_attributes(TopicArn="invalid_topic_arn")
+            except Exception as exception:
+                print("Expected exception occurred", exception)
+        elif self.in_path("gettopattributes/get-topic-attributes"):
+            set_main_status(200)
+            sns_client.get_topic_attributes(TopicArn="arn:aws:sns:us-west-2:000000000000:test_topic")
+        elif self.in_path("publishmessage/publish-message/some-message"):
+            set_main_status(200)
+            topic_arn = "arn:aws:sns:us-west-2:000000000000:test_topic"
+            message = "Hello from Amazon SNS!"
+            subject = "Test Message"
+            message_attributes = {"Attribute1": {"DataType": "String", "StringValue": "Value1"}}
+            sns_client.publish(
+                TopicArn=topic_arn, Message=message, Subject=subject, MessageAttributes=message_attributes
+            )
+        else:
+            set_main_status(404)
+
     def _end_request(self, status_code: int):
         self.send_response_only(status_code)
         self.end_headers()
@@ -247,6 +290,10 @@ def prepare_aws_server() -> None:
         # Set up Kinesis so tests can access a stream.
         kinesis_client: BaseClient = boto3.client("kinesis", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
         kinesis_client.create_stream(StreamName="test_stream", ShardCount=1)
+
+        # Set up SNS so tests can access a topic.
+        sns_client: BaseClient = boto3.client("sns", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
+        sns_client.create_topic(Name="test_topic")
     except Exception as exception:
         print("Unexpected exception occurred", exception)
 

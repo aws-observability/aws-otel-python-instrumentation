@@ -4,6 +4,7 @@
 import importlib
 
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
+from opentelemetry.instrumentation.botocore.extensions.sns import _SnsExtension
 from opentelemetry.instrumentation.botocore.extensions.sqs import _SqsExtension
 from opentelemetry.instrumentation.botocore.extensions.types import _AttributeMapT, _AwsSdkExtension
 from opentelemetry.semconv.trace import SpanAttributes
@@ -12,11 +13,12 @@ from opentelemetry.semconv.trace import SpanAttributes
 def _apply_botocore_instrumentation_patches() -> None:
     """Botocore instrumentation patches
 
-    Adds patches to provide additional support and Java parity for Kinesis, S3, and SQS.
+    Adds patches to provide additional support for Kinesis, S3, SQS and SNS.
     """
     _apply_botocore_kinesis_patch()
     _apply_botocore_s3_patch()
     _apply_botocore_sqs_patch()
+    _apply_botocore_sns_patch()
 
 
 def _apply_botocore_kinesis_patch() -> None:
@@ -63,6 +65,26 @@ def _apply_botocore_sqs_patch() -> None:
             attributes["aws.sqs.queue_url"] = queue_url
 
     _SqsExtension.extract_attributes = patch_extract_attributes
+
+
+def _apply_botocore_sns_patch() -> None:
+    """Botocore instrumentation patch for SNS
+
+    This patch extends the existing upstream extension for SNS. Extensions allow for custom logic for adding
+    service-specific information to spans, such as attributes. Specifically, we are adding logic to add
+    "aws.sns.topic_arn" attributes to be used to generate AWS_REMOTE_RESOURCE_TYPE and AWS_REMOTE_RESOURCE_IDENTIFIER.
+    Callout that today, the upstream logic adds SpanAttributes.MESSAGING_DESTINATION_NAME,
+    but we are not using it as it can only be assigned with TargetArn as well.
+    """
+    old_extract_attributes = _SnsExtension.extract_attributes
+
+    def patch_extract_attributes(self, attributes: _AttributeMapT):
+        old_extract_attributes(self, attributes)
+        topic_arn = self._call_context.params.get("TopicArn")
+        if topic_arn:
+            attributes["aws.sns.topic_arn"] = topic_arn
+
+    _SnsExtension.extract_attributes = patch_extract_attributes
 
 
 # The OpenTelemetry Authors code

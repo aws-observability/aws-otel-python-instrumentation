@@ -16,6 +16,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_REMOTE_SERVICE,
     AWS_SPAN_KIND,
     AWS_STREAM_NAME,
+    AWS_TOPIC_ARN,
 )
 from amazon.opentelemetry.distro._aws_span_processing_util import (
     LOCAL_ROOT,
@@ -78,6 +79,7 @@ _NORMALIZED_DYNAMO_DB_SERVICE_NAME: str = "AWS::DynamoDB"
 _NORMALIZED_KINESIS_SERVICE_NAME: str = "AWS::Kinesis"
 _NORMALIZED_S3_SERVICE_NAME: str = "AWS::S3"
 _NORMALIZED_SQS_SERVICE_NAME: str = "AWS::SQS"
+_NORMALIZED_SNS_SERVICE_NAME: str = "AWS::SNS"
 _DB_CONNECTION_STRING_TYPE: str = "DB::Connection"
 
 # Special DEPENDENCY attribute value if GRAPHQL_OPERATION_TYPE attribute key is present.
@@ -372,6 +374,9 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
             remote_resource_identifier = _escape_delimiters(
                 SqsUrlParser.get_queue_name(span.attributes.get(AWS_QUEUE_URL))
             )
+        elif is_key_present(span, AWS_TOPIC_ARN):
+            remote_resource_type = _NORMALIZED_SNS_SERVICE_NAME + "::TopicArn"
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_TOPIC_ARN))
     elif is_db_span(span):
         remote_resource_type = _DB_CONNECTION_STRING_TYPE
         remote_resource_identifier = _get_db_connection(span)

@@ -19,6 +19,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_REMOTE_SERVICE,
     AWS_SPAN_KIND,
     AWS_STREAM_NAME,
+    AWS_TOPIC_ARN,
 )
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
 from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, SERVICE_METRIC
@@ -821,6 +822,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.validate_aws_sdk_service_normalization("Kinesis", "AWS::Kinesis")
         self.validate_aws_sdk_service_normalization("S3", "AWS::S3")
         self.validate_aws_sdk_service_normalization("SQS", "AWS::SQS")
+        self.validate_aws_sdk_service_normalization("SNS", "AWS::SNS")
 
     def validate_aws_sdk_service_normalization(self, service_name: str, expected_remote_service: str):
         self._mock_attribute([SpanAttributes.RPC_SYSTEM, SpanAttributes.RPC_SERVICE], ["aws-api", service_name])
@@ -976,6 +978,11 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [["aws_table^name"]], keys, values)
         self._validate_remote_resource_attributes("AWS::DynamoDB::Table", "aws_table^^name")
         self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [None])
+
+        # Validate behaviour of AWS_TOPIC_ARN attribute, then remove it
+        self._mock_attribute([AWS_TOPIC_ARN], ["arn:aws:sns:us-west-2:012345678901:test_topic"], keys, values)
+        self._validate_remote_resource_attributes("AWS::SNS::TopicArn", "arn:aws:sns:us-west-2:012345678901:test_topic")
+        self._mock_attribute([AWS_TOPIC_ARN], [None])
 
         self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None])
 

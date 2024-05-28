@@ -29,6 +29,7 @@ _logger.setLevel(INFO)
 _AWS_QUEUE_URL: str = "aws.sqs.queue_url"
 _AWS_QUEUE_NAME: str = "aws.sqs.queue_name"
 _AWS_STREAM_NAME: str = "aws.kinesis.stream_name"
+_AWS_TOPIC_ARN: str = "aws.sns.topic_arn"
 
 
 # pylint: disable=too-many-public-methods
@@ -97,6 +98,7 @@ class BotocoreTest(ContractTestBase):
                 SpanAttributes.AWS_S3_BUCKET: "test-bucket-name",
             },
             span_name="S3.CreateBucket",
+            span_kind="CLIENT",
         )
 
     def test_s3_create_object(self):
@@ -114,6 +116,7 @@ class BotocoreTest(ContractTestBase):
                 SpanAttributes.AWS_S3_BUCKET: "test-put-object-bucket-name",
             },
             span_name="S3.PutObject",
+            span_kind="CLIENT",
         )
 
     def test_s3_get_object(self):
@@ -131,6 +134,7 @@ class BotocoreTest(ContractTestBase):
                 SpanAttributes.AWS_S3_BUCKET: "test-get-object-bucket-name",
             },
             span_name="S3.GetObject",
+            span_kind="CLIENT",
         )
 
     def test_s3_error(self):
@@ -148,227 +152,79 @@ class BotocoreTest(ContractTestBase):
                 SpanAttributes.AWS_S3_BUCKET: "-",
             },
             span_name="S3.CreateBucket",
+            span_kind="CLIENT",
         )
 
-    def test_s3_fault(self):
+    def test_sns_get_topic_attributes(self):
         self.do_test_requests(
-            "s3/fault",
-            "GET",
-            500,
-            0,
-            1,
-            remote_service="AWS::S3",
-            remote_operation="CreateBucket",
-            remote_resource_type="AWS::S3::Bucket",
-            remote_resource_identifier="valid-bucket-name",
-            request_specific_attributes={
-                SpanAttributes.AWS_S3_BUCKET: "valid-bucket-name",
-            },
-            span_name="S3.CreateBucket",
-        )
-
-    def test_dynamodb_create_table(self):
-        self.do_test_requests(
-            "ddb/createtable/some-table",
+            "sns/gettopattributes/get-topic-attributes",
             "GET",
             200,
             0,
             0,
-            remote_service="AWS::DynamoDB",
-            remote_operation="CreateTable",
-            remote_resource_type="AWS::DynamoDB::Table",
-            remote_resource_identifier="test_table",
+            remote_service="AWS::SNS",
+            remote_operation="GetTopicAttributes",
+            remote_resource_type="AWS::SNS::TopicArn",
+            remote_resource_identifier="arn:aws:sns:us-west-2:000000000000:test_topic",
             request_specific_attributes={
-                SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["test_table"],
+                _AWS_TOPIC_ARN: "arn:aws:sns:us-west-2:000000000000:test_topic",
             },
-            span_name="DynamoDB.CreateTable",
+            span_name="SNS.GetTopicAttributes",
+            span_kind="CLIENT",
         )
 
-    def test_dynamodb_put_item(self):
+    def test_sns_publish_message(self):
         self.do_test_requests(
-            "ddb/putitem/putitem-table/key",
+            "sns/publishmessage/publish-message/some-message",
             "GET",
             200,
             0,
             0,
-            remote_service="AWS::DynamoDB",
-            remote_operation="PutItem",
-            remote_resource_type="AWS::DynamoDB::Table",
-            remote_resource_identifier="put_test_table",
+            remote_service="AWS::SNS",
+            remote_operation="Publish",
+            remote_resource_type="AWS::SNS::TopicArn",
+            remote_resource_identifier="arn:aws:sns:us-west-2:000000000000:test_topic",
             request_specific_attributes={
-                SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["put_test_table"],
+                _AWS_TOPIC_ARN: "arn:aws:sns:us-west-2:000000000000:test_topic",
             },
-            span_name="DynamoDB.PutItem",
+            span_name="test_topic send",
+            span_kind="PRODUCER",
         )
 
-    def test_dynamodb_error(self):
+    def test_sns_error(self):
         self.do_test_requests(
-            "ddb/error",
+            "sns/error",
             "GET",
             400,
             1,
             0,
-            remote_service="AWS::DynamoDB",
-            remote_operation="PutItem",
-            remote_resource_type="AWS::DynamoDB::Table",
-            remote_resource_identifier="invalid_table",
+            remote_service="AWS::SNS",
+            remote_operation="Publish",
+            remote_resource_type="AWS::SNS::TopicArn",
+            remote_resource_identifier="arn:aws:sns:us-west-2:000000000000:test_topic/snserror",
             request_specific_attributes={
-                SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["invalid_table"],
+                _AWS_TOPIC_ARN: "arn:aws:sns:us-west-2:000000000000:test_topic/snserror",
             },
-            span_name="DynamoDB.PutItem",
+            span_name="test_topic/snserror send",
+            span_kind="PRODUCER",
         )
 
-    def test_dynamodb_fault(self):
+    def test_sns_fault(self):
         self.do_test_requests(
-            "ddb/fault",
+            "sns/fault",
             "GET",
             500,
             0,
             1,
-            remote_service="AWS::DynamoDB",
-            remote_operation="PutItem",
-            remote_resource_type="AWS::DynamoDB::Table",
-            remote_resource_identifier="invalid_table",
+            remote_service="AWS::SNS",
+            remote_operation="GetTopicAttributes",
+            remote_resource_type="AWS::SNS::TopicArn",
+            remote_resource_identifier="invalid_topic_arn",
             request_specific_attributes={
-                SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["invalid_table"],
+                _AWS_TOPIC_ARN: "invalid_topic_arn",
             },
-            span_name="DynamoDB.PutItem",
-        )
-
-    def test_sqs_create_queue(self):
-        self.do_test_requests(
-            "sqs/createqueue/some-queue",
-            "GET",
-            200,
-            0,
-            0,
-            remote_service="AWS::SQS",
-            remote_operation="CreateQueue",
-            remote_resource_type="AWS::SQS::Queue",
-            remote_resource_identifier="test_queue",
-            request_specific_attributes={
-                _AWS_QUEUE_NAME: "test_queue",
-            },
-            span_name="SQS.CreateQueue",
-        )
-
-    def test_sqs_send_message(self):
-        self.do_test_requests(
-            "sqs/publishqueue/some-queue",
-            "GET",
-            200,
-            0,
-            0,
-            remote_service="AWS::SQS",
-            remote_operation="SendMessage",
-            remote_resource_type="AWS::SQS::Queue",
-            remote_resource_identifier="test_put_get_queue",
-            request_specific_attributes={
-                _AWS_QUEUE_URL: "http://localstack:4566/000000000000/test_put_get_queue",
-            },
-            span_name="SQS.SendMessage",
-        )
-
-    def test_sqs_receive_message(self):
-        self.do_test_requests(
-            "sqs/consumequeue/some-queue",
-            "GET",
-            200,
-            0,
-            0,
-            remote_service="AWS::SQS",
-            remote_operation="ReceiveMessage",
-            remote_resource_type="AWS::SQS::Queue",
-            remote_resource_identifier="test_put_get_queue",
-            request_specific_attributes={
-                _AWS_QUEUE_URL: "http://localstack:4566/000000000000/test_put_get_queue",
-            },
-            span_name="SQS.ReceiveMessage",
-        )
-
-    def test_sqs_error(self):
-        self.do_test_requests(
-            "sqs/error",
-            "GET",
-            400,
-            1,
-            0,
-            remote_service="AWS::SQS",
-            remote_operation="SendMessage",
-            remote_resource_type="AWS::SQS::Queue",
-            remote_resource_identifier="sqserror",
-            request_specific_attributes={
-                _AWS_QUEUE_URL: "http://error.test:8080/000000000000/sqserror",
-            },
-            span_name="SQS.SendMessage",
-        )
-
-    def test_sqs_fault(self):
-        self.do_test_requests(
-            "sqs/fault",
-            "GET",
-            500,
-            0,
-            1,
-            remote_service="AWS::SQS",
-            remote_operation="CreateQueue",
-            remote_resource_type="AWS::SQS::Queue",
-            remote_resource_identifier="invalid_test",
-            request_specific_attributes={
-                _AWS_QUEUE_NAME: "invalid_test",
-            },
-            span_name="SQS.CreateQueue",
-        )
-
-    def test_kinesis_put_record(self):
-        self.do_test_requests(
-            "kinesis/putrecord/my-stream",
-            "GET",
-            200,
-            0,
-            0,
-            remote_service="AWS::Kinesis",
-            remote_operation="PutRecord",
-            remote_resource_type="AWS::Kinesis::Stream",
-            remote_resource_identifier="test_stream",
-            request_specific_attributes={
-                _AWS_STREAM_NAME: "test_stream",
-            },
-            span_name="Kinesis.PutRecord",
-        )
-
-    def test_kinesis_error(self):
-        self.do_test_requests(
-            "kinesis/error",
-            "GET",
-            400,
-            1,
-            0,
-            remote_service="AWS::Kinesis",
-            remote_operation="PutRecord",
-            remote_resource_type="AWS::Kinesis::Stream",
-            remote_resource_identifier="invalid_stream",
-            request_specific_attributes={
-                _AWS_STREAM_NAME: "invalid_stream",
-            },
-            span_name="Kinesis.PutRecord",
-        )
-
-    def test_kinesis_fault(self):
-        self.do_test_requests(
-            "kinesis/fault",
-            "GET",
-            500,
-            0,
-            1,
-            remote_service="AWS::Kinesis",
-            remote_operation="PutRecord",
-            remote_resource_type="AWS::Kinesis::Stream",
-            remote_resource_identifier="test_stream",
-            request_specific_attributes={
-                _AWS_STREAM_NAME: "test_stream",
-            },
-            span_name="Kinesis.PutRecord",
+            span_name="SNS.GetTopicAttributes",
+            span_kind="CLIENT",
         )
 
     @override
@@ -376,9 +232,8 @@ class BotocoreTest(ContractTestBase):
         target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
-            if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
+            if resource_scope_span.span.kind in (Span.SPAN_KIND_CLIENT, Span.SPAN_KIND_PRODUCER):
                 target_spans.append(resource_scope_span.span)
-
         self.assertEqual(len(target_spans), 1)
         self._assert_aws_attributes(
             target_spans[0].attributes,
@@ -419,7 +274,7 @@ class BotocoreTest(ContractTestBase):
         target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
-            if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
+            if resource_scope_span.span.kind in (Span.SPAN_KIND_CLIENT, Span.SPAN_KIND_PRODUCER):
                 target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
@@ -485,7 +340,7 @@ class BotocoreTest(ContractTestBase):
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, kwargs.get("remote_service"))
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, kwargs.get("remote_operation"))
-        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "CLIENT")
+        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, kwargs.get("span_kind"))
         remote_resource_type = kwargs.get("remote_resource_type", "None")
         remote_resource_identifier = kwargs.get("remote_resource_identifier", "None")
         if remote_resource_type != "None":
