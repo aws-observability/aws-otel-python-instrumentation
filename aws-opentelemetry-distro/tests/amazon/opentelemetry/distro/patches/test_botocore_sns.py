@@ -30,6 +30,11 @@ class TestSnsExtension(TestBase):
         self.memory_exporter.clear()
         response = self.client.create_topic(Name=self.topic_name)
         topic_arn = response["TopicArn"]
+        create_spans = self.memory_exporter.get_finished_spans()
+        self.assertEqual(1, len(create_spans))
+        create_span = create_spans[0]
+        self.assertEqual(topic_arn, create_span.attributes["aws.sns.topic_arn"])
+
         self.client.delete_topic(TopicArn=topic_arn)
         spans = self.memory_exporter.get_finished_spans()
         self.assertEqual(2, len(spans))

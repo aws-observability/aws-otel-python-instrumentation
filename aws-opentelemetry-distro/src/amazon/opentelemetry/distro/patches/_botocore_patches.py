@@ -6,8 +6,9 @@ import importlib
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
 from opentelemetry.instrumentation.botocore.extensions.sns import _SnsExtension
 from opentelemetry.instrumentation.botocore.extensions.sqs import _SqsExtension
-from opentelemetry.instrumentation.botocore.extensions.types import _AttributeMapT, _AwsSdkExtension
+from opentelemetry.instrumentation.botocore.extensions.types import _AttributeMapT, _AwsSdkExtension, _BotoResultT
 from opentelemetry.semconv.trace import SpanAttributes
+from opentelemetry.trace.span import Span
 
 
 def _apply_botocore_instrumentation_patches() -> None:
@@ -74,7 +75,7 @@ def _apply_botocore_sns_patch() -> None:
     service-specific information to spans, such as attributes. Specifically, we are adding logic to add
     "aws.sns.topic_arn" attributes to be used to generate AWS_REMOTE_RESOURCE_TYPE and AWS_REMOTE_RESOURCE_IDENTIFIER.
     Callout that today, the upstream logic adds SpanAttributes.MESSAGING_DESTINATION_NAME,
-    but we are not using it as it can only be assigned with TargetArn as well.
+    but we are not using it as it can be assigned with TargetArn as well.
     """
     old_extract_attributes = _SnsExtension.extract_attributes
 
@@ -84,7 +85,19 @@ def _apply_botocore_sns_patch() -> None:
         if topic_arn:
             attributes["aws.sns.topic_arn"] = topic_arn
 
+    old_on_success = _SnsExtension.on_success
+
+    def patch_on_success(self, span: Span, result: _BotoResultT):
+        old_on_success(self, span, result)
+        topic_arn = result.get("TopicArn")
+        if topic_arn:
+            span.set_attribute(
+                "aws.sns.topic_arn",
+                topic_arn,
+            )
+
     _SnsExtension.extract_attributes = patch_extract_attributes
+    _SnsExtension.on_success = patch_on_success
 
 
 # The OpenTelemetry Authors code
