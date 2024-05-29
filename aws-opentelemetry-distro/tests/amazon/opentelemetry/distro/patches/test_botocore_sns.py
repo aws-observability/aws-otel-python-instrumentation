@@ -7,7 +7,7 @@ from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_ins
 from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
 from opentelemetry.test.test_base import TestBase
 
-
+# pylint: disable=C0103
 class TestSnsExtension(TestBase):
     def setUp(self):
         super().setUp()
