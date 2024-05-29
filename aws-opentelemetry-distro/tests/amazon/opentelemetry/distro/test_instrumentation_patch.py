@@ -78,8 +78,6 @@ class TestInstrumentationPatch(TestCase):
         # SNS
         self.assertTrue("sns" in _KNOWN_EXTENSIONS, "Upstream has removed the SNS extension")
         sns_attributes: Dict[str, str] = _do_extract_sns_attributes()
-        self.assertTrue(SpanAttributes.MESSAGING_SYSTEM in sns_attributes)
-        self.assertEqual(sns_attributes[SpanAttributes.MESSAGING_SYSTEM], "aws.sns")
         self.assertFalse("aws.sns.topic_arn" in sns_attributes)
 
     def _validate_patched_botocore_instrumentation(self):

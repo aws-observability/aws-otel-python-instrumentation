@@ -467,6 +467,7 @@ class BotocoreTest(ContractTestBase):
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
             if resource_scope_span.span.kind in (Span.SPAN_KIND_CLIENT, Span.SPAN_KIND_PRODUCER):
+                self.assertEqual(resource_scope_span.span.kind, kwargs.get("span_kind"))
                 target_spans.append(resource_scope_span.span)
         self.assertEqual(len(target_spans), 1)
         self._assert_aws_attributes(
@@ -509,6 +510,7 @@ class BotocoreTest(ContractTestBase):
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
             if resource_scope_span.span.kind in (Span.SPAN_KIND_CLIENT, Span.SPAN_KIND_PRODUCER):
+                self.assertEqual(resource_scope_span.span.kind, kwargs.get("span_kind"))
                 target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
@@ -531,6 +533,7 @@ class BotocoreTest(ContractTestBase):
         request_specific_attributes: dict,
     ) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
+
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_METHOD, operation)
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SYSTEM, "aws-api")
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SERVICE, service.split("::")[-1])
