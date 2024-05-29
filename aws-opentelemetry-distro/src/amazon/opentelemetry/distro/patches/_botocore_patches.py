@@ -116,9 +116,17 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
             # Append text to the file
             file.write("context_param: \n")
             json.dump(context_param, file, indent=4)
+        # modelId = context_param.modelId
+        # prompt_token = context_param.body.prompt
+        # model_provider?
+        # gen_ai.request.top_p?
+        # gen_ai.request.temperature = context_param.body.temperature
+        # gen_ai.request.max_tokens = ?
 
     def on_success(self, span: Span, result: _BotoResultT):
         with open('/Users/zzhlogin/workplace/sample_app_python/aws-otel-python-instrumentation/log.txt', 'a') as file:
             # Append text to the file
             file.write("on_success result: \n")
             file.write(str(result) + "\n")
+        # output_token = result.body.?
+        # completion_reason = ?
