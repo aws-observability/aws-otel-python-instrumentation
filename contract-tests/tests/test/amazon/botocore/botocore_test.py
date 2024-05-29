@@ -22,6 +22,7 @@ from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
 from opentelemetry.proto.metrics.v1.metrics_pb2 import ExponentialHistogramDataPoint, Metric
 from opentelemetry.proto.trace.v1.trace_pb2 import Span
 from opentelemetry.semconv.trace import SpanAttributes
+from opentelemetry.trace import SpanKind
 
 _logger: Logger = getLogger(__name__)
 _logger.setLevel(INFO)
@@ -467,7 +468,7 @@ class BotocoreTest(ContractTestBase):
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
             if resource_scope_span.span.kind in (Span.SPAN_KIND_CLIENT, Span.SPAN_KIND_PRODUCER):
-                self.assertEqual(resource_scope_span.span.kind, kwargs.get("span_kind"))
+                self.assertEqual(resource_scope_span.span.kind, SpanKind[kwargs.get("span_kind")].value)
                 target_spans.append(resource_scope_span.span)
         self.assertEqual(len(target_spans), 1)
         self._assert_aws_attributes(
@@ -510,7 +511,7 @@ class BotocoreTest(ContractTestBase):
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
             if resource_scope_span.span.kind in (Span.SPAN_KIND_CLIENT, Span.SPAN_KIND_PRODUCER):
-                self.assertEqual(resource_scope_span.span.kind, kwargs.get("span_kind"))
+                self.assertEqual(resource_scope_span.span.kind, SpanKind[kwargs.get("span_kind")].value)
                 target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
