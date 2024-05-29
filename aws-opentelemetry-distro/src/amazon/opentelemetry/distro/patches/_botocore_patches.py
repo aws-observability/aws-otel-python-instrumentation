@@ -2,11 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import importlib
+import json
 
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
 from opentelemetry.instrumentation.botocore.extensions.sqs import _SqsExtension
-from opentelemetry.instrumentation.botocore.extensions.types import _AttributeMapT, _AwsSdkExtension
+from opentelemetry.instrumentation.botocore.extensions.types import _AttributeMapT, _AwsSdkExtension, _BotoResultT
 from opentelemetry.semconv.trace import SpanAttributes
+from opentelemetry.trace.span import Span
 
 
 def _apply_botocore_instrumentation_patches() -> None:
@@ -17,6 +19,7 @@ def _apply_botocore_instrumentation_patches() -> None:
     _apply_botocore_kinesis_patch()
     _apply_botocore_s3_patch()
     _apply_botocore_sqs_patch()
+    _apply_botocore_bedrock_runtime_patch()
 
 
 def _apply_botocore_kinesis_patch() -> None:
@@ -64,6 +67,17 @@ def _apply_botocore_sqs_patch() -> None:
 
     _SqsExtension.extract_attributes = patch_extract_attributes
 
+def _apply_botocore_bedrock_runtime_patch() -> None:
+    """Botocore instrumentation patch for S3
+
+    This patch adds an extension to the upstream's list of known extension for S3. Extensions allow for custom
+    logic for adding service-specific information to spans, such as attributes. Specifically, we are adding logic to add
+    the AWS_S3_BUCKET attribute, to be used to generate RemoteTarget and achieve parity with the Java instrumentation.
+    Callout that AWS_S3_BUCKET is in the AWS Semantic Conventions, and is simply not implemented in Python
+    instrumentation.
+    """
+    _KNOWN_EXTENSIONS["bedrock-runtime"] = _lazy_load(".", "_BedrockRuntimeExtension")
+
 
 # The OpenTelemetry Authors code
 def _lazy_load(module, cls):
@@ -94,3 +108,17 @@ class _KinesisExtension(_AwsSdkExtension):
         stream_name = self._call_context.params.get("StreamName")
         if stream_name:
             attributes["aws.kinesis.stream_name"] = stream_name
+
+class _BedrockRuntimeExtension(_AwsSdkExtension):
+    def extract_attributes(self, attributes: _AttributeMapT):
+        context_param = self._call_context.params
+        with open('/Users/zzhlogin/workplace/sample_app_python/aws-otel-python-instrumentation/log.txt', 'a') as file:
+            # Append text to the file
+            file.write("context_param: \n")
+            json.dump(context_param, file, indent=4)
+
+    def on_success(self, span: Span, result: _BotoResultT):
+        with open('/Users/zzhlogin/workplace/sample_app_python/aws-otel-python-instrumentation/log.txt', 'a') as file:
+            # Append text to the file
+            file.write("on_success result: \n")
+            file.write(str(result) + "\n")
