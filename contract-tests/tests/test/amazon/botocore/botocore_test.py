@@ -467,7 +467,7 @@ class BotocoreTest(ContractTestBase):
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
             if resource_scope_span.span.kind in (Span.SPAN_KIND_CLIENT, Span.SPAN_KIND_PRODUCER):
-                self.assertEqual(resource_scope_span.span.kind, SpanKind['SPAN_KIND_' + kwargs.get("span_kind")].value)
+                self.assertEqual(resource_scope_span.span.kind, Span.SpanKind.Value('SPAN_KIND_' + kwargs.get("span_kind")))
                 target_spans.append(resource_scope_span.span)
         self.assertEqual(len(target_spans), 1)
         self._assert_aws_attributes(
@@ -510,7 +510,7 @@ class BotocoreTest(ContractTestBase):
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
             if resource_scope_span.span.kind in (Span.SPAN_KIND_CLIENT, Span.SPAN_KIND_PRODUCER):
-                self.assertEqual(resource_scope_span.span.kind, SpanKind['SPAN_KIND_' + kwargs.get("span_kind")].value)
+                self.assertEqual(resource_scope_span.span.kind, Span.SpanKind.Value('SPAN_KIND_' + kwargs.get("span_kind")))
                 target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
