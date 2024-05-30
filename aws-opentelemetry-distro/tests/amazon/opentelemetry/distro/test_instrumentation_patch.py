@@ -81,7 +81,7 @@ class TestInstrumentationPatch(TestCase):
         sns_attributes: Dict[str, str] = _do_extract_sns_attributes()
         self.assertFalse("aws.sns.topic_arn" in sns_attributes)
         sns_success_attributes: Dict[str, str] = _do_sns_on_success()
-        self.assertFlase("aws.sns.topic_arn" in sns_success_attributes)
+        self.assertFalse("aws.sns.topic_arn" in sns_success_attributes)
 
     def _validate_patched_botocore_instrumentation(self):
         # Kinesis
