@@ -375,7 +375,7 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
                 SqsUrlParser.get_queue_name(span.attributes.get(AWS_QUEUE_URL))
             )
         elif is_key_present(span, AWS_TOPIC_ARN):
-            remote_resource_type = _NORMALIZED_SNS_SERVICE_NAME + "::TopicArn"
+            remote_resource_type = _NORMALIZED_SNS_SERVICE_NAME + "::Topic"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_TOPIC_ARN))
     elif is_db_span(span):
         remote_resource_type = _DB_CONNECTION_STRING_TYPE

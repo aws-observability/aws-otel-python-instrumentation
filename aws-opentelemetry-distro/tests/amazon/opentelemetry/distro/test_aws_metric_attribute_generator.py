@@ -981,7 +981,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
 
         # Validate behaviour of AWS_TOPIC_ARN attribute, then remove it
         self._mock_attribute([AWS_TOPIC_ARN], ["arn:aws:sns:us-west-2:012345678901:test_topic"], keys, values)
-        self._validate_remote_resource_attributes("AWS::SNS::TopicArn", "arn:aws:sns:us-west-2:012345678901:test_topic")
+        self._validate_remote_resource_attributes("AWS::SNS::Topic", "arn:aws:sns:us-west-2:012345678901:test_topic")
         self._mock_attribute([AWS_TOPIC_ARN], [None])
 
         self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None])

@@ -398,7 +398,7 @@ class BotocoreTest(ContractTestBase):
             0,
             remote_service="AWS::SNS",
             remote_operation="GetTopicAttributes",
-            remote_resource_type="AWS::SNS::TopicArn",
+            remote_resource_type="AWS::SNS::Topic",
             remote_resource_identifier="arn:aws:sns:us-west-2:000000000000:test_topic",
             request_specific_attributes={
                 _AWS_TOPIC_ARN: "arn:aws:sns:us-west-2:000000000000:test_topic",
@@ -416,7 +416,7 @@ class BotocoreTest(ContractTestBase):
             0,
             remote_service="AWS::SNS",
             remote_operation="Publish",
-            remote_resource_type="AWS::SNS::TopicArn",
+            remote_resource_type="AWS::SNS::Topic",
             remote_resource_identifier="arn:aws:sns:us-west-2:000000000000:test_topic",
             request_specific_attributes={
                 _AWS_TOPIC_ARN: "arn:aws:sns:us-west-2:000000000000:test_topic",
@@ -434,7 +434,7 @@ class BotocoreTest(ContractTestBase):
             0,
             remote_service="AWS::SNS",
             remote_operation="Publish",
-            remote_resource_type="AWS::SNS::TopicArn",
+            remote_resource_type="AWS::SNS::Topic",
             remote_resource_identifier="arn:aws:sns:us-west-2:000000000000:test_topic/snserror",
             request_specific_attributes={
                 _AWS_TOPIC_ARN: "arn:aws:sns:us-west-2:000000000000:test_topic/snserror",
@@ -452,7 +452,7 @@ class BotocoreTest(ContractTestBase):
             1,
             remote_service="AWS::SNS",
             remote_operation="GetTopicAttributes",
-            remote_resource_type="AWS::SNS::TopicArn",
+            remote_resource_type="AWS::SNS::Topic",
             remote_resource_identifier="invalid_topic_arn",
             request_specific_attributes={
                 _AWS_TOPIC_ARN: "invalid_topic_arn",
