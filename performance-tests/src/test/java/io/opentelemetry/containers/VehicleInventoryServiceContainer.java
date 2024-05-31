@@ -20,6 +20,7 @@ import org.testcontainers.lifecycle.Startable;
 import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
 
+// TODO: The vehicle sample app doesn't exist anymore so this needs to be cleaned up
 public class VehicleInventoryServiceContainer {
 
   private static final Logger logger =
