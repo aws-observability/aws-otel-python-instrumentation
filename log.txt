@@ -1,0 +1,110 @@
+meta.llama2-13b-chat-v1 !!!!!!!!!!!!!!!!!!!!!!!
+
+context_param:
+{
+    "modelId": "meta.llama2-13b-chat-v1",
+    "body": "{
+               "prompt": "<s>[INST] Describe the purpose of a 'hello world' program in one line. [/INST]",
+               "max_gen_len": 512,
+               "temperature": 0.5
+             }"
+}
+on_success result:
+{
+    "ResponseMetadata": {
+        "RequestId": "cdc96904-3d12-46c6-ac1a-173efcc4fd71",
+        "HTTPStatusCode": 200,
+        "HTTPHeaders": {
+            "date": "Wed, 29 May 2024 21:07:52 GMT",
+            "content-type": "application/json",
+            "content-length": "390",
+            "connection": "keep-alive",
+            "x-amzn-requestid": "cdc96904-3d12-46c6-ac1a-173efcc4fd71",
+            "x-amzn-bedrock-invocation-latency": "1168",
+            "x-amzn-bedrock-output-token-count": "55",
+            "x-amzn-bedrock-input-token-count": "24"
+        },
+        "RetryAttempts": 0
+    },
+    "contentType": "application/json",
+    "body": <botocore.response.StreamingBody object at 0x1073210c0>
+}
+
+"amazon.titan-text-premier-v1:0" !!!!!!!!!!!!!!!!!
+
+context_param:
+{
+    "body": "{
+                 "inputText": "<s>[INST] Describe the purpose of a 'hello world' program in one line. [/INST]",
+                 "textGenerationConfig": {
+                     "maxTokenCount": 3072,
+                     "stopSequences": [],
+                     "temperature": 0.7,
+                     "topP": 0.9
+                 }
+             }",
+    "modelId": "amazon.titan-text-premier-v1:0",
+    "accept": "application/json",
+    "contentType": "application/json"
+}
+on_success result:
+{
+    "ResponseMetadata": {
+        "RequestId": "7329b08c-c7a1-4d97-a2ec-10c2583b9b99",
+        "HTTPStatusCode": 200,
+        "HTTPHeaders": {
+            "date": "Thu, 30 May 2024 00:09:47 GMT",
+            "content-type": "application/json",
+            "content-length": "276",
+            "connection": "keep-alive",
+            "x-amzn-requestid": "7329b08c-c7a1-4d97-a2ec-10c2583b9b99",
+            "x-amzn-bedrock-invocation-latency": "1140",
+            "x-amzn-bedrock-output-token-count": "35",
+            "x-amzn-bedrock-input-token-count": "24"
+        },
+        "RetryAttempts": 0
+    },
+    "contentType": "application/json",
+    "body": "<botocore.response.StreamingBody object at 0x107f76110>"
+}
+
+
+
+result body readlines: 
+list[b'{"inputTextTokenCount":24,"results":[{"tokenCount":32,"outputText":"\\"A \'hello world\' program is an introductory computer program that outputs the message \'hello world\', showcasing the basic functionality of a programming language.\\"","completionReason":"FINISH"}]}']result body read _amount_read: 
+0result body read _content_length: 
+265result body read second: 
+result body read: 
+result body readlines: 
+list[b'{"inputTextTokenCount":24,"results":[{"tokenCount":25,"outputText":"A \'hello world\' program is a fundamental exercise in programming that showcases the basic syntax and functionality of a programming language.","completionReason":"FINISH"}]}']result body read _amount_read: 
+0result body read _content_length: 
+241result body read second:
+
+Error when invoking function 'on_success'
+Traceback (most recent call last):
+  File "/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/site-packages/opentelemetry/instrumentation/botocore/__init__.py", line 301, in _safe_invoke
+    function(*args)
+  File "/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/site-packages/amazon/opentelemetry/distro/patches/_botocore_patches.py", line 152, in on_success
+    file.write(str(result["body"].read()))
+                   ^^^^^^^^^^^^^^^^^^^^^
+  File "/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/site-packages/botocore/response.py", line 110, in read
+    self._verify_content_length()
+  File "/Library/Frameworks/Python.framework/Versions/3.11/lib/python3.11/site-packages/botocore/response.py", line 167, in _verify_content_length
+    raise IncompleteReadError(
+botocore.exceptions.IncompleteReadError: 0 read, but total bytes expected is 241.
+Traceback (most recent call last):
+  File "/Volumes/workplace/service-expansion/aws-application-signals-test-framework/sample-apps/python/bedrock-runtime/bedrock-runtime.py", line 72, in <module>
+    response_body = json.loads(response.get("body").read())
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+result body read: 
+result body readlines: 
+list[b'{"inputTextTokenCount":24,"results":[{"tokenCount":27,"outputText":"A \'hello world\' program is a simple, introductory program that serves to demonstrate the basic functionality of a programming language or environment.","completionReason":"FINISH"}]}']result body read _amount_read: 
+0result body read _content_length: 
+250result body json: 
+result body read: 
+result body readlines: 
+list[b'{"inputTextTokenCount":24,"results":[{"tokenCount":26,"outputText":"\'Hello World\' programs serve as simple introductions to programming, showcasing the fundamental concepts and syntax of a specific programming language.","completionReason":"FINISH"}]}']result body read _amount_read: 
+0result body read _content_length: 
+251
+
+requests.exceptions.ConnectionError: HTTPConnectionPool(host='localhost', port=4316): Max retries exceeded with url: /v1/metrics (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x107629fd0>: Failed to establish a new connection: [Errno 61] Connection refused'))
