@@ -348,9 +348,11 @@ class BotocoreTest(ContractTestBase):
             remote_service="AWS::Kinesis",
             remote_operation="DescribeStreamConsumer",
             remote_resource_type="AWS::Kinesis::StreamConsumer",
-            remote_resource_identifier=r"arn:aws:kinesis:us-west-2:000000000000:stream/test_stream/consumer/test_consumer:\d{10}",
+            remote_resource_identifier=r"arn:aws:kinesis:us-west-2:000000000000:"
+            r"stream/test_stream/consumer/test_consumer:\d{10}",
             request_specific_attributes={
-                _AWS_CONSUMER_ARN: r"arn:aws:kinesis:us-west-2:000000000000:stream/test_stream/consumer/test_consumer:\d{10}",
+                _AWS_CONSUMER_ARN: r"arn:aws:kinesis:us-west-2:000000000000:"
+                r"stream/test_stream/consumer/test_consumer:\d{10}",
             },
             span_name="Kinesis.DescribeStreamConsumer",
             span_length=2,

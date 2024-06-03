@@ -102,7 +102,7 @@ class TestInstrumentationPatch(TestCase):
 
 def _do_extract_kinesis_attributes() -> Dict[str, str]:
     service_name: str = "kinesis"
-    params: Dict[str, str] = {"StreamName": _STREAM_NAME, "ConsumerArn": _CONSUMER_ARN}
+    params: Dict[str, str] = {"StreamName": _STREAM_NAME, "ConsumerARN": _CONSUMER_ARN}
     return _do_extract_attributes(service_name, params)
 
 
