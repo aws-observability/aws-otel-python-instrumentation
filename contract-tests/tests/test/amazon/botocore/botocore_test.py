@@ -489,6 +489,7 @@ class BotocoreTest(ContractTestBase):
                 self._assert_array_value_ddb_table_name(attributes_dict, key, value)
 
     @override
+    # pylint: disable=too-many-locals
     def _assert_metric_attributes(
         self,
         resource_scope_metrics: List[ResourceScopeMetric],
