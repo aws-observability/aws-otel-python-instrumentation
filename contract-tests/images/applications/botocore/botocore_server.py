@@ -6,6 +6,7 @@ import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 
+from logging import INFO, Logger, getLogger
 import boto3
 import requests
 from botocore.client import BaseClient
@@ -25,6 +26,8 @@ os.environ.setdefault("AWS_ACCESS_KEY_ID", "testcontainers-localstack")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testcontainers-localstack")
 _NO_RETRY_CONFIG: Config = Config(retries={"max_attempts": 0}, connect_timeout=3, read_timeout=3)
 
+_logger: Logger = getLogger(__name__)
+_logger.setLevel(INFO)
 
 # pylint: disable=broad-exception-caught
 class RequestHandler(BaseHTTPRequestHandler):
@@ -200,6 +203,11 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif self.in_path("putrecord/my-stream"):
             set_main_status(200)
             kinesis_client.put_record(StreamName="test_stream", Data=b"test", PartitionKey="partition_key")
+        elif self.in_path("describestreamconsumer/my-consumer"):
+            set_main_status(200)
+            response = kinesis_client.register_stream_consumer(StreamARN="arn:aws:kinesis:us-west-2:000000000000:stream/test_stream", ConsumerName="test_consumer")
+            consumer_arn = response['Consumer']['ConsumerARN']
+            kinesis_client.describe_stream_consumer(ConsumerARN=consumer_arn)
         else:
             set_main_status(404)
 

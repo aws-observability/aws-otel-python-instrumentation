@@ -19,6 +19,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_REMOTE_SERVICE,
     AWS_SPAN_KIND,
     AWS_STREAM_NAME,
+    AWS_CONSUMER_ARN,
 )
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
 from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, SERVICE_METRIC
@@ -949,6 +950,11 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute([AWS_STREAM_NAME], ["aws_stream_name"], keys, values)
         self._validate_remote_resource_attributes("AWS::Kinesis::Stream", "aws_stream_name")
         self._mock_attribute([AWS_STREAM_NAME], [None])
+
+        # Validate behaviour of AWS_CONSUMER_ARN attribute, then remove it.
+        self._mock_attribute([AWS_CONSUMER_ARN], ["arn:aws:kinesis:us-west-2:000000000000:stream/test_stream/consumer/test_consumer:0123456789"], keys, values)
+        self._validate_remote_resource_attributes("AWS::Kinesis::StreamConsumer", "arn:aws:kinesis:us-west-2:000000000000:stream/test_stream/consumer/test_consumer:0123456789")
+        self._mock_attribute([AWS_CONSUMER_ARN], [None])
 
         # Validate behaviour of SpanAttributes.AWS_DYNAMODB_TABLE_NAMES attribute with one table name, then remove it.
         self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [["aws_table_name"]], keys, values)

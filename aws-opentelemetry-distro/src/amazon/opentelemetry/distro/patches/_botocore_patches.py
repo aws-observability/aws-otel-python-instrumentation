@@ -94,3 +94,6 @@ class _KinesisExtension(_AwsSdkExtension):
         stream_name = self._call_context.params.get("StreamName")
         if stream_name:
             attributes["aws.kinesis.stream_name"] = stream_name
+        consumer_arn = self._call_context.params.get("ConsumerARN")
+        if consumer_arn:
+            attributes["aws.kinesis.consumer_arn"] = consumer_arn
