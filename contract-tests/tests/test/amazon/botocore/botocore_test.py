@@ -353,7 +353,7 @@ class BotocoreTest(ContractTestBase):
                 _AWS_CONSUMER_ARN: r"arn:aws:kinesis:us-west-2:000000000000:stream/test_stream/consumer/test_consumer:\d{10}",
             },
             span_name="Kinesis.DescribeStreamConsumer",
-            span_length = 2,
+            span_length=2,
         )
 
     def test_kinesis_error(self):
@@ -402,7 +402,7 @@ class BotocoreTest(ContractTestBase):
 
         self.assertEqual(len(target_spans), span_length)
         self._assert_aws_attributes(
-            target_spans[span_length-1].attributes,
+            target_spans[span_length - 1].attributes,
             kwargs.get("remote_service"),
             kwargs.get("remote_operation"),
             "LOCAL_ROOT",
@@ -430,7 +430,9 @@ class BotocoreTest(ContractTestBase):
             self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_TYPE, remote_resource_type)
         if remote_resource_identifier != "None":
             if self._is_valid_regex(remote_resource_identifier):
-                self._assert_match_attribute(attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
+                self._assert_match_attribute(
+                    attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier
+                )
             else:
                 self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
         # See comment above AWS_LOCAL_OPERATION
@@ -449,9 +451,9 @@ class BotocoreTest(ContractTestBase):
         span_length = kwargs.get("span_length") if kwargs.get("span_length") else 1
 
         self.assertEqual(len(target_spans), span_length)
-        self.assertEqual(target_spans[span_length-1].name, kwargs.get("span_name"))
+        self.assertEqual(target_spans[span_length - 1].name, kwargs.get("span_name"))
         self._assert_semantic_conventions_attributes(
-            target_spans[span_length-1].attributes,
+            target_spans[span_length - 1].attributes,
             kwargs.get("remote_service"),
             kwargs.get("remote_operation"),
             status_code,
@@ -498,7 +500,7 @@ class BotocoreTest(ContractTestBase):
                 target_metrics.append(resource_scope_metric.metric)
         span_length = kwargs.get("span_length") if kwargs.get("span_length") else 1
         self.assertEqual(len(target_metrics), span_length)
-        target_metric: Metric = target_metrics[span_length-1]
+        target_metric: Metric = target_metrics[span_length - 1]
         dp_list: List[ExponentialHistogramDataPoint] = target_metric.exponential_histogram.data_points
         dp_list_count: int = kwargs.get("dp_count", 2)
         self.assertEqual(len(dp_list), dp_list_count)

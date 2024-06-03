@@ -4,9 +4,9 @@ import atexit
 import os
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from logging import INFO, Logger, getLogger
 from threading import Thread
 
-from logging import INFO, Logger, getLogger
 import boto3
 import requests
 from botocore.client import BaseClient
@@ -28,6 +28,7 @@ _NO_RETRY_CONFIG: Config = Config(retries={"max_attempts": 0}, connect_timeout=3
 
 _logger: Logger = getLogger(__name__)
 _logger.setLevel(INFO)
+
 
 # pylint: disable=broad-exception-caught
 class RequestHandler(BaseHTTPRequestHandler):
@@ -205,8 +206,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             kinesis_client.put_record(StreamName="test_stream", Data=b"test", PartitionKey="partition_key")
         elif self.in_path("describestreamconsumer/my-consumer"):
             set_main_status(200)
-            response = kinesis_client.register_stream_consumer(StreamARN="arn:aws:kinesis:us-west-2:000000000000:stream/test_stream", ConsumerName="test_consumer")
-            consumer_arn = response['Consumer']['ConsumerARN']
+            response = kinesis_client.register_stream_consumer(
+                StreamARN="arn:aws:kinesis:us-west-2:000000000000:stream/test_stream", ConsumerName="test_consumer"
+            )
+            consumer_arn = response["Consumer"]["ConsumerARN"]
             kinesis_client.describe_stream_consumer(ConsumerARN=consumer_arn)
         else:
             set_main_status(404)
