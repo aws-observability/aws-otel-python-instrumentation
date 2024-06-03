@@ -83,243 +83,243 @@ class BotocoreTest(ContractTestBase):
         _logger.info(cls._local_stack.get_logs()[1].decode())
         cls._local_stack.stop()
 
-    # def test_s3_create_bucket(self):
-    #     self.do_test_requests(
-    #         "s3/createbucket/create-bucket",
-    #         "GET",
-    #         200,
-    #         0,
-    #         0,
-    #         remote_service="AWS::S3",
-    #         remote_operation="CreateBucket",
-    #         remote_resource_type="AWS::S3::Bucket",
-    #         remote_resource_identifier="test-bucket-name",
-    #         request_specific_attributes={
-    #             SpanAttributes.AWS_S3_BUCKET: "test-bucket-name",
-    #         },
-    #         span_name="S3.CreateBucket",
-    #     )
-    #
-    # def test_s3_create_object(self):
-    #     self.do_test_requests(
-    #         "s3/createobject/put-object/some-object",
-    #         "GET",
-    #         200,
-    #         0,
-    #         0,
-    #         remote_service="AWS::S3",
-    #         remote_operation="PutObject",
-    #         remote_resource_type="AWS::S3::Bucket",
-    #         remote_resource_identifier="test-put-object-bucket-name",
-    #         request_specific_attributes={
-    #             SpanAttributes.AWS_S3_BUCKET: "test-put-object-bucket-name",
-    #         },
-    #         span_name="S3.PutObject",
-    #     )
-    #
-    # def test_s3_get_object(self):
-    #     self.do_test_requests(
-    #         "s3/getobject/get-object/some-object",
-    #         "GET",
-    #         200,
-    #         0,
-    #         0,
-    #         remote_service="AWS::S3",
-    #         remote_operation="GetObject",
-    #         remote_resource_type="AWS::S3::Bucket",
-    #         remote_resource_identifier="test-get-object-bucket-name",
-    #         request_specific_attributes={
-    #             SpanAttributes.AWS_S3_BUCKET: "test-get-object-bucket-name",
-    #         },
-    #         span_name="S3.GetObject",
-    #     )
-    #
-    # def test_s3_error(self):
-    #     self.do_test_requests(
-    #         "s3/error",
-    #         "GET",
-    #         400,
-    #         1,
-    #         0,
-    #         remote_service="AWS::S3",
-    #         remote_operation="CreateBucket",
-    #         remote_resource_type="AWS::S3::Bucket",
-    #         remote_resource_identifier="-",
-    #         request_specific_attributes={
-    #             SpanAttributes.AWS_S3_BUCKET: "-",
-    #         },
-    #         span_name="S3.CreateBucket",
-    #     )
-    #
-    # def test_s3_fault(self):
-    #     self.do_test_requests(
-    #         "s3/fault",
-    #         "GET",
-    #         500,
-    #         0,
-    #         1,
-    #         remote_service="AWS::S3",
-    #         remote_operation="CreateBucket",
-    #         remote_resource_type="AWS::S3::Bucket",
-    #         remote_resource_identifier="valid-bucket-name",
-    #         request_specific_attributes={
-    #             SpanAttributes.AWS_S3_BUCKET: "valid-bucket-name",
-    #         },
-    #         span_name="S3.CreateBucket",
-    #     )
-    #
-    # def test_dynamodb_create_table(self):
-    #     self.do_test_requests(
-    #         "ddb/createtable/some-table",
-    #         "GET",
-    #         200,
-    #         0,
-    #         0,
-    #         remote_service="AWS::DynamoDB",
-    #         remote_operation="CreateTable",
-    #         remote_resource_type="AWS::DynamoDB::Table",
-    #         remote_resource_identifier="test_table",
-    #         request_specific_attributes={
-    #             SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["test_table"],
-    #         },
-    #         span_name="DynamoDB.CreateTable",
-    #     )
-    #
-    # def test_dynamodb_put_item(self):
-    #     self.do_test_requests(
-    #         "ddb/putitem/putitem-table/key",
-    #         "GET",
-    #         200,
-    #         0,
-    #         0,
-    #         remote_service="AWS::DynamoDB",
-    #         remote_operation="PutItem",
-    #         remote_resource_type="AWS::DynamoDB::Table",
-    #         remote_resource_identifier="put_test_table",
-    #         request_specific_attributes={
-    #             SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["put_test_table"],
-    #         },
-    #         span_name="DynamoDB.PutItem",
-    #     )
-    #
-    # def test_dynamodb_error(self):
-    #     self.do_test_requests(
-    #         "ddb/error",
-    #         "GET",
-    #         400,
-    #         1,
-    #         0,
-    #         remote_service="AWS::DynamoDB",
-    #         remote_operation="PutItem",
-    #         remote_resource_type="AWS::DynamoDB::Table",
-    #         remote_resource_identifier="invalid_table",
-    #         request_specific_attributes={
-    #             SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["invalid_table"],
-    #         },
-    #         span_name="DynamoDB.PutItem",
-    #     )
-    #
-    # def test_dynamodb_fault(self):
-    #     self.do_test_requests(
-    #         "ddb/fault",
-    #         "GET",
-    #         500,
-    #         0,
-    #         1,
-    #         remote_service="AWS::DynamoDB",
-    #         remote_operation="PutItem",
-    #         remote_resource_type="AWS::DynamoDB::Table",
-    #         remote_resource_identifier="invalid_table",
-    #         request_specific_attributes={
-    #             SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["invalid_table"],
-    #         },
-    #         span_name="DynamoDB.PutItem",
-    #     )
-    #
-    # def test_sqs_create_queue(self):
-    #     self.do_test_requests(
-    #         "sqs/createqueue/some-queue",
-    #         "GET",
-    #         200,
-    #         0,
-    #         0,
-    #         remote_service="AWS::SQS",
-    #         remote_operation="CreateQueue",
-    #         remote_resource_type="AWS::SQS::Queue",
-    #         remote_resource_identifier="test_queue",
-    #         request_specific_attributes={
-    #             _AWS_QUEUE_NAME: "test_queue",
-    #         },
-    #         span_name="SQS.CreateQueue",
-    #     )
-    #
-    # def test_sqs_send_message(self):
-    #     self.do_test_requests(
-    #         "sqs/publishqueue/some-queue",
-    #         "GET",
-    #         200,
-    #         0,
-    #         0,
-    #         remote_service="AWS::SQS",
-    #         remote_operation="SendMessage",
-    #         remote_resource_type="AWS::SQS::Queue",
-    #         remote_resource_identifier="test_put_get_queue",
-    #         request_specific_attributes={
-    #             _AWS_QUEUE_URL: "http://localstack:4566/000000000000/test_put_get_queue",
-    #         },
-    #         span_name="SQS.SendMessage",
-    #     )
-    #
-    # def test_sqs_receive_message(self):
-    #     self.do_test_requests(
-    #         "sqs/consumequeue/some-queue",
-    #         "GET",
-    #         200,
-    #         0,
-    #         0,
-    #         remote_service="AWS::SQS",
-    #         remote_operation="ReceiveMessage",
-    #         remote_resource_type="AWS::SQS::Queue",
-    #         remote_resource_identifier="test_put_get_queue",
-    #         request_specific_attributes={
-    #             _AWS_QUEUE_URL: "http://localstack:4566/000000000000/test_put_get_queue",
-    #         },
-    #         span_name="SQS.ReceiveMessage",
-    #     )
-    #
-    # def test_sqs_error(self):
-    #     self.do_test_requests(
-    #         "sqs/error",
-    #         "GET",
-    #         400,
-    #         1,
-    #         0,
-    #         remote_service="AWS::SQS",
-    #         remote_operation="SendMessage",
-    #         remote_resource_type="AWS::SQS::Queue",
-    #         remote_resource_identifier="sqserror",
-    #         request_specific_attributes={
-    #             _AWS_QUEUE_URL: "http://error.test:8080/000000000000/sqserror",
-    #         },
-    #         span_name="SQS.SendMessage",
-    #     )
-    #
-    # def test_sqs_fault(self):
-    #     self.do_test_requests(
-    #         "sqs/fault",
-    #         "GET",
-    #         500,
-    #         0,
-    #         1,
-    #         remote_service="AWS::SQS",
-    #         remote_operation="CreateQueue",
-    #         remote_resource_type="AWS::SQS::Queue",
-    #         remote_resource_identifier="invalid_test",
-    #         request_specific_attributes={
-    #             _AWS_QUEUE_NAME: "invalid_test",
-    #         },
-    #         span_name="SQS.CreateQueue",
-    #     )
+    def test_s3_create_bucket(self):
+        self.do_test_requests(
+            "s3/createbucket/create-bucket",
+            "GET",
+            200,
+            0,
+            0,
+            remote_service="AWS::S3",
+            remote_operation="CreateBucket",
+            remote_resource_type="AWS::S3::Bucket",
+            remote_resource_identifier="test-bucket-name",
+            request_specific_attributes={
+                SpanAttributes.AWS_S3_BUCKET: "test-bucket-name",
+            },
+            span_name="S3.CreateBucket",
+        )
+
+    def test_s3_create_object(self):
+        self.do_test_requests(
+            "s3/createobject/put-object/some-object",
+            "GET",
+            200,
+            0,
+            0,
+            remote_service="AWS::S3",
+            remote_operation="PutObject",
+            remote_resource_type="AWS::S3::Bucket",
+            remote_resource_identifier="test-put-object-bucket-name",
+            request_specific_attributes={
+                SpanAttributes.AWS_S3_BUCKET: "test-put-object-bucket-name",
+            },
+            span_name="S3.PutObject",
+        )
+
+    def test_s3_get_object(self):
+        self.do_test_requests(
+            "s3/getobject/get-object/some-object",
+            "GET",
+            200,
+            0,
+            0,
+            remote_service="AWS::S3",
+            remote_operation="GetObject",
+            remote_resource_type="AWS::S3::Bucket",
+            remote_resource_identifier="test-get-object-bucket-name",
+            request_specific_attributes={
+                SpanAttributes.AWS_S3_BUCKET: "test-get-object-bucket-name",
+            },
+            span_name="S3.GetObject",
+        )
+
+    def test_s3_error(self):
+        self.do_test_requests(
+            "s3/error",
+            "GET",
+            400,
+            1,
+            0,
+            remote_service="AWS::S3",
+            remote_operation="CreateBucket",
+            remote_resource_type="AWS::S3::Bucket",
+            remote_resource_identifier="-",
+            request_specific_attributes={
+                SpanAttributes.AWS_S3_BUCKET: "-",
+            },
+            span_name="S3.CreateBucket",
+        )
+
+    def test_s3_fault(self):
+        self.do_test_requests(
+            "s3/fault",
+            "GET",
+            500,
+            0,
+            1,
+            remote_service="AWS::S3",
+            remote_operation="CreateBucket",
+            remote_resource_type="AWS::S3::Bucket",
+            remote_resource_identifier="valid-bucket-name",
+            request_specific_attributes={
+                SpanAttributes.AWS_S3_BUCKET: "valid-bucket-name",
+            },
+            span_name="S3.CreateBucket",
+        )
+
+    def test_dynamodb_create_table(self):
+        self.do_test_requests(
+            "ddb/createtable/some-table",
+            "GET",
+            200,
+            0,
+            0,
+            remote_service="AWS::DynamoDB",
+            remote_operation="CreateTable",
+            remote_resource_type="AWS::DynamoDB::Table",
+            remote_resource_identifier="test_table",
+            request_specific_attributes={
+                SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["test_table"],
+            },
+            span_name="DynamoDB.CreateTable",
+        )
+
+    def test_dynamodb_put_item(self):
+        self.do_test_requests(
+            "ddb/putitem/putitem-table/key",
+            "GET",
+            200,
+            0,
+            0,
+            remote_service="AWS::DynamoDB",
+            remote_operation="PutItem",
+            remote_resource_type="AWS::DynamoDB::Table",
+            remote_resource_identifier="put_test_table",
+            request_specific_attributes={
+                SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["put_test_table"],
+            },
+            span_name="DynamoDB.PutItem",
+        )
+
+    def test_dynamodb_error(self):
+        self.do_test_requests(
+            "ddb/error",
+            "GET",
+            400,
+            1,
+            0,
+            remote_service="AWS::DynamoDB",
+            remote_operation="PutItem",
+            remote_resource_type="AWS::DynamoDB::Table",
+            remote_resource_identifier="invalid_table",
+            request_specific_attributes={
+                SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["invalid_table"],
+            },
+            span_name="DynamoDB.PutItem",
+        )
+
+    def test_dynamodb_fault(self):
+        self.do_test_requests(
+            "ddb/fault",
+            "GET",
+            500,
+            0,
+            1,
+            remote_service="AWS::DynamoDB",
+            remote_operation="PutItem",
+            remote_resource_type="AWS::DynamoDB::Table",
+            remote_resource_identifier="invalid_table",
+            request_specific_attributes={
+                SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["invalid_table"],
+            },
+            span_name="DynamoDB.PutItem",
+        )
+
+    def test_sqs_create_queue(self):
+        self.do_test_requests(
+            "sqs/createqueue/some-queue",
+            "GET",
+            200,
+            0,
+            0,
+            remote_service="AWS::SQS",
+            remote_operation="CreateQueue",
+            remote_resource_type="AWS::SQS::Queue",
+            remote_resource_identifier="test_queue",
+            request_specific_attributes={
+                _AWS_QUEUE_NAME: "test_queue",
+            },
+            span_name="SQS.CreateQueue",
+        )
+
+    def test_sqs_send_message(self):
+        self.do_test_requests(
+            "sqs/publishqueue/some-queue",
+            "GET",
+            200,
+            0,
+            0,
+            remote_service="AWS::SQS",
+            remote_operation="SendMessage",
+            remote_resource_type="AWS::SQS::Queue",
+            remote_resource_identifier="test_put_get_queue",
+            request_specific_attributes={
+                _AWS_QUEUE_URL: "http://localstack:4566/000000000000/test_put_get_queue",
+            },
+            span_name="SQS.SendMessage",
+        )
+
+    def test_sqs_receive_message(self):
+        self.do_test_requests(
+            "sqs/consumequeue/some-queue",
+            "GET",
+            200,
+            0,
+            0,
+            remote_service="AWS::SQS",
+            remote_operation="ReceiveMessage",
+            remote_resource_type="AWS::SQS::Queue",
+            remote_resource_identifier="test_put_get_queue",
+            request_specific_attributes={
+                _AWS_QUEUE_URL: "http://localstack:4566/000000000000/test_put_get_queue",
+            },
+            span_name="SQS.ReceiveMessage",
+        )
+
+    def test_sqs_error(self):
+        self.do_test_requests(
+            "sqs/error",
+            "GET",
+            400,
+            1,
+            0,
+            remote_service="AWS::SQS",
+            remote_operation="SendMessage",
+            remote_resource_type="AWS::SQS::Queue",
+            remote_resource_identifier="sqserror",
+            request_specific_attributes={
+                _AWS_QUEUE_URL: "http://error.test:8080/000000000000/sqserror",
+            },
+            span_name="SQS.SendMessage",
+        )
+
+    def test_sqs_fault(self):
+        self.do_test_requests(
+            "sqs/fault",
+            "GET",
+            500,
+            0,
+            1,
+            remote_service="AWS::SQS",
+            remote_operation="CreateQueue",
+            remote_resource_type="AWS::SQS::Queue",
+            remote_resource_identifier="invalid_test",
+            request_specific_attributes={
+                _AWS_QUEUE_NAME: "invalid_test",
+            },
+            span_name="SQS.CreateQueue",
+        )
 
     def test_kinesis_put_record(self):
         self.do_test_requests(
@@ -355,7 +355,6 @@ class BotocoreTest(ContractTestBase):
                 r"stream/test_stream/consumer/test_consumer:\d{10}",
             },
             span_name="Kinesis.DescribeStreamConsumer",
-            span_length=2,
         )
 
     def test_kinesis_error(self):
@@ -400,11 +399,9 @@ class BotocoreTest(ContractTestBase):
             if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
                 target_spans.append(resource_scope_span.span)
 
-        span_length = kwargs.get("span_length") if kwargs.get("span_length") else 1
-
-        self.assertEqual(len(target_spans), span_length)
+        self.assertEqual(len(target_spans), 1)
         self._assert_aws_attributes(
-            target_spans[span_length - 1].attributes,
+            target_spans[0].attributes,
             kwargs.get("remote_service"),
             kwargs.get("remote_operation"),
             "LOCAL_ROOT",
@@ -450,12 +447,10 @@ class BotocoreTest(ContractTestBase):
             if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
                 target_spans.append(resource_scope_span.span)
 
-        span_length = kwargs.get("span_length") if kwargs.get("span_length") else 1
-
-        self.assertEqual(len(target_spans), span_length)
-        self.assertEqual(target_spans[span_length - 1].name, kwargs.get("span_name"))
+        self.assertEqual(len(target_spans), 1)
+        self.assertEqual(target_spans[0].name, kwargs.get("span_name"))
         self._assert_semantic_conventions_attributes(
-            target_spans[span_length - 1].attributes,
+            target_spans[0].attributes,
             kwargs.get("remote_service"),
             kwargs.get("remote_operation"),
             status_code,
@@ -501,9 +496,9 @@ class BotocoreTest(ContractTestBase):
         for resource_scope_metric in resource_scope_metrics:
             if resource_scope_metric.metric.name.lower() == metric_name.lower():
                 target_metrics.append(resource_scope_metric.metric)
-        span_length = kwargs.get("span_length") if kwargs.get("span_length") else 1
-        self.assertEqual(len(target_metrics), span_length)
-        target_metric: Metric = target_metrics[span_length - 1]
+
+        self.assertEqual(len(target_metrics), 1)
+        target_metric: Metric = target_metrics[0]
         dp_list: List[ExponentialHistogramDataPoint] = target_metric.exponential_histogram.data_points
         dp_list_count: int = kwargs.get("dp_count", 2)
         self.assertEqual(len(dp_list), dp_list_count)

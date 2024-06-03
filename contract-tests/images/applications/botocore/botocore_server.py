@@ -6,6 +6,7 @@ import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from logging import INFO, Logger, getLogger
 from threading import Thread
+from typing import Optional, List
 
 import boto3
 import requests
@@ -33,6 +34,10 @@ _logger.setLevel(INFO)
 # pylint: disable=broad-exception-caught
 class RequestHandler(BaseHTTPRequestHandler):
     main_status: int = 200
+
+    def __init__(self, request, client_address, server, *args, consumer_arn=None, **kwargs):
+        self.consumer_arn = consumer_arn
+        super().__init__(request, client_address, server, *args, **kwargs)
 
     @override
     # pylint: disable=invalid-name
@@ -206,11 +211,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             kinesis_client.put_record(StreamName="test_stream", Data=b"test", PartitionKey="partition_key")
         elif self.in_path("describestreamconsumer/my-consumer"):
             set_main_status(200)
-            response = kinesis_client.register_stream_consumer(
-                StreamARN="arn:aws:kinesis:us-west-2:000000000000:stream/test_stream", ConsumerName="test_consumer"
-            )
-            consumer_arn = response["Consumer"]["ConsumerARN"]
-            kinesis_client.describe_stream_consumer(ConsumerARN=consumer_arn)
+            kinesis_client.describe_stream_consumer(ConsumerARN=self.consumer_arn)
         else:
             set_main_status(404)
 
@@ -223,7 +224,7 @@ def set_main_status(status: int) -> None:
     RequestHandler.main_status = status
 
 
-def prepare_aws_server() -> None:
+def prepare_aws_server() -> Optional[List[str]]:
     requests.Request(method="POST", url="http://localhost:4566/_localstack/state/reset")
     try:
         # Set up S3 so tests can access buckets and retrieve a file.
@@ -258,15 +259,21 @@ def prepare_aws_server() -> None:
         # Set up Kinesis so tests can access a stream.
         kinesis_client: BaseClient = boto3.client("kinesis", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
         kinesis_client.create_stream(StreamName="test_stream", ShardCount=1)
+        response = kinesis_client.register_stream_consumer(
+            StreamARN="arn:aws:kinesis:us-west-2:000000000000:stream/test_stream", ConsumerName="test_consumer"
+        )
+        consumer_arn = response["Consumer"]["ConsumerARN"]
+        return [consumer_arn]
     except Exception as exception:
         print("Unexpected exception occurred", exception)
+        return [None]
 
 
 def main() -> None:
-    prepare_aws_server()
+    [consumer_arn] = prepare_aws_server()
     server_address: tuple[str, int] = ("0.0.0.0", _PORT)
     request_handler_class: type = RequestHandler
-    requests_server: ThreadingHTTPServer = ThreadingHTTPServer(server_address, request_handler_class)
+    requests_server: ThreadingHTTPServer = ThreadingHTTPServer(server_address, lambda *args, **kwargs: request_handler_class(*args, consumer_arn=consumer_arn, **kwargs))
     atexit.register(requests_server.shutdown)
     server_thread: Thread = Thread(target=requests_server.serve_forever)
     server_thread.start()
