@@ -4,7 +4,6 @@ import atexit
 import os
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from logging import INFO, Logger, getLogger
 from threading import Thread
 from typing import List, Optional
 
@@ -26,9 +25,6 @@ _FAULT_ENDPOINT: str = "http://fault.test:8080"
 os.environ.setdefault("AWS_ACCESS_KEY_ID", "testcontainers-localstack")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testcontainers-localstack")
 _NO_RETRY_CONFIG: Config = Config(retries={"max_attempts": 0}, connect_timeout=3, read_timeout=3)
-
-_logger: Logger = getLogger(__name__)
-_logger.setLevel(INFO)
 
 
 # pylint: disable=broad-exception-caught
