@@ -57,6 +57,10 @@ class TestAwsXRayRemoteSampler(TestCase):
         self.assertIsNotNone(rs._AwsXRayRemoteSampler__resource)
         self.assertTrue(len(rs._AwsXRayRemoteSampler__client_id), 24)
 
+        # Clean up timers
+        rs._rules_timer.cancel()
+        rs._targets_timer.cancel()
+
     def test_create_remote_sampler_with_populated_resource(self):
         rs = AwsXRayRemoteSampler(
             resource=Resource.create({"service.name": "test-service-name", "cloud.platform": "test-cloud-platform"})
@@ -67,6 +71,10 @@ class TestAwsXRayRemoteSampler(TestCase):
         self.assertIsNotNone(rs._AwsXRayRemoteSampler__resource)
         self.assertEqual(rs._AwsXRayRemoteSampler__resource.attributes["service.name"], "test-service-name")
         self.assertEqual(rs._AwsXRayRemoteSampler__resource.attributes["cloud.platform"], "test-cloud-platform")
+
+        # Clean up timers
+        rs._rules_timer.cancel()
+        rs._targets_timer.cancel()
 
     def test_create_remote_sampler_with_all_fields_populated(self):
         rs = AwsXRayRemoteSampler(
@@ -85,6 +93,10 @@ class TestAwsXRayRemoteSampler(TestCase):
         )
         self.assertEqual(rs._AwsXRayRemoteSampler__resource.attributes["service.name"], "test-service-name")
         self.assertEqual(rs._AwsXRayRemoteSampler__resource.attributes["cloud.platform"], "test-cloud-platform")
+
+        # Clean up timers
+        rs._rules_timer.cancel()
+        rs._targets_timer.cancel()
 
     @patch("requests.Session.post", side_effect=mocked_requests_get)
     @patch("amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler.DEFAULT_TARGET_POLLING_INTERVAL_SECONDS", 2)
@@ -112,6 +124,10 @@ class TestAwsXRayRemoteSampler(TestCase):
         self.assertEqual(
             rs.should_sample(None, 0, "name", attributes={"abc": "1234"}).decision, Decision.RECORD_AND_SAMPLE
         )
+
+        # Clean up timers
+        rs._rules_timer.cancel()
+        rs._targets_timer.cancel()
 
     @patch("requests.Session.post", side_effect=mocked_requests_get)
     @patch("amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler.DEFAULT_TARGET_POLLING_INTERVAL_SECONDS", 3)
@@ -155,6 +171,10 @@ class TestAwsXRayRemoteSampler(TestCase):
             100000,
         )
         self.assertEqual(sum_sampled, 100000)
+
+        # Clean up timers
+        rs._rules_timer.cancel()
+        rs._targets_timer.cancel()
 
     # pylint: disable=no-member
     @patch("requests.Session.post", side_effect=mocked_requests_get)
@@ -210,3 +230,7 @@ class TestAwsXRayRemoteSampler(TestCase):
             100,
         )
         self.assertEqual(sum_sampled, 100)
+
+        # Clean up timers
+        rs._rules_timer.cancel()
+        rs._targets_timer.cancel()
