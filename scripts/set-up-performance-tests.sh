@@ -30,6 +30,7 @@ if [ "$DISTRO" = "aws_opentelemetry_distro-*-py3-none-any.whl" ]; then
 fi
 
 # Create application images
+# TODO: The vehicle sample app doesn't exist anymore so this needs to be cleaned up
 cd ..
 docker build . -t performance-test/vehicle-inventory-service -f performance-tests/Dockerfile-VehicleInventoryService-base --build-arg="DISTRO=${DISTRO}"
 if [ $? = 1 ]; then
