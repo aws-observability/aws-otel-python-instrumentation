@@ -4,6 +4,9 @@
 import importlib
 import json
 import copy
+import io
+import codecs
+from http.client import HTTPResponse
 
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
 from opentelemetry.instrumentation.botocore.extensions.sqs import _SqsExtension
@@ -139,15 +142,50 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
 
             file.write("result body read: \n")
             # copy_result_body = copy.deepcopy(result["body"])
-            body = result["body"].readlines()
-            file.write("result body readlines: \n")
-            file.write(body.__class__.__name__)
-            file.write(str(body))
+            # raw_stream = result["body"]._raw_stream.read().decode("UTF8")
+            # body_read = result["body"]._raw_stream.read().decode("UTF8")
+            file.write("body_read type: \n")
+            # file.write(result["body"]._raw_stream.__class__.__name__) # HTTPResponse
 
-            file.write("result body read _amount_read: \n")
-            file.write(str(result["body"]._amount_read))
-            file.write("result body read _content_length: \n")
-            file.write(str(result["body"]._content_length))
+            raw_stream = result["body"]._raw_stream.read()
+            # raw_stream.seek(0)
+
+            file.write("raw_stream: \n")
+            # file.write(str(raw_stream.decode("UTF8")))
+            json.dump(json.loads(raw_stream.decode("UTF8")), file, indent=4)
+            stream_csv = io.BytesIO(raw_stream)
+            stream_csv.seek(0)
+            # raw_stream = b'This is the raw stream content'
+            # raw_stream = io.BytesIO(raw_stream)
+            #
+            # file.write("new stream_csv type: \n")
+            # file.write(stream_csv.__class__.__name__)
+            # file.write("new_read: \n")
+            # file.write(str(stream_csv.read()))
+            # stream_csv.seek(0)
+            # httpresponse = HTTPResponse(raw_stream)
+            # httpresponse.begin()
+            result["body"]._raw_stream = stream_csv
+            # result["body"]._raw_stream.begin()
+
+            # stream_body = io.StringIO(body_read)
+            # stream_body.seek(0)
+            # file.write("stream_body: \n")
+            # file.write(str(stream_body))
+            #
+            # new_read = body_read.read()
+            # file.write("new_read: \n")
+            # file.write(str(new_read))
+
+            # body = result["body"].readlines()
+            # file.write("result body readlines: \n")
+            # file.write(body.__class__.__name__)
+            # file.write(str(body))
+            #
+            # file.write("result body read _amount_read: \n")
+            # file.write(str(result["body"]._amount_read))
+            # file.write("result body read _content_length: \n")
+            # file.write(str(result["body"]._content_length))
             # file.write("result body read second: \n")
             # file.write(str(result["body"].read()))
             #
