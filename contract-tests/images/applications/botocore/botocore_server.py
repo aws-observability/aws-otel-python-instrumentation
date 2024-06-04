@@ -5,6 +5,7 @@ import os
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
+from typing import List
 
 import boto3
 import requests
@@ -41,6 +42,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._handle_sqs_request()
         if self.in_path("kinesis"):
             self._handle_kinesis_request()
+        if self.in_path("secretsmanager"):
+            self._handle_secretsmanager_request()
 
         self._end_request(self.main_status)
 
@@ -203,6 +206,34 @@ class RequestHandler(BaseHTTPRequestHandler):
         else:
             set_main_status(404)
 
+    def _handle_secretsmanager_request(self) -> None:
+        secretsmanager_client = boto3.client("secretsmanager", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
+        if self.in_path(_ERROR):
+            set_main_status(400)
+            try:
+                error_client = boto3.client("secretsmanager", endpoint_url=_ERROR_ENDPOINT, region_name=_AWS_REGION)
+                error_client.describe_secret(
+                    SecretId="arn:aws:secretsmanager:us-west-2:000000000000:secret:unExistSecret"
+                )
+            except Exception as exception:
+                print("Expected exception occurred", exception)
+        elif self.in_path(_FAULT):
+            set_main_status(500)
+            try:
+                fault_client = boto3.client(
+                    "secretsmanager", endpoint_url=_FAULT_ENDPOINT, region_name=_AWS_REGION, config=_NO_RETRY_CONFIG
+                )
+                fault_client.get_secret_value(
+                    SecretId="arn:aws:secretsmanager:us-west-2:000000000000:secret:nonexistent-secret"
+                )
+            except Exception as exception:
+                print("Expected exception occurred", exception)
+        elif self.in_path("describesecret/my-secret"):
+            set_main_status(200)
+            secretsmanager_client.describe_secret(SecretId="testSecret")
+        else:
+            set_main_status(404)
+
     def _end_request(self, status_code: int):
         self.send_response_only(status_code)
         self.end_headers()
@@ -212,17 +243,24 @@ def set_main_status(status: int) -> None:
     RequestHandler.main_status = status
 
 
+# pylint: disable=too-many-locals
 def prepare_aws_server() -> None:
     requests.Request(method="POST", url="http://localhost:4566/_localstack/state/reset")
     try:
         # Set up S3 so tests can access buckets and retrieve a file.
         s3_client: BaseClient = boto3.client("s3", endpoint_url=_AWS_SDK_S3_ENDPOINT, region_name=_AWS_REGION)
-        s3_client.create_bucket(
-            Bucket="test-put-object-bucket-name", CreateBucketConfiguration={"LocationConstraint": _AWS_REGION}
-        )
-        s3_client.create_bucket(
-            Bucket="test-get-object-bucket-name", CreateBucketConfiguration={"LocationConstraint": _AWS_REGION}
-        )
+        bucket_names: List[str] = [bucket["Name"] for bucket in s3_client.list_buckets()["Buckets"]]
+        put_bucket_name: str = "test-put-object-bucket-name"
+        if put_bucket_name not in bucket_names:
+            s3_client.create_bucket(
+                Bucket=put_bucket_name, CreateBucketConfiguration={"LocationConstraint": _AWS_REGION}
+            )
+
+        get_bucket_name: str = "test-get-object-bucket-name"
+        if get_bucket_name not in bucket_names:
+            s3_client.create_bucket(
+                Bucket=get_bucket_name, CreateBucketConfiguration={"LocationConstraint": _AWS_REGION}
+            )
         with tempfile.NamedTemporaryFile(delete=True) as temp_file:
             temp_file_name: str = temp_file.name
             temp_file.write(b"This is temp file for S3 upload")
@@ -231,22 +269,44 @@ def prepare_aws_server() -> None:
 
         # Set up DDB so tests can access a table.
         ddb_client: BaseClient = boto3.client("dynamodb", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
-        ddb_client.create_table(
-            TableName="put_test_table",
-            KeySchema=[{"AttributeName": "id", "KeyType": "HASH"}],
-            AttributeDefinitions=[
-                {"AttributeName": "id", "AttributeType": "S"},
-            ],
-            BillingMode="PAY_PER_REQUEST",
-        )
+        table_names: List[str] = ddb_client.list_tables()["TableNames"]
+
+        table_name: str = "put_test_table"
+        if table_name not in table_names:
+            ddb_client.create_table(
+                TableName=table_name,
+                KeySchema=[{"AttributeName": "id", "KeyType": "HASH"}],
+                AttributeDefinitions=[{"AttributeName": "id", "AttributeType": "S"}],
+                BillingMode="PAY_PER_REQUEST",
+            )
 
         # Set up SQS so tests can access a queue.
         sqs_client: BaseClient = boto3.client("sqs", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
-        sqs_client.create_queue(QueueName="test_put_get_queue")
+        queue_name: str = "test_put_get_queue"
+        queues_response = sqs_client.list_queues(QueueNamePrefix=queue_name)
+        queues: List[str] = queues_response["QueueUrls"] if "QueueUrls" in queues_response else []
+        if not queues:
+            sqs_client.create_queue(QueueName=queue_name)
 
         # Set up Kinesis so tests can access a stream.
         kinesis_client: BaseClient = boto3.client("kinesis", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
-        kinesis_client.create_stream(StreamName="test_stream", ShardCount=1)
+        stream_name: str = "test_stream"
+        stream_response = kinesis_client.list_streams()
+        if not stream_response["StreamNames"]:
+            kinesis_client.create_stream(StreamName=stream_name, ShardCount=1)
+            kinesis_client.register_stream_consumer(
+                StreamARN="arn:aws:kinesis:us-west-2:000000000000:stream/" + stream_name, ConsumerName="test_consumer"
+            )
+
+        # Set up Secrets Manager so tests can access a stream.
+        secretsmanager_client = boto3.client("secretsmanager", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
+
+        response = secretsmanager_client.list_secrets()
+        secret = next((s for s in response["SecretList"] if s["Name"] == "testSecret"), None)
+        if not secret:
+            secretsmanager_client.create_secret(
+                Name="testSecret", SecretString="secretValue", Description="This is a test secret"
+            )
     except Exception as exception:
         print("Unexpected exception occurred", exception)
 
