@@ -964,7 +964,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         )
         self._mock_attribute([AWS_STREAM_CONSUMER_ARN], [None])
 
-        # Validate both AWS_STREAM_NAME and AWS_STREAM_NAME present, then remove it.
+        # Validate both AWS_STREAM_NAME and AWS_STREAM_CONSUMER_ARN present, then remove it.
         self._mock_attribute(
             [AWS_STREAM_NAME, AWS_STREAM_CONSUMER_ARN],
             [
