@@ -379,6 +379,7 @@ class BotocoreTest(ContractTestBase):
             200,
             0,
             0,
+            rpc_service="Secrets Manager",
             remote_service="AWS::SecretsManager",
             remote_operation="DescribeSecret",
             remote_resource_type="AWS::SecretsManager::Secret",
@@ -397,6 +398,7 @@ class BotocoreTest(ContractTestBase):
             400,
             1,
             0,
+            rpc_service="Secrets Manager",
             remote_service="AWS::SecretsManager",
             remote_operation="DescribeSecret",
             remote_resource_type="AWS::SecretsManager::Secret",
@@ -414,6 +416,7 @@ class BotocoreTest(ContractTestBase):
             500,
             0,
             1,
+            rpc_service="Secrets Manager",
             remote_service="AWS::SecretsManager",
             remote_operation="GetSecretValue",
             remote_resource_type="AWS::SecretsManager::Secret",
@@ -484,7 +487,7 @@ class BotocoreTest(ContractTestBase):
         self.assertEqual(target_spans[0].name, kwargs.get("span_name"))
         self._assert_semantic_conventions_attributes(
             target_spans[0].attributes,
-            kwargs.get("remote_service"),
+            kwargs.get("rpc_service") if "rpc_service" in kwargs else kwargs.get("remote_service").split("::")[-1],
             kwargs.get("remote_operation"),
             status_code,
             kwargs.get("request_specific_attributes", {}),
@@ -494,7 +497,7 @@ class BotocoreTest(ContractTestBase):
     def _assert_semantic_conventions_attributes(
         self,
         attributes_list: List[KeyValue],
-        service: str,
+        rpc_service: str,
         operation: str,
         status_code: int,
         request_specific_attributes: dict,
@@ -502,7 +505,7 @@ class BotocoreTest(ContractTestBase):
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_METHOD, operation)
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SYSTEM, "aws-api")
-        self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SERVICE, service.split("::")[-1])
+        self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SERVICE, rpc_service)
         self._assert_int_attribute(attributes_dict, SpanAttributes.HTTP_STATUS_CODE, status_code)
         # TODO: botocore instrumentation is not respecting PEER_SERVICE
         # self._assert_str_attribute(attributes_dict, SpanAttributes.PEER_SERVICE, "backend:8080")
