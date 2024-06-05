@@ -206,6 +206,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             set_main_status(200)
             kinesis_client.put_record(StreamName="test_stream", Data=b"test", PartitionKey="partition_key")
         elif self.in_path("describestreamconsumer/my-consumer"):
+            if self.consumer_arn is None:
+                raise ValueError("Consumer ARN is None. Cannot describe stream consumer.")
             set_main_status(200)
             kinesis_client.describe_stream_consumer(ConsumerARN=self.consumer_arn)
         else:

@@ -29,7 +29,7 @@ _logger.setLevel(INFO)
 _AWS_QUEUE_URL: str = "aws.sqs.queue_url"
 _AWS_QUEUE_NAME: str = "aws.sqs.queue_name"
 _AWS_STREAM_NAME: str = "aws.kinesis.stream_name"
-_AWS_CONSUMER_ARN: str = "aws.kinesis.consumer_arn"
+_AWS_STREAM_CONSUMER_ARN: str = "aws.kinesis.stream_consumer_arn"
 
 
 # pylint: disable=too-many-public-methods
@@ -351,7 +351,7 @@ class BotocoreTest(ContractTestBase):
             remote_resource_identifier=r"arn:aws:kinesis:us-west-2:000000000000:"
             r"stream/test_stream/consumer/test_consumer:\d{10}",
             request_specific_attributes={
-                _AWS_CONSUMER_ARN: r"arn:aws:kinesis:us-west-2:000000000000:"
+                _AWS_STREAM_CONSUMER_ARN: r"arn:aws:kinesis:us-west-2:000000000000:"
                 r"stream/test_stream/consumer/test_consumer:\d{10}",
             },
             span_name="Kinesis.DescribeStreamConsumer",

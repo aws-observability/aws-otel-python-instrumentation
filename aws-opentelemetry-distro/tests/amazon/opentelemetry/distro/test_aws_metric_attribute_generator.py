@@ -8,7 +8,6 @@ from unittest import TestCase
 from unittest.mock import MagicMock
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
-    AWS_CONSUMER_ARN,
     AWS_CONSUMER_PARENT_SPAN_KIND,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
@@ -19,6 +18,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_REMOTE_RESOURCE_TYPE,
     AWS_REMOTE_SERVICE,
     AWS_SPAN_KIND,
+    AWS_STREAM_CONSUMER_ARN,
     AWS_STREAM_NAME,
 )
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
@@ -951,9 +951,9 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._validate_remote_resource_attributes("AWS::Kinesis::Stream", "aws_stream_name")
         self._mock_attribute([AWS_STREAM_NAME], [None])
 
-        # Validate behaviour of AWS_CONSUMER_ARN attribute, then remove it.
+        # Validate behaviour of AWS_STREAM_CONSUMER_ARN attribute, then remove it.
         self._mock_attribute(
-            [AWS_CONSUMER_ARN],
+            [AWS_STREAM_CONSUMER_ARN],
             ["arn:aws:kinesis:us-west-2:000000000000:stream/test_stream/consumer/test_consumer:0123456789"],
             keys,
             values,
@@ -962,7 +962,20 @@ class TestAwsMetricAttributeGenerator(TestCase):
             "AWS::Kinesis::StreamConsumer",
             "arn:aws:kinesis:us-west-2:000000000000:stream/test_stream/consumer/test_consumer:0123456789",
         )
-        self._mock_attribute([AWS_CONSUMER_ARN], [None])
+        self._mock_attribute([AWS_STREAM_CONSUMER_ARN], [None])
+
+        # Validate both AWS_STREAM_NAME and AWS_STREAM_NAME present, then remove it.
+        self._mock_attribute(
+            [AWS_STREAM_NAME, AWS_STREAM_CONSUMER_ARN],
+            [
+                "aws_stream_name",
+                "arn:aws:kinesis:us-west-2:000000000000:stream/test_stream/consumer/test_consumer:0123456789",
+            ],
+            keys,
+            values,
+        )
+        self._validate_remote_resource_attributes("AWS::Kinesis::Stream", "aws_stream_name")
+        self._mock_attribute([AWS_STREAM_NAME, AWS_STREAM_CONSUMER_ARN], [None, None])
 
         # Validate behaviour of SpanAttributes.AWS_DYNAMODB_TABLE_NAMES attribute with one table name, then remove it.
         self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [["aws_table_name"]], keys, values)

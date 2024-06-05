@@ -81,8 +81,8 @@ class TestInstrumentationPatch(TestCase):
         kinesis_attributes: Dict[str, str] = _do_extract_kinesis_attributes()
         self.assertTrue("aws.kinesis.stream_name" in kinesis_attributes)
         self.assertEqual(kinesis_attributes["aws.kinesis.stream_name"], _STREAM_NAME)
-        self.assertTrue("aws.kinesis.consumer_arn" in kinesis_attributes)
-        self.assertEqual(kinesis_attributes["aws.kinesis.consumer_arn"], _CONSUMER_ARN)
+        self.assertTrue("aws.kinesis.stream_consumer_arn" in kinesis_attributes)
+        self.assertEqual(kinesis_attributes["aws.kinesis.stream_consumer_arn"], _CONSUMER_ARN)
 
         # S3
         self.assertTrue("s3" in _KNOWN_EXTENSIONS)
