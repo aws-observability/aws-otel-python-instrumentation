@@ -30,6 +30,7 @@ _AWS_QUEUE_URL: str = "aws.sqs.queue_url"
 _AWS_QUEUE_NAME: str = "aws.sqs.queue_name"
 _AWS_STREAM_NAME: str = "aws.kinesis.stream_name"
 _AWS_SECRET_ARN: str = "aws.secretsmanager.secret_arn"
+_AWS_STATE_MACHINE_ARN: str = "aws.stepfunctions.state_machine_arn"
 
 
 # pylint: disable=too-many-public-methods
@@ -425,6 +426,60 @@ class BotocoreTest(ContractTestBase):
                 _AWS_SECRET_ARN: "arn:aws:secretsmanager:us-west-2:000000000000:secret:nonexistent-secret",
             },
             span_name="Secrets Manager.GetSecretValue",
+        )
+
+    def test_stepfunctions_describe_state_machine(self):
+        self.do_test_requests(
+            "stepfunctions/describestatemachine/my-state-machine",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="SFN",
+            remote_service="AWS::StepFunctions",
+            remote_operation="DescribeStateMachine",
+            remote_resource_type="AWS::StepFunctions::StateMachine",
+            remote_resource_identifier="arn:aws:states:us-west-2:000000000000:stateMachine:testStateMachine",
+            request_specific_attributes={
+                _AWS_STATE_MACHINE_ARN: "arn:aws:states:us-west-2:000000000000:stateMachine:testStateMachine",
+            },
+            span_name="SFN.DescribeStateMachine",
+        )
+
+    def test_stepfunctions_error(self):
+        self.do_test_requests(
+            "stepfunctions/error",
+            "GET",
+            400,
+            1,
+            0,
+            rpc_service="SFN",
+            remote_service="AWS::StepFunctions",
+            remote_operation="DescribeStateMachine",
+            remote_resource_type="AWS::StepFunctions::StateMachine",
+            remote_resource_identifier="arn:aws:states:us-west-2:000000000000:stateMachine:unExistStateMachine",
+            request_specific_attributes={
+                _AWS_STATE_MACHINE_ARN: "arn:aws:states:us-west-2:000000000000:stateMachine:unExistStateMachine",
+            },
+            span_name="SFN.DescribeStateMachine",
+        )
+
+    def test_stepfunctions_fault(self):
+        self.do_test_requests(
+            "stepfunctions/fault",
+            "GET",
+            500,
+            0,
+            1,
+            rpc_service="SFN",
+            remote_service="AWS::StepFunctions",
+            remote_operation="ListStateMachineVersions",
+            remote_resource_type="AWS::StepFunctions::StateMachine",
+            remote_resource_identifier="arn:aws:states:us-west-2:000000000000:stateMachine:invalid-state-machine",
+            request_specific_attributes={
+                _AWS_STATE_MACHINE_ARN: "arn:aws:states:us-west-2:000000000000:stateMachine:invalid-state-machine",
+            },
+            span_name="SFN.ListStateMachineVersions",
         )
 
     @override

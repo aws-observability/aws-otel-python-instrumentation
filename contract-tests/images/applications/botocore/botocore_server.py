@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import atexit
+import json
 import os
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -11,6 +12,7 @@ import boto3
 import requests
 from botocore.client import BaseClient
 from botocore.config import Config
+from botocore.exceptions import ClientError
 from typing_extensions import override
 
 _PORT: int = 8080
@@ -44,6 +46,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._handle_kinesis_request()
         if self.in_path("secretsmanager"):
             self._handle_secretsmanager_request()
+        if self.in_path("stepfunctions"):
+            self._handle_stepsfunction_request()
 
         self._end_request(self.main_status)
 
@@ -234,6 +238,40 @@ class RequestHandler(BaseHTTPRequestHandler):
         else:
             set_main_status(404)
 
+    def _handle_stepsfunction_request(self) -> None:
+        sfn_client = boto3.client("stepfunctions", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
+        if self.in_path(_ERROR):
+            set_main_status(400)
+            try:
+                error_client = boto3.client("stepfunctions", endpoint_url=_ERROR_ENDPOINT, region_name=_AWS_REGION)
+                error_client.describe_state_machine(
+                    stateMachineArn="arn:aws:states:us-west-2:000000000000:stateMachine:unExistStateMachine"
+                )
+            except Exception as exception:
+                print("Expected exception occurred", exception)
+        elif self.in_path(_FAULT):
+            set_main_status(500)
+            try:
+                fault_client = boto3.client(
+                    "stepfunctions", endpoint_url=_FAULT_ENDPOINT, region_name=_AWS_REGION, config=_NO_RETRY_CONFIG
+                )
+                fault_client.meta.events.register(
+                    "before-call.stepfunctions.ListStateMachineVersions",
+                    lambda **kwargs: inject_500_error("ListStateMachineVersions", **kwargs),
+                )
+                fault_client.list_state_machine_versions(
+                    stateMachineArn="arn:aws:states:us-west-2:000000000000:stateMachine:invalid-state-machine",
+                )
+            except Exception as exception:
+                print("Expected exception occurred", exception)
+        elif self.in_path("describestatemachine/my-state-machine"):
+            set_main_status(200)
+            sfn_client.describe_state_machine(
+                stateMachineArn="arn:aws:states:us-west-2:000000000000:stateMachine:testStateMachine"
+            )
+        else:
+            set_main_status(404)
+
     def _end_request(self, status_code: int):
         self.send_response_only(status_code)
         self.end_headers()
@@ -243,7 +281,7 @@ def set_main_status(status: int) -> None:
     RequestHandler.main_status = status
 
 
-# pylint: disable=too-many-locals
+# pylint: disable=too-many-locals, too-many-statements
 def prepare_aws_server() -> None:
     requests.Request(method="POST", url="http://localhost:4566/_localstack/state/reset")
     try:
@@ -301,14 +339,62 @@ def prepare_aws_server() -> None:
         # Set up Secrets Manager so tests can access a stream.
         secretsmanager_client = boto3.client("secretsmanager", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
 
-        response = secretsmanager_client.list_secrets()
-        secret = next((s for s in response["SecretList"] if s["Name"] == "testSecret"), None)
+        secretsmanager_response = secretsmanager_client.list_secrets()
+        secret = next((s for s in secretsmanager_response["SecretList"] if s["Name"] == "testSecret"), None)
         if not secret:
             secretsmanager_client.create_secret(
                 Name="testSecret", SecretString="secretValue", Description="This is a test secret"
             )
+
+        # Set up IAM and create a role so StepFunctions use it to create a state machine.
+        iam_client = boto3.client("iam", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
+        role_name = "StepFunctionsExecutionTestRole"
+        iam_response = iam_client.list_roles()
+        role = next((r for r in iam_response["Roles"] if r["RoleName"] == role_name), None)
+        if not role:
+            assume_role_policy = {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {"Effect": "Allow", "Principal": {"Service": "states.amazonaws.com"}, "Action": "sts:AssumeRole"}
+                ],
+            }
+            iam_client.create_role(RoleName=role_name, AssumeRolePolicyDocument=json.dumps(assume_role_policy))
+            iam_client.attach_role_policy(
+                RoleName=role_name, PolicyArn="arn:aws:iam::aws:policy/service-role/AWSLambdaRole"
+            )
+
+        # Set up StepFucntion so tests can access a state machine.
+        sfn_client = boto3.client("stepfunctions", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
+        state_machine_name = "testStateMachine"
+        state_machine_response = sfn_client.list_state_machines()
+        state_machine = next(
+            (st for st in state_machine_response["stateMachines"] if st["name"] == state_machine_name), None
+        )
+        if not state_machine:
+            definition = {
+                "Comment": "A simple AWS Step Functions state machine",
+                "StartAt": "SimpleState",
+                "States": {"SimpleState": {"Type": "Pass", "Result": "Hello, State Machine!", "End": True}},
+            }
+
+            sfn_client.create_state_machine(
+                name=state_machine_name,
+                definition=json.dumps(definition),
+                roleArn="arn:aws:iam::000000000000:role/StepFunctionsExecutionTestRole",
+            )
+            # arn:aws:states:us-west-2:000000000000:stateMachine:testStateMachine
     except Exception as exception:
         print("Unexpected exception occurred", exception)
+
+
+def inject_500_error(api_name, **kwargs):
+    raise ClientError(
+        {
+            "Error": {"Code": "InternalServerError", "Message": "Internal Server Error"},
+            "ResponseMetadata": {"HTTPStatusCode": 500, "RequestId": "mock-request-id"},
+        },
+        api_name,
+    )
 
 
 def main() -> None:

@@ -16,6 +16,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_REMOTE_SERVICE,
     AWS_SECRET_ARN,
     AWS_SPAN_KIND,
+    AWS_STATE_MACHINE_ARN,
     AWS_STREAM_NAME,
 )
 from amazon.opentelemetry.distro._aws_span_processing_util import (
@@ -80,6 +81,7 @@ _NORMALIZED_KINESIS_SERVICE_NAME: str = "AWS::Kinesis"
 _NORMALIZED_S3_SERVICE_NAME: str = "AWS::S3"
 _NORMALIZED_SQS_SERVICE_NAME: str = "AWS::SQS"
 _NORMALIZED_SECRETSMANAGER_SERVICE_NAME: str = "AWS::SecretsManager"
+_NORMALIZED_STEPFUNCTIONS_SERVICE_NAME: str = "AWS::StepFunctions"  # "rpc.service": "SFN",
 _DB_CONNECTION_STRING_TYPE: str = "DB::Connection"
 
 # Special DEPENDENCY attribute value if GRAPHQL_OPERATION_TYPE attribute key is present.
@@ -294,6 +296,7 @@ def _normalize_remote_service_name(span: ReadableSpan, service_name: str) -> str
     if is_aws_sdk_span(span):
         aws_sdk_service_mapping = {
             "Secrets Manager": _NORMALIZED_SECRETSMANAGER_SERVICE_NAME,
+            "SFN": _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME,
         }
         return aws_sdk_service_mapping.get(service_name, "AWS::" + service_name)
     return service_name
@@ -380,6 +383,9 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         elif is_key_present(span, AWS_SECRET_ARN):
             remote_resource_type = _NORMALIZED_SECRETSMANAGER_SERVICE_NAME + "::Secret"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_SECRET_ARN))
+        elif is_key_present(span, AWS_STATE_MACHINE_ARN):
+            remote_resource_type = _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME + "::StateMachine"
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_STATE_MACHINE_ARN))
     elif is_db_span(span):
         remote_resource_type = _DB_CONNECTION_STRING_TYPE
         remote_resource_identifier = _get_db_connection(span)

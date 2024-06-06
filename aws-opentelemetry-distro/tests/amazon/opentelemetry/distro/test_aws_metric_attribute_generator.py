@@ -19,6 +19,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_REMOTE_SERVICE,
     AWS_SECRET_ARN,
     AWS_SPAN_KIND,
+    AWS_STATE_MACHINE_ARN,
     AWS_STREAM_NAME,
 )
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
@@ -823,6 +824,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.validate_aws_sdk_service_normalization("S3", "AWS::S3")
         self.validate_aws_sdk_service_normalization("SQS", "AWS::SQS")
         self.validate_aws_sdk_service_normalization("Secrets Manager", "AWS::SecretsManager")
+        self.validate_aws_sdk_service_normalization("SFN", "AWS::StepFunctions")
 
     def validate_aws_sdk_service_normalization(self, service_name: str, expected_remote_service: str):
         self._mock_attribute([SpanAttributes.RPC_SYSTEM, SpanAttributes.RPC_SERVICE], ["aws-api", service_name])
@@ -986,7 +988,19 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._validate_remote_resource_attributes(
             "AWS::SecretsManager::Secret", "arn:aws:secretsmanager:us-east-1:123456789012:secret:secret_name-lERW9H"
         )
-        self._mock_attribute([AWS_STREAM_NAME], [None])
+        self._mock_attribute([AWS_SECRET_ARN], [None])
+
+        # Validate behaviour of AWS_STATE_MACHINE_ARN attribute, then remove it.
+        self._mock_attribute(
+            [AWS_STATE_MACHINE_ARN],
+            ["arn:aws:states:us-east-1:123456789012:stateMachine:test_state_machine"],
+            keys,
+            values,
+        )
+        self._validate_remote_resource_attributes(
+            "AWS::StepFunctions::StateMachine", "arn:aws:states:us-east-1:123456789012:stateMachine:test_state_machine"
+        )
+        self._mock_attribute([AWS_STATE_MACHINE_ARN], [None])
 
         self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None])
 

@@ -16,6 +16,7 @@ _BUCKET_NAME: str = "bucketName"
 _QUEUE_NAME: str = "queueName"
 _QUEUE_URL: str = "queueUrl"
 _SECRET_ARN: str = "arn:aws:secretsmanager:us-west-2:000000000000:secret:testSecret-ABCDEF"
+_STATE_MACHINE_ARN: str = "arn:aws:states:us-west-2:000000000000:stateMachine:testStateMachine"
 
 
 class TestInstrumentationPatch(TestCase):
@@ -79,6 +80,9 @@ class TestInstrumentationPatch(TestCase):
         # SecretsManager
         self.assertFalse("secretsmanager" in _KNOWN_EXTENSIONS, "Upstream has added a SecretsManager extension")
 
+        # StepFunctions
+        self.assertFalse("stepfunctions" in _KNOWN_EXTENSIONS, "Upstream has added a StepFunctions extension")
+
     def _validate_patched_botocore_instrumentation(self):
         # Kinesis
         self.assertTrue("kinesis" in _KNOWN_EXTENSIONS)
@@ -110,6 +114,15 @@ class TestInstrumentationPatch(TestCase):
         self.assertTrue("aws.secretsmanager.secret_arn" in secretsmanager_sucess_attributes)
         self.assertEqual(secretsmanager_sucess_attributes["aws.secretsmanager.secret_arn"], _SECRET_ARN)
 
+        # StepFunctions
+        self.assertTrue("stepfunctions" in _KNOWN_EXTENSIONS)
+        stepfunctions_attributes: Dict[str, str] = _do_extract_stepfunctions_attributes()
+        self.assertTrue("aws.stepfunctions.state_machine_arn" in stepfunctions_attributes)
+        self.assertEqual(stepfunctions_attributes["aws.stepfunctions.state_machine_arn"], _STATE_MACHINE_ARN)
+        stepfunctions_sucess_attributes: Dict[str, str] = _do_stepfunctions_on_success()
+        self.assertTrue("aws.stepfunctions.state_machine_arn" in stepfunctions_sucess_attributes)
+        self.assertEqual(stepfunctions_sucess_attributes["aws.stepfunctions.state_machine_arn"], _STATE_MACHINE_ARN)
+
 
 def _do_extract_kinesis_attributes() -> Dict[str, str]:
     service_name: str = "kinesis"
@@ -138,6 +151,18 @@ def _do_extract_secretsmanager_attributes() -> Dict[str, str]:
 def _do_secretsmanager_on_success() -> Dict[str, str]:
     service_name: str = "secretsmanager"
     result: Dict[str, Any] = {"ARN": _SECRET_ARN}
+    return _do_on_success(service_name, result)
+
+
+def _do_extract_stepfunctions_attributes() -> Dict[str, str]:
+    service_name: str = "stepfunctions"
+    params: Dict[str, str] = {"stateMachineArn": _STATE_MACHINE_ARN}
+    return _do_extract_attributes(service_name, params)
+
+
+def _do_stepfunctions_on_success() -> Dict[str, str]:
+    service_name: str = "stepfunctions"
+    result: Dict[str, Any] = {"stateMachineArn": _STATE_MACHINE_ARN}
     return _do_on_success(service_name, result)
 
 
