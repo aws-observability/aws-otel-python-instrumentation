@@ -48,6 +48,7 @@ from opentelemetry.sdk.metrics._internal.instrument import (
     UpDownCounter,
 )
 from opentelemetry.sdk.metrics.export import AggregationTemporality, PeriodicExportingMetricReader
+from opentelemetry.sdk.metrics.view import Aggregation, ExponentialBucketHistogramAggregation
 from opentelemetry.sdk.resources import Resource, get_aggregated_resources
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
@@ -277,6 +278,7 @@ class ApplicationSignalsExporterProvider:
         )
         _logger.debug("AWS Application Signals export protocol: %s", protocol)
 
+        # Application Signals depends on Delta metrics for export and use in CloudWatch Metrics
         temporality_dict: Dict[type, AggregationTemporality] = {}
         for typ in [
             Counter,
@@ -289,6 +291,12 @@ class ApplicationSignalsExporterProvider:
         ]:
             temporality_dict[typ] = AggregationTemporality.DELTA
 
+        # Histograms must only be exported with no more than 100 buckets per EMF specifications. Per OTEL documentation,
+        # max total buckets = max_size*2+1; *2 is because of positive and negative buckets, +1 because of the zero
+        # bucket. Negatives are not a concern for Application Signals use-case, which only measures latency, so max_size
+        # of 99 gives total buckets of 100.
+        aggregation_dict: Dict[type, Aggregation] = {Histogram: ExponentialBucketHistogramAggregation(99, 20)}
+
         if protocol == "http/protobuf":
             application_signals_endpoint = os.environ.get(
                 APPLICATION_SIGNALS_EXPORTER_ENDPOINT_CONFIG,
@@ -296,7 +304,9 @@ class ApplicationSignalsExporterProvider:
             )
             _logger.debug("AWS Application Signals export endpoint: %s", application_signals_endpoint)
             return OTLPHttpOTLPMetricExporter(
-                endpoint=application_signals_endpoint, preferred_temporality=temporality_dict
+                endpoint=application_signals_endpoint,
+                preferred_temporality=temporality_dict,
+                preferred_aggregation=aggregation_dict,
             )
         if protocol == "grpc":
             # pylint: disable=import-outside-toplevel
@@ -312,7 +322,9 @@ class ApplicationSignalsExporterProvider:
             )
             _logger.debug("AWS Application Signals export endpoint: %s", application_signals_endpoint)
             return OTLPGrpcOTLPMetricExporter(
-                endpoint=application_signals_endpoint, preferred_temporality=temporality_dict
+                endpoint=application_signals_endpoint,
+                preferred_temporality=temporality_dict,
+                preferred_aggregation=aggregation_dict,
             )
 
         raise RuntimeError(f"Unsupported AWS Application Signals export protocol: {protocol} ")

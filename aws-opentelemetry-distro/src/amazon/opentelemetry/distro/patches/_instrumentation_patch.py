@@ -6,6 +6,7 @@ from logging import Logger, getLogger
 
 import pkg_resources
 
+from amazon.opentelemetry.distro.patches._otlp_metric_exporter_patches import _apply_otlp_metric_exporter_patches
 from amazon.opentelemetry.distro.patches._resource_detector_patches import _apply_resource_detector_patches
 
 _logger: Logger = getLogger(__name__)
@@ -31,6 +32,7 @@ def apply_instrumentation_patches() -> None:
     # No need to check if library is installed as this patches opentelemetry.sdk,
     # which must be installed for the distro to work at all.
     _apply_resource_detector_patches()
+    _apply_otlp_metric_exporter_patches()
 
 
 def _is_installed(req: str) -> bool:
