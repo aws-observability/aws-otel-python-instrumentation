@@ -41,7 +41,7 @@ from opentelemetry.util.re import parse_env_headers
 
 
 # The OpenTelemetry Authors code
-def _apply_otlp_metric_exporter_patches() -> None:
+def _apply_otlp_metric_exporter_patches() -> None:  # pragma: no cover
     """OTLP Metrics Exporter patches for getting the following change in the upstream:
     https://github.com/open-telemetry/opentelemetry-python/commit/12f449074e80fa88b59468a48b7a4b99dbcda34d
     """
