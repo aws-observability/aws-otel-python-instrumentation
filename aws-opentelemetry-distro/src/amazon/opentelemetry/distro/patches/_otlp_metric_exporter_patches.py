@@ -92,9 +92,7 @@ def _apply_otlp_metric_exporter_patches() -> None:
             }
 
         else:
-            if otel_exporter_otlp_metrics_temporality_preference != (
-                    "CUMULATIVE"
-            ):
+            if otel_exporter_otlp_metrics_temporality_preference != ("CUMULATIVE"):
                 # pylint: disable=logging-fstring-interpolation
                 _logger.warning(
                     "Unrecognized OTEL_EXPORTER_METRICS_TEMPORALITY_PREFERENCE"
@@ -125,9 +123,7 @@ def _apply_otlp_metric_exporter_patches() -> None:
             "explicit_bucket_histogram",
         )
 
-        if otel_exporter_otlp_metrics_default_histogram_aggregation == (
-                "base2_exponential_bucket_histogram"
-        ):
+        if otel_exporter_otlp_metrics_default_histogram_aggregation == ("base2_exponential_bucket_histogram"):
 
             instrument_class_aggregation = {
                 Histogram: ExponentialBucketHistogramAggregation(),
@@ -135,16 +131,11 @@ def _apply_otlp_metric_exporter_patches() -> None:
 
         else:
 
-            if otel_exporter_otlp_metrics_default_histogram_aggregation != (
-                    "explicit_bucket_histogram"
-            ):
+            if otel_exporter_otlp_metrics_default_histogram_aggregation != ("explicit_bucket_histogram"):
 
                 # pylint: disable=implicit-str-concat
                 _logger.warning(
-                    (
-                        "Invalid value for %s: %s, using explicit bucket "
-                        "histogram aggregation"
-                    ),
+                    ("Invalid value for %s: %s, using explicit bucket " "histogram aggregation"),
                     OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION,
                     otel_exporter_otlp_metrics_default_histogram_aggregation,
                 )
@@ -170,9 +161,7 @@ def _apply_otlp_metric_exporter_patches() -> None:
     ):
         self._endpoint = endpoint or environ.get(
             OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
-            _append_metrics_path(
-                environ.get(OTEL_EXPORTER_OTLP_ENDPOINT, DEFAULT_ENDPOINT)
-            ),
+            _append_metrics_path(environ.get(OTEL_EXPORTER_OTLP_ENDPOINT, DEFAULT_ENDPOINT)),
         )
         self._certificate_file = certificate_file or environ.get(
             OTEL_EXPORTER_OTLP_METRICS_CERTIFICATE,
@@ -192,17 +181,11 @@ def _apply_otlp_metric_exporter_patches() -> None:
         self._compression = compression or _compression_from_env()
         self._session = session or requests.Session()
         self._session.headers.update(self._headers)
-        self._session.headers.update(
-            {"Content-Type": "application/x-protobuf"}
-        )
+        self._session.headers.update({"Content-Type": "application/x-protobuf"})
         if self._compression is not HttpCompression.NoCompression:
-            self._session.headers.update(
-                {"Content-Encoding": self._compression.value}
-            )
+            self._session.headers.update({"Content-Encoding": self._compression.value})
 
-        self._common_configuration(
-            preferred_temporality, preferred_aggregation
-        )
+        self._common_configuration(preferred_temporality, preferred_aggregation)
 
     OTLPMetricExporterMixin._common_configuration = patch_otlp_metric_exporter_mixin_common_configuration
     OTLPMetricExporterMixin._get_temporality = patch_otlp_metric_exporter_mixin_get_temporality
@@ -242,9 +225,7 @@ def _apply_grpc_otlp_metric_exporter_patches():
         endpoint: Optional[str] = None,
         insecure: Optional[bool] = None,
         credentials: Optional[ChannelCredentials] = None,
-        headers: Optional[
-            Union[TypingSequence[Tuple[str, str]], Dict[str, str], str]
-        ] = None,
+        headers: Optional[Union[TypingSequence[Tuple[str, str]], Dict[str, str], str]] = None,
         timeout: Optional[int] = None,
         compression: Optional[GrpcCompression] = None,
         preferred_temporality: Dict[type, AggregationTemporality] = None,
@@ -257,33 +238,21 @@ def _apply_grpc_otlp_metric_exporter_patches():
             if insecure is not None:
                 insecure = insecure.lower() == "true"
 
-        if (
-                not insecure
-                and environ.get(OTEL_EXPORTER_OTLP_METRICS_CERTIFICATE) is not None
-        ):
-            credentials = _get_credentials(
-                credentials, OTEL_EXPORTER_OTLP_METRICS_CERTIFICATE
-            )
+        if not insecure and environ.get(OTEL_EXPORTER_OTLP_METRICS_CERTIFICATE) is not None:
+            credentials = _get_credentials(credentials, OTEL_EXPORTER_OTLP_METRICS_CERTIFICATE)
 
         environ_timeout = environ.get(OTEL_EXPORTER_OTLP_METRICS_TIMEOUT)
-        environ_timeout = (
-            int(environ_timeout) if environ_timeout is not None else None
-        )
+        environ_timeout = int(environ_timeout) if environ_timeout is not None else None
 
         compression = (
-            environ_to_compression(OTEL_EXPORTER_OTLP_METRICS_COMPRESSION)
-            if compression is None
-            else compression
+            environ_to_compression(OTEL_EXPORTER_OTLP_METRICS_COMPRESSION) if compression is None else compression
         )
 
-        self._common_configuration(
-            preferred_temporality, preferred_aggregation
-        )
+        self._common_configuration(preferred_temporality, preferred_aggregation)
 
         OTLPExporterMixin.__init__(
             self,
-            endpoint=endpoint
-                     or environ.get(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT),
+            endpoint=endpoint or environ.get(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT),
             insecure=insecure,
             credentials=credentials,
             headers=headers or environ.get(OTEL_EXPORTER_OTLP_METRICS_HEADERS),
