@@ -52,6 +52,7 @@ def _apply_otlp_metric_exporter_patches() -> None:  # pragma: no cover
         preferred_aggregation: Dict[type, ViewAggregation] = None,
     ) -> None:
 
+        # pylint: disable=unnecessary-dunder-call
         MetricExporter.__init__(
             self,
             preferred_temporality=self._get_temporality(preferred_temporality),
@@ -250,6 +251,7 @@ def _apply_grpc_otlp_metric_exporter_patches():
 
         self._common_configuration(preferred_temporality, preferred_aggregation)
 
+        # pylint: disable=unnecessary-dunder-call
         OTLPExporterMixin.__init__(
             self,
             endpoint=endpoint or environ.get(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT),
