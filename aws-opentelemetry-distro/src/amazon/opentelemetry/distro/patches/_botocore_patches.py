@@ -2,18 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import importlib
-import json
-import copy
-import io
-import codecs
-from http.client import HTTPResponse
 
+from amazon.opentelemetry.distro.patches._bedrock_patches import (  # noqa # pylint: disable=unused-import
+    _BedrockRuntimeExtension,
+)
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
 from opentelemetry.instrumentation.botocore.extensions.sqs import _SqsExtension
-from opentelemetry.instrumentation.botocore.extensions.types import _AttributeMapT, _AwsSdkExtension, _BotoResultT
+from opentelemetry.instrumentation.botocore.extensions.types import _AttributeMapT, _AwsSdkExtension
 from opentelemetry.semconv.trace import SpanAttributes
-from opentelemetry.trace.span import Span
-from botocore.response import StreamingBody
 
 
 def _apply_botocore_instrumentation_patches() -> None:
@@ -24,7 +20,7 @@ def _apply_botocore_instrumentation_patches() -> None:
     _apply_botocore_kinesis_patch()
     _apply_botocore_s3_patch()
     _apply_botocore_sqs_patch()
-    _apply_botocore_bedrock_runtime_patch()
+    _apply_botocore_bedrock_patch()
 
 
 def _apply_botocore_kinesis_patch() -> None:
@@ -72,7 +68,8 @@ def _apply_botocore_sqs_patch() -> None:
 
     _SqsExtension.extract_attributes = patch_extract_attributes
 
-def _apply_botocore_bedrock_runtime_patch() -> None:
+
+def _apply_botocore_bedrock_patch() -> None:
     """Botocore instrumentation patch for S3
 
     This patch adds an extension to the upstream's list of known extension for S3. Extensions allow for custom
@@ -113,126 +110,3 @@ class _KinesisExtension(_AwsSdkExtension):
         stream_name = self._call_context.params.get("StreamName")
         if stream_name:
             attributes["aws.kinesis.stream_name"] = stream_name
-
-class _BedrockRuntimeExtension(_AwsSdkExtension):
-    def extract_attributes(self, attributes: _AttributeMapT):
-        context_param = self._call_context.params
-        # with open('/Users/zzhlogin/workplace/sample_app_python/aws-otel-python-instrumentation/log.txt', 'a') as file:
-        #     # Append text to the file
-        #     file.write("context_param: \n")
-        #     json.dump(context_param, file, indent=4)
-        # gen_ai.request.model: modelId = context_param.modelId !!!!
-        # gen_ai.system: "AWS Bedrock" !!!!!!!
-        # gen_ai.prompt: prompt_token = context_param.body.prompt !!!!!!
-
-        # model_provider?
-        # gen_ai.request.top_p = context_param.body.textGenerationConfig.topP ??????????
-        # gen_ai.request.temperature = context_param.body.textGenerationConfig.temperature ??????????
-        # gen_ai.request.max_tokens = context_param.body.textGenerationConfig.maxTokenCount ??????????
-
-    def on_success(self, span: Span, result: _BotoResultT):
-        with open('/Users/zzhlogin/workplace/sample_app_python/aws-otel-python-instrumentation/log.txt', 'a') as file:
-            # Append text to the file
-            # file.write("on_success result: \n")
-            # file.write(str(result) + "\n")
-
-            # file.write("result body readable: \n")
-            # file.write(str(result["body"].readable()))
-
-
-            file.write("result body read: \n")
-            # copy_result_body = copy.deepcopy(result["body"])
-            # raw_stream = result["body"]._raw_stream.read().decode("UTF8")
-            # body_read = result["body"]._raw_stream.read().decode("UTF8")
-            file.write("body_read type: \n")
-            # file.write(result["body"]._raw_stream.__class__.__name__) # HTTPResponse
-
-            raw_stream = result["body"]._raw_stream.read()
-            # raw_stream.seek(0)
-
-            file.write("raw_stream: \n")
-            # file.write(str(raw_stream.decode("UTF8")))
-            json.dump(json.loads(raw_stream.decode("UTF8")), file, indent=4)
-            stream_csv = io.BytesIO(raw_stream)
-            stream_csv.seek(0)
-            # raw_stream = b'This is the raw stream content'
-            # raw_stream = io.BytesIO(raw_stream)
-            #
-            # file.write("new stream_csv type: \n")
-            # file.write(stream_csv.__class__.__name__)
-            # file.write("new_read: \n")
-            # file.write(str(stream_csv.read()))
-            # stream_csv.seek(0)
-            # httpresponse = HTTPResponse(raw_stream)
-            # httpresponse.begin()
-            result["body"]._raw_stream = stream_csv
-            # result["body"]._raw_stream.begin()
-
-            # stream_body = io.StringIO(body_read)
-            # stream_body.seek(0)
-            # file.write("stream_body: \n")
-            # file.write(str(stream_body))
-            #
-            # new_read = body_read.read()
-            # file.write("new_read: \n")
-            # file.write(str(new_read))
-
-            # body = result["body"].readlines()
-            # file.write("result body readlines: \n")
-            # file.write(body.__class__.__name__)
-            # file.write(str(body))
-            #
-            # file.write("result body read _amount_read: \n")
-            # file.write(str(result["body"]._amount_read))
-            # file.write("result body read _content_length: \n")
-            # file.write(str(result["body"]._content_length))
-            # file.write("result body read second: \n")
-            # file.write(str(result["body"].read()))
-            #
-            #
-            # # file.write(result["body"]._raw_stream.__class__.__name__)
-            # # body = StreamingBody(copy.deepcopy(result["body"]._raw_stream), result["body"]._content_length)
-            # file.write("result body: \n")
-            # content_chunks = []
-            # file.write("result content_chunks: \n")
-            # for chunk in body.iter_chunks():
-            #     file.write("result chunk: \n")
-            #     content_chunks.append(chunk)
-            #     file.write("result chunk append: \n")
-            # content = b"".join(content_chunks)
-            # file.write("result content: \n")
-            # file.write(str(content))
-            # body = result["body"].read()
-
-
-
-
-            # file.write("result body class name: \n")
-            # file.write(body.__class__.__name__)
-            # file.write("result body: \n")
-            # file.write(str(body))
-            # file.write("result body decode: \n")
-            # file.write(str(body.decode('utf-8')))
-            # file.write("result body decode type: \n")
-            # file.write(body.decode('utf-8').__class__.__name__)
-            # file.write("result body json: \n")
-            # json.dump(json.loads(content.decode('utf-8')), file, indent=4)
-            # # file.write("result body results: \n")
-            # # json.dump(json.loads(body.decode('utf-8')).get("results"), file, indent=4)
-            # # file.write("result body results[0]: \n")
-            # # json.dump(json.loads(body.decode('utf-8')).get("results")[0], file, indent=4)
-            # file.write("result body completionReason: \n")
-            # json.dump(json.loads(content.decode('utf-8')).get("results")[0].get("completionReason"), file, indent=4)
-            #
-            # file.write("original body read: \n")
-            # file.write(str(result["body"]._content_length))
-            # file.write("original body _amount_read: \n")
-            # file.write(str(result["body"]._amount_read))
-            # file.write(str(result["body"].read()))
-
-        # gen_ai.completion_text: output_token = result.body.? !!!!!!!!!
-        # gen_ai.response.finish_reason: completion_reason = result.body.results.completionReason
-
-        # gen_ai.usage.completion_tokens: (generation_token_count)result.ResponseMetadata.HTTPHeaders.x-amzn-bedrock-output-token-count
-        # gen_ai.usage.prompt_tokens: (prompt_token_count)result.ResponseMetadata.HTTPHeaders.x-amzn-bedrock-input-token-count
-

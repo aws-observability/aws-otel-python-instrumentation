@@ -68,3 +68,7 @@ examples/**/build/
 
 # Performance test results
 **/performance-tests/results/
+
+
+log.txt
+log_bytes.txt

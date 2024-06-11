@@ -8,6 +8,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
+    AWS_BEDROCK_RUNTIME_MODEL_ID,
     AWS_CONSUMER_PARENT_SPAN_KIND,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
@@ -821,6 +822,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.validate_aws_sdk_service_normalization("Kinesis", "AWS::Kinesis")
         self.validate_aws_sdk_service_normalization("S3", "AWS::S3")
         self.validate_aws_sdk_service_normalization("SQS", "AWS::SQS")
+        self.validate_aws_sdk_service_normalization("Bedrock Runtime", "AWS::BedrockRuntime")
 
     def validate_aws_sdk_service_normalization(self, service_name: str, expected_remote_service: str):
         self._mock_attribute([SpanAttributes.RPC_SYSTEM, SpanAttributes.RPC_SERVICE], ["aws-api", service_name])
@@ -976,6 +978,11 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [["aws_table^name"]], keys, values)
         self._validate_remote_resource_attributes("AWS::DynamoDB::Table", "aws_table^^name")
         self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [None])
+
+        # Validate behaviour of AWS_BEDROCK_RUNTIME_MODEL_ID attribute, then remove it.
+        self._mock_attribute([AWS_BEDROCK_RUNTIME_MODEL_ID], ["test.service-id"], keys, values)
+        self._validate_remote_resource_attributes("AWS::BedrockRuntime::Model", "test.service-id")
+        self._mock_attribute([AWS_BEDROCK_RUNTIME_MODEL_ID], [None])
 
         self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None])
 

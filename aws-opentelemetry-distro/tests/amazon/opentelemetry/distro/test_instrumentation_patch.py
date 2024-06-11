@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import Dict
+import json
+from typing import Any, Dict
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
@@ -9,11 +10,19 @@ import pkg_resources
 from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_instrumentation_patches
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
 from opentelemetry.semconv.trace import SpanAttributes
+from opentelemetry.trace.span import Span
 
 _STREAM_NAME: str = "streamName"
 _BUCKET_NAME: str = "bucketName"
 _QUEUE_NAME: str = "queueName"
 _QUEUE_URL: str = "queueUrl"
+_GEN_AI_SYSTEM: str = "AWS Bedrock"
+_GEN_AI_REQUEST_MODEL: str = "amazon.titan-test-id"
+_GEN_AI_REQUEST_TOP_P: float = 0.9
+_GEN_AI_REQUEST_TEMPERATURE: float = 0.7
+_GEN_AI_REQUEST_MAX_TOKENS: int = 1234
+_GEN_AI_USAGE_PROMOT_TOKENS: int = 55
+_GEN_AI_USAGE_COMPLETION_TOKENS: int = 24
 
 
 class TestInstrumentationPatch(TestCase):
@@ -74,6 +83,9 @@ class TestInstrumentationPatch(TestCase):
         self.assertFalse("aws.sqs.queue_url" in attributes)
         self.assertFalse("aws.sqs.queue_name" in attributes)
 
+        # BedrockRuntime
+        self.assertFalse("bedrock-runtime" in _KNOWN_EXTENSIONS, "Upstream has added a bedrock-runtime extension")
+
     def _validate_patched_botocore_instrumentation(self):
         # Kinesis
         self.assertTrue("kinesis" in _KNOWN_EXTENSIONS)
@@ -96,6 +108,28 @@ class TestInstrumentationPatch(TestCase):
         self.assertTrue("aws.sqs.queue_name" in sqs_attributes)
         self.assertEqual(sqs_attributes["aws.sqs.queue_name"], _QUEUE_NAME)
 
+        # BedrockRuntime
+        self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
+        bedrock_runtime_attributes: Dict[str, str] = _do_extract_bedrock_runtime_attributes()
+        self.assertTrue("gen_ai.system" in bedrock_runtime_attributes)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.system"], _GEN_AI_SYSTEM)
+        self.assertTrue("gen_ai.request.model" in bedrock_runtime_attributes)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.model"], _GEN_AI_REQUEST_MODEL)
+        self.assertTrue("gen_ai.request.top_p" in bedrock_runtime_attributes)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.top_p"], _GEN_AI_REQUEST_TOP_P)
+        self.assertTrue("gen_ai.request.temperature" in bedrock_runtime_attributes)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.temperature"], _GEN_AI_REQUEST_TEMPERATURE)
+        self.assertTrue("gen_ai.request.max_tokens" in bedrock_runtime_attributes)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.max_tokens"], _GEN_AI_REQUEST_MAX_TOKENS)
+
+        bedrock_runtime_sucess_attributes: Dict[str, str] = _do_bedrock_runtime_on_success()
+        self.assertTrue("gen_ai.usage.prompt_tokens" in bedrock_runtime_sucess_attributes)
+        self.assertEqual(bedrock_runtime_sucess_attributes["gen_ai.usage.prompt_tokens"], _GEN_AI_USAGE_PROMOT_TOKENS)
+        self.assertTrue("gen_ai.usage.completion_tokens" in bedrock_runtime_sucess_attributes)
+        self.assertEqual(
+            bedrock_runtime_sucess_attributes["gen_ai.usage.completion_tokens"], _GEN_AI_USAGE_COMPLETION_TOKENS
+        )
+
 
 def _do_extract_kinesis_attributes() -> Dict[str, str]:
     service_name: str = "kinesis"
@@ -115,10 +149,73 @@ def _do_extract_sqs_attributes() -> Dict[str, str]:
     return _do_extract_attributes(service_name, params)
 
 
-def _do_extract_attributes(service_name: str, params: Dict[str, str]) -> Dict[str, str]:
+def _do_extract_bedrock_runtime_attributes() -> Dict[str, str]:
+    service_name: str = "bedrock-runtime"
+    body: Dict[str, Any] = {
+        "inputText": "Test input texts.",
+        "textGenerationConfig": {
+            "maxTokenCount": _GEN_AI_REQUEST_MAX_TOKENS,
+            "temperature": _GEN_AI_REQUEST_TEMPERATURE,
+            "topP": _GEN_AI_REQUEST_TOP_P,
+        },
+    }
+    body = json.dumps(body)
+    params: Dict[str, Any] = {
+        "body": body,
+        "modelId": _GEN_AI_REQUEST_MODEL,
+    }
+    operation = "InvokeModel"
+    return _do_extract_attributes(service_name, params, operation)
+
+
+def _do_bedrock_runtime_on_success() -> Dict[str, str]:
+    service_name: str = "bedrock-runtime"
+    result: Dict[str, Any] = {
+        "ResponseMetadata": {
+            "HTTPHeaders": {
+                "x-amzn-bedrock-output-token-count": str(_GEN_AI_USAGE_COMPLETION_TOKENS),
+                "x-amzn-bedrock-input-token-count": str(_GEN_AI_USAGE_PROMOT_TOKENS),
+            },
+        },
+        "body": None,
+    }
+    operation = "InvokeModel"
+    params: Dict[str, Any] = {
+        "modelId": _GEN_AI_REQUEST_MODEL,
+    }
+    return _do_on_success(service_name, result, operation, params)
+
+
+def _do_extract_attributes(service_name: str, params: Dict[str, Any], operation: str = None) -> Dict[str, str]:
     mock_call_context: MagicMock = MagicMock()
     mock_call_context.params = params
+    if operation:
+        mock_call_context.operation = operation
     attributes: Dict[str, str] = {}
     sqs_extension = _KNOWN_EXTENSIONS[service_name]()(mock_call_context)
     sqs_extension.extract_attributes(attributes)
     return attributes
+
+
+def _do_on_success(
+    service_name: str, result: Dict[str, Any], operation: str = None, params: Dict[str, Any] = None
+) -> Dict[str, str]:
+    span_mock: Span = MagicMock()
+    mock_call_context = MagicMock()
+    span_attributes: Dict[str, str] = {}
+
+    def set_side_effect(set_key, set_value):
+        span_attributes[set_key] = set_value
+
+    span_mock.set_attribute.side_effect = set_side_effect
+
+    if operation:
+        mock_call_context.operation = operation
+
+    if params:
+        mock_call_context.params = params
+
+    extension = _KNOWN_EXTENSIONS[service_name]()(mock_call_context)
+    extension.on_success(span_mock, result)
+
+    return span_attributes
