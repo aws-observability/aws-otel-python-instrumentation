@@ -17,7 +17,9 @@ _BUCKET_NAME: str = "bucketName"
 _QUEUE_NAME: str = "queueName"
 _QUEUE_URL: str = "queueUrl"
 _GEN_AI_SYSTEM: str = "AWS Bedrock"
-_GEN_AI_REQUEST_MODEL: str = "amazon.titan-test-id"
+_GEN_AI_REQUEST_TITAN_MODEL: str = "amazon.titan-test-id"
+_GEN_AI_REQUEST_CLAUDE_MODEL: str = "anthropic.claude-test-id"
+_GEN_AI_REQUEST_LLAMA2_MODEL: str = "meta.llama2-test-id"
 _GEN_AI_REQUEST_TOP_P: float = 0.9
 _GEN_AI_REQUEST_TEMPERATURE: float = 0.7
 _GEN_AI_REQUEST_MAX_TOKENS: int = 1234
@@ -86,6 +88,7 @@ class TestInstrumentationPatch(TestCase):
         # BedrockRuntime
         self.assertFalse("bedrock-runtime" in _KNOWN_EXTENSIONS, "Upstream has added a bedrock-runtime extension")
 
+    # pylint: disable=too-many-statements
     def _validate_patched_botocore_instrumentation(self):
         # Kinesis
         self.assertTrue("kinesis" in _KNOWN_EXTENSIONS)
@@ -109,12 +112,13 @@ class TestInstrumentationPatch(TestCase):
         self.assertEqual(sqs_attributes["aws.sqs.queue_name"], _QUEUE_NAME)
 
         # BedrockRuntime
+        # A. amazon.titan
         self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
-        bedrock_runtime_attributes: Dict[str, str] = _do_extract_bedrock_runtime_attributes()
+        bedrock_runtime_attributes: Dict[str, str] = _do_extract_bedrock_runtime_titan_attributes()
         self.assertTrue("gen_ai.system" in bedrock_runtime_attributes)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.system"], _GEN_AI_SYSTEM)
         self.assertTrue("gen_ai.request.model" in bedrock_runtime_attributes)
-        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.model"], _GEN_AI_REQUEST_MODEL)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.model"], _GEN_AI_REQUEST_TITAN_MODEL)
         self.assertTrue("gen_ai.request.top_p" in bedrock_runtime_attributes)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.request.top_p"], _GEN_AI_REQUEST_TOP_P)
         self.assertTrue("gen_ai.request.temperature" in bedrock_runtime_attributes)
@@ -122,7 +126,51 @@ class TestInstrumentationPatch(TestCase):
         self.assertTrue("gen_ai.request.max_tokens" in bedrock_runtime_attributes)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.request.max_tokens"], _GEN_AI_REQUEST_MAX_TOKENS)
 
-        bedrock_runtime_sucess_attributes: Dict[str, str] = _do_bedrock_runtime_on_success()
+        bedrock_runtime_sucess_attributes: Dict[str, str] = _do_bedrock_runtime_titan_on_success()
+        self.assertTrue("gen_ai.usage.prompt_tokens" in bedrock_runtime_sucess_attributes)
+        self.assertEqual(bedrock_runtime_sucess_attributes["gen_ai.usage.prompt_tokens"], _GEN_AI_USAGE_PROMOT_TOKENS)
+        self.assertTrue("gen_ai.usage.completion_tokens" in bedrock_runtime_sucess_attributes)
+        self.assertEqual(
+            bedrock_runtime_sucess_attributes["gen_ai.usage.completion_tokens"], _GEN_AI_USAGE_COMPLETION_TOKENS
+        )
+
+        # B. anthropic.claude
+        self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
+        bedrock_runtime_attributes: Dict[str, str] = _do_extract_bedrock_runtime_claude_attributes()
+        self.assertTrue("gen_ai.system" in bedrock_runtime_attributes)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.system"], _GEN_AI_SYSTEM)
+        self.assertTrue("gen_ai.request.model" in bedrock_runtime_attributes)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.model"], _GEN_AI_REQUEST_CLAUDE_MODEL)
+        self.assertTrue("gen_ai.request.top_p" in bedrock_runtime_attributes)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.top_p"], _GEN_AI_REQUEST_TOP_P)
+        self.assertTrue("gen_ai.request.temperature" in bedrock_runtime_attributes)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.temperature"], _GEN_AI_REQUEST_TEMPERATURE)
+        self.assertTrue("gen_ai.request.max_tokens" in bedrock_runtime_attributes)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.max_tokens"], _GEN_AI_REQUEST_MAX_TOKENS)
+
+        bedrock_runtime_sucess_attributes: Dict[str, str] = _do_bedrock_runtime_claude_on_success()
+        self.assertTrue("gen_ai.usage.prompt_tokens" in bedrock_runtime_sucess_attributes)
+        self.assertEqual(bedrock_runtime_sucess_attributes["gen_ai.usage.prompt_tokens"], _GEN_AI_USAGE_PROMOT_TOKENS)
+        self.assertTrue("gen_ai.usage.completion_tokens" in bedrock_runtime_sucess_attributes)
+        self.assertEqual(
+            bedrock_runtime_sucess_attributes["gen_ai.usage.completion_tokens"], _GEN_AI_USAGE_COMPLETION_TOKENS
+        )
+
+        # C. meta.llama2
+        self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
+        bedrock_runtime_attributes: Dict[str, str] = _do_extract_bedrock_runtime_llama2_attributes()
+        self.assertTrue("gen_ai.system" in bedrock_runtime_attributes)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.system"], _GEN_AI_SYSTEM)
+        self.assertTrue("gen_ai.request.model" in bedrock_runtime_attributes)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.model"], _GEN_AI_REQUEST_LLAMA2_MODEL)
+        self.assertTrue("gen_ai.request.top_p" in bedrock_runtime_attributes)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.top_p"], _GEN_AI_REQUEST_TOP_P)
+        self.assertTrue("gen_ai.request.temperature" in bedrock_runtime_attributes)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.temperature"], _GEN_AI_REQUEST_TEMPERATURE)
+        self.assertTrue("gen_ai.request.max_tokens" in bedrock_runtime_attributes)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.max_tokens"], _GEN_AI_REQUEST_MAX_TOKENS)
+
+        bedrock_runtime_sucess_attributes: Dict[str, str] = _do_bedrock_runtime_llama2_on_success()
         self.assertTrue("gen_ai.usage.prompt_tokens" in bedrock_runtime_sucess_attributes)
         self.assertEqual(bedrock_runtime_sucess_attributes["gen_ai.usage.prompt_tokens"], _GEN_AI_USAGE_PROMOT_TOKENS)
         self.assertTrue("gen_ai.usage.completion_tokens" in bedrock_runtime_sucess_attributes)
@@ -149,7 +197,7 @@ def _do_extract_sqs_attributes() -> Dict[str, str]:
     return _do_extract_attributes(service_name, params)
 
 
-def _do_extract_bedrock_runtime_attributes() -> Dict[str, str]:
+def _do_extract_bedrock_runtime_titan_attributes() -> Dict[str, str]:
     service_name: str = "bedrock-runtime"
     body: Dict[str, Any] = {
         "inputText": "Test input texts.",
@@ -162,26 +210,73 @@ def _do_extract_bedrock_runtime_attributes() -> Dict[str, str]:
     body = json.dumps(body)
     params: Dict[str, Any] = {
         "body": body,
-        "modelId": _GEN_AI_REQUEST_MODEL,
+        "modelId": _GEN_AI_REQUEST_TITAN_MODEL,
     }
     operation = "InvokeModel"
     return _do_extract_attributes(service_name, params, operation)
 
 
-def _do_bedrock_runtime_on_success() -> Dict[str, str]:
+def _do_bedrock_runtime_titan_on_success() -> Dict[str, str]:
     service_name: str = "bedrock-runtime"
-    result: Dict[str, Any] = {
-        "ResponseMetadata": {
-            "HTTPHeaders": {
-                "x-amzn-bedrock-output-token-count": str(_GEN_AI_USAGE_COMPLETION_TOKENS),
-                "x-amzn-bedrock-input-token-count": str(_GEN_AI_USAGE_PROMOT_TOKENS),
-            },
-        },
-        "body": None,
-    }
+    result: Dict[str, Any] = _get_bedrock_runtime_sample_result()
     operation = "InvokeModel"
     params: Dict[str, Any] = {
-        "modelId": _GEN_AI_REQUEST_MODEL,
+        "modelId": _GEN_AI_REQUEST_TITAN_MODEL,
+    }
+    return _do_on_success(service_name, result, operation, params)
+
+
+def _do_extract_bedrock_runtime_claude_attributes() -> Dict[str, str]:
+    service_name: str = "bedrock-runtime"
+    body: Dict[str, Any] = {
+        "max_tokens": _GEN_AI_REQUEST_MAX_TOKENS,
+        "system": "Test input texts.",
+        "messages": [{"role": "user", "content": "Test use content"}],
+        "temperature": _GEN_AI_REQUEST_TEMPERATURE,
+        "top_p": _GEN_AI_REQUEST_TOP_P,
+    }
+    body = json.dumps(body)
+    params: Dict[str, Any] = {
+        "body": body,
+        "modelId": _GEN_AI_REQUEST_CLAUDE_MODEL,
+    }
+    operation = "InvokeModel"
+    return _do_extract_attributes(service_name, params, operation)
+
+
+def _do_bedrock_runtime_claude_on_success() -> Dict[str, str]:
+    service_name: str = "bedrock-runtime"
+    result: Dict[str, Any] = _get_bedrock_runtime_sample_result()
+    operation = "InvokeModel"
+    params: Dict[str, Any] = {
+        "modelId": _GEN_AI_REQUEST_CLAUDE_MODEL,
+    }
+    return _do_on_success(service_name, result, operation, params)
+
+
+def _do_extract_bedrock_runtime_llama2_attributes() -> Dict[str, str]:
+    service_name: str = "bedrock-runtime"
+    body: Dict[str, Any] = {
+        "prompt": "Test input texts.",
+        "max_gen_len": _GEN_AI_REQUEST_MAX_TOKENS,
+        "temperature": _GEN_AI_REQUEST_TEMPERATURE,
+        "top_p": _GEN_AI_REQUEST_TOP_P,
+    }
+    body = json.dumps(body)
+    params: Dict[str, Any] = {
+        "body": body,
+        "modelId": _GEN_AI_REQUEST_LLAMA2_MODEL,
+    }
+    operation = "InvokeModel"
+    return _do_extract_attributes(service_name, params, operation)
+
+
+def _do_bedrock_runtime_llama2_on_success() -> Dict[str, str]:
+    service_name: str = "bedrock-runtime"
+    result: Dict[str, Any] = _get_bedrock_runtime_sample_result()
+    operation = "InvokeModel"
+    params: Dict[str, Any] = {
+        "modelId": _GEN_AI_REQUEST_LLAMA2_MODEL,
     }
     return _do_on_success(service_name, result, operation, params)
 
@@ -219,3 +314,16 @@ def _do_on_success(
     extension.on_success(span_mock, result)
 
     return span_attributes
+
+
+def _get_bedrock_runtime_sample_result():
+    result: Dict[str, Any] = {
+        "ResponseMetadata": {
+            "HTTPHeaders": {
+                "x-amzn-bedrock-output-token-count": str(_GEN_AI_USAGE_COMPLETION_TOKENS),
+                "x-amzn-bedrock-input-token-count": str(_GEN_AI_USAGE_PROMOT_TOKENS),
+            },
+        },
+        "body": None,
+    }
+    return result

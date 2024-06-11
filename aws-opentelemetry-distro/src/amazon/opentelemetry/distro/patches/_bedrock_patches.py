@@ -94,15 +94,15 @@ class ClaudeBedrockRuntimeModel(BaseBedrockRuntimeModel):
         body = json.loads(context_param.get("body"))
         top_p = body.get("top_p")
         if top_p:
-            attributes["gen_ai.request.top_p"] = top_p
+            attributes["gen_ai.request.top_p"] = float(top_p)
 
         temperature = body.get("temperature")
         if temperature:
-            attributes["gen_ai.request.temperature"] = temperature
+            attributes["gen_ai.request.temperature"] = float(temperature)
 
         max_token_count = body.get("max_tokens_to_sample", body.get("max_tokens"))
         if max_token_count:
-            attributes["gen_ai.request.max_tokens"] = max_token_count
+            attributes["gen_ai.request.max_tokens"] = int(max_token_count)
 
     @classmethod
     def on_success(cls, span: Span, result: _BotoResultT):
@@ -112,14 +112,14 @@ class ClaudeBedrockRuntimeModel(BaseBedrockRuntimeModel):
         if input_token_count:
             span.set_attribute(
                 "gen_ai.usage.prompt_tokens",
-                input_token_count,
+                int(input_token_count),
             )
 
         output_token_count = headers.get("x-amzn-bedrock-output-token-count")
         if output_token_count:
             span.set_attribute(
                 "gen_ai.usage.completion_tokens",
-                output_token_count,
+                int(output_token_count),
             )
 
 
@@ -133,15 +133,15 @@ class LlamaBedrockRuntimeModel(BaseBedrockRuntimeModel):
         body = json.loads(context_param.get("body"))
         top_p = body.get("top_p")
         if top_p:
-            attributes["gen_ai.request.top_p"] = top_p
+            attributes["gen_ai.request.top_p"] = float(top_p)
 
         temperature = body.get("temperature")
         if temperature:
-            attributes["gen_ai.request.temperature"] = temperature
+            attributes["gen_ai.request.temperature"] = float(temperature)
 
         max_token_count = body.get("max_gen_len")
         if max_token_count:
-            attributes["gen_ai.request.max_tokens"] = max_token_count
+            attributes["gen_ai.request.max_tokens"] = int(max_token_count)
 
     @classmethod
     def on_success(cls, span: Span, result: _BotoResultT):
@@ -151,14 +151,14 @@ class LlamaBedrockRuntimeModel(BaseBedrockRuntimeModel):
         if input_token_count:
             span.set_attribute(
                 "gen_ai.usage.prompt_tokens",
-                input_token_count,
+                int(input_token_count),
             )
 
         output_token_count = headers.get("x-amzn-bedrock-output-token-count")
         if output_token_count:
             span.set_attribute(
                 "gen_ai.usage.completion_tokens",
-                output_token_count,
+                int(output_token_count),
             )
 
 
