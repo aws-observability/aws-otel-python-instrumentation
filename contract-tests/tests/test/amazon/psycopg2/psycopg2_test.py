@@ -51,9 +51,13 @@ class Psycopg2Test(ContractTestBase):
     def get_application_image_name(self) -> str:
         return "aws-application-signals-tests-psycopg2-app"
 
-    def test_success(self) -> None:
+    def test_drop_table_succeeds(self) -> None:
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("success", "GET", 200, 0, 0, sql_command="DROP TABLE")
+        self.do_test_requests("drop_table", "GET", 200, 0, 0, sql_command="DROP TABLE")
+
+    def test_create_database_succeeds(self) -> None:
+        self.mock_collector_client.clear_signals()
+        self.do_test_requests("create_database", "GET", 200, 0, 0, sql_command="CREATE DATABASE")
 
     def test_fault(self) -> None:
         self.mock_collector_client.clear_signals()

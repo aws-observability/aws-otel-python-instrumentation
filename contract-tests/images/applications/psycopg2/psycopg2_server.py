@@ -10,9 +10,10 @@ import psycopg2
 from typing_extensions import override
 
 _PORT: int = 8080
-_SUCCESS: str = "success"
+_DROP_TABLE: str = "drop_table"
 _ERROR: str = "error"
 _FAULT: str = "fault"
+_CREATE_DATABASE: str = "create_database"
 
 _DB_HOST = os.getenv("DB_HOST")
 _DB_USER = os.getenv("DB_USER")
@@ -26,9 +27,15 @@ class RequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         status_code: int = 200
         conn = psycopg2.connect(dbname=_DB_NAME, user=_DB_USER, password=_DB_PASS, host=_DB_HOST)
-        if self.in_path(_SUCCESS):
+        conn.autocommit = True # CREATE DATABASE cannot run in a transaction block
+        if self.in_path(_DROP_TABLE):
             cur = conn.cursor()
             cur.execute("DROP TABLE IF EXISTS test_table")
+            cur.close()
+            status_code = 200
+        elif self.in_path(_CREATE_DATABASE):
+            cur = conn.cursor()
+            cur.execute("CREATE DATABASE test_database")
             cur.close()
             status_code = 200
         elif self.in_path(_FAULT):
