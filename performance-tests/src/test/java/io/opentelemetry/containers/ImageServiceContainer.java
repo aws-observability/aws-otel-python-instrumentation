@@ -16,6 +16,7 @@ import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.utility.DockerImageName;
 
+// TODO: The vehicle sample app doesn't exist anymore so this needs to be cleaned up
 public class ImageServiceContainer {
 
   private static final Logger logger = LoggerFactory.getLogger(ImageServiceContainer.class);

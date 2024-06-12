@@ -175,6 +175,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(default_sampler.get_description(), DEFAULT_ON.get_description())
         # DEFAULT_ON is a ParentBased(ALWAYS_ON) sampler
 
+    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
+    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
     def test_using_xray_sampler_sets_url_exclusion_env_vars(self):
         targets_to_exclude = "SamplingTargets,GetSamplingRules"
         os.environ.pop("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", None)
@@ -186,6 +188,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(os.environ.get("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", None), targets_to_exclude)
         self.assertEqual(os.environ.get("OTEL_PYTHON_URLLIB3_EXCLUDED_URLS", None), targets_to_exclude)
 
+    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
+    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
     def test_using_xray_sampler_appends_url_exclusion_env_vars(self):
         targets_to_exclude = "SamplingTargets,GetSamplingRules"
         os.environ.pop("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", None)
