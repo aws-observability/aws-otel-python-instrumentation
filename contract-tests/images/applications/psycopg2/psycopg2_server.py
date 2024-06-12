@@ -27,7 +27,7 @@ class RequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         status_code: int = 200
         conn = psycopg2.connect(dbname=_DB_NAME, user=_DB_USER, password=_DB_PASS, host=_DB_HOST)
-        conn.autocommit = True # CREATE DATABASE cannot run in a transaction block
+        conn.autocommit = True  # CREATE DATABASE cannot run in a transaction block
         if self.in_path(_DROP_TABLE):
             cur = conn.cursor()
             cur.execute("DROP TABLE IF EXISTS test_table")
