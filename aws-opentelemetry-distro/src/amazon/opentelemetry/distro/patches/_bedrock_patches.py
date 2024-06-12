@@ -3,7 +3,7 @@
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import abc
 import inspect
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from opentelemetry.instrumentation.botocore.extensions.types import (
     _AttributeMapT,
@@ -15,13 +15,14 @@ from opentelemetry.trace.span import Span
 
 
 class _BedrockAgentOperation(abc.ABC):
-    start_attributes: Optional[Dict[str, _AttrSpecT]] = None
-    response_attributes: Optional[Dict[str, _AttrSpecT]] = None
+    start_attributes: Optional[Dict[str, str]] = None
+    response_attributes: Optional[Dict[str, str]] = None
 
     @classmethod
     @abc.abstractmethod
     def operation_names(cls):
         pass
+
 
 class _AgentOperation(_BedrockAgentOperation):
     # AgentId Operations !!! do both request and response
@@ -57,7 +58,7 @@ class _AgentOperation(_BedrockAgentOperation):
             "PrepareAgent",
             "UpdateAgentActionGroup",
             "UpdateAgentAlias",
-            "UpdateAgent"
+            "UpdateAgent",
         ]
 
 
@@ -84,7 +85,7 @@ class _KnowledgeBaseOperation(_BedrockAgentOperation):
             "GetAgentKnowledgeBase",
             "GetKnowledgeBase",
             "ListDataSources",
-            "UpdateAgentKnowledgeBase"
+            "UpdateAgentKnowledgeBase",
         ]
 
 
@@ -102,23 +103,18 @@ class _DataSourceOperation(_BedrockAgentOperation):
 
     @classmethod
     def operation_names(cls):
-        return [
-            "DeleteDataSource",
-            "GetDataSource",
-            "UpdateDataSource"
-        ]
+        return ["DeleteDataSource", "GetDataSource", "UpdateDataSource"]
+
 
 _OPERATION_MAPPING = {
     op_name: op_class
     for op_class in [_KnowledgeBaseOperation, _DataSourceOperation]
     for op_name in op_class.operation_names()
-    if inspect.isclass(op_class)
-    and issubclass(op_class, _BedrockAgentOperation)
-    and not inspect.isabstract(op_class)
+    if inspect.isclass(op_class) and issubclass(op_class, _BedrockAgentOperation) and not inspect.isabstract(op_class)
 }
 
 
-class _BedrockAgentExtension(_AwsSdkExtension): # -> AgentId, KnowledgeId, DataSourceId
+class _BedrockAgentExtension(_AwsSdkExtension):  # -> AgentId, KnowledgeId, DataSourceId
     def __init__(self, call_context: _AwsSdkCallContext):
         super().__init__(call_context)
         self._op = _OPERATION_MAPPING.get(call_context.operation)
@@ -130,7 +126,6 @@ class _BedrockAgentExtension(_AwsSdkExtension): # -> AgentId, KnowledgeId, DataS
             extracted_value = self._call_context.params.get(value)
             if extracted_value:
                 attributes[key] = extracted_value
-
 
     def on_success(self, span: Span, result: _BotoResultT):
         if self._op is None:
@@ -145,7 +140,7 @@ class _BedrockAgentExtension(_AwsSdkExtension): # -> AgentId, KnowledgeId, DataS
                 )
 
 
-class _BedrockAgentRuntimeExtension(_AwsSdkExtension):# -> AgentId, KnowledgebaseId  -> no overlap
+class _BedrockAgentRuntimeExtension(_AwsSdkExtension):  # -> AgentId, KnowledgebaseId  -> no overlap
     def extract_attributes(self, attributes: _AttributeMapT):
         # AgentId, KnowledgebaseId
         agent_id = self._call_context.params.get("AgentId")
@@ -157,7 +152,7 @@ class _BedrockAgentRuntimeExtension(_AwsSdkExtension):# -> AgentId, Knowledgebas
             attributes["aws.bedrock.knowledgebase_id"] = knowledgebase_id
 
 
-class _BedrockExtension(_AwsSdkExtension): # -> ModelId, GaurdrailId -> no overlap
+class _BedrockExtension(_AwsSdkExtension):  # -> ModelId, GaurdrailId -> no overlap
     def extract_attributes(self, attributes: _AttributeMapT):
         # ModelId
         model_id = self._call_context.params.get("ModelId")
@@ -166,10 +161,9 @@ class _BedrockExtension(_AwsSdkExtension): # -> ModelId, GaurdrailId -> no overl
 
     def on_success(self, span: Span, result: _BotoResultT):
         # GuardrailId
-        gaurdrail_id = result.get("GuardrailId")
+        gaurdrail_id = result.get("guardrailId")
         if gaurdrail_id:
             span.set_attribute(
                 "aws.bedrock.guardrail_id",
                 gaurdrail_id,
             )
-
