@@ -126,6 +126,14 @@ class TestInstrumentationPatch(TestCase):
         self.assertTrue("gen_ai.request.max_tokens" in bedrock_runtime_attributes)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.request.max_tokens"], _GEN_AI_REQUEST_MAX_TOKENS)
 
+        bedrock_runtime_sucess_attributes: Dict[str, str] = _do_bedrock_runtime_titan_on_success()
+        self.assertTrue("gen_ai.usage.prompt_tokens" in bedrock_runtime_sucess_attributes)
+        self.assertEqual(bedrock_runtime_sucess_attributes["gen_ai.usage.prompt_tokens"], _GEN_AI_USAGE_PROMOT_TOKENS)
+        self.assertTrue("gen_ai.usage.completion_tokens" in bedrock_runtime_sucess_attributes)
+        self.assertEqual(
+            bedrock_runtime_sucess_attributes["gen_ai.usage.completion_tokens"], _GEN_AI_USAGE_COMPLETION_TOKENS
+        )
+
         bedrock_runtime_no_valid_attributes: Dict[str, str] = _do_extract_bedrock_runtime_titan_no_valid_attributes()
         self.assertTrue("gen_ai.system" in bedrock_runtime_no_valid_attributes)
         self.assertEqual(bedrock_runtime_no_valid_attributes["gen_ai.system"], _GEN_AI_SYSTEM)
