@@ -36,7 +36,12 @@ class TitanBedrockRuntimeModel(BaseBedrockRuntimeModel):
 
     @classmethod
     def extract_attributes(cls, context_param: Dict[str, Any], attributes: _AttributeMapT):
+        if "body" not in context_param:
+            return
+
         text_generation_config = json.loads(context_param.get("body")).get("textGenerationConfig")
+        if text_generation_config is None:
+            return
 
         top_p = text_generation_config.get("topP")
         if top_p:
@@ -52,8 +57,10 @@ class TitanBedrockRuntimeModel(BaseBedrockRuntimeModel):
 
     @classmethod
     def on_success(cls, span: Span, result: _BotoResultT):
-        headers = result["ResponseMetadata"].get("HTTPHeaders")
+        if ("ResponseMetadata" not in result) or ("HTTPHeaders" not in result["ResponseMetadata"]):
+            return
 
+        headers = result["ResponseMetadata"].get("HTTPHeaders")
         input_token_count = headers.get("x-amzn-bedrock-input-token-count")
         if input_token_count:
             span.set_attribute(
@@ -68,21 +75,6 @@ class TitanBedrockRuntimeModel(BaseBedrockRuntimeModel):
                 int(output_token_count),
             )
 
-        # raw_stream = result["body"]._raw_stream.read()
-        # response = json.loads(raw_stream.decode("UTF8"))
-        #
-        # # gen_ai.response.finish_reason: completion_reason = result.body.results.completionReason
-        # finish_reason = response.get("results")[0].get("completionReason")
-        # if finish_reason:
-        #     span.set_attribute(
-        #         "gen_ai.response.finish_reason",
-        #         finish_reason,
-        #     )
-        #
-        # stream_csv = io.BytesIO(raw_stream)
-        # stream_csv.seek(0)
-        # result["body"]._raw_stream = stream_csv
-
 
 class ClaudeBedrockRuntimeModel(BaseBedrockRuntimeModel):
     @classmethod
@@ -91,6 +83,9 @@ class ClaudeBedrockRuntimeModel(BaseBedrockRuntimeModel):
 
     @classmethod
     def extract_attributes(cls, context_param: Dict[str, Any], attributes: _AttributeMapT):
+        if "body" not in context_param:
+            return
+
         body = json.loads(context_param.get("body"))
         top_p = body.get("top_p")
         if top_p:
@@ -106,8 +101,10 @@ class ClaudeBedrockRuntimeModel(BaseBedrockRuntimeModel):
 
     @classmethod
     def on_success(cls, span: Span, result: _BotoResultT):
-        headers = result["ResponseMetadata"].get("HTTPHeaders")
+        if ("ResponseMetadata" not in result) or ("HTTPHeaders" not in result["ResponseMetadata"]):
+            return
 
+        headers = result["ResponseMetadata"].get("HTTPHeaders")
         input_token_count = headers.get("x-amzn-bedrock-input-token-count")
         if input_token_count:
             span.set_attribute(
@@ -130,6 +127,9 @@ class LlamaBedrockRuntimeModel(BaseBedrockRuntimeModel):
 
     @classmethod
     def extract_attributes(cls, context_param: Dict[str, Any], attributes: _AttributeMapT):
+        if "body" not in context_param:
+            return
+
         body = json.loads(context_param.get("body"))
         top_p = body.get("top_p")
         if top_p:
@@ -145,8 +145,10 @@ class LlamaBedrockRuntimeModel(BaseBedrockRuntimeModel):
 
     @classmethod
     def on_success(cls, span: Span, result: _BotoResultT):
-        headers = result["ResponseMetadata"].get("HTTPHeaders")
+        if ("ResponseMetadata" not in result) or ("HTTPHeaders" not in result["ResponseMetadata"]):
+            return
 
+        headers = result["ResponseMetadata"].get("HTTPHeaders")
         input_token_count = headers.get("x-amzn-bedrock-input-token-count")
         if input_token_count:
             span.set_attribute(

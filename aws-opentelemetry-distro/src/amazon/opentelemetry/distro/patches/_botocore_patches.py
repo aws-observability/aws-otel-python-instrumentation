@@ -70,13 +70,12 @@ def _apply_botocore_sqs_patch() -> None:
 
 
 def _apply_botocore_bedrock_patch() -> None:
-    """Botocore instrumentation patch for S3
+    """Botocore instrumentation patch for Bedrock Runtime
 
-    This patch adds an extension to the upstream's list of known extension for S3. Extensions allow for custom
-    logic for adding service-specific information to spans, such as attributes. Specifically, we are adding logic to add
-    the AWS_S3_BUCKET attribute, to be used to generate RemoteTarget and achieve parity with the Java instrumentation.
-    Callout that AWS_S3_BUCKET is in the AWS Semantic Conventions, and is simply not implemented in Python
-    instrumentation.
+    This patch adds an extension to the upstream's list of known extension for Bedrock Runtime.
+    Extensions allow for custom logic for adding service-specific information to spans, such as attributes.
+    Specifically, we are adding logic to add
+    the AWS_BEDROCK_RUNTIME_MODEL_ID attribute.
     """
     _KNOWN_EXTENSIONS["bedrock-runtime"] = _lazy_load(".", "_BedrockRuntimeExtension")
 
