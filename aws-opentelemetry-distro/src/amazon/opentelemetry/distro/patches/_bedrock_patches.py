@@ -25,11 +25,6 @@ class _BedrockAgentOperation(abc.ABC):
 
 
 class _AgentOperation(_BedrockAgentOperation):
-    # AgentId Operations !!! do both request and response
-    # AssociateAgentKnowledgeBase -> KnowledgeBaseId
-    # DisassociateAgentKnowledgeBase -> KnowledgeBaseId
-    # UpdateAgentKnowledgeBase -> KnowledgeBaseId
-    # GetAgentKnowledgeBase -> KnowledgeBaseId
     start_attributes = {
         "aws.bedrock.agent_id": "agentId",
     }
@@ -62,13 +57,6 @@ class _AgentOperation(_BedrockAgentOperation):
 
 
 class _KnowledgeBaseOperation(_BedrockAgentOperation):
-    # KnowledgeId !!! only do request
-    # UpdateDataSource -> DataSourceId
-    # GetDataSource -> DataSourceId
-    # DeleteDataSource -> DataSourceId
-    # GetIngestionJob -> not support
-    # ListIngestionJobs -> not support
-    # StartIngestionJob -> not support
     start_attributes = {
         "aws.bedrock.knowledgebase_id": "knowledgeBaseId",
     }
@@ -89,10 +77,6 @@ class _KnowledgeBaseOperation(_BedrockAgentOperation):
 
 
 class _DataSourceOperation(_BedrockAgentOperation):
-    # DataSourceId !!! do both request and response
-    # GetIngestionJob -> not support
-    # ListIngestionJobs -> not support
-    # StartIngestionJob -> not support
     start_attributes = {
         "aws.bedrock.datasource_id": "dataSourceId",
     }
@@ -113,7 +97,7 @@ _OPERATION_MAPPING = {
 }
 
 
-class _BedrockAgentExtension(_AwsSdkExtension):  # -> AgentId, KnowledgeId, DataSourceId
+class _BedrockAgentExtension(_AwsSdkExtension):
     def __init__(self, call_context: _AwsSdkCallContext):
         super().__init__(call_context)
         self._op = _OPERATION_MAPPING.get(call_context.operation)
@@ -139,9 +123,8 @@ class _BedrockAgentExtension(_AwsSdkExtension):  # -> AgentId, KnowledgeId, Data
                 )
 
 
-class _BedrockAgentRuntimeExtension(_AwsSdkExtension):  # -> AgentId, KnowledgebaseId  -> no overlap
+class _BedrockAgentRuntimeExtension(_AwsSdkExtension):
     def extract_attributes(self, attributes: _AttributeMapT):
-        # AgentId, KnowledgebaseId
         agent_id = self._call_context.params.get("agentId")
         if agent_id:
             attributes["aws.bedrock.agent_id"] = agent_id
@@ -151,7 +134,7 @@ class _BedrockAgentRuntimeExtension(_AwsSdkExtension):  # -> AgentId, Knowledgeb
             attributes["aws.bedrock.knowledgebase_id"] = knowledgebase_id
 
 
-class _BedrockExtension(_AwsSdkExtension):  # -> ModelId, GaurdrailId -> no overlap
+class _BedrockExtension(_AwsSdkExtension):
     def on_success(self, span: Span, result: _BotoResultT):
         # GuardrailId
         guardrail_id = result.get("guardrailId")
