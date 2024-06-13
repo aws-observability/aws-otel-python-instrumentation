@@ -135,6 +135,7 @@ class _BedrockAgentRuntimeExtension(_AwsSdkExtension):
 
 
 class _BedrockExtension(_AwsSdkExtension):
+    # pylint: disable=no-self-use
     def on_success(self, span: Span, result: _BotoResultT):
         # GuardrailId
         guardrail_id = result.get("guardrailId")
