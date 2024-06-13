@@ -20,5 +20,4 @@ AWS_BEDROCK_DATASOURCE_ID: str = "aws.bedrock.datasource_id"
 AWS_BEDROCK_KNOWLEDGEBASE_ID: str = "aws.bedrock.knowledgebase_id"
 AWS_BEDROCK_AGENT_ID: str = "aws.bedrock.agent_id"
 AWS_BEDROCK_MODEL_ID: str = "aws.bedrock.model_id"
-AWS_BEDROCK_GAURDRAIL_ID: str = "aws.bedrock.guardrail_id"
-
+AWS_BEDROCK_GUARDRAIL_ID: str = "aws.bedrock.guardrail_id"

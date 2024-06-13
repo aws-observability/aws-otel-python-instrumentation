@@ -3,7 +3,7 @@
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import abc
 import inspect
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 from opentelemetry.instrumentation.botocore.extensions.types import (
     _AttributeMapT,
@@ -31,14 +31,13 @@ class _AgentOperation(_BedrockAgentOperation):
     # UpdateAgentKnowledgeBase -> KnowledgeBaseId
     # GetAgentKnowledgeBase -> KnowledgeBaseId
     start_attributes = {
-        "aws.bedrock.agent_id": "AgentId",
+        "aws.bedrock.agent_id": "agentId",
     }
     response_attributes = {
-        "aws.bedrock.agent_id": "AgentId",
+        "aws.bedrock.agent_id": "agentId",
     }
 
     @classmethod
-    @abc.abstractmethod
     def operation_names(cls):
         return [
             "CreateAgentActionGroup",
@@ -71,7 +70,7 @@ class _KnowledgeBaseOperation(_BedrockAgentOperation):
     # ListIngestionJobs -> not support
     # StartIngestionJob -> not support
     start_attributes = {
-        "aws.bedrock.knowledgebase_id": "KnowledgeBaseId",
+        "aws.bedrock.knowledgebase_id": "knowledgeBaseId",
     }
     response_attributes = {}
 
@@ -95,10 +94,10 @@ class _DataSourceOperation(_BedrockAgentOperation):
     # ListIngestionJobs -> not support
     # StartIngestionJob -> not support
     start_attributes = {
-        "aws.bedrock.datasource_id": "DataSourceId",
+        "aws.bedrock.datasource_id": "dataSourceId",
     }
     response_attributes = {
-        "aws.bedrock.datasource_id": "DataSourceId",
+        "aws.bedrock.datasource_id": "dataSourceId",
     }
 
     @classmethod
@@ -108,7 +107,7 @@ class _DataSourceOperation(_BedrockAgentOperation):
 
 _OPERATION_MAPPING = {
     op_name: op_class
-    for op_class in [_KnowledgeBaseOperation, _DataSourceOperation]
+    for op_class in [_KnowledgeBaseOperation, _DataSourceOperation, _AgentOperation]
     for op_name in op_class.operation_names()
     if inspect.isclass(op_class) and issubclass(op_class, _BedrockAgentOperation) and not inspect.isabstract(op_class)
 }
@@ -136,34 +135,28 @@ class _BedrockAgentExtension(_AwsSdkExtension):  # -> AgentId, KnowledgeId, Data
             if response_value:
                 span.set_attribute(
                     key,
-                    value,
+                    response_value,
                 )
 
 
 class _BedrockAgentRuntimeExtension(_AwsSdkExtension):  # -> AgentId, KnowledgebaseId  -> no overlap
     def extract_attributes(self, attributes: _AttributeMapT):
         # AgentId, KnowledgebaseId
-        agent_id = self._call_context.params.get("AgentId")
+        agent_id = self._call_context.params.get("agentId")
         if agent_id:
             attributes["aws.bedrock.agent_id"] = agent_id
 
-        knowledgebase_id = self._call_context.params.get("KnowledgeBaseId")
+        knowledgebase_id = self._call_context.params.get("knowledgeBaseId")
         if knowledgebase_id:
             attributes["aws.bedrock.knowledgebase_id"] = knowledgebase_id
 
 
 class _BedrockExtension(_AwsSdkExtension):  # -> ModelId, GaurdrailId -> no overlap
-    def extract_attributes(self, attributes: _AttributeMapT):
-        # ModelId
-        model_id = self._call_context.params.get("ModelId")
-        if model_id:
-            attributes["aws.bedrock.model_id"] = model_id
-
     def on_success(self, span: Span, result: _BotoResultT):
         # GuardrailId
-        gaurdrail_id = result.get("guardrailId")
-        if gaurdrail_id:
+        guardrail_id = result.get("guardrailId")
+        if guardrail_id:
             span.set_attribute(
                 "aws.bedrock.guardrail_id",
-                gaurdrail_id,
+                guardrail_id,
             )
