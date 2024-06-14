@@ -6,6 +6,8 @@ from typing import Match, Optional
 from urllib.parse import ParseResult, urlparse
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
+    AWS_LAMBDA_FUNCTION_NAME,
+    AWS_LAMBDA_SOURCE_MAPPING_ID,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_QUEUE_NAME,
@@ -78,6 +80,7 @@ _NORMALIZED_DYNAMO_DB_SERVICE_NAME: str = "AWS::DynamoDB"
 _NORMALIZED_KINESIS_SERVICE_NAME: str = "AWS::Kinesis"
 _NORMALIZED_S3_SERVICE_NAME: str = "AWS::S3"
 _NORMALIZED_SQS_SERVICE_NAME: str = "AWS::SQS"
+_NORMALIZED_LAMBDA_SERVICE_NAME: str = "AWS::Lambda"
 _DB_CONNECTION_STRING_TYPE: str = "DB::Connection"
 
 # Special DEPENDENCY attribute value if GRAPHQL_OPERATION_TYPE attribute key is present.
@@ -372,6 +375,12 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
             remote_resource_identifier = _escape_delimiters(
                 SqsUrlParser.get_queue_name(span.attributes.get(AWS_QUEUE_URL))
             )
+        elif is_key_present(span, AWS_LAMBDA_SOURCE_MAPPING_ID):
+            remote_resource_type = _NORMALIZED_LAMBDA_SERVICE_NAME + "::EventSourceMapping"
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_SOURCE_MAPPING_ID))
+        elif is_key_present(span, AWS_LAMBDA_FUNCTION_NAME):
+            remote_resource_type = _NORMALIZED_LAMBDA_SERVICE_NAME + "::Function"
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_FUNCTION_NAME))
     elif is_db_span(span):
         remote_resource_type = _DB_CONNECTION_STRING_TYPE
         remote_resource_identifier = _get_db_connection(span)

@@ -4,6 +4,7 @@
 import importlib
 
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
+from opentelemetry.instrumentation.botocore.extensions.lmbd import _LambdaExtension
 from opentelemetry.instrumentation.botocore.extensions.sqs import _SqsExtension
 from opentelemetry.instrumentation.botocore.extensions.types import _AttributeMapT, _AwsSdkExtension
 from opentelemetry.semconv.trace import SpanAttributes
@@ -12,11 +13,12 @@ from opentelemetry.semconv.trace import SpanAttributes
 def _apply_botocore_instrumentation_patches() -> None:
     """Botocore instrumentation patches
 
-    Adds patches to provide additional support and Java parity for Kinesis, S3, and SQS.
+    Adds patches to provide additional support and Java parity for Kinesis, S3, SQS and Lambda.
     """
     _apply_botocore_kinesis_patch()
     _apply_botocore_s3_patch()
     _apply_botocore_sqs_patch()
+    _apply_botocore_lambda_patch()
 
 
 def _apply_botocore_kinesis_patch() -> None:
@@ -63,6 +65,32 @@ def _apply_botocore_sqs_patch() -> None:
             attributes["aws.sqs.queue_url"] = queue_url
 
     _SqsExtension.extract_attributes = patch_extract_attributes
+
+
+def _apply_botocore_lambda_patch() -> None:
+    """Botocore instrumentation patch for Lambda
+
+    This patch extends the existing upstream extension for Lambda. Extensions allow for custom logic for adding
+    service-specific information to spans, such as attributes. Specifically, we are adding logic to add
+    `aws.lambda.function_name` and `aws.lambda.resource_mapping_id` attributes.
+    Callout that today, the upstream logic adds `SpanAttributes.FAAS_INVOKED_NAME` for Invoke operation,
+    but we want to cover more operations to extract `FunctionName`, we define "aws.lambda.function_name" separately.
+    """
+    old_extract_attributes = _LambdaExtension.extract_attributes
+
+    def patch_extract_attributes(self, attributes: _AttributeMapT):
+        old_extract_attributes(self, attributes)
+        function_name = self._call_context.params.get("FunctionName")
+        resource_mapping_id = self._call_context.params.get("UUID")
+        if function_name:
+            attributes["aws.lambda.function_name"] = function_name
+        if resource_mapping_id:
+            attributes["aws.lambda.resource_mapping_id"] = resource_mapping_id
+
+    _LambdaExtension.extract_attributes = patch_extract_attributes
+
+
+# UpdateEventSourceMappingRequest
 
 
 # The OpenTelemetry Authors code
