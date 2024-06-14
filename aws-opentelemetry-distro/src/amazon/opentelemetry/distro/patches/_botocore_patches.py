@@ -90,9 +90,6 @@ def _apply_botocore_lambda_patch() -> None:
     _LambdaExtension.extract_attributes = patch_extract_attributes
 
 
-# UpdateEventSourceMappingRequest
-
-
 # The OpenTelemetry Authors code
 def _lazy_load(module, cls):
     """Clone of upstream opentelemetry.instrumentation.botocore.extensions.lazy_load

@@ -980,17 +980,18 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._validate_remote_resource_attributes("AWS::DynamoDB::Table", "aws_table^^name")
         self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [None])
 
-        # Valid queue name with invalid queue URL, we should default to using the queue name.
+        # Validate behaviour of AWS_LAMBDA_FUNCTION_NAME attribute, then remove it.
         self._mock_attribute([AWS_LAMBDA_FUNCTION_NAME], ["aws_lambda_function_name"], keys, values)
         self._validate_remote_resource_attributes("AWS::Lambda::Function", "aws_lambda_function_name")
         self._mock_attribute([AWS_LAMBDA_FUNCTION_NAME], [None])
 
-        # Valid queue name with invalid queue URL, we should default to using the queue name.
+        # Validate behaviour of AWS_LAMBDA_SOURCE_MAPPING_ID attribute, then remove it.
         self._mock_attribute([AWS_LAMBDA_SOURCE_MAPPING_ID], ["aws_event_source_mapping_id"], keys, values)
         self._validate_remote_resource_attributes("AWS::Lambda::EventSourceMapping", "aws_event_source_mapping_id")
         self._mock_attribute([AWS_LAMBDA_SOURCE_MAPPING_ID], [None])
 
-        # Valid queue name with invalid queue URL, we should default to using the queue name.
+        # Validate behaviour of AWS_LAMBDA_FUNCTION_NAME and AWS_LAMBDA_SOURCE_MAPPING_ID attributes both exist,
+        # then remove them.
         self._mock_attribute(
             [AWS_LAMBDA_FUNCTION_NAME, AWS_LAMBDA_SOURCE_MAPPING_ID],
             ["aws_lambda_function_name", "aws_event_source_mapping_id"],
