@@ -3,7 +3,7 @@
 from typing import Dict, List
 
 from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
-from testcontainers.postgres import PostgresContainer
+from testcontainers.mysql import MySqlContainer
 from typing_extensions import override
 
 from amazon.base.contract_test_base import NETWORK_NAME, ContractTestBase
@@ -22,12 +22,12 @@ from opentelemetry.proto.trace.v1.trace_pb2 import Span
 from opentelemetry.trace import StatusCode
 
 
-class Psycopg2Test(ContractTestBase):
+class PyMysqlTest(ContractTestBase):
     @override
     @classmethod
     def set_up_dependency_container(cls) -> None:
         cls.container = (
-            PostgresContainer(user="dbuser", password="example", dbname="postgres")
+            MySqlContainer(MYSQL_USER="dbuser", MYSQL_PASSWORD="example", MYSQL_DATABASE="testdb")
             .with_kwargs(network=NETWORK_NAME)
             .with_name("mydb")
         )
@@ -44,20 +44,16 @@ class Psycopg2Test(ContractTestBase):
             "DB_HOST": "mydb",
             "DB_USER": "dbuser",
             "DB_PASS": "example",
-            "DB_NAME": "postgres",
+            "DB_NAME": "testdb",
         }
 
     @override
     def get_application_image_name(self) -> str:
-        return "aws-application-signals-tests-psycopg2-app"
+        return "aws-application-signals-tests-pymysql-app"
 
-    def test_drop_table_succeeds(self) -> None:
+    def test_success(self) -> None:
         self.mock_collector_client.clear_signals()
-        self.do_test_requests("drop_table", "GET", 200, 0, 0, sql_command="DROP TABLE")
-
-    def test_create_database_succeeds(self) -> None:
-        self.mock_collector_client.clear_signals()
-        self.do_test_requests("create_database", "GET", 200, 0, 0, sql_command="CREATE DATABASE")
+        self.do_test_requests("success", "GET", 200, 0, 0, sql_command="DROP TABLE")
 
     def test_fault(self) -> None:
         self.mock_collector_client.clear_signals()
@@ -81,11 +77,11 @@ class Psycopg2Test(ContractTestBase):
         # InternalOperation as OTEL does not instrument the basic server we are using, so the client span is a local
         # root.
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_OPERATION, "InternalOperation")
-        self._assert_str_attribute(attributes_dict, AWS_REMOTE_SERVICE, "postgresql")
+        self._assert_str_attribute(attributes_dict, AWS_REMOTE_SERVICE, "mysql")
         command: str = kwargs.get("sql_command")
         self._assert_str_attribute(attributes_dict, AWS_REMOTE_OPERATION, f"{command}")
         self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_TYPE, "DB::Connection")
-        self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, "postgres|mydb|5432")
+        self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, "testdb|mydb|3306")
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
 
@@ -110,10 +106,10 @@ class Psycopg2Test(ContractTestBase):
     def _assert_semantic_conventions_attributes(self, attributes_list: List[KeyValue], command: str) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self.assertTrue(attributes_dict.get("db.statement").string_value.startswith(command))
-        self._assert_str_attribute(attributes_dict, "db.system", "postgresql")
-        self._assert_str_attribute(attributes_dict, "db.name", "postgres")
+        self._assert_str_attribute(attributes_dict, "db.system", "mysql")
+        self._assert_str_attribute(attributes_dict, "db.name", "testdb")
         self._assert_str_attribute(attributes_dict, "net.peer.name", "mydb")
-        self._assert_int_attribute(attributes_dict, "net.peer.port", 5432)
+        self._assert_int_attribute(attributes_dict, "net.peer.port", 3306)
         self.assertTrue("server.address" not in attributes_dict)
         self.assertTrue("server.port" not in attributes_dict)
         self.assertTrue("db.operation" not in attributes_dict)
@@ -141,10 +137,10 @@ class Psycopg2Test(ContractTestBase):
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
-        self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, "postgresql")
+        self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, "mysql")
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, kwargs.get("sql_command"))
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_TYPE, "DB::Connection")
-        self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, "postgres|mydb|5432")
+        self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, "testdb|mydb|3306")
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "CLIENT")
         self.check_sum(metric_name, dependency_dp.sum, expected_sum)
 
