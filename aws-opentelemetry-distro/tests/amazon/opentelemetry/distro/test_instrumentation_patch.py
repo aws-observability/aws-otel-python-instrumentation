@@ -14,6 +14,8 @@ _STREAM_NAME: str = "streamName"
 _BUCKET_NAME: str = "bucketName"
 _QUEUE_NAME: str = "queueName"
 _QUEUE_URL: str = "queueUrl"
+_LAMBDA_FUNCTION_NAME: str = "lambdaFunctionName"
+_LAMBDA_SOURCE_MAPPING_ID: str = "lambdaEventSourceMappingID"
 
 
 class TestInstrumentationPatch(TestCase):
@@ -74,6 +76,9 @@ class TestInstrumentationPatch(TestCase):
         self.assertFalse("aws.sqs.queue_url" in attributes)
         self.assertFalse("aws.sqs.queue_name" in attributes)
 
+        # Lambda
+        self.assertTrue("lambda" in _KNOWN_EXTENSIONS, "Upstream has removed the Lambda extension")
+
     def _validate_patched_botocore_instrumentation(self):
         # Kinesis
         self.assertTrue("kinesis" in _KNOWN_EXTENSIONS)
@@ -96,6 +101,14 @@ class TestInstrumentationPatch(TestCase):
         self.assertTrue("aws.sqs.queue_name" in sqs_attributes)
         self.assertEqual(sqs_attributes["aws.sqs.queue_name"], _QUEUE_NAME)
 
+        # Lambda
+        self.assertTrue("lambda" in _KNOWN_EXTENSIONS)
+        lambda_attributes: Dict[str, str] = _do_extract_lambda_attributes()
+        self.assertTrue("aws.lambda.function_name" in lambda_attributes)
+        self.assertEqual(lambda_attributes["aws.lambda.function_name"], _LAMBDA_FUNCTION_NAME)
+        self.assertTrue("aws.lambda.resource_mapping_id" in lambda_attributes)
+        self.assertEqual(lambda_attributes["aws.lambda.resource_mapping_id"], _LAMBDA_SOURCE_MAPPING_ID)
+
 
 def _do_extract_kinesis_attributes() -> Dict[str, str]:
     service_name: str = "kinesis"
@@ -112,6 +125,12 @@ def _do_extract_s3_attributes() -> Dict[str, str]:
 def _do_extract_sqs_attributes() -> Dict[str, str]:
     service_name: str = "sqs"
     params: Dict[str, str] = {"QueueUrl": _QUEUE_URL, "QueueName": _QUEUE_NAME}
+    return _do_extract_attributes(service_name, params)
+
+
+def _do_extract_lambda_attributes() -> Dict[str, str]:
+    service_name: str = "lambda"
+    params: Dict[str, str] = {"FunctionName": _LAMBDA_FUNCTION_NAME, "UUID": _LAMBDA_SOURCE_MAPPING_ID}
     return _do_extract_attributes(service_name, params)
 
 

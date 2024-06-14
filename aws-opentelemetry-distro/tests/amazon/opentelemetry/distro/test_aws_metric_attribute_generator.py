@@ -9,6 +9,8 @@ from unittest.mock import MagicMock
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_CONSUMER_PARENT_SPAN_KIND,
+    AWS_LAMBDA_FUNCTION_NAME,
+    AWS_LAMBDA_SOURCE_MAPPING_ID,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_QUEUE_NAME,
@@ -821,6 +823,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.validate_aws_sdk_service_normalization("Kinesis", "AWS::Kinesis")
         self.validate_aws_sdk_service_normalization("S3", "AWS::S3")
         self.validate_aws_sdk_service_normalization("SQS", "AWS::SQS")
+        self.validate_aws_sdk_service_normalization("Lambda", "AWS::Lambda")
 
     def validate_aws_sdk_service_normalization(self, service_name: str, expected_remote_service: str):
         self._mock_attribute([SpanAttributes.RPC_SYSTEM, SpanAttributes.RPC_SERVICE], ["aws-api", service_name])
@@ -976,6 +979,29 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [["aws_table^name"]], keys, values)
         self._validate_remote_resource_attributes("AWS::DynamoDB::Table", "aws_table^^name")
         self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [None])
+
+        # Validate behaviour of AWS_LAMBDA_FUNCTION_NAME attribute, then remove it.
+        self._mock_attribute([AWS_LAMBDA_FUNCTION_NAME], ["aws_lambda_function_name"], keys, values)
+        self._validate_remote_resource_attributes("AWS::Lambda::Function", "aws_lambda_function_name")
+        self._mock_attribute([AWS_LAMBDA_FUNCTION_NAME], [None])
+
+        # Validate behaviour of AWS_LAMBDA_SOURCE_MAPPING_ID attribute, then remove it.
+        self._mock_attribute([AWS_LAMBDA_SOURCE_MAPPING_ID], ["aws_event_source_mapping_id"], keys, values)
+        self._validate_remote_resource_attributes("AWS::Lambda::EventSourceMapping", "aws_event_source_mapping_id")
+        self._mock_attribute([AWS_LAMBDA_SOURCE_MAPPING_ID], [None])
+
+        # Validate behaviour of AWS_LAMBDA_FUNCTION_NAME and AWS_LAMBDA_SOURCE_MAPPING_ID attributes both exist,
+        # then remove them.
+        self._mock_attribute(
+            [AWS_LAMBDA_FUNCTION_NAME, AWS_LAMBDA_SOURCE_MAPPING_ID],
+            ["aws_lambda_function_name", "aws_event_source_mapping_id"],
+            keys,
+            values,
+        )
+        self._validate_remote_resource_attributes("AWS::Lambda::EventSourceMapping", "aws_event_source_mapping_id")
+        self._mock_attribute([AWS_LAMBDA_FUNCTION_NAME, AWS_LAMBDA_SOURCE_MAPPING_ID], [None, None])
+
+        # AWS_LAMBDA_SOURCE_MAPPING_ID
 
         self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None])
 
