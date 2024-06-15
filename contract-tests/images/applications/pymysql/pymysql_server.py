@@ -6,14 +6,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from typing import Tuple
 
-import psycopg2
+import pymysql
 from typing_extensions import override
 
 _PORT: int = 8080
-_DROP_TABLE: str = "drop_table"
+_SUCCESS: str = "success"
 _ERROR: str = "error"
 _FAULT: str = "fault"
-_CREATE_DATABASE: str = "create_database"
 
 _DB_HOST = os.getenv("DB_HOST")
 _DB_USER = os.getenv("DB_USER")
@@ -26,23 +25,17 @@ class RequestHandler(BaseHTTPRequestHandler):
     # pylint: disable=invalid-name
     def do_GET(self):
         status_code: int = 200
-        conn = psycopg2.connect(dbname=_DB_NAME, user=_DB_USER, password=_DB_PASS, host=_DB_HOST)
-        conn.autocommit = True  # CREATE DATABASE cannot run in a transaction block
-        if self.in_path(_DROP_TABLE):
+        conn = pymysql.connect(host=_DB_HOST, user=_DB_USER, password=_DB_PASS, database=_DB_NAME)
+        if self.in_path(_SUCCESS):
             cur = conn.cursor()
             cur.execute("DROP TABLE IF EXISTS test_table")
-            cur.close()
-            status_code = 200
-        elif self.in_path(_CREATE_DATABASE):
-            cur = conn.cursor()
-            cur.execute("CREATE DATABASE test_database")
             cur.close()
             status_code = 200
         elif self.in_path(_FAULT):
             cur = conn.cursor()
             try:
                 cur.execute("SELECT DISTINCT id, name FROM invalid_table")
-            except psycopg2.ProgrammingError as exception:
+            except pymysql.MySQLError as exception:
                 print("Expected Exception with Invalid SQL occurred:", exception)
                 status_code = 500
             except Exception as exception:  # pylint: disable=broad-except
