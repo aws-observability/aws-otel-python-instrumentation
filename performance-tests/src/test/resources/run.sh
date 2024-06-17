@@ -7,9 +7,11 @@ set -e
 
 # If a distro is not provided, run service normally. If it is, run the service with instrumentation.
 if [[ "${DO_INSTRUMENT}" == "true" ]]; then
-    opentelemetry-instrument python3 -u ./requests_server.py &
+    opentelemetry-instrument gunicorn --config gunicorn_config.py app:app &
+    #opentelemetry-instrument python3 -u ./requests_server.py &
 else
-    python3 -u ./requests_server.py &
+    gunicorn --config gunicorn_config.py app:app &
+    #python3 -u ./requests_server.py &
 fi
 
 if [[ "${PROFILE}" == "true"  ]]; then

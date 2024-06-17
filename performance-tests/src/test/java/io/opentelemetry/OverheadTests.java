@@ -33,8 +33,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
-import org.testcontainers.containers.wait.strategy.LogMessageWaitStrategy;
-import org.testcontainers.containers.wait.strategy.Wait;
 
 public class OverheadTests {
 
@@ -88,15 +86,19 @@ public class OverheadTests {
   }
 
   void runAppOnce(TestConfig config, DistroConfig distroConfig) throws Exception {
-    GenericContainer<?> simpleRequestsService =
-        new SimpleRequestsServiceContainer(NETWORK, collector, distroConfig, namingConventions)
+    GenericContainer<?> dependency =
+        new SimpleServiceContainer(NETWORK, collector, DistroConfig.NONE, namingConventions, 8081, false)
             .build();
+    GenericContainer<?> application =
+        new SimpleServiceContainer(NETWORK, collector, distroConfig, namingConventions, 8080, true)
+            .build();
+    dependency.start();
     long start = System.currentTimeMillis();
-    simpleRequestsService.start();
+    application.start();
     writeStartupTimeFile(distroConfig, start);
 
     long testStart = System.currentTimeMillis();
-    startRecording(distroConfig, simpleRequestsService);
+    startRecording(distroConfig, application);
 
     GenericContainer<?> k6 =
         new K6Container(NETWORK, distroConfig, config, namingConventions).build();
@@ -109,7 +111,7 @@ public class OverheadTests {
     while(counter++ < 120) {
       if (!"true".equals(System.getenv("PROFILE"))) {
         break;
-      } else if (simpleRequestsService.getLogs().contains("Wrote flamegraph data")) {
+      } else if (application.getLogs().contains("Wrote flamegraph data")) {
         logger.info("Flamegraph done.");
         break;
       } else {
@@ -118,7 +120,8 @@ public class OverheadTests {
       }
     }
 
-    simpleRequestsService.stop();
+    application.stop();
+    dependency.stop();
   }
 
   private void startRecording(DistroConfig distroConfig, GenericContainer<?> service)

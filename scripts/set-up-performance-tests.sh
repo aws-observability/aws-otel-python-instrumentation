@@ -23,14 +23,14 @@ fi
 
 # Create application images
 cd ..
-docker build . -t performance-test/simple-requests-service-adot -f sample-applications/simple-requests-service/Dockerfile-ADOT --build-arg="DISTRO=${DISTRO}"
+docker build . -t performance-test/simple-service-adot -f sample-applications/simple-flask-service/Dockerfile-ADOT --build-arg="DISTRO=${DISTRO}"
 if [ $? = 1 ]; then
-  echo "Docker build for SimpleRequestsService-ADOT failed"
+  echo "Docker build for simple-service-adot failed"
   exit 1
 fi
 
-docker build . -t performance-test/simple-requests-service-otel -f sample-applications/simple-requests-service/Dockerfile-OTEL
+docker build . -t performance-test/simple-service-otel -f sample-applications/simple-flask-service/Dockerfile-OTEL
 if [ $? = 1 ]; then
-  echo "Docker build for SimpleRequestsService-OTEL failed"
+  echo "Docker build for simple-service-otel failed"
   exit 1
 fi

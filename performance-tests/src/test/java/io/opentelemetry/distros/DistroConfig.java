@@ -14,12 +14,12 @@ public enum DistroConfig {
       "no distro at all",
       false,
       Collections.EMPTY_MAP,
-      "performance-test/simple-requests-service-adot"),
-//  OTEL_100(
-//      "OTEL distro with 100% sampling",
-//      true,
-//      Map.of("OTEL_TRACES_SAMPLER", "traceidratio", "OTEL_TRACES_SAMPLER_ARG", "1"),
-//      "performance-test/simple-requests-service-otel"),
+      "performance-test/simple-service-adot"),
+  OTEL_100(
+      "OTEL distro with 100% sampling",
+      true,
+      Map.of("OTEL_TRACES_SAMPLER", "traceidratio", "OTEL_TRACES_SAMPLER_ARG", "1"),
+      "performance-test/simple-service-otel"),
   ADOT_100(
       "ADOT distro with Application Signals disabled, 100% sampling",
       true,
@@ -32,7 +32,7 @@ public enum DistroConfig {
           "aws_distro",
           "OTEL_PYTHON_CONFIGURATOR",
           "aws_configurator"),
-      "performance-test/simple-requests-service-adot"),
+      "performance-test/simple-service-adot"),
   AS_100(
       "ADOT distro with Application Signals enabled, 100% sampling",
       true,
@@ -49,7 +49,7 @@ public enum DistroConfig {
           "true",
           "OTEL_AWS_APPLICATION_SIGNALS_EXPORTER_ENDPOINT",
           "http://collector:4318/v1/metrics"),
-      "performance-test/simple-requests-service-adot");
+      "performance-test/simple-service-adot");
 
   private final String description;
   private final boolean doInstrument;

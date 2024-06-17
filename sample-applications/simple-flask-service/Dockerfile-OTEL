@@ -1,0 +1,18 @@
+# Meant to be run from aws-otel-python-instrumentation
+# Assumes existence of dist/aws_opentelemetry_distro-<pkg_version>-py3-none-any.whl.
+# Assumes filename of aws_opentelemetry_distro-<pkg_version>-py3-none-any.whl is passed in as "DISTRO" arg.
+FROM python:3.10
+WORKDIR /app
+COPY ./sample-applications/simple-flask-service /app
+
+RUN rm -rf venv
+ENV PIP_ROOT_USER_ACTION=ignore
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+
+EXPOSE 8080 8081
+
+RUN pip install --upgrade pip && pip install -r requirements.txt && pip install psutil py-spy opentelemetry-distro --force-reinstall
+RUN pip install --force-reinstall -v "opentelemetry-exporter-otlp==1.22.0"
+RUN  pip install --force-reinstall -v "opentelemetry-distro==0.43b0"
+RUN opentelemetry-bootstrap -a install

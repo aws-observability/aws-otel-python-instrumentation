@@ -71,7 +71,16 @@ public class ResultsCollector {
     double requestLatencyP0 = read(json, "$.metrics.http_req_duration['p(0)']");
     double requestLatencyP50 = read(json, "$.metrics.http_req_duration['p(50)']");
     double requestLatencyP90 = read(json, "$.metrics.http_req_duration['p(90)']");
+    double requestLatencyP91 = read(json, "$.metrics.http_req_duration['p(91)']");
+    double requestLatencyP92 = read(json, "$.metrics.http_req_duration['p(92)']");
+    double requestLatencyP93 = read(json, "$.metrics.http_req_duration['p(93)']");
+    double requestLatencyP94 = read(json, "$.metrics.http_req_duration['p(94)']");
+    double requestLatencyP95 = read(json, "$.metrics.http_req_duration['p(95)']");
+    double requestLatencyP96 = read(json, "$.metrics.http_req_duration['p(96)']");
+    double requestLatencyP97 = read(json, "$.metrics.http_req_duration['p(97)']");
+    double requestLatencyP98 = read(json, "$.metrics.http_req_duration['p(98)']");
     double requestLatencyP99 = read(json, "$.metrics.http_req_duration['p(99)']");
+    double requestLatencyP999 = read(json, "$.metrics.http_req_duration['p(99.9)']");
     double requestLatencyP100 = read(json, "$.metrics.http_req_duration['p(100)']");
     builder.requestCount = requestCount;
     builder.requestRate = requestRate;
@@ -79,7 +88,16 @@ public class ResultsCollector {
     builder.requestLatencyP0 = requestLatencyP0;
     builder.requestLatencyP50 = requestLatencyP50;
     builder.requestLatencyP90 = requestLatencyP90;
+    builder.requestLatencyP91 = requestLatencyP91;
+    builder.requestLatencyP92 = requestLatencyP92;
+    builder.requestLatencyP93 = requestLatencyP93;
+    builder.requestLatencyP94 = requestLatencyP94;
+    builder.requestLatencyP95 = requestLatencyP95;
+    builder.requestLatencyP96 = requestLatencyP96;
+    builder.requestLatencyP97 = requestLatencyP97;
+    builder.requestLatencyP98 = requestLatencyP98;
     builder.requestLatencyP99 = requestLatencyP99;
+    builder.requestLatencyP999 = requestLatencyP999;
     builder.requestLatencyP100 = requestLatencyP100;
     return builder;
   }

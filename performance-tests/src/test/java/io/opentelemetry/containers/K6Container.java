@@ -59,7 +59,7 @@ public class K6Container {
             "--summary-export",
             k6OutputFile.toString(),
             "--summary-trend-stats",
-            "avg,p(0),p(50),p(90),p(99),p(100),count",
+            "avg,p(0),p(50),p(90),p(91),p(92),p(93),p(94),p(95),p(96),p(97),p(98),p(99),p(99.9),p(100),count",
             "/app/performanceTest.js")
         .withCreateContainerCmdModifier(
             cmd -> cmd.getHostConfig().withCpusetCpus(RuntimeUtil.getNonApplicationCores()))
