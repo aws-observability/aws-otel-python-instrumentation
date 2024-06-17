@@ -22,6 +22,7 @@ if [ "$DISTRO" = "aws_opentelemetry_distro-*-py3-none-any.whl" ]; then
 fi
 
 # Create application images
+# TODO: The vehicle sample app doesn't exist anymore so this needs to be cleaned up
 cd ..
 docker build . -t performance-test/simple-service-adot -f sample-applications/simple-flask-service/Dockerfile-ADOT --build-arg="DISTRO=${DISTRO}"
 if [ $? = 1 ]; then
