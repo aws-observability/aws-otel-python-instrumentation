@@ -30,7 +30,7 @@ COPY ./tools/cp-utility .
 # https://docs.docker.com/engine/reference/builder/#automatic-platform-args-in-the-global-scope
 ARG TARGETARCH
 
-# Run validations and audit only on amd64 bacause it is faster and those two steps
+# Run validations and audit only on amd64 because it is faster and those two steps
 # are only used to validate the source code and don't require anything that is
 # architecture specific.
 
