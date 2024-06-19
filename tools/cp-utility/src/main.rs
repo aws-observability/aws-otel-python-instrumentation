@@ -73,28 +73,18 @@ fn do_copy(operation: CopyOperation) -> io::Result<()> {
     Ok(())
 }
 
-/// Execute the recursive type of copy operation
+// Execute the recursive type of copy operation
 fn copy_archive(source: &Path, dest: &Path) -> io::Result<()> {
-    // This will cover the case in which the destination exists
-    let sanitized_dest: PathBuf = if dest.exists() {
-        dest.to_path_buf()
-            .join(source.file_name().ok_or(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Invalid source file",
-            ))?)
-    } else {
-        dest.to_path_buf()
-    };
-
     let mut stack = VecDeque::new();
-    stack.push_back((source.to_path_buf(), sanitized_dest));
-
+    stack.push_back((source.to_path_buf(), dest.to_path_buf()));
     while let Some((current_source, current_dest)) = stack.pop_back() {
         if current_source.is_symlink() {
             let target = current_source.read_link()?;
             unix::fs::symlink(target, &current_dest)?;
         } else if current_source.is_dir() {
-            fs::create_dir(&current_dest)?;
+            if !current_dest.exists() {
+                fs::create_dir(&current_dest)?;
+            }
             for entry in fs::read_dir(current_source)? {
                 let next_source = entry?.path();
                 let next_dest =
@@ -110,6 +100,7 @@ fn copy_archive(source: &Path, dest: &Path) -> io::Result<()> {
             fs::copy(current_source, current_dest)?;
         }
     }
+
     Ok(())
 }
 
@@ -306,13 +297,13 @@ mod tests {
         files.iter().for_each(|x| {
             assert_same_file(
                 &test_base.join(x),
-                &test_base.join(x.replace("foo/", "bar/foo/")),
+                &test_base.join(x.replace("foo/", "bar/")),
             )
         });
 
         assert_same_link(
             &test_base.join("foo/symlink1.txt"),
-            &test_base.join("bar/foo/symlink1.txt"),
+            &test_base.join("bar/symlink1.txt"),
         )
     }
 

@@ -3,6 +3,8 @@
 #   The packages are installed in the `/autoinstrumentation` directory. This is required as when instrumenting the pod by CWOperator,
 #   one init container will be created to copy all the content in `/autoinstrumentation` directory to app's container. Then
 #   update the `PYTHONPATH` environment variable accordingly. Then in the second stage, copy the directory to `/autoinstrumentation`.
+
+# Stage 1: Build the /autoinstrumentation folder
 FROM python:3.11 AS build
 
 WORKDIR /operator-build
@@ -18,11 +20,7 @@ RUN sed -i "/opentelemetry-exporter-otlp-proto-grpc/d" ./aws-opentelemetry-distr
 
 RUN mkdir workspace && pip install --target workspace ./aws-opentelemetry-distro
 
-
-#RUN chmod -R go+r /autoinstrumentation
-
-
-# Stage 1: Build the cp-utility binary
+# Stage 2: Build the cp-utility binary
 FROM rust:1.75 as builder
 
 WORKDIR /usr/src/cp-utility
@@ -37,10 +35,10 @@ ARG TARGETARCH
 # architecture specific.
 
 # Validations
-## Validate formatting
+# Validate formatting
 RUN if [ $TARGETARCH = "amd64" ]; then rustup component add rustfmt && cargo fmt --check ; fi
 
-## Audit dependencies
+# Audit dependencies
 RUN if [ $TARGETARCH = "amd64" ]; then cargo install cargo-audit && cargo audit ; fi
 
 
@@ -53,6 +51,7 @@ RUN if [ $TARGETARCH = "amd64" ]; then export ARCH="x86_64" ; \
     && cargo test  --target ${ARCH}-unknown-linux-musl \
     && cargo install --target ${ARCH}-unknown-linux-musl --path . --root .
 
+# Stage 3: Copy /autoinstrumentation and cp to scratch image
 FROM scratch
 
 # Required to copy attribute files to distributed docker images
@@ -60,4 +59,3 @@ ADD THIRD-PARTY-LICENSES ./THIRD-PARTY-LICENSES
 
 COPY --from=builder /usr/src/cp-utility/bin/cp-utility /bin/cp
 COPY --from=build /operator-build/workspace /autoinstrumentation
-
