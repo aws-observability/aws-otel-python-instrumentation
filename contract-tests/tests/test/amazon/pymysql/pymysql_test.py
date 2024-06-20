@@ -1,35 +1,26 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import Dict, List
-
-from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
 from testcontainers.mysql import MySqlContainer
 from typing_extensions import override
 
-from amazon.base.contract_test_base import NETWORK_NAME, ContractTestBase
-from amazon.utils.application_signals_constants import (
-    AWS_LOCAL_OPERATION,
-    AWS_LOCAL_SERVICE,
-    AWS_REMOTE_OPERATION,
-    AWS_REMOTE_RESOURCE_IDENTIFIER,
-    AWS_REMOTE_RESOURCE_TYPE,
-    AWS_REMOTE_SERVICE,
-    AWS_SPAN_KIND,
+from amazon.base.contract_test_base import NETWORK_NAME
+from amazon.base.database_contract_test_base import (
+    DATABASE_HOST,
+    DATABASE_NAME,
+    DATABASE_PASSWORD,
+    DATABASE_USER,
+    DatabaseContractTestBase,
 )
-from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
-from opentelemetry.proto.metrics.v1.metrics_pb2 import ExponentialHistogramDataPoint, Metric
-from opentelemetry.proto.trace.v1.trace_pb2 import Span
-from opentelemetry.trace import StatusCode
 
 
-class PyMysqlTest(ContractTestBase):
+class PyMysqlTest(DatabaseContractTestBase):
     @override
     @classmethod
     def set_up_dependency_container(cls) -> None:
         cls.container = (
-            MySqlContainer(MYSQL_USER="dbuser", MYSQL_PASSWORD="example", MYSQL_DATABASE="testdb")
+            MySqlContainer(MYSQL_USER=DATABASE_USER, MYSQL_PASSWORD=DATABASE_PASSWORD, MYSQL_DATABASE=DATABASE_NAME)
             .with_kwargs(network=NETWORK_NAME)
-            .with_name("mydb")
+            .with_name(DATABASE_HOST)
         )
         cls.container.start()
 
@@ -39,113 +30,22 @@ class PyMysqlTest(ContractTestBase):
         cls.container.stop()
 
     @override
-    def get_application_extra_environment_variables(self) -> Dict[str, str]:
-        return {
-            "DB_HOST": "mydb",
-            "DB_USER": "dbuser",
-            "DB_PASS": "example",
-            "DB_NAME": "testdb",
-        }
-
-    @override
     def get_application_image_name(self) -> str:
         return "aws-application-signals-tests-pymysql-app"
 
-    def test_success(self) -> None:
-        self.mock_collector_client.clear_signals()
-        self.do_test_requests("success", "GET", 200, 0, 0, sql_command="DROP TABLE")
+    @override
+    def get_remote_service(self) -> str:
+        return "mysql"
+
+    @override
+    def get_database_port(self) -> int:
+        return 3306
+
+    def test_drop_table_succeeds(self) -> None:
+        self.assert_drop_table_succeeds()
+
+    def test_create_database_succeeds(self) -> None:
+        self.assert_create_database_succeeds()
 
     def test_fault(self) -> None:
-        self.mock_collector_client.clear_signals()
-        self.do_test_requests("fault", "GET", 500, 0, 1, sql_command="SELECT DISTINCT")
-
-    @override
-    def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs) -> None:
-        target_spans: List[Span] = []
-        for resource_scope_span in resource_scope_spans:
-            # pylint: disable=no-member
-            if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
-                target_spans.append(resource_scope_span.span)
-
-        self.assertEqual(len(target_spans), 1)
-        self._assert_aws_attributes(target_spans[0].attributes, **kwargs)
-
-    @override
-    def _assert_aws_attributes(self, attributes_list: List[KeyValue], **kwargs) -> None:
-        attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
-        self._assert_str_attribute(attributes_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
-        # InternalOperation as OTEL does not instrument the basic server we are using, so the client span is a local
-        # root.
-        self._assert_str_attribute(attributes_dict, AWS_LOCAL_OPERATION, "InternalOperation")
-        self._assert_str_attribute(attributes_dict, AWS_REMOTE_SERVICE, "mysql")
-        command: str = kwargs.get("sql_command")
-        self._assert_str_attribute(attributes_dict, AWS_REMOTE_OPERATION, f"{command}")
-        self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_TYPE, "DB::Connection")
-        self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, "testdb|mydb|3306")
-        # See comment above AWS_LOCAL_OPERATION
-        self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
-
-    @override
-    def _assert_semantic_conventions_span_attributes(
-        self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str, status_code: int, **kwargs
-    ) -> None:
-        target_spans: List[Span] = []
-        for resource_scope_span in resource_scope_spans:
-            # pylint: disable=no-member
-            if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
-                target_spans.append(resource_scope_span.span)
-
-        self.assertEqual(target_spans[0].name, kwargs.get("sql_command").split()[0])
-        if status_code == 200:
-            self.assertEqual(target_spans[0].status.code, StatusCode.UNSET.value)
-        else:
-            self.assertEqual(target_spans[0].status.code, StatusCode.ERROR.value)
-
-        self._assert_semantic_conventions_attributes(target_spans[0].attributes, kwargs.get("sql_command"))
-
-    def _assert_semantic_conventions_attributes(self, attributes_list: List[KeyValue], command: str) -> None:
-        attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
-        self.assertTrue(attributes_dict.get("db.statement").string_value.startswith(command))
-        self._assert_str_attribute(attributes_dict, "db.system", "mysql")
-        self._assert_str_attribute(attributes_dict, "db.name", "testdb")
-        self._assert_str_attribute(attributes_dict, "net.peer.name", "mydb")
-        self._assert_int_attribute(attributes_dict, "net.peer.port", 3306)
-        self.assertTrue("server.address" not in attributes_dict)
-        self.assertTrue("server.port" not in attributes_dict)
-        self.assertTrue("db.operation" not in attributes_dict)
-
-    @override
-    def _assert_metric_attributes(
-        self, resource_scope_metrics: List[ResourceScopeMetric], metric_name: str, expected_sum: int, **kwargs
-    ) -> None:
-        target_metrics: List[Metric] = []
-        for resource_scope_metric in resource_scope_metrics:
-            if resource_scope_metric.metric.name.lower() == metric_name.lower():
-                target_metrics.append(resource_scope_metric.metric)
-
-        self.assertEqual(len(target_metrics), 1)
-        target_metric: Metric = target_metrics[0]
-        dp_list: List[ExponentialHistogramDataPoint] = target_metric.exponential_histogram.data_points
-
-        self.assertEqual(len(dp_list), 2)
-        dependency_dp: ExponentialHistogramDataPoint = dp_list[0]
-        service_dp: ExponentialHistogramDataPoint = dp_list[1]
-        if len(dp_list[1].attributes) > len(dp_list[0].attributes):
-            dependency_dp = dp_list[1]
-            service_dp = dp_list[0]
-        attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(dependency_dp.attributes)
-        self._assert_str_attribute(attribute_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
-        # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
-        self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
-        self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, "mysql")
-        self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, kwargs.get("sql_command"))
-        self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_TYPE, "DB::Connection")
-        self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, "testdb|mydb|3306")
-        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "CLIENT")
-        self.check_sum(metric_name, dependency_dp.sum, expected_sum)
-
-        attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(service_dp.attributes)
-        # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
-        self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
-        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
-        self.check_sum(metric_name, service_dp.sum, expected_sum)
+        self.assert_fault()
