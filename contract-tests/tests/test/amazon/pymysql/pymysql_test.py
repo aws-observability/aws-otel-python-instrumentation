@@ -30,16 +30,19 @@ class PyMysqlTest(DatabaseContractTestBase):
         cls.container.stop()
 
     @override
-    def get_application_image_name(self) -> str:
-        return "aws-application-signals-tests-pymysql-app"
-
-    @override
-    def get_remote_service(self) -> str:
+    @staticmethod
+    def get_remote_service() -> str:
         return "mysql"
 
     @override
-    def get_database_port(self) -> int:
+    @staticmethod
+    def get_database_port() -> int:
         return 3306
+
+    @override
+    @staticmethod
+    def get_application_image_name() -> str:
+        return "aws-application-signals-tests-pymysql-app"
 
     def test_drop_table_succeeds(self) -> None:
         self.assert_drop_table_succeeds()

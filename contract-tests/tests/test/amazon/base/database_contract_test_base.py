@@ -27,6 +27,26 @@ DATABASE_NAME: str = "testdb"
 
 
 class DatabaseContractTestBase(ContractTestBase):
+    @staticmethod
+    def get_remote_service() -> str:
+        return None
+
+    @staticmethod
+    def get_database_port() -> int:
+        return None
+
+    def get_remote_resource_identifier(self) -> str:
+        return f"{DATABASE_NAME}|{DATABASE_HOST}|{self.get_database_port()}"
+
+    @override
+    def get_application_extra_environment_variables(self) -> Dict[str, str]:
+        return {
+            "DB_HOST": DATABASE_HOST,
+            "DB_USER": DATABASE_USER,
+            "DB_PASS": DATABASE_PASSWORD,
+            "DB_NAME": DATABASE_NAME,
+        }
+
     def assert_drop_table_succeeds(self) -> None:
         self.mock_collector_client.clear_signals()
         self.do_test_requests("drop_table", "GET", 200, 0, 0, sql_command="DROP TABLE")
@@ -38,15 +58,6 @@ class DatabaseContractTestBase(ContractTestBase):
     def assert_fault(self) -> None:
         self.mock_collector_client.clear_signals()
         self.do_test_requests("fault", "GET", 500, 0, 1, sql_command="SELECT DISTINCT")
-
-    @override
-    def get_application_extra_environment_variables(self) -> Dict[str, str]:
-        return {
-            "DB_HOST": DATABASE_HOST,
-            "DB_USER": DATABASE_USER,
-            "DB_PASS": DATABASE_PASSWORD,
-            "DB_NAME": DATABASE_NAME,
-        }
 
     @override
     def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs) -> None:
@@ -141,12 +152,3 @@ class DatabaseContractTestBase(ContractTestBase):
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
         self.check_sum(metric_name, service_dp.sum, expected_sum)
-
-    def get_remote_resource_identifier(self) -> str:
-        return f"{DATABASE_NAME}|{DATABASE_HOST}|{self.get_database_port()}"
-
-    def get_remote_service(self) -> str:
-        return None
-
-    def get_database_port(self) -> int:
-        return None

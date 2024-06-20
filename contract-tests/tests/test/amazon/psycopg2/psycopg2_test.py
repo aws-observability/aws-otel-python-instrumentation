@@ -30,16 +30,19 @@ class Psycopg2Test(DatabaseContractTestBase):
         cls.container.stop()
 
     @override
-    def get_application_image_name(self) -> str:
-        return "aws-application-signals-tests-psycopg2-app"
-
-    @override
-    def get_remote_service(self) -> str:
+    @staticmethod
+    def get_remote_service() -> str:
         return "postgresql"
 
     @override
-    def get_database_port(self) -> int:
+    @staticmethod
+    def get_database_port() -> int:
         return 5432
+
+    @override
+    @staticmethod
+    def get_application_image_name() -> str:
+        return "aws-application-signals-tests-psycopg2-app"
 
     def test_drop_table_succeeds(self) -> None:
         self.assert_drop_table_succeeds()
