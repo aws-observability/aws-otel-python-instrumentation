@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import sys
 from typing import Dict
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
@@ -57,12 +58,14 @@ class TestInstrumentationPatch(TestCase):
 
         # Validate unpatched upstream behaviour - important to detect upstream changes that may break instrumentation
         self._test_unpatched_botocore_instrumentation()
+        self._test_unpatched_gevent_ssl_instrumentation()
 
         # Apply patches
         apply_instrumentation_patches()
 
         # Validate patched upstream behaviour - important to detect downstream changes that may break instrumentation
         self._test_patched_botocore_instrumentation()
+        self._test_patched_gevent_ssl_instrumentation()
 
         # Test teardown
         self._reset_mocks()
@@ -93,6 +96,10 @@ class TestInstrumentationPatch(TestCase):
         self.assertFalse("aws.sqs.queue_url" in attributes)
         self.assertFalse("aws.sqs.queue_name" in attributes)
 
+    def _test_unpatched_gevent_ssl_instrumentation(self):
+        # Ssl
+        self.assertFalse("gevent.ssl" in sys.modules, "Upstream has added the gevent ssl patch")
+
     def _test_patched_botocore_instrumentation(self):
         # Kinesis
         self.assertTrue("kinesis" in _KNOWN_EXTENSIONS)
@@ -114,6 +121,10 @@ class TestInstrumentationPatch(TestCase):
         self.assertEqual(sqs_attributes["aws.sqs.queue_url"], _QUEUE_URL)
         self.assertTrue("aws.sqs.queue_name" in sqs_attributes)
         self.assertEqual(sqs_attributes["aws.sqs.queue_name"], _QUEUE_NAME)
+
+    def _test_patched_gevent_ssl_instrumentation(self):
+        # Ssl
+        self.assertTrue("gevent.ssl" in sys.modules)
 
     def _test_botocore_installed_flag(self):
         with patch(
