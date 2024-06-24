@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
 import sys
-from pathlib import Path
 from logging import Logger, getLogger
 
 from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_instrumentation_patches
@@ -55,15 +54,6 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
         _logger.debug("Current working directory path: %s", cwd_path)
         if cwd_path not in sys.path:
             sys.path.insert(0, cwd_path)
-
-        # If application is using gevent, the application may crash due to SSL recursive issues. Check if application has the module 'gevent', and if so, patch SSL before gevent is started.
-        for path in Path('/').rglob('*'):
-            try:
-                if path.is_dir() and path.name == 'gevent':
-                    from gevent import monkey; monkey.patch_ssl()
-                    break
-            except Exception:
-                continue
 
         os.environ.setdefault(OTEL_EXPORTER_OTLP_PROTOCOL, "http/protobuf")
 

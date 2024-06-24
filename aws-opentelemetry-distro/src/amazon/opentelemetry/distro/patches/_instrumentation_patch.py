@@ -20,6 +20,12 @@ def apply_instrumentation_patches() -> None:
 
     Where possible, automated testing should be run to catch upstream changes resulting in broken patches
     """
+    if _is_installed("gevent"):
+        # pylint: disable=import-outside-toplevel
+        # Delay import to only occur if monkey patch is needed (e.g. gevent is used to run application).
+        from gevent import monkey
+
+        monkey.patch_ssl()
 
     if _is_installed("botocore ~= 1.0"):
         # pylint: disable=import-outside-toplevel
