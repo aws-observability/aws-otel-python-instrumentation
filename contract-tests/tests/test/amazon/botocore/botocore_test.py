@@ -50,7 +50,8 @@ class BotocoreTest(ContractTestBase):
         return ["error.test", "fault.test"]
 
     @override
-    def get_application_image_name(self) -> str:
+    @staticmethod
+    def get_application_image_name() -> str:
         return "aws-application-signals-tests-botocore-app"
 
     @classmethod
