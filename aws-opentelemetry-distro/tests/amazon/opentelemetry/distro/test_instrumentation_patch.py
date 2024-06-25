@@ -17,52 +17,71 @@ _QUEUE_NAME: str = "queueName"
 _QUEUE_URL: str = "queueUrl"
 _TOPIC_ARN: str = "topicArn"
 
+# Patch names
+GET_DISTRIBUTION_PATCH: str = (
+    "amazon.opentelemetry.distro.patches._instrumentation_patch.pkg_resources.get_distribution"
+)
+
 
 class TestInstrumentationPatch(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls.mock_get_distribution = patch(
-            "amazon.opentelemetry.distro.patches._instrumentation_patch.pkg_resources.get_distribution"
-        ).start()
+    """
+    This test class has exactly one test, test_instrumentation_patch. This is an anti-pattern, but the scenario is
+    fairly unusual and we feel justifies the code smell. Essentially the _instrumentation_patch module monkey-patches
+    upstream components, so once it's run, it's challenging to "undo" between tests. To work around this, we have a
+    monolith test framework that tests two major categories of test scenarios:
+    1. Patch behaviour
+    2. Patch mechanism
 
-    @classmethod
-    def tearDownClass(cls):
-        super().tearDownClass()
-        cls.mock_get_distribution.stop()
+    Patch behaviour tests validate upstream behaviour without patches, apply patches, and validate patched behaviour.
+    Patch mechanism tests validate the logic that is used to actually apply patches, and can be run regardless of the
+    pre- or post-patch behaviour.
+    """
 
-    def test_botocore_not_installed(self):
-        # Test scenario 1: Botocore package not installed
-        self.mock_get_distribution.side_effect = pkg_resources.DistributionNotFound
-        apply_instrumentation_patches()
-        with patch(
-            "amazon.opentelemetry.distro.patches._botocore_patches._apply_botocore_instrumentation_patches"
-        ) as mock_apply_patches:
-            mock_apply_patches.assert_not_called()
+    method_patches: Dict[str, patch] = {}
+    mock_metric_exporter_init: patch
 
-    def test_botocore_installed_wrong_version(self):
-        # Test scenario 2: Botocore package installed with wrong version
-        self.mock_get_distribution.side_effect = pkg_resources.VersionConflict("botocore==1.0.0", "botocore==0.0.1")
-        apply_instrumentation_patches()
-        with patch(
-            "amazon.opentelemetry.distro.patches._botocore_patches._apply_botocore_instrumentation_patches"
-        ) as mock_apply_patches:
-            mock_apply_patches.assert_not_called()
+    def test_instrumentation_patch(self):
+        # Set up method patches used by all tests
+        self.method_patches[GET_DISTRIBUTION_PATCH] = patch(GET_DISTRIBUTION_PATCH).start()
 
-    def test_botocore_installed_correct_version(self):
-        # Test scenario 3: Botocore package installed with correct version
+        # Run tests that validate patch behaviour before and after patching
+        self._run_patch_behaviour_tests()
+        # Run tests not specifically related to patch behaviour
+        self._run_patch_mechanism_tests()
+
+        # Clean up method patches
+        for method_patch in self.method_patches.values():
+            method_patch.stop()
+
+    def _run_patch_behaviour_tests(self):
+        # Test setup
+        self.method_patches[GET_DISTRIBUTION_PATCH].return_value = "CorrectDistributionObject"
+
         # Validate unpatched upstream behaviour - important to detect upstream changes that may break instrumentation
-        self._validate_unpatched_botocore_instrumentation()
-
-        self.mock_get_distribution.return_value = "CorrectDistributionObject"
+        self._test_unpatched_botocore_instrumentation()
 
         # Apply patches
         apply_instrumentation_patches()
 
         # Validate patched upstream behaviour - important to detect downstream changes that may break instrumentation
-        self._validate_patched_botocore_instrumentation()
+        self._test_patched_botocore_instrumentation()
 
-    def _validate_unpatched_botocore_instrumentation(self):
+        # Test teardown
+        self._reset_mocks()
+
+    def _run_patch_mechanism_tests(self):
+        """
+        Each test should be invoked, resetting mocks in between each test. E.g.:
+            self.test_x()
+            self.reset_mocks()
+            self.test_y()
+            self.reset_mocks()
+            etc.
+        """
+        self._test_botocore_installed_flag()
+        self._reset_mocks()
+
+    def _test_unpatched_botocore_instrumentation(self):
         # Kinesis
         self.assertFalse("kinesis" in _KNOWN_EXTENSIONS, "Upstream has added a Kinesis extension")
 
@@ -83,7 +102,7 @@ class TestInstrumentationPatch(TestCase):
         sns_success_attributes: Dict[str, str] = _do_sns_on_success()
         self.assertFalse("aws.sns.topic_arn" in sns_success_attributes)
 
-    def _validate_patched_botocore_instrumentation(self):
+    def _test_patched_botocore_instrumentation(self):
         # Kinesis
         self.assertTrue("kinesis" in _KNOWN_EXTENSIONS)
         kinesis_attributes: Dict[str, str] = _do_extract_kinesis_attributes()
@@ -113,6 +132,29 @@ class TestInstrumentationPatch(TestCase):
         sns_success_attributes: Dict[str, str] = _do_sns_on_success()
         self.assertTrue("aws.sns.topic_arn" in sns_success_attributes)
         self.assertEqual(sns_success_attributes["aws.sns.topic_arn"], _TOPIC_ARN)
+
+
+    def _test_botocore_installed_flag(self):
+        with patch(
+            "amazon.opentelemetry.distro.patches._botocore_patches._apply_botocore_instrumentation_patches"
+        ) as mock_apply_patches:
+            get_distribution_patch: patch = self.method_patches[GET_DISTRIBUTION_PATCH]
+            get_distribution_patch.side_effect = pkg_resources.DistributionNotFound
+            apply_instrumentation_patches()
+            mock_apply_patches.assert_not_called()
+
+            get_distribution_patch.side_effect = pkg_resources.VersionConflict("botocore==1.0.0", "botocore==0.0.1")
+            apply_instrumentation_patches()
+            mock_apply_patches.assert_not_called()
+
+            get_distribution_patch.side_effect = None
+            get_distribution_patch.return_value = "CorrectDistributionObject"
+            apply_instrumentation_patches()
+            mock_apply_patches.assert_called()
+
+    def _reset_mocks(self):
+        for method_patch in self.method_patches.values():
+            method_patch.reset_mock()
 
 
 def _do_extract_kinesis_attributes() -> Dict[str, str]:

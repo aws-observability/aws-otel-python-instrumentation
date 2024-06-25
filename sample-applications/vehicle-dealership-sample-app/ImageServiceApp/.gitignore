@@ -1,5 +1,0 @@
-static
-.idea
-.env
-db.sqlite3
-*.iml
