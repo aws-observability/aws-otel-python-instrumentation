@@ -41,8 +41,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._handle_sqs_request()
         if self.in_path("kinesis"):
             self._handle_kinesis_request()
-        if self.in_path("sns"):
-            self._handle_sns_request()
 
         self._end_request(self.main_status)
 
