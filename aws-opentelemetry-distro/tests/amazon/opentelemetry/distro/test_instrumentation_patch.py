@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import Any, Dict
+from typing import Dict
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
@@ -9,13 +9,11 @@ import pkg_resources
 from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_instrumentation_patches
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
 from opentelemetry.semconv.trace import SpanAttributes
-from opentelemetry.trace.span import Span
 
 _STREAM_NAME: str = "streamName"
 _BUCKET_NAME: str = "bucketName"
 _QUEUE_NAME: str = "queueName"
 _QUEUE_URL: str = "queueUrl"
-_TOPIC_ARN: str = "topicArn"
 
 # Patch names
 GET_DISTRIBUTION_PATCH: str = (
@@ -95,13 +93,6 @@ class TestInstrumentationPatch(TestCase):
         self.assertFalse("aws.sqs.queue_url" in sqs_attributes)
         self.assertFalse("aws.sqs.queue_name" in sqs_attributes)
 
-        # SNS
-        self.assertTrue("sns" in _KNOWN_EXTENSIONS, "Upstream has removed the SNS extension")
-        sns_attributes: Dict[str, str] = _do_extract_sns_attributes()
-        self.assertFalse("aws.sns.topic_arn" in sns_attributes)
-        sns_success_attributes: Dict[str, str] = _do_sns_on_success()
-        self.assertFalse("aws.sns.topic_arn" in sns_success_attributes)
-
     def _test_patched_botocore_instrumentation(self):
         # Kinesis
         self.assertTrue("kinesis" in _KNOWN_EXTENSIONS)
@@ -123,16 +114,6 @@ class TestInstrumentationPatch(TestCase):
         self.assertEqual(sqs_attributes["aws.sqs.queue_url"], _QUEUE_URL)
         self.assertTrue("aws.sqs.queue_name" in sqs_attributes)
         self.assertEqual(sqs_attributes["aws.sqs.queue_name"], _QUEUE_NAME)
-
-        # SNS
-        self.assertTrue("sns" in _KNOWN_EXTENSIONS)
-        sns_attributes: Dict[str, str] = _do_extract_sns_attributes()
-        self.assertTrue("aws.sns.topic_arn" in sns_attributes)
-        self.assertEqual(sns_attributes["aws.sns.topic_arn"], _TOPIC_ARN)
-        sns_success_attributes: Dict[str, str] = _do_sns_on_success()
-        self.assertTrue("aws.sns.topic_arn" in sns_success_attributes)
-        self.assertEqual(sns_success_attributes["aws.sns.topic_arn"], _TOPIC_ARN)
-
 
     def _test_botocore_installed_flag(self):
         with patch(
@@ -175,18 +156,6 @@ def _do_extract_sqs_attributes() -> Dict[str, str]:
     return _do_extract_attributes(service_name, params)
 
 
-def _do_extract_sns_attributes() -> Dict[str, str]:
-    service_name: str = "sns"
-    params: Dict[str, str] = {"TopicArn": _TOPIC_ARN}
-    return _do_extract_attributes(service_name, params)
-
-
-def _do_sns_on_success() -> Dict[str, str]:
-    service_name: str = "sns"
-    result: Dict[str, Any] = {"TopicArn": _TOPIC_ARN}
-    return _do_on_success(service_name, result)
-
-
 def _do_extract_attributes(service_name: str, params: Dict[str, str]) -> Dict[str, str]:
     mock_call_context: MagicMock = MagicMock()
     mock_call_context.params = params
@@ -194,17 +163,3 @@ def _do_extract_attributes(service_name: str, params: Dict[str, str]) -> Dict[st
     extension = _KNOWN_EXTENSIONS[service_name]()(mock_call_context)
     extension.extract_attributes(attributes)
     return attributes
-
-
-def _do_on_success(service_name: str, result: Dict[str, Any]) -> Dict[str, str]:
-    span_mock: Span = MagicMock()
-    span_attributes: Dict[str, str] = {}
-
-    def set_side_effect(set_key, set_value):
-        span_attributes[set_key] = set_value
-
-    span_mock.set_attribute.side_effect = set_side_effect
-    extension = _KNOWN_EXTENSIONS[service_name]()(span_mock)
-    extension.on_success(span_mock, result)
-
-    return span_attributes

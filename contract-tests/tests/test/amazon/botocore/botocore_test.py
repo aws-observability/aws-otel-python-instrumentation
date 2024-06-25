@@ -29,7 +29,6 @@ _logger.setLevel(INFO)
 _AWS_QUEUE_URL: str = "aws.sqs.queue_url"
 _AWS_QUEUE_NAME: str = "aws.sqs.queue_name"
 _AWS_STREAM_NAME: str = "aws.kinesis.stream_name"
-_AWS_TOPIC_ARN: str = "aws.sns.topic_arn"
 
 
 # pylint: disable=too-many-public-methods
@@ -387,78 +386,6 @@ class BotocoreTest(ContractTestBase):
                 _AWS_STREAM_NAME: "test_stream",
             },
             span_name="Kinesis.PutRecord",
-            span_kind="CLIENT",
-        )
-
-    def test_sns_get_topic_attributes(self):
-        self.do_test_requests(
-            "sns/gettopattributes/get-topic-attributes",
-            "GET",
-            200,
-            0,
-            0,
-            remote_service="AWS::SNS",
-            remote_operation="GetTopicAttributes",
-            remote_resource_type="AWS::SNS::Topic",
-            remote_resource_identifier="arn:aws:sns:us-west-2:000000000000:test_topic",
-            request_specific_attributes={
-                _AWS_TOPIC_ARN: "arn:aws:sns:us-west-2:000000000000:test_topic",
-            },
-            span_name="SNS.GetTopicAttributes",
-            span_kind="CLIENT",
-        )
-
-    def test_sns_publish_message(self):
-        self.do_test_requests(
-            "sns/publishmessage/publish-message/some-message",
-            "GET",
-            200,
-            0,
-            0,
-            remote_service="AWS::SNS",
-            remote_operation="Publish",
-            remote_resource_type="AWS::SNS::Topic",
-            remote_resource_identifier="arn:aws:sns:us-west-2:000000000000:test_topic",
-            request_specific_attributes={
-                _AWS_TOPIC_ARN: "arn:aws:sns:us-west-2:000000000000:test_topic",
-            },
-            span_name="test_topic send",
-            span_kind="PRODUCER",
-        )
-
-    def test_sns_error(self):
-        self.do_test_requests(
-            "sns/error",
-            "GET",
-            400,
-            1,
-            0,
-            remote_service="AWS::SNS",
-            remote_operation="Publish",
-            remote_resource_type="AWS::SNS::Topic",
-            remote_resource_identifier="arn:aws:sns:us-west-2:000000000000:test_topic/snserror",
-            request_specific_attributes={
-                _AWS_TOPIC_ARN: "arn:aws:sns:us-west-2:000000000000:test_topic/snserror",
-            },
-            span_name="test_topic/snserror send",
-            span_kind="PRODUCER",
-        )
-
-    def test_sns_fault(self):
-        self.do_test_requests(
-            "sns/fault",
-            "GET",
-            500,
-            0,
-            1,
-            remote_service="AWS::SNS",
-            remote_operation="GetTopicAttributes",
-            remote_resource_type="AWS::SNS::Topic",
-            remote_resource_identifier="invalid_topic_arn",
-            request_specific_attributes={
-                _AWS_TOPIC_ARN: "invalid_topic_arn",
-            },
-            span_name="SNS.GetTopicAttributes",
             span_kind="CLIENT",
         )
 

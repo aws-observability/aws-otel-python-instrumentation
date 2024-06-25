@@ -19,7 +19,6 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_REMOTE_SERVICE,
     AWS_SPAN_KIND,
     AWS_STREAM_NAME,
-    AWS_TOPIC_ARN,
 )
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
 from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, SERVICE_METRIC
@@ -980,9 +979,14 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [None])
 
         # Validate behaviour of AWS_TOPIC_ARN attribute, then remove it
-        self._mock_attribute([AWS_TOPIC_ARN], ["arn:aws:sns:us-west-2:012345678901:test_topic"], keys, values)
+        self._mock_attribute(
+            [SpanAttributes.MESSAGING_DESTINATION, SpanAttributes.RPC_SERVICE],
+            ["arn:aws:sns:us-west-2:012345678901:test_topic", "SNS"],
+            keys,
+            values,
+        )
         self._validate_remote_resource_attributes("AWS::SNS::Topic", "arn:aws:sns:us-west-2:012345678901:test_topic")
-        self._mock_attribute([AWS_TOPIC_ARN], [None])
+        self._mock_attribute([SpanAttributes.MESSAGING_DESTINATION, SpanAttributes.RPC_SERVICE], [None, None])
 
         self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None])
 
