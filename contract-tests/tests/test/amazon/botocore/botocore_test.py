@@ -29,6 +29,7 @@ _logger.setLevel(INFO)
 _AWS_QUEUE_URL: str = "aws.sqs.queue_url"
 _AWS_QUEUE_NAME: str = "aws.sqs.queue_name"
 _AWS_STREAM_NAME: str = "aws.kinesis.stream_name"
+_AWS_STREAM_CONSUMER_NAME: str = "aws.stream.consumer_name"
 
 
 # pylint: disable=too-many-public-methods
@@ -338,6 +339,23 @@ class BotocoreTest(ContractTestBase):
             span_name="Kinesis.PutRecord",
         )
 
+    def test_kinesis_describe_stream_consumer(self):
+        self.do_test_requests(
+            "kinesis/describestreamconsumer/my-consumer",
+            "GET",
+            200,
+            0,
+            0,
+            remote_service="AWS::Kinesis",
+            remote_operation="DescribeStreamConsumer",
+            remote_resource_type="AWS::Kinesis::StreamConsumer",
+            remote_resource_identifier="test_consumer",
+            request_specific_attributes={
+                _AWS_STREAM_CONSUMER_NAME: "test_consumer",
+            },
+            span_name="Kinesis.DescribeStreamConsumer",
+        )
+
     def test_kinesis_error(self):
         self.do_test_requests(
             "kinesis/error",
@@ -458,6 +476,7 @@ class BotocoreTest(ContractTestBase):
                 self._assert_array_value_ddb_table_name(attributes_dict, key, value)
 
     @override
+    # pylint: disable=too-many-locals
     def _assert_metric_attributes(
         self,
         resource_scope_metrics: List[ResourceScopeMetric],

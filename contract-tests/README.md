@@ -28,6 +28,9 @@ The steps to add a new test for a library or framework are:
     * The test class should be created in `contract-tests/tests/amazon/<framework-name>`.
     * The test class should extend `contract_test_base.py`
 
+Note: For botocore applications, when creating new resources in [prepare_aws_server()](https://github.com/aws-observability/aws-otel-python-instrumentation/blob/166c4cb36da6634cb070df5a312a62f6b0136a9c/contract-tests/images/applications/botocore/botocore_server.py#L215), make sure to check if the resource already exist before creation. 
+This is because each test pull the "aws-application-signals-tests-botocore-app" image and start a new container running `prepare_aws_server()` once, only the first attempt can succeeds, all subsequent attempts will fail due to the resources already existing. 
+
 # How to run the tests locally?
 
 Pre-requirements:
