@@ -6,6 +6,7 @@ from typing import Match, Optional
 from urllib.parse import ParseResult, urlparse
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
+    AWS_ACTIVITY_ARN,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_QUEUE_NAME,
@@ -386,6 +387,9 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         elif is_key_present(span, AWS_STATE_MACHINE_ARN):
             remote_resource_type = _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME + "::StateMachine"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_STATE_MACHINE_ARN))
+        elif is_key_present(span, AWS_ACTIVITY_ARN):
+            remote_resource_type = _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME + "::Activity"
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_ACTIVITY_ARN))
     elif is_db_span(span):
         remote_resource_type = _DB_CONNECTION_STRING_TYPE
         remote_resource_identifier = _get_db_connection(span)

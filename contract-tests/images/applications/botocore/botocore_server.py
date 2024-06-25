@@ -269,6 +269,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             sfn_client.describe_state_machine(
                 stateMachineArn="arn:aws:states:us-west-2:000000000000:stateMachine:testStateMachine"
             )
+        elif self.in_path("describeactivity/my-activity"):
+            set_main_status(200)
+            sfn_client.describe_activity(activityArn="arn:aws:states:us-west-2:000000000000:activity:testActivity")
         else:
             set_main_status(404)
 
@@ -382,6 +385,10 @@ def prepare_aws_server() -> None:
                 definition=json.dumps(definition),
                 roleArn="arn:aws:iam::000000000000:role/StepFunctionsExecutionTestRole",
             )
+        activity_response = sfn_client.list_activities()
+        activity = next((a for a in activity_response["activities"] if a["name"] == "testActivity"), None)
+        if not activity:
+            sfn_client.create_activity(name="testActivity")
             # arn:aws:states:us-west-2:000000000000:stateMachine:testStateMachine
     except Exception as exception:
         print("Unexpected exception occurred", exception)

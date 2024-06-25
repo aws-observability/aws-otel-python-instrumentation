@@ -8,6 +8,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
+    AWS_ACTIVITY_ARN,
     AWS_CONSUMER_PARENT_SPAN_KIND,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
@@ -1001,6 +1002,18 @@ class TestAwsMetricAttributeGenerator(TestCase):
             "AWS::StepFunctions::StateMachine", "arn:aws:states:us-east-1:123456789012:stateMachine:test_state_machine"
         )
         self._mock_attribute([AWS_STATE_MACHINE_ARN], [None])
+
+        # Validate behaviour of AWS_ACTIVITY_ARN attribute, then remove it.
+        self._mock_attribute(
+            [AWS_ACTIVITY_ARN],
+            ["arn:aws:states:us-east-1:007003123456789012:activity:testActivity"],
+            keys,
+            values,
+        )
+        self._validate_remote_resource_attributes(
+            "AWS::StepFunctions::Activity", "arn:aws:states:us-east-1:007003123456789012:activity:testActivity"
+        )
+        self._mock_attribute([AWS_ACTIVITY_ARN], [None])
 
         self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None])
 

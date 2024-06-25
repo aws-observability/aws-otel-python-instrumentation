@@ -17,6 +17,7 @@ _QUEUE_NAME: str = "queueName"
 _QUEUE_URL: str = "queueUrl"
 _SECRET_ARN: str = "arn:aws:secretsmanager:us-west-2:000000000000:secret:testSecret-ABCDEF"
 _STATE_MACHINE_ARN: str = "arn:aws:states:us-west-2:000000000000:stateMachine:testStateMachine"
+_ACTIVITY_ARN: str = "arn:aws:states:us-east-1:007003123456789012:activity:testActivity"
 
 # Patch names
 GET_DISTRIBUTION_PATCH: str = (
@@ -138,10 +139,13 @@ class TestInstrumentationPatch(TestCase):
         stepfunctions_attributes: Dict[str, str] = _do_extract_stepfunctions_attributes()
         self.assertTrue("aws.stepfunctions.state_machine_arn" in stepfunctions_attributes)
         self.assertEqual(stepfunctions_attributes["aws.stepfunctions.state_machine_arn"], _STATE_MACHINE_ARN)
+        self.assertTrue("aws.stepfunctions.activity_arn" in stepfunctions_attributes)
+        self.assertEqual(stepfunctions_attributes["aws.stepfunctions.activity_arn"], _ACTIVITY_ARN)
         stepfunctions_sucess_attributes: Dict[str, str] = _do_stepfunctions_on_success()
         self.assertTrue("aws.stepfunctions.state_machine_arn" in stepfunctions_sucess_attributes)
         self.assertEqual(stepfunctions_sucess_attributes["aws.stepfunctions.state_machine_arn"], _STATE_MACHINE_ARN)
-
+        self.assertTrue("aws.stepfunctions.activity_arn" in stepfunctions_sucess_attributes)
+        self.assertEqual(stepfunctions_sucess_attributes["aws.stepfunctions.activity_arn"], _ACTIVITY_ARN)
 
     def _test_botocore_installed_flag(self):
         with patch(
@@ -198,13 +202,13 @@ def _do_secretsmanager_on_success() -> Dict[str, str]:
 
 def _do_extract_stepfunctions_attributes() -> Dict[str, str]:
     service_name: str = "stepfunctions"
-    params: Dict[str, str] = {"stateMachineArn": _STATE_MACHINE_ARN}
+    params: Dict[str, str] = {"stateMachineArn": _STATE_MACHINE_ARN, "activityArn": _ACTIVITY_ARN}
     return _do_extract_attributes(service_name, params)
 
 
 def _do_stepfunctions_on_success() -> Dict[str, str]:
     service_name: str = "stepfunctions"
-    result: Dict[str, Any] = {"stateMachineArn": _STATE_MACHINE_ARN}
+    result: Dict[str, Any] = {"stateMachineArn": _STATE_MACHINE_ARN, "activityArn": _ACTIVITY_ARN}
     return _do_on_success(service_name, result)
 
 

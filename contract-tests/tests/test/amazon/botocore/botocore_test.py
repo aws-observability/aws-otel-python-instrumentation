@@ -31,6 +31,7 @@ _AWS_QUEUE_NAME: str = "aws.sqs.queue_name"
 _AWS_STREAM_NAME: str = "aws.kinesis.stream_name"
 _AWS_SECRET_ARN: str = "aws.secretsmanager.secret_arn"
 _AWS_STATE_MACHINE_ARN: str = "aws.stepfunctions.state_machine_arn"
+_AWS_ACTIVITY_ARN: str = "aws.stepfunctions.activity_arn"
 
 
 # pylint: disable=too-many-public-methods
@@ -445,6 +446,24 @@ class BotocoreTest(ContractTestBase):
                 _AWS_STATE_MACHINE_ARN: "arn:aws:states:us-west-2:000000000000:stateMachine:testStateMachine",
             },
             span_name="SFN.DescribeStateMachine",
+        )
+
+    def test_stepfunctions_activity(self):
+        self.do_test_requests(
+            "stepfunctions/describeactivity/my-activity",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="SFN",
+            remote_service="AWS::StepFunctions",
+            remote_operation="DescribeActivity",
+            remote_resource_type="AWS::StepFunctions::Activity",
+            remote_resource_identifier="arn:aws:states:us-west-2:000000000000:activity:testActivity",
+            request_specific_attributes={
+                _AWS_ACTIVITY_ARN: "arn:aws:states:us-west-2:000000000000:activity:testActivity",
+            },
+            span_name="SFN.DescribeActivity",
         )
 
     def test_stepfunctions_error(self):

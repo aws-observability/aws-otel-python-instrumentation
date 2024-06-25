@@ -144,6 +144,9 @@ class _StepFunctionsExtension(_AwsSdkExtension):
         state_machine_arn = self._call_context.params.get("stateMachineArn")
         if state_machine_arn:
             attributes["aws.stepfunctions.state_machine_arn"] = state_machine_arn
+        activity_arn = self._call_context.params.get("activityArn")
+        if activity_arn:
+            attributes["aws.stepfunctions.activity_arn"] = activity_arn
 
     # pylint: disable=no-self-use
     def on_success(self, span: Span, result: _BotoResultT):
@@ -152,4 +155,10 @@ class _StepFunctionsExtension(_AwsSdkExtension):
             span.set_attribute(
                 "aws.stepfunctions.state_machine_arn",
                 state_machine_arn,
+            )
+        activity_arn = result.get("activityArn")
+        if activity_arn:
+            span.set_attribute(
+                "aws.stepfunctions.activity_arn",
+                activity_arn,
             )
