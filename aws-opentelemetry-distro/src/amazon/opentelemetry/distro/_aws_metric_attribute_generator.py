@@ -58,6 +58,7 @@ _GRAPHQL_OPERATION_TYPE: str = SpanAttributes.GRAPHQL_OPERATION_TYPE
 _HTTP_METHOD: str = SpanAttributes.HTTP_METHOD
 _HTTP_URL: str = SpanAttributes.HTTP_URL
 _MESSAGING_OPERATION: str = SpanAttributes.MESSAGING_OPERATION
+_MESSAGING_DESTINATION: str = SpanAttributes.MESSAGING_DESTINATION
 _MESSAGING_SYSTEM: str = SpanAttributes.MESSAGING_SYSTEM
 _NET_PEER_NAME: str = SpanAttributes.NET_PEER_NAME
 _NET_PEER_PORT: str = SpanAttributes.NET_PEER_PORT
@@ -78,6 +79,7 @@ _NORMALIZED_DYNAMO_DB_SERVICE_NAME: str = "AWS::DynamoDB"
 _NORMALIZED_KINESIS_SERVICE_NAME: str = "AWS::Kinesis"
 _NORMALIZED_S3_SERVICE_NAME: str = "AWS::S3"
 _NORMALIZED_SQS_SERVICE_NAME: str = "AWS::SQS"
+_NORMALIZED_SNS_SERVICE_NAME: str = "AWS::SNS"
 _DB_CONNECTION_STRING_TYPE: str = "DB::Connection"
 
 # Special DEPENDENCY attribute value if GRAPHQL_OPERATION_TYPE attribute key is present.
@@ -372,6 +374,12 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
             remote_resource_identifier = _escape_delimiters(
                 SqsUrlParser.get_queue_name(span.attributes.get(AWS_QUEUE_URL))
             )
+        elif (
+            is_key_present(span, _MESSAGING_DESTINATION)
+            and _normalize_remote_service_name(span, _get_remote_service(span, _RPC_SERVICE)) == "AWS::SNS"
+        ):
+            remote_resource_type = _NORMALIZED_SNS_SERVICE_NAME + "::Topic"
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(_MESSAGING_DESTINATION))
     elif is_db_span(span):
         remote_resource_type = _DB_CONNECTION_STRING_TYPE
         remote_resource_identifier = _get_db_connection(span)

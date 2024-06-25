@@ -12,7 +12,7 @@ from opentelemetry.semconv.trace import SpanAttributes
 def _apply_botocore_instrumentation_patches() -> None:
     """Botocore instrumentation patches
 
-    Adds patches to provide additional support and Java parity for Kinesis, S3, and SQS.
+    Adds patches to provide additional support for Kinesis, S3, and SQS.
     """
     _apply_botocore_kinesis_patch()
     _apply_botocore_s3_patch()

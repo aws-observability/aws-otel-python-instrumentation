@@ -98,6 +98,7 @@ class BotocoreTest(ContractTestBase):
                 SpanAttributes.AWS_S3_BUCKET: "test-bucket-name",
             },
             span_name="S3.CreateBucket",
+            span_kind="CLIENT",
         )
 
     def test_s3_create_object(self):
@@ -115,6 +116,7 @@ class BotocoreTest(ContractTestBase):
                 SpanAttributes.AWS_S3_BUCKET: "test-put-object-bucket-name",
             },
             span_name="S3.PutObject",
+            span_kind="CLIENT",
         )
 
     def test_s3_get_object(self):
@@ -132,6 +134,7 @@ class BotocoreTest(ContractTestBase):
                 SpanAttributes.AWS_S3_BUCKET: "test-get-object-bucket-name",
             },
             span_name="S3.GetObject",
+            span_kind="CLIENT",
         )
 
     def test_s3_error(self):
@@ -149,6 +152,7 @@ class BotocoreTest(ContractTestBase):
                 SpanAttributes.AWS_S3_BUCKET: "-",
             },
             span_name="S3.CreateBucket",
+            span_kind="CLIENT",
         )
 
     def test_s3_fault(self):
@@ -166,6 +170,7 @@ class BotocoreTest(ContractTestBase):
                 SpanAttributes.AWS_S3_BUCKET: "valid-bucket-name",
             },
             span_name="S3.CreateBucket",
+            span_kind="CLIENT",
         )
 
     def test_dynamodb_create_table(self):
@@ -183,6 +188,7 @@ class BotocoreTest(ContractTestBase):
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["test_table"],
             },
             span_name="DynamoDB.CreateTable",
+            span_kind="CLIENT",
         )
 
     def test_dynamodb_put_item(self):
@@ -200,6 +206,7 @@ class BotocoreTest(ContractTestBase):
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["put_test_table"],
             },
             span_name="DynamoDB.PutItem",
+            span_kind="CLIENT",
         )
 
     def test_dynamodb_error(self):
@@ -217,6 +224,7 @@ class BotocoreTest(ContractTestBase):
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["invalid_table"],
             },
             span_name="DynamoDB.PutItem",
+            span_kind="CLIENT",
         )
 
     def test_dynamodb_fault(self):
@@ -234,6 +242,7 @@ class BotocoreTest(ContractTestBase):
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["invalid_table"],
             },
             span_name="DynamoDB.PutItem",
+            span_kind="CLIENT",
         )
 
     def test_sqs_create_queue(self):
@@ -251,6 +260,7 @@ class BotocoreTest(ContractTestBase):
                 _AWS_QUEUE_NAME: "test_queue",
             },
             span_name="SQS.CreateQueue",
+            span_kind="CLIENT",
         )
 
     def test_sqs_send_message(self):
@@ -268,6 +278,7 @@ class BotocoreTest(ContractTestBase):
                 _AWS_QUEUE_URL: "http://localstack:4566/000000000000/test_put_get_queue",
             },
             span_name="SQS.SendMessage",
+            span_kind="CLIENT",
         )
 
     def test_sqs_receive_message(self):
@@ -285,6 +296,7 @@ class BotocoreTest(ContractTestBase):
                 _AWS_QUEUE_URL: "http://localstack:4566/000000000000/test_put_get_queue",
             },
             span_name="SQS.ReceiveMessage",
+            span_kind="CLIENT",
         )
 
     def test_sqs_error(self):
@@ -302,6 +314,7 @@ class BotocoreTest(ContractTestBase):
                 _AWS_QUEUE_URL: "http://error.test:8080/000000000000/sqserror",
             },
             span_name="SQS.SendMessage",
+            span_kind="CLIENT",
         )
 
     def test_sqs_fault(self):
@@ -319,6 +332,7 @@ class BotocoreTest(ContractTestBase):
                 _AWS_QUEUE_NAME: "invalid_test",
             },
             span_name="SQS.CreateQueue",
+            span_kind="CLIENT",
         )
 
     def test_kinesis_put_record(self):
@@ -336,6 +350,7 @@ class BotocoreTest(ContractTestBase):
                 _AWS_STREAM_NAME: "test_stream",
             },
             span_name="Kinesis.PutRecord",
+            span_kind="CLIENT",
         )
 
     def test_kinesis_error(self):
@@ -353,6 +368,7 @@ class BotocoreTest(ContractTestBase):
                 _AWS_STREAM_NAME: "invalid_stream",
             },
             span_name="Kinesis.PutRecord",
+            span_kind="CLIENT",
         )
 
     def test_kinesis_fault(self):
@@ -370,6 +386,7 @@ class BotocoreTest(ContractTestBase):
                 _AWS_STREAM_NAME: "test_stream",
             },
             span_name="Kinesis.PutRecord",
+            span_kind="CLIENT",
         )
 
     @override
@@ -377,9 +394,11 @@ class BotocoreTest(ContractTestBase):
         target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
-            if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
+            if resource_scope_span.span.kind in (Span.SPAN_KIND_CLIENT, Span.SPAN_KIND_PRODUCER):
+                self.assertEqual(
+                    resource_scope_span.span.kind, Span.SpanKind.Value("SPAN_KIND_" + kwargs.get("span_kind"))
+                )
                 target_spans.append(resource_scope_span.span)
-
         self.assertEqual(len(target_spans), 1)
         self._assert_aws_attributes(
             target_spans[0].attributes,
@@ -420,7 +439,10 @@ class BotocoreTest(ContractTestBase):
         target_spans: List[Span] = []
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
-            if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
+            if resource_scope_span.span.kind in (Span.SPAN_KIND_CLIENT, Span.SPAN_KIND_PRODUCER):
+                self.assertEqual(
+                    resource_scope_span.span.kind, Span.SpanKind.Value("SPAN_KIND_" + kwargs.get("span_kind"))
+                )
                 target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
@@ -443,6 +465,7 @@ class BotocoreTest(ContractTestBase):
         request_specific_attributes: dict,
     ) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
+
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_METHOD, operation)
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SYSTEM, "aws-api")
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SERVICE, service.split("::")[-1])
@@ -486,7 +509,7 @@ class BotocoreTest(ContractTestBase):
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, kwargs.get("remote_service"))
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, kwargs.get("remote_operation"))
-        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "CLIENT")
+        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, kwargs.get("span_kind"))
         remote_resource_type = kwargs.get("remote_resource_type", "None")
         remote_resource_identifier = kwargs.get("remote_resource_identifier", "None")
         if remote_resource_type != "None":

@@ -88,10 +88,10 @@ class TestInstrumentationPatch(TestCase):
 
         # SQS
         self.assertTrue("sqs" in _KNOWN_EXTENSIONS, "Upstream has removed the SQS extension")
-        attributes: Dict[str, str] = _do_extract_sqs_attributes()
-        self.assertTrue("aws.queue_url" in attributes)
-        self.assertFalse("aws.sqs.queue_url" in attributes)
-        self.assertFalse("aws.sqs.queue_name" in attributes)
+        sqs_attributes: Dict[str, str] = _do_extract_sqs_attributes()
+        self.assertTrue("aws.queue_url" in sqs_attributes)
+        self.assertFalse("aws.sqs.queue_url" in sqs_attributes)
+        self.assertFalse("aws.sqs.queue_name" in sqs_attributes)
 
     def _test_patched_botocore_instrumentation(self):
         # Kinesis
@@ -160,6 +160,6 @@ def _do_extract_attributes(service_name: str, params: Dict[str, str]) -> Dict[st
     mock_call_context: MagicMock = MagicMock()
     mock_call_context.params = params
     attributes: Dict[str, str] = {}
-    sqs_extension = _KNOWN_EXTENSIONS[service_name]()(mock_call_context)
-    sqs_extension.extract_attributes(attributes)
+    extension = _KNOWN_EXTENSIONS[service_name]()(mock_call_context)
+    extension.extract_attributes(attributes)
     return attributes
