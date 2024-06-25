@@ -29,7 +29,7 @@ _logger.setLevel(INFO)
 _AWS_QUEUE_URL: str = "aws.sqs.queue_url"
 _AWS_QUEUE_NAME: str = "aws.sqs.queue_name"
 _AWS_STREAM_NAME: str = "aws.kinesis.stream_name"
-_AWS_STREAM_CONSUMER_ARN: str = "aws.kinesis.stream_consumer_arn"
+_AWS_STREAM_CONSUMER_NAME: str = "aws.stream.consumer_name"
 
 
 # pylint: disable=too-many-public-methods
@@ -348,11 +348,9 @@ class BotocoreTest(ContractTestBase):
             remote_service="AWS::Kinesis",
             remote_operation="DescribeStreamConsumer",
             remote_resource_type="AWS::Kinesis::StreamConsumer",
-            remote_resource_identifier=r"arn:aws:kinesis:us-west-2:000000000000:"
-            r"stream/test_stream/consumer/test_consumer:\d{10}",
+            remote_resource_identifier="test_consumer",
             request_specific_attributes={
-                _AWS_STREAM_CONSUMER_ARN: r"arn:aws:kinesis:us-west-2:000000000000:"
-                r"stream/test_stream/consumer/test_consumer:\d{10}",
+                _AWS_STREAM_CONSUMER_NAME: "test_consumer",
             },
             span_name="Kinesis.DescribeStreamConsumer",
         )
@@ -428,12 +426,7 @@ class BotocoreTest(ContractTestBase):
         if remote_resource_type != "None":
             self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_TYPE, remote_resource_type)
         if remote_resource_identifier != "None":
-            if self._is_valid_regex(remote_resource_identifier):
-                self._assert_match_attribute(
-                    attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier
-                )
-            else:
-                self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
+            self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, span_kind)
 
@@ -474,9 +467,7 @@ class BotocoreTest(ContractTestBase):
         # TODO: botocore instrumentation is not respecting PEER_SERVICE
         # self._assert_str_attribute(attributes_dict, SpanAttributes.PEER_SERVICE, "backend:8080")
         for key, value in request_specific_attributes.items():
-            if self._is_valid_regex(value):
-                self._assert_match_attribute(attributes_dict, key, value)
-            elif isinstance(value, str):
+            if isinstance(value, str):
                 self._assert_str_attribute(attributes_dict, key, value)
             elif isinstance(value, int):
                 self._assert_int_attribute(attributes_dict, key, value)
@@ -519,10 +510,7 @@ class BotocoreTest(ContractTestBase):
         if remote_resource_type != "None":
             self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_TYPE, remote_resource_type)
         if remote_resource_identifier != "None":
-            if self._is_valid_regex(remote_resource_identifier):
-                self._assert_match_attribute(attribute_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
-            else:
-                self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
+            self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
         self.check_sum(metric_name, dependency_dp.sum, expected_sum)
 
         attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(service_dp.attributes)

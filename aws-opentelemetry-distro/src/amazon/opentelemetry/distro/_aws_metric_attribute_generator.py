@@ -15,7 +15,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_REMOTE_RESOURCE_TYPE,
     AWS_REMOTE_SERVICE,
     AWS_SPAN_KIND,
-    AWS_STREAM_CONSUMER_ARN,
+    AWS_STREAM_CONSUMER_NAME,
     AWS_STREAM_NAME,
 )
 from amazon.opentelemetry.distro._aws_span_processing_util import (
@@ -362,9 +362,9 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         elif is_key_present(span, AWS_STREAM_NAME):
             remote_resource_type = _NORMALIZED_KINESIS_SERVICE_NAME + "::Stream"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_STREAM_NAME))
-        elif is_key_present(span, AWS_STREAM_CONSUMER_ARN):
+        elif is_key_present(span, AWS_STREAM_CONSUMER_NAME):
             remote_resource_type = _NORMALIZED_KINESIS_SERVICE_NAME + "::StreamConsumer"
-            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_STREAM_CONSUMER_ARN))
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_STREAM_CONSUMER_NAME))
         elif is_key_present(span, _AWS_BUCKET_NAME):
             remote_resource_type = _NORMALIZED_S3_SERVICE_NAME + "::Bucket"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(_AWS_BUCKET_NAME))

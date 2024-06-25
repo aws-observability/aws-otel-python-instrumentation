@@ -1,6 +1,5 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-import re
 import time
 from logging import INFO, Logger, getLogger
 from typing import Dict, List
@@ -169,12 +168,6 @@ class ContractTestBase(TestCase):
         self.assertIsNotNone(actual_value)
         self.assertEqual(expected_value, actual_value.int_value)
 
-    def _assert_match_attribute(self, attributes_dict: Dict[str, AnyValue], key: str, pattern: str) -> None:
-        self.assertIn(key, attributes_dict)
-        actual_value: AnyValue = attributes_dict[key]
-        self.assertIsNotNone(actual_value)
-        self.assertRegex(actual_value.string_value, pattern)
-
     def check_sum(self, metric_name: str, actual_sum: float, expected_sum: float) -> None:
         if metric_name is LATENCY_METRIC:
             self.assertTrue(0 < actual_sum < expected_sum)
@@ -224,13 +217,3 @@ class ContractTestBase(TestCase):
         self, resource_scope_metrics: List[ResourceScopeMetric], metric_name: str, expected_sum: int, **kwargs
     ):
         self.fail("Tests must implement this function")
-
-    def _is_valid_regex(self, pattern: str) -> bool:
-        if not isinstance(pattern, str):
-            return False
-
-        try:
-            re.compile(pattern)
-            return True
-        except re.error:
-            return False
