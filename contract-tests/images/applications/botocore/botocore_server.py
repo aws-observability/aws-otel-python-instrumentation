@@ -13,7 +13,7 @@ import requests
 from botocore.client import BaseClient
 from botocore.config import Config
 from botocore.exceptions import ClientError
-from typing_extensions import override
+from typing_extensions import Tuple, override
 
 _PORT: int = 8080
 _ERROR: str = "error"
@@ -399,7 +399,7 @@ def inject_500_error(api_name, **kwargs):
 
 def main() -> None:
     prepare_aws_server()
-    server_address: tuple[str, int] = ("0.0.0.0", _PORT)
+    server_address: Tuple[str, int] = ("0.0.0.0", _PORT)
     request_handler_class: type = RequestHandler
     requests_server: ThreadingHTTPServer = ThreadingHTTPServer(server_address, request_handler_class)
     atexit.register(requests_server.shutdown)
