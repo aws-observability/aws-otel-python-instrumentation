@@ -29,6 +29,9 @@ _logger.setLevel(INFO)
 _AWS_QUEUE_URL: str = "aws.sqs.queue_url"
 _AWS_QUEUE_NAME: str = "aws.sqs.queue_name"
 _AWS_STREAM_NAME: str = "aws.kinesis.stream_name"
+_AWS_SECRET_ARN: str = "aws.secretsmanager.secret_arn"
+_AWS_STATE_MACHINE_ARN: str = "aws.stepfunctions.state_machine_arn"
+_AWS_ACTIVITY_ARN: str = "aws.stepfunctions.activity_arn"
 
 
 # pylint: disable=too-many-public-methods
@@ -372,6 +375,133 @@ class BotocoreTest(ContractTestBase):
             span_name="Kinesis.PutRecord",
         )
 
+    def test_secretsmanager_describe_secret(self):
+        self.do_test_requests(
+            "secretsmanager/describesecret/my-secret",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Secrets Manager",
+            remote_service="AWS::SecretsManager",
+            remote_operation="DescribeSecret",
+            remote_resource_type="AWS::SecretsManager::Secret",
+            remote_resource_identifier=r"arn:aws:secretsmanager:us-west-2:000000000000:"
+            r"secret:testSecret-[a-zA-Z0-9]{6}$",
+            request_specific_attributes={
+                _AWS_SECRET_ARN: r"arn:aws:secretsmanager:us-west-2:000000000000:" r"secret:testSecret-[a-zA-Z0-9]{6}$",
+            },
+            span_name="Secrets Manager.DescribeSecret",
+        )
+
+    def test_secretsmanager_error(self):
+        self.do_test_requests(
+            "secretsmanager/error",
+            "GET",
+            400,
+            1,
+            0,
+            rpc_service="Secrets Manager",
+            remote_service="AWS::SecretsManager",
+            remote_operation="DescribeSecret",
+            remote_resource_type="AWS::SecretsManager::Secret",
+            remote_resource_identifier="arn:aws:secretsmanager:us-west-2:000000000000:secret:unExistSecret",
+            request_specific_attributes={
+                _AWS_SECRET_ARN: "arn:aws:secretsmanager:us-west-2:000000000000:secret:unExistSecret",
+            },
+            span_name="Secrets Manager.DescribeSecret",
+        )
+
+    def test_secretsmanager_fault(self):
+        self.do_test_requests(
+            "secretsmanager/fault",
+            "GET",
+            500,
+            0,
+            1,
+            rpc_service="Secrets Manager",
+            remote_service="AWS::SecretsManager",
+            remote_operation="GetSecretValue",
+            remote_resource_type="AWS::SecretsManager::Secret",
+            remote_resource_identifier="arn:aws:secretsmanager:us-west-2:000000000000:secret:nonexistent-secret",
+            request_specific_attributes={
+                _AWS_SECRET_ARN: "arn:aws:secretsmanager:us-west-2:000000000000:secret:nonexistent-secret",
+            },
+            span_name="Secrets Manager.GetSecretValue",
+        )
+
+    def test_stepfunctions_describe_state_machine(self):
+        self.do_test_requests(
+            "stepfunctions/describestatemachine/my-state-machine",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="SFN",
+            remote_service="AWS::StepFunctions",
+            remote_operation="DescribeStateMachine",
+            remote_resource_type="AWS::StepFunctions::StateMachine",
+            remote_resource_identifier="arn:aws:states:us-west-2:000000000000:stateMachine:testStateMachine",
+            request_specific_attributes={
+                _AWS_STATE_MACHINE_ARN: "arn:aws:states:us-west-2:000000000000:stateMachine:testStateMachine",
+            },
+            span_name="SFN.DescribeStateMachine",
+        )
+
+    def test_stepfunctions_activity(self):
+        self.do_test_requests(
+            "stepfunctions/describeactivity/my-activity",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="SFN",
+            remote_service="AWS::StepFunctions",
+            remote_operation="DescribeActivity",
+            remote_resource_type="AWS::StepFunctions::Activity",
+            remote_resource_identifier="arn:aws:states:us-west-2:000000000000:activity:testActivity",
+            request_specific_attributes={
+                _AWS_ACTIVITY_ARN: "arn:aws:states:us-west-2:000000000000:activity:testActivity",
+            },
+            span_name="SFN.DescribeActivity",
+        )
+
+    def test_stepfunctions_error(self):
+        self.do_test_requests(
+            "stepfunctions/error",
+            "GET",
+            400,
+            1,
+            0,
+            rpc_service="SFN",
+            remote_service="AWS::StepFunctions",
+            remote_operation="DescribeStateMachine",
+            remote_resource_type="AWS::StepFunctions::StateMachine",
+            remote_resource_identifier="arn:aws:states:us-west-2:000000000000:stateMachine:unExistStateMachine",
+            request_specific_attributes={
+                _AWS_STATE_MACHINE_ARN: "arn:aws:states:us-west-2:000000000000:stateMachine:unExistStateMachine",
+            },
+            span_name="SFN.DescribeStateMachine",
+        )
+
+    def test_stepfunctions_fault(self):
+        self.do_test_requests(
+            "stepfunctions/fault",
+            "GET",
+            500,
+            0,
+            1,
+            rpc_service="SFN",
+            remote_service="AWS::StepFunctions",
+            remote_operation="ListStateMachineVersions",
+            remote_resource_type="AWS::StepFunctions::StateMachine",
+            remote_resource_identifier="arn:aws:states:us-west-2:000000000000:stateMachine:invalid-state-machine",
+            request_specific_attributes={
+                _AWS_STATE_MACHINE_ARN: "arn:aws:states:us-west-2:000000000000:stateMachine:invalid-state-machine",
+            },
+            span_name="SFN.ListStateMachineVersions",
+        )
+
     @override
     def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs) -> None:
         target_spans: List[Span] = []
@@ -409,7 +539,12 @@ class BotocoreTest(ContractTestBase):
         if remote_resource_type != "None":
             self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_TYPE, remote_resource_type)
         if remote_resource_identifier != "None":
-            self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
+            if self._is_valid_regex(remote_resource_identifier):
+                self._assert_match_attribute(
+                    attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier
+                )
+            else:
+                self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, span_kind)
 
@@ -427,7 +562,7 @@ class BotocoreTest(ContractTestBase):
         self.assertEqual(target_spans[0].name, kwargs.get("span_name"))
         self._assert_semantic_conventions_attributes(
             target_spans[0].attributes,
-            kwargs.get("remote_service"),
+            kwargs.get("rpc_service") if "rpc_service" in kwargs else kwargs.get("remote_service").split("::")[-1],
             kwargs.get("remote_operation"),
             status_code,
             kwargs.get("request_specific_attributes", {}),
@@ -437,7 +572,7 @@ class BotocoreTest(ContractTestBase):
     def _assert_semantic_conventions_attributes(
         self,
         attributes_list: List[KeyValue],
-        service: str,
+        rpc_service: str,
         operation: str,
         status_code: int,
         request_specific_attributes: dict,
@@ -445,12 +580,14 @@ class BotocoreTest(ContractTestBase):
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_METHOD, operation)
         self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SYSTEM, "aws-api")
-        self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SERVICE, service.split("::")[-1])
+        self._assert_str_attribute(attributes_dict, SpanAttributes.RPC_SERVICE, rpc_service)
         self._assert_int_attribute(attributes_dict, SpanAttributes.HTTP_STATUS_CODE, status_code)
         # TODO: botocore instrumentation is not respecting PEER_SERVICE
         # self._assert_str_attribute(attributes_dict, SpanAttributes.PEER_SERVICE, "backend:8080")
         for key, value in request_specific_attributes.items():
-            if isinstance(value, str):
+            if self._is_valid_regex(value):
+                self._assert_match_attribute(attributes_dict, key, value)
+            elif isinstance(value, str):
                 self._assert_str_attribute(attributes_dict, key, value)
             elif isinstance(value, int):
                 self._assert_int_attribute(attributes_dict, key, value)
@@ -492,7 +629,10 @@ class BotocoreTest(ContractTestBase):
         if remote_resource_type != "None":
             self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_TYPE, remote_resource_type)
         if remote_resource_identifier != "None":
-            self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
+            if self._is_valid_regex(remote_resource_identifier):
+                self._assert_match_attribute(attribute_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
+            else:
+                self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
         self.check_sum(metric_name, dependency_dp.sum, expected_sum)
 
         attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(service_dp.attributes)

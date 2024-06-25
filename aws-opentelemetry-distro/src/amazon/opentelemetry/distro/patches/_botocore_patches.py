@@ -5,18 +5,21 @@ import importlib
 
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
 from opentelemetry.instrumentation.botocore.extensions.sqs import _SqsExtension
-from opentelemetry.instrumentation.botocore.extensions.types import _AttributeMapT, _AwsSdkExtension
+from opentelemetry.instrumentation.botocore.extensions.types import _AttributeMapT, _AwsSdkExtension, _BotoResultT
 from opentelemetry.semconv.trace import SpanAttributes
+from opentelemetry.trace.span import Span
 
 
 def _apply_botocore_instrumentation_patches() -> None:
     """Botocore instrumentation patches
 
-    Adds patches to provide additional support and Java parity for Kinesis, S3, and SQS.
+    Adds patches to provide additional support and Java parity for Kinesis, S3, SQS, SecretsManager and StepFunctions.
     """
     _apply_botocore_kinesis_patch()
     _apply_botocore_s3_patch()
     _apply_botocore_sqs_patch()
+    _apply_botocore_secretsmanager_patch()
+    _apply_botocore_stepfunctions_patch()
 
 
 def _apply_botocore_kinesis_patch() -> None:
@@ -65,6 +68,26 @@ def _apply_botocore_sqs_patch() -> None:
     _SqsExtension.extract_attributes = patch_extract_attributes
 
 
+def _apply_botocore_secretsmanager_patch() -> None:
+    """Botocore instrumentation patch for SecretsManager
+
+    This patch adds an extension to the upstream's list of known extension for SecretsManager.
+    Extensions allow for custom logic for adding service-specific information to spans,
+    such as attributes. Specifically, we are adding logic to add the AWS_SECRET_ARN attribute.
+    """
+    _KNOWN_EXTENSIONS["secretsmanager"] = _lazy_load(".", "_SecretsManagerExtension")
+
+
+def _apply_botocore_stepfunctions_patch() -> None:
+    """Botocore instrumentation patch for StepFunctions
+
+    This patch adds an extension to the upstream's list of known extension for StepFunctions.
+    Extensions allow for custom logic for adding service-specific information to spans,
+    such as attributes. Specifically, we are adding logic to add the AWS_STATE_MACHINE_ARN attribute.
+    """
+    _KNOWN_EXTENSIONS["stepfunctions"] = _lazy_load(".", "_StepFunctionsExtension")
+
+
 # The OpenTelemetry Authors code
 def _lazy_load(module, cls):
     """Clone of upstream opentelemetry.instrumentation.botocore.extensions.lazy_load
@@ -94,3 +117,48 @@ class _KinesisExtension(_AwsSdkExtension):
         stream_name = self._call_context.params.get("StreamName")
         if stream_name:
             attributes["aws.kinesis.stream_name"] = stream_name
+
+
+class _SecretsManagerExtension(_AwsSdkExtension):
+    def extract_attributes(self, attributes: _AttributeMapT):
+        """
+        SecretId can be secret name or secret arn, the function extracts attributes only if the SecretId parameter
+        is provided as arn which starts with 'arn:aws:secretsmanager:'.
+        """
+        secret_id = self._call_context.params.get("SecretId")
+        if secret_id and secret_id.startswith("arn:aws:secretsmanager:"):
+            attributes["aws.secretsmanager.secret_arn"] = secret_id
+
+    # pylint: disable=no-self-use
+    def on_success(self, span: Span, result: _BotoResultT):
+        secret_arn = result.get("ARN")
+        if secret_arn:
+            span.set_attribute(
+                "aws.secretsmanager.secret_arn",
+                secret_arn,
+            )
+
+
+class _StepFunctionsExtension(_AwsSdkExtension):
+    def extract_attributes(self, attributes: _AttributeMapT):
+        state_machine_arn = self._call_context.params.get("stateMachineArn")
+        if state_machine_arn:
+            attributes["aws.stepfunctions.state_machine_arn"] = state_machine_arn
+        activity_arn = self._call_context.params.get("activityArn")
+        if activity_arn:
+            attributes["aws.stepfunctions.activity_arn"] = activity_arn
+
+    # pylint: disable=no-self-use
+    def on_success(self, span: Span, result: _BotoResultT):
+        state_machine_arn = result.get("stateMachineArn")
+        if state_machine_arn:
+            span.set_attribute(
+                "aws.stepfunctions.state_machine_arn",
+                state_machine_arn,
+            )
+        activity_arn = result.get("activityArn")
+        if activity_arn:
+            span.set_attribute(
+                "aws.stepfunctions.activity_arn",
+                activity_arn,
+            )
