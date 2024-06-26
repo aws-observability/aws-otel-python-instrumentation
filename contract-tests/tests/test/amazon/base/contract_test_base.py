@@ -128,10 +128,7 @@ class ContractTestBase(TestCase):
     def do_test_requests(
         self, path: str, method: str, status_code: int, expected_error: int, expected_fault: int, **kwargs
     ) -> None:
-        address: str = self.application.get_container_host_ip()
-        port: str = self.application.get_exposed_port(self.get_application_port())
-        url: str = f"http://{address}:{port}/{path}"
-        response: Response = request(method, url, timeout=20)
+        response: Response = self.send_request(method, path)
         self.assertEqual(status_code, response.status_code)
 
         resource_scope_spans: List[ResourceScopeSpan] = self.mock_collector_client.get_traces()
@@ -144,6 +141,12 @@ class ContractTestBase(TestCase):
         self._assert_metric_attributes(metrics, LATENCY_METRIC, 5000, **kwargs)
         self._assert_metric_attributes(metrics, ERROR_METRIC, expected_error, **kwargs)
         self._assert_metric_attributes(metrics, FAULT_METRIC, expected_fault, **kwargs)
+
+    def send_request(self, method, path) -> Response:
+        address: str = self.application.get_container_host_ip()
+        port: str = self.application.get_exposed_port(self.get_application_port())
+        url: str = f"http://{address}:{port}/{path}"
+        return request(method, url, timeout=20)
 
     def _get_attributes_dict(self, attributes_list: List[KeyValue]) -> Dict[str, AnyValue]:
         attributes_dict: Dict[str, AnyValue] = {}
