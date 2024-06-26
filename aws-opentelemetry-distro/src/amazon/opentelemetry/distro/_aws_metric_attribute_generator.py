@@ -293,7 +293,7 @@ def _normalize_remote_service_name(span: ReadableSpan, service_name: str) -> str
     """
     if is_aws_sdk_span(span):
         aws_sdk_service_mapping = {
-            "Bedrock Runtime": _NORMALIZED_BEDROCK_RUNTIME_SERVICE_NAME,
+            "Bedrock Runtime": _NORMALIZED_BEDROCK_SERVICE_NAME,
         }
         return aws_sdk_service_mapping.get(service_name, "AWS::" + service_name)
     return service_name
@@ -378,7 +378,7 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
                 SqsUrlParser.get_queue_name(span.attributes.get(AWS_QUEUE_URL))
             )
         elif is_key_present(span, AWS_BEDROCK_RUNTIME_MODEL_ID):
-            remote_resource_type = _NORMALIZED_BEDROCK_RUNTIME_SERVICE_NAME + "::Model"
+            remote_resource_type = _NORMALIZED_BEDROCK_SERVICE_NAME + "::Model"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_BEDROCK_RUNTIME_MODEL_ID))
     elif is_db_span(span):
         remote_resource_type = _DB_CONNECTION_STRING_TYPE
