@@ -25,6 +25,8 @@ DATABASE_HOST: str = "mydb"
 DATABASE_USER: str = "root"
 DATABASE_PASSWORD: str = "example"
 DATABASE_NAME: str = "testdb"
+LOCAL_ROOT: str = "LOCAL_ROOT"
+CLIENT: str = "CLIENT"
 
 
 class DatabaseContractTestBase(ContractTestBase):
@@ -101,7 +103,9 @@ class DatabaseContractTestBase(ContractTestBase):
         self.assertTrue("db.operation" not in attributes_dict)
 
     @override
-    def _assert_aws_attributes(self, attributes_list: List[KeyValue], **kwargs) -> None:
+    def _assert_aws_attributes(
+        self, attributes_list: List[KeyValue], expected_span_kind: str = LOCAL_ROOT, **kwargs
+    ) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # InternalOperation as OTEL does not instrument the basic server we are using, so the client span is a local
@@ -115,7 +119,7 @@ class DatabaseContractTestBase(ContractTestBase):
             attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, self.get_remote_resource_identifier()
         )
         # See comment above AWS_LOCAL_OPERATION
-        self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
+        self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, expected_span_kind)
 
     @override
     def _assert_metric_attributes(
@@ -136,21 +140,11 @@ class DatabaseContractTestBase(ContractTestBase):
         if len(dp_list[1].attributes) > len(dp_list[0].attributes):
             dependency_dp = dp_list[1]
             service_dp = dp_list[0]
-        attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(dependency_dp.attributes)
-        self._assert_str_attribute(attribute_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
-        # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
-        self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
-        self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, self.get_remote_service())
-        self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, kwargs.get("sql_command"))
-        self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_TYPE, "DB::Connection")
-        self._assert_str_attribute(
-            attribute_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, self.get_remote_resource_identifier()
-        )
-        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "CLIENT")
+        self._assert_aws_attributes(dependency_dp.attributes, CLIENT, **kwargs)
         self.check_sum(metric_name, dependency_dp.sum, expected_sum)
 
         attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(service_dp.attributes)
         # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
-        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
+        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, LOCAL_ROOT)
         self.check_sum(metric_name, service_dp.sum, expected_sum)
