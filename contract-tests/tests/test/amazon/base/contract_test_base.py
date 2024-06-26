@@ -193,7 +193,8 @@ class ContractTestBase(TestCase):
     def get_application_network_aliases(self) -> List[str]:
         return []
 
-    def get_application_image_name(self) -> str:
+    @staticmethod
+    def get_application_image_name() -> str:
         return None
 
     def get_application_wait_pattern(self) -> str:
