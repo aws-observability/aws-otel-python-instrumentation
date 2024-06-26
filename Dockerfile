@@ -4,7 +4,7 @@
 #   one init container will be created to copy all the content in `/autoinstrumentation` directory to app's container. Then
 #   update the `PYTHONPATH` environment variable accordingly. Then in the second stage, copy the directory to `/autoinstrumentation`.
 
-# Stage 1: Build the /autoinstrumentation folder
+# Stage 1: Install ADOT Python in the /operator-build folder
 FROM python:3.11 AS build
 
 WORKDIR /operator-build
@@ -51,7 +51,7 @@ RUN if [ $TARGETARCH = "amd64" ]; then export ARCH="x86_64" ; \
     && cargo test  --target ${ARCH}-unknown-linux-musl \
     && cargo install --target ${ARCH}-unknown-linux-musl --path . --root .
 
-# Stage 3: Copy /autoinstrumentation and cp to scratch image
+# Stage 3: Build the distribution image by copying the THIRD-PARTY-LICENSES, the custom built cp command from stage 2, and the installed ADOT Python from stage 1 to their respective destinations
 FROM scratch
 
 # Required to copy attribute files to distributed docker images
