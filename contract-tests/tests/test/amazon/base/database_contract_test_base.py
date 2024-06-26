@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 from typing import Dict, List
-
+import time
 from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
 from typing_extensions import override
 
@@ -57,6 +57,13 @@ class DatabaseContractTestBase(ContractTestBase):
     def assert_create_database_succeeds(self) -> None:
         self.mock_collector_client.clear_signals()
         self.do_test_requests("create_database", "GET", 200, 0, 0, sql_command="CREATE DATABASE")
+
+    def assert_select_succeeds(self) -> None:
+        self.send_request("GET", "prepare_db")
+        # wait for metrics and traces to be available on the collector before clearing the signals
+        time.sleep(1)
+        self.mock_collector_client.clear_signals()
+        self.do_test_requests("select", "GET", 200, 0, 0, sql_command="SELECT")
 
     def assert_fault(self) -> None:
         self.mock_collector_client.clear_signals()
