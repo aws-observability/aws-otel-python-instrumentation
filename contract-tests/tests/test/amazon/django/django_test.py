@@ -15,7 +15,8 @@ from opentelemetry.semconv.trace import SpanAttributes
 
 class DjangoTest(ContractTestBase):
     @override
-    def get_application_image_name(self) -> str:
+    @staticmethod
+    def get_application_image_name() -> str:
         return "aws-application-signals-tests-django-app"
 
     @override
