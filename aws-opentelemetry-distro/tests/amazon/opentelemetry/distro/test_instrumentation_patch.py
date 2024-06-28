@@ -236,7 +236,6 @@ class TestInstrumentationPatch(TestCase):
         self.assertFalse("gen_ai.usage.prompt_tokens" in bedrock_runtime_sucess_no_valid_attributes)
         self.assertFalse("gen_ai.usage.completion_tokens" in bedrock_runtime_sucess_no_valid_attributes)
 
-        
     def _test_botocore_installed_flag(self):
         with patch(
             "amazon.opentelemetry.distro.patches._botocore_patches._apply_botocore_instrumentation_patches"

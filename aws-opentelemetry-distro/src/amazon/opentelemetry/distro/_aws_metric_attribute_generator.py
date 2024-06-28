@@ -80,6 +80,7 @@ _NORMALIZED_KINESIS_SERVICE_NAME: str = "AWS::Kinesis"
 _NORMALIZED_S3_SERVICE_NAME: str = "AWS::S3"
 _NORMALIZED_SQS_SERVICE_NAME: str = "AWS::SQS"
 _NORMALIZED_BEDROCK_SERVICE_NAME: str = "AWS::Bedrock"
+_NORMALIZED_BEDROCK_RUNTIME_SERVICE_NAME: str = "AWS::BedrockRuntime"
 _DB_CONNECTION_STRING_TYPE: str = "DB::Connection"
 
 # Special DEPENDENCY attribute value if GRAPHQL_OPERATION_TYPE attribute key is present.
@@ -293,7 +294,7 @@ def _normalize_remote_service_name(span: ReadableSpan, service_name: str) -> str
     """
     if is_aws_sdk_span(span):
         aws_sdk_service_mapping = {
-            "Bedrock Runtime": _NORMALIZED_BEDROCK_SERVICE_NAME,
+            "Bedrock Runtime": _NORMALIZED_BEDROCK_RUNTIME_SERVICE_NAME,
         }
         return aws_sdk_service_mapping.get(service_name, "AWS::" + service_name)
     return service_name

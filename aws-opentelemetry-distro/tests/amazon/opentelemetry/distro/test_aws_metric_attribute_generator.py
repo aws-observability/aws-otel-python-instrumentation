@@ -822,7 +822,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.validate_aws_sdk_service_normalization("Kinesis", "AWS::Kinesis")
         self.validate_aws_sdk_service_normalization("S3", "AWS::S3")
         self.validate_aws_sdk_service_normalization("SQS", "AWS::SQS")
-        self.validate_aws_sdk_service_normalization("Bedrock Runtime", "AWS::Bedrock")
+        self.validate_aws_sdk_service_normalization("Bedrock Runtime", "AWS::BedrockRuntime")
 
     def validate_aws_sdk_service_normalization(self, service_name: str, expected_remote_service: str):
         self._mock_attribute([SpanAttributes.RPC_SYSTEM, SpanAttributes.RPC_SERVICE], ["aws-api", service_name])
