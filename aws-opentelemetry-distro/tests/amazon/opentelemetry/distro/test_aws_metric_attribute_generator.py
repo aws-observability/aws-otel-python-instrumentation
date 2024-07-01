@@ -785,7 +785,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.assertEqual(actual_attributes.get(AWS_REMOTE_DB_USER), db_user)
 
     def test_db_user_attribute_absent(self):
-        self._mock_attribute(SpanAttributes.DB_USER, None)
+        self._mock_attribute([SpanAttributes.DB_USER], [None])
         self.span_mock.kind = SpanKind.CLIENT
 
         actual_attributes: Attributes = _GENERATOR.generate_metric_attributes_dict_from_span(
