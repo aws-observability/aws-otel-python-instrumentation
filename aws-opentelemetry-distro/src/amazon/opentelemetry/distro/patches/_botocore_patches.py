@@ -7,6 +7,7 @@ from amazon.opentelemetry.distro.patches._bedrock_patches import (  # noqa # pyl
     _BedrockAgentExtension,
     _BedrockAgentRuntimeExtension,
     _BedrockExtension,
+    _BedrockRuntimeExtension,
 )
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
 from opentelemetry.instrumentation.botocore.extensions.sqs import _SqsExtension
@@ -80,6 +81,7 @@ def _apply_botocore_bedrock_patch() -> None:
     _KNOWN_EXTENSIONS["bedrock"] = _lazy_load(".", "_BedrockExtension")
     _KNOWN_EXTENSIONS["bedrock-agent"] = _lazy_load(".", "_BedrockAgentExtension")
     _KNOWN_EXTENSIONS["bedrock-agent-runtime"] = _lazy_load(".", "_BedrockAgentRuntimeExtension")
+    _KNOWN_EXTENSIONS["bedrock-runtime"] = _lazy_load(".", "_BedrockRuntimeExtension")
 
 
 # The OpenTelemetry Authors code

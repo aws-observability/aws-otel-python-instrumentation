@@ -12,6 +12,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_DATASOURCE_ID,
     AWS_BEDROCK_GUARDRAIL_ID,
     AWS_BEDROCK_KNOWLEDGEBASE_ID,
+    AWS_BEDROCK_RUNTIME_MODEL_ID,
     AWS_CONSUMER_PARENT_SPAN_KIND,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
@@ -828,6 +829,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.validate_aws_sdk_service_normalization("Bedrock", "AWS::Bedrock")
         self.validate_aws_sdk_service_normalization("Bedrock Agent", "AWS::Bedrock")
         self.validate_aws_sdk_service_normalization("Bedrock Agent Runtime", "AWS::Bedrock")
+        self.validate_aws_sdk_service_normalization("Bedrock Runtime", "AWS::BedrockRuntime")
 
     def validate_aws_sdk_service_normalization(self, service_name: str, expected_remote_service: str):
         self._mock_attribute([SpanAttributes.RPC_SYSTEM, SpanAttributes.RPC_SERVICE], ["aws-api", service_name])
@@ -1003,6 +1005,11 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute([AWS_BEDROCK_KNOWLEDGEBASE_ID], ["test_knowledgeBase_id"], keys, values)
         self._validate_remote_resource_attributes("AWS::Bedrock::KnowledgeBase", "test_knowledgeBase_id")
         self._mock_attribute([AWS_BEDROCK_KNOWLEDGEBASE_ID], [None])
+
+        # Validate behaviour of AWS_BEDROCK_RUNTIME_MODEL_ID attribute, then remove it.
+        self._mock_attribute([AWS_BEDROCK_RUNTIME_MODEL_ID], ["test.service-id"], keys, values)
+        self._validate_remote_resource_attributes("AWS::Bedrock::Model", "test.service-id")
+        self._mock_attribute([AWS_BEDROCK_RUNTIME_MODEL_ID], [None])
 
         self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None])
 

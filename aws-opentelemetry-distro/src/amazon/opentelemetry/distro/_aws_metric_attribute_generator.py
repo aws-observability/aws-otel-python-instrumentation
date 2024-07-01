@@ -10,6 +10,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_DATASOURCE_ID,
     AWS_BEDROCK_GUARDRAIL_ID,
     AWS_BEDROCK_KNOWLEDGEBASE_ID,
+    AWS_BEDROCK_RUNTIME_MODEL_ID,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_QUEUE_NAME,
@@ -83,6 +84,7 @@ _NORMALIZED_KINESIS_SERVICE_NAME: str = "AWS::Kinesis"
 _NORMALIZED_S3_SERVICE_NAME: str = "AWS::S3"
 _NORMALIZED_SQS_SERVICE_NAME: str = "AWS::SQS"
 _NORMALIZED_BEDROCK_SERVICE_NAME: str = "AWS::Bedrock"
+_NORMALIZED_BEDROCK_RUNTIME_SERVICE_NAME: str = "AWS::BedrockRuntime"
 _DB_CONNECTION_STRING_TYPE: str = "DB::Connection"
 
 # Special DEPENDENCY attribute value if GRAPHQL_OPERATION_TYPE attribute key is present.
@@ -298,6 +300,7 @@ def _normalize_remote_service_name(span: ReadableSpan, service_name: str) -> str
         aws_sdk_service_mapping = {
             "Bedrock Agent": _NORMALIZED_BEDROCK_SERVICE_NAME,
             "Bedrock Agent Runtime": _NORMALIZED_BEDROCK_SERVICE_NAME,
+            "Bedrock Runtime": _NORMALIZED_BEDROCK_RUNTIME_SERVICE_NAME,
         }
         return aws_sdk_service_mapping.get(service_name, "AWS::" + service_name)
     return service_name
@@ -348,6 +351,7 @@ def _generate_remote_operation(span: ReadableSpan) -> str:
     return remote_operation
 
 
+# pylint: disable=too-many-branches
 def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttributes) -> None:
     """
     Remote resource attributes {@link AwsAttributeKeys#AWS_REMOTE_RESOURCE_TYPE} and {@link
@@ -393,6 +397,9 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         elif is_key_present(span, AWS_BEDROCK_KNOWLEDGEBASE_ID):
             remote_resource_type = _NORMALIZED_BEDROCK_SERVICE_NAME + "::KnowledgeBase"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_BEDROCK_KNOWLEDGEBASE_ID))
+        elif is_key_present(span, AWS_BEDROCK_RUNTIME_MODEL_ID):
+            remote_resource_type = _NORMALIZED_BEDROCK_SERVICE_NAME + "::Model"
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_BEDROCK_RUNTIME_MODEL_ID))
     elif is_db_span(span):
         remote_resource_type = _DB_CONNECTION_STRING_TYPE
         remote_resource_identifier = _get_db_connection(span)
