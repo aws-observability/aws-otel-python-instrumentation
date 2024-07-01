@@ -27,6 +27,7 @@ DATABASE_PASSWORD: str = "example"
 DATABASE_NAME: str = "testdb"
 DB_USER: str = "db.user"
 
+
 class DatabaseContractTestBase(ContractTestBase):
     @staticmethod
     def get_remote_service() -> str:

@@ -453,9 +453,11 @@ def _escape_delimiters(input_str: str) -> Optional[str]:
         return None
     return input_str.replace("^", "^^").replace("|", "^|")
 
+
 def _set_remote_db_user(span: ReadableSpan, attributes: BoundedAttributes) -> None:
     if is_db_span(span) and is_key_present(span, _DB_USER):
         attributes[AWS_REMOTE_DB_USER] = span.attributes.get(_DB_USER)
+
 
 def _set_span_kind_for_dependency(span: ReadableSpan, attributes: BoundedAttributes) -> None:
     span_kind: str = span.kind.name

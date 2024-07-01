@@ -13,13 +13,13 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_LOCAL_SERVICE,
     AWS_QUEUE_NAME,
     AWS_QUEUE_URL,
+    AWS_REMOTE_DB_USER,
     AWS_REMOTE_OPERATION,
     AWS_REMOTE_RESOURCE_IDENTIFIER,
     AWS_REMOTE_RESOURCE_TYPE,
     AWS_REMOTE_SERVICE,
     AWS_SPAN_KIND,
     AWS_STREAM_NAME,
-    AWS_REMOTE_DB_USER,
 )
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
 from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, SERVICE_METRIC
@@ -788,7 +788,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute(SpanAttributes.DB_USER, None)
         self.span_mock.kind = SpanKind.CLIENT
 
-        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(
+        actual_attributes: Attributes = _GENERATOR.generate_metric_attributes_dict_from_span(
             self.span_mock, self.resource
         ).get(DEPENDENCY_METRIC)
         self.assertIsNone(actual_attributes.get(AWS_REMOTE_DB_USER))
@@ -798,7 +798,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute([SpanAttributes.DB_USER], [db_user])
         self.span_mock.kind = SpanKind.SERVER
 
-        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(
+        actual_attributes: Attributes = _GENERATOR.generate_metric_attributes_dict_from_span(
             self.span_mock, self.resource
         ).get(SERVICE_METRIC)
         self.assertIsNone(actual_attributes.get(AWS_REMOTE_DB_USER))
@@ -808,7 +808,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute([SpanAttributes.DB_USER], [db_user])
         self.span_mock.kind = SpanKind.CLIENT
 
-        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(
+        actual_attributes: Attributes = _GENERATOR.generate_metric_attributes_dict_from_span(
             self.span_mock, self.resource
         ).get(DEPENDENCY_METRIC)
         self.assertEqual(actual_attributes.get(AWS_REMOTE_DB_USER), db_user)
