@@ -20,11 +20,12 @@ from opentelemetry.proto.metrics.v1.metrics_pb2 import ExponentialHistogramDataP
 from opentelemetry.proto.trace.v1.trace_pb2 import Span
 from opentelemetry.trace import StatusCode
 
+AWS_REMOTE_DB_USER: str = "aws.remote.db.user"
 DATABASE_HOST: str = "mydb"
 DATABASE_USER: str = "root"
 DATABASE_PASSWORD: str = "example"
 DATABASE_NAME: str = "testdb"
-
+DB_USER: str = "db.user"
 
 class DatabaseContractTestBase(ContractTestBase):
     @staticmethod
@@ -98,6 +99,7 @@ class DatabaseContractTestBase(ContractTestBase):
         self.assertTrue("server.address" not in attributes_dict)
         self.assertTrue("server.port" not in attributes_dict)
         self.assertTrue("db.operation" not in attributes_dict)
+        self._assert_str_attribute(attributes_dict, AWS_REMOTE_DB_USER, DB_USER)
 
     @override
     def _assert_aws_attributes(self, attributes_list: List[KeyValue], **kwargs) -> None:
@@ -114,6 +116,7 @@ class DatabaseContractTestBase(ContractTestBase):
         )
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
+        self._assert_str_attribute(attributes_dict, AWS_REMOTE_DB_USER, DB_USER)
 
     @override
     def _assert_metric_attributes(
@@ -145,6 +148,7 @@ class DatabaseContractTestBase(ContractTestBase):
             attribute_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, self.get_remote_resource_identifier()
         )
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "CLIENT")
+        self._assert_str_attribute(attribute_dict, AWS_REMOTE_DB_USER, DB_USER)
         self.check_sum(metric_name, dependency_dp.sum, expected_sum)
 
         attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(service_dp.attributes)
