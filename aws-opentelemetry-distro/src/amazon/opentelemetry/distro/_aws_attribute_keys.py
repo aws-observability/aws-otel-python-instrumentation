@@ -4,6 +4,7 @@
 AWS_SPAN_KIND: str = "aws.span.kind"
 AWS_LOCAL_SERVICE: str = "aws.local.service"
 AWS_LOCAL_OPERATION: str = "aws.local.operation"
+AWS_REMOTE_DB_USER: str = "aws.remote.db.user"
 AWS_REMOTE_SERVICE: str = "aws.remote.service"
 AWS_REMOTE_OPERATION: str = "aws.remote.operation"
 AWS_REMOTE_RESOURCE_TYPE: str = "aws.remote.resource.type"

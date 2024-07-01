@@ -10,6 +10,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_LOCAL_SERVICE,
     AWS_QUEUE_NAME,
     AWS_QUEUE_URL,
+    AWS_REMOTE_DB_USER,
     AWS_REMOTE_OPERATION,
     AWS_REMOTE_RESOURCE_IDENTIFIER,
     AWS_REMOTE_RESOURCE_TYPE,
@@ -52,6 +53,7 @@ _DB_NAME: str = SpanAttributes.DB_NAME
 _DB_OPERATION: str = SpanAttributes.DB_OPERATION
 _DB_STATEMENT: str = SpanAttributes.DB_STATEMENT
 _DB_SYSTEM: str = SpanAttributes.DB_SYSTEM
+_DB_USER: str = SpanAttributes.DB_USER
 _FAAS_INVOKED_NAME: str = SpanAttributes.FAAS_INVOKED_NAME
 _FAAS_TRIGGER: str = SpanAttributes.FAAS_TRIGGER
 _GRAPHQL_OPERATION_TYPE: str = SpanAttributes.GRAPHQL_OPERATION_TYPE
@@ -126,6 +128,7 @@ def _generate_dependency_metric_attributes(span: ReadableSpan, resource: Resourc
     _set_egress_operation(span, attributes)
     _set_remote_service_and_operation(span, attributes)
     _set_remote_type_and_identifier(span, attributes)
+    _set_remote_db_user(span, attributes)
     _set_span_kind_for_dependency(span, attributes)
     return attributes
 
@@ -449,6 +452,11 @@ def _escape_delimiters(input_str: str) -> Optional[str]:
     if input_str is None:
         return None
     return input_str.replace("^", "^^").replace("|", "^|")
+
+
+def _set_remote_db_user(span: ReadableSpan, attributes: BoundedAttributes) -> None:
+    if is_db_span(span) and is_key_present(span, _DB_USER):
+        attributes[AWS_REMOTE_DB_USER] = span.attributes.get(_DB_USER)
 
 
 def _set_span_kind_for_dependency(span: ReadableSpan, attributes: BoundedAttributes) -> None:
