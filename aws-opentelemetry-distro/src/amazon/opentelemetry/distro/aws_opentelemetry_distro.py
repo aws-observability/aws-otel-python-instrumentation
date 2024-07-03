@@ -4,7 +4,10 @@ import os
 import sys
 from logging import Logger, getLogger
 
-from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_instrumentation_patches
+from amazon.opentelemetry.distro.patches._instrumentation_patch import (
+    AWS_GEVENT_PATCH_MODULES,
+    apply_instrumentation_patches,
+)
 from opentelemetry.distro import OpenTelemetryDistro
 from opentelemetry.environment_variables import OTEL_PROPAGATORS, OTEL_PYTHON_ID_GENERATOR
 from opentelemetry.sdk.environment_variables import (
@@ -64,6 +67,8 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
         os.environ.setdefault(
             OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION, "base2_exponential_bucket_histogram"
         )
+
+        os.environ.setdefault(AWS_GEVENT_PATCH_MODULES, "all")
 
         if kwargs.get("apply_patches", True):
             apply_instrumentation_patches()

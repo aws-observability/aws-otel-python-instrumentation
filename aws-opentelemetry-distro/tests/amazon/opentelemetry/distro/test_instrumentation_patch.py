@@ -1,13 +1,17 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-import sys
+import os
 from typing import Dict
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
+import gevent.monkey
 import pkg_resources
 
-from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_instrumentation_patches
+from amazon.opentelemetry.distro.patches._instrumentation_patch import (
+    AWS_GEVENT_PATCH_MODULES,
+    apply_instrumentation_patches,
+)
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
 from opentelemetry.semconv.trace import SpanAttributes
 
@@ -55,17 +59,37 @@ class TestInstrumentationPatch(TestCase):
     def _run_patch_behaviour_tests(self):
         # Test setup
         self.method_patches[GET_DISTRIBUTION_PATCH].return_value = "CorrectDistributionObject"
+        # Test setup to not patch gevent
+        os.environ[AWS_GEVENT_PATCH_MODULES] = "none"
 
         # Validate unpatched upstream behaviour - important to detect upstream changes that may break instrumentation
         self._test_unpatched_botocore_instrumentation()
-        self._test_unpatched_gevent_ssl_instrumentation()
+        self._test_unpatched_gevent_instrumentation()
 
         # Apply patches
         apply_instrumentation_patches()
 
         # Validate patched upstream behaviour - important to detect downstream changes that may break instrumentation
         self._test_patched_botocore_instrumentation()
-        self._test_patched_gevent_ssl_instrumentation()
+        self._test_unpatched_gevent_instrumentation()
+
+        # Test setup to check whether only these two modules get patched by gevent monkey
+        os.environ[AWS_GEVENT_PATCH_MODULES] = "os, ssl"
+
+        # Apply patches
+        apply_instrumentation_patches()
+
+        # Validate that os and ssl gevent monkey patch modules were patched
+        self._test_patched_gevent_os_ssl_instrumentation()
+
+        # Set the value to 'all' so that all the remaining gevent monkey patch modules are patched
+        os.environ[AWS_GEVENT_PATCH_MODULES] = "all"
+
+        # Apply patches again.
+        apply_instrumentation_patches()
+
+        # Validate that remaining gevent monkey patch modules were patched
+        self._test_patched_gevent_instrumentation()
 
         # Test teardown
         self._reset_mocks()
@@ -96,9 +120,19 @@ class TestInstrumentationPatch(TestCase):
         self.assertFalse("aws.sqs.queue_url" in attributes)
         self.assertFalse("aws.sqs.queue_name" in attributes)
 
-    def _test_unpatched_gevent_ssl_instrumentation(self):
-        # Ssl
-        self.assertFalse("gevent.ssl" in sys.modules, "Upstream has added the gevent ssl patch")
+    def _test_unpatched_gevent_instrumentation(self):
+        self.assertFalse(gevent.monkey.is_module_patched("os"), "gevent os module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("thread"), "gevent thread module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("time"), "gevent time module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("sys"), "gevent sys module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("socket"), "gevent socket module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("select"), "gevent select module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("ssl"), "gevent ssl module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("subprocess"), "gevent subprocess module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("builtins"), "gevent builtins module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("signal"), "gevent signal module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("queue"), "gevent queue module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("contextvars"), "gevent contextvars module has been patched")
 
     def _test_patched_botocore_instrumentation(self):
         # Kinesis
@@ -122,9 +156,37 @@ class TestInstrumentationPatch(TestCase):
         self.assertTrue("aws.sqs.queue_name" in sqs_attributes)
         self.assertEqual(sqs_attributes["aws.sqs.queue_name"], _QUEUE_NAME)
 
-    def _test_patched_gevent_ssl_instrumentation(self):
-        # Ssl
-        self.assertTrue("gevent.ssl" in sys.modules)
+    def _test_patched_gevent_os_ssl_instrumentation(self):
+        # Only ssl and os module should have been patched since the environment variable was set to 'os, ssl'
+        self.assertTrue(gevent.monkey.is_module_patched("ssl"), "gevent ssl module has not been patched")
+        self.assertTrue(gevent.monkey.is_module_patched("os"), "gevent os module has not been patched")
+        # Rest should still be unpatched
+        self.assertFalse(gevent.monkey.is_module_patched("thread"), "gevent thread module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("time"), "gevent time module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("sys"), "gevent sys module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("socket"), "gevent socket module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("select"), "gevent select module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("subprocess"), "gevent subprocess module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("builtins"), "gevent builtins module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("signal"), "gevent signal module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("queue"), "gevent queue module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("contextvars"), "gevent contextvars module has been patched")
+
+    def _test_patched_gevent_instrumentation(self):
+        self.assertTrue(gevent.monkey.is_module_patched("os"), "gevent os module has not been patched")
+        self.assertTrue(gevent.monkey.is_module_patched("time"), "gevent time module has not been patched")
+        self.assertTrue(gevent.monkey.is_module_patched("socket"), "gevent socket module has not been patched")
+        self.assertTrue(gevent.monkey.is_module_patched("select"), "gevent select module has not been patched")
+        self.assertTrue(gevent.monkey.is_module_patched("ssl"), "gevent ssl module has not been patched")
+        self.assertTrue(gevent.monkey.is_module_patched("subprocess"), "gevent subprocess module has not been patched")
+        self.assertTrue(gevent.monkey.is_module_patched("signal"), "gevent signal module has not been patched")
+        self.assertTrue(gevent.monkey.is_module_patched("queue"), "gevent queue module has not been patched")
+
+        # Current version of gevent.monkey.patch_all() does not do anything to these modules despite being called
+        self.assertFalse(gevent.monkey.is_module_patched("thread"), "gevent thread module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("sys"), "gevent sys module has  been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("builtins"), "gevent builtins module not been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("contextvars"), "gevent contextvars module has been patched")
 
     def _test_botocore_installed_flag(self):
         with patch(
