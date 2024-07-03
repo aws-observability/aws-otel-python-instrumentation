@@ -13,6 +13,7 @@ from amazon.utils.application_signals_constants import (
     AWS_REMOTE_RESOURCE_IDENTIFIER,
     AWS_REMOTE_RESOURCE_TYPE,
     AWS_REMOTE_SERVICE,
+    AWS_REMOTE_DB_USER,
     AWS_SPAN_KIND,
 )
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
@@ -109,6 +110,7 @@ class DatabaseContractTestBase(ContractTestBase):
         self._assert_str_attribute(attributes_dict, AWS_REMOTE_SERVICE, self.get_remote_service())
         self._assert_str_attribute(attributes_dict, AWS_REMOTE_OPERATION, kwargs.get("sql_command"))
         self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_TYPE, "DB::Connection")
+        self._assert_str_attribute(attributes_dict, AWS_REMOTE_DB_USER, DATABASE_USER)
         self._assert_str_attribute(
             attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, self.get_remote_resource_identifier()
         )

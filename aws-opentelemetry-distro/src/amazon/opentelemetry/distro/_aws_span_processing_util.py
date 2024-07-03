@@ -91,7 +91,6 @@ def is_db_span(span: ReadableSpan) -> bool:
         is_key_present(span, SpanAttributes.DB_SYSTEM)
         or is_key_present(span, SpanAttributes.DB_OPERATION)
         or is_key_present(span, SpanAttributes.DB_STATEMENT)
-        or is_key_present(span, SpanAttributes.DB_USER)
     )
 
 

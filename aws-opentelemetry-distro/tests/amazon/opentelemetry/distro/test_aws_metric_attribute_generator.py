@@ -775,17 +775,17 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.assertIsNotNone(dependency_attributes)
 
     def test_db_user_attribute(self):
-        db_user: str = "test_user"
-        self._mock_attribute([SpanAttributes.DB_USER], [db_user])
+        self._mock_attribute([SpanAttributes.DB_OPERATION, SpanAttributes.DB_USER], ["db_operation", "db_user"])
         self.span_mock.kind = SpanKind.CLIENT
 
         actual_attributes: Attributes = _GENERATOR.generate_metric_attributes_dict_from_span(
             self.span_mock, self.resource
         ).get(DEPENDENCY_METRIC)
-        self.assertEqual(actual_attributes.get(AWS_REMOTE_DB_USER), db_user)
+        self.assertEqual(actual_attributes.get(AWS_REMOTE_OPERATION), "db_operation")
+        self.assertEqual(actual_attributes.get(AWS_REMOTE_DB_USER), "db_user")
 
     def test_db_user_attribute_absent(self):
-        self._mock_attribute([SpanAttributes.DB_USER], [None])
+        self._mock_attribute([SpanAttributes.DB_SYSTEM], ["db_system"])
         self.span_mock.kind = SpanKind.CLIENT
 
         actual_attributes: Attributes = _GENERATOR.generate_metric_attributes_dict_from_span(
@@ -794,8 +794,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.assertIsNone(actual_attributes.get(AWS_REMOTE_DB_USER))
 
     def test_db_user_attribute_not_present_in_service_metric_for_server_span(self):
-        db_user: str = "test_user"
-        self._mock_attribute([SpanAttributes.DB_USER], [db_user])
+        self._mock_attribute([SpanAttributes.DB_USER, SpanAttributes.DB_SYSTEM], ["db_user", "db_system"])
         self.span_mock.kind = SpanKind.SERVER
 
         actual_attributes: Attributes = _GENERATOR.generate_metric_attributes_dict_from_span(
@@ -804,14 +803,22 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.assertIsNone(actual_attributes.get(AWS_REMOTE_DB_USER))
 
     def test_db_user_attribute_with_different_values(self):
-        db_user: str = "non_db_user"
-        self._mock_attribute([SpanAttributes.DB_USER], [db_user])
+        self._mock_attribute([SpanAttributes.DB_OPERATION, SpanAttributes.DB_USER], ["db_operation", "non_db_user"])
         self.span_mock.kind = SpanKind.CLIENT
 
         actual_attributes: Attributes = _GENERATOR.generate_metric_attributes_dict_from_span(
             self.span_mock, self.resource
         ).get(DEPENDENCY_METRIC)
-        self.assertEqual(actual_attributes.get(AWS_REMOTE_DB_USER), db_user)
+        self.assertEqual(actual_attributes.get(AWS_REMOTE_DB_USER), "non_db_user")
+
+    def test_db_user_present_and_is_db_span_false(self):
+        self._mock_attribute([SpanAttributes.DB_USER], ["db_user"])
+        self.span_mock.kind = SpanKind.CLIENT
+
+        actual_attributes: Attributes = _GENERATOR.generate_metric_attributes_dict_from_span(
+            self.span_mock, self.resource
+        ).get(DEPENDENCY_METRIC)
+        self.assertIsNone(actual_attributes.get(AWS_REMOTE_DB_USER))
 
     def test_local_root_boto3_span(self):
         self._update_resource_with_service_name()
