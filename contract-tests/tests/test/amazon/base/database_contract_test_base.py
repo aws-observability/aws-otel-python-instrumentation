@@ -9,11 +9,11 @@ from amazon.base.contract_test_base import ContractTestBase
 from amazon.utils.application_signals_constants import (
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
+    AWS_REMOTE_DB_USER,
     AWS_REMOTE_OPERATION,
     AWS_REMOTE_RESOURCE_IDENTIFIER,
     AWS_REMOTE_RESOURCE_TYPE,
     AWS_REMOTE_SERVICE,
-    AWS_REMOTE_DB_USER,
     AWS_SPAN_KIND,
 )
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue, KeyValue
