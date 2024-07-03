@@ -48,7 +48,7 @@ class ContractTestBase(TestCase):
         cls.addClassCleanup(cls.class_tear_down)
         cls.network = NetworkCollection(client=DockerClient()).create(NETWORK_NAME)
         mock_collector_networking_config: Dict[str, EndpointConfig] = {
-            NETWORK_NAME: EndpointConfig(version="1.22", aliases=[_MOCK_COLLECTOR_ALIAS])
+            NETWORK_NAME: EndpointConfig(version="1.25", aliases=[_MOCK_COLLECTOR_ALIAS])
         }
         cls.mock_collector: DockerContainer = (
             DockerContainer(_MOCK_COLLECTOR_NAME)
@@ -82,7 +82,7 @@ class ContractTestBase(TestCase):
     def setUp(self) -> None:
         self.addCleanup(self.tear_down)
         application_networking_config: Dict[str, EndpointConfig] = {
-            NETWORK_NAME: EndpointConfig(version="1.22", aliases=self.get_application_network_aliases())
+            NETWORK_NAME: EndpointConfig(version="1.25", aliases=self.get_application_network_aliases())
         }
         self.application: DockerContainer = (
             DockerContainer(self.get_application_image_name())
