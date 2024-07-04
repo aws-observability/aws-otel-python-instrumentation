@@ -74,9 +74,10 @@ def _apply_botocore_sqs_patch() -> None:
 
 def _apply_botocore_bedrock_patch() -> None:
     """Botocore instrumentation patch for Bedrock, Bedrock Agent, Bedrock Runtime and Bedrock Agent Runtime
+
     This patch adds an extension to the upstream's list of known extension for Bedrock.
     Extensions allow for custom logic for adding service-specific information to spans, such as attributes.
-    Specifically, we are adding logic to add the AWS_BEDROCK_RUNTIME_MODEL_ID attribute.
+    Specifically, we are adding logic to add the AWS_BEDROCK attributes referenced in _aws_attribute_keys.
     """
     _KNOWN_EXTENSIONS["bedrock"] = _lazy_load(".", "_BedrockExtension")
     _KNOWN_EXTENSIONS["bedrock-agent"] = _lazy_load(".", "_BedrockAgentExtension")

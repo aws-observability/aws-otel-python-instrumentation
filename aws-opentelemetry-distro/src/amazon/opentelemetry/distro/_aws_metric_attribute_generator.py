@@ -10,7 +10,6 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_DATASOURCE_ID,
     AWS_BEDROCK_GUARDRAIL_ID,
     AWS_BEDROCK_KNOWLEDGEBASE_ID,
-    AWS_BEDROCK_RUNTIME_MODEL_ID,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_QUEUE_NAME,
@@ -22,6 +21,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_REMOTE_SERVICE,
     AWS_SPAN_KIND,
     AWS_STREAM_NAME,
+    GEN_AI_REQUEST_MODEL,
 )
 from amazon.opentelemetry.distro._aws_span_processing_util import (
     LOCAL_ROOT,
@@ -298,6 +298,10 @@ def _normalize_remote_service_name(span: ReadableSpan, service_name: str) -> str
     If the span is an AWS SDK span, normalize the name to align with <a
     href="https://docs.aws.amazon.com/cloudcontrolapi/latest/userguide/supported-resources.html">AWS Cloud Control
     resource format</a> as much as possible. Long term, we would like to normalize service name in the upstream.
+
+    For Bedrock, Bedrock Agent, Bedrock Agent Runtime, we follow the cloudformation template,
+    use RemoteService as AWS::Bedrock. For BedrockRuntime, there is no corresponding reference in Cloudformation found,
+    so we use AWS::BedrockRuntime.
     """
     if is_aws_sdk_span(span):
         aws_sdk_service_mapping = {
@@ -400,9 +404,9 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         elif is_key_present(span, AWS_BEDROCK_KNOWLEDGEBASE_ID):
             remote_resource_type = _NORMALIZED_BEDROCK_SERVICE_NAME + "::KnowledgeBase"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_BEDROCK_KNOWLEDGEBASE_ID))
-        elif is_key_present(span, AWS_BEDROCK_RUNTIME_MODEL_ID):
+        elif is_key_present(span, GEN_AI_REQUEST_MODEL):
             remote_resource_type = _NORMALIZED_BEDROCK_SERVICE_NAME + "::Model"
-            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_BEDROCK_RUNTIME_MODEL_ID))
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(GEN_AI_REQUEST_MODEL))
     elif is_db_span(span):
         remote_resource_type = _DB_CONNECTION_STRING_TYPE
         remote_resource_identifier = _get_db_connection(span)

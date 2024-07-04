@@ -12,7 +12,6 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_DATASOURCE_ID,
     AWS_BEDROCK_GUARDRAIL_ID,
     AWS_BEDROCK_KNOWLEDGEBASE_ID,
-    AWS_BEDROCK_RUNTIME_MODEL_ID,
     AWS_CONSUMER_PARENT_SPAN_KIND,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
@@ -25,6 +24,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_REMOTE_SERVICE,
     AWS_SPAN_KIND,
     AWS_STREAM_NAME,
+    GEN_AI_REQUEST_MODEL,
 )
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
 from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, SERVICE_METRIC
@@ -1033,30 +1033,55 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._validate_remote_resource_attributes("AWS::DynamoDB::Table", "aws_table^^name")
         self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [None])
 
-        # Validate behaviour of AWS_BEDROCK_AGENT_ID attribute with special chars(^), then remove it.
+        # Validate behaviour of AWS_BEDROCK_AGENT_ID attribute, then remove it.
         self._mock_attribute([AWS_BEDROCK_AGENT_ID], ["test_agent_id"], keys, values)
         self._validate_remote_resource_attributes("AWS::Bedrock::Agent", "test_agent_id")
         self._mock_attribute([AWS_BEDROCK_AGENT_ID], [None])
 
-        # Validate behaviour of AWS_BEDROCK_DATASOURCE_ID attribute with special chars(^), then remove it.
+        # Validate behaviour of AWS_BEDROCK_AGENT_ID attribute with special chars(^), then remove it.
+        self._mock_attribute([AWS_BEDROCK_AGENT_ID], ["test_agent_^id"], keys, values)
+        self._validate_remote_resource_attributes("AWS::Bedrock::Agent", "test_agent_^^id")
+        self._mock_attribute([AWS_BEDROCK_AGENT_ID], [None])
+
+        # Validate behaviour of AWS_BEDROCK_DATASOURCE_ID attribute, then remove it.
         self._mock_attribute([AWS_BEDROCK_DATASOURCE_ID], ["test_datasource_id"], keys, values)
         self._validate_remote_resource_attributes("AWS::Bedrock::DataSource", "test_datasource_id")
         self._mock_attribute([AWS_BEDROCK_DATASOURCE_ID], [None])
 
-        # Validate behaviour of AWS_BEDROCK_GUARDRAIL_ID attribute with special chars(^), then remove it.
+        # Validate behaviour of AWS_BEDROCK_DATASOURCE_ID attribute with special chars(^), then remove it.
+        self._mock_attribute([AWS_BEDROCK_DATASOURCE_ID], ["test_datasource_^id"], keys, values)
+        self._validate_remote_resource_attributes("AWS::Bedrock::DataSource", "test_datasource_^^id")
+        self._mock_attribute([AWS_BEDROCK_DATASOURCE_ID], [None])
+
+        # Validate behaviour of AWS_BEDROCK_GUARDRAIL_ID attribute, then remove it.
         self._mock_attribute([AWS_BEDROCK_GUARDRAIL_ID], ["test_guardrail_id"], keys, values)
         self._validate_remote_resource_attributes("AWS::Bedrock::Guardrail", "test_guardrail_id")
         self._mock_attribute([AWS_BEDROCK_GUARDRAIL_ID], [None])
 
-        # Validate behaviour of AWS_BEDROCK_KNOWLEDGEBASE_ID attribute with special chars(^), then remove it.
+        # Validate behaviour of AWS_BEDROCK_GUARDRAIL_ID attribute with special chars(^), then remove it.
+        self._mock_attribute([AWS_BEDROCK_GUARDRAIL_ID], ["test_guardrail_^id"], keys, values)
+        self._validate_remote_resource_attributes("AWS::Bedrock::Guardrail", "test_guardrail_^^id")
+        self._mock_attribute([AWS_BEDROCK_GUARDRAIL_ID], [None])
+
+        # Validate behaviour of AWS_BEDROCK_KNOWLEDGEBASE_ID attribute, then remove it.
         self._mock_attribute([AWS_BEDROCK_KNOWLEDGEBASE_ID], ["test_knowledgeBase_id"], keys, values)
         self._validate_remote_resource_attributes("AWS::Bedrock::KnowledgeBase", "test_knowledgeBase_id")
         self._mock_attribute([AWS_BEDROCK_KNOWLEDGEBASE_ID], [None])
 
-        # Validate behaviour of AWS_BEDROCK_RUNTIME_MODEL_ID attribute, then remove it.
-        self._mock_attribute([AWS_BEDROCK_RUNTIME_MODEL_ID], ["test.service-id"], keys, values)
-        self._validate_remote_resource_attributes("AWS::Bedrock::Model", "test.service-id")
-        self._mock_attribute([AWS_BEDROCK_RUNTIME_MODEL_ID], [None])
+        # Validate behaviour of AWS_BEDROCK_KNOWLEDGEBASE_ID attribute with special chars(^), then remove it.
+        self._mock_attribute([AWS_BEDROCK_KNOWLEDGEBASE_ID], ["test_knowledgeBase_^id"], keys, values)
+        self._validate_remote_resource_attributes("AWS::Bedrock::KnowledgeBase", "test_knowledgeBase_^^id")
+        self._mock_attribute([AWS_BEDROCK_KNOWLEDGEBASE_ID], [None])
+
+        # Validate behaviour of GEN_AI_REQUEST_MODEL attribute, then remove it.
+        self._mock_attribute([GEN_AI_REQUEST_MODEL], ["test.service_id"], keys, values)
+        self._validate_remote_resource_attributes("AWS::Bedrock::Model", "test.service_id")
+        self._mock_attribute([GEN_AI_REQUEST_MODEL], [None])
+
+        # Validate behaviour of GEN_AI_REQUEST_MODEL attribute with special chars(^), then remove it.
+        self._mock_attribute([GEN_AI_REQUEST_MODEL], ["test.service_^id"], keys, values)
+        self._validate_remote_resource_attributes("AWS::Bedrock::Model", "test.service_^^id")
+        self._mock_attribute([GEN_AI_REQUEST_MODEL], [None])
 
         self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None])
 
