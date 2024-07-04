@@ -9,6 +9,7 @@ from amazon.base.contract_test_base import ContractTestBase
 from amazon.utils.application_signals_constants import (
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
+    AWS_REMOTE_DB_USER,
     AWS_REMOTE_OPERATION,
     AWS_REMOTE_RESOURCE_IDENTIFIER,
     AWS_REMOTE_RESOURCE_TYPE,
@@ -109,6 +110,7 @@ class DatabaseContractTestBase(ContractTestBase):
         self._assert_str_attribute(attributes_dict, AWS_REMOTE_SERVICE, self.get_remote_service())
         self._assert_str_attribute(attributes_dict, AWS_REMOTE_OPERATION, kwargs.get("sql_command"))
         self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_TYPE, "DB::Connection")
+        self._assert_str_attribute(attributes_dict, AWS_REMOTE_DB_USER, DATABASE_USER)
         self._assert_str_attribute(
             attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, self.get_remote_resource_identifier()
         )
