@@ -26,9 +26,9 @@ from opentelemetry.semconv.trace import SpanAttributes
 _logger: Logger = getLogger(__name__)
 _logger.setLevel(INFO)
 
-_AWS_QUEUE_URL: str = "aws.sqs.queue_url"
-_AWS_QUEUE_NAME: str = "aws.sqs.queue_name"
-_AWS_STREAM_NAME: str = "aws.kinesis.stream_name"
+_AWS_QUEUE_URL: str = "aws.sqs.queue.url"
+_AWS_QUEUE_NAME: str = "aws.sqs.queue.name"
+_AWS_STREAM_NAME: str = "aws.kinesis.stream.name"
 
 
 # pylint: disable=too-many-public-methods
