@@ -19,7 +19,6 @@ _BEDROCK_AGENT_ID: str = "agentId"
 _BEDROCK_DATASOURCE_ID: str = "DataSourceId"
 _BEDROCK_GUARDRAIL_ID: str = "GuardrailId"
 _BEDROCK_KNOWLEDGEBASE_ID: str = "KnowledgeBaseId"
-_BEDROCK_MODEL_ID: str = "ModelId"
 _GEN_AI_SYSTEM: str = "aws_bedrock"
 _GEN_AI_REQUEST_MODEL: str = "genAiReuqestModelId"
 
@@ -146,15 +145,21 @@ class TestInstrumentationPatch(TestCase):
 
         # Bedrock Agent Runtime
         self.assertTrue("bedrock-agent-runtime" in _KNOWN_EXTENSIONS)
-        bedrock_agent_runtime_attributes: Dict[str, str] = _do_extract_bedrock_agent_runtime_attributes()
+        bedrock_agent_runtime_attributes: Dict[str, str] = _do_extract_attributes_bedrock("bedrock-agent-runtime")
+        self.assertEqual(len(bedrock_agent_runtime_attributes), 2)
         self.assertTrue("aws.bedrock.agent.id" in bedrock_agent_runtime_attributes)
         self.assertEqual(bedrock_agent_runtime_attributes["aws.bedrock.agent.id"], _BEDROCK_AGENT_ID)
         self.assertTrue("aws.bedrock.knowledge_base.id" in bedrock_agent_runtime_attributes)
         self.assertEqual(bedrock_agent_runtime_attributes["aws.bedrock.knowledge_base.id"], _BEDROCK_KNOWLEDGEBASE_ID)
+        self.assertFalse("aws.bedrock.data_source.id" in bedrock_agent_runtime_attributes)
+        self.assertFalse("gen_ai.request.model" in bedrock_agent_runtime_attributes)
+        bedrock_agent_runtime_sucess_attributes: Dict[str, str] = _do_on_success_bedrock("bedrock-agent-runtime")
+        self.assertEqual(len(bedrock_agent_runtime_sucess_attributes), 0)
 
         # BedrockRuntime
         self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
         bedrock_runtime_attributes: Dict[str, str] = _do_extract_bedrock_runtime_attributes()
+        self.assertEqual(len(bedrock_runtime_attributes), 2)
         self.assertTrue("gen_ai.system" in bedrock_runtime_attributes)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.system"], _GEN_AI_SYSTEM)
         self.assertTrue("gen_ai.request.model" in bedrock_runtime_attributes)
@@ -180,9 +185,14 @@ class TestInstrumentationPatch(TestCase):
 
     def _test_patched_bedrock_instrumentation(self):
         """For bedrock service, only on_success provides attributes, and we only expect to see guardrail"""
-        bedrock_sucess_attributes: Dict[str, str] = _do_bedrock_on_success()
+        bedrock_sucess_attributes: Dict[str, str] = _do_on_success_bedrock("bedrock")
+        self.assertEqual(len(bedrock_sucess_attributes), 1)
         self.assertTrue("aws.bedrock.guardrail.id" in bedrock_sucess_attributes)
         self.assertEqual(bedrock_sucess_attributes["aws.bedrock.guardrail.id"], _BEDROCK_GUARDRAIL_ID)
+        self.assertFalse("aws.bedrock.agent.id" in bedrock_sucess_attributes)
+        self.assertFalse("aws.bedrock.knowledge_base.id" in bedrock_sucess_attributes)
+        self.assertFalse("aws.bedrock.data_source.id" in bedrock_sucess_attributes)
+        self.assertFalse("gen_ai.request.model" in bedrock_sucess_attributes)
 
     def _test_patched_bedrock_agent_instrumentation(self):
         """For bedrock-agent service, both extract_attributes and on_success provides attributes,
@@ -224,8 +234,10 @@ class TestInstrumentationPatch(TestCase):
             bedrock_agent_extract_attributes: Dict[str, str] = _do_extract_attributes_bedrock(
                 "bedrock-agent", operation
             )
+            self.assertEqual(len(bedrock_agent_extract_attributes), 1)
             self.assertEqual(bedrock_agent_extract_attributes[attribute_tuple[0]], attribute_tuple[1])
             bedrock_agent_success_attributes: Dict[str, str] = _do_on_success_bedrock("bedrock-agent", operation)
+            self.assertEqual(len(bedrock_agent_success_attributes), 1)
             self.assertEqual(bedrock_agent_success_attributes[attribute_tuple[0]], attribute_tuple[1])
 
     def _reset_mocks(self):
@@ -251,19 +263,13 @@ def _do_extract_sqs_attributes() -> Dict[str, str]:
     return _do_extract_attributes(service_name, params)
 
 
-def _do_bedrock_on_success() -> Dict[str, str]:
-    service_name: str = "bedrock"
-    result: Dict[str, Any] = {"guardrailId": _BEDROCK_GUARDRAIL_ID}
-    return _do_on_success(service_name, result)
-
-
 def _do_extract_attributes_bedrock(service, operation=None) -> Dict[str, str]:
     params: Dict[str, Any] = {
         "agentId": _BEDROCK_AGENT_ID,
         "dataSourceId": _BEDROCK_DATASOURCE_ID,
         "knowledgeBaseId": _BEDROCK_KNOWLEDGEBASE_ID,
         "guardrailId": _BEDROCK_GUARDRAIL_ID,
-        "modelId": _BEDROCK_MODEL_ID,
+        "modelId": _GEN_AI_REQUEST_MODEL,
     }
     return _do_extract_attributes(service, params, operation)
 
@@ -274,20 +280,20 @@ def _do_on_success_bedrock(service, operation=None) -> Dict[str, str]:
         "dataSourceId": _BEDROCK_DATASOURCE_ID,
         "knowledgeBaseId": _BEDROCK_KNOWLEDGEBASE_ID,
         "guardrailId": _BEDROCK_GUARDRAIL_ID,
-        "modelId": _BEDROCK_MODEL_ID,
+        "modelId": _GEN_AI_REQUEST_MODEL,
     }
     return _do_on_success(service, result, operation)
 
 
-def _do_extract_bedrock_agent_runtime_attributes() -> Dict[str, str]:
-    service_name: str = "bedrock-agent-runtime"
-    params: Dict[str, str] = {"agentId": _BEDROCK_AGENT_ID, "knowledgeBaseId": _BEDROCK_KNOWLEDGEBASE_ID}
-    return _do_extract_attributes(service_name, params)
-
-
 def _do_extract_bedrock_runtime_attributes() -> Dict[str, str]:
     service_name: str = "bedrock-runtime"
-    params: Dict[str, str] = {"modelId": _GEN_AI_REQUEST_MODEL}
+    params: Dict[str, str] = {
+        "agentId": _BEDROCK_AGENT_ID,
+        "dataSourceId": _BEDROCK_DATASOURCE_ID,
+        "knowledgeBaseId": _BEDROCK_KNOWLEDGEBASE_ID,
+        "guardrailId": _BEDROCK_GUARDRAIL_ID,
+        "modelId": _GEN_AI_REQUEST_MODEL,
+    }
     return _do_extract_attributes(service_name, params)
 
 

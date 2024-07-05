@@ -7,9 +7,9 @@ from urllib.parse import ParseResult, urlparse
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_AGENT_ID,
-    AWS_BEDROCK_DATASOURCE_ID,
+    AWS_BEDROCK_DATA_SOURCE_ID,
     AWS_BEDROCK_GUARDRAIL_ID,
-    AWS_BEDROCK_KNOWLEDGEBASE_ID,
+    AWS_BEDROCK_KNOWLEDGE_BASE_ID,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_QUEUE_NAME,
@@ -21,9 +21,9 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_REMOTE_SERVICE,
     AWS_SPAN_KIND,
     AWS_STREAM_NAME,
-    GEN_AI_REQUEST_MODEL,
 )
 from amazon.opentelemetry.distro._aws_span_processing_util import (
+    GEN_AI_REQUEST_MODEL,
     LOCAL_ROOT,
     MAX_KEYWORD_LENGTH,
     SQL_KEYWORD_PATTERN,
@@ -299,9 +299,9 @@ def _normalize_remote_service_name(span: ReadableSpan, service_name: str) -> str
     href="https://docs.aws.amazon.com/cloudcontrolapi/latest/userguide/supported-resources.html">AWS Cloud Control
     resource format</a> as much as possible. Long term, we would like to normalize service name in the upstream.
 
-    For Bedrock, Bedrock Agent, Bedrock Agent Runtime, we follow the cloudformation template,
-    use RemoteService as AWS::Bedrock. For BedrockRuntime, there is no corresponding reference in Cloudformation found,
-    so we use AWS::BedrockRuntime.
+    For Bedrock, Bedrock Agent, and Bedrock Agent Runtime, we can align with AWS Cloud Control and use
+    AWS::Bedrock for RemoteService. For BedrockRuntime, we are using AWS::BedrockRuntime
+    as the associated remote resource (Model) is not listed in Cloud Control.
     """
     if is_aws_sdk_span(span):
         aws_sdk_service_mapping = {
@@ -395,15 +395,15 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         elif is_key_present(span, AWS_BEDROCK_AGENT_ID):
             remote_resource_type = _NORMALIZED_BEDROCK_SERVICE_NAME + "::Agent"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_BEDROCK_AGENT_ID))
-        elif is_key_present(span, AWS_BEDROCK_DATASOURCE_ID):
+        elif is_key_present(span, AWS_BEDROCK_DATA_SOURCE_ID):
             remote_resource_type = _NORMALIZED_BEDROCK_SERVICE_NAME + "::DataSource"
-            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_BEDROCK_DATASOURCE_ID))
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_BEDROCK_DATA_SOURCE_ID))
         elif is_key_present(span, AWS_BEDROCK_GUARDRAIL_ID):
             remote_resource_type = _NORMALIZED_BEDROCK_SERVICE_NAME + "::Guardrail"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_BEDROCK_GUARDRAIL_ID))
-        elif is_key_present(span, AWS_BEDROCK_KNOWLEDGEBASE_ID):
+        elif is_key_present(span, AWS_BEDROCK_KNOWLEDGE_BASE_ID):
             remote_resource_type = _NORMALIZED_BEDROCK_SERVICE_NAME + "::KnowledgeBase"
-            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_BEDROCK_KNOWLEDGEBASE_ID))
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_BEDROCK_KNOWLEDGE_BASE_ID))
         elif is_key_present(span, GEN_AI_REQUEST_MODEL):
             remote_resource_type = _NORMALIZED_BEDROCK_SERVICE_NAME + "::Model"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(GEN_AI_REQUEST_MODEL))

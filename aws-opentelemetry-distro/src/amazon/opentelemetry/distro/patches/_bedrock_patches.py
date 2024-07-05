@@ -1,10 +1,16 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-# Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import abc
 import inspect
 from typing import Dict, Optional
 
+from amazon.opentelemetry.distro._aws_attribute_keys import (
+    AWS_BEDROCK_AGENT_ID,
+    AWS_BEDROCK_DATA_SOURCE_ID,
+    AWS_BEDROCK_GUARDRAIL_ID,
+    AWS_BEDROCK_KNOWLEDGE_BASE_ID,
+)
+from amazon.opentelemetry.distro._aws_span_processing_util import GEN_AI_REQUEST_MODEL, GEN_AI_SYSTEM
 from opentelemetry.instrumentation.botocore.extensions.types import (
     _AttributeMapT,
     _AwsSdkCallContext,
@@ -12,6 +18,13 @@ from opentelemetry.instrumentation.botocore.extensions.types import (
     _BotoResultT,
 )
 from opentelemetry.trace.span import Span
+
+_AGENT_ID: str = "agentId"
+_KNOWLEDGE_BASE_ID: str = "knowledgeBaseId"
+_DATA_SOURCE_ID: str = "dataSourceId"
+_GUARDRAIL_ID: str = "guardrailId"
+_MODEL_ID: str = "modelId"
+_GEN_AI_SYSTEM: str = "aws_bedrock"
 
 
 class _BedrockAgentOperation(abc.ABC):
@@ -30,10 +43,10 @@ class _AgentOperation(_BedrockAgentOperation):
     """
 
     request_attributes = {
-        "aws.bedrock.agent.id": "agentId",
+        AWS_BEDROCK_AGENT_ID: _AGENT_ID,
     }
     response_attributes = {
-        "aws.bedrock.agent.id": "agentId",
+        AWS_BEDROCK_AGENT_ID: _AGENT_ID,
     }
 
     @classmethod
@@ -69,10 +82,10 @@ class _KnowledgeBaseOperation(_BedrockAgentOperation):
     """
 
     request_attributes = {
-        "aws.bedrock.knowledge_base.id": "knowledgeBaseId",
+        AWS_BEDROCK_KNOWLEDGE_BASE_ID: _KNOWLEDGE_BASE_ID,
     }
     response_attributes = {
-        "aws.bedrock.knowledge_base.id": "knowledgeBaseId",
+        AWS_BEDROCK_KNOWLEDGE_BASE_ID: _KNOWLEDGE_BASE_ID,
     }
 
     @classmethod
@@ -95,10 +108,10 @@ class _DataSourceOperation(_BedrockAgentOperation):
     """
 
     request_attributes = {
-        "aws.bedrock.data_source.id": "dataSourceId",
+        AWS_BEDROCK_DATA_SOURCE_ID: _DATA_SOURCE_ID,
     }
     response_attributes = {
-        "aws.bedrock.data_source.id": "dataSourceId",
+        AWS_BEDROCK_DATA_SOURCE_ID: _DATA_SOURCE_ID,
     }
 
     @classmethod
@@ -161,13 +174,13 @@ class _BedrockAgentRuntimeExtension(_AwsSdkExtension):
     """
 
     def extract_attributes(self, attributes: _AttributeMapT):
-        agent_id = self._call_context.params.get("agentId")
+        agent_id = self._call_context.params.get(_AGENT_ID)
         if agent_id:
-            attributes["aws.bedrock.agent.id"] = agent_id
+            attributes[AWS_BEDROCK_AGENT_ID] = agent_id
 
-        knowledge_base_id = self._call_context.params.get("knowledgeBaseId")
+        knowledge_base_id = self._call_context.params.get(_KNOWLEDGE_BASE_ID)
         if knowledge_base_id:
-            attributes["aws.bedrock.knowledge_base.id"] = knowledge_base_id
+            attributes[AWS_BEDROCK_KNOWLEDGE_BASE_ID] = knowledge_base_id
 
 
 class _BedrockExtension(_AwsSdkExtension):
@@ -178,11 +191,11 @@ class _BedrockExtension(_AwsSdkExtension):
 
     # pylint: disable=no-self-use
     def on_success(self, span: Span, result: _BotoResultT):
-        # guardrailId can only be retrieved from the response, not from the request
-        guardrail_id = result.get("guardrailId")
+        # _GUARDRAIL_ID can only be retrieved from the response, not from the request
+        guardrail_id = result.get(_GUARDRAIL_ID)
         if guardrail_id:
             span.set_attribute(
-                "aws.bedrock.guardrail.id",
+                AWS_BEDROCK_GUARDRAIL_ID,
                 guardrail_id,
             )
 
@@ -195,8 +208,8 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
     """
 
     def extract_attributes(self, attributes: _AttributeMapT):
-        attributes["gen_ai.system"] = "aws_bedrock"
+        attributes[GEN_AI_SYSTEM] = _GEN_AI_SYSTEM
 
-        model_id = self._call_context.params.get("modelId")
+        model_id = self._call_context.params.get(_MODEL_ID)
         if model_id:
-            attributes["gen_ai.request.model"] = model_id
+            attributes[GEN_AI_REQUEST_MODEL] = model_id
