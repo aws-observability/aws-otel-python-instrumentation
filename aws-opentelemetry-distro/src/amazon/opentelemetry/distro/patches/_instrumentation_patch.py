@@ -27,38 +27,35 @@ def apply_instrumentation_patches() -> None:
     """
     if _is_installed("gevent"):
         try:
-            gevent_patch_module = os.environ.get(AWS_GEVENT_PATCH_MODULES)
-            if gevent_patch_module == "all":
+            gevent_patch_module = os.environ.get(AWS_GEVENT_PATCH_MODULES, "all")
+
+            if gevent_patch_module != "none":
                 # pylint: disable=import-outside-toplevel
                 # Delay import to only occur if monkey patch is needed (e.g. gevent is used to run application).
                 from gevent import monkey
 
-                monkey.patch_all()
-            elif gevent_patch_module == "none":
-                pass
-            else:
-                module_list = [module.strip() for module in gevent_patch_module.split(",")]
+                if gevent_patch_module == "all":
 
-                # pylint: disable=import-outside-toplevel
-                # Delay import to only occur if monkey patch is needed (e.g. gevent is used to run application).
-                from gevent import monkey
+                    monkey.patch_all()
+                else:
+                    module_list = [module.strip() for module in gevent_patch_module.split(",")]
 
-                monkey.patch_all(
-                    socket="socket" in module_list,
-                    time="time" in module_list,
-                    select="select" in module_list,
-                    thread="thread" in module_list,
-                    os="os" in module_list,
-                    ssl="ssl" in module_list,
-                    subprocess="subprocess" in module_list,
-                    sys="sys" in module_list,
-                    builtins="builtins" in module_list,
-                    signal="signal" in module_list,
-                    queue="queue" in module_list,
-                    contextvars="contextvars" in module_list,
-                )
+                    monkey.patch_all(
+                        socket="socket" in module_list,
+                        time="time" in module_list,
+                        select="select" in module_list,
+                        thread="thread" in module_list,
+                        os="os" in module_list,
+                        ssl="ssl" in module_list,
+                        subprocess="subprocess" in module_list,
+                        sys="sys" in module_list,
+                        builtins="builtins" in module_list,
+                        signal="signal" in module_list,
+                        queue="queue" in module_list,
+                        contextvars="contextvars" in module_list,
+                    )
         except Exception as exc:  # pylint: disable=broad-except
-            _logger.debug("Failed to monkey patch gevent, exception: %s", exc)
+            _logger.info("Failed to monkey patch gevent, exception: %s", exc)
 
     if _is_installed("botocore ~= 1.0"):
         # pylint: disable=import-outside-toplevel
