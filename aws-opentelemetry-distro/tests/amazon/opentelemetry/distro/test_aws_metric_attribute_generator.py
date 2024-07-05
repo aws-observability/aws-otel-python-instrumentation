@@ -9,17 +9,17 @@ from unittest.mock import MagicMock
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_CONSUMER_PARENT_SPAN_KIND,
+    AWS_KINESIS_STREAM_NAME,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
-    AWS_QUEUE_NAME,
-    AWS_QUEUE_URL,
     AWS_REMOTE_DB_USER,
     AWS_REMOTE_OPERATION,
     AWS_REMOTE_RESOURCE_IDENTIFIER,
     AWS_REMOTE_RESOURCE_TYPE,
     AWS_REMOTE_SERVICE,
     AWS_SPAN_KIND,
-    AWS_STREAM_NAME,
+    AWS_SQS_QUEUE_NAME,
+    AWS_SQS_QUEUE_URL,
 )
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
 from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, SERVICE_METRIC
@@ -971,31 +971,31 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._validate_remote_resource_attributes("AWS::S3::Bucket", "aws_s3_bucket_name")
         self._mock_attribute([SpanAttributes.AWS_S3_BUCKET], [None])
 
-        # Validate behaviour of AWS_QUEUE_NAME attribute, then remove it
-        self._mock_attribute([AWS_QUEUE_NAME], ["aws_queue_name"], keys, values)
+        # Validate behaviour of AWS_SQS_QUEUE_NAME attribute, then remove it
+        self._mock_attribute([AWS_SQS_QUEUE_NAME], ["aws_queue_name"], keys, values)
         self._validate_remote_resource_attributes("AWS::SQS::Queue", "aws_queue_name")
-        self._mock_attribute([AWS_QUEUE_NAME], [None])
+        self._mock_attribute([AWS_SQS_QUEUE_NAME], [None])
 
-        # Validate behaviour of having both AWS_QUEUE_NAME and AWS_QUEUE_URL attribute, then remove them. Queue name is
-        # more reliable than queue URL, so we prefer to use name over URL.
+        # Validate behaviour of having both AWS_SQS_QUEUE_NAME and AWS_SQS_QUEUE_URL attribute, then remove them.
+        # Queue name is more reliable than queue URL, so we prefer to use name over URL.
         self._mock_attribute(
-            [AWS_QUEUE_URL, AWS_QUEUE_NAME],
+            [AWS_SQS_QUEUE_URL, AWS_SQS_QUEUE_NAME],
             ["https://sqs.us-east-2.amazonaws.com/123456789012/Queue", "aws_queue_name"],
             keys,
             values,
         )
         self._validate_remote_resource_attributes("AWS::SQS::Queue", "aws_queue_name")
-        self._mock_attribute([AWS_QUEUE_URL, AWS_QUEUE_NAME], [None, None])
+        self._mock_attribute([AWS_SQS_QUEUE_URL, AWS_SQS_QUEUE_NAME], [None, None])
 
         # Valid queue name with invalid queue URL, we should default to using the queue name.
-        self._mock_attribute([AWS_QUEUE_URL, AWS_QUEUE_NAME], ["invalidUrl", "aws_queue_name"], keys, values)
+        self._mock_attribute([AWS_SQS_QUEUE_URL, AWS_SQS_QUEUE_NAME], ["invalidUrl", "aws_queue_name"], keys, values)
         self._validate_remote_resource_attributes("AWS::SQS::Queue", "aws_queue_name")
-        self._mock_attribute([AWS_QUEUE_URL, AWS_QUEUE_NAME], [None, None])
+        self._mock_attribute([AWS_SQS_QUEUE_URL, AWS_SQS_QUEUE_NAME], [None, None])
 
-        # Validate behaviour of AWS_STREAM_NAME attribute, then remove it.
-        self._mock_attribute([AWS_STREAM_NAME], ["aws_stream_name"], keys, values)
+        # Validate behaviour of AWS_KINESIS_STREAM_NAME attribute, then remove it.
+        self._mock_attribute([AWS_KINESIS_STREAM_NAME], ["aws_stream_name"], keys, values)
         self._validate_remote_resource_attributes("AWS::Kinesis::Stream", "aws_stream_name")
-        self._mock_attribute([AWS_STREAM_NAME], [None])
+        self._mock_attribute([AWS_KINESIS_STREAM_NAME], [None])
 
         # Validate behaviour of SpanAttributes.AWS_DYNAMODB_TABLE_NAMES attribute with one table name, then remove it.
         self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [["aws_table_name"]], keys, values)

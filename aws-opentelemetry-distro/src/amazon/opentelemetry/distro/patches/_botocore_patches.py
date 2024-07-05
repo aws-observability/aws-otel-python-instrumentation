@@ -3,6 +3,11 @@
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import importlib
 
+from amazon.opentelemetry.distro._aws_attribute_keys import (
+    AWS_KINESIS_STREAM_NAME,
+    AWS_SQS_QUEUE_NAME,
+    AWS_SQS_QUEUE_URL,
+)
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
 from opentelemetry.instrumentation.botocore.extensions.sqs import _SqsExtension
 from opentelemetry.instrumentation.botocore.extensions.types import _AttributeMapT, _AwsSdkExtension
@@ -24,7 +29,7 @@ def _apply_botocore_kinesis_patch() -> None:
 
     This patch adds an extension to the upstream's list of known extension for Kinesis. Extensions allow for custom
     logic for adding service-specific information to spans, such as attributes. Specifically, we are adding logic to add
-    the `aws.kinesis.stream_name` attribute, to be used to generate RemoteTarget and achieve parity with the Java
+    the `aws.kinesis.stream.name` attribute, to be used to generate RemoteTarget and achieve parity with the Java
     instrumentation.
     """
     _KNOWN_EXTENSIONS["kinesis"] = _lazy_load(".", "_KinesisExtension")
@@ -47,7 +52,7 @@ def _apply_botocore_sqs_patch() -> None:
 
     This patch extends the existing upstream extension for SQS. Extensions allow for custom logic for adding
     service-specific information to spans, such as attributes. Specifically, we are adding logic to add
-    `aws.sqs.queue_url` and `aws.sqs.queue_name` attributes, to be used to generate RemoteTarget and achieve parity
+    `aws.sqs.queue.url` and `aws.sqs.queue.name` attributes, to be used to generate RemoteTarget and achieve parity
     with the Java instrumentation. Callout that today, the upstream logic adds `aws.queue_url` but we feel that
     `aws.sqs` is more in line with existing AWS Semantic Convention attributes like `AWS_S3_BUCKET`, etc.
     """
@@ -58,9 +63,9 @@ def _apply_botocore_sqs_patch() -> None:
         queue_name = self._call_context.params.get("QueueName")
         queue_url = self._call_context.params.get("QueueUrl")
         if queue_name:
-            attributes["aws.sqs.queue_name"] = queue_name
+            attributes[AWS_SQS_QUEUE_NAME] = queue_name
         if queue_url:
-            attributes["aws.sqs.queue_url"] = queue_url
+            attributes[AWS_SQS_QUEUE_URL] = queue_url
 
     _SqsExtension.extract_attributes = patch_extract_attributes
 
@@ -93,4 +98,4 @@ class _KinesisExtension(_AwsSdkExtension):
     def extract_attributes(self, attributes: _AttributeMapT):
         stream_name = self._call_context.params.get("StreamName")
         if stream_name:
-            attributes["aws.kinesis.stream_name"] = stream_name
+            attributes[AWS_KINESIS_STREAM_NAME] = stream_name
