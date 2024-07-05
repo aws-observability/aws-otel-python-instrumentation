@@ -90,15 +90,15 @@ class TestInstrumentationPatch(TestCase):
         self.assertTrue("sqs" in _KNOWN_EXTENSIONS, "Upstream has removed the SQS extension")
         attributes: Dict[str, str] = _do_extract_sqs_attributes()
         self.assertTrue("aws.queue_url" in attributes)
-        self.assertFalse("aws.sqs.queue_url" in attributes)
-        self.assertFalse("aws.sqs.queue_name" in attributes)
+        self.assertFalse("aws.sqs.queue.url" in attributes)
+        self.assertFalse("aws.sqs.queue.name" in attributes)
 
     def _test_patched_botocore_instrumentation(self):
         # Kinesis
         self.assertTrue("kinesis" in _KNOWN_EXTENSIONS)
         kinesis_attributes: Dict[str, str] = _do_extract_kinesis_attributes()
-        self.assertTrue("aws.kinesis.stream_name" in kinesis_attributes)
-        self.assertEqual(kinesis_attributes["aws.kinesis.stream_name"], _STREAM_NAME)
+        self.assertTrue("aws.kinesis.stream.name" in kinesis_attributes)
+        self.assertEqual(kinesis_attributes["aws.kinesis.stream.name"], _STREAM_NAME)
 
         # S3
         self.assertTrue("s3" in _KNOWN_EXTENSIONS)
@@ -110,10 +110,10 @@ class TestInstrumentationPatch(TestCase):
         self.assertTrue("sqs" in _KNOWN_EXTENSIONS)
         sqs_attributes: Dict[str, str] = _do_extract_sqs_attributes()
         self.assertTrue("aws.queue_url" in sqs_attributes)
-        self.assertTrue("aws.sqs.queue_url" in sqs_attributes)
-        self.assertEqual(sqs_attributes["aws.sqs.queue_url"], _QUEUE_URL)
-        self.assertTrue("aws.sqs.queue_name" in sqs_attributes)
-        self.assertEqual(sqs_attributes["aws.sqs.queue_name"], _QUEUE_NAME)
+        self.assertTrue("aws.sqs.queue.url" in sqs_attributes)
+        self.assertEqual(sqs_attributes["aws.sqs.queue.url"], _QUEUE_URL)
+        self.assertTrue("aws.sqs.queue.name" in sqs_attributes)
+        self.assertEqual(sqs_attributes["aws.sqs.queue.name"], _QUEUE_NAME)
 
     def _test_botocore_installed_flag(self):
         with patch(
