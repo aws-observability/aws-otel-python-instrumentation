@@ -3,7 +3,11 @@
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import importlib
 
-from amazon.opentelemetry.distro._aws_attribute_keys import AWS_QUEUE_NAME, AWS_QUEUE_URL, AWS_STREAM_NAME
+from amazon.opentelemetry.distro._aws_attribute_keys import (
+    AWS_KINESIS_STREAM_NAME,
+    AWS_SQS_QUEUE_NAME,
+    AWS_SQS_QUEUE_URL,
+)
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
 from opentelemetry.instrumentation.botocore.extensions.sqs import _SqsExtension
 from opentelemetry.instrumentation.botocore.extensions.types import _AttributeMapT, _AwsSdkExtension
@@ -59,9 +63,9 @@ def _apply_botocore_sqs_patch() -> None:
         queue_name = self._call_context.params.get("QueueName")
         queue_url = self._call_context.params.get("QueueUrl")
         if queue_name:
-            attributes[AWS_QUEUE_NAME] = queue_name
+            attributes[AWS_SQS_QUEUE_NAME] = queue_name
         if queue_url:
-            attributes[AWS_QUEUE_URL] = queue_url
+            attributes[AWS_SQS_QUEUE_URL] = queue_url
 
     _SqsExtension.extract_attributes = patch_extract_attributes
 
@@ -94,4 +98,4 @@ class _KinesisExtension(_AwsSdkExtension):
     def extract_attributes(self, attributes: _AttributeMapT):
         stream_name = self._call_context.params.get("StreamName")
         if stream_name:
-            attributes[AWS_STREAM_NAME] = stream_name
+            attributes[AWS_KINESIS_STREAM_NAME] = stream_name

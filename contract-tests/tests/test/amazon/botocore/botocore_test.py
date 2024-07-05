@@ -26,9 +26,9 @@ from opentelemetry.semconv.trace import SpanAttributes
 _logger: Logger = getLogger(__name__)
 _logger.setLevel(INFO)
 
-_AWS_QUEUE_URL: str = "aws.sqs.queue.url"
-_AWS_QUEUE_NAME: str = "aws.sqs.queue.name"
-_AWS_STREAM_NAME: str = "aws.kinesis.stream.name"
+_AWS_SQS_QUEUE_URL: str = "aws.sqs.queue.url"
+_AWS_SQS_QUEUE_NAME: str = "aws.sqs.queue.name"
+_AWS_KINESIS_STREAM_NAME: str = "aws.kinesis.stream.name"
 
 
 # pylint: disable=too-many-public-methods
@@ -248,7 +248,7 @@ class BotocoreTest(ContractTestBase):
             remote_resource_type="AWS::SQS::Queue",
             remote_resource_identifier="test_queue",
             request_specific_attributes={
-                _AWS_QUEUE_NAME: "test_queue",
+                _AWS_SQS_QUEUE_NAME: "test_queue",
             },
             span_name="SQS.CreateQueue",
         )
@@ -265,7 +265,7 @@ class BotocoreTest(ContractTestBase):
             remote_resource_type="AWS::SQS::Queue",
             remote_resource_identifier="test_put_get_queue",
             request_specific_attributes={
-                _AWS_QUEUE_URL: "http://localstack:4566/000000000000/test_put_get_queue",
+                _AWS_SQS_QUEUE_URL: "http://localstack:4566/000000000000/test_put_get_queue",
             },
             span_name="SQS.SendMessage",
         )
@@ -282,7 +282,7 @@ class BotocoreTest(ContractTestBase):
             remote_resource_type="AWS::SQS::Queue",
             remote_resource_identifier="test_put_get_queue",
             request_specific_attributes={
-                _AWS_QUEUE_URL: "http://localstack:4566/000000000000/test_put_get_queue",
+                _AWS_SQS_QUEUE_URL: "http://localstack:4566/000000000000/test_put_get_queue",
             },
             span_name="SQS.ReceiveMessage",
         )
@@ -299,7 +299,7 @@ class BotocoreTest(ContractTestBase):
             remote_resource_type="AWS::SQS::Queue",
             remote_resource_identifier="sqserror",
             request_specific_attributes={
-                _AWS_QUEUE_URL: "http://error.test:8080/000000000000/sqserror",
+                _AWS_SQS_QUEUE_URL: "http://error.test:8080/000000000000/sqserror",
             },
             span_name="SQS.SendMessage",
         )
@@ -316,7 +316,7 @@ class BotocoreTest(ContractTestBase):
             remote_resource_type="AWS::SQS::Queue",
             remote_resource_identifier="invalid_test",
             request_specific_attributes={
-                _AWS_QUEUE_NAME: "invalid_test",
+                _AWS_SQS_QUEUE_NAME: "invalid_test",
             },
             span_name="SQS.CreateQueue",
         )
@@ -333,7 +333,7 @@ class BotocoreTest(ContractTestBase):
             remote_resource_type="AWS::Kinesis::Stream",
             remote_resource_identifier="test_stream",
             request_specific_attributes={
-                _AWS_STREAM_NAME: "test_stream",
+                _AWS_KINESIS_STREAM_NAME: "test_stream",
             },
             span_name="Kinesis.PutRecord",
         )
@@ -350,7 +350,7 @@ class BotocoreTest(ContractTestBase):
             remote_resource_type="AWS::Kinesis::Stream",
             remote_resource_identifier="invalid_stream",
             request_specific_attributes={
-                _AWS_STREAM_NAME: "invalid_stream",
+                _AWS_KINESIS_STREAM_NAME: "invalid_stream",
             },
             span_name="Kinesis.PutRecord",
         )
@@ -367,7 +367,7 @@ class BotocoreTest(ContractTestBase):
             remote_resource_type="AWS::Kinesis::Stream",
             remote_resource_identifier="test_stream",
             request_specific_attributes={
-                _AWS_STREAM_NAME: "test_stream",
+                _AWS_KINESIS_STREAM_NAME: "test_stream",
             },
             span_name="Kinesis.PutRecord",
         )
