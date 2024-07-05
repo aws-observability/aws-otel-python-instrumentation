@@ -3,15 +3,11 @@
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import importlib
 
+from amazon.opentelemetry.distro._aws_attribute_keys import AWS_QUEUE_NAME, AWS_QUEUE_URL, AWS_STREAM_NAME
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
 from opentelemetry.instrumentation.botocore.extensions.sqs import _SqsExtension
 from opentelemetry.instrumentation.botocore.extensions.types import _AttributeMapT, _AwsSdkExtension
 from opentelemetry.semconv.trace import SpanAttributes
-from amazon.opentelemetry.distro._aws_attribute_keys import (
-    AWS_QUEUE_URL,
-    AWS_QUEUE_NAME,
-    AWS_STREAM_NAME
-)
 
 
 def _apply_botocore_instrumentation_patches() -> None:
