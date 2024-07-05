@@ -14,6 +14,6 @@ AWS_CONSUMER_PARENT_SPAN_KIND: str = "aws.consumer.parent.span.kind"
 
 # AWS_#_NAME attributes are not supported in python as they are not part of the Semantic Conventions.
 # TODO：Move to Semantic Conventions when these attributes are added.
-AWS_QUEUE_URL: str = "aws.sqs.queue.url"
-AWS_QUEUE_NAME: str = "aws.sqs.queue.name"
-AWS_STREAM_NAME: str = "aws.kinesis.stream.name"
+AWS_SQS_QUEUE_URL: str = "aws.sqs.queue.url"
+AWS_SQS_QUEUE_NAME: str = "aws.sqs.queue.name"
+AWS_KINESIS_STREAM_NAME: str = "aws.kinesis.stream.name"
