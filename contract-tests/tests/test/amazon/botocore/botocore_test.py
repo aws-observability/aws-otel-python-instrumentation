@@ -58,7 +58,7 @@ class BotocoreTest(ContractTestBase):
     def set_up_dependency_container(cls):
         local_stack_networking_config: Dict[str, EndpointConfig] = {
             NETWORK_NAME: EndpointConfig(
-                version="1.25",
+                version="1.22",
                 aliases=[
                     "localstack",
                     "s3.localstack",
