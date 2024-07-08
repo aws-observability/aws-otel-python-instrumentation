@@ -44,6 +44,9 @@ class Psycopg2Test(DatabaseContractTestBase):
     def get_application_image_name() -> str:
         return "aws-application-signals-tests-psycopg2-app"
 
+    def test_select_succeeds(self) -> None:
+        self.assert_select_succeeds()
+
     def test_drop_table_succeeds(self) -> None:
         self.assert_drop_table_succeeds()
 

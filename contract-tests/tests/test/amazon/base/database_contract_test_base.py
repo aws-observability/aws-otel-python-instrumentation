@@ -1,7 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import Dict, List
 import time
+from typing import Dict, List
+
 from mock_collector_client import ResourceScopeMetric, ResourceScopeSpan
 from typing_extensions import override
 

@@ -7,7 +7,6 @@ from threading import Thread
 from typing import Tuple
 
 import mysql.connector as mysql
-
 from typing_extensions import override
 
 _PREPARE_DB: str = "prepare_db"

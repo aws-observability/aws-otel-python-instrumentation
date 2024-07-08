@@ -9,6 +9,8 @@ from typing import Tuple
 import pymysql
 from typing_extensions import override
 
+_PREPARE_DB: str = "prepare_db"
+_SELECT: str = "select"
 _CREATE_DATABASE: str = "create_database"
 _DROP_TABLE: str = "drop_table"
 _ERROR: str = "error"
@@ -28,7 +30,19 @@ class RequestHandler(BaseHTTPRequestHandler):
         status_code: int = 200
         conn = pymysql.connect(host=_DB_HOST, user=_DB_USER, password=_DB_PASS, database=_DB_NAME)
         conn.autocommit = True  # CREATE DATABASE cannot run in a transaction block
-        if self.in_path(_DROP_TABLE):
+        if self.in_path(_PREPARE_DB):
+            cur = conn.cursor()
+            cur.execute("CREATE TABLE employee (id int, name varchar(255))")
+            cur.execute("INSERT INTO employee (id, name) values (1, 'A')")
+            cur.close()
+            status_code = 200
+        elif self.in_path(_SELECT):
+            cur = conn.cursor()
+            cur.execute("SELECT count(*) FROM employee")
+            result = cur.fetchall()
+            cur.close()
+            status_code = 200 if len(result) == 1 else 500
+        elif self.in_path(_DROP_TABLE):
             cur = conn.cursor()
             cur.execute("DROP TABLE IF EXISTS test_table")
             cur.close()
