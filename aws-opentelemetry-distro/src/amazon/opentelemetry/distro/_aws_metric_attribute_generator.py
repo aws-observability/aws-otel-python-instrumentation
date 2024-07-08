@@ -6,17 +6,17 @@ from typing import Match, Optional
 from urllib.parse import ParseResult, urlparse
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
+    AWS_KINESIS_STREAM_NAME,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
-    AWS_QUEUE_NAME,
-    AWS_QUEUE_URL,
     AWS_REMOTE_DB_USER,
     AWS_REMOTE_OPERATION,
     AWS_REMOTE_RESOURCE_IDENTIFIER,
     AWS_REMOTE_RESOURCE_TYPE,
     AWS_REMOTE_SERVICE,
     AWS_SPAN_KIND,
-    AWS_STREAM_NAME,
+    AWS_SQS_QUEUE_NAME,
+    AWS_SQS_QUEUE_URL,
 )
 from amazon.opentelemetry.distro._aws_span_processing_util import (
     LOCAL_ROOT,
@@ -361,19 +361,19 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         if is_key_present(span, _AWS_TABLE_NAMES) and len(span.attributes.get(_AWS_TABLE_NAMES)) == 1:
             remote_resource_type = _NORMALIZED_DYNAMO_DB_SERVICE_NAME + "::Table"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(_AWS_TABLE_NAMES)[0])
-        elif is_key_present(span, AWS_STREAM_NAME):
+        elif is_key_present(span, AWS_KINESIS_STREAM_NAME):
             remote_resource_type = _NORMALIZED_KINESIS_SERVICE_NAME + "::Stream"
-            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_STREAM_NAME))
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_KINESIS_STREAM_NAME))
         elif is_key_present(span, _AWS_BUCKET_NAME):
             remote_resource_type = _NORMALIZED_S3_SERVICE_NAME + "::Bucket"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(_AWS_BUCKET_NAME))
-        elif is_key_present(span, AWS_QUEUE_NAME):
+        elif is_key_present(span, AWS_SQS_QUEUE_NAME):
             remote_resource_type = _NORMALIZED_SQS_SERVICE_NAME + "::Queue"
-            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_QUEUE_NAME))
-        elif is_key_present(span, AWS_QUEUE_URL):
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_SQS_QUEUE_NAME))
+        elif is_key_present(span, AWS_SQS_QUEUE_URL):
             remote_resource_type = _NORMALIZED_SQS_SERVICE_NAME + "::Queue"
             remote_resource_identifier = _escape_delimiters(
-                SqsUrlParser.get_queue_name(span.attributes.get(AWS_QUEUE_URL))
+                SqsUrlParser.get_queue_name(span.attributes.get(AWS_SQS_QUEUE_URL))
             )
     elif is_db_span(span):
         remote_resource_type = _DB_CONNECTION_STRING_TYPE

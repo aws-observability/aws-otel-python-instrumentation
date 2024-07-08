@@ -1,4 +1,4 @@
-opentelemetry-distro==0.43b0
-opentelemetry-exporter-otlp-proto-grpc==1.22.0
+opentelemetry-distro==0.46b0
+opentelemetry-exporter-otlp-proto-grpc==1.25.0
 typing-extensions==4.9.0
 pymysql==1.1.1
