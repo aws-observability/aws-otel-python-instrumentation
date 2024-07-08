@@ -24,10 +24,21 @@ _KNOWLEDGE_BASE_ID: str = "knowledgeBaseId"
 _DATA_SOURCE_ID: str = "dataSourceId"
 _GUARDRAIL_ID: str = "guardrailId"
 _MODEL_ID: str = "modelId"
-_GEN_AI_SYSTEM: str = "aws_bedrock"
+_AWS_BEDROCK_SYSTEM: str = "aws_bedrock"
 
 
 class _BedrockAgentOperation(abc.ABC):
+    """
+    We use subclasses and operation names to handle specific Bedrock Agent operations.
+    - Only operations involving Agent, DataSource, or KnowledgeBase resources are supported.
+    - Operations without these specified resources are not covered.
+    - When an operation involves multiple resources (e.g., AssociateAgentKnowledgeBase),
+      we map it to one resource based on some judgement classification of rules.
+
+    For detailed API documentation on Bedrock Agent operations, visit:
+    https://docs.aws.amazon.com/bedrock/latest/APIReference/API_Operations_Agents_for_Amazon_Bedrock.html
+    """
+
     request_attributes: Optional[Dict[str, str]] = None
     response_attributes: Optional[Dict[str, str]] = None
 
@@ -39,7 +50,9 @@ class _BedrockAgentOperation(abc.ABC):
 
 class _AgentOperation(_BedrockAgentOperation):
     """
-    This class primarily supports BedrockAgent Agent related operations.
+    This class covers BedrockAgent API related to <a
+    href="https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent_Agent.html">Agents</a>,
+    and extracts agent-related attributes.
     """
 
     request_attributes = {
@@ -75,7 +88,9 @@ class _AgentOperation(_BedrockAgentOperation):
 
 class _KnowledgeBaseOperation(_BedrockAgentOperation):
     """
-    This class primarily supports BedrockAgent KnowledgeBase related operations.
+    This class covers BedrockAgent API related to <a
+    href="https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent_KnowledgeBase.html">KnowledgeBases</a>,
+    and extracts knowledge base-related attributes.
 
     Note: The 'CreateDataSource' operation does not have a 'dataSourceId' in the context,
     but it always comes with a 'knowledgeBaseId'. Therefore, we categorize it under 'knowledgeBaseId' operations.
@@ -104,7 +119,9 @@ class _KnowledgeBaseOperation(_BedrockAgentOperation):
 
 class _DataSourceOperation(_BedrockAgentOperation):
     """
-    This class primarily supports BedrockAgent DataSource related operations.
+    This class covers BedrockAgent API related to <a
+    href="https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent_DataSource.html">DataSources</a>,
+    and extracts data source-related attributes.
     """
 
     request_attributes = {
@@ -119,10 +136,10 @@ class _DataSourceOperation(_BedrockAgentOperation):
         return ["DeleteDataSource", "GetDataSource", "UpdateDataSource"]
 
 
-# _OPERATION_NAME_TO_ClASS_MAPPING maps operation names to their corresponding classes
-# by iterating over all subclasses of _BedrockAgentOperation and extract operation
-# by call operation_names() function.
-_OPERATION_NAME_TO_ClASS_MAPPING = {
+# _OPERATION_NAME_TO_CLASS_MAPPING maps operation names to their corresponding classes
+# by iterating over all subclasses of _BedrockAgentOperation and extract operations
+# by calling operation_names() function.
+_OPERATION_NAME_TO_CLASS_MAPPING = {
     op_name: op_class
     for op_class in [_KnowledgeBaseOperation, _DataSourceOperation, _AgentOperation]
     for op_name in op_class.operation_names()
@@ -143,7 +160,7 @@ class _BedrockAgentExtension(_AwsSdkExtension):
 
     def __init__(self, call_context: _AwsSdkCallContext):
         super().__init__(call_context)
-        self._operation_class = _OPERATION_NAME_TO_ClASS_MAPPING.get(call_context.operation)
+        self._operation_class = _OPERATION_NAME_TO_CLASS_MAPPING.get(call_context.operation)
 
     def extract_attributes(self, attributes: _AttributeMapT):
         if self._operation_class is None:
@@ -208,7 +225,7 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
     """
 
     def extract_attributes(self, attributes: _AttributeMapT):
-        attributes[GEN_AI_SYSTEM] = _GEN_AI_SYSTEM
+        attributes[GEN_AI_SYSTEM] = _AWS_BEDROCK_SYSTEM
 
         model_id = self._call_context.params.get(_MODEL_ID)
         if model_id:

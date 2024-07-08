@@ -77,7 +77,8 @@ def _apply_botocore_bedrock_patch() -> None:
 
     This patch adds an extension to the upstream's list of known extension for Bedrock.
     Extensions allow for custom logic for adding service-specific information to spans, such as attributes.
-    Specifically, we are adding logic to add the AWS_BEDROCK attributes referenced in _aws_attribute_keys.
+    Specifically, we are adding logic to add the AWS_BEDROCK attributes referenced in _aws_attribute_keys,
+    GEN_AI_REQUEST_MODEL and GEN_AI_SYSTEM attributes referenced in _aws_span_processing_util.
     """
     _KNOWN_EXTENSIONS["bedrock"] = _lazy_load(".", "_BedrockExtension")
     _KNOWN_EXTENSIONS["bedrock-agent"] = _lazy_load(".", "_BedrockAgentExtension")

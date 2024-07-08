@@ -147,12 +147,8 @@ class TestInstrumentationPatch(TestCase):
         self.assertTrue("bedrock-agent-runtime" in _KNOWN_EXTENSIONS)
         bedrock_agent_runtime_attributes: Dict[str, str] = _do_extract_attributes_bedrock("bedrock-agent-runtime")
         self.assertEqual(len(bedrock_agent_runtime_attributes), 2)
-        self.assertTrue("aws.bedrock.agent.id" in bedrock_agent_runtime_attributes)
         self.assertEqual(bedrock_agent_runtime_attributes["aws.bedrock.agent.id"], _BEDROCK_AGENT_ID)
-        self.assertTrue("aws.bedrock.knowledge_base.id" in bedrock_agent_runtime_attributes)
         self.assertEqual(bedrock_agent_runtime_attributes["aws.bedrock.knowledge_base.id"], _BEDROCK_KNOWLEDGEBASE_ID)
-        self.assertFalse("aws.bedrock.data_source.id" in bedrock_agent_runtime_attributes)
-        self.assertFalse("gen_ai.request.model" in bedrock_agent_runtime_attributes)
         bedrock_agent_runtime_sucess_attributes: Dict[str, str] = _do_on_success_bedrock("bedrock-agent-runtime")
         self.assertEqual(len(bedrock_agent_runtime_sucess_attributes), 0)
 
@@ -160,9 +156,7 @@ class TestInstrumentationPatch(TestCase):
         self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
         bedrock_runtime_attributes: Dict[str, str] = _do_extract_bedrock_runtime_attributes()
         self.assertEqual(len(bedrock_runtime_attributes), 2)
-        self.assertTrue("gen_ai.system" in bedrock_runtime_attributes)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.system"], _GEN_AI_SYSTEM)
-        self.assertTrue("gen_ai.request.model" in bedrock_runtime_attributes)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.request.model"], _GEN_AI_REQUEST_MODEL)
 
     def _test_botocore_installed_flag(self):
@@ -187,12 +181,7 @@ class TestInstrumentationPatch(TestCase):
         """For bedrock service, only on_success provides attributes, and we only expect to see guardrail"""
         bedrock_sucess_attributes: Dict[str, str] = _do_on_success_bedrock("bedrock")
         self.assertEqual(len(bedrock_sucess_attributes), 1)
-        self.assertTrue("aws.bedrock.guardrail.id" in bedrock_sucess_attributes)
         self.assertEqual(bedrock_sucess_attributes["aws.bedrock.guardrail.id"], _BEDROCK_GUARDRAIL_ID)
-        self.assertFalse("aws.bedrock.agent.id" in bedrock_sucess_attributes)
-        self.assertFalse("aws.bedrock.knowledge_base.id" in bedrock_sucess_attributes)
-        self.assertFalse("aws.bedrock.data_source.id" in bedrock_sucess_attributes)
-        self.assertFalse("gen_ai.request.model" in bedrock_sucess_attributes)
 
     def _test_patched_bedrock_agent_instrumentation(self):
         """For bedrock-agent service, both extract_attributes and on_success provides attributes,
