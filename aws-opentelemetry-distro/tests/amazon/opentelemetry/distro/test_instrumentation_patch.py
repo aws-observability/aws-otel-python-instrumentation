@@ -127,20 +127,6 @@ class TestInstrumentationPatch(TestCase):
         self.assertFalse("aws.sqs.queue.url" in attributes)
         self.assertFalse("aws.sqs.queue.name" in attributes)
 
-    def _test_unpatched_gevent_instrumentation(self):
-        self.assertFalse(gevent.monkey.is_module_patched("os"), "gevent os module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("thread"), "gevent thread module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("time"), "gevent time module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("sys"), "gevent sys module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("socket"), "gevent socket module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("select"), "gevent select module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("ssl"), "gevent ssl module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("subprocess"), "gevent subprocess module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("builtins"), "gevent builtins module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("signal"), "gevent signal module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("queue"), "gevent queue module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("contextvars"), "gevent contextvars module has been patched")
-
         # Bedrock
         self.assertFalse("bedrock" in _KNOWN_EXTENSIONS, "Upstream has added a Bedrock extension")
 
@@ -154,6 +140,20 @@ class TestInstrumentationPatch(TestCase):
 
         # BedrockRuntime
         self.assertFalse("bedrock-runtime" in _KNOWN_EXTENSIONS, "Upstream has added a bedrock-runtime extension")
+
+    def _test_unpatched_gevent_instrumentation(self):
+        self.assertFalse(gevent.monkey.is_module_patched("os"), "gevent os module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("thread"), "gevent thread module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("time"), "gevent time module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("sys"), "gevent sys module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("socket"), "gevent socket module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("select"), "gevent select module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("ssl"), "gevent ssl module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("subprocess"), "gevent subprocess module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("builtins"), "gevent builtins module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("signal"), "gevent signal module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("queue"), "gevent queue module has been patched")
+        self.assertFalse(gevent.monkey.is_module_patched("contextvars"), "gevent contextvars module has been patched")
 
     # pylint: disable=too-many-statements
     def _test_patched_botocore_instrumentation(self):
@@ -177,6 +177,28 @@ class TestInstrumentationPatch(TestCase):
         self.assertEqual(sqs_attributes["aws.sqs.queue.url"], _QUEUE_URL)
         self.assertTrue("aws.sqs.queue.name" in sqs_attributes)
         self.assertEqual(sqs_attributes["aws.sqs.queue.name"], _QUEUE_NAME)
+
+        # Bedrock
+        self._test_patched_bedrock_instrumentation()
+
+        # Bedrock Agent Operation
+        self._test_patched_bedrock_agent_instrumentation()
+
+        # Bedrock Agent Runtime
+        self.assertTrue("bedrock-agent-runtime" in _KNOWN_EXTENSIONS)
+        bedrock_agent_runtime_attributes: Dict[str, str] = _do_extract_attributes_bedrock("bedrock-agent-runtime")
+        self.assertEqual(len(bedrock_agent_runtime_attributes), 2)
+        self.assertEqual(bedrock_agent_runtime_attributes["aws.bedrock.agent.id"], _BEDROCK_AGENT_ID)
+        self.assertEqual(bedrock_agent_runtime_attributes["aws.bedrock.knowledge_base.id"], _BEDROCK_KNOWLEDGEBASE_ID)
+        bedrock_agent_runtime_sucess_attributes: Dict[str, str] = _do_on_success_bedrock("bedrock-agent-runtime")
+        self.assertEqual(len(bedrock_agent_runtime_sucess_attributes), 0)
+
+        # BedrockRuntime
+        self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
+        bedrock_runtime_attributes: Dict[str, str] = _do_extract_bedrock_runtime_attributes()
+        self.assertEqual(len(bedrock_runtime_attributes), 2)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.system"], _GEN_AI_SYSTEM)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.model"], _GEN_AI_REQUEST_MODEL)
 
     def _test_patched_gevent_os_ssl_instrumentation(self):
         # Only ssl and os module should have been patched since the environment variable was set to 'os, ssl'
@@ -209,28 +231,6 @@ class TestInstrumentationPatch(TestCase):
         self.assertFalse(gevent.monkey.is_module_patched("sys"), "gevent sys module has  been patched")
         self.assertFalse(gevent.monkey.is_module_patched("builtins"), "gevent builtins module not been patched")
         self.assertFalse(gevent.monkey.is_module_patched("contextvars"), "gevent contextvars module has been patched")
-
-        # Bedrock
-        self._test_patched_bedrock_instrumentation()
-
-        # Bedrock Agent Operation
-        self._test_patched_bedrock_agent_instrumentation()
-
-        # Bedrock Agent Runtime
-        self.assertTrue("bedrock-agent-runtime" in _KNOWN_EXTENSIONS)
-        bedrock_agent_runtime_attributes: Dict[str, str] = _do_extract_attributes_bedrock("bedrock-agent-runtime")
-        self.assertEqual(len(bedrock_agent_runtime_attributes), 2)
-        self.assertEqual(bedrock_agent_runtime_attributes["aws.bedrock.agent.id"], _BEDROCK_AGENT_ID)
-        self.assertEqual(bedrock_agent_runtime_attributes["aws.bedrock.knowledge_base.id"], _BEDROCK_KNOWLEDGEBASE_ID)
-        bedrock_agent_runtime_sucess_attributes: Dict[str, str] = _do_on_success_bedrock("bedrock-agent-runtime")
-        self.assertEqual(len(bedrock_agent_runtime_sucess_attributes), 0)
-
-        # BedrockRuntime
-        self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
-        bedrock_runtime_attributes: Dict[str, str] = _do_extract_bedrock_runtime_attributes()
-        self.assertEqual(len(bedrock_runtime_attributes), 2)
-        self.assertEqual(bedrock_runtime_attributes["gen_ai.system"], _GEN_AI_SYSTEM)
-        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.model"], _GEN_AI_REQUEST_MODEL)
 
     def _test_botocore_installed_flag(self):
         with patch(
