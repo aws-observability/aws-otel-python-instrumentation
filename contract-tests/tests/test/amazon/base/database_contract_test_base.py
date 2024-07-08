@@ -22,11 +22,11 @@ from opentelemetry.proto.trace.v1.trace_pb2 import Span
 from opentelemetry.trace import StatusCode
 
 DATABASE_HOST: str = "mydb"
-DATABASE_USER: str = "root"
-DATABASE_PASSWORD: str = "example"
 DATABASE_NAME: str = "testdb"
-LOCAL_ROOT: str = "LOCAL_ROOT"
-CLIENT: str = "CLIENT"
+DATABASE_PASSWORD: str = "example"
+DATABASE_USER: str = "root"
+SPAN_KIND_CLIENT: str = "CLIENT"
+SPAN_KIND_LOCAL_ROOT: str = "LOCAL_ROOT"
 
 
 class DatabaseContractTestBase(ContractTestBase):
@@ -104,7 +104,7 @@ class DatabaseContractTestBase(ContractTestBase):
 
     @override
     def _assert_aws_attributes(
-        self, attributes_list: List[KeyValue], expected_span_kind: str = LOCAL_ROOT, **kwargs
+        self, attributes_list: List[KeyValue], expected_span_kind: str = SPAN_KIND_LOCAL_ROOT, **kwargs
     ) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
@@ -140,11 +140,11 @@ class DatabaseContractTestBase(ContractTestBase):
         if len(dp_list[1].attributes) > len(dp_list[0].attributes):
             dependency_dp = dp_list[1]
             service_dp = dp_list[0]
-        self._assert_aws_attributes(dependency_dp.attributes, CLIENT, **kwargs)
+        self._assert_aws_attributes(dependency_dp.attributes, SPAN_KIND_CLIENT, **kwargs)
         self.check_sum(metric_name, dependency_dp.sum, expected_sum)
 
         attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(service_dp.attributes)
         # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
-        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, LOCAL_ROOT)
+        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, SPAN_KIND_LOCAL_ROOT)
         self.check_sum(metric_name, service_dp.sum, expected_sum)

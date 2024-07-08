@@ -433,7 +433,6 @@ def _build_db_connection(address: str, port: int) -> Optional[str]:
 
 
 def _build_db_connection_string(connection_string: str) -> Optional[str]:
-
     uri = urlparse(connection_string)
     address = uri.hostname
     try:

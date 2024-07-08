@@ -11,7 +11,7 @@ from amazon.base.database_contract_test_base import (
     DATABASE_NAME,
     DATABASE_PASSWORD,
     DATABASE_USER,
-    LOCAL_ROOT,
+    SPAN_KIND_LOCAL_ROOT,
     DatabaseContractTestBase,
 )
 from amazon.utils.application_signals_constants import (
@@ -68,11 +68,11 @@ class MysqlClientTest(DatabaseContractTestBase):
 
     # This adapter is not currently fully supported by OTEL
     # GitHub issue: https://github.com/open-telemetry/opentelemetry-python-contrib/issues/1319
-    # Once the adapter is supported, we could remove _assert_aws_attributes and _assert_semantic_conventions_attributes
-    # methods from this class.
+    # TODO: Once the adapter is supported, we could remove _assert_aws_attributes and
+    # _assert_semantic_conventions_attributes methods from this class.
     @override
     def _assert_aws_attributes(
-        self, attributes_list: List[KeyValue], expected_span_kind: str = LOCAL_ROOT, **kwargs
+        self, attributes_list: List[KeyValue], expected_span_kind: str = SPAN_KIND_LOCAL_ROOT, **kwargs
     ) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
