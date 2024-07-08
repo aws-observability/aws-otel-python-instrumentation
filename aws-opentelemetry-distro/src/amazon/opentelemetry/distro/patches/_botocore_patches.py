@@ -3,15 +3,16 @@
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import importlib
 
+from amazon.opentelemetry.distro._aws_attribute_keys import (
+    AWS_KINESIS_STREAM_NAME,
+    AWS_SQS_QUEUE_NAME,
+    AWS_SQS_QUEUE_URL,
+)
 from amazon.opentelemetry.distro.patches._bedrock_patches import (  # noqa # pylint: disable=unused-import
     _BedrockAgentExtension,
     _BedrockAgentRuntimeExtension,
     _BedrockExtension,
     _BedrockRuntimeExtension,
-from amazon.opentelemetry.distro._aws_attribute_keys import (
-    AWS_KINESIS_STREAM_NAME,
-    AWS_SQS_QUEUE_NAME,
-    AWS_SQS_QUEUE_URL,
 )
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
 from opentelemetry.instrumentation.botocore.extensions.sqs import _SqsExtension
