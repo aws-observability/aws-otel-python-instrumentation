@@ -70,7 +70,9 @@ class DatabaseContractTestBase(ContractTestBase):
             if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
                 target_spans.append(resource_scope_span.span)
 
-        self.assertEqual(len(target_spans), 1)
+        self.assertEqual(
+            len(target_spans), 1, f"target_spans is {str(target_spans)}, although only one walue was expected"
+        )
         self._assert_aws_attributes(target_spans[0].attributes, **kwargs)
 
     @override
