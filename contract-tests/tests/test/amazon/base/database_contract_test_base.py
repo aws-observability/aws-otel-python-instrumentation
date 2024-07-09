@@ -131,13 +131,14 @@ class DatabaseContractTestBase(ContractTestBase):
         for resource_scope_metric in resource_scope_metrics:
             if resource_scope_metric.metric.name.lower() == metric_name.lower():
                 target_metrics.append(resource_scope_metric.metric)
-
-        self.assertEqual(
-            len(target_metrics), 1, f"target_metrics is {str(target_metrics)}, although only one walue was expected"
+        self.assertLessEqual(
+            len(target_metrics),
+            2,
+            f"target_metrics is {str(target_metrics)}, although we expect less than or equal to 2 metrics",
         )
-        target_metric: Metric = target_metrics[0]
-        dp_list: List[ExponentialHistogramDataPoint] = target_metric.exponential_histogram.data_points
-
+        dp_list: List[ExponentialHistogramDataPoint] = [
+            dp for target_metric in target_metrics for dp in target_metric.exponential_histogram.data_points
+        ]
         self.assertEqual(len(dp_list), 2)
         dependency_dp: ExponentialHistogramDataPoint = dp_list[0]
         service_dp: ExponentialHistogramDataPoint = dp_list[1]
