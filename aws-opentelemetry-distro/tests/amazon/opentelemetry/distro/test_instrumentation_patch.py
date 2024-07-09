@@ -195,7 +195,7 @@ class TestInstrumentationPatch(TestCase):
 
         # BedrockRuntime
         self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
-        bedrock_runtime_attributes: Dict[str, str] = _do_extract_bedrock_runtime_attributes()
+        bedrock_runtime_attributes: Dict[str, str] = _do_extract_attributes_bedrock("bedrock-runtime")
         self.assertEqual(len(bedrock_runtime_attributes), 2)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.system"], _GEN_AI_SYSTEM)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.request.model"], _GEN_AI_REQUEST_MODEL)
@@ -345,18 +345,6 @@ def _do_on_success_bedrock(service, operation=None) -> Dict[str, str]:
         "modelId": _GEN_AI_REQUEST_MODEL,
     }
     return _do_on_success(service, result, operation)
-
-
-def _do_extract_bedrock_runtime_attributes() -> Dict[str, str]:
-    service_name: str = "bedrock-runtime"
-    params: Dict[str, str] = {
-        "agentId": _BEDROCK_AGENT_ID,
-        "dataSourceId": _BEDROCK_DATASOURCE_ID,
-        "knowledgeBaseId": _BEDROCK_KNOWLEDGEBASE_ID,
-        "guardrailId": _BEDROCK_GUARDRAIL_ID,
-        "modelId": _GEN_AI_REQUEST_MODEL,
-    }
-    return _do_extract_attributes(service_name, params)
 
 
 def _do_extract_attributes(service_name: str, params: Dict[str, Any], operation: str = None) -> Dict[str, str]:
