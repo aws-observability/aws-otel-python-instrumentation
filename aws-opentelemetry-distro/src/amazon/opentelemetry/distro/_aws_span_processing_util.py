@@ -25,6 +25,10 @@ _BOTO3SQS_INSTRUMENTATION_SCOPE: str = "opentelemetry.instrumentation.boto3sqs"
 # Max keyword length supported by parsing into remote_operation from DB_STATEMENT
 MAX_KEYWORD_LENGTH = 27
 
+# TODO: Use Semantic Conventions once upgrade to 0.47b0
+GEN_AI_REQUEST_MODEL: str = "gen_ai.request.model"
+GEN_AI_SYSTEM: str = "gen_ai.system"
+
 
 # Get dialect keywords retrieved from dialect_keywords.json file.
 # Only meant to be invoked by SQL_KEYWORD_PATTERN and unit tests
