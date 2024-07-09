@@ -8,6 +8,12 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_SQS_QUEUE_NAME,
     AWS_SQS_QUEUE_URL,
 )
+from amazon.opentelemetry.distro.patches._bedrock_patches import (  # noqa # pylint: disable=unused-import
+    _BedrockAgentExtension,
+    _BedrockAgentRuntimeExtension,
+    _BedrockExtension,
+    _BedrockRuntimeExtension,
+)
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
 from opentelemetry.instrumentation.botocore.extensions.sqs import _SqsExtension
 from opentelemetry.instrumentation.botocore.extensions.types import _AttributeMapT, _AwsSdkExtension
@@ -22,6 +28,7 @@ def _apply_botocore_instrumentation_patches() -> None:
     _apply_botocore_kinesis_patch()
     _apply_botocore_s3_patch()
     _apply_botocore_sqs_patch()
+    _apply_botocore_bedrock_patch()
 
 
 def _apply_botocore_kinesis_patch() -> None:
@@ -68,6 +75,20 @@ def _apply_botocore_sqs_patch() -> None:
             attributes[AWS_SQS_QUEUE_URL] = queue_url
 
     _SqsExtension.extract_attributes = patch_extract_attributes
+
+
+def _apply_botocore_bedrock_patch() -> None:
+    """Botocore instrumentation patch for Bedrock, Bedrock Agent, Bedrock Runtime and Bedrock Agent Runtime
+
+    This patch adds an extension to the upstream's list of known extension for Bedrock.
+    Extensions allow for custom logic for adding service-specific information to spans, such as attributes.
+    Specifically, we are adding logic to add the AWS_BEDROCK attributes referenced in _aws_attribute_keys,
+    GEN_AI_REQUEST_MODEL and GEN_AI_SYSTEM attributes referenced in _aws_span_processing_util.
+    """
+    _KNOWN_EXTENSIONS["bedrock"] = _lazy_load(".", "_BedrockExtension")
+    _KNOWN_EXTENSIONS["bedrock-agent"] = _lazy_load(".", "_BedrockAgentExtension")
+    _KNOWN_EXTENSIONS["bedrock-agent-runtime"] = _lazy_load(".", "_BedrockAgentRuntimeExtension")
+    _KNOWN_EXTENSIONS["bedrock-runtime"] = _lazy_load(".", "_BedrockRuntimeExtension")
 
 
 # The OpenTelemetry Authors code

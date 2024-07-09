@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import os
-from typing import Dict
+from typing import Any, Dict
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
@@ -14,11 +14,18 @@ from amazon.opentelemetry.distro.patches._instrumentation_patch import (
 )
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
 from opentelemetry.semconv.trace import SpanAttributes
+from opentelemetry.trace.span import Span
 
 _STREAM_NAME: str = "streamName"
 _BUCKET_NAME: str = "bucketName"
 _QUEUE_NAME: str = "queueName"
 _QUEUE_URL: str = "queueUrl"
+_BEDROCK_AGENT_ID: str = "agentId"
+_BEDROCK_DATASOURCE_ID: str = "DataSourceId"
+_BEDROCK_GUARDRAIL_ID: str = "GuardrailId"
+_BEDROCK_KNOWLEDGEBASE_ID: str = "KnowledgeBaseId"
+_GEN_AI_SYSTEM: str = "aws_bedrock"
+_GEN_AI_REQUEST_MODEL: str = "genAiReuqestModelId"
 
 # Patch names
 GET_DISTRIBUTION_PATCH: str = (
@@ -120,6 +127,20 @@ class TestInstrumentationPatch(TestCase):
         self.assertFalse("aws.sqs.queue.url" in attributes)
         self.assertFalse("aws.sqs.queue.name" in attributes)
 
+        # Bedrock
+        self.assertFalse("bedrock" in _KNOWN_EXTENSIONS, "Upstream has added a Bedrock extension")
+
+        # Bedrock Agent
+        self.assertFalse("bedrock-agent" in _KNOWN_EXTENSIONS, "Upstream has added a Bedrock Agent extension")
+
+        # Bedrock Agent Runtime
+        self.assertFalse(
+            "bedrock-agent-runtime" in _KNOWN_EXTENSIONS, "Upstream has added a Bedrock Agent Runtime extension"
+        )
+
+        # BedrockRuntime
+        self.assertFalse("bedrock-runtime" in _KNOWN_EXTENSIONS, "Upstream has added a bedrock-runtime extension")
+
     def _test_unpatched_gevent_instrumentation(self):
         self.assertFalse(gevent.monkey.is_module_patched("os"), "gevent os module has been patched")
         self.assertFalse(gevent.monkey.is_module_patched("thread"), "gevent thread module has been patched")
@@ -134,6 +155,7 @@ class TestInstrumentationPatch(TestCase):
         self.assertFalse(gevent.monkey.is_module_patched("queue"), "gevent queue module has been patched")
         self.assertFalse(gevent.monkey.is_module_patched("contextvars"), "gevent contextvars module has been patched")
 
+    # pylint: disable=too-many-statements
     def _test_patched_botocore_instrumentation(self):
         # Kinesis
         self.assertTrue("kinesis" in _KNOWN_EXTENSIONS)
@@ -155,6 +177,28 @@ class TestInstrumentationPatch(TestCase):
         self.assertEqual(sqs_attributes["aws.sqs.queue.url"], _QUEUE_URL)
         self.assertTrue("aws.sqs.queue.name" in sqs_attributes)
         self.assertEqual(sqs_attributes["aws.sqs.queue.name"], _QUEUE_NAME)
+
+        # Bedrock
+        self._test_patched_bedrock_instrumentation()
+
+        # Bedrock Agent Operation
+        self._test_patched_bedrock_agent_instrumentation()
+
+        # Bedrock Agent Runtime
+        self.assertTrue("bedrock-agent-runtime" in _KNOWN_EXTENSIONS)
+        bedrock_agent_runtime_attributes: Dict[str, str] = _do_extract_attributes_bedrock("bedrock-agent-runtime")
+        self.assertEqual(len(bedrock_agent_runtime_attributes), 2)
+        self.assertEqual(bedrock_agent_runtime_attributes["aws.bedrock.agent.id"], _BEDROCK_AGENT_ID)
+        self.assertEqual(bedrock_agent_runtime_attributes["aws.bedrock.knowledge_base.id"], _BEDROCK_KNOWLEDGEBASE_ID)
+        bedrock_agent_runtime_sucess_attributes: Dict[str, str] = _do_on_success_bedrock("bedrock-agent-runtime")
+        self.assertEqual(len(bedrock_agent_runtime_sucess_attributes), 0)
+
+        # BedrockRuntime
+        self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
+        bedrock_runtime_attributes: Dict[str, str] = _do_extract_attributes_bedrock("bedrock-runtime")
+        self.assertEqual(len(bedrock_runtime_attributes), 2)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.system"], _GEN_AI_SYSTEM)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.model"], _GEN_AI_REQUEST_MODEL)
 
     def _test_patched_gevent_os_ssl_instrumentation(self):
         # Only ssl and os module should have been patched since the environment variable was set to 'os, ssl'
@@ -206,6 +250,58 @@ class TestInstrumentationPatch(TestCase):
             apply_instrumentation_patches()
             mock_apply_patches.assert_called()
 
+    def _test_patched_bedrock_instrumentation(self):
+        """For bedrock service, only on_success provides attributes, and we only expect to see guardrail"""
+        bedrock_sucess_attributes: Dict[str, str] = _do_on_success_bedrock("bedrock")
+        self.assertEqual(len(bedrock_sucess_attributes), 1)
+        self.assertEqual(bedrock_sucess_attributes["aws.bedrock.guardrail.id"], _BEDROCK_GUARDRAIL_ID)
+
+    def _test_patched_bedrock_agent_instrumentation(self):
+        """For bedrock-agent service, both extract_attributes and on_success provides attributes,
+        the attributes depend on the API being invoked."""
+        self.assertTrue("bedrock-agent" in _KNOWN_EXTENSIONS)
+        operation_to_expected_attribute = {
+            "CreateAgentActionGroup": ("aws.bedrock.agent.id", _BEDROCK_AGENT_ID),
+            "CreateAgentAlias": ("aws.bedrock.agent.id", _BEDROCK_AGENT_ID),
+            "DeleteAgentActionGroup": ("aws.bedrock.agent.id", _BEDROCK_AGENT_ID),
+            "DeleteAgentAlias": ("aws.bedrock.agent.id", _BEDROCK_AGENT_ID),
+            "DeleteAgent": ("aws.bedrock.agent.id", _BEDROCK_AGENT_ID),
+            "DeleteAgentVersion": ("aws.bedrock.agent.id", _BEDROCK_AGENT_ID),
+            "GetAgentActionGroup": ("aws.bedrock.agent.id", _BEDROCK_AGENT_ID),
+            "GetAgentAlias": ("aws.bedrock.agent.id", _BEDROCK_AGENT_ID),
+            "GetAgent": ("aws.bedrock.agent.id", _BEDROCK_AGENT_ID),
+            "GetAgentVersion": ("aws.bedrock.agent.id", _BEDROCK_AGENT_ID),
+            "ListAgentActionGroups": ("aws.bedrock.agent.id", _BEDROCK_AGENT_ID),
+            "ListAgentAliases": ("aws.bedrock.agent.id", _BEDROCK_AGENT_ID),
+            "ListAgentKnowledgeBases": ("aws.bedrock.agent.id", _BEDROCK_AGENT_ID),
+            "ListAgentVersions": ("aws.bedrock.agent.id", _BEDROCK_AGENT_ID),
+            "PrepareAgent": ("aws.bedrock.agent.id", _BEDROCK_AGENT_ID),
+            "UpdateAgentActionGroup": ("aws.bedrock.agent.id", _BEDROCK_AGENT_ID),
+            "UpdateAgentAlias": ("aws.bedrock.agent.id", _BEDROCK_AGENT_ID),
+            "UpdateAgent": ("aws.bedrock.agent.id", _BEDROCK_AGENT_ID),
+            "AssociateAgentKnowledgeBase": ("aws.bedrock.knowledge_base.id", _BEDROCK_KNOWLEDGEBASE_ID),
+            "CreateDataSource": ("aws.bedrock.knowledge_base.id", _BEDROCK_KNOWLEDGEBASE_ID),
+            "DeleteKnowledgeBase": ("aws.bedrock.knowledge_base.id", _BEDROCK_KNOWLEDGEBASE_ID),
+            "DisassociateAgentKnowledgeBase": ("aws.bedrock.knowledge_base.id", _BEDROCK_KNOWLEDGEBASE_ID),
+            "GetAgentKnowledgeBase": ("aws.bedrock.knowledge_base.id", _BEDROCK_KNOWLEDGEBASE_ID),
+            "GetKnowledgeBase": ("aws.bedrock.knowledge_base.id", _BEDROCK_KNOWLEDGEBASE_ID),
+            "ListDataSources": ("aws.bedrock.knowledge_base.id", _BEDROCK_KNOWLEDGEBASE_ID),
+            "UpdateAgentKnowledgeBase": ("aws.bedrock.knowledge_base.id", _BEDROCK_KNOWLEDGEBASE_ID),
+            "DeleteDataSource": ("aws.bedrock.data_source.id", _BEDROCK_DATASOURCE_ID),
+            "GetDataSource": ("aws.bedrock.data_source.id", _BEDROCK_DATASOURCE_ID),
+            "UpdateDataSource": ("aws.bedrock.data_source.id", _BEDROCK_DATASOURCE_ID),
+        }
+
+        for operation, attribute_tuple in operation_to_expected_attribute.items():
+            bedrock_agent_extract_attributes: Dict[str, str] = _do_extract_attributes_bedrock(
+                "bedrock-agent", operation
+            )
+            self.assertEqual(len(bedrock_agent_extract_attributes), 1)
+            self.assertEqual(bedrock_agent_extract_attributes[attribute_tuple[0]], attribute_tuple[1])
+            bedrock_agent_success_attributes: Dict[str, str] = _do_on_success_bedrock("bedrock-agent", operation)
+            self.assertEqual(len(bedrock_agent_success_attributes), 1)
+            self.assertEqual(bedrock_agent_success_attributes[attribute_tuple[0]], attribute_tuple[1])
+
     def _reset_mocks(self):
         for method_patch in self.method_patches.values():
             method_patch.reset_mock()
@@ -229,10 +325,58 @@ def _do_extract_sqs_attributes() -> Dict[str, str]:
     return _do_extract_attributes(service_name, params)
 
 
-def _do_extract_attributes(service_name: str, params: Dict[str, str]) -> Dict[str, str]:
+def _do_extract_attributes_bedrock(service, operation=None) -> Dict[str, str]:
+    params: Dict[str, Any] = {
+        "agentId": _BEDROCK_AGENT_ID,
+        "dataSourceId": _BEDROCK_DATASOURCE_ID,
+        "knowledgeBaseId": _BEDROCK_KNOWLEDGEBASE_ID,
+        "guardrailId": _BEDROCK_GUARDRAIL_ID,
+        "modelId": _GEN_AI_REQUEST_MODEL,
+    }
+    return _do_extract_attributes(service, params, operation)
+
+
+def _do_on_success_bedrock(service, operation=None) -> Dict[str, str]:
+    result: Dict[str, Any] = {
+        "agentId": _BEDROCK_AGENT_ID,
+        "dataSourceId": _BEDROCK_DATASOURCE_ID,
+        "knowledgeBaseId": _BEDROCK_KNOWLEDGEBASE_ID,
+        "guardrailId": _BEDROCK_GUARDRAIL_ID,
+        "modelId": _GEN_AI_REQUEST_MODEL,
+    }
+    return _do_on_success(service, result, operation)
+
+
+def _do_extract_attributes(service_name: str, params: Dict[str, Any], operation: str = None) -> Dict[str, str]:
     mock_call_context: MagicMock = MagicMock()
     mock_call_context.params = params
+    if operation:
+        mock_call_context.operation = operation
     attributes: Dict[str, str] = {}
     sqs_extension = _KNOWN_EXTENSIONS[service_name]()(mock_call_context)
     sqs_extension.extract_attributes(attributes)
     return attributes
+
+
+def _do_on_success(
+    service_name: str, result: Dict[str, Any], operation: str = None, params: Dict[str, Any] = None
+) -> Dict[str, str]:
+    span_mock: Span = MagicMock()
+    mock_call_context = MagicMock()
+    span_attributes: Dict[str, str] = {}
+
+    def set_side_effect(set_key, set_value):
+        span_attributes[set_key] = set_value
+
+    span_mock.set_attribute.side_effect = set_side_effect
+
+    if operation:
+        mock_call_context.operation = operation
+
+    if params:
+        mock_call_context.params = params
+
+    extension = _KNOWN_EXTENSIONS[service_name]()(mock_call_context)
+    extension.on_success(span_mock, result)
+
+    return span_attributes

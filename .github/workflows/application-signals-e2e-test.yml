@@ -1,0 +1,80 @@
+## Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+## SPDX-License-Identifier: Apache-2.0
+
+# This is a reusable workflow for running the E2E test for Application Signals.
+# It is meant to be called from another workflow.
+# Read more about reusable workflows: https://docs.github.com/en/actions/using-workflows/reusing-workflows#overview
+name: E2E Testing
+on:
+  workflow_call:
+    inputs:
+      staging-wheel-name:
+        required: true
+        type: string
+      adot-image-name:
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: '${{ github.workflow }} @ ${{ inputs.aws-region }}'
+  cancel-in-progress: false
+
+
+jobs:
+  upload-main-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.APPLICATION_SIGNALS_E2E_TEST_ACCOUNT_ID }}:role/${{ secrets.APPLICATION_SIGNALS_E2E_TEST_ROLE_NAME }}
+          aws-region: us-east-1
+
+      - uses: actions/download-artifact@v3
+        with:
+          name: ${{ inputs.staging-wheel-name }}
+
+      - name: Upload main-build adot.whl to s3
+        run: aws s3 cp ${{ inputs.staging-wheel-name }} s3://adot-main-build-staging-jar/${{ inputs.staging-wheel-name }}
+
+  python-ec2-default-e2e-test:
+    needs: [ upload-main-build ]
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-e2e-test.yml@consolidate-release
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      staging-wheel-name: aws_opentelemetry_distro-0.2.0.dev0-07ca0f26-py3-none-any.whl
+      caller-workflow-name: 'main-build'
+
+  python-ec2-asg-e2e-test:
+    needs: [ upload-main-build ]
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-asg-e2e-test.yml@consolidate-release
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      staging-wheel-name: aws_opentelemetry_distro-0.2.0.dev0-07ca0f26-py3-none-any.whl
+      caller-workflow-name: 'main-build'
+
+  python-eks-e2e-test:
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-e2e-test.yml@consolidate-release
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      test-cluster-name: 'e2e-python-adot-test'
+      adot-image-name: ${{ inputs.adot-image-name }}
+      caller-workflow-name: 'main-build'
+
+  python-k8s-e2e-test:
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-k8s-e2e-test.yml@consolidate-release
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      adot-image-name: ${{ inputs.adot-image-name }}
+      caller-workflow-name: 'main-build'
+
+
+

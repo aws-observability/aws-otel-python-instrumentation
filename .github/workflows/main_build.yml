@@ -87,24 +87,14 @@ jobs:
           pip install pytest
           pytest contract-tests/tests
 
-  # Application Signals specific e2e eks tests
-  application-signals-python-e2e-eks-test:
-    needs: [build]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/application-signals-python-e2e-eks-test.yml@main
-    secrets: inherit
-    with:
-      aws-region: ${{ needs.build.outputs.aws_default_region }}
-      test-cluster-name: e2e-python-adot-test
-      caller-workflow-name: 'main-build'
-      application-signals-adot-image: ${{ needs.build.outputs.staging_registry }}/aws-observability/adot-autoinstrumentation-python-staging
-      application-signals-adot-image-tag: ${{ needs.build.outputs.python_image_tag }}
-
-  # Application Signals specific e2e tests for ec2
-  application-signals-python-e2e-ec2-test:
+  application-signals-e2e-test:
+    name: "Application Signals E2E Test"
     needs: [ build ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/application-signals-python-e2e-ec2-default-test.yml@main
+    uses: ./.github/workflows/application-signals-e2e-test.yml
     secrets: inherit
+    permissions:
+      id-token: write
+      contents: read
     with:
-      aws-region: ${{ needs.build.outputs.aws_default_region }}
-      staging_wheel_name: ${{ needs.build.outputs.staging_wheel_file }}
-      caller-workflow-name: 'main-build'
+      staging-wheel-name: ${{ needs.build.outputs.staging_wheel_file }}
+      adot-image-name: ${{ needs.build.outputs.staging_registry }}/aws-observability/adot-autoinstrumentation-python-staging:${{ needs.build.outputs.python_image_tag }}
