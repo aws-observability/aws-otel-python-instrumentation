@@ -7,7 +7,6 @@ from typing_extensions import override
 
 
 class ServiceNameInEnvVarTest(ResourceAttributesTest):
-
     @override
     # pylint: disable=no-self-use
     def get_application_extra_environment_variables(self) -> str:

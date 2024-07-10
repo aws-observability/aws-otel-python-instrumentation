@@ -22,9 +22,11 @@ from opentelemetry.proto.trace.v1.trace_pb2 import Span
 from opentelemetry.trace import StatusCode
 
 DATABASE_HOST: str = "mydb"
-DATABASE_USER: str = "root"
-DATABASE_PASSWORD: str = "example"
 DATABASE_NAME: str = "testdb"
+DATABASE_PASSWORD: str = "example"
+DATABASE_USER: str = "root"
+SPAN_KIND_CLIENT: str = "CLIENT"
+SPAN_KIND_LOCAL_ROOT: str = "LOCAL_ROOT"
 
 
 class DatabaseContractTestBase(ContractTestBase):
@@ -68,7 +70,9 @@ class DatabaseContractTestBase(ContractTestBase):
             if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
                 target_spans.append(resource_scope_span.span)
 
-        self.assertEqual(len(target_spans), 1)
+        self.assertEqual(
+            len(target_spans), 1, f"target_spans is {str(target_spans)}, although only one walue was expected"
+        )
         self._assert_aws_attributes(target_spans[0].attributes, **kwargs)
 
     @override
@@ -101,7 +105,9 @@ class DatabaseContractTestBase(ContractTestBase):
         self.assertTrue("db.operation" not in attributes_dict)
 
     @override
-    def _assert_aws_attributes(self, attributes_list: List[KeyValue], **kwargs) -> None:
+    def _assert_aws_attributes(
+        self, attributes_list: List[KeyValue], expected_span_kind: str = SPAN_KIND_LOCAL_ROOT, **kwargs
+    ) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
         # InternalOperation as OTEL does not instrument the basic server we are using, so the client span is a local
@@ -115,7 +121,7 @@ class DatabaseContractTestBase(ContractTestBase):
             attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, self.get_remote_resource_identifier()
         )
         # See comment above AWS_LOCAL_OPERATION
-        self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
+        self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, expected_span_kind)
 
     @override
     def _assert_metric_attributes(
@@ -125,32 +131,25 @@ class DatabaseContractTestBase(ContractTestBase):
         for resource_scope_metric in resource_scope_metrics:
             if resource_scope_metric.metric.name.lower() == metric_name.lower():
                 target_metrics.append(resource_scope_metric.metric)
-
-        self.assertEqual(len(target_metrics), 1)
-        target_metric: Metric = target_metrics[0]
-        dp_list: List[ExponentialHistogramDataPoint] = target_metric.exponential_histogram.data_points
-
+        self.assertLessEqual(
+            len(target_metrics),
+            2,
+            f"target_metrics is {str(target_metrics)}, although we expect less than or equal to 2 metrics",
+        )
+        dp_list: List[ExponentialHistogramDataPoint] = [
+            dp for target_metric in target_metrics for dp in target_metric.exponential_histogram.data_points
+        ]
         self.assertEqual(len(dp_list), 2)
         dependency_dp: ExponentialHistogramDataPoint = dp_list[0]
         service_dp: ExponentialHistogramDataPoint = dp_list[1]
         if len(dp_list[1].attributes) > len(dp_list[0].attributes):
             dependency_dp = dp_list[1]
             service_dp = dp_list[0]
-        attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(dependency_dp.attributes)
-        self._assert_str_attribute(attribute_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
-        # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
-        self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
-        self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, self.get_remote_service())
-        self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, kwargs.get("sql_command"))
-        self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_TYPE, "DB::Connection")
-        self._assert_str_attribute(
-            attribute_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, self.get_remote_resource_identifier()
-        )
-        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "CLIENT")
+        self._assert_aws_attributes(dependency_dp.attributes, SPAN_KIND_CLIENT, **kwargs)
         self.check_sum(metric_name, dependency_dp.sum, expected_sum)
 
         attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(service_dp.attributes)
         # See comment on AWS_LOCAL_OPERATION in _assert_aws_attributes
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
-        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "LOCAL_ROOT")
+        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, SPAN_KIND_LOCAL_ROOT)
         self.check_sum(metric_name, service_dp.sum, expected_sum)

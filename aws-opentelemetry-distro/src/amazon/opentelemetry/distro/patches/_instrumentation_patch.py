@@ -35,7 +35,6 @@ def apply_instrumentation_patches() -> None:
                 from gevent import monkey
 
                 if gevent_patch_module == "all":
-
                     monkey.patch_all()
                 else:
                     module_list = [module.strip() for module in gevent_patch_module.split(",")]

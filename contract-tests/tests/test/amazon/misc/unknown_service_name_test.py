@@ -7,7 +7,6 @@ from typing_extensions import override
 
 
 class UnknownServiceNameTest(ResourceAttributesTest):
-
     @override
     # pylint: disable=no-self-use
     def get_application_otel_resource_attributes(self) -> str:
