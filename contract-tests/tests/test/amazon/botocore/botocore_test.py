@@ -71,7 +71,7 @@ class BotocoreTest(ContractTestBase):
             )
         }
         cls._local_stack: LocalStackContainer = (
-            LocalStackContainer(image="localstack/localstack:2.0.1")
+            LocalStackContainer(image="localstack/localstack:3.5.0")
             .with_name("localstack")
             .with_services("s3", "sqs", "dynamodb", "kinesis")
             .with_env("DEFAULT_REGION", "us-west-2")
