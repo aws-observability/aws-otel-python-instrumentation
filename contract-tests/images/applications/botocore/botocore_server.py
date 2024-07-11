@@ -1,8 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import atexit
+import json
 import os
 import tempfile
+from collections import namedtuple
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 
@@ -10,6 +12,7 @@ import boto3
 import requests
 from botocore.client import BaseClient
 from botocore.config import Config
+from botocore.exceptions import ClientError
 from typing_extensions import Tuple, override
 
 _PORT: int = 8080
@@ -41,6 +44,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._handle_sqs_request()
         if self.in_path("kinesis"):
             self._handle_kinesis_request()
+        if self.in_path("bedrock"):
+            self._handle_bedrock_request()
 
         self._end_request(self.main_status)
 
@@ -203,6 +208,95 @@ class RequestHandler(BaseHTTPRequestHandler):
         else:
             set_main_status(404)
 
+    def _handle_bedrock_request(self) -> None:
+        bedrock_client: BaseClient = boto3.client(
+            "bedrock", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION
+        )
+        bedrock_agent_client: BaseClient = boto3.client(
+            "bedrock-agent", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION
+        )
+        bedrock_runtime_client: BaseClient = boto3.client(
+            "bedrock-runtime", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION
+        )
+        bedrock_agent_runtime_client: BaseClient = boto3.client(
+            "bedrock-agent-runtime", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION
+        )
+        if self.in_path(_ERROR):
+            error_client: BaseClient = boto3.client(
+                "bedrock-agent", endpoint_url=_ERROR_ENDPOINT, region_name=_AWS_REGION
+            )
+            set_main_status(400)
+            try:
+                error_client.get_knowledge_base(knowledgeBaseId="invalid-knowledge-base-id")
+            except Exception as exception:
+                print("Expected exception occurred", exception)
+        elif self.in_path(_FAULT):
+            set_main_status(500)
+            try:
+                fault_client: BaseClient = boto3.client(
+                    "bedrock-agent", endpoint_url=_FAULT_ENDPOINT, region_name=_AWS_REGION, config=_NO_RETRY_CONFIG
+                )
+                fault_client.meta.events.register(
+                    "before-call.bedrock-agent.GetDataSource",
+                    lambda **kwargs: inject_500_error("GetDataSource", **kwargs),
+                )
+                fault_client.get_data_source(knowledgeBaseId="TESTKBSEID", dataSourceId="DATASURCID")
+            except Exception as exception:
+                print("Expected exception occurred", exception)
+        elif self.in_path("getagent/get-agent"):
+            set_main_status(200)
+            bedrock_agent_client.meta.events.register(
+                "before-call.bedrock-agent.GetAgent",
+                inject_200_success,
+            )
+            bedrock_agent_client.get_agent(agentId="TESTAGENTID")
+        elif self.in_path("getguardrail/get-guardrail"):
+            set_main_status(200)
+            bedrock_client.meta.events.register(
+                "before-call.bedrock.GetGuardrail",
+                lambda **kwargs: inject_200_success(guardrailId="bt4o77i015cu", **kwargs),
+            )
+            bedrock_client.get_guardrail(
+                guardrailIdentifier="arn:aws:bedrock:us-east-1:000000000000:guardrail/bt4o77i015cu"
+            )
+        elif self.in_path("invokeagent/invoke_agent"):
+            set_main_status(200)
+            bedrock_agent_runtime_client.meta.events.register(
+                "before-call.bedrock-agent-runtime.InvokeAgent",
+                inject_200_success,
+            )
+            bedrock_agent_runtime_client.invoke_agent(
+                agentId="Q08WFRPHVL",
+                agentAliasId="testAlias",
+                sessionId="testSessionId",
+                inputText="Invoke agent sample input text",
+            )
+        elif self.in_path("invokemodel/invoke-model"):
+            set_main_status(200)
+            bedrock_runtime_client.meta.events.register(
+                "before-call.bedrock-runtime.InvokeModel",
+                inject_200_success,
+            )
+            model_id = "amazon.titan-text-premier-v1:0"
+            user_message = "Describe the purpose of a 'hello world' program in one line."
+            prompt = f"<s>[INST] {user_message} [/INST]"
+            body = json.dumps(
+                {
+                    "inputText": prompt,
+                    "textGenerationConfig": {
+                        "maxTokenCount": 3072,
+                        "stopSequences": [],
+                        "temperature": 0.7,
+                        "topP": 0.9,
+                    },
+                }
+            )
+            accept = "application/json"
+            content_type = "application/json"
+            bedrock_runtime_client.invoke_model(body=body, modelId=model_id, accept=accept, contentType=content_type)
+        else:
+            set_main_status(404)
+
     def _end_request(self, status_code: int):
         self.send_response_only(status_code)
         self.end_headers()
@@ -249,6 +343,38 @@ def prepare_aws_server() -> None:
         kinesis_client.create_stream(StreamName="test_stream", ShardCount=1)
     except Exception as exception:
         print("Unexpected exception occurred", exception)
+
+
+def inject_200_success(**kwargs):
+    response_metadata = {
+        "HTTPStatusCode": 200,
+        "RequestId": "mock-request-id",
+    }
+
+    response_body = {
+        "Message": "Request succeeded",
+        "ResponseMetadata": response_metadata,
+    }
+
+    guardrail_id = kwargs.get("guardrailId")
+    if guardrail_id is not None:
+        response_body["guardrailId"] = guardrail_id
+
+    HTTPResponse = namedtuple("HTTPResponse", ["status_code", "headers", "body"])
+    headers = kwargs.get("headers", {})
+    body = kwargs.get("body", "")
+    http_response = HTTPResponse(200, headers=headers, body=body)
+    return http_response, response_body
+
+
+def inject_500_error(api_name, **kwargs):
+    raise ClientError(
+        {
+            "Error": {"Code": "InternalServerError", "Message": "Internal Server Error"},
+            "ResponseMetadata": {"HTTPStatusCode": 500, "RequestId": "mock-request-id"},
+        },
+        api_name,
+    )
 
 
 def main() -> None:
