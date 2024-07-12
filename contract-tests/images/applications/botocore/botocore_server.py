@@ -209,9 +209,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             set_main_status(404)
 
     def _handle_bedrock_request(self) -> None:
-        bedrock_client: BaseClient = boto3.client(
-            "bedrock", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION
-        )
+        bedrock_client: BaseClient = boto3.client("bedrock", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
         bedrock_agent_client: BaseClient = boto3.client(
             "bedrock-agent", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION
         )
