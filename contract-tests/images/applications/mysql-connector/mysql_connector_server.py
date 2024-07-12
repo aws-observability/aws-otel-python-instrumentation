@@ -9,7 +9,6 @@ from typing import Tuple
 import mysql.connector as mysql
 from typing_extensions import override
 
-_PREPARE_DB: str = "prepare_db"
 _SELECT: str = "select"
 _CREATE_DATABASE: str = "create_database"
 _DROP_TABLE: str = "drop_table"
@@ -29,13 +28,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         status_code: int = 200
         conn = mysql.connect(host=_DB_HOST, user=_DB_USER, password=_DB_PASS, database=_DB_NAME)
         conn.autocommit = True  # CREATE DATABASE cannot run in a transaction block
-        if self.in_path(_PREPARE_DB):
-            cur = conn.cursor()
-            cur.execute("CREATE TABLE employee (id int, name varchar(255))")
-            cur.execute("INSERT INTO employee (id, name) values (1, 'A')")
-            cur.close()
-            status_code = 200
-        elif self.in_path(_SELECT):
+        if self.in_path(_SELECT):
             cur = conn.cursor()
             cur.execute("SELECT count(*) FROM employee")
             result = cur.fetchall()
@@ -74,7 +67,20 @@ class RequestHandler(BaseHTTPRequestHandler):
         return sub_path in self.path
 
 
+def prepare_db_server() -> None:
+    conn = mysql.connect(host=_DB_HOST, user=_DB_USER, password=_DB_PASS, database=_DB_NAME)
+    cur = conn.cursor()
+    cur.execute("SHOW TABLES LIKE 'employee'")
+    result = cur.fetchone()
+    if not result:
+        cur.execute("CREATE TABLE employee (id int, name varchar(255))")
+        cur.execute("INSERT INTO employee (id, name) values (1, 'A')")
+    cur.close()
+    conn.close()
+
+
 def main() -> None:
+    prepare_db_server()
     server_address: Tuple[str, int] = ("0.0.0.0", _PORT)
     request_handler_class: type = RequestHandler
     requests_server: ThreadingHTTPServer = ThreadingHTTPServer(server_address, request_handler_class)
