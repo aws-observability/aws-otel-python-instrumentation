@@ -58,6 +58,10 @@ class DatabaseContractTestBase(ContractTestBase):
         self.mock_collector_client.clear_signals()
         self.do_test_requests("create_database", "GET", 200, 0, 0, sql_command="CREATE DATABASE")
 
+    def assert_select_succeeds(self) -> None:
+        self.mock_collector_client.clear_signals()
+        self.do_test_requests("select", "GET", 200, 0, 0, sql_command="SELECT")
+
     def assert_fault(self) -> None:
         self.mock_collector_client.clear_signals()
         self.do_test_requests("fault", "GET", 500, 0, 1, sql_command="SELECT DISTINCT")

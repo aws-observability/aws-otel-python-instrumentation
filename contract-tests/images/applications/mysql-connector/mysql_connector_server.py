@@ -6,15 +6,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from typing import Tuple
 
-import psycopg2
+import mysql.connector as mysql
 from typing_extensions import override
 
-_PORT: int = 8080
 _SELECT: str = "select"
-_DROP_TABLE: str = "drop_table"
-_ERROR: str = "error"
-_FAULT: str = "fault"
 _CREATE_DATABASE: str = "create_database"
+_DROP_TABLE: str = "drop_table"
+_FAULT: str = "fault"
+_PORT: int = 8080
 
 _DB_HOST = os.getenv("DB_HOST")
 _DB_USER = os.getenv("DB_USER")
@@ -27,7 +26,7 @@ class RequestHandler(BaseHTTPRequestHandler):
     # pylint: disable=invalid-name
     def do_GET(self):
         status_code: int = 200
-        conn = psycopg2.connect(dbname=_DB_NAME, user=_DB_USER, password=_DB_PASS, host=_DB_HOST)
+        conn = mysql.connect(host=_DB_HOST, user=_DB_USER, password=_DB_PASS, database=_DB_NAME)
         conn.autocommit = True  # CREATE DATABASE cannot run in a transaction block
         if self.in_path(_SELECT):
             cur = conn.cursor()
@@ -49,7 +48,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             cur = conn.cursor()
             try:
                 cur.execute("SELECT DISTINCT id, name FROM invalid_table")
-            except psycopg2.ProgrammingError as exception:
+            except mysql.ProgrammingError as exception:
                 print("Expected Exception with Invalid SQL occurred:", exception)
                 status_code = 500
             except Exception as exception:  # pylint: disable=broad-except
@@ -69,14 +68,13 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 
 def prepare_db_server() -> None:
-    conn = psycopg2.connect(host=_DB_HOST, user=_DB_USER, password=_DB_PASS, database=_DB_NAME)
+    conn = mysql.connect(host=_DB_HOST, user=_DB_USER, password=_DB_PASS, database=_DB_NAME)
     cur = conn.cursor()
-    cur.execute("SELECT to_regclass('public.employee')")
-    result = cur.fetchone()[0]
+    cur.execute("SHOW TABLES LIKE 'employee'")
+    result = cur.fetchone()
     if not result:
         cur.execute("CREATE TABLE employee (id int, name varchar(255))")
         cur.execute("INSERT INTO employee (id, name) values (1, 'A')")
-        conn.commit()
     cur.close()
     conn.close()
 
