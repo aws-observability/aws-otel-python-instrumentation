@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from testcontainers.postgres import PostgresContainer
+from testcontainers.mysql import MySqlContainer
 from typing_extensions import override
 
 from amazon.base.contract_test_base import NETWORK_NAME
@@ -13,12 +13,12 @@ from amazon.base.database_contract_test_base import (
 )
 
 
-class Psycopg2Test(DatabaseContractTestBase):
+class MysqlConnectorTest(DatabaseContractTestBase):
     @override
     @classmethod
     def set_up_dependency_container(cls) -> None:
         cls.container = (
-            PostgresContainer(user=DATABASE_USER, password=DATABASE_PASSWORD, dbname=DATABASE_NAME)
+            MySqlContainer(MYSQL_USER=DATABASE_USER, MYSQL_PASSWORD=DATABASE_PASSWORD, MYSQL_DATABASE=DATABASE_NAME)
             .with_kwargs(network=NETWORK_NAME)
             .with_name(DATABASE_HOST)
         )
@@ -32,26 +32,26 @@ class Psycopg2Test(DatabaseContractTestBase):
     @override
     @staticmethod
     def get_remote_service() -> str:
-        return "postgresql"
+        return "mysql"
 
     @override
     @staticmethod
     def get_database_port() -> int:
-        return 5432
+        return 3306
 
     @override
     @staticmethod
     def get_application_image_name() -> str:
-        return "aws-application-signals-tests-psycopg2-app"
+        return "aws-application-signals-tests-mysql-connector-app"
 
     def test_select_succeeds(self) -> None:
         self.assert_select_succeeds()
 
-    def test_drop_table_succeeds(self) -> None:
-        self.assert_drop_table_succeeds()
-
     def test_create_database_succeeds(self) -> None:
         self.assert_create_database_succeeds()
+
+    def test_drop_table_succeeds(self) -> None:
+        self.assert_drop_table_succeeds()
 
     def test_fault(self) -> None:
         self.assert_fault()

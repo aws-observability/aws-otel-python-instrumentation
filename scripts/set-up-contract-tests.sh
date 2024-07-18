@@ -18,12 +18,14 @@ rm -rf dist/mock_collector*
 rm -rf dist/contract_tests*
 
 # Install python dependency for contract-test
-pip install pymysql
-pip install cryptography
+python3 -m pip install pytest
+python3 -m pip install pymysql
+python3 -m pip install cryptography
+python3 -m pip install mysql-connector-python
 
 # To be clear, install binary for psycopg2 have no negative influence on otel here
 # since Otel-Instrumentation running in container that install psycopg2 from source
-pip install sqlalchemy psycopg2-binary
+python3 -m pip install sqlalchemy psycopg2-binary
 
 # Create mock-collector image
 cd contract-tests/images/mock-collector
@@ -57,12 +59,12 @@ done
 cd contract-tests/images/mock-collector
 python3 -m build --outdir ../../../dist
 cd ../../../dist
-pip install mock_collector-1.0.0-py3-none-any.whl --force-reinstall
+python3 -m pip install mock_collector-1.0.0-py3-none-any.whl --force-reinstall
 
 # Build and install contract-tests
 cd ../contract-tests/tests
 python3 -m build --outdir ../../dist
 cd ../../dist
 # --force-reinstall causes `ERROR: No matching distribution found for mock-collector==1.0.0`, but uninstalling and reinstalling works pretty reliably.
-pip uninstall contract-tests -y
-pip install contract_tests-1.0.0-py3-none-any.whl
+python3 -m pip uninstall contract-tests -y
+python3 -m pip install contract_tests-1.0.0-py3-none-any.whl

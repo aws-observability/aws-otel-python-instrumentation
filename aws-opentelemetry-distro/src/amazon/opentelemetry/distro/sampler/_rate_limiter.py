@@ -31,9 +31,7 @@ class _RateLimiter:
         with self.__lock:
             wallet_ceiling_millis = Decimal(self._clock.now().timestamp() * 1000.0)
             current_balance_millis = wallet_ceiling_millis - self.__wallet_floor_millis
-            if current_balance_millis > self.MAX_BALANCE_MILLIS:
-                current_balance_millis = self.MAX_BALANCE_MILLIS
-
+            current_balance_millis = min(current_balance_millis, self.MAX_BALANCE_MILLIS)
             pending_remaining_balance_millis = current_balance_millis - cost_in_millis
             if pending_remaining_balance_millis >= 0:
                 self.__wallet_floor_millis = wallet_ceiling_millis - pending_remaining_balance_millis

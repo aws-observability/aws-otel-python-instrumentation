@@ -1,0 +1,6 @@
+[project]
+name = "mysqlclient-server"
+description = "Simple server that relies on mysqlclient library"
+version = "1.0.0"
+license = "Apache-2.0"
+requires-python = ">=3.8"
