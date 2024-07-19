@@ -209,6 +209,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             set_main_status(404)
 
     def _handle_bedrock_request(self) -> None:
+        # Localstack does not support Bedrock related services.
+        # we inject inject_200_success and inject_500_error directly into the API call
+        # to make sure we receive http response with expected status code and attributes.
         bedrock_client: BaseClient = boto3.client("bedrock", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
         bedrock_agent_client: BaseClient = boto3.client(
             "bedrock-agent", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION
