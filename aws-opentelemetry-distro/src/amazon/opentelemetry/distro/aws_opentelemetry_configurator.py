@@ -17,6 +17,8 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
+from amazon.opentelemetry.distro.otlp_udp_exporter import OtlpUdpMetricExporter
+from amazon.opentelemetry.distro.otlp_udp_exporter import OtlpUdpTraceExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.sdk._configuration import (
     _get_exporter_names,
@@ -219,7 +221,8 @@ def _customize_sampler(sampler: Sampler) -> Sampler:
 def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> SpanExporter:
     if not _is_application_signals_enabled():
         return span_exporter
-    return AwsMetricAttributesSpanExporterBuilder(span_exporter, resource).build()
+    udp_span_exporter = OtlpUdpTraceExporter(endpoint="something")
+    return AwsMetricAttributesSpanExporterBuilder(udp_span_exporter, resource).build()
 
 
 def _customize_span_processors(provider: TracerProvider, resource: Resource) -> None:
@@ -262,6 +265,11 @@ def _is_application_signals_enabled():
     )
 
 
+def _is_lambda_environment():
+    # detect if running in AWS Lambda environment
+    return "AWS_LAMBDA_FUNCTION_NAME" in os.environ
+
+
 class ApplicationSignalsExporterProvider:
     _instance: ClassVar["ApplicationSignalsExporterProvider"] = None
 
@@ -288,6 +296,9 @@ class ApplicationSignalsExporterProvider:
             Histogram,
         ]:
             temporality_dict[typ] = AggregationTemporality.DELTA
+
+        if _is_lambda_environment():
+            return OtlpUdpMetricExporter(temporality_dict=temporality_dict)
 
         if protocol == "http/protobuf":
             application_signals_endpoint = os.environ.get(
