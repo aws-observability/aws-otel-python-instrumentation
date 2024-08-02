@@ -17,7 +17,7 @@ jobs:
       matrix:
         python-version: ["3.8", "3.9", "3.10", "3.11"]
     steps:
-      - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@v4
 
       - name: Build Wheel and Image Files
@@ -43,7 +43,7 @@ jobs:
       matrix:
         tox-environment: ["spellcheck", "lint"]
     steps:
-      - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@v4
 
       - name: Install libsnappy-dev
@@ -64,7 +64,7 @@ jobs:
   spotless:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Contrib Repo @ SHA - ${{ github.sha }}
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@v4
 
       - name: Gradle validation
