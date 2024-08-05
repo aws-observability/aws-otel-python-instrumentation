@@ -43,7 +43,6 @@ class AwsMetricAttributesSpanExporter(SpanExporter):
 
     @override
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
-        print("IN AWS EXPORTER:::")
         modified_spans: Sequence[ReadableSpan] = self._add_metric_attributes(spans)
         return self._delegate.export(modified_spans)
 
