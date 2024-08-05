@@ -16,9 +16,8 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
+from amazon.opentelemetry.distro.otlp_udp_exporter import OtlpUdpMetricExporter, OtlpUdpSpanExporter
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
-from amazon.opentelemetry.distro.otlp_udp_exporter import OtlpUdpMetricExporter
-from amazon.opentelemetry.distro.otlp_udp_exporter import OtlpUdpSpanExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.sdk._configuration import (
     _get_exporter_names,
@@ -64,6 +63,7 @@ APP_SIGNALS_EXPORTER_ENDPOINT_CONFIG = "OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT"
 APPLICATION_SIGNALS_EXPORTER_ENDPOINT_CONFIG = "OTEL_AWS_APPLICATION_SIGNALS_EXPORTER_ENDPOINT"
 METRIC_EXPORT_INTERVAL_CONFIG = "OTEL_METRIC_EXPORT_INTERVAL"
 DEFAULT_METRIC_EXPORT_INTERVAL = 60000.0
+AWS_LAMBDA_FUNCTION_NAME_ENV_VAR = "AWS_LAMBDA_FUNCTION_NAME"
 
 _logger: Logger = getLogger(__name__)
 
@@ -268,7 +268,7 @@ def _is_application_signals_enabled():
 
 def _is_lambda_environment():
     # detect if running in AWS Lambda environment
-    return "AWS_LAMBDA_FUNCTION_NAME" in os.environ
+    return AWS_LAMBDA_FUNCTION_NAME_ENV_VAR in os.environ
 
 
 class ApplicationSignalsExporterProvider:
@@ -300,7 +300,7 @@ class ApplicationSignalsExporterProvider:
 
         if _is_lambda_environment():
             # When running in Lambda, export Application Signals metrics over UDP
-            return OtlpUdpMetricExporter(preferred_temporality=temporality_dict)
+            return OtlpUdpMetricExporter(endpoint="127.0.0.1:2000", preferred_temporality=temporality_dict)
 
         if protocol == "http/protobuf":
             application_signals_endpoint = os.environ.get(

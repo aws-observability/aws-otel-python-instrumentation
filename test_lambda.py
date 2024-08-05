@@ -1,8 +1,8 @@
 # test script for appsignals lambda behavior
 
-from opentelemetry import trace
-
 from time import sleep
+
+from opentelemetry import trace
 
 if __name__ == "__main__":
     tracer = trace.get_tracer("test-tracer")
