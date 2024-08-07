@@ -1,7 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import socket
-from typing import Dict, Optional, Sequence
+from logging import Logger, getLogger
+from typing import Dict, Optional, Sequence, Tuple
 
 from typing_extensions import override
 
@@ -15,17 +16,16 @@ from opentelemetry.sdk.metrics.view import Aggregation
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
-from logging import getLogger, Logger
-
 DEFAULT_ENDPOINT = "127.0.0.1:2000"
 PROTOCOL_HEADER = '{"format":"json","version":1}\n'
 PROTOCOL_DELIMITER = "\n"
 
 _logger: Logger = getLogger(__name__)
 
+
 class UdpExporter:
     def __init__(self, endpoint: Optional[str] = None):
-        self._endpoint = endpoint or DEFAULT_ENDPOINT # TODO: read from some env var??
+        self._endpoint = endpoint or DEFAULT_ENDPOINT  # TODO: read from some env var??
         self._host, self._port = self._parse_endpoint(self._endpoint)
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._socket.setblocking(False)
@@ -44,7 +44,7 @@ class UdpExporter:
         self._socket.close()
 
     # pylint: disable=no-self-use
-    def _parse_endpoint(self, endpoint: str) -> tuple[str, int]:
+    def _parse_endpoint(self, endpoint: str) -> Tuple[str, int]:
         try:
             vals = endpoint.split(":")
             host = vals[0]
@@ -79,7 +79,9 @@ class OtlpUdpMetricExporter(MetricExporter):
         self._udp_exporter.send_data(data=serialized_data, signal_format="OTEL_V1_METRICS")  # TODO: Convert to constant
         return MetricExportResult.SUCCESS  # TODO: send appropriate status back. Need to??
 
+    # pylint: disable=no-self-use
     def force_flush(self, timeout_millis: float = 10_000) -> bool:
+        # TODO: implement force flush
         return True
 
     def shutdown(self, timeout_millis: float = 30_000, **kwargs) -> None:
@@ -96,8 +98,10 @@ class OtlpUdpSpanExporter(SpanExporter):
         self._udp_exporter.send_data(data=serialized_data, signal_format="OTEL_V1_TRACES")  # TODO: Convert to constant
         return SpanExportResult.SUCCESS  # TODO: send appropriate status back. Need to??
 
+    # pylint: disable=no-self-use
     @override
     def force_flush(self, timeout_millis: int = 30000) -> bool:
+        # TODO: implement force flush
         return True
 
     @override

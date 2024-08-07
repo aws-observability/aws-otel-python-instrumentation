@@ -46,7 +46,7 @@ class TestUdpExporter(TestCase):
     def test_send_data(self, mock_socket):
         mock_socket_instance = mock_socket.return_value
         exporter = UdpExporter()
-        exporter.send_data('encoded_data', "signal")
+        exporter.send_data("encoded_data", "signal")
         expected_message = PROTOCOL_HEADER + '{"format":"signal","data":encoded_data}'
         mock_socket_instance.sendto.assert_called_once_with(expected_message.encode("utf-8"), ("127.0.0.1", 2000))
 

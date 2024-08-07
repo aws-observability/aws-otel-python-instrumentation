@@ -19,7 +19,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
-from amazon.opentelemetry.distro.otlp_udp_exporter import OtlpUdpSpanExporter
+from amazon.opentelemetry.distro.otlp_udp_exporter import OtlpUdpMetricExporter, OtlpUdpSpanExporter
 from amazon.opentelemetry.distro.sampler._aws_xray_sampling_client import _AwsXRaySamplingClient
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from opentelemetry.environment_variables import OTEL_LOGS_EXPORTER, OTEL_METRICS_EXPORTER, OTEL_TRACES_EXPORTER
@@ -301,8 +301,9 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         # When in Lambda, exporter should be UDP.
         os.environ.setdefault("AWS_LAMBDA_FUNCTION_NAME", "myLambdaFunc")
         exporter: MetricExporter = ApplicationSignalsExporterProvider().create_exporter()
-        self.assertIsInstance(exporter, OtlpUdpSpanExporter)
+        self.assertIsInstance(exporter, OtlpUdpMetricExporter)
         self.assertEqual("127.0.0.1:2000", exporter._udp_exporter._endpoint)
+        os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
 
 
 def validate_distro_environ():
