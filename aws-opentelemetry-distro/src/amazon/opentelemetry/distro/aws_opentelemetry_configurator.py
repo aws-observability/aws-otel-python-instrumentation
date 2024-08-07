@@ -63,7 +63,8 @@ APP_SIGNALS_EXPORTER_ENDPOINT_CONFIG = "OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT"
 APPLICATION_SIGNALS_EXPORTER_ENDPOINT_CONFIG = "OTEL_AWS_APPLICATION_SIGNALS_EXPORTER_ENDPOINT"
 METRIC_EXPORT_INTERVAL_CONFIG = "OTEL_METRIC_EXPORT_INTERVAL"
 DEFAULT_METRIC_EXPORT_INTERVAL = 60000.0
-AWS_LAMBDA_FUNCTION_NAME_ENV_VAR = "AWS_LAMBDA_FUNCTION_NAME"
+AWS_LAMBDA_FUNCTION_NAME_CONFIG = "AWS_LAMBDA_FUNCTION_NAME"
+AWS_XRAY_DAEMON_ADDRESS_CONFIG = "AWS_XRAY_DAEMON_ADDRESS"
 
 _logger: Logger = getLogger(__name__)
 
@@ -268,7 +269,7 @@ def _is_application_signals_enabled():
 
 def _is_lambda_environment():
     # detect if running in AWS Lambda environment
-    return AWS_LAMBDA_FUNCTION_NAME_ENV_VAR in os.environ
+    return AWS_LAMBDA_FUNCTION_NAME_CONFIG in os.environ
 
 
 class ApplicationSignalsExporterProvider:
@@ -300,7 +301,8 @@ class ApplicationSignalsExporterProvider:
 
         if _is_lambda_environment():
             # When running in Lambda, export Application Signals metrics over UDP
-            return OtlpUdpMetricExporter(endpoint="127.0.0.1:2000", preferred_temporality=temporality_dict)
+            application_signals_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
+            return OtlpUdpMetricExporter(endpoint=application_signals_endpoint, preferred_temporality=temporality_dict)
 
         if protocol == "http/protobuf":
             application_signals_endpoint = os.environ.get(
