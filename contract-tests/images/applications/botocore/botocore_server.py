@@ -12,7 +12,6 @@ import boto3
 import requests
 from botocore.client import BaseClient
 from botocore.config import Config
-from botocore.exceptions import ClientError
 from typing_extensions import Tuple, override
 
 _PORT: int = 8080
@@ -210,7 +209,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _handle_bedrock_request(self) -> None:
         # Localstack does not support Bedrock related services.
-        # we inject inject_200_success and inject_500_error directly into the API call
+        # we inject inject_200_success directly into the API call
         # to make sure we receive http response with expected status code and attributes.
         bedrock_client: BaseClient = boto3.client("bedrock", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
         bedrock_agent_client: BaseClient = boto3.client(
@@ -222,28 +221,20 @@ class RequestHandler(BaseHTTPRequestHandler):
         bedrock_agent_runtime_client: BaseClient = boto3.client(
             "bedrock-agent-runtime", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION
         )
-        if self.in_path(_ERROR):
-            error_client: BaseClient = boto3.client(
-                "bedrock-agent", endpoint_url=_ERROR_ENDPOINT, region_name=_AWS_REGION
+        if self.in_path("getknowledgebase/get_knowledge_base"):
+            set_main_status(200)
+            bedrock_agent_client.meta.events.register(
+                "before-call.bedrock-agent.GetKnowledgeBase",
+                inject_200_success,
             )
-            set_main_status(400)
-            try:
-                error_client.get_knowledge_base(knowledgeBaseId="invalid-knowledge-base-id")
-            except Exception as exception:
-                print("Expected exception occurred", exception)
-        elif self.in_path(_FAULT):
-            set_main_status(500)
-            try:
-                fault_client: BaseClient = boto3.client(
-                    "bedrock-agent", endpoint_url=_FAULT_ENDPOINT, region_name=_AWS_REGION, config=_NO_RETRY_CONFIG
-                )
-                fault_client.meta.events.register(
-                    "before-call.bedrock-agent.GetDataSource",
-                    lambda **kwargs: inject_500_error("GetDataSource", **kwargs),
-                )
-                fault_client.get_data_source(knowledgeBaseId="TESTKBSEID", dataSourceId="DATASURCID")
-            except Exception as exception:
-                print("Expected exception occurred", exception)
+            bedrock_agent_client.get_knowledge_base(knowledgeBaseId="invalid-knowledge-base-id")
+        elif self.in_path("getdatasource/get_data_source"):
+            set_main_status(200)
+            bedrock_agent_client.meta.events.register(
+                "before-call.bedrock-agent.GetDataSource",
+                inject_200_success,
+            )
+            bedrock_agent_client.get_data_source(knowledgeBaseId="TESTKBSEID", dataSourceId="DATASURCID")
         elif self.in_path("getagent/get-agent"):
             set_main_status(200)
             bedrock_agent_client.meta.events.register(
@@ -271,6 +262,18 @@ class RequestHandler(BaseHTTPRequestHandler):
                 agentAliasId="testAlias",
                 sessionId="testSessionId",
                 inputText="Invoke agent sample input text",
+            )
+        elif self.in_path("retrieve/retrieve"):
+            set_main_status(200)
+            bedrock_agent_runtime_client.meta.events.register(
+                "before-call.bedrock-agent-runtime.Retrieve",
+                inject_200_success,
+            )
+            bedrock_agent_runtime_client.retrieve(
+                knowledgeBaseId="test-knowledge-base-id",
+                retrievalQuery={
+                    "text": "an example of retrieve query",
+                },
             )
         elif self.in_path("invokemodel/invoke-model"):
             set_main_status(200)
@@ -366,16 +369,6 @@ def inject_200_success(**kwargs):
     body = kwargs.get("body", "")
     http_response = HTTPResponse(200, headers=headers, body=body)
     return http_response, response_body
-
-
-def inject_500_error(api_name, **kwargs):
-    raise ClientError(
-        {
-            "Error": {"Code": "InternalServerError", "Message": "Internal Server Error"},
-            "ResponseMetadata": {"HTTPStatusCode": 500, "RequestId": "mock-request-id"},
-        },
-        api_name,
-    )
 
 
 def main() -> None:
