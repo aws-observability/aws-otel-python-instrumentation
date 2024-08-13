@@ -16,7 +16,7 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
-from amazon.opentelemetry.distro.otlp_udp_exporter import OtlpUdpMetricExporter, OtlpUdpSpanExporter
+from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpMetricExporter, OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.sdk._configuration import (
@@ -40,6 +40,7 @@ from opentelemetry.sdk.extension.aws.resource.ec2 import AwsEc2ResourceDetector
 from opentelemetry.sdk.extension.aws.resource.ecs import AwsEcsResourceDetector
 from opentelemetry.sdk.extension.aws.resource.eks import AwsEksResourceDetector
 from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics._internal.export import ConsoleMetricExporter
 from opentelemetry.sdk.metrics._internal.instrument import (
     Counter,
     Histogram,
@@ -223,7 +224,7 @@ def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> Span
     if not _is_application_signals_enabled():
         return span_exporter
     if _is_lambda_environment():
-        return AwsMetricAttributesSpanExporterBuilder(OtlpUdpSpanExporter(), resource).build()
+        return AwsMetricAttributesSpanExporterBuilder(OTLPUdpSpanExporter(), resource).build()
     return AwsMetricAttributesSpanExporterBuilder(span_exporter, resource).build()
 
 
@@ -302,7 +303,7 @@ class ApplicationSignalsExporterProvider:
         if _is_lambda_environment():
             # When running in Lambda, export Application Signals metrics over UDP
             application_signals_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
-            return OtlpUdpMetricExporter(endpoint=application_signals_endpoint, preferred_temporality=temporality_dict)
+            return OTLPUdpMetricExporter(endpoint=application_signals_endpoint, preferred_temporality=temporality_dict)
 
         if protocol == "http/protobuf":
             application_signals_endpoint = os.environ.get(

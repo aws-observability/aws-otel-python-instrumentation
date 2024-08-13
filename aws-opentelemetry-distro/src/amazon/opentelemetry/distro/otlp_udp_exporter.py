@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import base64
 import socket
 from logging import Logger, getLogger
 from typing import Dict, Optional, Sequence, Tuple
@@ -18,27 +19,30 @@ from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
 DEFAULT_ENDPOINT = "127.0.0.1:2000"
 PROTOCOL_HEADER = '{"format":"json","version":1}\n'
-PROTOCOL_DELIMITER = "\n"
+FORMAT_OTEL_METRICS_BINARY_PREFIX = "M1"
+FORMAT_OTEL_TRACES_BINARY_PREFIX = "T1"
 
 _logger: Logger = getLogger(__name__)
 
 
 class UdpExporter:
     def __init__(self, endpoint: Optional[str] = None):
-        self._endpoint = endpoint or DEFAULT_ENDPOINT  # TODO: read from some env var??
+        self._endpoint = endpoint or DEFAULT_ENDPOINT
         self._host, self._port = self._parse_endpoint(self._endpoint)
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._socket.setblocking(False)
 
-    def send_data(self, data: str, signal_format: str):
-        udp_data = f'{{"format":"{signal_format}","data":{data}}}'
-        message = PROTOCOL_HEADER + udp_data
+    def send_data(self, data: bytes, signal_format_prefix: str):
+        # base64 encoding and then converting to string with utf-8
+        base64_encoded_string: str = base64.b64encode(data).decode("utf-8")
+        message = f"{PROTOCOL_HEADER}{signal_format_prefix}{base64_encoded_string}"
 
         try:
-            print("Sending UDP data: ", message)  # TODO: remove
+            _logger.debug("Sending UDP data: ", message)
             self._socket.sendto(message.encode("utf-8"), (self._host, int(self._port)))
         except Exception as exc:  # pylint: disable=broad-except
             _logger.error("Error sending UDP data: %s", exc)
+            raise
 
     def shutdown(self):
         self._socket.close()
@@ -55,7 +59,7 @@ class UdpExporter:
         return host, port
 
 
-class OtlpUdpMetricExporter(MetricExporter):
+class OTLPUdpMetricExporter(MetricExporter):
     def __init__(
         self,
         endpoint: Optional[str] = None,
@@ -76,8 +80,13 @@ class OtlpUdpMetricExporter(MetricExporter):
         **kwargs,
     ) -> MetricExportResult:
         serialized_data = encode_metrics(metrics_data).SerializeToString()
-        self._udp_exporter.send_data(data=serialized_data, signal_format="OTEL_V1_METRICS")  # TODO: Convert to constant
-        return MetricExportResult.SUCCESS  # TODO: send appropriate status back. Need to??
+
+        try:
+            self._udp_exporter.send_data(data=serialized_data, signal_format_prefix=FORMAT_OTEL_METRICS_BINARY_PREFIX)
+            return MetricExportResult.SUCCESS
+        except Exception as exc:  # pylint: disable=broad-except
+            _logger.error("Error exporting metrics: %s", exc)
+            return MetricExportResult.FAILURE
 
     # pylint: disable=no-self-use
     def force_flush(self, timeout_millis: float = 10_000) -> bool:
@@ -88,15 +97,20 @@ class OtlpUdpMetricExporter(MetricExporter):
         self._udp_exporter.shutdown()
 
 
-class OtlpUdpSpanExporter(SpanExporter):
+class OTLPUdpSpanExporter(SpanExporter):
     def __init__(self, endpoint: Optional[str] = None):
         self._udp_exporter = UdpExporter(endpoint=endpoint)
 
     @override
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
         serialized_data = encode_spans(spans).SerializeToString()
-        self._udp_exporter.send_data(data=serialized_data, signal_format="OTEL_V1_TRACES")  # TODO: Convert to constant
-        return SpanExportResult.SUCCESS  # TODO: send appropriate status back. Need to??
+
+        try:
+            self._udp_exporter.send_data(data=serialized_data, signal_format_prefix=FORMAT_OTEL_TRACES_BINARY_PREFIX)
+            return SpanExportResult.SUCCESS
+        except Exception as exc:
+            _logger.error("Error exporting spans: %s", exc)
+            return SpanExportResult.FAILURE
 
     # pylint: disable=no-self-use
     @override

@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import base64
 import socket
 import unittest
 from unittest import TestCase
@@ -8,8 +9,8 @@ from unittest.mock import MagicMock, patch
 from amazon.opentelemetry.distro.otlp_udp_exporter import (
     DEFAULT_ENDPOINT,
     PROTOCOL_HEADER,
-    OtlpUdpMetricExporter,
-    OtlpUdpSpanExporter,
+    OTLPUdpMetricExporter,
+    OTLPUdpSpanExporter,
     UdpExporter,
 )
 from opentelemetry.sdk.metrics._internal.export import MetricExportResult
@@ -46,8 +47,10 @@ class TestUdpExporter(TestCase):
     def test_send_data(self, mock_socket):
         mock_socket_instance = mock_socket.return_value
         exporter = UdpExporter()
-        exporter.send_data("encoded_data", "signal")
-        expected_message = PROTOCOL_HEADER + '{"format":"signal","data":encoded_data}'
+        input_bytes: bytes = b"hello"
+        encoded_bytes: bytes = base64.b64encode(input_bytes)
+        exporter.send_data(input_bytes, "signal_prefix")
+        expected_message = PROTOCOL_HEADER + "signal_prefix" + encoded_bytes.decode("utf-8")
         mock_socket_instance.sendto.assert_called_once_with(expected_message.encode("utf-8"), ("127.0.0.1", 2000))
 
     @patch("amazon.opentelemetry.distro.otlp_udp_exporter.socket.socket")
@@ -58,7 +61,7 @@ class TestUdpExporter(TestCase):
         mock_socket_instance.close.assert_called_once()
 
 
-class TestOtlpUdpMetricExporter(unittest.TestCase):
+class TestOTLPUdpMetricExporter(unittest.TestCase):
 
     @patch("amazon.opentelemetry.distro.otlp_udp_exporter.encode_metrics")
     @patch("amazon.opentelemetry.distro.otlp_udp_exporter.UdpExporter")
@@ -66,23 +69,21 @@ class TestOtlpUdpMetricExporter(unittest.TestCase):
         mock_udp_exporter_instance = mock_udp_exporter.return_value
         mock_encoded_data = MagicMock()
         mock_encode_metrics.return_value.SerializeToString.return_value = mock_encoded_data
-        exporter = OtlpUdpMetricExporter()
+        exporter = OTLPUdpMetricExporter()
         result = exporter.export(MagicMock())
-        mock_udp_exporter_instance.send_data.assert_called_once_with(
-            data=mock_encoded_data, signal_format="OTEL_V1_METRICS"
-        )
+        mock_udp_exporter_instance.send_data.assert_called_once_with(data=mock_encoded_data, signal_format_prefix="M1")
         self.assertEqual(result, MetricExportResult.SUCCESS)
 
     # pylint: disable=no-self-use
     @patch("amazon.opentelemetry.distro.otlp_udp_exporter.UdpExporter")
     def test_shutdown(self, mock_udp_exporter):
         mock_udp_exporter_instance = mock_udp_exporter.return_value
-        exporter = OtlpUdpMetricExporter()
+        exporter = OTLPUdpMetricExporter()
         exporter.shutdown()
         mock_udp_exporter_instance.shutdown.assert_called_once()
 
 
-class TestOtlpUdpSpanExporter(unittest.TestCase):
+class TestOTLPUdpSpanExporter(unittest.TestCase):
 
     @patch("amazon.opentelemetry.distro.otlp_udp_exporter.encode_spans")
     @patch("amazon.opentelemetry.distro.otlp_udp_exporter.UdpExporter")
@@ -90,22 +91,15 @@ class TestOtlpUdpSpanExporter(unittest.TestCase):
         mock_udp_exporter_instance = mock_udp_exporter.return_value
         mock_encoded_data = MagicMock()
         mock_encode_spans.return_value.SerializeToString.return_value = mock_encoded_data
-        exporter = OtlpUdpSpanExporter()
+        exporter = OTLPUdpSpanExporter()
         result = exporter.export(MagicMock())
-        mock_udp_exporter_instance.send_data.assert_called_once_with(
-            data=mock_encoded_data, signal_format="OTEL_V1_TRACES"
-        )
+        mock_udp_exporter_instance.send_data.assert_called_once_with(data=mock_encoded_data, signal_format_prefix="T1")
         self.assertEqual(result, SpanExportResult.SUCCESS)
 
     # pylint: disable=no-self-use
     @patch("amazon.opentelemetry.distro.otlp_udp_exporter.UdpExporter")
     def test_shutdown(self, mock_udp_exporter):
         mock_udp_exporter_instance = mock_udp_exporter.return_value
-        exporter = OtlpUdpSpanExporter()
+        exporter = OTLPUdpSpanExporter()
         exporter.shutdown()
         mock_udp_exporter_instance.shutdown.assert_called_once()
-
-
-# TODO: remove this line for final PR
-if __name__ == "__main__":
-    unittest.main()
