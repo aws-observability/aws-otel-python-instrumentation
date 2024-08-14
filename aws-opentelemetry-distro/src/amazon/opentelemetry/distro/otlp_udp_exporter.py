@@ -38,7 +38,7 @@ class UdpExporter:
         message = f"{PROTOCOL_HEADER}{signal_format_prefix}{base64_encoded_string}"
 
         try:
-            _logger.debug("Sending UDP data: ", message)
+            _logger.debug(f"Sending UDP data: {message}")
             self._socket.sendto(message.encode("utf-8"), (self._host, int(self._port)))
         except Exception as exc:  # pylint: disable=broad-except
             _logger.error("Error sending UDP data: %s", exc)
@@ -108,7 +108,7 @@ class OTLPUdpSpanExporter(SpanExporter):
         try:
             self._udp_exporter.send_data(data=serialized_data, signal_format_prefix=FORMAT_OTEL_TRACES_BINARY_PREFIX)
             return SpanExportResult.SUCCESS
-        except Exception as exc:
+        except Exception as exc:  # pylint: disable=broad-except
             _logger.error("Error exporting spans: %s", exc)
             return SpanExportResult.FAILURE
 
