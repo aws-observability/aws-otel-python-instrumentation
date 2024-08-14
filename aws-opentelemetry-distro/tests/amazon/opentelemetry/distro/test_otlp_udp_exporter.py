@@ -74,6 +74,17 @@ class TestOTLPUdpMetricExporter(unittest.TestCase):
         mock_udp_exporter_instance.send_data.assert_called_once_with(data=mock_encoded_data, signal_format_prefix="M1")
         self.assertEqual(result, MetricExportResult.SUCCESS)
 
+    @patch("amazon.opentelemetry.distro.otlp_udp_exporter.encode_metrics")
+    @patch("amazon.opentelemetry.distro.otlp_udp_exporter.UdpExporter")
+    def test_export_with_exception(self, mock_udp_exporter, mock_encode_metrics):
+        mock_udp_exporter_instance = mock_udp_exporter.return_value
+        mock_encoded_data = MagicMock()
+        mock_encode_metrics.return_value.SerializeToString.return_value = mock_encoded_data
+        mock_udp_exporter_instance.send_data.side_effect = Exception("Something went wrong")
+        exporter = OTLPUdpMetricExporter()
+        result = exporter.export(MagicMock())
+        self.assertEqual(result, MetricExportResult.FAILURE)
+
     # pylint: disable=no-self-use
     @patch("amazon.opentelemetry.distro.otlp_udp_exporter.UdpExporter")
     def test_shutdown(self, mock_udp_exporter):
@@ -95,6 +106,17 @@ class TestOTLPUdpSpanExporter(unittest.TestCase):
         result = exporter.export(MagicMock())
         mock_udp_exporter_instance.send_data.assert_called_once_with(data=mock_encoded_data, signal_format_prefix="T1")
         self.assertEqual(result, SpanExportResult.SUCCESS)
+
+    @patch("amazon.opentelemetry.distro.otlp_udp_exporter.encode_spans")
+    @patch("amazon.opentelemetry.distro.otlp_udp_exporter.UdpExporter")
+    def test_export_with_exception(self, mock_udp_exporter, mock_encode_spans):
+        mock_udp_exporter_instance = mock_udp_exporter.return_value
+        mock_encoded_data = MagicMock()
+        mock_encode_spans.return_value.SerializeToString.return_value = mock_encoded_data
+        mock_udp_exporter_instance.send_data.side_effect = Exception("Something went wrong")
+        exporter = OTLPUdpSpanExporter()
+        result = exporter.export(MagicMock())
+        self.assertEqual(result, SpanExportResult.FAILURE)
 
     # pylint: disable=no-self-use
     @patch("amazon.opentelemetry.distro.otlp_udp_exporter.UdpExporter")
