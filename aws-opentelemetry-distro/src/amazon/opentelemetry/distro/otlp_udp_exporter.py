@@ -38,7 +38,7 @@ class UdpExporter:
         message = f"{PROTOCOL_HEADER}{signal_format_prefix}{base64_encoded_string}"
 
         try:
-            _logger.debug(f"Sending UDP data: {message}")
+            _logger.debug("Sending UDP data: %s", message)
             self._socket.sendto(message.encode("utf-8"), (self._host, int(self._port)))
         except Exception as exc:  # pylint: disable=broad-except
             _logger.error("Error sending UDP data: %s", exc)
