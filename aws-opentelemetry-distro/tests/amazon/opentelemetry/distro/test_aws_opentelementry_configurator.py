@@ -19,6 +19,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
+from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpMetricExporter, OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler._aws_xray_sampling_client import _AwsXRaySamplingClient
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from opentelemetry.environment_variables import OTEL_LOGS_EXPORTER, OTEL_METRICS_EXPORTER, OTEL_TRACES_EXPORTER
@@ -26,6 +27,7 @@ from opentelemetry.exporter.otlp.proto.common._internal.metrics_encoder import O
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter as OTLPGrpcOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.sdk.environment_variables import OTEL_TRACES_SAMPLER, OTEL_TRACES_SAMPLER_ARG
+from opentelemetry.sdk.metrics._internal.export import MetricExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Span, SpanProcessor, Tracer, TracerProvider
 from opentelemetry.sdk.trace.export import SpanExporter
@@ -254,6 +256,16 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(mock_exporter, customized_exporter._delegate)
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
 
+        # when Application Signals is enabled and running in lambda
+        os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
+        os.environ.setdefault("AWS_LAMBDA_FUNCTION_NAME", "myLambdaFunc")
+        customized_exporter = _customize_exporter(mock_exporter, Resource.get_empty())
+        self.assertNotEqual(mock_exporter, customized_exporter)
+        self.assertIsInstance(customized_exporter, AwsMetricAttributesSpanExporter)
+        self.assertIsInstance(customized_exporter._delegate, OTLPUdpSpanExporter)
+        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
+        os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
+
     def test_customize_span_processors(self):
         mock_tracer_provider: TracerProvider = MagicMock()
         _customize_span_processors(mock_tracer_provider, Resource.get_empty())
@@ -285,6 +297,13 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         exporter: SpanExporter = ApplicationSignalsExporterProvider().create_exporter()
         self.assertIsInstance(exporter, OTLPHttpOTLPMetricExporter)
         self.assertEqual("http://localhost:4316/v1/metrics", exporter._endpoint)
+
+        # When in Lambda, exporter should be UDP.
+        os.environ.setdefault("AWS_LAMBDA_FUNCTION_NAME", "myLambdaFunc")
+        exporter: MetricExporter = ApplicationSignalsExporterProvider().create_exporter()
+        self.assertIsInstance(exporter, OTLPUdpMetricExporter)
+        self.assertEqual("127.0.0.1:2000", exporter._udp_exporter._endpoint)
+        os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
 
 
 def validate_distro_environ():
