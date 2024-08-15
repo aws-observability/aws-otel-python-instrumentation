@@ -16,6 +16,7 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
+from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpMetricExporter, OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.sdk._configuration import (
@@ -62,6 +63,8 @@ APP_SIGNALS_EXPORTER_ENDPOINT_CONFIG = "OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT"
 APPLICATION_SIGNALS_EXPORTER_ENDPOINT_CONFIG = "OTEL_AWS_APPLICATION_SIGNALS_EXPORTER_ENDPOINT"
 METRIC_EXPORT_INTERVAL_CONFIG = "OTEL_METRIC_EXPORT_INTERVAL"
 DEFAULT_METRIC_EXPORT_INTERVAL = 60000.0
+AWS_LAMBDA_FUNCTION_NAME_CONFIG = "AWS_LAMBDA_FUNCTION_NAME"
+AWS_XRAY_DAEMON_ADDRESS_CONFIG = "AWS_XRAY_DAEMON_ADDRESS"
 
 _logger: Logger = getLogger(__name__)
 
@@ -219,6 +222,8 @@ def _customize_sampler(sampler: Sampler) -> Sampler:
 def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> SpanExporter:
     if not _is_application_signals_enabled():
         return span_exporter
+    if _is_lambda_environment():
+        return AwsMetricAttributesSpanExporterBuilder(OTLPUdpSpanExporter(), resource).build()
     return AwsMetricAttributesSpanExporterBuilder(span_exporter, resource).build()
 
 
@@ -262,6 +267,11 @@ def _is_application_signals_enabled():
     )
 
 
+def _is_lambda_environment():
+    # detect if running in AWS Lambda environment
+    return AWS_LAMBDA_FUNCTION_NAME_CONFIG in os.environ
+
+
 class ApplicationSignalsExporterProvider:
     _instance: ClassVar["ApplicationSignalsExporterProvider"] = None
 
@@ -288,6 +298,11 @@ class ApplicationSignalsExporterProvider:
             Histogram,
         ]:
             temporality_dict[typ] = AggregationTemporality.DELTA
+
+        if _is_lambda_environment():
+            # When running in Lambda, export Application Signals metrics over UDP
+            application_signals_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
+            return OTLPUdpMetricExporter(endpoint=application_signals_endpoint, preferred_temporality=temporality_dict)
 
         if protocol == "http/protobuf":
             application_signals_endpoint = os.environ.get(
