@@ -66,9 +66,9 @@ class AttributePropagatingSpanProcessor(SpanProcessor):
         if is_local_root(span):
             if not _is_server_kind(span):
                 propagation_data = self._propagation_data_extractor(span)
-        elif _is_server_kind(parent_span):
+        elif parent_span && _is_server_kind(parent_span):
             propagation_data = self._propagation_data_extractor(parent_span)
-        else:
+        elif parent_span:
             propagation_data = parent_span.attributes.get(self._propagation_data_key)
 
         if propagation_data is not None:
