@@ -29,6 +29,11 @@ _logger.setLevel(INFO)
 _AWS_SQS_QUEUE_URL: str = "aws.sqs.queue.url"
 _AWS_SQS_QUEUE_NAME: str = "aws.sqs.queue.name"
 _AWS_KINESIS_STREAM_NAME: str = "aws.kinesis.stream.name"
+_AWS_BEDROCK_AGENT_ID: str = "aws.bedrock.agent.id"
+_AWS_BEDROCK_GUARDRAIL_ID: str = "aws.bedrock.guardrail.id"
+_AWS_BEDROCK_KNOWLEDGE_BASE_ID: str = "aws.bedrock.knowledge_base.id"
+_AWS_BEDROCK_DATA_SOURCE_ID: str = "aws.bedrock.data_source.id"
+_GEN_AI_REQUEST_MODEL: str = "gen_ai.request.model"
 
 
 # pylint: disable=too-many-public-methods
@@ -66,7 +71,7 @@ class BotocoreTest(ContractTestBase):
             )
         }
         cls._local_stack: LocalStackContainer = (
-            LocalStackContainer(image="localstack/localstack:2.0.1")
+            LocalStackContainer(image="localstack/localstack:3.5.0")
             .with_name("localstack")
             .with_services("s3", "sqs", "dynamodb", "kinesis")
             .with_env("DEFAULT_REGION", "us-west-2")
@@ -372,6 +377,132 @@ class BotocoreTest(ContractTestBase):
             span_name="Kinesis.PutRecord",
         )
 
+    def test_bedrock_runtime_invoke_model(self):
+        self.do_test_requests(
+            "bedrock/invokemodel/invoke-model",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock Runtime",
+            remote_service="AWS::BedrockRuntime",
+            remote_operation="InvokeModel",
+            remote_resource_type="AWS::Bedrock::Model",
+            remote_resource_identifier="amazon.titan-text-premier-v1:0",
+            request_specific_attributes={
+                _GEN_AI_REQUEST_MODEL: "amazon.titan-text-premier-v1:0",
+            },
+            span_name="Bedrock Runtime.InvokeModel",
+        )
+
+    def test_bedrock_get_guardrail(self):
+        self.do_test_requests(
+            "bedrock/getguardrail/get-guardrail",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock",
+            remote_service="AWS::Bedrock",
+            remote_operation="GetGuardrail",
+            remote_resource_type="AWS::Bedrock::Guardrail",
+            remote_resource_identifier="bt4o77i015cu",
+            request_specific_attributes={
+                _AWS_BEDROCK_GUARDRAIL_ID: "bt4o77i015cu",
+            },
+            span_name="Bedrock.GetGuardrail",
+        )
+
+    def test_bedrock_agent_runtime_invoke_agent(self):
+        self.do_test_requests(
+            "bedrock/invokeagent/invoke_agent",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock Agent Runtime",
+            remote_service="AWS::Bedrock",
+            remote_operation="InvokeAgent",
+            remote_resource_type="AWS::Bedrock::Agent",
+            remote_resource_identifier="Q08WFRPHVL",
+            request_specific_attributes={
+                _AWS_BEDROCK_AGENT_ID: "Q08WFRPHVL",
+            },
+            span_name="Bedrock Agent Runtime.InvokeAgent",
+        )
+
+    def test_bedrock_agent_runtime_retrieve(self):
+        self.do_test_requests(
+            "bedrock/retrieve/retrieve",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock Agent Runtime",
+            remote_service="AWS::Bedrock",
+            remote_operation="Retrieve",
+            remote_resource_type="AWS::Bedrock::KnowledgeBase",
+            remote_resource_identifier="test-knowledge-base-id",
+            request_specific_attributes={
+                _AWS_BEDROCK_KNOWLEDGE_BASE_ID: "test-knowledge-base-id",
+            },
+            span_name="Bedrock Agent Runtime.Retrieve",
+        )
+
+    def test_bedrock_agent_get_agent(self):
+        self.do_test_requests(
+            "bedrock/getagent/get-agent",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock Agent",
+            remote_service="AWS::Bedrock",
+            remote_operation="GetAgent",
+            remote_resource_type="AWS::Bedrock::Agent",
+            remote_resource_identifier="TESTAGENTID",
+            request_specific_attributes={
+                _AWS_BEDROCK_AGENT_ID: "TESTAGENTID",
+            },
+            span_name="Bedrock Agent.GetAgent",
+        )
+
+    def test_bedrock_agent_get_knowledge_base(self):
+        self.do_test_requests(
+            "bedrock/getknowledgebase/get_knowledge_base",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock Agent",
+            remote_service="AWS::Bedrock",
+            remote_operation="GetKnowledgeBase",
+            remote_resource_type="AWS::Bedrock::KnowledgeBase",
+            remote_resource_identifier="invalid-knowledge-base-id",
+            request_specific_attributes={
+                _AWS_BEDROCK_KNOWLEDGE_BASE_ID: "invalid-knowledge-base-id",
+            },
+            span_name="Bedrock Agent.GetKnowledgeBase",
+        )
+
+    def test_bedrock_agent_get_data_source(self):
+        self.do_test_requests(
+            "bedrock/getdatasource/get_data_source",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock Agent",
+            remote_service="AWS::Bedrock",
+            remote_operation="GetDataSource",
+            remote_resource_type="AWS::Bedrock::DataSource",
+            remote_resource_identifier="DATASURCID",
+            request_specific_attributes={
+                _AWS_BEDROCK_DATA_SOURCE_ID: "DATASURCID",
+            },
+            span_name="Bedrock Agent.GetDataSource",
+        )
+
     @override
     def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs) -> None:
         target_spans: List[Span] = []
@@ -427,7 +558,7 @@ class BotocoreTest(ContractTestBase):
         self.assertEqual(target_spans[0].name, kwargs.get("span_name"))
         self._assert_semantic_conventions_attributes(
             target_spans[0].attributes,
-            kwargs.get("remote_service"),
+            kwargs.get("rpc_service") if "rpc_service" in kwargs else kwargs.get("remote_service").split("::")[-1],
             kwargs.get("remote_operation"),
             status_code,
             kwargs.get("request_specific_attributes", {}),
