@@ -5,7 +5,7 @@
 #   update the `PYTHONPATH` environment variable accordingly. Then in the second stage, copy the directory to `/autoinstrumentation`.
 
 # Stage 1: Install ADOT Python in the /operator-build folder
-FROM python:3.11 AS build
+FROM public.ecr.aws/docker/library/python:3.11 AS build
 
 WORKDIR /operator-build
 
@@ -21,7 +21,7 @@ RUN sed -i "/opentelemetry-exporter-otlp-proto-grpc/d" ./aws-opentelemetry-distr
 RUN mkdir workspace && pip install --target workspace ./aws-opentelemetry-distro
 
 # Stage 2: Build the cp-utility binary
-FROM rust:1.75 as builder
+FROM public.ecr.aws/docker/library/rust:1.75 as builder
 
 WORKDIR /usr/src/cp-utility
 COPY ./tools/cp-utility .
