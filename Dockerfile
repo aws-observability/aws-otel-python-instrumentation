@@ -9,7 +9,7 @@
 # Also mentioned in Docker build template in the upstream repository:
 # https://github.com/open-telemetry/opentelemetry-operator/blob/b5bb0ae34720d4be2d229dafecb87b61b37699b0/autoinstrumentation/python/requirements.txt#L2
 # For further details, please refer to: https://github.com/MicrosoftDocs/azure-docs/blob/main/articles/azure-functions/recover-python-functions.md#the-python-interpre[…]tions-python-worker
-FROM python:3.10 AS build
+FROM public.ecr.aws/docker/library/python:3.11 AS build
 
 WORKDIR /operator-build
 
@@ -17,7 +17,7 @@ ADD aws-opentelemetry-distro/ ./aws-opentelemetry-distro/
 
 RUN mkdir workspace && pip install --target workspace ./aws-opentelemetry-distro
 
-FROM busybox
+FROM public.ecr.aws/docker/library/busybox:latest
 
 COPY --from=build /operator-build/workspace /autoinstrumentation
 
