@@ -3,7 +3,7 @@
 #   The packages are installed in the `/autoinstrumentation` directory. This is required as when instrumenting the pod by CWOperator,
 #   one init container will be created to copy all the content in `/autoinstrumentation` directory to app's container. Then
 #   update the `PYTHONPATH` environment variable accordingly. Then in the second stage, copy the directory to `/autoinstrumentation`.
-FROM python:3.11 AS build
+FROM public.ecr.aws/docker/library/python:3.11 AS build
 
 WORKDIR /operator-build
 
