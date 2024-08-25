@@ -16,4 +16,4 @@ RUN mkdir -p /build && \
   cd /build && \
   zip -r aws-opentelemetry-python-layer.zip otel-instrument python
 
-CMD cp /build/aws-opentelemetry-python-layer.zip /out/aws-opentelemetry-python-layer.zip
+CMD ["cp", "/build/aws-opentelemetry-python-layer.zip", "/out/aws-opentelemetry-python-layer.zip"]
