@@ -223,7 +223,8 @@ def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> Span
     if not _is_application_signals_enabled():
         return span_exporter
     if _is_lambda_environment():
-        return AwsMetricAttributesSpanExporterBuilder(OTLPUdpSpanExporter(), resource).build()
+        traces_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
+        return AwsMetricAttributesSpanExporterBuilder(OTLPUdpSpanExporter(endpoint=traces_endpoint), resource).build()
     return AwsMetricAttributesSpanExporterBuilder(span_exporter, resource).build()
 
 
