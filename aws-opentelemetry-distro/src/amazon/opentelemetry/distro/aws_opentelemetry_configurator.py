@@ -65,6 +65,7 @@ METRIC_EXPORT_INTERVAL_CONFIG = "OTEL_METRIC_EXPORT_INTERVAL"
 DEFAULT_METRIC_EXPORT_INTERVAL = 60000.0
 AWS_LAMBDA_FUNCTION_NAME_CONFIG = "AWS_LAMBDA_FUNCTION_NAME"
 AWS_XRAY_DAEMON_ADDRESS_CONFIG = "AWS_XRAY_DAEMON_ADDRESS"
+OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED_CONFIG = "OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED"
 
 _logger: Logger = getLogger(__name__)
 
@@ -85,7 +86,10 @@ class AwsOpenTelemetryConfigurator(_OTelSDKConfigurator):
     # pylint: disable=no-self-use
     @override
     def _configure(self, **kwargs):
-        _initialize_components()
+        if _is_defer_to_workers_enabled() and _is_wsgi_master_process():
+            return
+        else:
+            _initialize_components()
 
 
 # The OpenTelemetry Authors code
@@ -154,6 +158,18 @@ def _init_tracing(
 
 
 # END The OpenTelemetry Authors code
+
+
+def _is_defer_to_workers_enabled():
+    return os.environ.get(OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED_CONFIG, "false").strip().lower() == "true"
+
+
+def _is_wsgi_master_process():
+    if os.environ.get("IS_WSGI_MASTER_PROCESS_ALREADY_SEEN", "false").lower() == "true":
+        return False
+    else:
+        os.environ["IS_WSGI_MASTER_PROCESS_ALREADY_SEEN"] = "true"
+        return True
 
 
 def _exclude_urls_for_instrumentations():
