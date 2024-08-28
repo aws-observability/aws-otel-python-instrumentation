@@ -16,6 +16,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _customize_sampler,
     _customize_span_processors,
     _is_application_signals_enabled,
+    _is_wsgi_master_process,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
@@ -304,6 +305,10 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertIsInstance(exporter, OTLPUdpMetricExporter)
         self.assertEqual("127.0.0.1:2000", exporter._udp_exporter._endpoint)
         os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
+
+    def test_is_wsgi_master_process_first_time(self):
+        self.assertTrue(_is_wsgi_master_process())
+        self.assertEqual(os.environ["IS_WSGI_MASTER_PROCESS_ALREADY_SEEN"], "true")
 
 
 def validate_distro_environ():

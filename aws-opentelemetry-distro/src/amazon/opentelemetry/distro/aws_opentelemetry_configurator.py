@@ -165,6 +165,14 @@ def _is_defer_to_workers_enabled():
 
 
 def _is_wsgi_master_process():
+    # Since the auto-instrumentation loads whenever a process is created and due to known issues with instrumenting
+    # WSGI apps using OTel, we want to skip the instrumentation of master process.
+    # This function is used to identify if the current process is a WSGI server's master process or not.
+    # Typically, a WSGI fork process model server spawns a single master process and multiple worker processes.
+    # When the master process starts, we use an environment variable as a marker. Since child worker processes inherit
+    # the master process environment, checking this marker in worker will tell that master process has been seen.
+    # Note: calling this function more than once in the same master process will return incorrect result.
+    # So use carefully.
     if os.environ.get("IS_WSGI_MASTER_PROCESS_ALREADY_SEEN", "false").lower() == "true":
         return False
     else:
