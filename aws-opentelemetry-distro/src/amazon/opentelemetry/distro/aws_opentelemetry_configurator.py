@@ -88,8 +88,7 @@ class AwsOpenTelemetryConfigurator(_OTelSDKConfigurator):
     def _configure(self, **kwargs):
         if _is_defer_to_workers_enabled() and _is_wsgi_master_process():
             return
-        else:
-            _initialize_components()
+        _initialize_components()
 
 
 # The OpenTelemetry Authors code
@@ -175,9 +174,8 @@ def _is_wsgi_master_process():
     # So use carefully.
     if os.environ.get("IS_WSGI_MASTER_PROCESS_ALREADY_SEEN", "false").lower() == "true":
         return False
-    else:
-        os.environ["IS_WSGI_MASTER_PROCESS_ALREADY_SEEN"] = "true"
-        return True
+    os.environ["IS_WSGI_MASTER_PROCESS_ALREADY_SEEN"] = "true"
+    return True
 
 
 def _exclude_urls_for_instrumentations():

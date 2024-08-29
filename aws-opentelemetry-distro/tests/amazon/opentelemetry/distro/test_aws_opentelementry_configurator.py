@@ -323,11 +323,14 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("IS_WSGI_MASTER_PROCESS_ALREADY_SEEN", None)
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._initialize_components")
-    def test_initialize_components_skipped_when_defer_to_workers_enabled(self, mock_initialize_components):
+    def test_initialize_components_skipped_in_master_when_deferred_enabled(self, mock_initialize_components):
         os.environ.setdefault("OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED", "True")
+        os.environ.pop("IS_WSGI_MASTER_PROCESS_ALREADY_SEEN", None)
         self.assertTrue(_is_defer_to_workers_enabled())
+        AwsOpenTelemetryConfigurator()._configure()
         mock_initialize_components.assert_not_called()
         os.environ.pop("OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED", None)
+        os.environ.pop("IS_WSGI_MASTER_PROCESS_ALREADY_SEEN", None)
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._initialize_components")
     def test_initialize_components_called_in_worker_when_deferred_enabled(self, mock_initialize_components):
@@ -335,8 +338,17 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.setdefault("IS_WSGI_MASTER_PROCESS_ALREADY_SEEN", "true")
         self.assertTrue(_is_defer_to_workers_enabled())
         self.assertFalse(_is_wsgi_master_process())
+        AwsOpenTelemetryConfigurator()._configure()
         mock_initialize_components.assert_called_once()
         os.environ.pop("OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED", None)
+        os.environ.pop("IS_WSGI_MASTER_PROCESS_ALREADY_SEEN", None)
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._initialize_components")
+    def test_initialize_components_called_when_deferred_disabled(self, mock_initialize_components):
+        os.environ.pop("OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED", None)
+        self.assertFalse(_is_defer_to_workers_enabled())
+        AwsOpenTelemetryConfigurator()._configure()
+        mock_initialize_components.assert_called_once()
         os.environ.pop("IS_WSGI_MASTER_PROCESS_ALREADY_SEEN", None)
 
 
