@@ -87,6 +87,9 @@ class AwsOpenTelemetryConfigurator(_OTelSDKConfigurator):
     @override
     def _configure(self, **kwargs):
         if _is_defer_to_workers_enabled() and _is_wsgi_master_process():
+            _logger.info(
+                "Skipping ADOT initialization since deferral to worker is enabled, and this is a master process."
+            )
             return
         _initialize_components()
 
@@ -173,8 +176,10 @@ def _is_wsgi_master_process():
     # Note: calling this function more than once in the same master process will return incorrect result.
     # So use carefully.
     if os.environ.get("IS_WSGI_MASTER_PROCESS_ALREADY_SEEN", "false").lower() == "true":
+        _logger.info("pid %s identified as a worker process", str(os.getpid()))
         return False
     os.environ["IS_WSGI_MASTER_PROCESS_ALREADY_SEEN"] = "true"
+    _logger.info("pid %s identified as a master process", str(os.getpid()))
     return True
 
 
