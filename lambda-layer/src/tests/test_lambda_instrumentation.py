@@ -239,11 +239,12 @@ class TestAwsLambdaInstrumentor(TestBase):
         )
         test_env_patch.start()
 
+        trace_state_header = f"{MOCK_W3C_TRACE_STATE_KEY}={MOCK_W3C_TRACE_STATE_VALUE},foo=1,bar=2"
         mock_execute_lambda(
             {
                 "headers": {
                     TraceContextTextMapPropagator._TRACEPARENT_HEADER_NAME: MOCK_W3C_TRACE_CONTEXT_SAMPLED,
-                    TraceContextTextMapPropagator._TRACESTATE_HEADER_NAME: f"{MOCK_W3C_TRACE_STATE_KEY}={MOCK_W3C_TRACE_STATE_VALUE},foo=1,bar=2",
+                    TraceContextTextMapPropagator._TRACESTATE_HEADER_NAME: trace_state_header,
                 }
             }
         )
