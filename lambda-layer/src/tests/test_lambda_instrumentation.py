@@ -45,9 +45,7 @@ from opentelemetry.trace.propagation.tracecontext import (
 )
 
 AWS_LAMBDA_EXEC_WRAPPER = "AWS_LAMBDA_EXEC_WRAPPER"
-INIT_OTEL_SCRIPTS_DIR = os.path.join(
-    *(os.path.dirname(__file__), "..")
-)
+INIT_OTEL_SCRIPTS_DIR = os.path.join(*(os.path.dirname(__file__), ".."))
 TOX_PYTHON_DIRECTORY = os.path.dirname(os.path.dirname(which("python3")))
 
 
@@ -67,18 +65,14 @@ MOCK_XRAY_TRACE_ID_STR = f"{MOCK_XRAY_TRACE_ID:x}"
 MOCK_XRAY_PARENT_SPAN_ID = 0x3328B8445A6DBAD2
 MOCK_XRAY_TRACE_CONTEXT_COMMON = f"Root={TRACE_ID_VERSION}-{MOCK_XRAY_TRACE_ID_STR[:TRACE_ID_FIRST_PART_LENGTH]}-{MOCK_XRAY_TRACE_ID_STR[TRACE_ID_FIRST_PART_LENGTH:]};Parent={MOCK_XRAY_PARENT_SPAN_ID:x}"
 MOCK_XRAY_TRACE_CONTEXT_SAMPLED = f"{MOCK_XRAY_TRACE_CONTEXT_COMMON};Sampled=1"
-MOCK_XRAY_TRACE_CONTEXT_NOT_SAMPLED = (
-    f"{MOCK_XRAY_TRACE_CONTEXT_COMMON};Sampled=0"
-)
+MOCK_XRAY_TRACE_CONTEXT_NOT_SAMPLED = f"{MOCK_XRAY_TRACE_CONTEXT_COMMON};Sampled=0"
 
 # See more:
 # https://www.w3.org/TR/trace-context/#examples-of-http-traceparent-headers
 
 MOCK_W3C_TRACE_ID = 0x5CE0E9A56015FEC5AADFA328AE398115
 MOCK_W3C_PARENT_SPAN_ID = 0xAB54A98CEB1F0AD2
-MOCK_W3C_TRACE_CONTEXT_SAMPLED = (
-    f"00-{MOCK_W3C_TRACE_ID:x}-{MOCK_W3C_PARENT_SPAN_ID:x}-01"
-)
+MOCK_W3C_TRACE_CONTEXT_SAMPLED = f"00-{MOCK_W3C_TRACE_ID:x}-{MOCK_W3C_PARENT_SPAN_ID:x}-01"
 
 MOCK_W3C_TRACE_STATE_KEY = "vendor_specific_key"
 MOCK_W3C_TRACE_STATE_VALUE = "test_value"
@@ -233,9 +227,7 @@ class TestAwsLambdaInstrumentor(TestBase):
         )
 
         parent_context = span.parent
-        self.assertEqual(
-            parent_context.trace_id, span.get_span_context().trace_id
-        )
+        self.assertEqual(parent_context.trace_id, span.get_span_context().trace_id)
         self.assertEqual(parent_context.span_id, MOCK_XRAY_PARENT_SPAN_ID)
         self.assertTrue(parent_context.is_remote)
 
@@ -259,7 +251,9 @@ class TestAwsLambdaInstrumentor(TestBase):
                 "headers": {
                     TraceContextTextMapPropagator._TRACEPARENT_HEADER_NAME: MOCK_W3C_TRACE_CONTEXT_SAMPLED,
                     TraceContextTextMapPropagator._TRACESTATE_HEADER_NAME: f"{MOCK_W3C_TRACE_STATE_KEY}={MOCK_W3C_TRACE_STATE_VALUE},foo=1,bar=2",
-                }})
+                }
+            }
+        )
 
         spans = self.memory_exporter.get_finished_spans()
 
@@ -270,9 +264,7 @@ class TestAwsLambdaInstrumentor(TestBase):
         self.assertEqual(span.get_span_context().trace_id, MOCK_W3C_TRACE_ID)
 
         parent_context = span.parent
-        self.assertEqual(
-            parent_context.trace_id, span.get_span_context().trace_id
-        )
+        self.assertEqual(parent_context.trace_id, span.get_span_context().trace_id)
         self.assertEqual(parent_context.span_id, MOCK_W3C_PARENT_SPAN_ID)
         self.assertEqual(len(parent_context.trace_state), 3)
         self.assertEqual(
