@@ -104,7 +104,7 @@ def mock_aws_lambda_exec_wrapper():
 
     # NOTE: Because we run as a subprocess, the python packages are NOT patched
     # with instrumentation. In this test we just make sure we can complete auto
-    # instrumentation without error and the correct environment variabels are
+    # instrumentation without error and the correct environment variables are
     # set. A future improvement might have us run `opentelemetry-instrument` in
     # this process to imitate `otel-instrument`, but our lambda handler does not
     # call other instrumented libraries so we have no use for it for now.
@@ -259,9 +259,7 @@ class TestAwsLambdaInstrumentor(TestBase):
                 "headers": {
                     TraceContextTextMapPropagator._TRACEPARENT_HEADER_NAME: MOCK_W3C_TRACE_CONTEXT_SAMPLED,
                     TraceContextTextMapPropagator._TRACESTATE_HEADER_NAME: f"{MOCK_W3C_TRACE_STATE_KEY}={MOCK_W3C_TRACE_STATE_VALUE},foo=1,bar=2",
-                }
-            }
-        )
+                }})
 
         spans = self.memory_exporter.get_finished_spans()
 
