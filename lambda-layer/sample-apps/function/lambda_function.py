@@ -1,9 +1,11 @@
-import os
 import json
-import requests
+import os
+
 import boto3
+import requests
 
 client = boto3.client("s3")
+
 
 # lambda function
 def lambda_handler(event, context):

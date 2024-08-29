@@ -26,23 +26,13 @@ from shutil import which
 from unittest import mock
 
 from opentelemetry.environment_variables import OTEL_PROPAGATORS
-from opentelemetry.instrumentation.aws_lambda import (
-    _HANDLER,
-    _X_AMZN_TRACE_ID,
-    ORIG_HANDLER,
-    AwsLambdaInstrumentor,
-)
-from opentelemetry.propagators.aws.aws_xray_propagator import (
-    TRACE_ID_FIRST_PART_LENGTH,
-    TRACE_ID_VERSION,
-)
+from opentelemetry.instrumentation.aws_lambda import _HANDLER, _X_AMZN_TRACE_ID, ORIG_HANDLER, AwsLambdaInstrumentor
+from opentelemetry.propagators.aws.aws_xray_propagator import TRACE_ID_FIRST_PART_LENGTH, TRACE_ID_VERSION
 from opentelemetry.semconv.resource import ResourceAttributes
 from opentelemetry.semconv.trace import SpanAttributes
 from opentelemetry.test.test_base import TestBase
 from opentelemetry.trace import SpanKind
-from opentelemetry.trace.propagation.tracecontext import (
-    TraceContextTextMapPropagator,
-)
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 AWS_LAMBDA_EXEC_WRAPPER = "AWS_LAMBDA_EXEC_WRAPPER"
 INIT_OTEL_SCRIPTS_DIR = os.path.join(*(os.path.dirname(__file__), ".."))
