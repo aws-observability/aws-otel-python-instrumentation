@@ -8,12 +8,12 @@ from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro.otlp_udp_exporter import (
     DEFAULT_ENDPOINT,
+    FORMAT_OTEL_SAMPLED_TRACES_BINARY_PREFIX,
+    FORMAT_OTEL_UNSAMPLED_TRACES_BINARY_PREFIX,
     PROTOCOL_HEADER,
     OTLPUdpMetricExporter,
     OTLPUdpSpanExporter,
     UdpExporter,
-    FORMAT_OTEL_SAMPLED_TRACES_BINARY_PREFIX,
-    FORMAT_OTEL_UNSAMPLED_TRACES_BINARY_PREFIX,
 )
 from opentelemetry.sdk.metrics._internal.export import MetricExportResult
 from opentelemetry.sdk.trace.export import SpanExportResult
