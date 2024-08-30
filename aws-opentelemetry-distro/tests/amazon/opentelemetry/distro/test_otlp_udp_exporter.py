@@ -12,9 +12,12 @@ from amazon.opentelemetry.distro.otlp_udp_exporter import (
     OTLPUdpMetricExporter,
     OTLPUdpSpanExporter,
     UdpExporter,
+    FORMAT_OTEL_UNSAMPLED_TRACES_BINARY_PREFIX,
 )
 from opentelemetry.sdk.metrics._internal.export import MetricExportResult
 from opentelemetry.sdk.trace.export import SpanExportResult
+
+from build.python.amazon.opentelemetry.distro.otlp_udp_exporter import FORMAT_OTEL_SAMPLED_TRACES_BINARY_PREFIX
 
 
 class TestUdpExporter(TestCase):
@@ -102,9 +105,11 @@ class TestOTLPUdpSpanExporter(unittest.TestCase):
         mock_udp_exporter_instance = mock_udp_exporter.return_value
         mock_encoded_data = MagicMock()
         mock_encode_spans.return_value.SerializeToString.return_value = mock_encoded_data
-        exporter = OTLPUdpSpanExporter()
+        exporter = OTLPUdpSpanExporter(sampled=False)
         result = exporter.export(MagicMock())
-        mock_udp_exporter_instance.send_data.assert_called_once_with(data=mock_encoded_data, signal_format_prefix="T1")
+        mock_udp_exporter_instance.send_data.assert_called_once_with(
+            data=mock_encoded_data, signal_format_prefix=FORMAT_OTEL_UNSAMPLED_TRACES_BINARY_PREFIX
+        )
         self.assertEqual(result, SpanExportResult.SUCCESS)
 
     @patch("amazon.opentelemetry.distro.otlp_udp_exporter.encode_spans")

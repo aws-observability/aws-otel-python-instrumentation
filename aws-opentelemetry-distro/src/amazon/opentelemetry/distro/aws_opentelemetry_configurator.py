@@ -12,6 +12,7 @@ from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSample
 from amazon.opentelemetry.distro.attribute_propagating_span_processor_builder import (
     AttributePropagatingSpanProcessorBuilder,
 )
+from amazon.opentelemetry.distro.aws_batch_unsampled_span_processor import BatchUnsampledSpanProcessor
 from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder import (
     AwsMetricAttributesSpanExporterBuilder,
 )
@@ -153,6 +154,7 @@ def _init_tracing(
         span_exporter: SpanExporter = exporter_class(**exporter_args)
         span_exporter = _customize_exporter(span_exporter, resource)
         trace_provider.add_span_processor(BatchSpanProcessor(span_exporter))
+        _export_unsampled_span_for_lambda(trace_provider, resource)
 
     _customize_span_processors(trace_provider, resource)
 
@@ -160,6 +162,21 @@ def _init_tracing(
 
 
 # END The OpenTelemetry Authors code
+
+
+def _export_unsampled_span_for_lambda(trace_provider: TracerProvider, resource: Resource = None):
+    if not _is_application_signals_enabled():
+        return
+    if not _is_lambda_environment():
+        return
+
+    traces_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
+
+    span_exporter = AwsMetricAttributesSpanExporterBuilder(
+        OTLPUdpSpanExporter(endpoint=traces_endpoint, sampled=False), resource
+    ).build()
+
+    trace_provider.add_span_processor(BatchUnsampledSpanProcessor(span_exporter))
 
 
 def _is_defer_to_workers_enabled():
