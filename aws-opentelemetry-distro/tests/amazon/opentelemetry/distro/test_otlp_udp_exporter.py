@@ -92,6 +92,7 @@ class TestOTLPUdpMetricExporter(unittest.TestCase):
     def test_shutdown(self, mock_udp_exporter):
         mock_udp_exporter_instance = mock_udp_exporter.return_value
         exporter = OTLPUdpMetricExporter()
+        exporter.force_flush()
         exporter.shutdown()
         mock_udp_exporter_instance.shutdown.assert_called_once()
 
@@ -141,4 +142,5 @@ class TestOTLPUdpSpanExporter(unittest.TestCase):
         mock_udp_exporter_instance = mock_udp_exporter.return_value
         exporter = OTLPUdpSpanExporter()
         exporter.shutdown()
+        exporter.force_flush()
         mock_udp_exporter_instance.shutdown.assert_called_once()
