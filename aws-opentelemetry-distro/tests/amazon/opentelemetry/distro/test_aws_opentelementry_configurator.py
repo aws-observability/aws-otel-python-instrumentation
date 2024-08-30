@@ -16,6 +16,8 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _customize_sampler,
     _customize_span_processors,
     _is_application_signals_enabled,
+    _is_defer_to_workers_enabled,
+    _is_wsgi_master_process,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
@@ -304,6 +306,50 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertIsInstance(exporter, OTLPUdpMetricExporter)
         self.assertEqual("127.0.0.1:2000", exporter._udp_exporter._endpoint)
         os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
+
+    def test_is_defer_to_workers_enabled(self):
+        os.environ.setdefault("OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED", "True")
+        self.assertTrue(_is_defer_to_workers_enabled())
+        os.environ.pop("OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED", None)
+
+        os.environ.setdefault("OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED", "False")
+        self.assertFalse(_is_defer_to_workers_enabled())
+        os.environ.pop("OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED", None)
+        self.assertFalse(_is_defer_to_workers_enabled())
+
+    def test_is_wsgi_master_process_first_time(self):
+        self.assertTrue(_is_wsgi_master_process())
+        self.assertEqual(os.environ["IS_WSGI_MASTER_PROCESS_ALREADY_SEEN"], "true")
+        os.environ.pop("IS_WSGI_MASTER_PROCESS_ALREADY_SEEN", None)
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._initialize_components")
+    def test_initialize_components_skipped_in_master_when_deferred_enabled(self, mock_initialize_components):
+        os.environ.setdefault("OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED", "True")
+        os.environ.pop("IS_WSGI_MASTER_PROCESS_ALREADY_SEEN", None)
+        self.assertTrue(_is_defer_to_workers_enabled())
+        AwsOpenTelemetryConfigurator()._configure()
+        mock_initialize_components.assert_not_called()
+        os.environ.pop("OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED", None)
+        os.environ.pop("IS_WSGI_MASTER_PROCESS_ALREADY_SEEN", None)
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._initialize_components")
+    def test_initialize_components_called_in_worker_when_deferred_enabled(self, mock_initialize_components):
+        os.environ.setdefault("OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED", "True")
+        os.environ.setdefault("IS_WSGI_MASTER_PROCESS_ALREADY_SEEN", "true")
+        self.assertTrue(_is_defer_to_workers_enabled())
+        self.assertFalse(_is_wsgi_master_process())
+        AwsOpenTelemetryConfigurator()._configure()
+        mock_initialize_components.assert_called_once()
+        os.environ.pop("OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED", None)
+        os.environ.pop("IS_WSGI_MASTER_PROCESS_ALREADY_SEEN", None)
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._initialize_components")
+    def test_initialize_components_called_when_deferred_disabled(self, mock_initialize_components):
+        os.environ.pop("OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED", None)
+        self.assertFalse(_is_defer_to_workers_enabled())
+        AwsOpenTelemetryConfigurator()._configure()
+        mock_initialize_components.assert_called_once()
+        os.environ.pop("IS_WSGI_MASTER_PROCESS_ALREADY_SEEN", None)
 
 
 def validate_distro_environ():
