@@ -17,8 +17,6 @@ from amazon.opentelemetry.distro.otlp_udp_exporter import (
 from opentelemetry.sdk.metrics._internal.export import MetricExportResult
 from opentelemetry.sdk.trace.export import SpanExportResult
 
-from build.python.amazon.opentelemetry.distro.otlp_udp_exporter import FORMAT_OTEL_SAMPLED_TRACES_BINARY_PREFIX
-
 
 class TestUdpExporter(TestCase):
 
