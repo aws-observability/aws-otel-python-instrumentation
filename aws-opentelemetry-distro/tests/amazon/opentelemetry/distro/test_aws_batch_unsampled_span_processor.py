@@ -10,7 +10,7 @@ class TestBatchUnsampledSpanProcessor(TestCase):
 
     def setUp(self):
         self.mock_exporter = MagicMock()
-        self.processor = BatchUnsampledSpanProcessor(self.mock_exporter)
+        self.processor = BatchUnsampledSpanProcessor(self.mock_exporter, max_queue_size=1, max_export_batch_size=1)
 
     @patch("opentelemetry.sdk.trace.Span")
     def test_on_end_sampled(self, mock_span_class):
