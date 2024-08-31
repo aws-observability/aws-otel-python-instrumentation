@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor import AttributePropagatingSpanProcessor
+from amazon.opentelemetry.distro.aws_batch_unsampled_span_processor import BatchUnsampledSpanProcessor
 from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsMetricAttributesSpanExporter
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     ApplicationSignalsExporterProvider,
@@ -15,6 +16,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _customize_exporter,
     _customize_sampler,
     _customize_span_processors,
+    _export_unsampled_span_for_lambda,
     _is_application_signals_enabled,
     _is_defer_to_workers_enabled,
     _is_wsgi_master_process,
@@ -350,6 +352,19 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         AwsOpenTelemetryConfigurator()._configure()
         mock_initialize_components.assert_called_once()
         os.environ.pop("IS_WSGI_MASTER_PROCESS_ALREADY_SEEN", None)
+
+    def test_export_unsampled_span_for_lambda(self):
+        mock_tracer_provider: TracerProvider = MagicMock()
+        _export_unsampled_span_for_lambda(mock_tracer_provider, Resource.get_empty())
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 0)
+
+        os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
+        os.environ.setdefault("AWS_LAMBDA_FUNCTION_NAME", "myfunction")
+        _export_unsampled_span_for_lambda(mock_tracer_provider, Resource.get_empty())
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 1)
+        first_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
+        self.assertIsInstance(first_processor, BatchUnsampledSpanProcessor)
+        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
 
 
 def validate_distro_environ():

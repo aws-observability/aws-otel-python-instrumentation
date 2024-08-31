@@ -154,8 +154,8 @@ def _init_tracing(
         span_exporter: SpanExporter = exporter_class(**exporter_args)
         span_exporter = _customize_exporter(span_exporter, resource)
         trace_provider.add_span_processor(BatchSpanProcessor(span_exporter))
-        _export_unsampled_span_for_lambda(trace_provider, resource)
 
+    _export_unsampled_span_for_lambda(trace_provider, resource)
     _customize_span_processors(trace_provider, resource)
 
     set_tracer_provider(trace_provider)

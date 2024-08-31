@@ -1,3 +1,5 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
 import logging
 from typing import Optional
 
@@ -13,6 +15,7 @@ SPANUNSAMPLED_FLAG = "OTEL_AWS_APP_SIGNALS_ENABLED"
 
 class BatchUnsampledSpanProcessor(BaseBatchSpanProcessor):
 
+    # pylint: disable=no-self-use
     def on_start(self, span: Span, parent_context: Optional[Context] = None) -> None:
         if not span.context.trace_flags.sampled:
             span.set_attribute(AWS_TRACE_FLAG_UNSAMPLED, "True")
@@ -26,6 +29,7 @@ class BatchUnsampledSpanProcessor(BaseBatchSpanProcessor):
             return
 
         if len(self.queue) == self.max_queue_size:
+            # pylint: disable=access-member-before-definition
             if not self._spans_dropped:
                 logger.warning("Queue is full, likely spans will be dropped.")
                 self._spans_dropped = True
