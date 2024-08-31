@@ -32,6 +32,7 @@ class BatchUnsampledSpanProcessor(BaseBatchSpanProcessor):
             # pylint: disable=access-member-before-definition
             if not self._spans_dropped:
                 logger.warning("Queue is full, likely spans will be dropped.")
+                # pylint: disable=attribute-defined-outside-init
                 self._spans_dropped = True
 
         self.queue.appendleft(span)

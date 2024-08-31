@@ -39,6 +39,7 @@ from opentelemetry.sdk.trace.sampling import DEFAULT_ON, Sampler
 from opentelemetry.trace import get_tracer_provider
 
 
+# pylint: disable=too-many-public-methods
 class TestAwsOpenTelemetryConfigurator(TestCase):
     """Tests AwsOpenTelemetryConfigurator and AwsOpenTelemetryDistro
 
