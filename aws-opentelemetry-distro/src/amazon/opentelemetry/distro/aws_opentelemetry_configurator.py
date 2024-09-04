@@ -155,7 +155,6 @@ def _init_tracing(
         span_exporter = _customize_exporter(span_exporter, resource)
         trace_provider.add_span_processor(BatchSpanProcessor(span_exporter))
 
-    _export_unsampled_span_for_lambda(trace_provider, resource)
     _customize_span_processors(trace_provider, resource)
 
     set_tracer_provider(trace_provider)
@@ -275,6 +274,8 @@ def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> Span
 def _customize_span_processors(provider: TracerProvider, resource: Resource) -> None:
     if not _is_application_signals_enabled():
         return
+
+    _export_unsampled_span_for_lambda(provider, resource)
 
     # Construct and set local and remote attributes span processor
     provider.add_span_processor(AttributePropagatingSpanProcessorBuilder().build())

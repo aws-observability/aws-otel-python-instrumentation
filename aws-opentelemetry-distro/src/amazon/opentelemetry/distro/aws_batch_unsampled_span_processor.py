@@ -18,7 +18,7 @@ class BatchUnsampledSpanProcessor(BaseBatchSpanProcessor):
     # pylint: disable=no-self-use
     def on_start(self, span: Span, parent_context: Optional[Context] = None) -> None:
         if not span.context.trace_flags.sampled:
-            span.set_attribute(AWS_TRACE_FLAG_UNSAMPLED, "True")
+            span.set_attribute(AWS_TRACE_FLAG_UNSAMPLED, True)
 
     def on_end(self, span: ReadableSpan) -> None:
         if span.context.trace_flags.sampled:
