@@ -8,6 +8,8 @@ from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro.otlp_udp_exporter import (
     DEFAULT_ENDPOINT,
+    FORMAT_OTEL_SAMPLED_TRACES_BINARY_PREFIX,
+    FORMAT_OTEL_UNSAMPLED_TRACES_BINARY_PREFIX,
     PROTOCOL_HEADER,
     OTLPUdpMetricExporter,
     OTLPUdpSpanExporter,
@@ -90,6 +92,7 @@ class TestOTLPUdpMetricExporter(unittest.TestCase):
     def test_shutdown(self, mock_udp_exporter):
         mock_udp_exporter_instance = mock_udp_exporter.return_value
         exporter = OTLPUdpMetricExporter()
+        exporter.force_flush()
         exporter.shutdown()
         mock_udp_exporter_instance.shutdown.assert_called_once()
 
@@ -98,13 +101,28 @@ class TestOTLPUdpSpanExporter(unittest.TestCase):
 
     @patch("amazon.opentelemetry.distro.otlp_udp_exporter.encode_spans")
     @patch("amazon.opentelemetry.distro.otlp_udp_exporter.UdpExporter")
-    def test_export(self, mock_udp_exporter, mock_encode_spans):
+    def test_export_unsampled_span(self, mock_udp_exporter, mock_encode_spans):
+        mock_udp_exporter_instance = mock_udp_exporter.return_value
+        mock_encoded_data = MagicMock()
+        mock_encode_spans.return_value.SerializeToString.return_value = mock_encoded_data
+        exporter = OTLPUdpSpanExporter(sampled=False)
+        result = exporter.export(MagicMock())
+        mock_udp_exporter_instance.send_data.assert_called_once_with(
+            data=mock_encoded_data, signal_format_prefix=FORMAT_OTEL_UNSAMPLED_TRACES_BINARY_PREFIX
+        )
+        self.assertEqual(result, SpanExportResult.SUCCESS)
+
+    @patch("amazon.opentelemetry.distro.otlp_udp_exporter.encode_spans")
+    @patch("amazon.opentelemetry.distro.otlp_udp_exporter.UdpExporter")
+    def test_export_sampled_span(self, mock_udp_exporter, mock_encode_spans):
         mock_udp_exporter_instance = mock_udp_exporter.return_value
         mock_encoded_data = MagicMock()
         mock_encode_spans.return_value.SerializeToString.return_value = mock_encoded_data
         exporter = OTLPUdpSpanExporter()
         result = exporter.export(MagicMock())
-        mock_udp_exporter_instance.send_data.assert_called_once_with(data=mock_encoded_data, signal_format_prefix="T1")
+        mock_udp_exporter_instance.send_data.assert_called_once_with(
+            data=mock_encoded_data, signal_format_prefix=FORMAT_OTEL_SAMPLED_TRACES_BINARY_PREFIX
+        )
         self.assertEqual(result, SpanExportResult.SUCCESS)
 
     @patch("amazon.opentelemetry.distro.otlp_udp_exporter.encode_spans")
@@ -124,4 +142,5 @@ class TestOTLPUdpSpanExporter(unittest.TestCase):
         mock_udp_exporter_instance = mock_udp_exporter.return_value
         exporter = OTLPUdpSpanExporter()
         exporter.shutdown()
+        exporter.force_flush()
         mock_udp_exporter_instance.shutdown.assert_called_once()

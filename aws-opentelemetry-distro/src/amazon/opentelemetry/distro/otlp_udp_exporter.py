@@ -20,7 +20,10 @@ from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 DEFAULT_ENDPOINT = "127.0.0.1:2000"
 PROTOCOL_HEADER = '{"format":"json","version":1}\n'
 FORMAT_OTEL_METRICS_BINARY_PREFIX = "M1"
-FORMAT_OTEL_TRACES_BINARY_PREFIX = "T1"
+
+# TODO: update sampled and unsampled prefix later
+FORMAT_OTEL_SAMPLED_TRACES_BINARY_PREFIX = "T1"
+FORMAT_OTEL_UNSAMPLED_TRACES_BINARY_PREFIX = "T1"
 
 _logger: Logger = getLogger(__name__)
 
@@ -98,15 +101,21 @@ class OTLPUdpMetricExporter(MetricExporter):
 
 
 class OTLPUdpSpanExporter(SpanExporter):
-    def __init__(self, endpoint: Optional[str] = None):
+    def __init__(self, endpoint: Optional[str] = None, sampled: bool = True):
         self._udp_exporter = UdpExporter(endpoint=endpoint)
+        self._sampled = sampled
 
     @override
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
         serialized_data = encode_spans(spans).SerializeToString()
 
         try:
-            self._udp_exporter.send_data(data=serialized_data, signal_format_prefix=FORMAT_OTEL_TRACES_BINARY_PREFIX)
+            prefix = (
+                FORMAT_OTEL_SAMPLED_TRACES_BINARY_PREFIX
+                if self._sampled
+                else FORMAT_OTEL_UNSAMPLED_TRACES_BINARY_PREFIX
+            )
+            self._udp_exporter.send_data(data=serialized_data, signal_format_prefix=prefix)
             return SpanExportResult.SUCCESS
         except Exception as exc:  # pylint: disable=broad-except
             _logger.error("Error exporting spans: %s", exc)
