@@ -39,7 +39,7 @@ from importlib import import_module
 from typing import Any
 
 from opentelemetry.context import Context
-from opentelemetry.instrumentation.aws_lambda import AwsLambdaInstrumentor, _X_AMZN_TRACE_ID
+from opentelemetry.instrumentation.aws_lambda import _X_AMZN_TRACE_ID, AwsLambdaInstrumentor
 from opentelemetry.propagate import get_global_textmap
 from opentelemetry.propagators.aws import AwsXRayPropagator
 from opentelemetry.propagators.aws.aws_xray_propagator import TRACE_HEADER_KEY
