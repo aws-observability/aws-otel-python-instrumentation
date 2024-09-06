@@ -49,7 +49,7 @@ dependencies = [
   "opentelemetry-instrumentation-celery == 0.48b0",
   "opentelemetry-instrumentation-confluent-kafka == 0.48b0",
   "opentelemetry-instrumentation-dbapi == 0.48b0",
-  "opentelemetry-instrumentation-django == 0.4680",
+  "opentelemetry-instrumentation-django == 0.48b0",
   "opentelemetry-instrumentation-elasticsearch == 0.48b0",
   "opentelemetry-instrumentation-falcon == 0.48b0",
   "opentelemetry-instrumentation-fastapi == 0.48b0",
