@@ -38,7 +38,7 @@ class TestAlwaysRecordSampler(TestCase):
             trace_id=0,
             name="name",
             kind=SpanKind.CLIENT,
-            attributes={},
+            attributes={"key": root_decision.name},
             trace_state=TraceState(),
         )
 
