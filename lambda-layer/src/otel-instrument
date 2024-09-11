@@ -126,7 +126,7 @@ fi
 # - Enable botocore instrumentation by default
 
 if [ -z ${OTEL_PYTHON_DISABLED_INSTRUMENTATIONS} ]; then
-    export OTEL_PYTHON_DISABLED_INSTRUMENTATIONS="aio-pika,aiohttp-client,aiopg,asgi,asyncpg,boto3sqs,boto,cassandra,celery,confluent-kafka,dbapi,django,elasticsearch,fastapi,falcon,flask,grpc,httpx,jinja2,kafka-python,logging,mysql,mysqlclient,pika,psycopg2,pymemcache,pymongo,pymysql,pyramid,redis,remoulade,requests,sklearn,sqlalchemy,sqlite3,starlette,system-metrics,tornado,tortoiseorm,urllib,urllib3,wsgi"
+    export OTEL_PYTHON_DISABLED_INSTRUMENTATIONS="aio-pika,aiohttp-client,aiohttp-server,aiopg,asgi,asyncio,asyncpg,boto,boto3,cassandra,celery,confluent_kafka,dbapi,django,elasticsearch,falcon,fastapi,flask,grpc_client,grpc_server,grpc_aio_client,grpc_aio_server,httpx,jinja2,kafka,logging,mysql,mysqlclient,pika,psycopg,psycopg2,pymemcache,pymongo,pymysql,pyramid,redis,remoulade,requests,sklearn,sqlalchemy,sqlite3,starlette,system_metrics,threading,tornado,tortoiseorm,urllib,urllib3,wsgi"
 fi
 
 # - Use a wrapper because AWS Lambda's `python3 /var/runtime/bootstrap.py` will

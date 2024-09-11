@@ -36,8 +36,14 @@ https://docs.python.org/3/library/imp.html#imp.load_module
 
 import os
 from importlib import import_module
+from typing import Any
 
-from opentelemetry.instrumentation.aws_lambda import AwsLambdaInstrumentor
+from opentelemetry.context import Context
+from opentelemetry.instrumentation.aws_lambda import _X_AMZN_TRACE_ID, AwsLambdaInstrumentor
+from opentelemetry.propagate import get_global_textmap
+from opentelemetry.propagators.aws import AwsXRayPropagator
+from opentelemetry.propagators.aws.aws_xray_propagator import TRACE_HEADER_KEY
+from opentelemetry.trace import get_current_span
 
 
 def modify_module_name(module_name):
@@ -49,7 +55,26 @@ class HandlerError(Exception):
     pass
 
 
-AwsLambdaInstrumentor().instrument()
+def custom_event_context_extractor(lambda_event: Any) -> Context:
+    xray_env_var = os.environ.get(_X_AMZN_TRACE_ID)
+    lambda_trace_context = AwsXRayPropagator().extract({TRACE_HEADER_KEY: xray_env_var})
+    parent_span_context = get_current_span(lambda_trace_context).get_span_context()
+
+    if parent_span_context is None or not parent_span_context.is_valid:
+        headers = None
+        try:
+            headers = lambda_event["headers"]
+        except (TypeError, KeyError):
+            pass
+        if not isinstance(headers, dict):
+            headers = {}
+
+        return get_global_textmap().extract(headers)
+
+    return lambda_trace_context
+
+
+AwsLambdaInstrumentor().instrument(event_context_extractor=custom_event_context_extractor)
 
 path = os.environ.get("ORIG_HANDLER")
 
