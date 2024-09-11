@@ -19,7 +19,8 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _export_unsampled_span_for_lambda,
     _is_application_signals_enabled,
     _is_defer_to_workers_enabled,
-    _is_wsgi_master_process, LAMBDA_SPAN_EXPORT_BATCH_SIZE, _is_lambda_environment,
+    _is_wsgi_master_process,
+    LAMBDA_SPAN_EXPORT_BATCH_SIZE,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
@@ -31,7 +32,6 @@ from opentelemetry.exporter.otlp.proto.common._internal.metrics_encoder import O
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter as OTLPGrpcOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.sdk.environment_variables import OTEL_TRACES_SAMPLER, OTEL_TRACES_SAMPLER_ARG
-from opentelemetry.sdk.metrics._internal.export import MetricExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Span, SpanProcessor, Tracer, TracerProvider
 from opentelemetry.sdk.trace.export import SpanExporter

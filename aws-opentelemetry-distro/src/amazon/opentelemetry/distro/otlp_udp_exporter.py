@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import base64
+import errno
 import socket
 from logging import Logger, getLogger
 from typing import Dict, Optional, Sequence, Tuple
@@ -21,9 +22,10 @@ DEFAULT_ENDPOINT = "127.0.0.1:2000"
 PROTOCOL_HEADER = '{"format":"json","version":1}\n'
 FORMAT_OTEL_METRICS_BINARY_PREFIX = "M1"
 
-# TODO: update sampled and unsampled prefix later
 FORMAT_OTEL_SAMPLED_TRACES_BINARY_PREFIX = "T1S"
 FORMAT_OTEL_UNSAMPLED_TRACES_BINARY_PREFIX = "T1U"
+# UDP packet size limit in IPv4
+UDP_PACKET_LIMIT = 65507
 
 _logger: Logger = getLogger(__name__)
 
@@ -39,10 +41,15 @@ class UdpExporter:
         # base64 encoding and then converting to string with utf-8
         base64_encoded_string: str = base64.b64encode(data).decode("utf-8")
         message = f"{PROTOCOL_HEADER}{signal_format_prefix}{base64_encoded_string}"
+        packet_bytes = message.encode("utf-8")
+        if len(packet_bytes) > UDP_PACKET_LIMIT:
+            # TODO: send metrics
+            _logger.error("Data size %s exceeds the UDP packet limit.", len(packet_bytes))
+            pass
 
         try:
             _logger.debug("Sending UDP data: %s", message)
-            self._socket.sendto(message.encode("utf-8"), (self._host, int(self._port)))
+            self._socket.sendto(packet_bytes, (self._host, int(self._port)))
         except Exception as exc:  # pylint: disable=broad-except
             _logger.error("Error sending UDP data: %s", exc)
             raise
@@ -60,45 +67,6 @@ class UdpExporter:
             raise ValueError(f"Invalid endpoint: {endpoint}") from exc
 
         return host, port
-
-
-class OTLPUdpMetricExporter(MetricExporter):
-    def __init__(
-        self,
-        endpoint: Optional[str] = None,
-        preferred_temporality: Dict[type, AggregationTemporality] = None,
-        preferred_aggregation: Dict[type, Aggregation] = None,
-    ):
-        super().__init__(
-            preferred_temporality=preferred_temporality,
-            preferred_aggregation=preferred_aggregation,
-        )
-        self._udp_exporter = UdpExporter(endpoint=endpoint)
-
-    @override
-    def export(
-        self,
-        metrics_data: MetricsData,
-        timeout_millis: float = 10_000,
-        **kwargs,
-    ) -> MetricExportResult:
-        serialized_data = encode_metrics(metrics_data).SerializeToString()
-
-        try:
-            self._udp_exporter.send_data(data=serialized_data, signal_format_prefix=FORMAT_OTEL_METRICS_BINARY_PREFIX)
-            return MetricExportResult.SUCCESS
-        except Exception as exc:  # pylint: disable=broad-except
-            _logger.error("Error exporting metrics: %s", exc)
-            return MetricExportResult.FAILURE
-
-    # pylint: disable=no-self-use
-    def force_flush(self, timeout_millis: float = 10_000) -> bool:
-        # TODO: implement force flush
-        return True
-
-    def shutdown(self, timeout_millis: float = 30_000, **kwargs) -> None:
-        self._udp_exporter.shutdown()
-
 
 class OTLPUdpSpanExporter(SpanExporter):
     def __init__(self, endpoint: Optional[str] = None, sampled: bool = True):
