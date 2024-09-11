@@ -52,7 +52,7 @@ class AlwaysRecordSampler(Sampler):
             parent_context, trace_id, name, kind, attributes, links, trace_state
         )
         if result.decision is Decision.DROP:
-            result = _wrap_result_with_record_only_result(result)
+            result = _wrap_result_with_record_only_result(result, attributes)
         return result
 
     @override
@@ -60,9 +60,9 @@ class AlwaysRecordSampler(Sampler):
         return "AlwaysRecordSampler{" + self._root_sampler.get_description() + "}"
 
 
-def _wrap_result_with_record_only_result(result: SamplingResult) -> SamplingResult:
+def _wrap_result_with_record_only_result(result: SamplingResult, attributes: Attributes) -> SamplingResult:
     return SamplingResult(
         Decision.RECORD_ONLY,
-        result.attributes,
+        attributes,
         result.trace_state,
     )
