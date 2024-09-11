@@ -10,6 +10,7 @@ from amazon.opentelemetry.distro.attribute_propagating_span_processor import Att
 from amazon.opentelemetry.distro.aws_batch_unsampled_span_processor import BatchUnsampledSpanProcessor
 from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsMetricAttributesSpanExporter
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
+    LAMBDA_SPAN_EXPORT_BATCH_SIZE,
     ApplicationSignalsExporterProvider,
     AwsOpenTelemetryConfigurator,
     _custom_import_sampler,
@@ -20,11 +21,10 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _is_application_signals_enabled,
     _is_defer_to_workers_enabled,
     _is_wsgi_master_process,
-    LAMBDA_SPAN_EXPORT_BATCH_SIZE,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
-from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpMetricExporter, OTLPUdpSpanExporter
+from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler._aws_xray_sampling_client import _AwsXRaySamplingClient
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from opentelemetry.environment_variables import OTEL_LOGS_EXPORTER, OTEL_METRICS_EXPORTER, OTEL_TRACES_EXPORTER
