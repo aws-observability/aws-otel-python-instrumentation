@@ -1,20 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import base64
-import errno
 import socket
 from logging import Logger, getLogger
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Optional, Sequence, Tuple
 
 from typing_extensions import override
 
-from opentelemetry.exporter.otlp.proto.common.metrics_encoder import encode_metrics
 from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
-from opentelemetry.sdk.metrics._internal.aggregation import AggregationTemporality
-from opentelemetry.sdk.metrics._internal.export import MetricExportResult
-from opentelemetry.sdk.metrics._internal.point import MetricsData
-from opentelemetry.sdk.metrics.export import MetricExporter
-from opentelemetry.sdk.metrics.view import Aggregation
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
@@ -44,7 +37,7 @@ class UdpExporter:
         packet_bytes = message.encode("utf-8")
         if len(packet_bytes) > UDP_PACKET_LIMIT:
             # TODO: send metrics
-            _logger.error("Data size %s exceeds the UDP packet limit.", len(packet_bytes))
+            _logger.debug("Data size %s exceeds the UDP packet limit.", len(packet_bytes))
             pass
 
         try:
@@ -67,6 +60,7 @@ class UdpExporter:
             raise ValueError(f"Invalid endpoint: {endpoint}") from exc
 
         return host, port
+
 
 class OTLPUdpSpanExporter(SpanExporter):
     def __init__(self, endpoint: Optional[str] = None, sampled: bool = True):
