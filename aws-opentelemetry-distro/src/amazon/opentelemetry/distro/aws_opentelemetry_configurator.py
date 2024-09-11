@@ -67,6 +67,8 @@ DEFAULT_METRIC_EXPORT_INTERVAL = 60000.0
 AWS_LAMBDA_FUNCTION_NAME_CONFIG = "AWS_LAMBDA_FUNCTION_NAME"
 AWS_XRAY_DAEMON_ADDRESS_CONFIG = "AWS_XRAY_DAEMON_ADDRESS"
 OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED_CONFIG = "OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED"
+# UDP package size is not larger than 64KB
+LAMBDA_SPAN_EXPORT_BATCH_SIZE = 10
 
 _logger: Logger = getLogger(__name__)
 
@@ -112,13 +114,18 @@ def _initialize_components():
 
     auto_resource: Dict[str, any] = {}
     auto_resource = _customize_versions(auto_resource)
-    resource = get_aggregated_resources(
+
+    resource_detectors = (
         [
             AwsEc2ResourceDetector(),
             AwsEksResourceDetector(),
             AwsEcsResourceDetector(),
         ]
-    ).merge(Resource.create(auto_resource))
+        if not _is_lambda_environment()
+        else []
+    )
+
+    resource = get_aggregated_resources(resource_detectors).merge(Resource.create(auto_resource))
 
     sampler_name = _get_sampler()
     sampler = _custom_import_sampler(sampler_name, resource)
@@ -153,7 +160,9 @@ def _init_tracing(
         exporter_args: Dict[str, any] = {}
         span_exporter: SpanExporter = exporter_class(**exporter_args)
         span_exporter = _customize_exporter(span_exporter, resource)
-        trace_provider.add_span_processor(BatchSpanProcessor(span_exporter))
+        trace_provider.add_span_processor(
+            BatchSpanProcessor(span_exporter=span_exporter, max_export_batch_size=_span_export_batch_size())
+        )
 
     _customize_span_processors(trace_provider, resource)
 
@@ -175,7 +184,9 @@ def _export_unsampled_span_for_lambda(trace_provider: TracerProvider, resource: 
         OTLPUdpSpanExporter(endpoint=traces_endpoint, sampled=False), resource
     ).build()
 
-    trace_provider.add_span_processor(BatchUnsampledSpanProcessor(span_exporter))
+    trace_provider.add_span_processor(
+        BatchUnsampledSpanProcessor(span_exporter=span_exporter, max_export_batch_size=LAMBDA_SPAN_EXPORT_BATCH_SIZE)
+    )
 
 
 def _is_defer_to_workers_enabled():
@@ -263,11 +274,15 @@ def _customize_sampler(sampler: Sampler) -> Sampler:
 
 
 def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> SpanExporter:
+    if _is_lambda_environment():
+        # TODO: not override span exporter if set OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+        # TODO: not override span exporter if set console exporter
+        traces_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
+        span_exporter = OTLPUdpSpanExporter(endpoint=traces_endpoint)
+
     if not _is_application_signals_enabled():
         return span_exporter
-    if _is_lambda_environment():
-        traces_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
-        return AwsMetricAttributesSpanExporterBuilder(OTLPUdpSpanExporter(endpoint=traces_endpoint), resource).build()
+
     return AwsMetricAttributesSpanExporterBuilder(span_exporter, resource).build()
 
 
@@ -275,10 +290,13 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource) -> 
     if not _is_application_signals_enabled():
         return
 
-    _export_unsampled_span_for_lambda(provider, resource)
-
     # Construct and set local and remote attributes span processor
     provider.add_span_processor(AttributePropagatingSpanProcessorBuilder().build())
+
+    # Export 100% spans and not export Application-Signals metrics if on Lambda.
+    if _is_lambda_environment():
+        _export_unsampled_span_for_lambda(provider, resource)
+        return
 
     # Construct meterProvider
     _logger.info("AWS Application Signals enabled")
@@ -318,6 +336,10 @@ def _is_lambda_environment():
     return AWS_LAMBDA_FUNCTION_NAME_CONFIG in os.environ
 
 
+def _span_export_batch_size():
+    return LAMBDA_SPAN_EXPORT_BATCH_SIZE if _is_lambda_environment() else None
+
+
 class ApplicationSignalsExporterProvider:
     _instance: ClassVar["ApplicationSignalsExporterProvider"] = None
 
@@ -344,11 +366,6 @@ class ApplicationSignalsExporterProvider:
             Histogram,
         ]:
             temporality_dict[typ] = AggregationTemporality.DELTA
-
-        if _is_lambda_environment():
-            # When running in Lambda, export Application Signals metrics over UDP
-            application_signals_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
-            return OTLPUdpMetricExporter(endpoint=application_signals_endpoint, preferred_temporality=temporality_dict)
 
         if protocol == "http/protobuf":
             application_signals_endpoint = os.environ.get(

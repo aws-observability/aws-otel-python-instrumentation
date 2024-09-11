@@ -19,7 +19,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _export_unsampled_span_for_lambda,
     _is_application_signals_enabled,
     _is_defer_to_workers_enabled,
-    _is_wsgi_master_process,
+    _is_wsgi_master_process, LAMBDA_SPAN_EXPORT_BATCH_SIZE, _is_lambda_environment,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
@@ -285,6 +285,23 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertIsInstance(second_processor, AwsSpanMetricsProcessor)
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
 
+    def test_customize_span_processors_lambda(self):
+        mock_tracer_provider: TracerProvider = MagicMock()
+        _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 0)
+
+        os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
+        os.environ.setdefault("AWS_LAMBDA_FUNCTION_NAME", "myLambdaFunc")
+        _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 2)
+        first_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
+        self.assertIsInstance(first_processor, AttributePropagatingSpanProcessor)
+        second_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[1].args[0]
+        self.assertIsInstance(second_processor, BatchUnsampledSpanProcessor)
+        self.assertEqual(second_processor.max_export_batch_size, LAMBDA_SPAN_EXPORT_BATCH_SIZE)
+        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
+        os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
+
     def test_application_signals_exporter_provider(self):
         # Check default protocol - HTTP, as specified by AwsOpenTelemetryDistro.
         exporter: OTLPMetricExporterMixin = ApplicationSignalsExporterProvider().create_exporter()
@@ -302,13 +319,6 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         exporter: SpanExporter = ApplicationSignalsExporterProvider().create_exporter()
         self.assertIsInstance(exporter, OTLPHttpOTLPMetricExporter)
         self.assertEqual("http://localhost:4316/v1/metrics", exporter._endpoint)
-
-        # When in Lambda, exporter should be UDP.
-        os.environ.setdefault("AWS_LAMBDA_FUNCTION_NAME", "myLambdaFunc")
-        exporter: MetricExporter = ApplicationSignalsExporterProvider().create_exporter()
-        self.assertIsInstance(exporter, OTLPUdpMetricExporter)
-        self.assertEqual("127.0.0.1:2000", exporter._udp_exporter._endpoint)
-        os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
 
     def test_is_defer_to_workers_enabled(self):
         os.environ.setdefault("OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED", "True")
