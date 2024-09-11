@@ -17,8 +17,6 @@ FORMAT_OTEL_METRICS_BINARY_PREFIX = "M1"
 
 FORMAT_OTEL_SAMPLED_TRACES_BINARY_PREFIX = "T1S"
 FORMAT_OTEL_UNSAMPLED_TRACES_BINARY_PREFIX = "T1U"
-# UDP packet size limit in IPv4
-UDP_PACKET_LIMIT = 65507
 
 _logger: Logger = getLogger(__name__)
 
@@ -34,15 +32,10 @@ class UdpExporter:
         # base64 encoding and then converting to string with utf-8
         base64_encoded_string: str = base64.b64encode(data).decode("utf-8")
         message = f"{PROTOCOL_HEADER}{signal_format_prefix}{base64_encoded_string}"
-        packet_bytes = message.encode("utf-8")
-        if len(packet_bytes) > UDP_PACKET_LIMIT:
-            # TODO: send metrics
-            _logger.debug("Data size %s exceeds the UDP packet limit.", len(packet_bytes))
-            pass
 
         try:
             _logger.debug("Sending UDP data: %s", message)
-            self._socket.sendto(packet_bytes, (self._host, int(self._port)))
+            self._socket.sendto(message.encode("utf-8"), (self._host, int(self._port)))
         except Exception as exc:  # pylint: disable=broad-except
             _logger.error("Error sending UDP data: %s", exc)
             raise
