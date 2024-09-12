@@ -28,7 +28,6 @@ module "test-function" {
 
   environment_variables = {
     AWS_LAMBDA_EXEC_WRAPPER = "/opt/otel-instrument"
-    OTEL_AWS_APPLICATION_SIGNALS_ENABLED = "true"
   }
 
   tracing_mode = var.tracing_mode
