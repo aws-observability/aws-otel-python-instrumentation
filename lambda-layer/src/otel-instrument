@@ -142,7 +142,7 @@ fi
 if [ -z ${OTEL_PYTHON_DISABLED_INSTRUMENTATIONS} ]; then
     export OTEL_PYTHON_DISABLED_INSTRUMENTATIONS="aio-pika,aiohttp-client,aiohttp-server,aiopg,asgi,asyncio,asyncpg,boto,boto3,cassandra,celery,confluent_kafka,dbapi,django,elasticsearch,falcon,fastapi,flask,grpc_client,grpc_server,grpc_aio_client,grpc_aio_server,httpx,jinja2,kafka,logging,mysql,mysqlclient,pika,psycopg,psycopg2,pymemcache,pymongo,pymysql,pyramid,redis,remoulade,requests,sklearn,sqlalchemy,sqlite3,starlette,system_metrics,threading,tornado,tortoiseorm,urllib,urllib3,wsgi"
 fi
-export OTEL_PYTHON_DISABLED_INSTRUMENTATIONS="OTEL_PYTHON_DISABLED_INSTRUMENTATIONS,aws-lambda";
+export OTEL_PYTHON_DISABLED_INSTRUMENTATIONS="$OTEL_PYTHON_DISABLED_INSTRUMENTATIONS,aws-lambda";
 
 # - Use a wrapper because AWS Lambda's `python3 /var/runtime/bootstrap.py` will
 #   use `imp.load_module` to load the function from the `_HANDLER` environment
