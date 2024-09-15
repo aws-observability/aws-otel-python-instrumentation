@@ -20,6 +20,7 @@ from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSp
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk._configuration import (
     _get_exporter_names,
     _get_id_generator,
@@ -67,6 +68,7 @@ DEFAULT_METRIC_EXPORT_INTERVAL = 60000.0
 AWS_LAMBDA_FUNCTION_NAME_CONFIG = "AWS_LAMBDA_FUNCTION_NAME"
 AWS_XRAY_DAEMON_ADDRESS_CONFIG = "AWS_XRAY_DAEMON_ADDRESS"
 OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED_CONFIG = "OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED"
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 # UDP package size is not larger than 64KB
 LAMBDA_SPAN_EXPORT_BATCH_SIZE = 10
 
@@ -275,10 +277,10 @@ def _customize_sampler(sampler: Sampler) -> Sampler:
 
 def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> SpanExporter:
     if _is_lambda_environment():
-        # TODO: not override span exporter if set OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
-        # TODO: not override span exporter if set console exporter
-        traces_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
-        span_exporter = OTLPUdpSpanExporter(endpoint=traces_endpoint)
+        # Override OTLP http default endpoint to UDP
+        if isinstance(span_exporter, OTLPSpanExporter) and os.getenv(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT) is None:
+            traces_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
+            span_exporter = OTLPUdpSpanExporter(endpoint=traces_endpoint)
 
     if not _is_application_signals_enabled():
         return span_exporter

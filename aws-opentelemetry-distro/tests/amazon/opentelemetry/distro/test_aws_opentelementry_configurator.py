@@ -31,6 +31,7 @@ from opentelemetry.environment_variables import OTEL_LOGS_EXPORTER, OTEL_METRICS
 from opentelemetry.exporter.otlp.proto.common._internal.metrics_encoder import OTLPMetricExporterMixin
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter as OTLPGrpcOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.environment_variables import OTEL_TRACES_SAMPLER, OTEL_TRACES_SAMPLER_ARG
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Span, SpanProcessor, Tracer, TracerProvider
@@ -250,7 +251,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
 
     def test_customize_exporter(self):
-        mock_exporter: SpanExporter = MagicMock()
+        mock_exporter: SpanExporter = MagicMock(spec=OTLPSpanExporter)
         customized_exporter: SpanExporter = _customize_exporter(mock_exporter, Resource.get_empty())
         self.assertEqual(mock_exporter, customized_exporter)
 
