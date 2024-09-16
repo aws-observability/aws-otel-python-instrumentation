@@ -3,7 +3,7 @@
 import os
 from typing import List
 from unittest import TestCase
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND, AWS_LOCAL_OPERATION
 from amazon.opentelemetry.distro._aws_span_processing_util import (
@@ -56,15 +56,13 @@ class TestAwsSpanProcessingUtil(TestCase):
         actual_operation: str = get_ingress_operation(self, self.span_data_mock)
         self.assertEqual(actual_operation, _INTERNAL_OPERATION)
 
+    @patch.dict(os.environ, {_AWS_LAMBDA_FUNCTION_NAME: 'MyLambda'})
     def test_get_ingress_operation_in_lambda(self):
         valid_name: str = "ValidName"
-        lambda_function_name: str = "MyLambda"
-        os.environ.setdefault(_AWS_LAMBDA_FUNCTION_NAME, lambda_function_name)
         self.span_data_mock.name = valid_name
         self.span_data_mock.kind = SpanKind.SERVER
         actual_operation: str = get_ingress_operation(self, self.span_data_mock)
-        self.assertEqual(actual_operation, lambda_function_name + "/Handler")
-        os.environ.pop(_AWS_LAMBDA_FUNCTION_NAME, None)
+        self.assertEqual(actual_operation, "MyLambda/Handler")
 
     def test_get_ingress_operation_http_method_name_and_no_fallback(self):
         invalid_name: str = "GET"

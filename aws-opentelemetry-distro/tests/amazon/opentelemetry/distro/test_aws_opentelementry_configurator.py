@@ -377,6 +377,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         first_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
         self.assertIsInstance(first_processor, BatchUnsampledSpanProcessor)
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
+        os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
 
 
 def validate_distro_environ():
