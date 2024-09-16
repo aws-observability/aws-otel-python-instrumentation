@@ -20,6 +20,7 @@ INTERNAL_OPERATION: str = "InternalOperation"
 LOCAL_ROOT: str = "LOCAL_ROOT"
 
 # Useful constants
+_AWS_LAMBDA_FUNCTION_NAME: str = "AWS_LAMBDA_FUNCTION_NAME"
 _BOTO3SQS_INSTRUMENTATION_SCOPE: str = "opentelemetry.instrumentation.boto3sqs"
 
 # Max keyword length supported by parsing into remote_operation from DB_STATEMENT
@@ -50,7 +51,9 @@ def get_ingress_operation(__, span: ReadableSpan) -> str:
     with the first API path parameter" if the default span name is None, UnknownOperation or http.method value.
     """
     operation: str = span.name
-    if should_use_internal_operation(span):
+    if _AWS_LAMBDA_FUNCTION_NAME in os.environ:
+        operation = os.environ.get(_AWS_LAMBDA_FUNCTION_NAME) + "/Handler"
+    elif should_use_internal_operation(span):
         operation = INTERNAL_OPERATION
     elif not _is_valid_operation(span, operation):
         operation = _generate_ingress_operation(span)
