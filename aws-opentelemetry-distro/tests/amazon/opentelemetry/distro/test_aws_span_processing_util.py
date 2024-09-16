@@ -56,7 +56,7 @@ class TestAwsSpanProcessingUtil(TestCase):
         actual_operation: str = get_ingress_operation(self, self.span_data_mock)
         self.assertEqual(actual_operation, _INTERNAL_OPERATION)
 
-    @patch.dict(os.environ, {_AWS_LAMBDA_FUNCTION_NAME: 'MyLambda'})
+    @patch.dict(os.environ, {_AWS_LAMBDA_FUNCTION_NAME: "MyLambda"})
     def test_get_ingress_operation_in_lambda(self):
         valid_name: str = "ValidName"
         self.span_data_mock.name = valid_name
