@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND, AWS_LOCAL_OPERATION
 from amazon.opentelemetry.distro._aws_span_processing_util import (
+    _AWS_LAMBDA_FUNCTION_NAME,
     MAX_KEYWORD_LENGTH,
     _get_dialect_keywords,
     extract_api_path_value,
@@ -19,7 +20,6 @@ from amazon.opentelemetry.distro._aws_span_processing_util import (
     should_generate_dependency_metric_attributes,
     should_generate_service_metric_attributes,
     should_use_internal_operation,
-    _AWS_LAMBDA_FUNCTION_NAME,
 )
 from opentelemetry.sdk.trace import Span, SpanContext
 from opentelemetry.sdk.util.instrumentation import InstrumentationScope
