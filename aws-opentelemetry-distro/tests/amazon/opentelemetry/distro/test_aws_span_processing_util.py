@@ -1,11 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import os
 from typing import List
 from unittest import TestCase
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND, AWS_LOCAL_OPERATION
 from amazon.opentelemetry.distro._aws_span_processing_util import (
+    _AWS_LAMBDA_FUNCTION_NAME,
     MAX_KEYWORD_LENGTH,
     _get_dialect_keywords,
     extract_api_path_value,
@@ -53,6 +55,14 @@ class TestAwsSpanProcessingUtil(TestCase):
         self.span_data_mock.kind = SpanKind.CLIENT
         actual_operation: str = get_ingress_operation(self, self.span_data_mock)
         self.assertEqual(actual_operation, _INTERNAL_OPERATION)
+
+    @patch.dict(os.environ, {_AWS_LAMBDA_FUNCTION_NAME: "MyLambda"})
+    def test_get_ingress_operation_in_lambda(self):
+        valid_name: str = "ValidName"
+        self.span_data_mock.name = valid_name
+        self.span_data_mock.kind = SpanKind.SERVER
+        actual_operation: str = get_ingress_operation(self, self.span_data_mock)
+        self.assertEqual(actual_operation, "MyLambda/Handler")
 
     def test_get_ingress_operation_http_method_name_and_no_fallback(self):
         invalid_name: str = "GET"
