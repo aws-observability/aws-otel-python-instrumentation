@@ -77,7 +77,7 @@ jobs:
       caller-workflow-name: 'main-build'
 
   python-ecs-e2e-test:
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ecs-test.yml@ecs_entry
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ecs-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
