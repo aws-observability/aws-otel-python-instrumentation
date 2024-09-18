@@ -43,11 +43,13 @@ jobs:
           shortsha="$(git rev-parse --short HEAD)"
           echo "SHORT_SHA=$shortsha" >> $GITHUB_ENV
           python_distro_tag=$pkg_version-$shortsha
+          echo "$python_distro_tag"
           echo "awsDefaultRegion=${{ env.AWS_DEFAULT_REGION }}" >> $GITHUB_OUTPUT
           echo "python_image_tag=$python_distro_tag" >> $GITHUB_OUTPUT
           echo "stagingRegistry=${{ env.STAGING_ECR_REGISTRY }}" >> $GITHUB_OUTPUT
           echo "stagingRepository=${{ env.STAGING_ECR_REPOSITORY }}" >> $GITHUB_OUTPUT
           echo "stagingImage=${{ env.STAGING_ECR_REGISTRY }}/${{ env.STAGING_ECR_REPOSITORY }}:$python_distro_tag" >> $GITHUB_OUTPUT
+          echo "${{ env.STAGING_ECR_REGISTRY }}/${{ env.STAGING_ECR_REPOSITORY }}:$python_distro_tag"
 
       - name: Build and Push Wheel and Image Files
         uses: ./.github/actions/artifacts_build
@@ -98,4 +100,5 @@ jobs:
       contents: read
     with:
       staging-wheel-name: ${{ needs.build.outputs.staging_wheel_file }}
-      adot-image-name: ${{ needs.build.outputs.staging_registry }}/aws-observability/adot-autoinstrumentation-python-staging:${{ needs.build.outputs.python_image_tag }}
+      adot-image-name: 637423224110.dkr.ecr.us-east-1.amazonaws.com/aws-observability/adot-autoinstrumentation-python-staging:${{ needs.build.outputs.python_image_tag }}
+#      adot-image-name: ${{ needs.build.outputs.staging_registry }}/aws-observability/adot-autoinstrumentation-python-staging:${{ needs.build.outputs.python_image_tag }}
