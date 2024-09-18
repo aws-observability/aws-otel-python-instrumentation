@@ -100,5 +100,4 @@ jobs:
       contents: read
     with:
       staging-wheel-name: ${{ needs.build.outputs.staging_wheel_file }}
-      adot-image-name: 637423224110.dkr.ecr.us-east-1.amazonaws.com/aws-observability/adot-autoinstrumentation-python-staging:${{ needs.build.outputs.python_image_tag }}
-#      adot-image-name: ${{ needs.build.outputs.staging_registry }}/aws-observability/adot-autoinstrumentation-python-staging:${{ needs.build.outputs.python_image_tag }}
+      adot-image-name: ${{ needs.build.outputs.staging_registry }}/aws-observability/adot-autoinstrumentation-python-staging:${{ needs.build.outputs.python_image_tag }}
