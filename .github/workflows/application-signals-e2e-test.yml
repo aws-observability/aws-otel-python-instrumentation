@@ -76,5 +76,13 @@ jobs:
       adot-image-name: ${{ inputs.adot-image-name }}
       caller-workflow-name: 'main-build'
 
+  python-ecs-e2e-test:
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ecs-test.yml@main
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      adot-image-name: ${{ inputs.adot-image-name }}
+      caller-workflow-name: 'main-build'
+
 
 
