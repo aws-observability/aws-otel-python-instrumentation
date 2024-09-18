@@ -84,11 +84,11 @@ jobs:
           name: ${{ steps.staging_wheel_output.outputs.STAGING_WHEEL}}
           path: dist/${{ steps.staging_wheel_output.outputs.STAGING_WHEEL}}
 
-#      - name: Set up and run contract tests with pytest
-#        run: |
-#          bash scripts/set-up-contract-tests.sh
-#          pip install pytest
-#          pytest contract-tests/tests
+      - name: Set up and run contract tests with pytest
+        run: |
+          bash scripts/set-up-contract-tests.sh
+          pip install pytest
+          pytest contract-tests/tests
 
   application-signals-e2e-test:
     name: "Application Signals E2E Test"

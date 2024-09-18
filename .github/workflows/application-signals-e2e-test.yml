@@ -41,46 +41,40 @@ jobs:
       - name: Upload main-build adot.whl to s3
         run: aws s3 cp ${{ inputs.staging-wheel-name }} s3://adot-main-build-staging-jar/${{ inputs.staging-wheel-name }}
 
-      - name: Get Python Distro Output
-        id: python_output
-        run: |
-          echo " input image: "
-          echo "${{ inputs.adot-image-name }}"
+  python-ec2-default-e2e-test:
+    needs: [ upload-main-build ]
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      staging-wheel-name: aws_opentelemetry_distro-0.2.0.dev0-07ca0f26-py3-none-any.whl
+      caller-workflow-name: 'main-build'
 
-#  python-ec2-default-e2e-test:
-#    needs: [ upload-main-build ]
-#    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
-#    secrets: inherit
-#    with:
-#      aws-region: us-east-1
-#      staging-wheel-name: aws_opentelemetry_distro-0.2.0.dev0-07ca0f26-py3-none-any.whl
-#      caller-workflow-name: 'main-build'
-#
-#  python-ec2-asg-e2e-test:
-#    needs: [ upload-main-build ]
-#    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-asg-test.yml@main
-#    secrets: inherit
-#    with:
-#      aws-region: us-east-1
-#      staging-wheel-name: aws_opentelemetry_distro-0.2.0.dev0-07ca0f26-py3-none-any.whl
-#      caller-workflow-name: 'main-build'
-#
-#  python-eks-e2e-test:
-#    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
-#    secrets: inherit
-#    with:
-#      aws-region: us-east-1
-#      test-cluster-name: 'e2e-python-adot-test'
-#      adot-image-name: ${{ inputs.adot-image-name }}
-#      caller-workflow-name: 'main-build'
-#
-#  python-k8s-e2e-test:
-#    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-k8s-test.yml@main
-#    secrets: inherit
-#    with:
-#      aws-region: us-east-1
-#      adot-image-name: ${{ inputs.adot-image-name }}
-#      caller-workflow-name: 'main-build'
+  python-ec2-asg-e2e-test:
+    needs: [ upload-main-build ]
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-asg-test.yml@main
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      staging-wheel-name: aws_opentelemetry_distro-0.2.0.dev0-07ca0f26-py3-none-any.whl
+      caller-workflow-name: 'main-build'
+
+  python-eks-e2e-test:
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      test-cluster-name: 'e2e-python-adot-test'
+      adot-image-name: ${{ inputs.adot-image-name }}
+      caller-workflow-name: 'main-build'
+
+  python-k8s-e2e-test:
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-k8s-test.yml@main
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      adot-image-name: ${{ inputs.adot-image-name }}
+      caller-workflow-name: 'main-build'
 
   python-ecs-e2e-test:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ecs-test.yml@ecs_entry
