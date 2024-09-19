@@ -11,7 +11,7 @@ AWS_REMOTE_RESOURCE_TYPE: str = "aws.remote.resource.type"
 AWS_REMOTE_RESOURCE_IDENTIFIER: str = "aws.remote.resource.identifier"
 AWS_SDK_DESCENDANT: str = "aws.sdk.descendant"
 AWS_CONSUMER_PARENT_SPAN_KIND: str = "aws.consumer.parent.span.kind"
-AWS_TRACE_FLAG_UNSAMPLED: str = "aws.trace.flag.unsampled"
+AWS_TRACE_FLAG_SAMPLED: str = "aws.trace.flag.sampled"
 
 # AWS_#_NAME attributes are not supported in python as they are not part of the Semantic Conventions.
 # TODO：Move to Semantic Conventions when these attributes are added.

@@ -3,7 +3,7 @@
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from amazon.opentelemetry.distro._aws_attribute_keys import AWS_TRACE_FLAG_UNSAMPLED
+from amazon.opentelemetry.distro._aws_attribute_keys import AWS_TRACE_FLAG_SAMPLED
 from amazon.opentelemetry.distro.aws_batch_unsampled_span_processor import BatchUnsampledSpanProcessor
 from opentelemetry.trace import TraceFlags
 
@@ -43,7 +43,7 @@ class TestBatchUnsampledSpanProcessor(TestCase):
         self.processor.on_end(mock_span2)
 
         self.assertEqual(len(self.processor.queue), 1)
-        self.assertIn(AWS_TRACE_FLAG_UNSAMPLED, mock_span1.set_attribute.call_args_list[0][0][0])
+        self.assertIn(AWS_TRACE_FLAG_SAMPLED, mock_span1.set_attribute.call_args_list[0][0][0])
 
         self.processor.shutdown()
         mock_span2 = mock_span_class.return_value

@@ -47,3 +47,10 @@ cd lambda-layer
 
 Once the script has successfully run, you will see the deployed Lambda sample app in your AWS account. You can trigger the 
 Lambda function and view the traces and metrics through the AWS CloudWatch Console.
+
+## Configuration
+
+By default the layer enable botocore and aws-lambda instrumentation libraries only for better Lambda cold start performance. To 
+enable all opentelemetry python 
+supported libraries you can set environment variable `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=none`. Refer to details in 
+[OpenTelemetry Python Disabling Specific Instrumentations](Disabling Specific Instrumentations)
