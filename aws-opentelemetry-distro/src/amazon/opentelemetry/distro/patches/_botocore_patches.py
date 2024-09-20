@@ -37,10 +37,12 @@ def _apply_botocore_sns_patch() -> None:
     """Botocore instrumentation patch for SNS
 
     This patch extends the existing upstream extension for SNS. Extensions allow for custom
-    logic for adding service-specific information to spans, such as attributes. Specifically, we are adding logic to add
-    the `aws.sns.topic.arn` attribute, to be used to generate AWS_REMOTE_RESOURCE_TYPE and AWS_REMOTE_RESOURCE_IDENTIFIER.
-    There exists SpanAttributes.MESSAGING_DESTINATION_NAME in the upstream logic that we could re-purpose here. However,
-    we are not using it here to maintain consistent naming patterns with other AWS resources.
+    logic for adding service-specific information to spans, such as attributes.
+    Specifically, we are adding logic to add the `aws.sns.topic.arn` attribute,
+    to be used to generate AWS_REMOTE_RESOURCE_TYPE and AWS_REMOTE_RESOURCE_IDENTIFIER.
+    There exists SpanAttributes.MESSAGING_DESTINATION_NAME in the upstream logic that we could
+    re-purpose here. However, we are not using it here to maintain consistent naming patterns
+    with other AWS resources.
     """
     old_extract_attributes = _SnsExtension.extract_attributes
 
