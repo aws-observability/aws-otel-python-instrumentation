@@ -18,6 +18,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_REMOTE_RESOURCE_IDENTIFIER,
     AWS_REMOTE_RESOURCE_TYPE,
     AWS_REMOTE_SERVICE,
+    AWS_SNS_TOPIC_ARN,
     AWS_SPAN_KIND,
     AWS_SQS_QUEUE_NAME,
     AWS_SQS_QUEUE_URL,
@@ -85,6 +86,7 @@ _NORMALIZED_DYNAMO_DB_SERVICE_NAME: str = "AWS::DynamoDB"
 _NORMALIZED_KINESIS_SERVICE_NAME: str = "AWS::Kinesis"
 _NORMALIZED_S3_SERVICE_NAME: str = "AWS::S3"
 _NORMALIZED_SQS_SERVICE_NAME: str = "AWS::SQS"
+_NORMALIZED_SNS_SERVICE_NAME: str = "AWS::SNS"
 _NORMALIZED_BEDROCK_SERVICE_NAME: str = "AWS::Bedrock"
 _NORMALIZED_BEDROCK_RUNTIME_SERVICE_NAME: str = "AWS::BedrockRuntime"
 _DB_CONNECTION_STRING_TYPE: str = "DB::Connection"
@@ -407,6 +409,9 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         elif is_key_present(span, GEN_AI_REQUEST_MODEL):
             remote_resource_type = _NORMALIZED_BEDROCK_SERVICE_NAME + "::Model"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(GEN_AI_REQUEST_MODEL))
+        elif is_key_present(span, AWS_SNS_TOPIC_ARN):
+            remote_resource_type = _NORMALIZED_SNS_SERVICE_NAME + "::Topic"
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_SNS_TOPIC_ARN))
     elif is_db_span(span):
         remote_resource_type = _DB_CONNECTION_STRING_TYPE
         remote_resource_identifier = _get_db_connection(span)

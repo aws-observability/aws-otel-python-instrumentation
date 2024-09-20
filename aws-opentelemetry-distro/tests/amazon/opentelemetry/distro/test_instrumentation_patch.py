@@ -20,6 +20,7 @@ _STREAM_NAME: str = "streamName"
 _BUCKET_NAME: str = "bucketName"
 _QUEUE_NAME: str = "queueName"
 _QUEUE_URL: str = "queueUrl"
+_TOPIC_ARN: str = "topicArn"
 _BEDROCK_AGENT_ID: str = "agentId"
 _BEDROCK_DATASOURCE_ID: str = "DataSourceId"
 _BEDROCK_GUARDRAIL_ID: str = "GuardrailId"
@@ -127,6 +128,11 @@ class TestInstrumentationPatch(TestCase):
         self.assertFalse("aws.sqs.queue.url" in attributes)
         self.assertFalse("aws.sqs.queue.name" in attributes)
 
+        # SNS
+        self.assertTrue("sns" in _KNOWN_EXTENSIONS, "Upstream has removed the SNS extension")
+        sns_attributes: Dict[str, str] = _do_extract_sns_attributes()
+        self.assertFalse("aws.sns.topic.arn" in sns_attributes)
+
         # Bedrock
         self.assertFalse("bedrock" in _KNOWN_EXTENSIONS, "Upstream has added a Bedrock extension")
 
@@ -177,6 +183,12 @@ class TestInstrumentationPatch(TestCase):
         self.assertEqual(sqs_attributes["aws.sqs.queue.url"], _QUEUE_URL)
         self.assertTrue("aws.sqs.queue.name" in sqs_attributes)
         self.assertEqual(sqs_attributes["aws.sqs.queue.name"], _QUEUE_NAME)
+
+        # SNS
+        self.assertTrue("sns" in _KNOWN_EXTENSIONS)
+        sns_attributes: Dict[str, str] = _do_extract_sns_attributes()
+        self.assertTrue("aws.sns.topic.arn" in sns_attributes)
+        self.assertEqual(sns_attributes["aws.sns.topic.arn"], _TOPIC_ARN)
 
         # Bedrock
         self._test_patched_bedrock_instrumentation()
@@ -322,6 +334,12 @@ def _do_extract_s3_attributes() -> Dict[str, str]:
 def _do_extract_sqs_attributes() -> Dict[str, str]:
     service_name: str = "sqs"
     params: Dict[str, str] = {"QueueUrl": _QUEUE_URL, "QueueName": _QUEUE_NAME}
+    return _do_extract_attributes(service_name, params)
+
+
+def _do_extract_sns_attributes() -> Dict[str, str]:
+    service_name: str = "sns"
+    params: Dict[str, str] = {"TopicArn": _TOPIC_ARN}
     return _do_extract_attributes(service_name, params)
 
 

@@ -15,6 +15,7 @@ from amazon.opentelemetry.distro.patches._bedrock_patches import (  # noqa # pyl
     _BedrockRuntimeExtension,
 )
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
+from opentelemetry.instrumentation.botocore.extensions.sns import _SnsExtension
 from opentelemetry.instrumentation.botocore.extensions.sqs import _SqsExtension
 from opentelemetry.instrumentation.botocore.extensions.types import _AttributeMapT, _AwsSdkExtension
 from opentelemetry.semconv.trace import SpanAttributes
@@ -29,6 +30,27 @@ def _apply_botocore_instrumentation_patches() -> None:
     _apply_botocore_s3_patch()
     _apply_botocore_sqs_patch()
     _apply_botocore_bedrock_patch()
+    _apply_botocore_sns_patch()
+
+
+def _apply_botocore_sns_patch() -> None:
+    """Botocore instrumentation patch for SNS
+
+    This patch extends the existing upstream extension for SNS. Extensions allow for custom
+    logic for adding service-specific information to spans, such as attributes. Specifically, we are adding logic to add
+    the `aws.sns.topic.arn` attribute, to be used to generate AWS_REMOTE_RESOURCE_TYPE and AWS_REMOTE_RESOURCE_IDENTIFIER.
+    There exists SpanAttributes.MESSAGING_DESTINATION_NAME in the upstream logic that we could re-purpose here. However,
+    we are not using it here to maintain consistent naming patterns with other AWS resources.
+    """
+    old_extract_attributes = _SnsExtension.extract_attributes
+
+    def patch_extract_attributes(self, attributes: _AttributeMapT):
+        old_extract_attributes(self, attributes)
+        topic_arn = self._call_context.params.get("TopicArn")
+        if topic_arn:
+            attributes["aws.sns.topic.arn"] = topic_arn
+
+    _SnsExtension.extract_attributes = patch_extract_attributes
 
 
 def _apply_botocore_kinesis_patch() -> None:
