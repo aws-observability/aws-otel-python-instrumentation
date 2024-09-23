@@ -156,6 +156,7 @@ class _SecretsManagerExtension(_AwsSdkExtension):
         if secret_id and secret_id.startswith("arn:aws:secretsmanager:"):
             attributes["aws.secretsmanager.secret.arn"] = secret_id
 
+    # pylint: disable=no-self-use
     def on_success(self, span: Span, result: _BotoResultT):
         secret_arn = result.get("ARN")
         if secret_arn:
