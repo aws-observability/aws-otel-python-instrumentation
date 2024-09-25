@@ -13,6 +13,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_GUARDRAIL_ID,
     AWS_BEDROCK_KNOWLEDGE_BASE_ID,
     AWS_CONSUMER_PARENT_SPAN_KIND,
+    AWS_KINESIS_STREAM_CONSUMERNAME,
     AWS_KINESIS_STREAM_NAME,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
@@ -1141,6 +1142,30 @@ class TestAwsMetricAttributeGenerator(TestCase):
             "AWS::StepFunctions::Activity", "arn:aws:states:us-east-1:007003123456789012:activity:testActivity"
         )
         self._mock_attribute([AWS_STEPFUNCTIONS_ACTIVITY_ARN], [None])
+
+        # Validate behaviour of AWS_KINESIS_STREAM_CONSUMERNAME present, then remove it.
+        self._mock_attribute(
+            [AWS_KINESIS_STREAM_CONSUMERNAME],
+            ["aws_stream_consumername"],
+            keys,
+            values,
+        )
+        self._validate_remote_resource_attributes(
+            "AWS::Kinesis::StreamConsumer", 
+            "aws_stream_consumername"
+        )
+        self._mock_attribute([AWS_KINESIS_STREAM_CONSUMERNAME], [None])
+
+        # Validate behaviour with both AWS_KINESIS_STREAM_NAME and AWS_KINESIS_STREAM_CONSUMERNAME
+        # present, then remove it.
+        self._mock_attribute(
+            [AWS_KINESIS_STREAM_NAME, AWS_KINESIS_STREAM_CONSUMERNAME],
+            ["aws_stream_name", "aws_stream_consumername"],
+            keys,
+            values,
+        )
+        self._validate_remote_resource_attributes("AWS::Kinesis::Stream", "aws_stream_name")
+        self._mock_attribute([AWS_KINESIS_STREAM_NAME, AWS_KINESIS_STREAM_CONSUMERNAME], [None, None])
 
         self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None])
 

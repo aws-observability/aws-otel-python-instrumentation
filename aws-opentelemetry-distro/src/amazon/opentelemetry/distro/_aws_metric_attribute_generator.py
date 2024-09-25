@@ -11,6 +11,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_GUARDRAIL_ID,
     AWS_BEDROCK_KNOWLEDGE_BASE_ID,
     AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER,
+    AWS_KINESIS_STREAM_CONSUMERNAME,
     AWS_KINESIS_STREAM_NAME,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
@@ -393,6 +394,9 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         elif is_key_present(span, AWS_KINESIS_STREAM_NAME):
             remote_resource_type = _NORMALIZED_KINESIS_SERVICE_NAME + "::Stream"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_KINESIS_STREAM_NAME))
+        elif is_key_present(span, AWS_KINESIS_STREAM_CONSUMERNAME):
+            remote_resource_type = _NORMALIZED_KINESIS_SERVICE_NAME + "::StreamConsumer"
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_KINESIS_STREAM_CONSUMERNAME))
         elif is_key_present(span, _AWS_BUCKET_NAME):
             remote_resource_type = _NORMALIZED_S3_SERVICE_NAME + "::Bucket"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(_AWS_BUCKET_NAME))

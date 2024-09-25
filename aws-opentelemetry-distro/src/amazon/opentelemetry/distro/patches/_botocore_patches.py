@@ -4,6 +4,7 @@
 import importlib
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
+    AWS_KINESIS_STREAM_CONSUMERNAME,
     AWS_KINESIS_STREAM_NAME,
     AWS_SECRETSMANAGER_SECRET_ARN,
     AWS_SNS_TOPIC_ARN,
@@ -204,3 +205,6 @@ class _KinesisExtension(_AwsSdkExtension):
         stream_name = self._call_context.params.get("StreamName")
         if stream_name:
             attributes[AWS_KINESIS_STREAM_NAME] = stream_name
+        consumer_name = self._call_context.params.get("ConsumerName")
+        if consumer_name:
+            attributes[AWS_KINESIS_STREAM_CONSUMERNAME] = consumer_name

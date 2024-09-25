@@ -17,6 +17,7 @@ from opentelemetry.semconv.trace import SpanAttributes
 from opentelemetry.trace.span import Span
 
 _STREAM_NAME: str = "streamName"
+_CONSUMER_NAME: str = "consumerName"
 _BUCKET_NAME: str = "bucketName"
 _QUEUE_NAME: str = "queueName"
 _QUEUE_URL: str = "queueUrl"
@@ -175,6 +176,8 @@ class TestInstrumentationPatch(TestCase):
         kinesis_attributes: Dict[str, str] = _do_extract_kinesis_attributes()
         self.assertTrue("aws.kinesis.stream.name" in kinesis_attributes)
         self.assertEqual(kinesis_attributes["aws.kinesis.stream.name"], _STREAM_NAME)
+        self.assertTrue("aws.kinesis.stream.consumer_name" in kinesis_attributes)
+        self.assertEqual(kinesis_attributes["aws.kinesis.stream.consumer_name"], _CONSUMER_NAME)
 
         # S3
         self.assertTrue("s3" in _KNOWN_EXTENSIONS)
@@ -356,7 +359,7 @@ class TestInstrumentationPatch(TestCase):
 
 def _do_extract_kinesis_attributes() -> Dict[str, str]:
     service_name: str = "kinesis"
-    params: Dict[str, str] = {"StreamName": _STREAM_NAME}
+    params: Dict[str, str] = {"StreamName": _STREAM_NAME, "ConsumerName": _CONSUMER_NAME}
     return _do_extract_attributes(service_name, params)
 
 
