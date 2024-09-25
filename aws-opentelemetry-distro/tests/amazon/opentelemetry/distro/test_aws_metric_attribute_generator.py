@@ -1108,7 +1108,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
             [AWS_SECRETSMANAGER_SECRET_ARN],
             ["arn:aws:secretsmanager:us-east-1:123456789012:secret:secret_name-lERW9H"],
             keys,
-            values
+            values,
         )
         self._validate_remote_resource_attributes(
             "AWS::SecretsManager::Secret", "arn:aws:secretsmanager:us-east-1:123456789012:secret:secret_name-lERW9H"
@@ -1122,14 +1122,13 @@ class TestAwsMetricAttributeGenerator(TestCase):
 
         # Validate behaviour of AWS_STEPFUNCTIONS_STATEMACHINE_ARN attribute, then remove it.
         self._mock_attribute(
-            [AWS_STEPFUNCTIONS_STATEMACHINE_ARN], 
-            ["arn:aws:states:us-east-1:123456789012:stateMachine:test_state_machine"], 
-             keys, 
-             values
+            [AWS_STEPFUNCTIONS_STATEMACHINE_ARN],
+            ["arn:aws:states:us-east-1:123456789012:stateMachine:test_state_machine"],
+            keys,
+            values,
         )
         self._validate_remote_resource_attributes(
-            "AWS::StepFunctions::StateMachine",
-            "arn:aws:states:us-east-1:123456789012:stateMachine:test_state_machine"
+            "AWS::StepFunctions::StateMachine", "arn:aws:states:us-east-1:123456789012:stateMachine:test_state_machine"
         )
         self._mock_attribute([AWS_STEPFUNCTIONS_STATEMACHINE_ARN], [None])
 
@@ -1152,10 +1151,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
             keys,
             values,
         )
-        self._validate_remote_resource_attributes(
-            "AWS::Kinesis::StreamConsumer", 
-            "aws_stream_consumername"
-        )
+        self._validate_remote_resource_attributes("AWS::Kinesis::StreamConsumer", "aws_stream_consumername")
         self._mock_attribute([AWS_KINESIS_STREAM_CONSUMERNAME], [None])
 
         # Validate behaviour with both AWS_KINESIS_STREAM_NAME and AWS_KINESIS_STREAM_CONSUMERNAME
@@ -1185,7 +1181,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
             [AWS_LAMBDA_FUNCTION_NAME, AWS_LAMBDA_RESOURCEMAPPING_ID],
             ["aws_lambda_function_name", "aws_event_source_mapping_id"],
             keys,
-            values
+            values,
         )
         self._validate_remote_resource_attributes("AWS::Lambda::EventSourceMapping", "aws_event_source_mapping_id")
         self._mock_attribute([AWS_LAMBDA_FUNCTION_NAME, AWS_LAMBDA_RESOURCEMAPPING_ID], [None, None])

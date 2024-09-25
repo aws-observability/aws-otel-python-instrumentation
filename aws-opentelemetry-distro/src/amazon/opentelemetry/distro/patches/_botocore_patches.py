@@ -51,7 +51,7 @@ def _apply_botocore_lambda_patch() -> None:
 
     This patch adds an extension to the upstream's list of known extensions for Lambda.
     Extensions allow for custom logic for adding service-specific information to spans,
-    such as attributes. Specifically, we are adding logic to add the 
+    such as attributes. Specifically, we are adding logic to add the
     `aws.lambda.function.name` and  `aws.lambda.resource_mapping.id` attributes
 
     Sidenote: There exists SpanAttributes.FAAS_INVOKED_NAME for invoke operations
@@ -70,7 +70,7 @@ def _apply_botocore_lambda_patch() -> None:
         if resource_mapping_id:
             attributes[AWS_LAMBDA_RESOURCEMAPPING_ID] = resource_mapping_id
 
-    old_on_success  = _LambdaExtension.on_success 
+    old_on_success = _LambdaExtension.on_success
 
     def patch_on_success(self, span: Span, result: _BotoResultT):
         old_on_success(self, span, result)
@@ -86,7 +86,7 @@ def _apply_botocore_lambda_patch() -> None:
 def _apply_botocore_stepfunctions_patch() -> None:
     """Botocore instrumentation patch for StepFunctions
 
-    This patch adds an extension to the upstream's list of known extensions for 
+    This patch adds an extension to the upstream's list of known extensions for
     StepFunctions. Extensions allow for custom logic for adding service-specific
     information to spans, such as attributes. Specifically, we are adding logic
     to add the `aws.stepfunctions.state_machine.arn` and `aws.stepfunctions.activity.arn`
@@ -101,7 +101,7 @@ def _apply_botocore_sns_patch() -> None:
 
     This patch adds an extension to the upstream's list of known extensions for SNS.
     Extensions allow for custom logic for adding service-specific information to
-    spans, such as attributes. Specifically, we are adding logic to add the 
+    spans, such as attributes. Specifically, we are adding logic to add the
     `aws.sns.topic.arn` attribute, to be used to generate RemoteTarget and achieve
     parity with the Java instrumentation.
 
@@ -119,12 +119,13 @@ def _apply_botocore_sns_patch() -> None:
 
     _SnsExtension.extract_attributes = patch_extract_attributes
 
+
 def _apply_botocore_secretsmanager_patch() -> None:
     """Botocore instrumentation patch for SecretsManager
 
     This patch adds an extension to the upstream's list of known extension for SecretsManager.
     Extensions allow for custom logic for adding service-specific information to spans, such as
-    attributes. Specifically, we are adding logic to add the `aws.secretsmanager.secret.arn` 
+    attributes. Specifically, we are adding logic to add the `aws.secretsmanager.secret.arn`
     attribute, to be used to generate RemoteTarget and achieve parity with the Java
     instrumentation.
     """
