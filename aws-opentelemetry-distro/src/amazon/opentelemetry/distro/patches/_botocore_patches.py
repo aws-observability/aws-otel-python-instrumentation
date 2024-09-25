@@ -5,6 +5,7 @@ import importlib
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_KINESIS_STREAM_NAME,
+    AWS_SECRETSMANAGER_SECRET_ARN,
     AWS_SQS_QUEUE_NAME,
     AWS_SQS_QUEUE_URL,
 )
@@ -16,8 +17,9 @@ from amazon.opentelemetry.distro.patches._bedrock_patches import (  # noqa # pyl
 )
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
 from opentelemetry.instrumentation.botocore.extensions.sqs import _SqsExtension
-from opentelemetry.instrumentation.botocore.extensions.types import _AttributeMapT, _AwsSdkExtension
+from opentelemetry.instrumentation.botocore.extensions.types import _AttributeMapT, _AwsSdkExtension, _BotoResultT
 from opentelemetry.semconv.trace import SpanAttributes
+from opentelemetry.trace.span import Span
 
 
 def _apply_botocore_instrumentation_patches() -> None:
@@ -29,6 +31,19 @@ def _apply_botocore_instrumentation_patches() -> None:
     _apply_botocore_s3_patch()
     _apply_botocore_sqs_patch()
     _apply_botocore_bedrock_patch()
+    _apply_botocore_secretsmanager_patch()
+
+
+def _apply_botocore_secretsmanager_patch() -> None:
+    """Botocore instrumentation patch for SecretsManager
+
+    This patch adds an extension to the upstream's list of known extension for SecretsManager.
+    Extensions allow for custom logic for adding service-specific information to spans, such as
+    attributes. Specifically, we are adding logic to add the `aws.secretsmanager.secret.arn` 
+    attribute, to be used to generate RemoteTarget and achieve parity with the Java
+    instrumentation.
+    """
+    _KNOWN_EXTENSIONS["secretsmanager"] = _lazy_load(".", "_SecretsManagerExtension")
 
 
 def _apply_botocore_kinesis_patch() -> None:
@@ -106,6 +121,23 @@ def _lazy_load(module, cls):
 
 
 # END The OpenTelemetry Authors code
+
+
+class _SecretsManagerExtension(_AwsSdkExtension):
+    def extract_attributes(self, attributes: _AttributeMapT):
+        """
+        SecretId can be secret name or secret arn, the function extracts attributes
+        only if the SecretId parameter is provided as an arn which starts with
+        `arn:aws:secretsmanager:`
+        """
+        secret_id = self._call_context.params.get("SecretId")
+        if secret_id and secret_id.startswith("arn:aws:secretsmanager:"):
+            attributes[AWS_SECRETSMANAGER_SECRET_ARN] = secret_id
+
+    def on_success(self, span: Span, result: _BotoResultT):
+        secret_arn = result.get("ARN")
+        if secret_arn:
+            span.set_attribute(AWS_SECRETSMANAGER_SECRET_ARN, secret_arn)
 
 
 class _S3Extension(_AwsSdkExtension):
