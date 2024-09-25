@@ -22,6 +22,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_REMOTE_RESOURCE_TYPE,
     AWS_REMOTE_SERVICE,
     AWS_SECRETSMANAGER_SECRET_ARN,
+    AWS_SNS_TOPIC_ARN,
     AWS_SPAN_KIND,
     AWS_SQS_QUEUE_NAME,
     AWS_SQS_QUEUE_URL,
@@ -879,6 +880,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.validate_aws_sdk_service_normalization("Bedrock Agent Runtime", "AWS::Bedrock")
         self.validate_aws_sdk_service_normalization("Bedrock Runtime", "AWS::BedrockRuntime")
         self.validate_aws_sdk_service_normalization("Secrets Manager", "AWS::SecretsManager")
+        self.validate_aws_sdk_service_normalization("SNS", "AWS::SNS")
 
     def validate_aws_sdk_service_normalization(self, service_name: str, expected_remote_service: str):
         self._mock_attribute([SpanAttributes.RPC_SYSTEM, SpanAttributes.RPC_SERVICE], ["aws-api", service_name])
@@ -1106,6 +1108,11 @@ class TestAwsMetricAttributeGenerator(TestCase):
             "AWS::SecretsManager::Secret", "arn:aws:secretsmanager:us-east-1:123456789012:secret:secret_name-lERW9H"
         )
         self._mock_attribute([AWS_SECRETSMANAGER_SECRET_ARN], [None])
+
+        # Validate behaviour of AWS_SNS_TOPIC_ARN attribute, then remove it.
+        self._mock_attribute([AWS_SNS_TOPIC_ARN], ["arn:aws:sns:us-west-2:012345678901:test_topic"], keys, values)
+        self._validate_remote_resource_attributes("AWS::SNS::Topic", "arn:aws:sns:us-west-2:012345678901:test_topic")
+        self._mock_attribute([AWS_SNS_TOPIC_ARN], [None])
 
         self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None])
 
