@@ -10,6 +10,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_DATA_SOURCE_ID,
     AWS_BEDROCK_GUARDRAIL_ID,
     AWS_BEDROCK_KNOWLEDGE_BASE_ID,
+    AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER,
     AWS_KINESIS_STREAM_NAME,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
@@ -372,6 +373,7 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
     """
     remote_resource_type: Optional[str] = None
     remote_resource_identifier: Optional[str] = None
+    cloudformation_primary_identifier: Optional[str] = None
 
     if is_aws_sdk_span(span):
         # Only extract the table name when _AWS_TABLE_NAMES has size equals to one
@@ -387,17 +389,24 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         elif is_key_present(span, AWS_SQS_QUEUE_NAME):
             remote_resource_type = _NORMALIZED_SQS_SERVICE_NAME + "::Queue"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_SQS_QUEUE_NAME))
+            cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_SQS_QUEUE_URL))
         elif is_key_present(span, AWS_SQS_QUEUE_URL):
             remote_resource_type = _NORMALIZED_SQS_SERVICE_NAME + "::Queue"
             remote_resource_identifier = _escape_delimiters(
                 SqsUrlParser.get_queue_name(span.attributes.get(AWS_SQS_QUEUE_URL))
             )
+            cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_SQS_QUEUE_URL))
         elif is_key_present(span, AWS_BEDROCK_AGENT_ID):
             remote_resource_type = _NORMALIZED_BEDROCK_SERVICE_NAME + "::Agent"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_BEDROCK_AGENT_ID))
         elif is_key_present(span, AWS_BEDROCK_DATA_SOURCE_ID):
             remote_resource_type = _NORMALIZED_BEDROCK_SERVICE_NAME + "::DataSource"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_BEDROCK_DATA_SOURCE_ID))
+            cloudformation_primary_identifier = (
+                _escape_delimiters(span.attributes.get(AWS_BEDROCK_KNOWLEDGE_BASE_ID))
+                + "|"
+                + remote_resource_identifier
+            )
         elif is_key_present(span, AWS_BEDROCK_GUARDRAIL_ID):
             remote_resource_type = _NORMALIZED_BEDROCK_SERVICE_NAME + "::Guardrail"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_BEDROCK_GUARDRAIL_ID))
@@ -411,9 +420,19 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         remote_resource_type = _DB_CONNECTION_STRING_TYPE
         remote_resource_identifier = _get_db_connection(span)
 
-    if remote_resource_type is not None and remote_resource_identifier is not None:
+    # If the CFN Primary Id is still None here, that means it is not an edge case.
+    # Then, we can just assign it the same value as remote_resource_identifier
+    if cloudformation_primary_identifier is None:
+        cloudformation_primary_identifier = remote_resource_identifier
+
+    if (
+        remote_resource_type is not None
+        and remote_resource_identifier is not None
+        and cloudformation_primary_identifier is not None
+    ):
         attributes[AWS_REMOTE_RESOURCE_TYPE] = remote_resource_type
         attributes[AWS_REMOTE_RESOURCE_IDENTIFIER] = remote_resource_identifier
+        attributes[AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER] = cloudformation_primary_identifier
 
 
 def _get_db_connection(span: ReadableSpan) -> None:

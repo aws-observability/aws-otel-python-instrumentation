@@ -125,6 +125,7 @@ class _DataSourceOperation(_BedrockAgentOperation):
     """
 
     request_attributes = {
+        AWS_BEDROCK_KNOWLEDGE_BASE_ID: _KNOWLEDGE_BASE_ID,
         AWS_BEDROCK_DATA_SOURCE_ID: _DATA_SOURCE_ID,
     }
     response_attributes = {
