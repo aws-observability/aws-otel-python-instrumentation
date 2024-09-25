@@ -26,6 +26,8 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_SPAN_KIND,
     AWS_SQS_QUEUE_NAME,
     AWS_SQS_QUEUE_URL,
+    AWS_STEPFUNCTIONS_ACTIVITY_ARN,
+    AWS_STEPFUNCTIONS_STATEMACHINE_ARN,
 )
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
 from amazon.opentelemetry.distro._aws_span_processing_util import GEN_AI_REQUEST_MODEL
@@ -881,6 +883,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.validate_aws_sdk_service_normalization("Bedrock Runtime", "AWS::BedrockRuntime")
         self.validate_aws_sdk_service_normalization("Secrets Manager", "AWS::SecretsManager")
         self.validate_aws_sdk_service_normalization("SNS", "AWS::SNS")
+        self.validate_aws_sdk_service_normalization("SFN", "AWS::StepFunctions")
 
     def validate_aws_sdk_service_normalization(self, service_name: str, expected_remote_service: str):
         self._mock_attribute([SpanAttributes.RPC_SYSTEM, SpanAttributes.RPC_SERVICE], ["aws-api", service_name])
@@ -1113,6 +1116,31 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute([AWS_SNS_TOPIC_ARN], ["arn:aws:sns:us-west-2:012345678901:test_topic"], keys, values)
         self._validate_remote_resource_attributes("AWS::SNS::Topic", "arn:aws:sns:us-west-2:012345678901:test_topic")
         self._mock_attribute([AWS_SNS_TOPIC_ARN], [None])
+
+        # Validate behaviour of AWS_STEPFUNCTIONS_STATEMACHINE_ARN attribute, then remove it.
+        self._mock_attribute(
+            [AWS_STEPFUNCTIONS_STATEMACHINE_ARN], 
+            ["arn:aws:states:us-east-1:123456789012:stateMachine:test_state_machine"], 
+             keys, 
+             values
+        )
+        self._validate_remote_resource_attributes(
+            "AWS::StepFunctions::StateMachine",
+            "arn:aws:states:us-east-1:123456789012:stateMachine:test_state_machine"
+        )
+        self._mock_attribute([AWS_STEPFUNCTIONS_STATEMACHINE_ARN], [None])
+
+        # Validate behaviour of AWS_STEPFUNCTIONS_ACTIVITY_ARN attribute, then remove it.
+        self._mock_attribute(
+            [AWS_STEPFUNCTIONS_ACTIVITY_ARN],
+            ["arn:aws:states:us-east-1:007003123456789012:activity:testActivity"],
+            keys,
+            values,
+        )
+        self._validate_remote_resource_attributes(
+            "AWS::StepFunctions::Activity", "arn:aws:states:us-east-1:007003123456789012:activity:testActivity"
+        )
+        self._mock_attribute([AWS_STEPFUNCTIONS_ACTIVITY_ARN], [None])
 
         self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None])
 

@@ -24,6 +24,8 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_SPAN_KIND,
     AWS_SQS_QUEUE_NAME,
     AWS_SQS_QUEUE_URL,
+    AWS_STEPFUNCTIONS_ACTIVITY_ARN,
+    AWS_STEPFUNCTIONS_STATEMACHINE_ARN,
 )
 from amazon.opentelemetry.distro._aws_span_processing_util import (
     GEN_AI_REQUEST_MODEL,
@@ -92,6 +94,7 @@ _NORMALIZED_BEDROCK_SERVICE_NAME: str = "AWS::Bedrock"
 _NORMALIZED_BEDROCK_RUNTIME_SERVICE_NAME: str = "AWS::BedrockRuntime"
 _NORMALIZED_SECRETSMANAGER_SERVICE_NAME: str = "AWS::SecretsManager"
 _NORMALIZED_SNS_SERVICE_NAME: str = "AWS::SNS"
+_NORMALIZED_STEPFUNCTIONS_SERVICE_NAME: str = "AWS::StepFunctions"
 _DB_CONNECTION_STRING_TYPE: str = "DB::Connection"
 
 # Special DEPENDENCY attribute value if GRAPHQL_OPERATION_TYPE attribute key is present.
@@ -315,6 +318,7 @@ def _normalize_remote_service_name(span: ReadableSpan, service_name: str) -> str
             "Bedrock Runtime": _NORMALIZED_BEDROCK_RUNTIME_SERVICE_NAME,
             "Secrets Manager": _NORMALIZED_SECRETSMANAGER_SERVICE_NAME,
             "SNS": _NORMALIZED_SNS_SERVICE_NAME,
+            "SFN": _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME,
         }
         return aws_sdk_service_mapping.get(service_name, "AWS::" + service_name)
     return service_name
@@ -428,6 +432,12 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         elif is_key_present(span, AWS_SNS_TOPIC_ARN):
             remote_resource_type = _NORMALIZED_SNS_SERVICE_NAME + "::Topic"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_SNS_TOPIC_ARN))
+        elif is_key_present(span, AWS_STEPFUNCTIONS_STATEMACHINE_ARN):
+            remote_resource_type = _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME + "::StateMachine"
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_STEPFUNCTIONS_STATEMACHINE_ARN))
+        elif is_key_present(span, AWS_STEPFUNCTIONS_ACTIVITY_ARN):
+            remote_resource_type = _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME + "::Activity"
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_STEPFUNCTIONS_ACTIVITY_ARN))
     elif is_db_span(span):
         remote_resource_type = _DB_CONNECTION_STRING_TYPE
         remote_resource_identifier = _get_db_connection(span)

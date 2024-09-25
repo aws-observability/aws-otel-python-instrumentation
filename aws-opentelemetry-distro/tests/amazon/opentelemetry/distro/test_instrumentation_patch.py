@@ -28,6 +28,8 @@ _GEN_AI_SYSTEM: str = "aws_bedrock"
 _GEN_AI_REQUEST_MODEL: str = "genAiReuqestModelId"
 _SECRET_ARN: str = "arn:aws:secretsmanager:us-west-2:000000000000:secret:testSecret-ABCDEF"
 _TOPIC_ARN: str = "topicArn"
+_STATE_MACHINE_ARN: str = "arn:aws:states:us-west-2:000000000000:stateMachine:testStateMachine"
+_ACTIVITY_ARN: str = "arn:aws:states:us-east-1:007003123456789012:activity:testActivity"
 
 # Patch names
 GET_DISTRIBUTION_PATCH: str = (
@@ -149,6 +151,9 @@ class TestInstrumentationPatch(TestCase):
         # SNS
         self.assertTrue("sns" in _KNOWN_EXTENSIONS, "Upstream has removed the SNS extension")
 
+        # StepFunctions
+        self.assertFalse("stepfunctions" in _KNOWN_EXTENSIONS, "Upstream has added a StepFunctions extension")
+
     def _test_unpatched_gevent_instrumentation(self):
         self.assertFalse(gevent.monkey.is_module_patched("os"), "gevent os module has been patched")
         self.assertFalse(gevent.monkey.is_module_patched("thread"), "gevent thread module has been patched")
@@ -222,6 +227,14 @@ class TestInstrumentationPatch(TestCase):
         sns_attributes: Dict[str, str] = _do_extract_sns_attributes()
         self.assertTrue("aws.sns.topic.arn" in sns_attributes)
         self.assertEqual(sns_attributes["aws.sns.topic.arn"], _TOPIC_ARN)
+
+        # StepFunctions
+        self.assertTrue("stepfunctions" in _KNOWN_EXTENSIONS)
+        stepfunctions_attributes: Dict[str, str] = _do_extract_stepfunctions_attributes()
+        self.assertTrue("aws.stepfunctions.state_machine.arn" in stepfunctions_attributes)
+        self.assertEqual(stepfunctions_attributes["aws.stepfunctions.state_machine.arn"], _STATE_MACHINE_ARN)
+        self.assertTrue("aws.stepfunctions.activity.arn" in stepfunctions_attributes)
+        self.assertEqual(stepfunctions_attributes["aws.stepfunctions.activity.arn"], _ACTIVITY_ARN)
 
     def _test_patched_gevent_os_ssl_instrumentation(self):
         # Only ssl and os module should have been patched since the environment variable was set to 'os, ssl'
@@ -396,6 +409,12 @@ def _do_on_success_secretsmanager() -> Dict[str, str]:
 def _do_extract_sns_attributes() -> Dict[str, str]:
     service_name: str = "sns"
     params: Dict[str, str] = {"TopicArn": _TOPIC_ARN}
+    return _do_extract_attributes(service_name, params)
+
+
+def _do_extract_stepfunctions_attributes() -> Dict[str, str]:
+    service_name: str = "stepfunctions"
+    params: Dict[str, str] = {"stateMachineArn": _STATE_MACHINE_ARN, "activityArn": _ACTIVITY_ARN}
     return _do_extract_attributes(service_name, params)
 
 

@@ -9,6 +9,8 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_SNS_TOPIC_ARN,
     AWS_SQS_QUEUE_NAME,
     AWS_SQS_QUEUE_URL,
+    AWS_STEPFUNCTIONS_ACTIVITY_ARN,
+    AWS_STEPFUNCTIONS_STATEMACHINE_ARN,
 )
 from amazon.opentelemetry.distro.patches._bedrock_patches import (  # noqa # pylint: disable=unused-import
     _BedrockAgentExtension,
@@ -35,6 +37,20 @@ def _apply_botocore_instrumentation_patches() -> None:
     _apply_botocore_bedrock_patch()
     _apply_botocore_secretsmanager_patch()
     _apply_botocore_sns_patch()
+    _apply_botocore_stepfunctions_patch()
+
+
+def _apply_botocore_stepfunctions_patch() -> None:
+    """Botocore instrumentation patch for StepFunctions
+
+    This patch adds an extension to the upstream's list of known extensions for 
+    StepFunctions. Extensions allow for custom logic for adding service-specific
+    information to spans, such as attributes. Specifically, we are adding logic
+    to add the `aws.stepfunctions.state_machine.arn` and `aws.stepfunctions.activity.arn`
+    attributes, to be used to generate RemoteTarget and achieve partity with the
+    Java instrumentation.
+    """
+    _KNOWN_EXTENSIONS["stepfunctions"] = _lazy_load(".", "_StepFunctionsExtension")
 
 
 def _apply_botocore_sns_patch() -> None:
@@ -147,6 +163,16 @@ def _lazy_load(module, cls):
 
 
 # END The OpenTelemetry Authors code
+
+
+class _StepFunctionsExtension(_AwsSdkExtension):
+    def extract_attributes(self, attributes: _AttributeMapT):
+        state_machine_arn = self._call_context.params.get("stateMachineArn")
+        if state_machine_arn:
+            attributes[AWS_STEPFUNCTIONS_STATEMACHINE_ARN] = state_machine_arn
+        activity_arn = self._call_context.params.get("activityArn")
+        if activity_arn:
+            attributes[AWS_STEPFUNCTIONS_ACTIVITY_ARN] = activity_arn
 
 
 class _SecretsManagerExtension(_AwsSdkExtension):
