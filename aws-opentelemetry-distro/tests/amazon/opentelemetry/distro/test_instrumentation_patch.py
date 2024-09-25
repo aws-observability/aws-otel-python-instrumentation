@@ -31,6 +31,8 @@ _SECRET_ARN: str = "arn:aws:secretsmanager:us-west-2:000000000000:secret:testSec
 _TOPIC_ARN: str = "topicArn"
 _STATE_MACHINE_ARN: str = "arn:aws:states:us-west-2:000000000000:stateMachine:testStateMachine"
 _ACTIVITY_ARN: str = "arn:aws:states:us-east-1:007003123456789012:activity:testActivity"
+_LAMBDA_FUNCTION_NAME: str = "lambdaFunctionName"
+_LAMBDA_SOURCE_MAPPING_ID: str = "lambdaEventSourceMappingID"
 
 # Patch names
 GET_DISTRIBUTION_PATCH: str = (
@@ -155,6 +157,9 @@ class TestInstrumentationPatch(TestCase):
         # StepFunctions
         self.assertFalse("stepfunctions" in _KNOWN_EXTENSIONS, "Upstream has added a StepFunctions extension")
 
+        # Lambda
+        self.assertTrue("lambda" in _KNOWN_EXTENSIONS, "Upstream has removed the Lambda extension")
+
     def _test_unpatched_gevent_instrumentation(self):
         self.assertFalse(gevent.monkey.is_module_patched("os"), "gevent os module has been patched")
         self.assertFalse(gevent.monkey.is_module_patched("thread"), "gevent thread module has been patched")
@@ -238,6 +243,14 @@ class TestInstrumentationPatch(TestCase):
         self.assertEqual(stepfunctions_attributes["aws.stepfunctions.state_machine.arn"], _STATE_MACHINE_ARN)
         self.assertTrue("aws.stepfunctions.activity.arn" in stepfunctions_attributes)
         self.assertEqual(stepfunctions_attributes["aws.stepfunctions.activity.arn"], _ACTIVITY_ARN)
+
+        # Lambda
+        self.assertTrue("lambda" in _KNOWN_EXTENSIONS)
+        lambda_attributes: Dict[str, str] = _do_extract_lambda_attributes()
+        self.assertTrue("aws.lambda.function.name" in lambda_attributes)
+        self.assertEqual(lambda_attributes["aws.lambda.function.name"], _LAMBDA_FUNCTION_NAME)
+        self.assertTrue("aws.lambda.resource_mapping.id" in lambda_attributes)
+        self.assertEqual(lambda_attributes["aws.lambda.resource_mapping.id"], _LAMBDA_SOURCE_MAPPING_ID)
 
     def _test_patched_gevent_os_ssl_instrumentation(self):
         # Only ssl and os module should have been patched since the environment variable was set to 'os, ssl'
@@ -418,6 +431,12 @@ def _do_extract_sns_attributes() -> Dict[str, str]:
 def _do_extract_stepfunctions_attributes() -> Dict[str, str]:
     service_name: str = "stepfunctions"
     params: Dict[str, str] = {"stateMachineArn": _STATE_MACHINE_ARN, "activityArn": _ACTIVITY_ARN}
+    return _do_extract_attributes(service_name, params)
+
+
+def _do_extract_lambda_attributes() -> Dict[str, str]:
+    service_name: str = "lambda"
+    params: Dict[str, str] = {"FunctionName": _LAMBDA_FUNCTION_NAME, "UUID": _LAMBDA_SOURCE_MAPPING_ID}
     return _do_extract_attributes(service_name, params)
 
 

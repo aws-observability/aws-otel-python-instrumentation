@@ -6,6 +6,9 @@ import importlib
 from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_KINESIS_STREAM_CONSUMERNAME,
     AWS_KINESIS_STREAM_NAME,
+    AWS_LAMBDA_FUNCTION_ARN,
+    AWS_LAMBDA_FUNCTION_NAME,
+    AWS_LAMBDA_RESOURCEMAPPING_ID,
     AWS_SECRETSMANAGER_SECRET_ARN,
     AWS_SNS_TOPIC_ARN,
     AWS_SQS_QUEUE_NAME,
@@ -20,6 +23,7 @@ from amazon.opentelemetry.distro.patches._bedrock_patches import (  # noqa # pyl
     _BedrockRuntimeExtension,
 )
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
+from opentelemetry.instrumentation.botocore.extensions.lmbd import _LambdaExtension
 from opentelemetry.instrumentation.botocore.extensions.sns import _SnsExtension
 from opentelemetry.instrumentation.botocore.extensions.sqs import _SqsExtension
 from opentelemetry.instrumentation.botocore.extensions.types import _AttributeMapT, _AwsSdkExtension, _BotoResultT
@@ -39,6 +43,44 @@ def _apply_botocore_instrumentation_patches() -> None:
     _apply_botocore_secretsmanager_patch()
     _apply_botocore_sns_patch()
     _apply_botocore_stepfunctions_patch()
+    _apply_botocore_lambda_patch()
+
+
+def _apply_botocore_lambda_patch() -> None:
+    """Botocore instrumentation patch for Lambda
+
+    This patch adds an extension to the upstream's list of known extensions for Lambda.
+    Extensions allow for custom logic for adding service-specific information to spans,
+    such as attributes. Specifically, we are adding logic to add the 
+    `aws.lambda.function.name` and  `aws.lambda.resource_mapping.id` attributes
+
+    Sidenote: There exists SpanAttributes.FAAS_INVOKED_NAME for invoke operations
+    in upstream. However, we want to cover more operations to extract 'FunctionName',
+    so we define `aws.lambda.function.name` separately. Additionally, this helps
+    us maintain naming consistency with the other AWS resources.
+    """
+    old_extract_attributes = _LambdaExtension.extract_attributes
+
+    def patch_extract_attributes(self, attributes: _AttributeMapT):
+        old_extract_attributes(self, attributes)
+        function_name = self._call_context.params.get("FunctionName")
+        if function_name:
+            attributes[AWS_LAMBDA_FUNCTION_NAME] = function_name
+        resource_mapping_id = self._call_context.params.get("UUID")
+        if resource_mapping_id:
+            attributes[AWS_LAMBDA_RESOURCEMAPPING_ID] = resource_mapping_id
+
+    old_on_success  = _LambdaExtension.on_success 
+
+    def patch_on_success(self, span: Span, result: _BotoResultT):
+        old_on_success(self, span, result)
+        lambda_configuration = result.get("Configuration", {})
+        function_arn = lambda_configuration.get("FunctionArn")
+        if function_arn:
+            span.set_attribute(AWS_LAMBDA_FUNCTION_ARN, function_arn)
+
+    _LambdaExtension.extract_attributes = patch_extract_attributes
+    _LambdaExtension.on_success = patch_on_success
 
 
 def _apply_botocore_stepfunctions_patch() -> None:

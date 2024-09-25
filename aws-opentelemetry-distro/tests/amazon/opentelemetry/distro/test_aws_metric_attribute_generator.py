@@ -15,6 +15,8 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_CONSUMER_PARENT_SPAN_KIND,
     AWS_KINESIS_STREAM_CONSUMERNAME,
     AWS_KINESIS_STREAM_NAME,
+    AWS_LAMBDA_FUNCTION_NAME,
+    AWS_LAMBDA_RESOURCEMAPPING_ID,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_REMOTE_DB_USER,
@@ -1166,6 +1168,27 @@ class TestAwsMetricAttributeGenerator(TestCase):
         )
         self._validate_remote_resource_attributes("AWS::Kinesis::Stream", "aws_stream_name")
         self._mock_attribute([AWS_KINESIS_STREAM_NAME, AWS_KINESIS_STREAM_CONSUMERNAME], [None, None])
+
+        # Validate behaviour of AWS_LAMBDA_FUNCTION_NAME attribute, then remove it.
+        self._mock_attribute([AWS_LAMBDA_FUNCTION_NAME], ["aws_lambda_function_name"], keys, values)
+        self._validate_remote_resource_attributes("AWS::Lambda::Function", "aws_lambda_function_name")
+        self._mock_attribute([AWS_LAMBDA_FUNCTION_NAME], [None])
+
+        # Validate behaviour of AWS_LAMBDA_RESOURCEMAPPING_ID attribute, then remove it.
+        self._mock_attribute([AWS_LAMBDA_RESOURCEMAPPING_ID], ["aws_event_source_mapping_id"], keys, values)
+        self._validate_remote_resource_attributes("AWS::Lambda::EventSourceMapping", "aws_event_source_mapping_id")
+        self._mock_attribute([AWS_LAMBDA_RESOURCEMAPPING_ID], [None])
+
+        # Validate behaviour of both AWS_LAMBDA_FUNCTION_NAME and AWS_LAMBDA_RESOURCE_MAPPING_ID,
+        # then remove it.
+        self._mock_attribute(
+            [AWS_LAMBDA_FUNCTION_NAME, AWS_LAMBDA_RESOURCEMAPPING_ID],
+            ["aws_lambda_function_name", "aws_event_source_mapping_id"],
+            keys,
+            values
+        )
+        self._validate_remote_resource_attributes("AWS::Lambda::EventSourceMapping", "aws_event_source_mapping_id")
+        self._mock_attribute([AWS_LAMBDA_FUNCTION_NAME, AWS_LAMBDA_RESOURCEMAPPING_ID], [None, None])
 
         self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None])
 
