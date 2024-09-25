@@ -374,7 +374,7 @@ def _generate_remote_operation(span: ReadableSpan) -> str:
     return remote_operation
 
 
-# pylint: disable=too-many-branches
+# pylint: disable=too-many-branches,too-many-statements
 def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttributes) -> None:
     """
     Remote resource attributes {@link AwsAttributeKeys#AWS_REMOTE_RESOURCE_TYPE} and {@link
