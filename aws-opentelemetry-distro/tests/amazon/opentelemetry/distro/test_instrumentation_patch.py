@@ -292,12 +292,23 @@ class TestInstrumentationPatch(TestCase):
             "UpdateDataSource": ("aws.bedrock.data_source.id", _BEDROCK_DATASOURCE_ID),
         }
 
+        data_source_operations = ["DeleteDataSource", "GetDataSource", "UpdateDataSource"]
+
         for operation, attribute_tuple in operation_to_expected_attribute.items():
             bedrock_agent_extract_attributes: Dict[str, str] = _do_extract_attributes_bedrock(
                 "bedrock-agent", operation
             )
-            self.assertEqual(len(bedrock_agent_extract_attributes), 1)
-            self.assertEqual(bedrock_agent_extract_attributes[attribute_tuple[0]], attribute_tuple[1])
+
+            if operation in data_source_operations:
+                self.assertEqual(len(bedrock_agent_extract_attributes), 2)
+                self.assertEqual(bedrock_agent_extract_attributes[attribute_tuple[0]], attribute_tuple[1])
+                self.assertEqual(
+                    bedrock_agent_extract_attributes["aws.bedrock.knowledge_base.id"], _BEDROCK_KNOWLEDGEBASE_ID
+                )
+            else:
+                self.assertEqual(len(bedrock_agent_extract_attributes), 1)
+                self.assertEqual(bedrock_agent_extract_attributes[attribute_tuple[0]], attribute_tuple[1])
+
             bedrock_agent_success_attributes: Dict[str, str] = _do_on_success_bedrock("bedrock-agent", operation)
             self.assertEqual(len(bedrock_agent_success_attributes), 1)
             self.assertEqual(bedrock_agent_success_attributes[attribute_tuple[0]], attribute_tuple[1])
