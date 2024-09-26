@@ -1109,9 +1109,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
             keys,
             values,
         )
-        self._validate_remote_resource_attributes(
-            "AWS::SecretsManager::Secret", "secret_name-lERW9H"
-        )
+        self._validate_remote_resource_attributes("AWS::SecretsManager::Secret", "secret_name-lERW9H")
         self._mock_attribute([AWS_SECRETSMANAGER_SECRET_ARN], [None])
 
         # Validate behaviour of AWS_SNS_TOPIC_ARN attribute, then remove it.
@@ -1126,9 +1124,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
             keys,
             values,
         )
-        self._validate_remote_resource_attributes(
-            "AWS::StepFunctions::StateMachine", "test_state_machine"
-        )
+        self._validate_remote_resource_attributes("AWS::StepFunctions::StateMachine", "test_state_machine")
         self._mock_attribute([AWS_STEPFUNCTIONS_STATEMACHINE_ARN], [None])
 
         # Validate behaviour of AWS_STEPFUNCTIONS_ACTIVITY_ARN attribute, then remove it.
@@ -1138,9 +1134,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
             keys,
             values,
         )
-        self._validate_remote_resource_attributes(
-            "AWS::StepFunctions::Activity", "testActivity"
-        )
+        self._validate_remote_resource_attributes("AWS::StepFunctions::Activity", "testActivity")
         self._mock_attribute([AWS_STEPFUNCTIONS_ACTIVITY_ARN], [None])
 
         # Validate behaviour of AWS_LAMBDA_FUNCTION_NAME attribute, then remove it.
