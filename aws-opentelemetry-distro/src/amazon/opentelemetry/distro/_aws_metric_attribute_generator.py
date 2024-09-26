@@ -436,16 +436,20 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
             remote_resource_identifier = _escape_delimiters(span.attributes.get(GEN_AI_REQUEST_MODEL))
         elif is_key_present(span, AWS_SECRETSMANAGER_SECRET_ARN):
             remote_resource_type = _NORMALIZED_SECRETSMANAGER_SERVICE_NAME + "::Secret"
-            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_SECRETSMANAGER_SECRET_ARN))
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_SECRETSMANAGER_SECRET_ARN)).split(":")[-1]
+            cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_SECRETSMANAGER_SECRET_ARN))
         elif is_key_present(span, AWS_SNS_TOPIC_ARN):
             remote_resource_type = _NORMALIZED_SNS_SERVICE_NAME + "::Topic"
-            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_SNS_TOPIC_ARN))
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_SNS_TOPIC_ARN)).split(":")[-1]
+            cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_SNS_TOPIC_ARN))
         elif is_key_present(span, AWS_STEPFUNCTIONS_STATEMACHINE_ARN):
             remote_resource_type = _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME + "::StateMachine"
-            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_STEPFUNCTIONS_STATEMACHINE_ARN))
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_STEPFUNCTIONS_STATEMACHINE_ARN)).split(":")[-1]
+            cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_STEPFUNCTIONS_STATEMACHINE_ARN))
         elif is_key_present(span, AWS_STEPFUNCTIONS_ACTIVITY_ARN):
             remote_resource_type = _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME + "::Activity"
-            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_STEPFUNCTIONS_ACTIVITY_ARN))
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_STEPFUNCTIONS_ACTIVITY_ARN)).split(":")[-1]
+            cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_STEPFUNCTIONS_ACTIVITY_ARN))
         elif is_key_present(span, AWS_LAMBDA_RESOURCEMAPPING_ID):
             remote_resource_type = _NORMALIZED_LAMBDA_SERVICE_NAME + "::EventSourceMapping"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_RESOURCEMAPPING_ID))
