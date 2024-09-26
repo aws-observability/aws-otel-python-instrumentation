@@ -19,7 +19,6 @@ AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER: str = "aws.remote.resource.cfn.primary.id
 AWS_SQS_QUEUE_URL: str = "aws.sqs.queue.url"
 AWS_SQS_QUEUE_NAME: str = "aws.sqs.queue.name"
 AWS_KINESIS_STREAM_NAME: str = "aws.kinesis.stream.name"
-AWS_KINESIS_STREAM_CONSUMERNAME: str = "aws.kinesis.stream.consumer_name"
 AWS_BEDROCK_DATA_SOURCE_ID: str = "aws.bedrock.data_source.id"
 AWS_BEDROCK_KNOWLEDGE_BASE_ID: str = "aws.bedrock.knowledge_base.id"
 AWS_BEDROCK_AGENT_ID: str = "aws.bedrock.agent.id"
