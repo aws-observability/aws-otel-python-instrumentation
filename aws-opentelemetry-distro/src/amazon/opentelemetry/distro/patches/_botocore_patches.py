@@ -62,8 +62,12 @@ def _apply_botocore_lambda_patch() -> None:
 
     def patch_extract_attributes(self, attributes: _AttributeMapT):
         old_extract_attributes(self, attributes)
-        function_name = self._call_context.params.get("FunctionName")
-        if function_name:
+        # This param can be passed as an arn or a name. We standardize it to be the name.
+        function_name_param = self._call_context.params.get("FunctionName")
+        if function_name_param:
+            function_name = function_name_param
+            if function_name_param.startswith("arn:aws:lambda:"):
+                function_name = function_name_param.split(":")[-1]
             attributes[AWS_LAMBDA_FUNCTION_NAME] = function_name
         resource_mapping_id = self._call_context.params.get("UUID")
         if resource_mapping_id:
