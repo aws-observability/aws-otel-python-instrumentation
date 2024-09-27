@@ -15,10 +15,12 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     AwsOpenTelemetryConfigurator,
     _custom_import_sampler,
     _customize_exporter,
+    _customize_metric_exporters,
     _customize_sampler,
     _customize_span_processors,
     _export_unsampled_span_for_lambda,
     _is_application_signals_enabled,
+    _is_application_signals_runtime_enabled,
     _is_defer_to_workers_enabled,
     _is_wsgi_master_process,
 )
@@ -27,12 +29,14 @@ from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetric
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler._aws_xray_sampling_client import _AwsXRaySamplingClient
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import _AwsXRayRemoteSampler
+from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
 from opentelemetry.environment_variables import OTEL_LOGS_EXPORTER, OTEL_METRICS_EXPORTER, OTEL_TRACES_EXPORTER
 from opentelemetry.exporter.otlp.proto.common._internal.metrics_encoder import OTLPMetricExporterMixin
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter as OTLPGrpcOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.environment_variables import OTEL_TRACES_SAMPLER, OTEL_TRACES_SAMPLER_ARG
+from opentelemetry.sdk.metrics._internal.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Span, SpanProcessor, Tracer, TracerProvider
 from opentelemetry.sdk.trace.export import SpanExporter
@@ -57,7 +61,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         # Overwrite exporter configs to keep tests clean, set sampler configs for tests
         os.environ[OTEL_TRACES_EXPORTER] = "none"
-        os.environ[OTEL_METRICS_EXPORTER] = "none"
+        os.environ[OTEL_METRICS_EXPORTER] = "console"
         os.environ[OTEL_LOGS_EXPORTER] = "none"
         os.environ[OTEL_TRACES_SAMPLER] = "traceidratio"
         os.environ[OTEL_TRACES_SAMPLER_ARG] = "0.01"
@@ -66,6 +70,10 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         aws_otel_configurator: AwsOpenTelemetryConfigurator = AwsOpenTelemetryConfigurator()
         aws_otel_configurator.configure()
         cls.tracer_provider: TracerProvider = get_tracer_provider()
+
+    def tearDown(self):
+        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
+        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", None)
 
     # The probability of this passing once without correct IDs is low, 20 times is inconceivable.
     def test_provide_generate_xray_ids(self):
@@ -240,17 +248,31 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
         self.assertFalse(_is_application_signals_enabled())
 
+    def test_is_application_signals_runtime_enabled(self):
+        os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
+        self.assertTrue(_is_application_signals_runtime_enabled())
+        os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", "False")
+        self.assertFalse(_is_application_signals_runtime_enabled())
+
+        os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "False")
+        os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", "True")
+        self.assertFalse(_is_application_signals_runtime_enabled())
+
+        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
+        os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", None)
+        self.assertFalse(_is_application_signals_enabled())
+
     def test_customize_sampler(self):
         mock_sampler: Sampler = MagicMock()
         customized_sampler: Sampler = _customize_sampler(mock_sampler)
         self.assertEqual(mock_sampler, customized_sampler)
 
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
+        os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", "False")
         customized_sampler = _customize_sampler(mock_sampler)
         self.assertNotEqual(mock_sampler, customized_sampler)
         self.assertIsInstance(customized_sampler, AlwaysRecordSampler)
         self.assertEqual(mock_sampler, customized_sampler._root_sampler)
-        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
 
     def test_customize_exporter(self):
         mock_exporter: SpanExporter = MagicMock(spec=OTLPSpanExporter)
@@ -258,20 +280,20 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(mock_exporter, customized_exporter)
 
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
+        os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", "False")
         customized_exporter = _customize_exporter(mock_exporter, Resource.get_empty())
         self.assertNotEqual(mock_exporter, customized_exporter)
         self.assertIsInstance(customized_exporter, AwsMetricAttributesSpanExporter)
         self.assertEqual(mock_exporter, customized_exporter._delegate)
-        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
 
         # when Application Signals is enabled and running in lambda
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
+        os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", "False")
         os.environ.setdefault("AWS_LAMBDA_FUNCTION_NAME", "myLambdaFunc")
         customized_exporter = _customize_exporter(mock_exporter, Resource.get_empty())
         self.assertNotEqual(mock_exporter, customized_exporter)
         self.assertIsInstance(customized_exporter, AwsMetricAttributesSpanExporter)
         self.assertIsInstance(customized_exporter._delegate, OTLPUdpSpanExporter)
-        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
         os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
 
     def test_customize_span_processors(self):
@@ -280,13 +302,13 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 0)
 
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
+        os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", "False")
         _customize_span_processors(mock_tracer_provider, Resource.get_empty())
         self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 2)
         first_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
         self.assertIsInstance(first_processor, AttributePropagatingSpanProcessor)
         second_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[1].args[0]
         self.assertIsInstance(second_processor, AwsSpanMetricsProcessor)
-        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
 
     def test_customize_span_processors_lambda(self):
         mock_tracer_provider: TracerProvider = MagicMock()
@@ -325,6 +347,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
     def test_is_defer_to_workers_enabled(self):
         os.environ.setdefault("OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED", "True")
+        os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", "False")
         self.assertTrue(_is_defer_to_workers_enabled())
         os.environ.pop("OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED", None)
 
@@ -380,6 +403,35 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertIsInstance(first_processor, BatchUnsampledSpanProcessor)
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
         os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
+
+    def test_customize_metric_exporter(self):
+        metric_readers = []
+        views = []
+
+        os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
+        os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", "True")
+        os.environ.setdefault("OTEL_METRIC_EXPORT_INTERVAL", "1000")
+
+        _customize_metric_exporters(metric_readers, views)
+        self.assertEqual(1, len(metric_readers))
+        self.assertEqual(6, len(views))
+        self.assertIsInstance(metric_readers[0], ScopeBasedPeriodicExportingMetricReader)
+        pmr: ScopeBasedPeriodicExportingMetricReader = metric_readers[0]
+        self.assertEqual(1000, pmr._export_interval_millis)
+        pmr.shutdown()
+
+        periodic_exporting_metric_reader: PeriodicExportingMetricReader = MagicMock()
+        metric_readers = [periodic_exporting_metric_reader]
+        views = []
+        _customize_metric_exporters(metric_readers, views)
+        self.assertEqual(2, len(metric_readers))
+        self.assertIsInstance(metric_readers[1], ScopeBasedPeriodicExportingMetricReader)
+        pmr: ScopeBasedPeriodicExportingMetricReader = metric_readers[1]
+        self.assertEqual(1000, pmr._export_interval_millis)
+        pmr.shutdown()
+        self.assertEqual(5, len(views))
+
+        os.environ.pop("OTEL_METRIC_EXPORT_INTERVAL", None)
 
 
 def validate_distro_environ():

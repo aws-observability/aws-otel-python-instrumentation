@@ -29,6 +29,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_STEPFUNCTIONS_ACTIVITY_ARN,
     AWS_STEPFUNCTIONS_STATEMACHINE_ARN,
 )
+from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
 from amazon.opentelemetry.distro._aws_span_processing_util import (
     GEN_AI_REQUEST_MODEL,
     LOCAL_ROOT,
@@ -37,7 +38,6 @@ from amazon.opentelemetry.distro._aws_span_processing_util import (
     UNKNOWN_OPERATION,
     UNKNOWN_REMOTE_OPERATION,
     UNKNOWN_REMOTE_SERVICE,
-    UNKNOWN_SERVICE,
     extract_api_path_value,
     get_egress_operation,
     get_ingress_operation,
@@ -54,12 +54,11 @@ from amazon.opentelemetry.distro.metric_attribute_generator import (
     MetricAttributeGenerator,
 )
 from amazon.opentelemetry.distro.sqs_url_parser import SqsUrlParser
-from opentelemetry.sdk.resources import Resource, ResourceAttributes
+from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import BoundedAttributes, ReadableSpan
 from opentelemetry.semconv.trace import SpanAttributes
 
 # Pertinent OTEL attribute keys
-_SERVICE_NAME: str = ResourceAttributes.SERVICE_NAME
 _DB_CONNECTION_STRING: str = SpanAttributes.DB_CONNECTION_STRING
 _DB_NAME: str = SpanAttributes.DB_NAME
 _DB_OPERATION: str = SpanAttributes.DB_OPERATION
@@ -102,10 +101,6 @@ _DB_CONNECTION_STRING_TYPE: str = "DB::Connection"
 
 # Special DEPENDENCY attribute value if GRAPHQL_OPERATION_TYPE attribute key is present.
 _GRAPHQL: str = "graphql"
-
-# As per https://opentelemetry.io/docs/specs/semconv/resource/#service, if service name is not specified, SDK defaults
-# the service name to unknown_service:<process name> or just unknown_service.
-_OTEL_UNKNOWN_SERVICE_PREFIX: str = "unknown_service"
 
 _logger: Logger = getLogger(__name__)
 
@@ -152,15 +147,11 @@ def _generate_dependency_metric_attributes(span: ReadableSpan, resource: Resourc
 
 
 def _set_service(resource: Resource, span: ReadableSpan, attributes: BoundedAttributes) -> None:
-    """Service is always derived from SERVICE_NAME"""
-    service: str = resource.attributes.get(_SERVICE_NAME)
-
-    # In practice the service name is never None, but we can be defensive here.
-    if service is None or service.startswith(_OTEL_UNKNOWN_SERVICE_PREFIX):
+    service_name, is_unknown = get_service_attribute(resource)
+    if is_unknown:
         _log_unknown_attribute(AWS_LOCAL_SERVICE, span)
-        service = UNKNOWN_SERVICE
 
-    attributes[AWS_LOCAL_SERVICE] = service
+    attributes[AWS_LOCAL_SERVICE] = service_name
 
 
 def _set_ingress_operation(span: ReadableSpan, attributes: BoundedAttributes) -> None:
