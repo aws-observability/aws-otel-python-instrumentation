@@ -90,6 +90,7 @@ class ContractTestBase(TestCase):
             .with_exposed_ports(self.get_application_port())
             .with_env("OTEL_METRIC_EXPORT_INTERVAL", "50")
             .with_env("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "true")
+            .with_env("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", "false")
             .with_env("OTEL_METRICS_EXPORTER", "none")
             .with_env("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
             .with_env("OTEL_BSP_SCHEDULE_DELAY", "1")
