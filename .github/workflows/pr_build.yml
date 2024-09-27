@@ -36,6 +36,25 @@ jobs:
           pip install pytest
           pytest contract-tests/tests
 
+  build-lambda:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        if: ${{ matrix.language == 'python' }}
+        with:
+          python-version: '3.x'
+      - name: Build sample lambda function
+        working-directory: lambda-layer/sample-apps
+        run: ./package-lambda-function.sh
+      - name: Build layers
+        working-directory: lambda-layer/src
+        run: |
+          ./build-lambda-layer.sh
+          pip install tox
+          tox
+
   lint:
     runs-on: ubuntu-latest
     strategy:
