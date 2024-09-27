@@ -3,11 +3,13 @@
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import os
 from logging import Logger, getLogger
-from typing import ClassVar, Dict, Type
+from typing import ClassVar, Dict, List, Type, Union
 
 from importlib_metadata import version
 from typing_extensions import override
 
+from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE
+from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor_builder import (
     AttributePropagatingSpanProcessorBuilder,
@@ -19,8 +21,11 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
+from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
+from amazon.opentelemetry.distro.scope_based_filtering_view import ScopeBasedRetainingView
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.metrics import set_meter_provider
 from opentelemetry.sdk._configuration import (
     _get_exporter_names,
     _get_id_generator,
@@ -29,7 +34,6 @@ from opentelemetry.sdk._configuration import (
     _import_id_generator,
     _import_sampler,
     _init_logging,
-    _init_metrics,
     _OTelSDKConfigurator,
 )
 from opentelemetry.sdk.environment_variables import (
@@ -50,7 +54,13 @@ from opentelemetry.sdk.metrics._internal.instrument import (
     ObservableUpDownCounter,
     UpDownCounter,
 )
-from opentelemetry.sdk.metrics.export import AggregationTemporality, PeriodicExportingMetricReader
+from opentelemetry.sdk.metrics.export import (
+    AggregationTemporality,
+    MetricExporter,
+    MetricReader,
+    PeriodicExportingMetricReader,
+)
+from opentelemetry.sdk.metrics.view import LastValueAggregation, View
 from opentelemetry.sdk.resources import Resource, get_aggregated_resources
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
@@ -59,15 +69,17 @@ from opentelemetry.sdk.trace.sampling import Sampler
 from opentelemetry.semconv.resource import ResourceAttributes
 from opentelemetry.trace import set_tracer_provider
 
-APP_SIGNALS_ENABLED_CONFIG = "OTEL_AWS_APP_SIGNALS_ENABLED"
+DEPRECATED_APP_SIGNALS_ENABLED_CONFIG = "OTEL_AWS_APP_SIGNALS_ENABLED"
 APPLICATION_SIGNALS_ENABLED_CONFIG = "OTEL_AWS_APPLICATION_SIGNALS_ENABLED"
-APP_SIGNALS_EXPORTER_ENDPOINT_CONFIG = "OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT"
+APPLICATION_SIGNALS_RUNTIME_ENABLED_CONFIG = "OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED"
+DEPRECATED_APP_SIGNALS_EXPORTER_ENDPOINT_CONFIG = "OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT"
 APPLICATION_SIGNALS_EXPORTER_ENDPOINT_CONFIG = "OTEL_AWS_APPLICATION_SIGNALS_EXPORTER_ENDPOINT"
 METRIC_EXPORT_INTERVAL_CONFIG = "OTEL_METRIC_EXPORT_INTERVAL"
 DEFAULT_METRIC_EXPORT_INTERVAL = 60000.0
 AWS_LAMBDA_FUNCTION_NAME_CONFIG = "AWS_LAMBDA_FUNCTION_NAME"
 AWS_XRAY_DAEMON_ADDRESS_CONFIG = "AWS_XRAY_DAEMON_ADDRESS"
 OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED_CONFIG = "OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED"
+SYSTEM_METRICS_INSTRUMENTATION_SCOPE_NAME = "opentelemetry.instrumentation.system_metrics"
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 # UDP package size is not larger than 64KB
 LAMBDA_SPAN_EXPORT_BATCH_SIZE = 10
@@ -127,7 +139,7 @@ def _initialize_components():
         else []
     )
 
-    resource = get_aggregated_resources(resource_detectors).merge(Resource.create(auto_resource))
+    resource = _customize_resource(get_aggregated_resources(resource_detectors).merge(Resource.create(auto_resource)))
 
     sampler_name = _get_sampler()
     sampler = _custom_import_sampler(sampler_name, resource)
@@ -169,6 +181,27 @@ def _init_tracing(
     _customize_span_processors(trace_provider, resource)
 
     set_tracer_provider(trace_provider)
+
+
+def _init_metrics(
+    exporters_or_readers: Dict[str, Union[Type[MetricExporter], Type[MetricReader]]],
+    resource: Resource = None,
+):
+    metric_readers = []
+    views = []
+
+    for _, exporter_or_reader_class in exporters_or_readers.items():
+        exporter_args = {}
+
+        if issubclass(exporter_or_reader_class, MetricReader):
+            metric_readers.append(exporter_or_reader_class(**exporter_args))
+        else:
+            metric_readers.append(PeriodicExportingMetricReader(exporter_or_reader_class(**exporter_args)))
+
+    _customize_metric_exporters(metric_readers, views)
+
+    provider = MeterProvider(resource=resource, metric_readers=metric_readers, views=views)
+    set_meter_provider(provider)
 
 
 # END The OpenTelemetry Authors code
@@ -303,20 +336,70 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource) -> 
     # Construct meterProvider
     _logger.info("AWS Application Signals enabled")
     otel_metric_exporter = ApplicationSignalsExporterProvider().create_exporter()
-    export_interval_millis = float(os.environ.get(METRIC_EXPORT_INTERVAL_CONFIG, DEFAULT_METRIC_EXPORT_INTERVAL))
-    _logger.debug("Span Metrics export interval: %s", export_interval_millis)
-    # Cap export interval to 60 seconds. This is currently required for metrics-trace correlation to work correctly.
-    if export_interval_millis > DEFAULT_METRIC_EXPORT_INTERVAL:
-        export_interval_millis = DEFAULT_METRIC_EXPORT_INTERVAL
-        _logger.info("AWS Application Signals metrics export interval capped to %s", export_interval_millis)
+
     periodic_exporting_metric_reader = PeriodicExportingMetricReader(
-        exporter=otel_metric_exporter, export_interval_millis=export_interval_millis
+        exporter=otel_metric_exporter, export_interval_millis=_get_metric_export_interval()
     )
     meter_provider: MeterProvider = MeterProvider(resource=resource, metric_readers=[periodic_exporting_metric_reader])
     # Construct and set application signals metrics processor
     provider.add_span_processor(AwsSpanMetricsProcessorBuilder(meter_provider, resource).build())
 
     return
+
+
+def _customize_metric_exporters(metric_readers: List[MetricReader], views: List[View]) -> None:
+    if _is_application_signals_runtime_enabled():
+        _get_runtime_metric_views(views, 0 == len(metric_readers))
+
+        application_signals_metric_exporter = ApplicationSignalsExporterProvider().create_exporter()
+        scope_based_periodic_exporting_metric_reader = ScopeBasedPeriodicExportingMetricReader(
+            exporter=application_signals_metric_exporter,
+            export_interval_millis=_get_metric_export_interval(),
+            registered_scope_names={SYSTEM_METRICS_INSTRUMENTATION_SCOPE_NAME},
+        )
+        metric_readers.append(scope_based_periodic_exporting_metric_reader)
+
+
+def _get_runtime_metric_views(views: List[View], retain_runtime_only: bool) -> None:
+    runtime_metrics_scope_name = SYSTEM_METRICS_INSTRUMENTATION_SCOPE_NAME
+    _logger.info("Registered scope %s", runtime_metrics_scope_name)
+    views.append(
+        View(
+            instrument_name="system.network.connections",
+            meter_name=runtime_metrics_scope_name,
+            aggregation=LastValueAggregation(),
+        )
+    )
+    views.append(
+        View(
+            instrument_name="process.open_file_descriptor.count",
+            meter_name=runtime_metrics_scope_name,
+            aggregation=LastValueAggregation(),
+        )
+    )
+    views.append(
+        View(
+            instrument_name="process.runtime.*.memory",
+            meter_name=runtime_metrics_scope_name,
+            aggregation=LastValueAggregation(),
+        )
+    )
+    views.append(
+        View(
+            instrument_name="process.runtime.*.gc_count",
+            meter_name=runtime_metrics_scope_name,
+            aggregation=LastValueAggregation(),
+        )
+    )
+    views.append(
+        View(
+            instrument_name="process.runtime.*.thread_count",
+            meter_name=runtime_metrics_scope_name,
+            aggregation=LastValueAggregation(),
+        )
+    )
+    if retain_runtime_only:
+        views.append(ScopeBasedRetainingView(meter_name=runtime_metrics_scope_name))
 
 
 def _customize_versions(auto_resource: Dict[str, any]) -> Dict[str, any]:
@@ -326,16 +409,42 @@ def _customize_versions(auto_resource: Dict[str, any]) -> Dict[str, any]:
     return auto_resource
 
 
+def _customize_resource(resource: Resource) -> Resource:
+    service_name, is_unknown = get_service_attribute(resource)
+    if is_unknown:
+        _logger.debug("No valid service name found")
+
+    return resource.merge(Resource.create({AWS_LOCAL_SERVICE: service_name}))
+
+
 def _is_application_signals_enabled():
     return (
-        os.environ.get(APPLICATION_SIGNALS_ENABLED_CONFIG, os.environ.get(APP_SIGNALS_ENABLED_CONFIG, "false")).lower()
+        os.environ.get(
+            APPLICATION_SIGNALS_ENABLED_CONFIG, os.environ.get(DEPRECATED_APP_SIGNALS_ENABLED_CONFIG, "false")
+        ).lower()
         == "true"
+    )
+
+
+def _is_application_signals_runtime_enabled():
+    return _is_application_signals_enabled() and (
+        os.environ.get(APPLICATION_SIGNALS_RUNTIME_ENABLED_CONFIG, "true").lower() == "true"
     )
 
 
 def _is_lambda_environment():
     # detect if running in AWS Lambda environment
     return AWS_LAMBDA_FUNCTION_NAME_CONFIG in os.environ
+
+
+def _get_metric_export_interval():
+    export_interval_millis = float(os.environ.get(METRIC_EXPORT_INTERVAL_CONFIG, DEFAULT_METRIC_EXPORT_INTERVAL))
+    _logger.debug("Span Metrics export interval: %s", export_interval_millis)
+    # Cap export interval to 60 seconds. This is currently required for metrics-trace correlation to work correctly.
+    if export_interval_millis > DEFAULT_METRIC_EXPORT_INTERVAL:
+        export_interval_millis = DEFAULT_METRIC_EXPORT_INTERVAL
+        _logger.info("AWS Application Signals metrics export interval capped to %s", export_interval_millis)
+    return export_interval_millis
 
 
 def _span_export_batch_size():
@@ -372,7 +481,7 @@ class ApplicationSignalsExporterProvider:
         if protocol == "http/protobuf":
             application_signals_endpoint = os.environ.get(
                 APPLICATION_SIGNALS_EXPORTER_ENDPOINT_CONFIG,
-                os.environ.get(APP_SIGNALS_EXPORTER_ENDPOINT_CONFIG, "http://localhost:4316/v1/metrics"),
+                os.environ.get(DEPRECATED_APP_SIGNALS_EXPORTER_ENDPOINT_CONFIG, "http://localhost:4316/v1/metrics"),
             )
             _logger.debug("AWS Application Signals export endpoint: %s", application_signals_endpoint)
             return OTLPHttpOTLPMetricExporter(
@@ -388,7 +497,7 @@ class ApplicationSignalsExporterProvider:
 
             application_signals_endpoint = os.environ.get(
                 APPLICATION_SIGNALS_EXPORTER_ENDPOINT_CONFIG,
-                os.environ.get(APP_SIGNALS_EXPORTER_ENDPOINT_CONFIG, "localhost:4315"),
+                os.environ.get(DEPRECATED_APP_SIGNALS_EXPORTER_ENDPOINT_CONFIG, "localhost:4315"),
             )
             _logger.debug("AWS Application Signals export endpoint: %s", application_signals_endpoint)
             return OTLPGrpcOTLPMetricExporter(
