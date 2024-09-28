@@ -107,6 +107,7 @@ if [ "${OTEL_AWS_APPLICATION_SIGNALS_ENABLED}" = "true" ]; then
     if [ -z "${OTEL_METRICS_EXPORTER}" ]; then
         export OTEL_METRICS_EXPORTER="none";
     fi
+    export LAMBDA_RESOURCE_ATTRIBUTES="aws.pulse.over.midlina=true,${LAMBDA_RESOURCE_ATTRIBUTES}"
 fi
 
 # - If Application Signals is disabled
