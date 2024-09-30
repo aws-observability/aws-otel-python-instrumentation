@@ -12,6 +12,9 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_KNOWLEDGE_BASE_ID,
     AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER,
     AWS_KINESIS_STREAM_NAME,
+    AWS_LAMBDA_FUNCTION_ARN,
+    AWS_LAMBDA_FUNCTION_NAME,
+    AWS_LAMBDA_RESOURCEMAPPING_ID,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_REMOTE_DB_USER,
@@ -19,9 +22,13 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_REMOTE_RESOURCE_IDENTIFIER,
     AWS_REMOTE_RESOURCE_TYPE,
     AWS_REMOTE_SERVICE,
+    AWS_SECRETSMANAGER_SECRET_ARN,
+    AWS_SNS_TOPIC_ARN,
     AWS_SPAN_KIND,
     AWS_SQS_QUEUE_NAME,
     AWS_SQS_QUEUE_URL,
+    AWS_STEPFUNCTIONS_ACTIVITY_ARN,
+    AWS_STEPFUNCTIONS_STATEMACHINE_ARN,
 )
 from amazon.opentelemetry.distro._aws_span_processing_util import (
     GEN_AI_REQUEST_MODEL,
@@ -88,6 +95,10 @@ _NORMALIZED_S3_SERVICE_NAME: str = "AWS::S3"
 _NORMALIZED_SQS_SERVICE_NAME: str = "AWS::SQS"
 _NORMALIZED_BEDROCK_SERVICE_NAME: str = "AWS::Bedrock"
 _NORMALIZED_BEDROCK_RUNTIME_SERVICE_NAME: str = "AWS::BedrockRuntime"
+_NORMALIZED_SECRETSMANAGER_SERVICE_NAME: str = "AWS::SecretsManager"
+_NORMALIZED_SNS_SERVICE_NAME: str = "AWS::SNS"
+_NORMALIZED_STEPFUNCTIONS_SERVICE_NAME: str = "AWS::StepFunctions"
+_NORMALIZED_LAMBDA_SERVICE_NAME: str = "AWS::Lambda"
 _DB_CONNECTION_STRING_TYPE: str = "DB::Connection"
 
 # Special DEPENDENCY attribute value if GRAPHQL_OPERATION_TYPE attribute key is present.
@@ -309,6 +320,9 @@ def _normalize_remote_service_name(span: ReadableSpan, service_name: str) -> str
             "Bedrock Agent": _NORMALIZED_BEDROCK_SERVICE_NAME,
             "Bedrock Agent Runtime": _NORMALIZED_BEDROCK_SERVICE_NAME,
             "Bedrock Runtime": _NORMALIZED_BEDROCK_RUNTIME_SERVICE_NAME,
+            "Secrets Manager": _NORMALIZED_SECRETSMANAGER_SERVICE_NAME,
+            "SNS": _NORMALIZED_SNS_SERVICE_NAME,
+            "SFN": _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME,
         }
         return aws_sdk_service_mapping.get(service_name, "AWS::" + service_name)
     return service_name
@@ -359,7 +373,7 @@ def _generate_remote_operation(span: ReadableSpan) -> str:
     return remote_operation
 
 
-# pylint: disable=too-many-branches
+# pylint: disable=too-many-branches,too-many-statements
 def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttributes) -> None:
     """
     Remote resource attributes {@link AwsAttributeKeys#AWS_REMOTE_RESOURCE_TYPE} and {@link
@@ -416,6 +430,37 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         elif is_key_present(span, GEN_AI_REQUEST_MODEL):
             remote_resource_type = _NORMALIZED_BEDROCK_SERVICE_NAME + "::Model"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(GEN_AI_REQUEST_MODEL))
+        elif is_key_present(span, AWS_SECRETSMANAGER_SECRET_ARN):
+            remote_resource_type = _NORMALIZED_SECRETSMANAGER_SERVICE_NAME + "::Secret"
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_SECRETSMANAGER_SECRET_ARN)).split(
+                ":"
+            )[-1]
+            cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_SECRETSMANAGER_SECRET_ARN))
+        elif is_key_present(span, AWS_SNS_TOPIC_ARN):
+            remote_resource_type = _NORMALIZED_SNS_SERVICE_NAME + "::Topic"
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_SNS_TOPIC_ARN)).split(":")[-1]
+            cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_SNS_TOPIC_ARN))
+        elif is_key_present(span, AWS_STEPFUNCTIONS_STATEMACHINE_ARN):
+            remote_resource_type = _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME + "::StateMachine"
+            remote_resource_identifier = _escape_delimiters(
+                span.attributes.get(AWS_STEPFUNCTIONS_STATEMACHINE_ARN)
+            ).split(":")[-1]
+            cloudformation_primary_identifier = _escape_delimiters(
+                span.attributes.get(AWS_STEPFUNCTIONS_STATEMACHINE_ARN)
+            )
+        elif is_key_present(span, AWS_STEPFUNCTIONS_ACTIVITY_ARN):
+            remote_resource_type = _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME + "::Activity"
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_STEPFUNCTIONS_ACTIVITY_ARN)).split(
+                ":"
+            )[-1]
+            cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_STEPFUNCTIONS_ACTIVITY_ARN))
+        elif is_key_present(span, AWS_LAMBDA_RESOURCEMAPPING_ID):
+            remote_resource_type = _NORMALIZED_LAMBDA_SERVICE_NAME + "::EventSourceMapping"
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_RESOURCEMAPPING_ID))
+        elif is_key_present(span, AWS_LAMBDA_FUNCTION_NAME):
+            remote_resource_type = _NORMALIZED_LAMBDA_SERVICE_NAME + "::Function"
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_FUNCTION_NAME))
+            cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_FUNCTION_ARN))
     elif is_db_span(span):
         remote_resource_type = _DB_CONNECTION_STRING_TYPE
         remote_resource_identifier = _get_db_connection(span)

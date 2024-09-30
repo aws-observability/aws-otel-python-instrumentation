@@ -26,6 +26,12 @@ _BEDROCK_GUARDRAIL_ID: str = "GuardrailId"
 _BEDROCK_KNOWLEDGEBASE_ID: str = "KnowledgeBaseId"
 _GEN_AI_SYSTEM: str = "aws_bedrock"
 _GEN_AI_REQUEST_MODEL: str = "genAiReuqestModelId"
+_SECRET_ARN: str = "arn:aws:secretsmanager:us-west-2:000000000000:secret:testSecret-ABCDEF"
+_TOPIC_ARN: str = "topicArn"
+_STATE_MACHINE_ARN: str = "arn:aws:states:us-west-2:000000000000:stateMachine:testStateMachine"
+_ACTIVITY_ARN: str = "arn:aws:states:us-east-1:007003123456789012:activity:testActivity"
+_LAMBDA_FUNCTION_NAME: str = "lambdaFunctionName"
+_LAMBDA_SOURCE_MAPPING_ID: str = "lambdaEventSourceMappingID"
 
 # Patch names
 GET_DISTRIBUTION_PATCH: str = (
@@ -141,6 +147,18 @@ class TestInstrumentationPatch(TestCase):
         # BedrockRuntime
         self.assertFalse("bedrock-runtime" in _KNOWN_EXTENSIONS, "Upstream has added a bedrock-runtime extension")
 
+        # SecretsManager
+        self.assertFalse("secretsmanager" in _KNOWN_EXTENSIONS, "Upstream has added a SecretsManager extension")
+
+        # SNS
+        self.assertTrue("sns" in _KNOWN_EXTENSIONS, "Upstream has removed the SNS extension")
+
+        # StepFunctions
+        self.assertFalse("stepfunctions" in _KNOWN_EXTENSIONS, "Upstream has added a StepFunctions extension")
+
+        # Lambda
+        self.assertTrue("lambda" in _KNOWN_EXTENSIONS, "Upstream has removed the Lambda extension")
+
     def _test_unpatched_gevent_instrumentation(self):
         self.assertFalse(gevent.monkey.is_module_patched("os"), "gevent os module has been patched")
         self.assertFalse(gevent.monkey.is_module_patched("thread"), "gevent thread module has been patched")
@@ -199,6 +217,37 @@ class TestInstrumentationPatch(TestCase):
         self.assertEqual(len(bedrock_runtime_attributes), 2)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.system"], _GEN_AI_SYSTEM)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.request.model"], _GEN_AI_REQUEST_MODEL)
+
+        # SecretsManager
+        self.assertTrue("secretsmanager" in _KNOWN_EXTENSIONS)
+        secretsmanager_attributes: Dict[str, str] = _do_extract_secretsmanager_attributes()
+        self.assertTrue("aws.secretsmanager.secret.arn" in secretsmanager_attributes)
+        self.assertEqual(secretsmanager_attributes["aws.secretsmanager.secret.arn"], _SECRET_ARN)
+        secretsmanager_success_attributes: Dict[str, str] = _do_on_success_secretsmanager()
+        self.assertTrue("aws.secretsmanager.secret.arn" in secretsmanager_success_attributes)
+        self.assertEqual(secretsmanager_success_attributes["aws.secretsmanager.secret.arn"], _SECRET_ARN)
+
+        # SNS
+        self.assertTrue("sns" in _KNOWN_EXTENSIONS)
+        sns_attributes: Dict[str, str] = _do_extract_sns_attributes()
+        self.assertTrue("aws.sns.topic.arn" in sns_attributes)
+        self.assertEqual(sns_attributes["aws.sns.topic.arn"], _TOPIC_ARN)
+
+        # StepFunctions
+        self.assertTrue("stepfunctions" in _KNOWN_EXTENSIONS)
+        stepfunctions_attributes: Dict[str, str] = _do_extract_stepfunctions_attributes()
+        self.assertTrue("aws.stepfunctions.state_machine.arn" in stepfunctions_attributes)
+        self.assertEqual(stepfunctions_attributes["aws.stepfunctions.state_machine.arn"], _STATE_MACHINE_ARN)
+        self.assertTrue("aws.stepfunctions.activity.arn" in stepfunctions_attributes)
+        self.assertEqual(stepfunctions_attributes["aws.stepfunctions.activity.arn"], _ACTIVITY_ARN)
+
+        # Lambda
+        self.assertTrue("lambda" in _KNOWN_EXTENSIONS)
+        lambda_attributes: Dict[str, str] = _do_extract_lambda_attributes()
+        self.assertTrue("aws.lambda.function.name" in lambda_attributes)
+        self.assertEqual(lambda_attributes["aws.lambda.function.name"], _LAMBDA_FUNCTION_NAME)
+        self.assertTrue("aws.lambda.resource_mapping.id" in lambda_attributes)
+        self.assertEqual(lambda_attributes["aws.lambda.resource_mapping.id"], _LAMBDA_SOURCE_MAPPING_ID)
 
     def _test_patched_gevent_os_ssl_instrumentation(self):
         # Only ssl and os module should have been patched since the environment variable was set to 'os, ssl'
@@ -356,6 +405,36 @@ def _do_on_success_bedrock(service, operation=None) -> Dict[str, str]:
         "modelId": _GEN_AI_REQUEST_MODEL,
     }
     return _do_on_success(service, result, operation)
+
+
+def _do_extract_secretsmanager_attributes() -> Dict[str, str]:
+    service_name: str = "secretsmanager"
+    params: Dict[str, str] = {"SecretId": _SECRET_ARN}
+    return _do_extract_attributes(service_name, params)
+
+
+def _do_on_success_secretsmanager() -> Dict[str, str]:
+    service_name: str = "secretsmanager"
+    result: Dict[str, Any] = {"ARN": _SECRET_ARN}
+    return _do_on_success(service_name, result)
+
+
+def _do_extract_sns_attributes() -> Dict[str, str]:
+    service_name: str = "sns"
+    params: Dict[str, str] = {"TopicArn": _TOPIC_ARN}
+    return _do_extract_attributes(service_name, params)
+
+
+def _do_extract_stepfunctions_attributes() -> Dict[str, str]:
+    service_name: str = "stepfunctions"
+    params: Dict[str, str] = {"stateMachineArn": _STATE_MACHINE_ARN, "activityArn": _ACTIVITY_ARN}
+    return _do_extract_attributes(service_name, params)
+
+
+def _do_extract_lambda_attributes() -> Dict[str, str]:
+    service_name: str = "lambda"
+    params: Dict[str, str] = {"FunctionName": _LAMBDA_FUNCTION_NAME, "UUID": _LAMBDA_SOURCE_MAPPING_ID}
+    return _do_extract_attributes(service_name, params)
 
 
 def _do_extract_attributes(service_name: str, params: Dict[str, Any], operation: str = None) -> Dict[str, str]:
