@@ -41,25 +41,72 @@ jobs:
       - name: Upload main-build adot.whl to s3
         run: aws s3 cp ${{ inputs.staging-wheel-name }} s3://adot-main-build-staging-jar/${{ inputs.staging-wheel-name }}
 
-  python-ec2-default-e2e-test:
+  #
+  # PACKAGED DISTRIBUTION LANGUAGE VERSION COVERAGE
+  # DEFAULT SETTING: {Python Version}, EC2, AMD64, AL2
+  #
+
+  default-v8-amd64:
     needs: [ upload-main-build ]
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
-      staging-wheel-name: aws_opentelemetry_distro-0.2.0.dev0-07ca0f26-py3-none-any.whl
       caller-workflow-name: 'main-build'
+      python-version: '3.8'
+      cpu-architecture: 'x86_64'
+      staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
-  python-ec2-asg-e2e-test:
+  default-v11-amd64:
     needs: [ upload-main-build ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-asg-test.yml@main
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
-      staging-wheel-name: aws_opentelemetry_distro-0.2.0.dev0-07ca0f26-py3-none-any.whl
       caller-workflow-name: 'main-build'
+      python-version: '3.9'
+      cpu-architecture: 'x86_64'
+      staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
-  python-eks-e2e-test:
+  default-v17-amd64:
+    needs: [ upload-main-build ]
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      caller-workflow-name: 'main-build'
+      python-version: '3.10'
+      cpu-architecture: 'x86_64'
+      staging-wheel-name: ${{ inputs.staging-wheel-name }}
+
+  default-v21-amd64:
+    needs: [ upload-main-build ]
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      caller-workflow-name: 'main-build'
+      python-version: '3.11'
+      cpu-architecture: 'x86_64'
+      staging-wheel-name: ${{ inputs.staging-wheel-name }}
+
+  default-v22-amd64:
+    needs: [ upload-main-build ]
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      caller-workflow-name: 'main-build'
+      python-version: '3.12'
+      cpu-architecture: 'x86_64'
+      staging-wheel-name: ${{ inputs.staging-wheel-name }}
+      
+  #
+  # DOCKER DISTRIBUTION LANGUAGE VERSION COVERAGE
+  # DEFAULT SETTING: {Python Version}, EKS, AMD64, AL2
+  #
+
+  eks-v3-8-amd64:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
@@ -67,22 +114,106 @@ jobs:
       test-cluster-name: 'e2e-python-adot-test'
       adot-image-name: ${{ inputs.adot-image-name }}
       caller-workflow-name: 'main-build'
+      python-version: '3.8'
 
-  python-k8s-e2e-test:
+  eks-v3-9-amd64:
+    needs: eks-v3-8-amd64
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      test-cluster-name: 'e2e-python-adot-test'
+      adot-image-name: ${{ inputs.adot-image-name }}
+      caller-workflow-name: 'main-build'
+      python-version: '3.9'
+
+  eks-v3-10-amd64:
+    needs: eks-v3-9-amd64
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      test-cluster-name: 'e2e-python-adot-test'
+      adot-image-name: ${{ inputs.adot-image-name }}
+      caller-workflow-name: 'main-build'
+      python-version: '3.10'
+
+  eks-v3-11-amd64:
+    needs: eks-v3-10-amd64
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      test-cluster-name: 'e2e-python-adot-test'
+      adot-image-name: ${{ inputs.adot-image-name }}
+      caller-workflow-name: 'main-build'
+      python-version: '3.11'
+
+  eks-v3-12-amd64:
+    needs: eks-v3-11-amd64
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      test-cluster-name: 'e2e-python-adot-test'
+      adot-image-name: ${{ inputs.adot-image-name }}
+      caller-workflow-name: 'main-build'
+      python-version: '3.12'
+
+  #
+  # PACKAGED DISTRIBUTION PLATFORM COVERAGE
+  # DEFAULT SETTING: Python 3.9, {Platform}, AMD64, AL2
+  #
+
+  asg-v11-amd64:
+    needs: [ upload-main-build ]
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-asg-test.yml@main
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      caller-workflow-name: 'main-build'
+      python-version: '3.9'
+      staging-wheel-name: ${{ inputs.staging-wheel-name }}
+      
+  #
+  # DOCKER DISTRIBUTION PLATFORM COVERAGE
+  # DEFAULT SETTING: Python 3.10, {Platform}, AMD64, AL2
+  #
+
+  k8s-v11-amd64:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-k8s-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
       adot-image-name: ${{ inputs.adot-image-name }}
       caller-workflow-name: 'main-build'
+      python-version: '3.10'
 
-  python-ecs-e2e-test:
+
+  ecs-v11-amd64:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ecs-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
       adot-image-name: ${{ inputs.adot-image-name }}
       caller-workflow-name: 'main-build'
+      python-version: '3.10'
+
+  #
+  # CPU ARCHITECTURE COVERAGE
+  # DEFAULT SETTING: Python 3.9, EC2, {CPU Architecture}, AL2
+  #
+
+  default-v11-arm64:
+    needs: [ upload-main-build ]
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      caller-workflow-name: 'main-build'
+      python-version: '3.9'
+      cpu-architecture: 'arm64'
+      staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
 
 
