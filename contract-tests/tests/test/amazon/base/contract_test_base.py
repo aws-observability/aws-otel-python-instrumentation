@@ -90,7 +90,7 @@ class ContractTestBase(TestCase):
             .with_exposed_ports(self.get_application_port())
             .with_env("OTEL_METRIC_EXPORT_INTERVAL", "50")
             .with_env("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "true")
-            .with_env("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", "false")
+            .with_env("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", self.is_runtime_enabled())
             .with_env("OTEL_METRICS_EXPORTER", "none")
             .with_env("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
             .with_env("OTEL_BSP_SCHEDULE_DELAY", "1")
@@ -216,6 +216,9 @@ class ContractTestBase(TestCase):
 
     def get_application_otel_resource_attributes(self) -> str:
         return "service.name=" + self.get_application_otel_service_name()
+
+    def is_runtime_enabled(self) -> str:
+        return "false"
 
     def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs):
         self.fail("Tests must implement this function")
