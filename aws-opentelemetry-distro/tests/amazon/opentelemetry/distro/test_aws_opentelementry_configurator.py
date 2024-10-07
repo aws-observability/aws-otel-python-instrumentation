@@ -26,7 +26,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetr
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler._aws_xray_sampling_client import _AwsXRaySamplingClient
-from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
+from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import _AwsXRayRemoteSampler
 from opentelemetry.environment_variables import OTEL_LOGS_EXPORTER, OTEL_METRICS_EXPORTER, OTEL_TRACES_EXPORTER
 from opentelemetry.exporter.otlp.proto.common._internal.metrics_encoder import OTLPMetricExporterMixin
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter as OTLPGrpcOTLPMetricExporter
@@ -95,27 +95,28 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
     # Test method for importing xray sampler
     # Cannot test this logic via `aws_otel_configurator.configure()` because that will
     # attempt to setup tracer provider again, which can be only be done once (already done)
-    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
-    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
+    @patch.object(_AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
+    @patch.object(_AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
     def test_import_xray_sampler_without_environment_arguments(self):
         os.environ.pop(OTEL_TRACES_SAMPLER_ARG, None)
 
         xray_sampler: Sampler = _custom_import_sampler("xray", resource=None)
-        xray_client: _AwsXRaySamplingClient = xray_sampler._AwsXRayRemoteSampler__xray_client
-        self.assertEqual(xray_sampler._AwsXRayRemoteSampler__polling_interval, 300)
+        xray_client: _AwsXRaySamplingClient = xray_sampler._root._root._AwsXRayRemoteSampler__xray_client
+        self.assertEqual(xray_sampler._root._root._AwsXRayRemoteSampler__polling_interval, 300)
         self.assertEqual(
-            xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint, "http://127.0.0.1:2000/GetSamplingRules"
+            xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint,
+            "http://127.0.0.1:2000/GetSamplingRules",
         )
 
-    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
-    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
+    @patch.object(_AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
+    @patch.object(_AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
     def test_import_xray_sampler_with_valid_environment_arguments(self):
         os.environ.pop(OTEL_TRACES_SAMPLER_ARG, None)
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "endpoint=http://localhost:2000,polling_interval=600")
 
         xray_sampler: Sampler = _custom_import_sampler("xray", resource=None)
-        xray_client: _AwsXRaySamplingClient = xray_sampler._AwsXRayRemoteSampler__xray_client
-        self.assertEqual(xray_sampler._AwsXRayRemoteSampler__polling_interval, 600)
+        xray_client: _AwsXRaySamplingClient = xray_sampler._root._root._AwsXRayRemoteSampler__xray_client
+        self.assertEqual(xray_sampler._root._root._AwsXRayRemoteSampler__polling_interval, 600)
         self.assertEqual(
             xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint, "http://localhost:2000/GetSamplingRules"
         )
@@ -124,8 +125,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "polling_interval=123")
 
         xray_sampler: Sampler = _custom_import_sampler("xray", resource=None)
-        xray_client: _AwsXRaySamplingClient = xray_sampler._AwsXRayRemoteSampler__xray_client
-        self.assertEqual(xray_sampler._AwsXRayRemoteSampler__polling_interval, 123)
+        xray_client: _AwsXRaySamplingClient = xray_sampler._root._root._AwsXRayRemoteSampler__xray_client
+        self.assertEqual(xray_sampler._root._root._AwsXRayRemoteSampler__polling_interval, 123)
         self.assertEqual(
             xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint, "http://127.0.0.1:2000/GetSamplingRules"
         )
@@ -134,22 +135,22 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "endpoint=http://cloudwatch-agent.amazon-cloudwatch:2000")
 
         xray_sampler: Sampler = _custom_import_sampler("xray", resource=None)
-        xray_client: _AwsXRaySamplingClient = xray_sampler._AwsXRayRemoteSampler__xray_client
-        self.assertEqual(xray_sampler._AwsXRayRemoteSampler__polling_interval, 300)
+        xray_client: _AwsXRaySamplingClient = xray_sampler._root._root._AwsXRayRemoteSampler__xray_client
+        self.assertEqual(xray_sampler._root._root._AwsXRayRemoteSampler__polling_interval, 300)
         self.assertEqual(
             xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint,
             "http://cloudwatch-agent.amazon-cloudwatch:2000/GetSamplingRules",
         )
 
-    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
-    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
+    @patch.object(_AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
+    @patch.object(_AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
     def test_import_xray_sampler_with_invalid_environment_arguments(self):
         os.environ.pop(OTEL_TRACES_SAMPLER_ARG, None)
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "endpoint=h=tt=p://=loca=lho=st:2000,polling_interval=FOOBAR")
 
         xray_sampler: Sampler = _custom_import_sampler("xray", resource=None)
-        xray_client: _AwsXRaySamplingClient = xray_sampler._AwsXRayRemoteSampler__xray_client
-        self.assertEqual(xray_sampler._AwsXRayRemoteSampler__polling_interval, 300)
+        xray_client: _AwsXRaySamplingClient = xray_sampler._root._root._AwsXRayRemoteSampler__xray_client
+        self.assertEqual(xray_sampler._root._root._AwsXRayRemoteSampler__polling_interval, 300)
         self.assertEqual(
             xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint,
             "h=tt=p://=loca=lho=st:2000/GetSamplingRules",
@@ -159,18 +160,19 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, ",,=,==,,===,")
 
         xray_sampler: Sampler = _custom_import_sampler("xray", resource=None)
-        xray_client: _AwsXRaySamplingClient = xray_sampler._AwsXRayRemoteSampler__xray_client
-        self.assertEqual(xray_sampler._AwsXRayRemoteSampler__polling_interval, 300)
+        xray_client: _AwsXRaySamplingClient = xray_sampler._root._root._AwsXRayRemoteSampler__xray_client
+        self.assertEqual(xray_sampler._root._root._AwsXRayRemoteSampler__polling_interval, 300)
         self.assertEqual(
-            xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint, "http://127.0.0.1:2000/GetSamplingRules"
+            xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint,
+            "http://127.0.0.1:2000/GetSamplingRules",
         )
 
         os.environ.pop(OTEL_TRACES_SAMPLER_ARG, None)
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "endpoint,polling_interval")
 
         xray_sampler: Sampler = _custom_import_sampler("xray", resource=None)
-        xray_client: _AwsXRaySamplingClient = xray_sampler._AwsXRayRemoteSampler__xray_client
-        self.assertEqual(xray_sampler._AwsXRayRemoteSampler__polling_interval, 300)
+        xray_client: _AwsXRaySamplingClient = xray_sampler._root._root._AwsXRayRemoteSampler__xray_client
+        self.assertEqual(xray_sampler._root._root._AwsXRayRemoteSampler__polling_interval, 300)
         self.assertEqual(
             xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint, "http://127.0.0.1:2000/GetSamplingRules"
         )
@@ -183,8 +185,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(default_sampler.get_description(), DEFAULT_ON.get_description())
         # DEFAULT_ON is a ParentBased(ALWAYS_ON) sampler
 
-    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
-    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
+    @patch.object(_AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
+    @patch.object(_AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
     def test_using_xray_sampler_sets_url_exclusion_env_vars(self):
         targets_to_exclude = "SamplingTargets,GetSamplingRules"
         os.environ.pop("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", None)
@@ -196,8 +198,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(os.environ.get("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", None), targets_to_exclude)
         self.assertEqual(os.environ.get("OTEL_PYTHON_URLLIB3_EXCLUDED_URLS", None), targets_to_exclude)
 
-    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
-    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
+    @patch.object(_AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
+    @patch.object(_AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
     def test_using_xray_sampler_appends_url_exclusion_env_vars(self):
         targets_to_exclude = "SamplingTargets,GetSamplingRules"
         os.environ.pop("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", None)
