@@ -48,6 +48,11 @@ class AwsSpanMetricsProcessor(SpanProcessor):
 
     _force_flush_function: Callable
 
+    # no op function to act as a default function in case forceFlushFunction was
+    # not supplied to the the constructor. 
+    def _no_op_function(self, timeout_millis) -> None:
+        return
+
     def __init__(
         self,
         error_histogram: Histogram,
@@ -55,7 +60,7 @@ class AwsSpanMetricsProcessor(SpanProcessor):
         latency_histogram: Histogram,
         generator: MetricAttributeGenerator,
         resource: Resource,
-        force_flush_function: Callable,
+        force_flush_function: Callable = _no_op_function,
     ):
         self._error_histogram = error_histogram
         self._fault_histogram = fault_histogram
