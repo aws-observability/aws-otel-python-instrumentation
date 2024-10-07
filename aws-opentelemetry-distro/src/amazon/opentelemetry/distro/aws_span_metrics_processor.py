@@ -7,7 +7,6 @@ from typing_extensions import override
 from amazon.opentelemetry.distro.metric_attribute_generator import MetricAttributeGenerator
 from opentelemetry.context import Context
 from opentelemetry.metrics import Histogram
-from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import BoundedAttributes, ReadableSpan, Span, SpanProcessor, StatusCode
 from opentelemetry.semconv.trace import SpanAttributes
@@ -50,8 +49,8 @@ class AwsSpanMetricsProcessor(SpanProcessor):
 
     # no op function to act as a default function in case forceFlushFunction was
     # not supplied to the the constructor.
-    def _no_op_function(self, timeout_millis: float = None) -> None:
-        return
+    def _no_op_function(self, timeout_millis: float = None) -> bool:
+        return True
 
     def __init__(
         self,
