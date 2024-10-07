@@ -388,10 +388,8 @@ class TestSamplingRuleApplier(TestCase):
 
         rule_applier = _SamplingRuleApplier(sampling_rule, CLIENT_ID, mock_clock)
 
-        self.assertEqual(rule_applier._SamplingRuleApplier__fixed_rate_sampler._root._rate, 0.11)
-        self.assertEqual(
-            rule_applier._SamplingRuleApplier__reservoir_sampler._root._RateLimitingSampler__reservoir._quota, 1
-        )
+        self.assertEqual(rule_applier._SamplingRuleApplier__fixed_rate_sampler._rate, 0.11)
+        self.assertEqual(rule_applier._SamplingRuleApplier__reservoir_sampler._RateLimitingSampler__reservoir._quota, 1)
         self.assertEqual(rule_applier._SamplingRuleApplier__reservoir_expiry, datetime.datetime.max)
 
         target = _SamplingTarget(
@@ -403,9 +401,9 @@ class TestSamplingRuleApplier(TestCase):
         time_now = datetime.datetime.fromtimestamp(target.ReservoirQuotaTTL)
         mock_clock.set_time(time_now)
 
-        self.assertEqual(rule_applier._SamplingRuleApplier__fixed_rate_sampler._root._rate, 1.0)
+        self.assertEqual(rule_applier._SamplingRuleApplier__fixed_rate_sampler._rate, 1.0)
         self.assertEqual(
-            rule_applier._SamplingRuleApplier__reservoir_sampler._root._RateLimitingSampler__reservoir._quota, 30
+            rule_applier._SamplingRuleApplier__reservoir_sampler._RateLimitingSampler__reservoir._quota, 30
         )
         self.assertEqual(rule_applier._SamplingRuleApplier__reservoir_expiry, mock_clock.now())
 

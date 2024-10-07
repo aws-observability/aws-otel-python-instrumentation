@@ -24,7 +24,48 @@ DEFAULT_RULES_POLLING_INTERVAL_SECONDS = 300
 DEFAULT_SAMPLING_PROXY_ENDPOINT = "http://127.0.0.1:2000"
 
 
+# Wrapper class to ensure that all XRay Sampler Functionality in _AwsXRayRemoteSampler
+# uses ParentBased logic to respect the parent span's sampling decision
 class AwsXRayRemoteSampler(Sampler):
+    def __init__(
+        self,
+        resource: Resource,
+        endpoint: str = None,
+        polling_interval: int = None,
+        log_level=None,
+    ):
+        self._root = ParentBased(
+            _AwsXRayRemoteSampler(
+                resource=resource, endpoint=endpoint, polling_interval=polling_interval, log_level=log_level
+            )
+        )
+
+    # pylint: disable=no-self-use
+    @override
+    def should_sample(
+        self,
+        parent_context: Optional[Context],
+        trace_id: int,
+        name: str,
+        kind: SpanKind = None,
+        attributes: Attributes = None,
+        links: Sequence[Link] = None,
+        trace_state: TraceState = None,
+    ) -> SamplingResult:
+        return self._root.should_sample(
+            parent_context, trace_id, name, kind=kind, attributes=attributes, links=links, trace_state=trace_state
+        )
+
+    # pylint: disable=no-self-use
+    @override
+    def get_description(self) -> str:
+        return f"AwsXRayRemoteSampler{{root:{self._root.get_description()}}}"
+
+
+# _AwsXRayRemoteSampler contains all core XRay Sampler Functionality,
+# however it is NOT Parent-based (e.g. Sample logic runs for each span)
+# Not intended for external use, use Parent-based `AwsXRayRemoteSampler` instead.
+class _AwsXRayRemoteSampler(Sampler):
     """
     Remote Sampler for OpenTelemetry that gets sampling configurations from AWS X-Ray
 
@@ -58,7 +99,7 @@ class AwsXRayRemoteSampler(Sampler):
         self.__client_id = self.__generate_client_id()
         self._clock = _Clock()
         self.__xray_client = _AwsXRaySamplingClient(endpoint, log_level=log_level)
-        self.__fallback_sampler = ParentBased(_FallbackSampler(self._clock))
+        self.__fallback_sampler = _FallbackSampler(self._clock)
 
         self.__polling_interval = polling_interval
         self.__target_polling_interval = DEFAULT_TARGET_POLLING_INTERVAL_SECONDS
@@ -114,7 +155,7 @@ class AwsXRayRemoteSampler(Sampler):
     # pylint: disable=no-self-use
     @override
     def get_description(self) -> str:
-        description = "AwsXRayRemoteSampler{remote sampling with AWS X-Ray}"
+        description = "_AwsXRayRemoteSampler{remote sampling with AWS X-Ray}"
         return description
 
     def __get_and_update_sampling_rules(self) -> None:
