@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import Dict, Optional, Callable
+from typing import Callable, Dict, Optional
 
 from typing_extensions import override
 
