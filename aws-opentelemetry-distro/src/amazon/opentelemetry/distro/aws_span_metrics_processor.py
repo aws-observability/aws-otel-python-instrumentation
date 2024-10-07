@@ -49,8 +49,8 @@ class AwsSpanMetricsProcessor(SpanProcessor):
     _force_flush_function: Callable
 
     # no op function to act as a default function in case forceFlushFunction was
-    # not supplied to the the constructor. 
-    def _no_op_function(self, timeout_millis) -> None:
+    # not supplied to the the constructor.
+    def _no_op_function(self, timeout_millis: float = None) -> None:
         return
 
     def __init__(
