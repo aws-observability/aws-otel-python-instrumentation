@@ -1,0 +1,50 @@
+name: Build and Push aws-opentelemetry-python-distro Layer
+description: |
+  This action assumes that the repo was checked out. Builds and push Lambda Layer and sample app to S3 bucket for 
+  the further end to end tests.
+
+inputs:
+  aws-region:
+    required: false
+    description: "AWS Region, required only if push_image is true"
+  snapshot-ecr-role:
+    required: false
+    description: "IAM Role used for pushing to snapshot ecr, required only if push_image is true"
+  python_version:
+    required: true
+    description: "The python version used in actions"
+  layer_directory:
+    required: true
+    description: 'The role use to publish lambda layer'
+  staging_s3_bucket:
+    required: true
+    description: 'S3 bucket holds SDK artifact tarball'
+  os:
+    required: true
+    description: "The os"
+
+
+runs:
+  using: "composite"
+  steps:
+    - name: Build sample lambda function
+      shell: bash
+      working-directory: ${{ inputs.layer_directory }}/sample-apps
+      run: ./package-lambda-function.sh
+    - name: Build layers
+      shell: bash
+      working-directory: ${{ inputs.layer_directory }}/src
+      run: |
+        ./build-lambda-layer.sh
+        pip install tox
+        tox
+    - name: Upload Layer to S3
+      shell: bash
+      run: |
+        aws s3 cp ./build/aws-opentelemetry-python-layer.zip s3://${{ inputs.staging_s3_bucket }}/layer-${{ github.run_id }}.zip
+      working-directory: ${{ inputs.layer_directory }}/src
+    - name: Upload Sample App to S3
+      shell: bash
+      run: |
+        aws s3 cp ./build/function.zip s3://${{ inputs.staging_s3_bucket }}/function-${{ github.run_id }}.zip
+      working-directory: ${{ inputs.layer_directory }}/sample-apps
