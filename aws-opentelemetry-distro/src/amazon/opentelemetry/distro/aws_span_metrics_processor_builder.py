@@ -63,5 +63,5 @@ class AwsSpanMetricsProcessorBuilder:
         latency_histogram.name = _LATENCY
 
         return AwsSpanMetricsProcessor(
-            error_histogram, fault_histogram, latency_histogram, self._generator, self._resource
+            error_histogram, fault_histogram, latency_histogram, self._generator, self._resource, self._meter_provider.force_flush
         )

@@ -1,12 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import Dict, Optional
+from typing import Dict, Optional, Callable
 
 from typing_extensions import override
 
 from amazon.opentelemetry.distro.metric_attribute_generator import MetricAttributeGenerator
 from opentelemetry.context import Context
 from opentelemetry.metrics import Histogram
+from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import BoundedAttributes, ReadableSpan, Span, SpanProcessor, StatusCode
 from opentelemetry.semconv.trace import SpanAttributes
@@ -45,6 +46,8 @@ class AwsSpanMetricsProcessor(SpanProcessor):
     _generator: MetricAttributeGenerator
     _resource: Resource
 
+    _force_flush_function: Callable
+
     def __init__(
         self,
         error_histogram: Histogram,
@@ -52,12 +55,14 @@ class AwsSpanMetricsProcessor(SpanProcessor):
         latency_histogram: Histogram,
         generator: MetricAttributeGenerator,
         resource: Resource,
+        force_flush_function: Callable,
     ):
         self._error_histogram = error_histogram
         self._fault_histogram = fault_histogram
         self._latency_histogram = latency_histogram
         self._generator = generator
         self._resource = resource
+        self._force_flush_function = force_flush_function
 
     # pylint: disable=no-self-use
     @override
@@ -78,8 +83,8 @@ class AwsSpanMetricsProcessor(SpanProcessor):
 
     # pylint: disable=no-self-use
     @override
-    def force_flush(self, timeout_millis: int = None) -> bool:
-        return True
+    def force_flush(self, timeout_millis: float = 10_000) -> bool:
+        return self._force_flush_function(timeout_millis)
 
     def _record_metrics(self, span: ReadableSpan, attributes: BoundedAttributes) -> None:
         # Only record metrics if non-empty attributes are returned.
