@@ -100,7 +100,7 @@ jobs:
       python-version: '3.12'
       cpu-architecture: 'x86_64'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
-      
+
   #
   # DOCKER DISTRIBUTION LANGUAGE VERSION COVERAGE
   # DEFAULT SETTING: {Python Version}, EKS, AMD64, AL2
@@ -174,7 +174,7 @@ jobs:
       caller-workflow-name: 'main-build'
       python-version: '3.9'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
-      
+
   #
   # DOCKER DISTRIBUTION PLATFORM COVERAGE
   # DEFAULT SETTING: Python 3.10, {Platform}, AMD64, AL2
@@ -215,5 +215,12 @@ jobs:
       cpu-architecture: 'arm64'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
-
-
+  #
+  # Lambda layer integration tests
+  lambda:
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-lambda-test.yml@main
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      python-version: '3.12'
+      caller-workflow-name: 'main-build'
