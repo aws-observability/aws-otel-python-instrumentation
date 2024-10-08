@@ -12,7 +12,7 @@ from amazon.opentelemetry.distro.sampler._sampling_statistics_document import _S
 from amazon.opentelemetry.distro.sampler._sampling_target import _SamplingTarget
 from opentelemetry.context import Context
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace.sampling import Decision, ParentBased, Sampler, SamplingResult, TraceIdRatioBased
+from opentelemetry.sdk.trace.sampling import Decision, Sampler, SamplingResult, TraceIdRatioBased
 from opentelemetry.semconv.resource import CloudPlatformValues, ResourceAttributes
 from opentelemetry.semconv.trace import SpanAttributes
 from opentelemetry.trace import Link, SpanKind
@@ -42,7 +42,7 @@ class _SamplingRuleApplier:
         self.__borrowing = False
 
         if target is None:
-            self.__fixed_rate_sampler = ParentBased(TraceIdRatioBased(self.sampling_rule.FixedRate))
+            self.__fixed_rate_sampler = TraceIdRatioBased(self.sampling_rule.FixedRate)
             # Until targets are fetched, initialize as borrowing=True if there will be a quota > 0
             if self.sampling_rule.ReservoirSize > 0:
                 self.__reservoir_sampler = self.__create_reservoir_sampler(quota=1)
@@ -55,7 +55,7 @@ class _SamplingRuleApplier:
             new_quota = target.ReservoirQuota if target.ReservoirQuota is not None else 0
             new_fixed_rate = target.FixedRate if target.FixedRate is not None else 0
             self.__reservoir_sampler = self.__create_reservoir_sampler(quota=new_quota)
-            self.__fixed_rate_sampler = ParentBased(TraceIdRatioBased(new_fixed_rate))
+            self.__fixed_rate_sampler = TraceIdRatioBased(new_fixed_rate)
             if target.ReservoirQuotaTTL is not None:
                 self.__reservoir_expiry = self._clock.from_timestamp(target.ReservoirQuotaTTL)
             else:
@@ -159,7 +159,7 @@ class _SamplingRuleApplier:
         )
 
     def __create_reservoir_sampler(self, quota: int) -> Sampler:
-        return ParentBased(_RateLimitingSampler(quota, self._clock))
+        return _RateLimitingSampler(quota, self._clock)
 
     # pylint: disable=no-self-use
     def __get_service_type(self, resource: Resource) -> str:

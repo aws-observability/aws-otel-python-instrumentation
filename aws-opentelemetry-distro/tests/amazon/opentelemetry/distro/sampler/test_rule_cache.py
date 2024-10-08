@@ -136,15 +136,15 @@ class TestRuleCache(TestCase):
         # quota should be 1 because of borrowing=true until targets are updated
         rule_applier_0 = rule_cache._RuleCache__rule_appliers[0]
         self.assertEqual(
-            rule_applier_0._SamplingRuleApplier__reservoir_sampler._root._RateLimitingSampler__reservoir._quota, 1
+            rule_applier_0._SamplingRuleApplier__reservoir_sampler._RateLimitingSampler__reservoir._quota, 1
         )
-        self.assertEqual(rule_applier_0._SamplingRuleApplier__fixed_rate_sampler._root._rate, sampling_rule_2.FixedRate)
+        self.assertEqual(rule_applier_0._SamplingRuleApplier__fixed_rate_sampler._rate, sampling_rule_2.FixedRate)
 
         rule_applier_1 = rule_cache._RuleCache__rule_appliers[1]
         self.assertEqual(
-            rule_applier_1._SamplingRuleApplier__reservoir_sampler._root._RateLimitingSampler__reservoir._quota, 1
+            rule_applier_1._SamplingRuleApplier__reservoir_sampler._RateLimitingSampler__reservoir._quota, 1
         )
-        self.assertEqual(rule_applier_1._SamplingRuleApplier__fixed_rate_sampler._root._rate, sampling_rule_1.FixedRate)
+        self.assertEqual(rule_applier_1._SamplingRuleApplier__fixed_rate_sampler._rate, sampling_rule_1.FixedRate)
 
         target_1 = {
             "FixedRate": 0.05,
@@ -179,17 +179,17 @@ class TestRuleCache(TestCase):
         # borrowing=false, use quota from targets
         rule_applier_0 = rule_cache._RuleCache__rule_appliers[0]
         self.assertEqual(
-            rule_applier_0._SamplingRuleApplier__reservoir_sampler._root._RateLimitingSampler__reservoir._quota,
+            rule_applier_0._SamplingRuleApplier__reservoir_sampler._RateLimitingSampler__reservoir._quota,
             target_2["ReservoirQuota"],
         )
-        self.assertEqual(rule_applier_0._SamplingRuleApplier__fixed_rate_sampler._root._rate, target_2["FixedRate"])
+        self.assertEqual(rule_applier_0._SamplingRuleApplier__fixed_rate_sampler._rate, target_2["FixedRate"])
 
         rule_applier_1 = rule_cache._RuleCache__rule_appliers[1]
         self.assertEqual(
-            rule_applier_1._SamplingRuleApplier__reservoir_sampler._root._RateLimitingSampler__reservoir._quota,
+            rule_applier_1._SamplingRuleApplier__reservoir_sampler._RateLimitingSampler__reservoir._quota,
             target_1["ReservoirQuota"],
         )
-        self.assertEqual(rule_applier_1._SamplingRuleApplier__fixed_rate_sampler._root._rate, target_1["FixedRate"])
+        self.assertEqual(rule_applier_1._SamplingRuleApplier__fixed_rate_sampler._rate, target_1["FixedRate"])
 
         # Test target response modified after Rule cache's last modified date
         target_response.LastRuleModification = mock_clock.now().timestamp() + 1
