@@ -10,8 +10,7 @@ on:
 
 env:
   COMMERCIAL_REGIONS: us-east-1, us-east-2, us-west-1, us-west-2, ap-south-1, ap-northeast-3, ap-northeast-2, ap-southeast-1, ap-southeast-2, ap-northeast-1, ca-central-1, eu-central-1, eu-west-1, eu-west-2, eu-west-3, eu-north-1, sa-east-1
-  # LAYER_NAME: AWSOpenTelemetryDistroPython
-  LAYER_NAME: AWSOpenTelemetryDistroPythonBeta
+  LAYER_NAME: AWSOpenTelemetryDistroPython
 
 permissions:
   id-token: write
@@ -56,7 +55,6 @@ jobs:
     needs: build-layer
     strategy:
       matrix:
-        # aws_region: ${{ fromJson(github.event.inputs.aws_region) }}
         aws_region: ${{ fromJson(needs.build-layer.outputs.aws_regions_json) }}
     steps:
       - name: role arn
@@ -112,7 +110,6 @@ jobs:
           mkdir ${{ env.LAYER_NAME }}
           echo $layerARN > ${{ env.LAYER_NAME }}/${{ matrix.aws_region }}
           cat ${{ env.LAYER_NAME }}/${{ matrix.aws_region }}
-          pwd
       - name: public layer
         run: |
           layerVersion=$(
@@ -193,21 +190,39 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -b "release-lambda-${{ github.run_id }}"
           mv layer.tf lambda-layer/terraform/lambda/
           git add lambda-layer/terraform/lambda/layer.tf
           git commit -m "Update Lambda layer ARNs for releasing" || echo "No changes to commit"
-          git push --set-upstream origin "release-lambda-${{ github.run_id }}"
-      - name: Create Pull Request
+          git push
+  create-release:
+    runs-on: ubuntu-latest
+    needs: generate-release-note
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@v4
+      - name: Get latest commit SHA
+        run: |
+          echo "COMMIT_SHA=${GITHUB_SHA}" >> $GITHUB_ENV
+          SHORT_SHA=$(echo $GITHUB_SHA | cut -c1-7)
+          echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_ENV
+      - name: Create Tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          TAG_NAME="lambda-${SHORT_SHA}"
+          git tag -a "$TAG_NAME" -m "Release Lambda layer based on commit $TAG_NAME"
+          git push origin "$TAG_NAME"
+          echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_ENV
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        uses: peter-evans/create-pull-request@v5
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "Update Lambda layer ARNs for releasing"
-          title: "Update Layer layer ARNs for releasing"
-          body: |
-            This PR updates the layer.tf file for the AWS region `${{ matrix.aws_region }}`.
-          branch: release-lambda-${{ github.run_id }}
-          base: main
-
+          tag_name: ${{ env.TAG_NAME }}
+          release_name: "Release AWSOpenTelemetryDistroPython Lambda Layer"
+          body_path: lambda-layer/terraform/lambda/layer.tf
+          draft: true
+          prerelease: false
