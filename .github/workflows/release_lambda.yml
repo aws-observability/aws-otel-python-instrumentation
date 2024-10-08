@@ -204,16 +204,4 @@ jobs:
           git add lambda-layer/terraform/lambda/layer.tf
           git commit -m "Update Lambda layer ARNs for releasing" || echo "No changes to commit"
           git push
-      - name: Create Pull Request
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        uses: peter-evans/create-pull-request@v5
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "Update Lambda layer ARNs for releasing"
-          title: "Update Layer layer ARNs for releasing"
-          body: |
-            This PR updates the layer.tf file for the AWS region `${{ matrix.aws_region }}`.
-          branch: release-lambda-${{ github.run_id }}
-          base: main
 
