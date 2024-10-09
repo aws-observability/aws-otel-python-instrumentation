@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "release/v*"
+      - ci-workflow
   workflow_dispatch: # be able to run the workflow on demand
 env:
   AWS_DEFAULT_REGION: us-east-1
@@ -70,6 +71,16 @@ jobs:
           echo "STAGING_WHEEL=$staging_wheel" >> $GITHUB_OUTPUT
           cd ./dist
           cp aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION}}-py3-none-any.whl $staging_wheel
+
+      - name: Build and Publish Lambda Staging Layer
+        uses: ./.github/actions/lambda_artifacts_build
+        with:
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+          snapshot-ecr-role: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
+          python_version: "3.12"
+          layer_directory: lambda-layer
+          staging_s3_bucket: ${{ env.STAGING_S3_BUCKET }}
+          os: ubuntu-latest
 
       - name: Upload wheel to S3
         run: |
