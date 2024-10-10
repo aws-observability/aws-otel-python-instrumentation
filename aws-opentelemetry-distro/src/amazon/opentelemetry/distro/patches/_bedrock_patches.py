@@ -7,6 +7,7 @@ from typing import Dict, Optional
 from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_AGENT_ID,
     AWS_BEDROCK_DATA_SOURCE_ID,
+    AWS_BEDROCK_GUARDRAIL_ARN,
     AWS_BEDROCK_GUARDRAIL_ID,
     AWS_BEDROCK_KNOWLEDGE_BASE_ID,
 )
@@ -23,6 +24,7 @@ _AGENT_ID: str = "agentId"
 _KNOWLEDGE_BASE_ID: str = "knowledgeBaseId"
 _DATA_SOURCE_ID: str = "dataSourceId"
 _GUARDRAIL_ID: str = "guardrailId"
+_GUARDRAIL_ARN: str = "guardrailArn"
 _MODEL_ID: str = "modelId"
 _AWS_BEDROCK_SYSTEM: str = "aws_bedrock"
 
@@ -215,6 +217,13 @@ class _BedrockExtension(_AwsSdkExtension):
             span.set_attribute(
                 AWS_BEDROCK_GUARDRAIL_ID,
                 guardrail_id,
+            )
+
+        guardrail_arn = result.get(_GUARDRAIL_ARN)
+        if guardrail_arn:
+            span.set_attribute(
+                AWS_BEDROCK_GUARDRAIL_ARN,
+                guardrail_arn,
             )
 
 
