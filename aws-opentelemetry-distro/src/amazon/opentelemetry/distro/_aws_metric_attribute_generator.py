@@ -8,6 +8,7 @@ from urllib.parse import ParseResult, urlparse
 from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_AGENT_ID,
     AWS_BEDROCK_DATA_SOURCE_ID,
+    AWS_BEDROCK_GUARDRAIL_ARN,
     AWS_BEDROCK_GUARDRAIL_ID,
     AWS_BEDROCK_KNOWLEDGE_BASE_ID,
     AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER,
@@ -423,6 +424,7 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         elif is_key_present(span, AWS_BEDROCK_GUARDRAIL_ID):
             remote_resource_type = _NORMALIZED_BEDROCK_SERVICE_NAME + "::Guardrail"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_BEDROCK_GUARDRAIL_ID))
+            cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_BEDROCK_GUARDRAIL_ARN))
         elif is_key_present(span, AWS_BEDROCK_KNOWLEDGE_BASE_ID):
             remote_resource_type = _NORMALIZED_BEDROCK_SERVICE_NAME + "::KnowledgeBase"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_BEDROCK_KNOWLEDGE_BASE_ID))
