@@ -13,7 +13,6 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_KNOWLEDGE_BASE_ID,
     AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER,
     AWS_KINESIS_STREAM_NAME,
-    AWS_LAMBDA_FUNCTION_NAME,
     AWS_LAMBDA_RESOURCEMAPPING_ID,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
@@ -458,9 +457,6 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         elif is_key_present(span, AWS_LAMBDA_RESOURCEMAPPING_ID):
             remote_resource_type = _NORMALIZED_LAMBDA_SERVICE_NAME + "::EventSourceMapping"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_RESOURCEMAPPING_ID))
-        elif is_key_present(span, AWS_LAMBDA_FUNCTION_NAME):
-            remote_resource_type = _NORMALIZED_LAMBDA_SERVICE_NAME + "::Function"
-            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_FUNCTION_NAME))
     elif is_db_span(span):
         remote_resource_type = _DB_CONNECTION_STRING_TYPE
         remote_resource_identifier = _get_db_connection(span)
