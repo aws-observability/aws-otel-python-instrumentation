@@ -87,7 +87,7 @@ class MockCollectorClient:
                         spans.append(ResourceScopeSpan(resource_span, scope_span, span))
         return spans
 
-    def get_metrics(self, present_metrics: Set[str]) -> List[ResourceScopeMetric]:
+    def get_metrics(self, present_metrics: Set[str], exact_match=True) -> List[ResourceScopeMetric]:
         """Get all metrics that are currently stored in the mock collector.
 
         Returns:
@@ -111,7 +111,9 @@ class MockCollectorClient:
                     for scope_metric in resource_metric.scope_metrics:
                         for metric in scope_metric.metrics:
                             received_metrics.add(metric.name.lower())
-            return 0 < len(exported) == len(current) and present_metrics_lower.issubset(received_metrics)
+            if exact_match:
+                return 0 < len(exported) == len(current) and present_metrics_lower.issubset(received_metrics)
+            return present_metrics_lower.issubset(received_metrics)
 
         exported_metrics: List[ExportMetricsServiceRequest] = _wait_for_content(get_export, wait_condition)
         metrics: List[ResourceScopeMetric] = []
