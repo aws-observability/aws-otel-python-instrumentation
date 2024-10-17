@@ -10,6 +10,7 @@ ERROR_METRIC: str = "error"
 FAULT_METRIC: str = "fault"
 
 # Attribute names
+AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER: str = "aws.remote.resource.cfn.primary.identifier"
 AWS_LOCAL_SERVICE: str = "aws.local.service"
 AWS_LOCAL_OPERATION: str = "aws.local.operation"
 AWS_REMOTE_DB_USER: str = "aws.remote.db.user"
