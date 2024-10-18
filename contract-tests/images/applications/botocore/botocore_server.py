@@ -246,7 +246,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             set_main_status(200)
             bedrock_client.meta.events.register(
                 "before-call.bedrock.GetGuardrail",
-                lambda **kwargs: inject_200_success(guardrailId="bt4o77i015cu", **kwargs),
+                lambda **kwargs: inject_200_success(guardrailId="bt4o77i015cu", guardrailArn="arn:aws:bedrock:us-east-1:000000000000:guardrail/bt4o77i015cu", **kwargs),
             )
             bedrock_client.get_guardrail(
                 guardrailIdentifier="arn:aws:bedrock:us-east-1:000000000000:guardrail/bt4o77i015cu"
@@ -363,6 +363,9 @@ def inject_200_success(**kwargs):
     guardrail_id = kwargs.get("guardrailId")
     if guardrail_id is not None:
         response_body["guardrailId"] = guardrail_id
+    guardrail_arn = kwargs.get("guardrailArn")
+    if guardrail_arn is not None:
+        response_body["guardrailArn"] = guardrail_arn
 
     HTTPResponse = namedtuple("HTTPResponse", ["status_code", "headers", "body"])
     headers = kwargs.get("headers", {})

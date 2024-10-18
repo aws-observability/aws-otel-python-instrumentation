@@ -10,6 +10,7 @@ from typing_extensions import override
 
 from amazon.base.contract_test_base import NETWORK_NAME, ContractTestBase
 from amazon.utils.application_signals_constants import (
+    AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_REMOTE_OPERATION,
@@ -99,6 +100,7 @@ class BotocoreTest(ContractTestBase):
             remote_operation="CreateBucket",
             remote_resource_type="AWS::S3::Bucket",
             remote_resource_identifier="test-bucket-name",
+            cloudformation_primary_identifier="test-bucket-name",
             request_specific_attributes={
                 SpanAttributes.AWS_S3_BUCKET: "test-bucket-name",
             },
@@ -116,6 +118,7 @@ class BotocoreTest(ContractTestBase):
             remote_operation="PutObject",
             remote_resource_type="AWS::S3::Bucket",
             remote_resource_identifier="test-put-object-bucket-name",
+            cloudformation_primary_identifier="test-put-object-bucket-name",
             request_specific_attributes={
                 SpanAttributes.AWS_S3_BUCKET: "test-put-object-bucket-name",
             },
@@ -133,6 +136,7 @@ class BotocoreTest(ContractTestBase):
             remote_operation="GetObject",
             remote_resource_type="AWS::S3::Bucket",
             remote_resource_identifier="test-get-object-bucket-name",
+            cloudformation_primary_identifier="test-get-object-bucket-name",
             request_specific_attributes={
                 SpanAttributes.AWS_S3_BUCKET: "test-get-object-bucket-name",
             },
@@ -150,6 +154,7 @@ class BotocoreTest(ContractTestBase):
             remote_operation="CreateBucket",
             remote_resource_type="AWS::S3::Bucket",
             remote_resource_identifier="-",
+            cloudformation_primary_identifier="-",
             request_specific_attributes={
                 SpanAttributes.AWS_S3_BUCKET: "-",
             },
@@ -167,6 +172,7 @@ class BotocoreTest(ContractTestBase):
             remote_operation="CreateBucket",
             remote_resource_type="AWS::S3::Bucket",
             remote_resource_identifier="valid-bucket-name",
+            cloudformation_primary_identifier="valid-bucket-name",
             request_specific_attributes={
                 SpanAttributes.AWS_S3_BUCKET: "valid-bucket-name",
             },
@@ -184,6 +190,7 @@ class BotocoreTest(ContractTestBase):
             remote_operation="CreateTable",
             remote_resource_type="AWS::DynamoDB::Table",
             remote_resource_identifier="test_table",
+            cloudformation_primary_identifier="test_table",
             request_specific_attributes={
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["test_table"],
             },
@@ -201,6 +208,7 @@ class BotocoreTest(ContractTestBase):
             remote_operation="PutItem",
             remote_resource_type="AWS::DynamoDB::Table",
             remote_resource_identifier="put_test_table",
+            cloudformation_primary_identifier="put_test_table",
             request_specific_attributes={
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["put_test_table"],
             },
@@ -218,6 +226,7 @@ class BotocoreTest(ContractTestBase):
             remote_operation="PutItem",
             remote_resource_type="AWS::DynamoDB::Table",
             remote_resource_identifier="invalid_table",
+            cloudformation_primary_identifier="invalid_table",
             request_specific_attributes={
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["invalid_table"],
             },
@@ -235,6 +244,7 @@ class BotocoreTest(ContractTestBase):
             remote_operation="PutItem",
             remote_resource_type="AWS::DynamoDB::Table",
             remote_resource_identifier="invalid_table",
+            cloudformation_primary_identifier="invalid_table",
             request_specific_attributes={
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["invalid_table"],
             },
@@ -252,6 +262,9 @@ class BotocoreTest(ContractTestBase):
             remote_operation="CreateQueue",
             remote_resource_type="AWS::SQS::Queue",
             remote_resource_identifier="test_queue",
+            # TODO: This passes but it is not correct. 
+            # cloudformation_primary_identifier should be some sort of queue url
+            cloudformation_primary_identifier="test_queue",
             request_specific_attributes={
                 _AWS_SQS_QUEUE_NAME: "test_queue",
             },
@@ -269,6 +282,7 @@ class BotocoreTest(ContractTestBase):
             remote_operation="SendMessage",
             remote_resource_type="AWS::SQS::Queue",
             remote_resource_identifier="test_put_get_queue",
+            cloudformation_primary_identifier="http://localstack:4566/000000000000/test_put_get_queue",
             request_specific_attributes={
                 _AWS_SQS_QUEUE_URL: "http://localstack:4566/000000000000/test_put_get_queue",
             },
@@ -407,6 +421,7 @@ class BotocoreTest(ContractTestBase):
             remote_operation="GetGuardrail",
             remote_resource_type="AWS::Bedrock::Guardrail",
             remote_resource_identifier="bt4o77i015cu",
+            cloudformation_primary_identifier="arn:aws:bedrock:us-east-1:000000000000:guardrail/bt4o77i015cu",
             request_specific_attributes={
                 _AWS_BEDROCK_GUARDRAIL_ID: "bt4o77i015cu",
             },
@@ -519,6 +534,7 @@ class BotocoreTest(ContractTestBase):
             "LOCAL_ROOT",
             kwargs.get("remote_resource_type", "None"),
             kwargs.get("remote_resource_identifier", "None"),
+            kwargs.get("cloudformation_primary_identifier", "None"),
         )
 
     def _assert_aws_attributes(
@@ -529,6 +545,7 @@ class BotocoreTest(ContractTestBase):
         span_kind: str,
         remote_resource_type: str,
         remote_resource_identifier: str,
+        cloudformation_primary_identifier: str,
     ) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
@@ -541,6 +558,8 @@ class BotocoreTest(ContractTestBase):
             self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_TYPE, remote_resource_type)
         if remote_resource_identifier != "None":
             self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
+        if cloudformation_primary_identifier != "None":
+            self._assert_str_attribute(attributes_dict, AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER, cloudformation_primary_identifier)
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, span_kind)
 
