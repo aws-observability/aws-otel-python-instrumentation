@@ -178,7 +178,16 @@ def _apply_botocore_sqs_patch() -> None:
         if queue_url:
             attributes[AWS_SQS_QUEUE_URL] = queue_url
 
+    old_on_success = _SqsExtension.on_success
+
+    def patch_on_success(self, span: Span, result: _BotoResultT):
+        old_on_success(self, span, result)
+        queue_url = result.get("QueueUrl")
+        if queue_url:
+            span.set_attribute(AWS_SQS_QUEUE_URL, queue_url)
+
     _SqsExtension.extract_attributes = patch_extract_attributes
+    _SqsExtension.on_success = patch_on_success
 
 
 def _apply_botocore_bedrock_patch() -> None:

@@ -262,6 +262,9 @@ class BotocoreTest(ContractTestBase):
             remote_operation="CreateQueue",
             remote_resource_type="AWS::SQS::Queue",
             remote_resource_identifier="test_queue",
+            # TODO: This passes but it is not correct. 
+            # cloudformation_primary_identifier should be some sort of queue url
+            cloudformation_primary_identifier="test_queue",
             request_specific_attributes={
                 _AWS_SQS_QUEUE_NAME: "test_queue",
             },
@@ -279,6 +282,7 @@ class BotocoreTest(ContractTestBase):
             remote_operation="SendMessage",
             remote_resource_type="AWS::SQS::Queue",
             remote_resource_identifier="test_put_get_queue",
+            cloudformation_primary_identifier="http://localstack:4566/000000000000/test_put_get_queue",
             request_specific_attributes={
                 _AWS_SQS_QUEUE_URL: "http://localstack:4566/000000000000/test_put_get_queue",
             },
