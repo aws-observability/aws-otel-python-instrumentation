@@ -8,6 +8,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_
 from amazon.opentelemetry.distro._aws_span_processing_util import is_aws_sdk_span, is_local_root
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
+from opentelemetry.semconv.trace import SpanAttributes
 from opentelemetry.trace import SpanKind
 from opentelemetry.trace.propagation import get_current_span
 
@@ -61,6 +62,12 @@ class AttributePropagatingSpanProcessor(SpanProcessor):
             # then check later if a metric should be generated.
             if _is_consumer_kind(span) and _is_consumer_kind(parent_span):
                 span.set_attribute(AWS_CONSUMER_PARENT_SPAN_KIND, parent_span.kind.name)
+
+            # Propagate span attribute cloud.resource_id for extracting lambda alias for dependency metrics.
+            _parentResourceId = parent_span.attributes.get(SpanAttributes.CLOUD_RESOURCE_ID)
+            _currentResourceId = span.attributes.get(SpanAttributes.CLOUD_RESOURCE_ID)
+            if _currentResourceId is None and _parentResourceId is not None:
+                span.set_attribute(SpanAttributes.CLOUD_RESOURCE_ID, _parentResourceId)
 
         propagation_data: str = None
         if is_local_root(span):
