@@ -64,10 +64,10 @@ class AttributePropagatingSpanProcessor(SpanProcessor):
                 span.set_attribute(AWS_CONSUMER_PARENT_SPAN_KIND, parent_span.kind.name)
 
             # Propagate span attribute cloud.resource_id for extracting lambda alias for dependency metrics.
-            _parentResourceId = parent_span.attributes.get(SpanAttributes.CLOUD_RESOURCE_ID)
-            _currentResourceId = span.attributes.get(SpanAttributes.CLOUD_RESOURCE_ID)
-            if _currentResourceId is None and _parentResourceId is not None:
-                span.set_attribute(SpanAttributes.CLOUD_RESOURCE_ID, _parentResourceId)
+            parent_resource_id = parent_span.attributes.get(SpanAttributes.CLOUD_RESOURCE_ID)
+            current_resource_id = span.attributes.get(SpanAttributes.CLOUD_RESOURCE_ID)
+            if current_resource_id is None and parent_resource_id is not None:
+                span.set_attribute(SpanAttributes.CLOUD_RESOURCE_ID, parent_resource_id)
 
         propagation_data: str = None
         if is_local_root(span):
