@@ -62,7 +62,7 @@ class TestAwsSpanProcessingUtil(TestCase):
         self.span_data_mock.name = valid_name
         self.span_data_mock.kind = SpanKind.SERVER
         actual_operation: str = get_ingress_operation(self, self.span_data_mock)
-        self.assertEqual(actual_operation, "MyLambda/Handler")
+        self.assertEqual(actual_operation, "MyLambda/FunctionHandler")
 
     def test_get_ingress_operation_http_method_name_and_no_fallback(self):
         invalid_name: str = "GET"

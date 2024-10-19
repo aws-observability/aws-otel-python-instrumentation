@@ -195,3 +195,26 @@ class TestAttributePropagatingSpanProcessor(TestCase):
             self.assertEqual(propagation_value2, leaf_span.attributes.get(_TEST_KEY_2))
         else:
             self.assertIsNone(leaf_span.attributes.get(_TEST_KEY_2))
+
+    def test_attributes_propagation_cloud_resource_id(self):
+        cloud_resource_id = "arn:x1"
+        grand_parent_span: Span = self.tracer.start_span(
+            name="grandparent", kind=SpanKind.INTERNAL, attributes={_TEST_KEY_1: "testValue1"}
+        )
+        parent_span: Span = self.tracer.start_span(
+            name="parent",
+            kind=SpanKind.SERVER,
+            attributes={_TEST_KEY_2: "testValue2", SpanAttributes.CLOUD_RESOURCE_ID: cloud_resource_id},
+            context=set_span_in_context(grand_parent_span),
+        )
+        child_span: Span = self.tracer.start_span(
+            name="child", kind=SpanKind.INTERNAL, context=set_span_in_context(parent_span)
+        )
+        grand_child_span: Span = self.tracer.start_span(
+            name="child", kind=SpanKind.CLIENT, context=set_span_in_context(child_span)
+        )
+
+        self.assertIsNone(grand_parent_span.attributes.get(SpanAttributes.CLOUD_RESOURCE_ID))
+        self.assertIsNotNone(parent_span.attributes.get(SpanAttributes.CLOUD_RESOURCE_ID))
+        self.assertEqual(child_span.attributes.get(SpanAttributes.CLOUD_RESOURCE_ID), cloud_resource_id)
+        self.assertEqual(grand_child_span.attributes.get(SpanAttributes.CLOUD_RESOURCE_ID), cloud_resource_id)
