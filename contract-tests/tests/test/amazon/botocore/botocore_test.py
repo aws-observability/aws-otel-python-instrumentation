@@ -36,6 +36,8 @@ _AWS_BEDROCK_KNOWLEDGE_BASE_ID: str = "aws.bedrock.knowledge_base.id"
 _AWS_BEDROCK_DATA_SOURCE_ID: str = "aws.bedrock.data_source.id"
 _GEN_AI_REQUEST_MODEL: str = "gen_ai.request.model"
 _AWS_SECRET_ARN: str = "aws.secretsmanager.secret.arn"
+_AWS_STATE_MACHINE_ARN: str = "aws.stepfunctions.state_machine.arn"
+_AWS_ACTIVITY_ARN: str = "aws.stepfunctions.activity.arn"
 
 
 # pylint: disable=too-many-public-methods
@@ -75,7 +77,7 @@ class BotocoreTest(ContractTestBase):
         cls._local_stack: LocalStackContainer = (
             LocalStackContainer(image="localstack/localstack:3.5.0")
             .with_name("localstack")
-            .with_services("s3", "sqs", "dynamodb", "kinesis", "secretsmanager")
+            .with_services("s3", "sqs", "dynamodb", "kinesis", "secretsmanager", "iam", "stepfunctions")
             .with_env("DEFAULT_REGION", "us-west-2")
             .with_kwargs(network=NETWORK_NAME, networking_config=local_stack_networking_config)
         )
@@ -588,6 +590,82 @@ class BotocoreTest(ContractTestBase):
                 _AWS_SECRET_ARN: "arn:aws:secretsmanager:us-west-2:000000000000:secret:nonexistent-secret",
             },
             span_name="Secrets Manager.GetSecretValue",
+        )
+
+    def test_stepfunctions_describe_state_machine(self):
+        self.do_test_requests(
+            "stepfunctions/describestatemachine/my-state-machine",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="SFN",
+            remote_service="AWS::StepFunctions",
+            remote_operation="DescribeStateMachine",
+            remote_resource_type="AWS::StepFunctions::StateMachine",
+            remote_resource_identifier="testStateMachine",
+            cloudformation_primary_identifier="arn:aws:states:us-west-2:000000000000:stateMachine:testStateMachine",
+            request_specific_attributes={
+                _AWS_STATE_MACHINE_ARN: "arn:aws:states:us-west-2:000000000000:stateMachine:testStateMachine",
+            },
+            span_name="SFN.DescribeStateMachine",
+        )
+
+    def test_stepfunctions_describe_activity(self):
+        self.do_test_requests(
+            "stepfunctions/describeactivity/my-activity",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="SFN",
+            remote_service="AWS::StepFunctions",
+            remote_operation="DescribeActivity",
+            remote_resource_type="AWS::StepFunctions::Activity",
+            remote_resource_identifier="testActivity",
+            cloudformation_primary_identifier="arn:aws:states:us-west-2:000000000000:activity:testActivity",
+            request_specific_attributes={
+                _AWS_ACTIVITY_ARN: "arn:aws:states:us-west-2:000000000000:activity:testActivity"
+            },
+            span_name="SFN.DescribeActivity",
+        )
+
+    def test_stepfunctions_error(self):
+        self.do_test_requests(
+            "stepfunctions/error",
+            "GET",
+            400,
+            1,
+            0,
+            rpc_service="SFN",
+            remote_service="AWS::StepFunctions",
+            remote_operation="DescribeStateMachine",
+            remote_resource_type="AWS::StepFunctions::StateMachine",
+            remote_resource_identifier="unExistStateMachine",
+            cloudformation_primary_identifier="arn:aws:states:us-west-2:000000000000:stateMachine:unExistStateMachine",
+            request_specific_attributes={
+                _AWS_STATE_MACHINE_ARN: "arn:aws:states:us-west-2:000000000000:stateMachine:unExistStateMachine",
+            },
+            span_name="SFN.DescribeStateMachine",
+        )
+
+    def test_stepfunctions_fault(self):
+        self.do_test_requests(
+            "stepfunctions/fault",
+            "GET",
+            500,
+            0,
+            1,
+            rpc_service="SFN",
+            remote_service="AWS::StepFunctions",
+            remote_operation="ListStateMachineVersions",
+            remote_resource_type="AWS::StepFunctions::StateMachine",
+            remote_resource_identifier="invalid-state-machine",
+            cloudformation_primary_identifier="arn:aws:states:us-west-2:000000000000:stateMachine:invalid-state-machine",
+            request_specific_attributes={
+                _AWS_STATE_MACHINE_ARN: "arn:aws:states:us-west-2:000000000000:stateMachine:invalid-state-machine",
+            },
+            span_name="SFN.ListStateMachineVersions",
         )
 
     @override
