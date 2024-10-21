@@ -45,6 +45,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._handle_kinesis_request()
         if self.in_path("bedrock"):
             self._handle_bedrock_request()
+        if self.in_path("secretsmanager"):
+            self._handle_secretsmanager_request()
 
         self._end_request(self.main_status)
 
@@ -301,6 +303,32 @@ class RequestHandler(BaseHTTPRequestHandler):
         else:
             set_main_status(404)
 
+    def _handle_secretsmanager_request(self) -> None:
+        secretsmanager_client = boto3.client("secretsmanager", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
+        if self.in_path(_ERROR):
+            set_main_status(400)
+            try:
+                error_client = boto3.client("secretsmanager", endpoint_url=_ERROR_ENDPOINT, region_name=_AWS_REGION)
+                error_client.describe_secret(
+                    SecretId="arn:aws:secretsmanager:us-west-2:000000000000:secret:unExistSecret"
+                )
+            except Exception as exception:
+                print("Expected exception occurred", exception)
+        elif self.in_path(_FAULT):
+            set_main_status(500)
+            try:
+                fault_client = boto3.client("secretsmanager", endpoint_url=_FAULT_ENDPOINT, region_name=_AWS_REGION, config=_NO_RETRY_CONFIG)
+                fault_client.get_secret_value(
+                    SecretId="arn:aws:secretsmanager:us-west-2:000000000000:secret:nonexistent-secret"
+                )
+            except Exception as exception:
+                print("Expected exception occurred", exception)
+        elif self.in_path("describesecret/my-secret"):
+            set_main_status(200)
+            secretsmanager_client.describe_secret(SecretId="testSecret")
+        else:
+            set_main_status(404)
+
     def _end_request(self, status_code: int):
         self.send_response_only(status_code)
         self.end_headers()
@@ -345,6 +373,16 @@ def prepare_aws_server() -> None:
         # Set up Kinesis so tests can access a stream.
         kinesis_client: BaseClient = boto3.client("kinesis", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
         kinesis_client.create_stream(StreamName="test_stream", ShardCount=1)
+
+        # Set up Secrets Manager so tests can access a secret.
+        secretsmanager_client: BaseClient = boto3.client("secretsmanager", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
+        secretsmanager_response = secretsmanager_client.list_secrets()
+        secret = next((s for s in secretsmanager_response["SecretList"] if s["Name"] == "testSecret"), None)
+        if not secret:
+            secretsmanager_client.create_secret(
+                Name="testSecret", SecretString="secretValue", Description="This is a test secret"
+            )
+
     except Exception as exception:
         print("Unexpected exception occurred", exception)
 

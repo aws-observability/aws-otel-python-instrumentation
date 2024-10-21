@@ -35,6 +35,7 @@ _AWS_BEDROCK_GUARDRAIL_ID: str = "aws.bedrock.guardrail.id"
 _AWS_BEDROCK_KNOWLEDGE_BASE_ID: str = "aws.bedrock.knowledge_base.id"
 _AWS_BEDROCK_DATA_SOURCE_ID: str = "aws.bedrock.data_source.id"
 _GEN_AI_REQUEST_MODEL: str = "gen_ai.request.model"
+_AWS_SECRET_ARN: str = "aws.secretsmanager.secret.arn"
 
 
 # pylint: disable=too-many-public-methods
@@ -74,7 +75,7 @@ class BotocoreTest(ContractTestBase):
         cls._local_stack: LocalStackContainer = (
             LocalStackContainer(image="localstack/localstack:3.5.0")
             .with_name("localstack")
-            .with_services("s3", "sqs", "dynamodb", "kinesis")
+            .with_services("s3", "sqs", "dynamodb", "kinesis", "secretsmanager")
             .with_env("DEFAULT_REGION", "us-west-2")
             .with_kwargs(network=NETWORK_NAME, networking_config=local_stack_networking_config)
         )
@@ -532,6 +533,63 @@ class BotocoreTest(ContractTestBase):
             span_name="Bedrock Agent.GetDataSource",
         )
 
+    def test_secretsmanager_describe_secret(self):
+        self.do_test_requests(
+            "secretsmanager/describesecret/my-secret",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Secrets Manager",
+            remote_service="AWS::SecretsManager",
+            remote_operation="DescribeSecret",
+            remote_resource_type="AWS::SecretsManager::Secret",
+            remote_resource_identifier=r"testSecret-[a-zA-Z0-9]{6}$",
+            cloudformation_primary_identifier=r"arn:aws:secretsmanager:us-west-2:000000000000:secret:testSecret-[a-zA-Z0-9]{6}$",
+            response_specific_attributes={
+                _AWS_SECRET_ARN: r"arn:aws:secretsmanager:us-west-2:000000000000:secret:testSecret-[a-zA-Z0-9]{6}$",
+            },
+            span_name="Secrets Manager.DescribeSecret",
+        )
+
+    def test_secretsmanager_error(self):
+        self.do_test_requests(
+            "secretsmanager/error",
+            "GET",
+            400,
+            1,
+            0,
+            rpc_service="Secrets Manager",
+            remote_service="AWS::SecretsManager",
+            remote_operation="DescribeSecret",
+            remote_resource_type="AWS::SecretsManager::Secret",
+            remote_resource_identifier="unExistSecret",
+            cloudformation_primary_identifier="arn:aws:secretsmanager:us-west-2:000000000000:secret:unExistSecret",
+            request_specific_attributes={
+                _AWS_SECRET_ARN: "arn:aws:secretsmanager:us-west-2:000000000000:secret:unExistSecret",
+            },
+            span_name="Secrets Manager.DescribeSecret",
+        )
+
+    def test_secretsmanager_fault(self):
+        self.do_test_requests(
+            "secretsmanager/fault",
+            "GET",
+            500,
+            0,
+            1,
+            rpc_service="Secrets Manager",
+            remote_service="AWS::SecretsManager",
+            remote_operation="GetSecretValue",
+            remote_resource_type="AWS::SecretsManager::Secret",
+            remote_resource_identifier="nonexistent-secret",
+            cloudformation_primary_identifier="arn:aws:secretsmanager:us-west-2:000000000000:secret:nonexistent-secret",
+            request_specific_attributes={
+                _AWS_SECRET_ARN: "arn:aws:secretsmanager:us-west-2:000000000000:secret:nonexistent-secret",
+            },
+            span_name="Secrets Manager.GetSecretValue",
+        )
+
     @override
     def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs) -> None:
         target_spans: List[Span] = []
@@ -571,9 +629,15 @@ class BotocoreTest(ContractTestBase):
         if remote_resource_type != "None":
             self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_TYPE, remote_resource_type)
         if remote_resource_identifier != "None":
-            self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
+            if self._is_valid_regex(remote_resource_identifier):
+                self._assert_match_attribute(attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
+            else:
+                self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
         if cloudformation_primary_identifier != "None":
-            self._assert_str_attribute(attributes_dict, AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER, cloudformation_primary_identifier)
+            if self._is_valid_regex(remote_resource_identifier):
+                self._assert_match_attribute(attributes_dict, AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER, cloudformation_primary_identifier)
+            else:
+                self._assert_str_attribute(attributes_dict, AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER, cloudformation_primary_identifier)
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, span_kind)
 
@@ -623,7 +687,9 @@ class BotocoreTest(ContractTestBase):
             else:
                 self._assert_array_value_ddb_table_name(attributes_dict, key, value)
         for key, value in response_specific_attributes.items():
-            if isinstance(value, str):
+            if self._is_valid_regex(value):
+                self._assert_match_attribute(attributes_dict, key, value)
+            elif isinstance(value, str):
                 self._assert_str_attribute(attributes_dict, key, value)
             elif isinstance(value, int):
                 self._assert_int_attribute(attributes_dict, key, value)
@@ -665,7 +731,10 @@ class BotocoreTest(ContractTestBase):
         if remote_resource_type != "None":
             self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_TYPE, remote_resource_type)
         if remote_resource_identifier != "None":
-            self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
+            if self._is_valid_regex(remote_resource_identifier):
+                self._assert_match_attribute(attribute_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
+            else:
+                self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
         self.check_sum(metric_name, dependency_dp.sum, expected_sum)
 
         attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(service_dp.attributes)
