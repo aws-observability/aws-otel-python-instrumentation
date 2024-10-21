@@ -674,6 +674,8 @@ class BotocoreTest(ContractTestBase):
             span_name="SFN.ListStateMachineVersions",
         )
 
+    # TODO: Add contract test for lambda event source mapping resource
+
     @override
     def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs) -> None:
         target_spans: List[Span] = []
