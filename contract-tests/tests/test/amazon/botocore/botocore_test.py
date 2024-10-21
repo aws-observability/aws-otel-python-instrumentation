@@ -265,7 +265,9 @@ class BotocoreTest(ContractTestBase):
             remote_operation="CreateQueue",
             remote_resource_type="AWS::SQS::Queue",
             remote_resource_identifier="test_queue",
-            cloudformation_primary_identifier="http://sqs.us-west-2.localhost.localstack.cloud:4566/000000000000/test_queue",
+            cloudformation_primary_identifier=(
+                "http://sqs.us-west-2.localhost.localstack.cloud:4566/000000000000/test_queue"
+            ),
             request_specific_attributes={
                 _AWS_SQS_QUEUE_NAME: "test_queue",
             },
@@ -547,7 +549,9 @@ class BotocoreTest(ContractTestBase):
             remote_operation="DescribeSecret",
             remote_resource_type="AWS::SecretsManager::Secret",
             remote_resource_identifier=r"testSecret-[a-zA-Z0-9]{6}$",
-            cloudformation_primary_identifier=r"arn:aws:secretsmanager:us-west-2:000000000000:secret:testSecret-[a-zA-Z0-9]{6}$",
+            cloudformation_primary_identifier=(
+                r"arn:aws:secretsmanager:us-west-2:000000000000:secret:testSecret-[a-zA-Z0-9]{6}$"
+            ),
             response_specific_attributes={
                 _AWS_SECRET_ARN: r"arn:aws:secretsmanager:us-west-2:000000000000:secret:testSecret-[a-zA-Z0-9]{6}$",
             },
@@ -661,7 +665,9 @@ class BotocoreTest(ContractTestBase):
             remote_operation="ListStateMachineVersions",
             remote_resource_type="AWS::StepFunctions::StateMachine",
             remote_resource_identifier="invalid-state-machine",
-            cloudformation_primary_identifier="arn:aws:states:us-west-2:000000000000:stateMachine:invalid-state-machine",
+            cloudformation_primary_identifier=(
+                "arn:aws:states:us-west-2:000000000000:stateMachine:invalid-state-machine"
+            ),
             request_specific_attributes={
                 _AWS_STATE_MACHINE_ARN: "arn:aws:states:us-west-2:000000000000:stateMachine:invalid-state-machine",
             },
@@ -708,14 +714,20 @@ class BotocoreTest(ContractTestBase):
             self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_TYPE, remote_resource_type)
         if remote_resource_identifier != "None":
             if self._is_valid_regex(remote_resource_identifier):
-                self._assert_match_attribute(attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
+                self._assert_match_attribute(
+                    attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier
+                )
             else:
                 self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
         if cloudformation_primary_identifier != "None":
             if self._is_valid_regex(remote_resource_identifier):
-                self._assert_match_attribute(attributes_dict, AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER, cloudformation_primary_identifier)
+                self._assert_match_attribute(
+                    attributes_dict, AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER, cloudformation_primary_identifier
+                )
             else:
-                self._assert_str_attribute(attributes_dict, AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER, cloudformation_primary_identifier)
+                self._assert_str_attribute(
+                    attributes_dict, AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER, cloudformation_primary_identifier
+                )
         # See comment above AWS_LOCAL_OPERATION
         self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, span_kind)
 
