@@ -52,7 +52,7 @@ def get_ingress_operation(__, span: ReadableSpan) -> str:
     """
     operation: str = span.name
     if _AWS_LAMBDA_FUNCTION_NAME in os.environ:
-        operation = os.environ.get(_AWS_LAMBDA_FUNCTION_NAME) + "/Handler"
+        operation = os.environ.get(_AWS_LAMBDA_FUNCTION_NAME) + "/FunctionHandler"
     elif should_use_internal_operation(span):
         operation = INTERNAL_OPERATION
     elif not _is_valid_operation(span, operation):
