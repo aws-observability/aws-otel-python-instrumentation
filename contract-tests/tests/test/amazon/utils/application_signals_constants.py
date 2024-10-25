@@ -9,6 +9,12 @@ LATENCY_METRIC: str = "latency"
 ERROR_METRIC: str = "error"
 FAULT_METRIC: str = "fault"
 
+PYTHON_PROCESS_GC_COUNT = "process.runtime.cpython.gc_count"
+PYTHON_PROCESS_MEMORY_USED = "process.runtime.cpython.memory"
+PYTHON_PROCESS_THREAD_COUNT = "process.runtime.cpython.thread_count"
+PYTHON_PROCESS_CPU_TIME = "process.runtime.cpython.cpu_time"
+PYTHON_PROCESS_CPU_UTILIZATION = "process.runtime.cpython.cpu.utilization"
+
 # Attribute names
 AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER: str = "aws.remote.resource.cfn.primary.identifier"
 AWS_LOCAL_SERVICE: str = "aws.local.service"
