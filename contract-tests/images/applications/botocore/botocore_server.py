@@ -12,6 +12,7 @@ import boto3
 import requests
 from botocore.client import BaseClient
 from botocore.config import Config
+from botocore.exceptions import ClientError
 from typing_extensions import Tuple, override
 
 _PORT: int = 8080
@@ -45,6 +46,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._handle_kinesis_request()
         if self.in_path("bedrock"):
             self._handle_bedrock_request()
+        if self.in_path("secretsmanager"):
+            self._handle_secretsmanager_request()
+        if self.in_path("stepfunctions"):
+            self._handle_stepfunctions_request()
 
         self._end_request(self.main_status)
 
@@ -246,7 +251,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             set_main_status(200)
             bedrock_client.meta.events.register(
                 "before-call.bedrock.GetGuardrail",
-                lambda **kwargs: inject_200_success(guardrailId="bt4o77i015cu", **kwargs),
+                lambda **kwargs: inject_200_success(
+                    guardrailId="bt4o77i015cu",
+                    guardrailArn="arn:aws:bedrock:us-east-1:000000000000:guardrail/bt4o77i015cu",
+                    **kwargs,
+                ),
             )
             bedrock_client.get_guardrail(
                 guardrailIdentifier="arn:aws:bedrock:us-east-1:000000000000:guardrail/bt4o77i015cu"
@@ -301,6 +310,69 @@ class RequestHandler(BaseHTTPRequestHandler):
         else:
             set_main_status(404)
 
+    def _handle_secretsmanager_request(self) -> None:
+        secretsmanager_client = boto3.client("secretsmanager", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
+        if self.in_path(_ERROR):
+            set_main_status(400)
+            try:
+                error_client = boto3.client("secretsmanager", endpoint_url=_ERROR_ENDPOINT, region_name=_AWS_REGION)
+                error_client.describe_secret(
+                    SecretId="arn:aws:secretsmanager:us-west-2:000000000000:secret:unExistSecret"
+                )
+            except Exception as exception:
+                print("Expected exception occurred", exception)
+        elif self.in_path(_FAULT):
+            set_main_status(500)
+            try:
+                fault_client = boto3.client(
+                    "secretsmanager", endpoint_url=_FAULT_ENDPOINT, region_name=_AWS_REGION, config=_NO_RETRY_CONFIG
+                )
+                fault_client.get_secret_value(
+                    SecretId="arn:aws:secretsmanager:us-west-2:000000000000:secret:nonexistent-secret"
+                )
+            except Exception as exception:
+                print("Expected exception occurred", exception)
+        elif self.in_path("describesecret/my-secret"):
+            set_main_status(200)
+            secretsmanager_client.describe_secret(SecretId="testSecret")
+        else:
+            set_main_status(404)
+
+    def _handle_stepfunctions_request(self) -> None:
+        sfn_client = boto3.client("stepfunctions", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
+        if self.in_path(_ERROR):
+            set_main_status(400)
+            try:
+                error_client = boto3.client("stepfunctions", endpoint_url=_ERROR_ENDPOINT, region_name=_AWS_REGION)
+                error_client.describe_state_machine(
+                    stateMachineArn="arn:aws:states:us-west-2:000000000000:stateMachine:unExistStateMachine"
+                )
+            except Exception as exception:
+                print("Expected exception occurred", exception)
+        elif self.in_path(_FAULT):
+            set_main_status(500)
+            try:
+                fault_client = boto3.client("stepfunctions", endpoint_url=_FAULT_ENDPOINT, region_name=_AWS_REGION)
+                fault_client.meta.events.register(
+                    "before-call.stepfunctions.ListStateMachineVersions",
+                    lambda **kwargs: inject_500_error("ListStateMachineVersions", **kwargs),
+                )
+                fault_client.list_state_machine_versions(
+                    stateMachineArn="arn:aws:states:us-west-2:000000000000:stateMachine:invalid-state-machine",
+                )
+            except Exception as exception:
+                print("Expected exception occurred", exception)
+        elif self.in_path("describestatemachine/my-state-machine"):
+            set_main_status(200)
+            sfn_client.describe_state_machine(
+                stateMachineArn="arn:aws:states:us-west-2:000000000000:stateMachine:testStateMachine"
+            )
+        elif self.in_path("describeactivity/my-activity"):
+            set_main_status(200)
+            sfn_client.describe_activity(activityArn="arn:aws:states:us-west-2:000000000000:activity:testActivity")
+        else:
+            set_main_status(404)
+
     def _end_request(self, status_code: int):
         self.send_response_only(status_code)
         self.end_headers()
@@ -310,6 +382,7 @@ def set_main_status(status: int) -> None:
     RequestHandler.main_status = status
 
 
+# pylint: disable=too-many-locals
 def prepare_aws_server() -> None:
     requests.Request(method="POST", url="http://localhost:4566/_localstack/state/reset")
     try:
@@ -345,6 +418,57 @@ def prepare_aws_server() -> None:
         # Set up Kinesis so tests can access a stream.
         kinesis_client: BaseClient = boto3.client("kinesis", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
         kinesis_client.create_stream(StreamName="test_stream", ShardCount=1)
+
+        # Set up Secrets Manager so tests can access a secret.
+        secretsmanager_client: BaseClient = boto3.client(
+            "secretsmanager", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION
+        )
+        secretsmanager_response = secretsmanager_client.list_secrets()
+        secret = next((s for s in secretsmanager_response["SecretList"] if s["Name"] == "testSecret"), None)
+        if not secret:
+            secretsmanager_client.create_secret(
+                Name="testSecret", SecretString="secretValue", Description="This is a test secret"
+            )
+
+        # Set up Step Functions so tests can access a state machine and activity.
+        sfn_client: BaseClient = boto3.client("stepfunctions", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
+        sfn_response = sfn_client.list_state_machines()
+        state_machine_name = "testStateMachine"
+        activity_name = "testActivity"
+        state_machine = next((st for st in sfn_response["stateMachines"] if st["name"] == state_machine_name), None)
+        if not state_machine:
+            # create state machine needs an iam role so we create it here
+            iam_client: BaseClient = boto3.client("iam", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
+            iam_role_name = "testRole"
+            iam_role_arn = None
+            trust_policy = {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {"Effect": "Allow", "Principal": {"Service": "states.amazonaws.com"}, "Action": "sts:AssumeRole"}
+                ],
+            }
+            try:
+                iam_response = iam_client.create_role(
+                    RoleName=iam_role_name, AssumeRolePolicyDocument=json.dumps(trust_policy)
+                )
+                iam_client.attach_role_policy(
+                    RoleName=iam_role_name, PolicyArn="arn:aws:iam::aws:policy/AWSStepFunctionsFullAccess"
+                )
+                print(f"IAM Role '{iam_role_name}' create successfully.")
+                iam_role_arn = iam_response["Role"]["Arn"]
+                sfn_defintion = {
+                    "Comment": "A simple sequential workflow",
+                    "StartAt": "FirstState",
+                    "States": {"FirstState": {"Type": "Pass", "Result": "Hello, World!", "End": True}},
+                }
+                definition_string = json.dumps(sfn_defintion)
+                sfn_client.create_state_machine(
+                    name=state_machine_name, definition=definition_string, roleArn=iam_role_arn
+                )
+                sfn_client.create_activity(name=activity_name)
+            except Exception as exception:
+                print("Something went wrong with Step Functions setup", exception)
+
     except Exception as exception:
         print("Unexpected exception occurred", exception)
 
@@ -363,12 +487,25 @@ def inject_200_success(**kwargs):
     guardrail_id = kwargs.get("guardrailId")
     if guardrail_id is not None:
         response_body["guardrailId"] = guardrail_id
+    guardrail_arn = kwargs.get("guardrailArn")
+    if guardrail_arn is not None:
+        response_body["guardrailArn"] = guardrail_arn
 
     HTTPResponse = namedtuple("HTTPResponse", ["status_code", "headers", "body"])
     headers = kwargs.get("headers", {})
     body = kwargs.get("body", "")
     http_response = HTTPResponse(200, headers=headers, body=body)
     return http_response, response_body
+
+
+def inject_500_error(api_name: str, **kwargs):
+    raise ClientError(
+        {
+            "Error": {"Code": "InternalServerError", "Message": "Internal Server Error"},
+            "ResponseMetadata": {"HTTPStatusCode": 500, "RequestId": "mock-request-id"},
+        },
+        api_name,
+    )
 
 
 def main() -> None:

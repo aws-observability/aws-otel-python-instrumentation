@@ -8,11 +8,11 @@ from urllib.parse import ParseResult, urlparse
 from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_AGENT_ID,
     AWS_BEDROCK_DATA_SOURCE_ID,
+    AWS_BEDROCK_GUARDRAIL_ARN,
     AWS_BEDROCK_GUARDRAIL_ID,
     AWS_BEDROCK_KNOWLEDGE_BASE_ID,
     AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER,
     AWS_KINESIS_STREAM_NAME,
-    AWS_LAMBDA_FUNCTION_NAME,
     AWS_LAMBDA_RESOURCEMAPPING_ID,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
@@ -423,6 +423,7 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         elif is_key_present(span, AWS_BEDROCK_GUARDRAIL_ID):
             remote_resource_type = _NORMALIZED_BEDROCK_SERVICE_NAME + "::Guardrail"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_BEDROCK_GUARDRAIL_ID))
+            cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_BEDROCK_GUARDRAIL_ARN))
         elif is_key_present(span, AWS_BEDROCK_KNOWLEDGE_BASE_ID):
             remote_resource_type = _NORMALIZED_BEDROCK_SERVICE_NAME + "::KnowledgeBase"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_BEDROCK_KNOWLEDGE_BASE_ID))
@@ -456,9 +457,6 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         elif is_key_present(span, AWS_LAMBDA_RESOURCEMAPPING_ID):
             remote_resource_type = _NORMALIZED_LAMBDA_SERVICE_NAME + "::EventSourceMapping"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_RESOURCEMAPPING_ID))
-        elif is_key_present(span, AWS_LAMBDA_FUNCTION_NAME):
-            remote_resource_type = _NORMALIZED_LAMBDA_SERVICE_NAME + "::Function"
-            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_FUNCTION_NAME))
     elif is_db_span(span):
         remote_resource_type = _DB_CONNECTION_STRING_TYPE
         remote_resource_identifier = _get_db_connection(span)
