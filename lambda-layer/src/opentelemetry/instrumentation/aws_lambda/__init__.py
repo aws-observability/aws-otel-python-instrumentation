@@ -86,13 +86,7 @@ from opentelemetry.metrics import MeterProvider, get_meter_provider
 from opentelemetry.propagate import get_global_textmap
 from opentelemetry.semconv.resource import ResourceAttributes
 from opentelemetry.semconv.trace import SpanAttributes
-from opentelemetry.trace import (
-    Span,
-    SpanKind,
-    TracerProvider,
-    get_tracer,
-    get_tracer_provider,
-)
+from opentelemetry.trace import Span, SpanKind, TracerProvider, get_tracer, get_tracer_provider
 from opentelemetry.trace.status import Status, StatusCode
 
 logger = logging.getLogger(__name__)
