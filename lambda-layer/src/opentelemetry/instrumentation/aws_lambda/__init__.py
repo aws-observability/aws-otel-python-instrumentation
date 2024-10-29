@@ -122,7 +122,8 @@ def _default_event_context_extractor(lambda_event: Any) -> Context:
         headers = lambda_event["headers"]
     except (TypeError, KeyError):
         logger.debug(
-            "Extracting context from Lambda Event failed: either enable X-Ray active tracing or configure API Gateway to trigger this Lambda function as a pure proxy. Otherwise, generated spans will have an invalid (empty) parent context."
+            "Extracting context from Lambda Event failed: either enable X-Ray active tracing or configure API Gateway to trigger "
+            "this Lambda function as a pure proxy. Otherwise, generated spans will have an invalid (empty) parent context."
         )
     if not isinstance(headers, dict):
         headers = {}
@@ -356,7 +357,8 @@ def _instrument(
                 logger.exception("TracerProvider failed to flush traces")
         else:
             logger.warning(
-                "TracerProvider was missing `force_flush` method. This is necessary in case of a Lambda freeze and would exist in the OTel SDK implementation."
+                "TracerProvider was missing `force_flush` method. This is necessary in case of a Lambda freeze and would exist "
+                "in the OTel SDK implementation."
             )
 
         _meter_provider = meter_provider or get_meter_provider()
@@ -370,7 +372,8 @@ def _instrument(
                     logger.exception("MeterProvider failed to flush metrics")
         else:
             logger.warning(
-                "MeterProvider was missing `force_flush` method. This is necessary in case of a Lambda freeze and would exist in the OTel SDK implementation."
+                "MeterProvider was missing `force_flush` method. This is necessary in case of a Lambda freeze and would exist in"
+                " the OTel SDK implementation."
             )
 
         if exception is not None:
