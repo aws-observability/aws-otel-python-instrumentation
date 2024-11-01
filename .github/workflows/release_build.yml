@@ -120,6 +120,14 @@ jobs:
           tags: |
             ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ github.event.inputs.version }}
 
+      - name: Get SHA256 checksum of wheel file
+        id: get_sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          filename="aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl"
+          shasum -a 256 dist/$filename | awk '{print $1}' > $filename.sha256
+
       # Publish to GitHub releases
       - name: Create GH release
         id: create_release
@@ -130,4 +138,5 @@ jobs:
              --title "Release v${{ github.event.inputs.version }}" \
              --draft \
              "v${{ github.event.inputs.version }}" \
-             dist/aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
+             dist/aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl \
+             aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl.sha256
