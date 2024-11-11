@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import math
 from logging import INFO, Logger, getLogger
 from typing import Dict, List
 
@@ -34,7 +35,15 @@ _AWS_BEDROCK_AGENT_ID: str = "aws.bedrock.agent.id"
 _AWS_BEDROCK_GUARDRAIL_ID: str = "aws.bedrock.guardrail.id"
 _AWS_BEDROCK_KNOWLEDGE_BASE_ID: str = "aws.bedrock.knowledge_base.id"
 _AWS_BEDROCK_DATA_SOURCE_ID: str = "aws.bedrock.data_source.id"
+
 _GEN_AI_REQUEST_MODEL: str = "gen_ai.request.model"
+_GEN_AI_REQUEST_TEMPERATURE: str = "gen_ai.request.temperature"
+_GEN_AI_REQUEST_TOP_P: str = "gen_ai.request.top_p"
+_GEN_AI_REQUEST_MAX_TOKENS: str = "gen_ai.request.max_tokens"
+_GEN_AI_RESPONSE_FINISH_REASONS: str = "gen_ai.response.finish_reasons"
+_GEN_AI_USAGE_INPUT_TOKENS: str = "gen_ai.usage.input_tokens"
+_GEN_AI_USAGE_OUTPUT_TOKENS: str = "gen_ai.usage.output_tokens"
+
 _AWS_SECRET_ARN: str = "aws.secretsmanager.secret.arn"
 _AWS_STATE_MACHINE_ARN: str = "aws.stepfunctions.state_machine.arn"
 _AWS_ACTIVITY_ARN: str = "aws.stepfunctions.activity.arn"
@@ -403,9 +412,9 @@ class BotocoreTest(ContractTestBase):
             span_name="Kinesis.PutRecord",
         )
 
-    def test_bedrock_runtime_invoke_model(self):
+    def test_bedrock_runtime_invoke_model_amazon_titan(self):
         self.do_test_requests(
-            "bedrock/invokemodel/invoke-model",
+            "bedrock/invokemodel/invoke-model/amazon.titan-text-premier-v1:0",
             "GET",
             200,
             0,
@@ -418,6 +427,153 @@ class BotocoreTest(ContractTestBase):
             cloudformation_primary_identifier="amazon.titan-text-premier-v1:0",
             request_specific_attributes={
                 _GEN_AI_REQUEST_MODEL: "amazon.titan-text-premier-v1:0",
+                _GEN_AI_REQUEST_MAX_TOKENS: 3072,
+                _GEN_AI_REQUEST_TEMPERATURE: 0.7,
+                _GEN_AI_REQUEST_TOP_P: 0.9,
+            },
+            response_specific_attributes={
+                _GEN_AI_RESPONSE_FINISH_REASONS: ["CONTENT_FILTERED"],
+                _GEN_AI_USAGE_INPUT_TOKENS: 15,
+                _GEN_AI_USAGE_OUTPUT_TOKENS: 13,
+            },
+            span_name="Bedrock Runtime.InvokeModel",
+        )
+
+    def test_bedrock_runtime_invoke_model_anthropic_claude(self):
+        self.do_test_requests(
+            "bedrock/invokemodel/invoke-model/anthropic.claude-v2:1",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock Runtime",
+            remote_service="AWS::BedrockRuntime",
+            remote_operation="InvokeModel",
+            remote_resource_type="AWS::Bedrock::Model",
+            remote_resource_identifier="anthropic.claude-v2:1",
+            cloudformation_primary_identifier="anthropic.claude-v2:1",
+            request_specific_attributes={
+                _GEN_AI_REQUEST_MODEL: "anthropic.claude-v2:1",
+                _GEN_AI_REQUEST_MAX_TOKENS: 1000,
+                _GEN_AI_REQUEST_TEMPERATURE: 0.99,
+                _GEN_AI_REQUEST_TOP_P: 1,
+            },
+            response_specific_attributes={
+                _GEN_AI_RESPONSE_FINISH_REASONS: ["end_turn"],
+                _GEN_AI_USAGE_INPUT_TOKENS: 15,
+                _GEN_AI_USAGE_OUTPUT_TOKENS: 13,
+            },
+            span_name="Bedrock Runtime.InvokeModel",
+        )
+
+    def test_bedrock_runtime_invoke_model_meta_llama(self):
+        self.do_test_requests(
+            "bedrock/invokemodel/invoke-model/meta.llama2-13b-chat-v1",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock Runtime",
+            remote_service="AWS::BedrockRuntime",
+            remote_operation="InvokeModel",
+            remote_resource_type="AWS::Bedrock::Model",
+            remote_resource_identifier="meta.llama2-13b-chat-v1",
+            cloudformation_primary_identifier="meta.llama2-13b-chat-v1",
+            request_specific_attributes={
+                _GEN_AI_REQUEST_MODEL: "meta.llama2-13b-chat-v1",
+                _GEN_AI_REQUEST_MAX_TOKENS: 512,
+                _GEN_AI_REQUEST_TEMPERATURE: 0.5,
+                _GEN_AI_REQUEST_TOP_P: 0.9,
+            },
+            response_specific_attributes={
+                _GEN_AI_RESPONSE_FINISH_REASONS: ["stop"],
+                _GEN_AI_USAGE_INPUT_TOKENS: 31,
+                _GEN_AI_USAGE_OUTPUT_TOKENS: 49,
+            },
+            span_name="Bedrock Runtime.InvokeModel",
+        )
+
+    def test_bedrock_runtime_invoke_model_cohere_command(self):
+        self.do_test_requests(
+            "bedrock/invokemodel/invoke-model/cohere.command-r-v1:0",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock Runtime",
+            remote_service="AWS::BedrockRuntime",
+            remote_operation="InvokeModel",
+            remote_resource_type="AWS::Bedrock::Model",
+            remote_resource_identifier="cohere.command-r-v1:0",
+            cloudformation_primary_identifier="cohere.command-r-v1:0",
+            request_specific_attributes={
+                _GEN_AI_REQUEST_MODEL: "cohere.command-r-v1:0",
+                _GEN_AI_REQUEST_MAX_TOKENS: 512,
+                _GEN_AI_REQUEST_TEMPERATURE: 0.5,
+                _GEN_AI_REQUEST_TOP_P: 0.65,
+            },
+            response_specific_attributes={
+                _GEN_AI_RESPONSE_FINISH_REASONS: ["COMPLETE"],
+                _GEN_AI_USAGE_INPUT_TOKENS: math.ceil(
+                    len("Describe the purpose of a 'hello world' program in one line.") / 6
+                ),
+                _GEN_AI_USAGE_OUTPUT_TOKENS: math.ceil(len("test-generation-text") / 6),
+            },
+            span_name="Bedrock Runtime.InvokeModel",
+        )
+
+    def test_bedrock_runtime_invoke_model_ai21_jamba(self):
+        self.do_test_requests(
+            "bedrock/invokemodel/invoke-model/ai21.jamba-1-5-large-v1:0",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock Runtime",
+            remote_service="AWS::BedrockRuntime",
+            remote_operation="InvokeModel",
+            remote_resource_type="AWS::Bedrock::Model",
+            remote_resource_identifier="ai21.jamba-1-5-large-v1:0",
+            cloudformation_primary_identifier="ai21.jamba-1-5-large-v1:0",
+            request_specific_attributes={
+                _GEN_AI_REQUEST_MODEL: "ai21.jamba-1-5-large-v1:0",
+                _GEN_AI_REQUEST_MAX_TOKENS: 512,
+                _GEN_AI_REQUEST_TEMPERATURE: 0.6,
+                _GEN_AI_REQUEST_TOP_P: 0.8,
+            },
+            response_specific_attributes={
+                _GEN_AI_RESPONSE_FINISH_REASONS: ["stop"],
+                _GEN_AI_USAGE_INPUT_TOKENS: 21,
+                _GEN_AI_USAGE_OUTPUT_TOKENS: 24,
+            },
+            span_name="Bedrock Runtime.InvokeModel",
+        )
+
+    def test_bedrock_runtime_invoke_model_mistral(self):
+        self.do_test_requests(
+            "bedrock/invokemodel/invoke-model/mistral.mistral-7b-instruct-v0:2",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock Runtime",
+            remote_service="AWS::BedrockRuntime",
+            remote_operation="InvokeModel",
+            remote_resource_type="AWS::Bedrock::Model",
+            remote_resource_identifier="mistral.mistral-7b-instruct-v0:2",
+            cloudformation_primary_identifier="mistral.mistral-7b-instruct-v0:2",
+            request_specific_attributes={
+                _GEN_AI_REQUEST_MODEL: "mistral.mistral-7b-instruct-v0:2",
+                _GEN_AI_REQUEST_MAX_TOKENS: 4096,
+                _GEN_AI_REQUEST_TEMPERATURE: 0.75,
+                _GEN_AI_REQUEST_TOP_P: 0.99,
+            },
+            response_specific_attributes={
+                _GEN_AI_RESPONSE_FINISH_REASONS: ["stop"],
+                _GEN_AI_USAGE_INPUT_TOKENS: math.ceil(
+                    len("Describe the purpose of a 'hello world' program in one line.") / 6
+                ),
+                _GEN_AI_USAGE_OUTPUT_TOKENS: math.ceil(len("test-output-text") / 6),
             },
             span_name="Bedrock Runtime.InvokeModel",
         )
@@ -771,20 +927,28 @@ class BotocoreTest(ContractTestBase):
         self._assert_int_attribute(attributes_dict, SpanAttributes.HTTP_STATUS_CODE, status_code)
         # TODO: botocore instrumentation is not respecting PEER_SERVICE
         # self._assert_str_attribute(attributes_dict, SpanAttributes.PEER_SERVICE, "backend:8080")
-        for key, value in request_specific_attributes.items():
-            if isinstance(value, str):
-                self._assert_str_attribute(attributes_dict, key, value)
-            elif isinstance(value, int):
-                self._assert_int_attribute(attributes_dict, key, value)
-            else:
-                self._assert_array_value_ddb_table_name(attributes_dict, key, value)
-        for key, value in response_specific_attributes.items():
-            if self._is_valid_regex(value):
+        self._assert_specific_attributes(attributes_dict, request_specific_attributes)
+        self._assert_specific_attributes(attributes_dict, response_specific_attributes)
+
+    def _assert_specific_attributes(
+        self, attributes_dict: Dict[str, AnyValue], specific_attributes: Dict[str, AnyValue]
+    ) -> None:
+        for key, value in specific_attributes.items():
+            is_valid_regex = False
+
+            try:
+                is_valid_regex = self._is_valid_regex()
+            except Exception:
+                is_valid_regex = False
+
+            if is_valid_regex:
                 self._assert_match_attribute(attributes_dict, key, value)
             elif isinstance(value, str):
                 self._assert_str_attribute(attributes_dict, key, value)
             elif isinstance(value, int):
                 self._assert_int_attribute(attributes_dict, key, value)
+            elif isinstance(value, float):
+                self._assert_float_attribute(attributes_dict, key, value)
             else:
                 self._assert_array_value_ddb_table_name(attributes_dict, key, value)
 
