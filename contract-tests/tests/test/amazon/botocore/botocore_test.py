@@ -937,7 +937,7 @@ class BotocoreTest(ContractTestBase):
             is_valid_regex = False
 
             try:
-                is_valid_regex = self._is_valid_regex()
+                is_valid_regex = self._is_valid_regex(value)
             except Exception:
                 is_valid_regex = False
 
