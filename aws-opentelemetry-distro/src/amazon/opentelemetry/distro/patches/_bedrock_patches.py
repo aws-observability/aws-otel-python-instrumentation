@@ -342,6 +342,7 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
                 result['body'].close()
 
     def _handle_amazon_titan_response(self, span: Span, response_body: Dict[str, Any]):
+        #print("This is the response body :", response_body)
         if 'inputTextTokenCount' in response_body:
             span.set_attribute(GEN_AI_USAGE_INPUT_TOKENS, response_body['inputTextTokenCount'])
         
@@ -352,6 +353,7 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
                 span.set_attribute(GEN_AI_RESPONSE_FINISH_REASONS, [result['completionReason']])
     
     def _handle_anthropic_claude_response(self, span: Span, response_body: Dict[str, Any]):
+        #print("This is the response body :", response_body)
         if 'usage' in response_body:
             usage = response_body['usage']
             if 'input_tokens' in usage:
@@ -362,6 +364,7 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
             span.set_attribute(GEN_AI_RESPONSE_FINISH_REASONS, [response_body['stop_reason']])
 
     def _handle_cohere_command_response(self, span: Span, response_body: Dict[str, Any]):
+        print("This is the response body :", response_body)
         # Input tokens: Approximate from the user's message in chat history
         if 'chat_history' in response_body:
             user_messages = [msg['message'] for msg in response_body['chat_history'] if msg['role'] == 'USER']
@@ -387,15 +390,16 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
                 span.set_attribute(GEN_AI_RESPONSE_FINISH_REASONS, [choices['finish_reason']])
 
     def _handle_meta_llama_response(self, span: Span, response_body: Dict[str, Any]):
-        #print("This is the response body :", response_body)
+        print("This is the response body :", response_body)
         if 'prompt_token_count' in response_body:
             span.set_attribute(GEN_AI_USAGE_INPUT_TOKENS, response_body['prompt_token_count'])
         if 'generation_token_count' in response_body:
             span.set_attribute(GEN_AI_USAGE_OUTPUT_TOKENS, response_body['generation_token_count'])
         if 'stop_reason' in response_body:
-            span.set_attribute(GEN_AI_RESPONSE_FINISH_REASONS, response_body['stop_reason'])
+            span.set_attribute(GEN_AI_RESPONSE_FINISH_REASONS, [response_body['stop_reason']])
         
     def _handle_mistral_mistral_response(self, span: Span, response_body: Dict[str, Any]):
+        print("This is the response body :", response_body)
         if "outputs" in response_body:
             outputs = response_body["outputs"][0]
             if "text" in outputs:
