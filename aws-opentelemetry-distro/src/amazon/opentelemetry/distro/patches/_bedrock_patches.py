@@ -279,6 +279,9 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
         self._set_if_not_none(attributes, GEN_AI_REQUEST_TOP_P, request_body.get('top_p'))
 
     def _extract_cohere_attributes(self, attributes, request_body):
+        prompt = request_body.get('message')
+        if prompt:
+            attributes[GEN_AI_USAGE_INPUT_TOKENS] = math.ceil(len(prompt) / 6)
         self._set_if_not_none(attributes, GEN_AI_REQUEST_MAX_TOKENS, request_body.get('max_tokens'))
         self._set_if_not_none(attributes, GEN_AI_REQUEST_TEMPERATURE, request_body.get('temperature'))
         self._set_if_not_none(attributes, GEN_AI_REQUEST_TOP_P, request_body.get('p'))
@@ -294,6 +297,7 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
         self._set_if_not_none(attributes, GEN_AI_REQUEST_TOP_P, request_body.get('top_p'))
 
     def _extract_mistral_attributes(self, attributes, request_body):
+        print("This is the request body:", request_body)
         prompt = request_body.get('prompt')
         if prompt:
             attributes[GEN_AI_USAGE_INPUT_TOKENS] = math.ceil(len(prompt) / 6)
@@ -342,7 +346,6 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
                 result['body'].close()
 
     def _handle_amazon_titan_response(self, span: Span, response_body: Dict[str, Any]):
-        #print("This is the response body :", response_body)
         if 'inputTextTokenCount' in response_body:
             span.set_attribute(GEN_AI_USAGE_INPUT_TOKENS, response_body['inputTextTokenCount'])
         
@@ -353,7 +356,6 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
                 span.set_attribute(GEN_AI_RESPONSE_FINISH_REASONS, [result['completionReason']])
     
     def _handle_anthropic_claude_response(self, span: Span, response_body: Dict[str, Any]):
-        #print("This is the response body :", response_body)
         if 'usage' in response_body:
             usage = response_body['usage']
             if 'input_tokens' in usage:
@@ -364,12 +366,6 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
             span.set_attribute(GEN_AI_RESPONSE_FINISH_REASONS, [response_body['stop_reason']])
 
     def _handle_cohere_command_response(self, span: Span, response_body: Dict[str, Any]):
-        print("This is the response body :", response_body)
-        # Input tokens: Approximate from the user's message in chat history
-        if 'chat_history' in response_body:
-            user_messages = [msg['message'] for msg in response_body['chat_history'] if msg['role'] == 'USER']
-            input_text = ' '.join(user_messages)
-            span.set_attribute(GEN_AI_USAGE_INPUT_TOKENS, math.ceil(len(input_text) / 6))
         # Output tokens: Approximate from the response text
         if 'text' in response_body:
             span.set_attribute(GEN_AI_USAGE_OUTPUT_TOKENS, math.ceil(len(response_body['text']) / 6))
@@ -377,7 +373,6 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
             span.set_attribute(GEN_AI_RESPONSE_FINISH_REASONS, [response_body['finish_reason']])
 
     def _handle_ai21_jamba_response(self, span: Span, response_body: Dict[str, Any]):
-        print("This is the response body :", response_body)
         if 'usage' in response_body:
             usage = response_body['usage']
             if 'prompt_tokens' in usage:
@@ -390,7 +385,6 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
                 span.set_attribute(GEN_AI_RESPONSE_FINISH_REASONS, [choices['finish_reason']])
 
     def _handle_meta_llama_response(self, span: Span, response_body: Dict[str, Any]):
-        print("This is the response body :", response_body)
         if 'prompt_token_count' in response_body:
             span.set_attribute(GEN_AI_USAGE_INPUT_TOKENS, response_body['prompt_token_count'])
         if 'generation_token_count' in response_body:
