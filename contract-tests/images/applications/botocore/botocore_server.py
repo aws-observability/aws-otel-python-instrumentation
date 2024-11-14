@@ -376,12 +376,12 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 def get_model_request_response(path):
     prompt = "Describe the purpose of a 'hello world' program in one line."
-    modelId = ""
+    model_id = ""
     request_body = {}
     response_body = {}
 
     if "amazon.titan" in path:
-        modelId = "amazon.titan-text-premier-v1:0"
+        model_id = "amazon.titan-text-premier-v1:0"
 
         request_body = {
             "inputText": prompt,
@@ -405,7 +405,7 @@ def get_model_request_response(path):
         }
 
     if "anthropic.claude" in path:
-        modelId = "anthropic.claude-v2:1"
+        model_id = "anthropic.claude-v2:1"
 
         request_body = {
             "anthropic_version": "bedrock-2023-05-31",
@@ -429,14 +429,14 @@ def get_model_request_response(path):
         }
 
     if "meta.llama" in path:
-        modelId = "meta.llama2-13b-chat-v1"
+        model_id = "meta.llama2-13b-chat-v1"
 
         request_body = {"prompt": prompt, "max_gen_len": 512, "temperature": 0.5, "top_p": 0.9}
 
         response_body = {"prompt_token_count": 31, "generation_token_count": 49, "stop_reason": "stop"}
 
     if "cohere.command" in path:
-        modelId = "cohere.command-r-v1:0"
+        model_id = "cohere.command-r-v1:0"
 
         request_body = {
             "chat_history": [],
@@ -456,7 +456,7 @@ def get_model_request_response(path):
         }
 
     if "ai21.jamba" in path:
-        modelId = "ai21.jamba-1-5-large-v1:0"
+        model_id = "ai21.jamba-1-5-large-v1:0"
 
         request_body = {
             "messages": [
@@ -482,7 +482,7 @@ def get_model_request_response(path):
         }
 
     if "mistral" in path:
-        modelId = "mistral.mistral-7b-instruct-v0:2"
+        model_id = "mistral.mistral-7b-instruct-v0:2"
 
         request_body = {
             "prompt": prompt,
@@ -502,7 +502,7 @@ def get_model_request_response(path):
 
     json_bytes = json.dumps(response_body).encode("utf-8")
 
-    return modelId, json.dumps(request_body), StreamingBody(BytesIO(json_bytes), len(json_bytes))
+    return model_id, json.dumps(request_body), StreamingBody(BytesIO(json_bytes), len(json_bytes))
 
 
 def set_main_status(status: int) -> None:
