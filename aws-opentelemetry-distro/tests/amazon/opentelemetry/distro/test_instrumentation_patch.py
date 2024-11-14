@@ -290,7 +290,7 @@ class TestInstrumentationPatch(TestCase):
         # BedrockRuntime - Cohere Command Models
         self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
         request_body = {
-            "message": "Describe the purpose of a 'hello world' program in one line.",
+            "message": "Hello, world",
             "max_tokens": 512,
             "temperature": 0.5,
             "p": 0.75,
@@ -309,7 +309,7 @@ class TestInstrumentationPatch(TestCase):
             bedrock_runtime_attributes["gen_ai.usage.input_tokens"], math.ceil(len(request_body["message"]) / 6)
         )
         response_body = {
-            "text": 'A "hello world" program serves as a simple introduction to programming, helping developers confirm their setup and test their coding environment.',
+            "text": 'Goodbye, world',
             "finish_reason": "COMPLETE",
         }
         json_bytes = json.dumps(response_body).encode("utf-8")
@@ -412,7 +412,7 @@ class TestInstrumentationPatch(TestCase):
         bedrock_runtime_success_attributes: Dict[str, str] = _do_on_success_bedrock(
             "bedrock-runtime", model_id="mistral", streaming_body=streaming_body
         )
-        # self.assertEqual(bedrock_runtime_success_attributes["gen_ai.usage.input_tokens"], 31) Srill have concerns regarging these lines
+        
         self.assertEqual(
             bedrock_runtime_success_attributes["gen_ai.usage.output_tokens"],
             math.ceil(len(response_body["outputs"][0]["text"]) / 6),
