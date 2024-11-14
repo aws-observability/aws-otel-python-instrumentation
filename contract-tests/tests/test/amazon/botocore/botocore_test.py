@@ -49,8 +49,7 @@ _AWS_STATE_MACHINE_ARN: str = "aws.stepfunctions.state_machine.arn"
 _AWS_ACTIVITY_ARN: str = "aws.stepfunctions.activity.arn"
 
 
-# pylint: disable=too-many-public-methods
-# pylint: disable=too-many-lines
+# pylint: disable=too-many-public-methods,too-many-lines
 class BotocoreTest(ContractTestBase):
     _local_stack: LocalStackContainer
 
