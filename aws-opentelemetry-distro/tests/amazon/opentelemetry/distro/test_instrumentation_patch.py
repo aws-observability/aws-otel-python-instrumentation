@@ -309,7 +309,7 @@ class TestInstrumentationPatch(TestCase):
             bedrock_runtime_attributes["gen_ai.usage.input_tokens"], math.ceil(len(request_body["message"]) / 6)
         )
         response_body = {
-            "text": 'Goodbye, world',
+            "text": "Goodbye, world",
             "finish_reason": "COMPLETE",
         }
         json_bytes = json.dumps(response_body).encode("utf-8")
@@ -412,7 +412,7 @@ class TestInstrumentationPatch(TestCase):
         bedrock_runtime_success_attributes: Dict[str, str] = _do_on_success_bedrock(
             "bedrock-runtime", model_id="mistral", streaming_body=streaming_body
         )
-        
+
         self.assertEqual(
             bedrock_runtime_success_attributes["gen_ai.usage.output_tokens"],
             math.ceil(len(response_body["outputs"][0]["text"]) / 6),

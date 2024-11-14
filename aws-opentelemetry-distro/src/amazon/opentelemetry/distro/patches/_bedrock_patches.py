@@ -251,13 +251,11 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
         attributes[GEN_AI_SYSTEM] = _AWS_BEDROCK_SYSTEM
 
         model_id = self._call_context.params.get(_MODEL_ID)
-        # attributes["Testing"]= "Test"
         if model_id:
             attributes[GEN_AI_REQUEST_MODEL] = model_id
 
             # Get the request body if it exists
             body = self._call_context.params.get("body")
-            # print("This is the body :",body)
             if body:
                 try:
                     request_body = json.loads(body)
@@ -308,7 +306,6 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
         self._set_if_not_none(attributes, GEN_AI_REQUEST_TOP_P, request_body.get("top_p"))
 
     def _extract_mistral_attributes(self, attributes, request_body):
-        print("This is the request body:", request_body)
         prompt = request_body.get("prompt")
         if prompt:
             attributes[GEN_AI_USAGE_INPUT_TOKENS] = math.ceil(len(prompt) / 6)
@@ -322,8 +319,6 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
             attributes[key] = value
 
     def on_success(self, span: Span, result: Dict[str, Any]):
-        super().on_success(span, result)
-
         model_id = self._call_context.params.get(_MODEL_ID)
         if not model_id:
             return
@@ -404,7 +399,6 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
             span.set_attribute(GEN_AI_RESPONSE_FINISH_REASONS, [response_body["stop_reason"]])
 
     def _handle_mistral_mistral_response(self, span: Span, response_body: Dict[str, Any]):
-        print("This is the response body :", response_body)
         if "outputs" in response_body:
             outputs = response_body["outputs"][0]
             if "text" in outputs:
