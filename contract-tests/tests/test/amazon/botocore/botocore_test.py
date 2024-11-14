@@ -50,6 +50,7 @@ _AWS_ACTIVITY_ARN: str = "aws.stepfunctions.activity.arn"
 
 
 # pylint: disable=too-many-public-methods
+# pylint: disable=too-many-lines
 class BotocoreTest(ContractTestBase):
     _local_stack: LocalStackContainer
 
@@ -938,7 +939,7 @@ class BotocoreTest(ContractTestBase):
 
             try:
                 is_valid_regex = self._is_valid_regex(value)
-            except (StopIteration, RuntimeError, KeyError):
+            except (StopIteration, RuntimeError, KeyError) as e:
                 is_valid_regex = False
 
             if is_valid_regex:
