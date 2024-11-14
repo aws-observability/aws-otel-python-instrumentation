@@ -1,16 +1,16 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import json
+import math
 import os
+from io import BytesIO
 from typing import Any, Dict
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
-from io import BytesIO
-import json
-from botocore.response import StreamingBody
-import math
 
 import gevent.monkey
 import pkg_resources
+from botocore.response import StreamingBody
 
 from amazon.opentelemetry.distro.patches._instrumentation_patch import (
     AWS_GEVENT_PATCH_MODULES,
@@ -220,14 +220,12 @@ class TestInstrumentationPatch(TestCase):
         request_body = {
             "textGenerationConfig": {
                 "maxTokenCount": 512,
-                "temperature":  0.9,
+                "temperature": 0.9,
                 "topP": 0.75,
             }
         }
         bedrock_runtime_attributes: Dict[str, str] = _do_extract_attributes_bedrock(
-            "bedrock-runtime", 
-            model_id="amazon.titan",
-            request_body=json.dumps(request_body)
+            "bedrock-runtime", model_id="amazon.titan", request_body=json.dumps(request_body)
         )
         self.assertEqual(len(bedrock_runtime_attributes), 5)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.system"], _GEN_AI_SYSTEM)
@@ -237,38 +235,36 @@ class TestInstrumentationPatch(TestCase):
         self.assertEqual(bedrock_runtime_attributes["gen_ai.request.top_p"], 0.75)
         response_body = {
             "inputTextTokenCount": 123,
-            "results": [{
-                "tokenCount": 456,
-                "outputText": "testing",
-                "completionReason": "FINISH",
-            }]
+            "results": [
+                {
+                    "tokenCount": 456,
+                    "outputText": "testing",
+                    "completionReason": "FINISH",
+                }
+            ],
         }
-        json_bytes = json.dumps(response_body).encode('utf-8')
+        json_bytes = json.dumps(response_body).encode("utf-8")
         body_bytes = BytesIO(json_bytes)
         streaming_body = StreamingBody(body_bytes, len(json_bytes))
         bedrock_runtime_success_attributes: Dict[str, str] = _do_on_success_bedrock(
-            "bedrock-runtime",
-            model_id="amazon.titan",
-            streaming_body=streaming_body
+            "bedrock-runtime", model_id="amazon.titan", streaming_body=streaming_body
         )
         self.assertEqual(bedrock_runtime_success_attributes["gen_ai.usage.input_tokens"], 123)
         self.assertEqual(bedrock_runtime_success_attributes["gen_ai.usage.output_tokens"], 456)
         self.assertEqual(bedrock_runtime_success_attributes["gen_ai.response.finish_reasons"], ["FINISH"])
 
-        #BedrockRuntime - Anthropic Claude Models
+        # BedrockRuntime - Anthropic Claude Models
 
         self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
         request_body = {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": 512,
             "temperature": 0.5,
-            "top_p":0.999,
+            "top_p": 0.999,
         }
-        
+
         bedrock_runtime_attributes: Dict[str, str] = _do_extract_attributes_bedrock(
-            "bedrock-runtime", 
-            model_id="anthropic.claude",
-            request_body=json.dumps(request_body)
+            "bedrock-runtime", model_id="anthropic.claude", request_body=json.dumps(request_body)
         )
         self.assertEqual(len(bedrock_runtime_attributes), 5)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.system"], _GEN_AI_SYSTEM)
@@ -277,33 +273,31 @@ class TestInstrumentationPatch(TestCase):
         self.assertEqual(bedrock_runtime_attributes["gen_ai.request.temperature"], 0.5)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.request.top_p"], 0.999)
         response_body = {
-            'stop_reason': 'end_turn', 'stop_sequence': None, 'usage': {'input_tokens': 23, 'output_tokens': 36}
+            "stop_reason": "end_turn",
+            "stop_sequence": None,
+            "usage": {"input_tokens": 23, "output_tokens": 36},
         }
-        json_bytes = json.dumps(response_body).encode('utf-8')
+        json_bytes = json.dumps(response_body).encode("utf-8")
         body_bytes = BytesIO(json_bytes)
         streaming_body = StreamingBody(body_bytes, len(json_bytes))
         bedrock_runtime_success_attributes: Dict[str, str] = _do_on_success_bedrock(
-            "bedrock-runtime",
-            model_id="anthropic.claude",
-            streaming_body=streaming_body
+            "bedrock-runtime", model_id="anthropic.claude", streaming_body=streaming_body
         )
         self.assertEqual(bedrock_runtime_success_attributes["gen_ai.usage.input_tokens"], 23)
         self.assertEqual(bedrock_runtime_success_attributes["gen_ai.usage.output_tokens"], 36)
         self.assertEqual(bedrock_runtime_success_attributes["gen_ai.response.finish_reasons"], ["end_turn"])
 
-        #BedrockRuntime - Cohere Command Models
+        # BedrockRuntime - Cohere Command Models
         self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
         request_body = {
-            'message': "Describe the purpose of a 'hello world' program in one line.",
+            "message": "Describe the purpose of a 'hello world' program in one line.",
             "max_tokens": 512,
             "temperature": 0.5,
-            "p":0.75,
+            "p": 0.75,
         }
-        
+
         bedrock_runtime_attributes: Dict[str, str] = _do_extract_attributes_bedrock(
-            "bedrock-runtime", 
-            model_id="cohere.command",
-            request_body=json.dumps(request_body)
+            "bedrock-runtime", model_id="cohere.command", request_body=json.dumps(request_body)
         )
         self.assertEqual(len(bedrock_runtime_attributes), 6)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.system"], _GEN_AI_SYSTEM)
@@ -311,35 +305,34 @@ class TestInstrumentationPatch(TestCase):
         self.assertEqual(bedrock_runtime_attributes["gen_ai.request.max_tokens"], 512)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.request.temperature"], 0.5)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.request.top_p"], 0.75)
-        self.assertEqual(bedrock_runtime_attributes["gen_ai.usage.input_tokens"], math.ceil(len(request_body['message'])/6))
+        self.assertEqual(
+            bedrock_runtime_attributes["gen_ai.usage.input_tokens"], math.ceil(len(request_body["message"]) / 6)
+        )
         response_body = {
-            'text': 'A "hello world" program serves as a simple introduction to programming, helping developers confirm their setup and test their coding environment.',
-            'finish_reason': 'COMPLETE'
-
+            "text": 'A "hello world" program serves as a simple introduction to programming, helping developers confirm their setup and test their coding environment.',
+            "finish_reason": "COMPLETE",
         }
-        json_bytes = json.dumps(response_body).encode('utf-8')
+        json_bytes = json.dumps(response_body).encode("utf-8")
         body_bytes = BytesIO(json_bytes)
         streaming_body = StreamingBody(body_bytes, len(json_bytes))
         bedrock_runtime_success_attributes: Dict[str, str] = _do_on_success_bedrock(
-            "bedrock-runtime",
-            model_id="cohere.command",
-            streaming_body=streaming_body
+            "bedrock-runtime", model_id="cohere.command", streaming_body=streaming_body
         )
-        self.assertEqual(bedrock_runtime_success_attributes["gen_ai.usage.output_tokens"], math.ceil(len(response_body['text'])/6))
+        self.assertEqual(
+            bedrock_runtime_success_attributes["gen_ai.usage.output_tokens"], math.ceil(len(response_body["text"]) / 6)
+        )
         self.assertEqual(bedrock_runtime_success_attributes["gen_ai.response.finish_reasons"], ["COMPLETE"])
 
-        #BedrockRuntime - AI21 Jamba Models
+        # BedrockRuntime - AI21 Jamba Models
         self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
         request_body = {
             "max_tokens": 512,
             "temperature": 0.5,
-            "top_p":0.9,
+            "top_p": 0.9,
         }
-        
+
         bedrock_runtime_attributes: Dict[str, str] = _do_extract_attributes_bedrock(
-            "bedrock-runtime", 
-            model_id="ai21.jamba",
-            request_body=json.dumps(request_body)
+            "bedrock-runtime", model_id="ai21.jamba", request_body=json.dumps(request_body)
         )
         self.assertEqual(len(bedrock_runtime_attributes), 5)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.system"], _GEN_AI_SYSTEM)
@@ -348,35 +341,29 @@ class TestInstrumentationPatch(TestCase):
         self.assertEqual(bedrock_runtime_attributes["gen_ai.request.temperature"], 0.5)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.request.top_p"], 0.9)
         response_body = {
-            'choices':[{'finish_reason': "stop"}],
-            'usage': {'prompt_tokens': 24,
-                      'completion_tokens': 31,
-                      'total_tokens': 55}
+            "choices": [{"finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 24, "completion_tokens": 31, "total_tokens": 55},
         }
-        json_bytes = json.dumps(response_body).encode('utf-8')
+        json_bytes = json.dumps(response_body).encode("utf-8")
         body_bytes = BytesIO(json_bytes)
         streaming_body = StreamingBody(body_bytes, len(json_bytes))
         bedrock_runtime_success_attributes: Dict[str, str] = _do_on_success_bedrock(
-            "bedrock-runtime",
-            model_id="ai21.jamba",
-            streaming_body=streaming_body
+            "bedrock-runtime", model_id="ai21.jamba", streaming_body=streaming_body
         )
         self.assertEqual(bedrock_runtime_success_attributes["gen_ai.usage.input_tokens"], 24)
         self.assertEqual(bedrock_runtime_success_attributes["gen_ai.usage.output_tokens"], 31)
         self.assertEqual(bedrock_runtime_success_attributes["gen_ai.response.finish_reasons"], ["stop"])
 
-        #BedrockRuntime - Meta LLama Models 
+        # BedrockRuntime - Meta LLama Models
         self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
         request_body = {
             "max_gen_len": 512,
             "temperature": 0.5,
-            "top_p":0.9,
+            "top_p": 0.9,
         }
-        
+
         bedrock_runtime_attributes: Dict[str, str] = _do_extract_attributes_bedrock(
-            "bedrock-runtime", 
-            model_id="meta.llama",
-            request_body=json.dumps(request_body)
+            "bedrock-runtime", model_id="meta.llama", request_body=json.dumps(request_body)
         )
         self.assertEqual(len(bedrock_runtime_attributes), 5)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.system"], _GEN_AI_SYSTEM)
@@ -384,38 +371,30 @@ class TestInstrumentationPatch(TestCase):
         self.assertEqual(bedrock_runtime_attributes["gen_ai.request.max_tokens"], 512)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.request.temperature"], 0.5)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.request.top_p"], 0.9)
-        response_body = {
-            'prompt_token_count': 31, 
-            'generation_token_count': 36, 
-            'stop_reason': 'stop'
-        }
-        json_bytes = json.dumps(response_body).encode('utf-8')
+        response_body = {"prompt_token_count": 31, "generation_token_count": 36, "stop_reason": "stop"}
+        json_bytes = json.dumps(response_body).encode("utf-8")
         body_bytes = BytesIO(json_bytes)
         streaming_body = StreamingBody(body_bytes, len(json_bytes))
         bedrock_runtime_success_attributes: Dict[str, str] = _do_on_success_bedrock(
-            "bedrock-runtime",
-            model_id="meta.llama",
-            streaming_body=streaming_body
+            "bedrock-runtime", model_id="meta.llama", streaming_body=streaming_body
         )
         self.assertEqual(bedrock_runtime_success_attributes["gen_ai.usage.input_tokens"], 31)
         self.assertEqual(bedrock_runtime_success_attributes["gen_ai.usage.output_tokens"], 36)
         self.assertEqual(bedrock_runtime_success_attributes["gen_ai.response.finish_reasons"], ["stop"])
 
-        #BedrockRuntime - Mistral Models
+        # BedrockRuntime - Mistral Models
         self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
-        msg="Hello, World"
+        msg = "Hello, World"
         formatted_prompt = f"<s>[INST] {msg} [/INST]"
         request_body = {
-            'prompt': formatted_prompt,
+            "prompt": formatted_prompt,
             "max_tokens": 512,
             "temperature": 0.5,
             "top_p": 0.9,
         }
-        
+
         bedrock_runtime_attributes: Dict[str, str] = _do_extract_attributes_bedrock(
-            "bedrock-runtime", 
-            model_id="mistral",
-            request_body=json.dumps(request_body)
+            "bedrock-runtime", model_id="mistral", request_body=json.dumps(request_body)
         )
         self.assertEqual(len(bedrock_runtime_attributes), 6)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.system"], _GEN_AI_SYSTEM)
@@ -423,22 +402,21 @@ class TestInstrumentationPatch(TestCase):
         self.assertEqual(bedrock_runtime_attributes["gen_ai.request.max_tokens"], 512)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.request.temperature"], 0.5)
         self.assertEqual(bedrock_runtime_attributes["gen_ai.request.top_p"], 0.9)
-        self.assertEqual(bedrock_runtime_attributes["gen_ai.usage.input_tokens"], math.ceil(len(request_body['prompt'])/6))
-        response_body = {
-            'outputs':[{
-                'text': 'Goodbye, World',
-                'stop_reason': 'stop'}]
-        }
-        json_bytes = json.dumps(response_body).encode('utf-8')
+        self.assertEqual(
+            bedrock_runtime_attributes["gen_ai.usage.input_tokens"], math.ceil(len(request_body["prompt"]) / 6)
+        )
+        response_body = {"outputs": [{"text": "Goodbye, World", "stop_reason": "stop"}]}
+        json_bytes = json.dumps(response_body).encode("utf-8")
         body_bytes = BytesIO(json_bytes)
         streaming_body = StreamingBody(body_bytes, len(json_bytes))
         bedrock_runtime_success_attributes: Dict[str, str] = _do_on_success_bedrock(
-            "bedrock-runtime",
-            model_id="mistral",
-            streaming_body=streaming_body
+            "bedrock-runtime", model_id="mistral", streaming_body=streaming_body
         )
-        #self.assertEqual(bedrock_runtime_success_attributes["gen_ai.usage.input_tokens"], 31) Srill have concerns regarging these lines
-        self.assertEqual(bedrock_runtime_success_attributes["gen_ai.usage.output_tokens"], math.ceil(len(response_body['outputs'][0]['text'])/6))
+        # self.assertEqual(bedrock_runtime_success_attributes["gen_ai.usage.input_tokens"], 31) Srill have concerns regarging these lines
+        self.assertEqual(
+            bedrock_runtime_success_attributes["gen_ai.usage.output_tokens"],
+            math.ceil(len(response_body["outputs"][0]["text"]) / 6),
+        )
         self.assertEqual(bedrock_runtime_success_attributes["gen_ai.response.finish_reasons"], ["stop"])
 
         # SecretsManager
