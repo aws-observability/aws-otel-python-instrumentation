@@ -938,7 +938,8 @@ class BotocoreTest(ContractTestBase):
 
             try:
                 is_valid_regex = self._is_valid_regex(value)
-            except (StopIteration, RuntimeError, KeyError) as e:
+            except (StopIteration, RuntimeError, KeyError):
+                
                 is_valid_regex = False
 
             if is_valid_regex:
