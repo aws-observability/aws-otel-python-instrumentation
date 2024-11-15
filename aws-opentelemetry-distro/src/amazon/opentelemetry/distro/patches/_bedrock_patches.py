@@ -351,6 +351,7 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
                 # Make sure to close the stream
                 result["body"].close()
 
+    # pylint: disable=no-self-use
     def _handle_amazon_titan_response(self, span: Span, response_body: Dict[str, Any]):
         if "inputTextTokenCount" in response_body:
             span.set_attribute(GEN_AI_USAGE_INPUT_TOKENS, response_body["inputTextTokenCount"])
@@ -361,6 +362,7 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
             if "completionReason" in result:
                 span.set_attribute(GEN_AI_RESPONSE_FINISH_REASONS, [result["completionReason"]])
 
+    # pylint: disable=no-self-use
     def _handle_anthropic_claude_response(self, span: Span, response_body: Dict[str, Any]):
         if "usage" in response_body:
             usage = response_body["usage"]
@@ -371,6 +373,7 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
         if "stop_reason" in response_body:
             span.set_attribute(GEN_AI_RESPONSE_FINISH_REASONS, [response_body["stop_reason"]])
 
+    # pylint: disable=no-self-use
     def _handle_cohere_command_response(self, span: Span, response_body: Dict[str, Any]):
         # Output tokens: Approximate from the response text
         if "text" in response_body:
@@ -378,6 +381,7 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
         if "finish_reason" in response_body:
             span.set_attribute(GEN_AI_RESPONSE_FINISH_REASONS, [response_body["finish_reason"]])
 
+    # pylint: disable=no-self-use
     def _handle_ai21_jamba_response(self, span: Span, response_body: Dict[str, Any]):
         if "usage" in response_body:
             usage = response_body["usage"]
@@ -390,6 +394,7 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
             if "finish_reason" in choices:
                 span.set_attribute(GEN_AI_RESPONSE_FINISH_REASONS, [choices["finish_reason"]])
 
+    # pylint: disable=no-self-use
     def _handle_meta_llama_response(self, span: Span, response_body: Dict[str, Any]):
         if "prompt_token_count" in response_body:
             span.set_attribute(GEN_AI_USAGE_INPUT_TOKENS, response_body["prompt_token_count"])
@@ -398,6 +403,7 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
         if "stop_reason" in response_body:
             span.set_attribute(GEN_AI_RESPONSE_FINISH_REASONS, [response_body["stop_reason"]])
 
+    # pylint: disable=no-self-use
     def _handle_mistral_mistral_response(self, span: Span, response_body: Dict[str, Any]):
         if "outputs" in response_body:
             outputs = response_body["outputs"][0]
