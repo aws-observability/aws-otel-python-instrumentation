@@ -363,8 +363,8 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
     def _handle_amazon_titan_response(self, span: Span, response_body: Dict[str, Any]):
         if "inputTextTokenCount" in response_body:
             span.set_attribute(GEN_AI_USAGE_INPUT_TOKENS, response_body["inputTextTokenCount"])
-
-            result = response_body["results"][0]
+            if "results" in response_body:
+                result = response_body["results"][0]
             if "tokenCount" in result:
                 span.set_attribute(GEN_AI_USAGE_OUTPUT_TOKENS, result["tokenCount"])
             if "completionReason" in result:
