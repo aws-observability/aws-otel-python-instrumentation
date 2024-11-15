@@ -177,7 +177,7 @@ class TestInstrumentationPatch(TestCase):
         self.assertFalse(gevent.monkey.is_module_patched("queue"), "gevent queue module has been patched")
         self.assertFalse(gevent.monkey.is_module_patched("contextvars"), "gevent contextvars module has been patched")
 
-    # pylint: disable=too-many-statements
+    # pylint: disable=too-many-statements, too-many-locals
     def _test_patched_botocore_instrumentation(self):
         # Kinesis
         self.assertTrue("kinesis" in _KNOWN_EXTENSIONS)
