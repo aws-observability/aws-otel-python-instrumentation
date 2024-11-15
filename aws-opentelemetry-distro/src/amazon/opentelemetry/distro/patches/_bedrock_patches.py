@@ -345,7 +345,7 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
 
             except json.JSONDecodeError:
                 print("Error: Unable to parse the response body as JSON")
-            except Exception as e: # pylint: disable=broad-exception-caught, invalid-name
+            except Exception as e:  # pylint: disable=broad-exception-caught, invalid-name
                 print(f"Error processing response: {str(e)}")
             finally:
                 # Make sure to close the stream
