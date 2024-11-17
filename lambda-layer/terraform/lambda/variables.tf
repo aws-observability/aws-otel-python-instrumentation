@@ -7,7 +7,7 @@ variable "sdk_layer_name" {
 variable "function_name" {
   type        = string
   description = "Name of sample app function / API gateway"
-  default     = "aws-opentelemetry-distro-python1"
+  default     = "aws-opentelemetry-distro-python"
 }
 
 variable "architecture" {
