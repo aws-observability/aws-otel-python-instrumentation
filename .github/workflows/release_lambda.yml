@@ -3,6 +3,9 @@ name: Release Lambda layer
 on:
   workflow_dispatch:
     inputs:
+      version:
+        description: The version to tag the lambda release with, e.g., 1.2.0
+        required: true
       aws_region:
         description: 'Deploy to aws regions'
         required: true
@@ -184,45 +187,13 @@ jobs:
         with:
           name: layer.tf
           path: layer.tf
-#      - name: Commit changes
-#        env:
-#          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-#        run: |
-#          git config user.name "github-actions[bot]"
-#          git config user.email "github-actions[bot]@users.noreply.github.com"
-#          mv layer.tf lambda-layer/terraform/lambda/
-#          git add lambda-layer/terraform/lambda/layer.tf
-#          git commit -m "Update Lambda layer ARNs for releasing" || echo "No changes to commit"
-#          git push
-  create-release:
-    runs-on: ubuntu-latest
-    needs: generate-release-note
-    steps:
-      - name: Checkout Repo @ SHA - ${{ github.sha }}
-        uses: actions/checkout@v4
-      - name: Get latest commit SHA
-        run: |
-          echo "COMMIT_SHA=${GITHUB_SHA}" >> $GITHUB_ENV
-          SHORT_SHA=$(echo $GITHUB_SHA | cut -c1-7)
-          echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_ENV
-#      - name: Create Tag
-#        run: |
-#          git config user.name "github-actions[bot]"
-#          git config user.email "github-actions[bot]@users.noreply.github.com"
-#          TAG_NAME="lambda-${SHORT_SHA}"
-#          git tag -a "$TAG_NAME" -m "Release Lambda layer based on commit $TAG_NAME"
-#          git push origin "$TAG_NAME"
-#          echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_ENV
-#        env:
-#          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Create Release
+      - name: Create GH release
         id: create_release
-        uses: actions/create-release@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ env.TAG_NAME }}
-          release_name: "Release AWSOpenTelemetryDistroPython Lambda Layer"
-          body_path: lambda-layer/terraform/lambda/layer.tf
-          draft: true
-          prerelease: false
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
+        run: |
+          gh release create --target "$GITHUB_REF_NAME" \
+             --title "Release lambda-v${{ github.event.inputs.version }}" \
+             --draft \
+             "lambda-v${{ github.event.inputs.version }}" \
+             layer.tf
