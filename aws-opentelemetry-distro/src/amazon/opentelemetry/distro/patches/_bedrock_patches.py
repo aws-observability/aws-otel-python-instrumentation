@@ -4,10 +4,15 @@ import abc
 import inspect
 import io
 import json
+import logging
 import math
 from typing import Any, Dict, Optional
 
 from botocore.response import StreamingBody
+
+_logger = logging.getLogger(__name__)
+# Set logger level to DEBUG
+_logger.setLevel(logging.DEBUG)
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_AGENT_ID,
@@ -275,7 +280,7 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
                         self._extract_mistral_attributes(attributes, request_body)
 
                 except json.JSONDecodeError:
-                    print("Error: Unable to parse the body as JSON")
+                    _logger.debug("Error: Unable to parse the body as JSON")
 
     def _extract_titan_attributes(self, attributes, request_body):
         config = request_body.get("textGenerationConfig", {})
@@ -352,9 +357,9 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
                 result["body"] = StreamingBody(new_stream, len(body_content))
 
             except json.JSONDecodeError:
-                print("Error: Unable to parse the response body as JSON")
+                _logger.debug("Error: Unable to parse the response body as JSON")
             except Exception as e:  # pylint: disable=broad-exception-caught, invalid-name
-                print(f"Error processing response: {str(e)}")
+                _logger.debug(f"Error processing response: {str(e)}")
             finally:
                 if original_body is not None:
                     original_body.close()
