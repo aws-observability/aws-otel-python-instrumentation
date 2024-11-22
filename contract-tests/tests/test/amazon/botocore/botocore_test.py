@@ -929,14 +929,14 @@ class BotocoreTest(ContractTestBase):
         # self._assert_str_attribute(attributes_dict, SpanAttributes.PEER_SERVICE, "backend:8080")
         for key, value in request_specific_attributes.items():
             self._assert_attribute(attributes_dict, key, value)
-        
+
         for key, value in response_specific_attributes.items():
             self._assert_attribute(attributes_dict, key, value)
 
     def _assert_attribute(self, attributes_dict: Dict[str, AnyValue], key, value) -> None:
         if isinstance(value, str):
             if self._is_valid_regex(value):
-                self._assert_match_attribute(attributes_dict, key, value) 
+                self._assert_match_attribute(attributes_dict, key, value)
             else:
                 self._assert_str_attribute(attributes_dict, key, value)
         elif isinstance(value, int):
