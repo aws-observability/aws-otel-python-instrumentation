@@ -927,30 +927,24 @@ class BotocoreTest(ContractTestBase):
         self._assert_int_attribute(attributes_dict, SpanAttributes.HTTP_STATUS_CODE, status_code)
         # TODO: botocore instrumentation is not respecting PEER_SERVICE
         # self._assert_str_attribute(attributes_dict, SpanAttributes.PEER_SERVICE, "backend:8080")
-        self._assert_specific_attributes(attributes_dict, request_specific_attributes)
-        self._assert_specific_attributes(attributes_dict, response_specific_attributes)
+        for key, value in request_specific_attributes.items():
+            self._assert_attribute(attributes_dict, key, value)
+        
+        for key, value in response_specific_attributes.items():
+            self._assert_attribute(attributes_dict, key, value)
 
-    def _assert_specific_attributes(
-        self, attributes_dict: Dict[str, AnyValue], specific_attributes: Dict[str, AnyValue]
-    ) -> None:
-        for key, value in specific_attributes.items():
-            is_valid_regex = False
-
-            try:
-                is_valid_regex = self._is_valid_regex(value)
-            except (StopIteration, RuntimeError, KeyError):
-                is_valid_regex = False
-
-            if is_valid_regex:
-                self._assert_match_attribute(attributes_dict, key, value)
-            elif isinstance(value, str):
-                self._assert_str_attribute(attributes_dict, key, value)
-            elif isinstance(value, int):
-                self._assert_int_attribute(attributes_dict, key, value)
-            elif isinstance(value, float):
-                self._assert_float_attribute(attributes_dict, key, value)
+    def _assert_attribute(self, attributes_dict: Dict[str, AnyValue], key, value) -> None:
+        if isinstance(value, str):
+            if self._is_valid_regex(value):
+                self._assert_match_attribute(attributes_dict, key, value) 
             else:
-                self._assert_array_value_ddb_table_name(attributes_dict, key, value)
+                self._assert_str_attribute(attributes_dict, key, value)
+        elif isinstance(value, int):
+            self._assert_int_attribute(attributes_dict, key, value)
+        elif isinstance(value, float):
+            self._assert_float_attribute(attributes_dict, key, value)
+        else:
+            self._assert_array_value_ddb_table_name(attributes_dict, key, value)
 
     @override
     def _assert_metric_attributes(

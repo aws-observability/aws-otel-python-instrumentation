@@ -239,9 +239,9 @@ class ContractTestBase(TestCase):
     ):
         self.fail("Tests must implement this function")
 
-    def _is_valid_regex(self, pattern: str) -> bool:
+    def _is_valid_regex(self, pattern: str):
         try:
             re.compile(pattern)
             return True
-        except re.error:
+        except (re.error, StopIteration, RuntimeError, KeyError):
             return False
