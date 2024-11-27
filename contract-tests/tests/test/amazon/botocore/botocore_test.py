@@ -47,6 +47,7 @@ _GEN_AI_USAGE_OUTPUT_TOKENS: str = "gen_ai.usage.output_tokens"
 _AWS_SECRET_ARN: str = "aws.secretsmanager.secret.arn"
 _AWS_STATE_MACHINE_ARN: str = "aws.stepfunctions.state_machine.arn"
 _AWS_ACTIVITY_ARN: str = "aws.stepfunctions.activity.arn"
+_AWS_SNS_TOPIC_ARN: str = "aws.sns.topic.arn"
 
 
 # pylint: disable=too-many-public-methods,too-many-lines
@@ -86,7 +87,7 @@ class BotocoreTest(ContractTestBase):
         cls._local_stack: LocalStackContainer = (
             LocalStackContainer(image="localstack/localstack:3.5.0")
             .with_name("localstack")
-            .with_services("s3", "sqs", "dynamodb", "kinesis", "secretsmanager", "iam", "stepfunctions")
+            .with_services("s3", "sqs", "dynamodb", "kinesis", "secretsmanager", "iam", "stepfunctions", "sns")
             .with_env("DEFAULT_REGION", "us-west-2")
             .with_kwargs(network=NETWORK_NAME, networking_config=local_stack_networking_config)
         )
@@ -750,6 +751,47 @@ class BotocoreTest(ContractTestBase):
                 _AWS_SECRET_ARN: "arn:aws:secretsmanager:us-west-2:000000000000:secret:nonexistent-secret",
             },
             span_name="Secrets Manager.GetSecretValue",
+        )
+
+    def test_sns_get_topic_attributes(self):
+        self.do_test_requests(
+            "sns/gettopicattributes/test-topic",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="SNS",
+            remote_service="AWS::SNS",
+            remote_operation="GetTopicAttributes",
+            remote_resource_type="AWS::SNS::Topic",
+            remote_resource_identifier="test-topic",
+            cloudformation_primary_identifier="arn:aws:sns:us-west-2:000000000000:test-topic",
+            request_specific_attributes={
+                _AWS_SNS_TOPIC_ARN: "arn:aws:sns:us-west-2:000000000000:test-topic"
+            },
+            span_name="SNS.GetTopicAttributes"
+        )
+
+    # TODO: Add error case for sns - our test setup is not setting the http status code properly 
+    # for this resource
+        
+    def test_sns_fault(self):
+        self.do_test_requests(
+            "sns/fault",
+            "GET",
+            500,
+            0,
+            1,
+            rpc_service="SNS",
+            remote_service="AWS::SNS",
+            remote_operation="GetTopicAttributes",
+            remote_resource_type="AWS::SNS::Topic",
+            remote_resource_identifier="invalid-topic",
+            cloudformation_primary_identifier="arn:aws:sns:us-west-2:000000000000:invalid-topic",
+            request_specific_attributes={
+                _AWS_SNS_TOPIC_ARN: "arn:aws:sns:us-west-2:000000000000:invalid-topic",
+            },
+            span_name="SNS.GetTopicAttributes",
         )
 
     def test_stepfunctions_describe_state_machine(self):

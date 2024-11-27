@@ -52,6 +52,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._handle_secretsmanager_request()
         if self.in_path("stepfunctions"):
             self._handle_stepfunctions_request()
+        if self.in_path("sns"):
+            self._handle_sns_request()
 
         self._end_request(self.main_status)
 
@@ -369,6 +371,29 @@ class RequestHandler(BaseHTTPRequestHandler):
         else:
             set_main_status(404)
 
+    def _handle_sns_request(self) -> None:
+        sns_client = boto3.client("sns", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
+        if self.in_path(_FAULT):
+            set_main_status(500)
+            try:
+                fault_client = boto3.client("sns", endpoint_url=_FAULT_ENDPOINT, region_name=_AWS_REGION)
+                fault_client.meta.events.register(
+                    "before-call.sns.GetTopicAttributes",
+                    lambda **kwargs: inject_500_error("GetTopicAttributes", **kwargs),
+                )
+                fault_client.get_topic_attributes(
+                    TopicArn="arn:aws:sns:us-west-2:000000000000:invalid-topic"
+                )
+            except Exception as exception:
+                print("Expected exception occurred", exception)
+        elif self.in_path("gettopicattributes/test-topic"):
+            set_main_status(200)
+            sns_client.get_topic_attributes(
+                TopicArn="arn:aws:sns:us-west-2:000000000000:test-topic",
+            )
+        else:
+            set_main_status(404)
+
     def _end_request(self, status_code: int):
         self.send_response_only(status_code)
         self.end_headers()
@@ -556,6 +581,13 @@ def prepare_aws_server() -> None:
             secretsmanager_client.create_secret(
                 Name="testSecret", SecretString="secretValue", Description="This is a test secret"
             )
+
+        # Set up SNS so tests can access a topic.
+        sns_client: BaseClient = boto3.client(
+            "sns", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION
+        )
+        create_topic_response = sns_client.create_topic(Name="test-topic")
+        print("Created topic successfully:", create_topic_response)
 
         # Set up Step Functions so tests can access a state machine and activity.
         sfn_client: BaseClient = boto3.client("stepfunctions", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
