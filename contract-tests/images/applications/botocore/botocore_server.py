@@ -381,9 +381,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     "before-call.sns.GetTopicAttributes",
                     lambda **kwargs: inject_500_error("GetTopicAttributes", **kwargs),
                 )
-                fault_client.get_topic_attributes(
-                    TopicArn="arn:aws:sns:us-west-2:000000000000:invalid-topic"
-                )
+                fault_client.get_topic_attributes(TopicArn="arn:aws:sns:us-west-2:000000000000:invalid-topic")
             except Exception as exception:
                 print("Expected exception occurred", exception)
         elif self.in_path("gettopicattributes/test-topic"):
@@ -583,9 +581,7 @@ def prepare_aws_server() -> None:
             )
 
         # Set up SNS so tests can access a topic.
-        sns_client: BaseClient = boto3.client(
-            "sns", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION
-        )
+        sns_client: BaseClient = boto3.client("sns", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
         create_topic_response = sns_client.create_topic(Name="test-topic")
         print("Created topic successfully:", create_topic_response)
 

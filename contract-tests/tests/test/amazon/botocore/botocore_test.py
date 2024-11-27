@@ -766,15 +766,13 @@ class BotocoreTest(ContractTestBase):
             remote_resource_type="AWS::SNS::Topic",
             remote_resource_identifier="test-topic",
             cloudformation_primary_identifier="arn:aws:sns:us-west-2:000000000000:test-topic",
-            request_specific_attributes={
-                _AWS_SNS_TOPIC_ARN: "arn:aws:sns:us-west-2:000000000000:test-topic"
-            },
-            span_name="SNS.GetTopicAttributes"
+            request_specific_attributes={_AWS_SNS_TOPIC_ARN: "arn:aws:sns:us-west-2:000000000000:test-topic"},
+            span_name="SNS.GetTopicAttributes",
         )
 
-    # TODO: Add error case for sns - our test setup is not setting the http status code properly 
+    # TODO: Add error case for sns - our test setup is not setting the http status code properly
     # for this resource
-        
+
     def test_sns_fault(self):
         self.do_test_requests(
             "sns/fault",
