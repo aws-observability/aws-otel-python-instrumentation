@@ -131,3 +131,6 @@ jobs:
              --draft \
              "v${{ github.event.inputs.version }}" \
              dist/aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
+        
+          
+

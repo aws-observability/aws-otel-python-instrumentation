@@ -1,0 +1,14 @@
+{
+    "release": [
+        {
+            "version": "0.7.0",
+            "checksum": [
+                {
+                    "name": "aws_opentelemetry_distro-0.7.0-py3-none-any.whl",
+                    "checksum": "8cf682fa56bc00326a741acf480024550017beda41acb1b51af9d3b5ef1a9470"
+                }
+            ]
+        }
+    ]
+}
+  
