@@ -1,7 +1,7 @@
 variable "sdk_layer_name" {
   type        = string
   description = "Name of published SDK layer"
-  default     = "aws-opentelemetry-distro-python"
+  default     = "AWSOpenTelemetryDistroPython"
 }
 
 variable "function_name" {
@@ -19,17 +19,11 @@ variable "architecture" {
 variable "runtime" {
   type        = string
   description = "Python runtime version used for sample Lambda Function"
-  default     = "python3.12"
+  default     = "python3.13"
 }
 
 variable "tracing_mode" {
   type        = string
   description = "Lambda function tracing mode"
   default     = "Active"
-}
-
-variable "enable_collector_layer" {
-  type        = bool
-  description = "Enables building and usage of a layer for the collector. If false, it means either the SDK layer includes the collector or it is not used."
-  default     = false
 }

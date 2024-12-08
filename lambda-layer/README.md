@@ -1,6 +1,6 @@
 # AWS Lambda Application Signals Support
 
-This package provides support for **Application Signals** in AWS Lambda environment.
+This folder provides support for **Application Signals** in AWS Lambda environments. You can explore this repository to learn how to build a Lambda layer for AWS Python Runtimes from scratch in your AWS account. Alternatively, you can directly visit the AWS documentation, [Enable Application Signals on Lambda functions](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Application-Signals-Enable-Lambda.html), and use the AWS-managed Lambda layers we provide.
 
 ## Features
 
@@ -53,4 +53,4 @@ Lambda function and view the traces and metrics through the AWS CloudWatch Conso
 By default the layer enable botocore and aws-lambda instrumentation libraries only for better Lambda cold start performance. To 
 enable all opentelemetry python 
 supported libraries you can set environment variable `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=none`. Refer to details in 
-[OpenTelemetry Python Disabling Specific Instrumentations](Disabling Specific Instrumentations)
+[OpenTelemetry Python Disabling Specific Instrumentations](https://opentelemetry.io/docs/zero-code/python/configuration/#disabling-specific-instrumentations)

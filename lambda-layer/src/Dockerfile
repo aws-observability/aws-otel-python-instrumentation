@@ -1,4 +1,4 @@
-FROM public.ecr.aws/sam/build-python3.12 AS python312
+FROM public.ecr.aws/sam/build-python3.13 AS python313
 
 ADD . /workspace
 
@@ -19,6 +19,13 @@ RUN mkdir -p /build && \
   chmod 755 /build/otel-instrument && \
   rm -rf /build/python/urllib3*
 
+FROM public.ecr.aws/sam/build-python3.12 AS python312
+
+WORKDIR /workspace
+
+COPY --from=python313 /build /build
+
+RUN python3 -m compileall /build/python
 
 FROM public.ecr.aws/sam/build-python3.11 AS python311
 
