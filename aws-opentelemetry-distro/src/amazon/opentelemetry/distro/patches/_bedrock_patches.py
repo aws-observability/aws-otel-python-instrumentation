@@ -338,7 +338,7 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
 
         if not model_id:
             return
-        
+
         if "body" in result and isinstance(result["body"], StreamingBody):
             original_body = None
             try:
