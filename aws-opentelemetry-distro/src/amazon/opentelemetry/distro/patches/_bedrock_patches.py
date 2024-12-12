@@ -332,12 +332,13 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
         if value is not None:
             attributes[key] = value
 
+    # pylint: disable=too-many-branches
     def on_success(self, span: Span, result: Dict[str, Any]):
         model_id = self._call_context.params.get(_MODEL_ID)
 
         if not model_id:
             return
-
+        
         if "body" in result and isinstance(result["body"], StreamingBody):
             original_body = None
             try:
