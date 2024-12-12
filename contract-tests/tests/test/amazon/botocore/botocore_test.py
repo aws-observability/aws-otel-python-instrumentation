@@ -1,8 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import math
-from logging import INFO, Logger, getLogger
 import re
+from logging import INFO, Logger, getLogger
 from typing import Dict, List
 
 from docker.types import EndpointConfig
@@ -1074,4 +1074,6 @@ class BotocoreTest(ContractTestBase):
         self.assertIsNotNone(actual_value)
         pattern = re.compile(expected_value)
         match = pattern.fullmatch(actual_value.string_value)
-        self.assertTrue(match is not None, f"Actual: {actual_value.string_value} does not match Expected: {expected_value}")
+        self.assertTrue(
+            match is not None, f"Actual: {actual_value.string_value} does not match Expected: {expected_value}"
+        )

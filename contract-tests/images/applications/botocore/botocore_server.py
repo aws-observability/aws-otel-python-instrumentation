@@ -429,14 +429,14 @@ def get_model_request_response(path):
 
     if "amazon.nova" in path:
         model_id = "amazon.nova-pro-v1:0"
-        
+
         request_body = {
-            "messages":[{"role": "user", "content": [{"text": "A camping trip"}]}],
+            "messages": [{"role": "user", "content": [{"text": "A camping trip"}]}],
             "inferenceConfig": {
                 "max_new_tokens": 800,
                 "temperature": 0.9,
                 "top_p": 0.7,
-            }
+            },
         }
 
         response_body = {
