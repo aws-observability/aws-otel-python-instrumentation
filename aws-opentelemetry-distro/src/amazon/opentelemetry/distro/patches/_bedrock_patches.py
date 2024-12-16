@@ -41,7 +41,7 @@ _DATA_SOURCE_ID: str = "dataSourceId"
 _GUARDRAIL_ID: str = "guardrailId"
 _GUARDRAIL_ARN: str = "guardrailArn"
 _MODEL_ID: str = "modelId"
-_AWS_BEDROCK_SYSTEM: str = "aws_bedrock"
+_AWS_BEDROCK_SYSTEM: str = "aws.bedrock"
 
 _logger = logging.getLogger(__name__)
 # Set logger level to DEBUG
