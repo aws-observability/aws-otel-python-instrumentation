@@ -268,6 +268,8 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
 
                     if "amazon.titan" in model_id:
                         self._extract_titan_attributes(attributes, request_body)
+                    if "amazon.nova" in model_id:
+                        self._extract_nova_attributes(attributes, request_body)
                     elif "anthropic.claude" in model_id:
                         self._extract_claude_attributes(attributes, request_body)
                     elif "meta.llama" in model_id:
@@ -287,6 +289,12 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
         self._set_if_not_none(attributes, GEN_AI_REQUEST_TEMPERATURE, config.get("temperature"))
         self._set_if_not_none(attributes, GEN_AI_REQUEST_TOP_P, config.get("topP"))
         self._set_if_not_none(attributes, GEN_AI_REQUEST_MAX_TOKENS, config.get("maxTokenCount"))
+
+    def _extract_nova_attributes(self, attributes, request_body):
+        config = request_body.get("inferenceConfig", {})
+        self._set_if_not_none(attributes, GEN_AI_REQUEST_TEMPERATURE, config.get("temperature"))
+        self._set_if_not_none(attributes, GEN_AI_REQUEST_TOP_P, config.get("top_p"))
+        self._set_if_not_none(attributes, GEN_AI_REQUEST_MAX_TOKENS, config.get("max_new_tokens"))
 
     def _extract_claude_attributes(self, attributes, request_body):
         self._set_if_not_none(attributes, GEN_AI_REQUEST_MAX_TOKENS, request_body.get("max_tokens"))
@@ -324,6 +332,7 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
         if value is not None:
             attributes[key] = value
 
+    # pylint: disable=too-many-branches
     def on_success(self, span: Span, result: Dict[str, Any]):
         model_id = self._call_context.params.get(_MODEL_ID)
 
@@ -342,6 +351,8 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
                 response_body = json.loads(telemetry_content.decode("utf-8"))
                 if "amazon.titan" in model_id:
                     self._handle_amazon_titan_response(span, response_body)
+                if "amazon.nova" in model_id:
+                    self._handle_amazon_nova_response(span, response_body)
                 elif "anthropic.claude" in model_id:
                     self._handle_anthropic_claude_response(span, response_body)
                 elif "meta.llama" in model_id:
@@ -374,6 +385,17 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
                     span.set_attribute(GEN_AI_USAGE_OUTPUT_TOKENS, result["tokenCount"])
                 if "completionReason" in result:
                     span.set_attribute(GEN_AI_RESPONSE_FINISH_REASONS, [result["completionReason"]])
+
+    # pylint: disable=no-self-use
+    def _handle_amazon_nova_response(self, span: Span, response_body: Dict[str, Any]):
+        if "usage" in response_body:
+            usage = response_body["usage"]
+            if "inputTokens" in usage:
+                span.set_attribute(GEN_AI_USAGE_INPUT_TOKENS, usage["inputTokens"])
+            if "outputTokens" in usage:
+                span.set_attribute(GEN_AI_USAGE_OUTPUT_TOKENS, usage["outputTokens"])
+        if "stopReason" in response_body:
+            span.set_attribute(GEN_AI_RESPONSE_FINISH_REASONS, [response_body["stopReason"]])
 
     # pylint: disable=no-self-use
     def _handle_anthropic_claude_response(self, span: Span, response_body: Dict[str, Any]):
