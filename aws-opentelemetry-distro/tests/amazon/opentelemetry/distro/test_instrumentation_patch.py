@@ -1,12 +1,16 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import json
+import math
 import os
+from io import BytesIO
 from typing import Any, Dict
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 import gevent.monkey
 import pkg_resources
+from botocore.response import StreamingBody
 
 from amazon.opentelemetry.distro.patches._instrumentation_patch import (
     AWS_GEVENT_PATCH_MODULES,
@@ -24,7 +28,7 @@ _BEDROCK_AGENT_ID: str = "agentId"
 _BEDROCK_DATASOURCE_ID: str = "DataSourceId"
 _BEDROCK_GUARDRAIL_ID: str = "GuardrailId"
 _BEDROCK_KNOWLEDGEBASE_ID: str = "KnowledgeBaseId"
-_GEN_AI_SYSTEM: str = "aws_bedrock"
+_GEN_AI_SYSTEM: str = "aws.bedrock"
 _GEN_AI_REQUEST_MODEL: str = "genAiReuqestModelId"
 _SECRET_ARN: str = "arn:aws:secretsmanager:us-west-2:000000000000:secret:testSecret-ABCDEF"
 _TOPIC_ARN: str = "topicArn"
@@ -173,7 +177,7 @@ class TestInstrumentationPatch(TestCase):
         self.assertFalse(gevent.monkey.is_module_patched("queue"), "gevent queue module has been patched")
         self.assertFalse(gevent.monkey.is_module_patched("contextvars"), "gevent contextvars module has been patched")
 
-    # pylint: disable=too-many-statements
+    # pylint: disable=too-many-statements, too-many-locals
     def _test_patched_botocore_instrumentation(self):
         # Kinesis
         self.assertTrue("kinesis" in _KNOWN_EXTENSIONS)
@@ -211,12 +215,94 @@ class TestInstrumentationPatch(TestCase):
         bedrock_agent_runtime_sucess_attributes: Dict[str, str] = _do_on_success_bedrock("bedrock-agent-runtime")
         self.assertEqual(len(bedrock_agent_runtime_sucess_attributes), 0)
 
-        # BedrockRuntime
+        # BedrockRuntime - Amazon Titan
         self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
-        bedrock_runtime_attributes: Dict[str, str] = _do_extract_attributes_bedrock("bedrock-runtime")
-        self.assertEqual(len(bedrock_runtime_attributes), 2)
-        self.assertEqual(bedrock_runtime_attributes["gen_ai.system"], _GEN_AI_SYSTEM)
-        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.model"], _GEN_AI_REQUEST_MODEL)
+
+        self._test_patched_bedrock_runtime_invoke_model(
+            model_id="amazon.titan-embed-text-v1",
+            max_tokens=512,
+            temperature=0.9,
+            top_p=0.75,
+            finish_reason="FINISH",
+            input_tokens=123,
+            output_tokens=456,
+        )
+
+        self._test_patched_bedrock_runtime_invoke_model(
+            model_id="amazon.nova-pro-v1:0",
+            max_tokens=500,
+            temperature=0.9,
+            top_p=0.7,
+            finish_reason="FINISH",
+            input_tokens=123,
+            output_tokens=456,
+        )
+
+        # BedrockRuntime - Anthropic Claude
+        self._test_patched_bedrock_runtime_invoke_model(
+            model_id="anthropic.claude-v2:1",
+            max_tokens=512,
+            temperature=0.5,
+            top_p=0.999,
+            finish_reason="end_turn",
+            input_tokens=23,
+            output_tokens=36,
+        )
+
+        # BedrockRuntime - Meta LLama
+        self._test_patched_bedrock_runtime_invoke_model(
+            model_id="meta.llama2-13b-chat-v1",
+            max_tokens=512,
+            temperature=0.5,
+            top_p=0.9,
+            finish_reason="stop",
+            input_tokens=31,
+            output_tokens=36,
+        )
+
+        # BedrockRuntime - Cohere Command-r
+        cohere_input = "Hello, world"
+        cohere_output = "Goodbye, world"
+
+        self._test_patched_bedrock_runtime_invoke_model(
+            model_id="cohere.command-r-v1:0",
+            max_tokens=512,
+            temperature=0.5,
+            top_p=0.75,
+            finish_reason="COMPLETE",
+            input_tokens=math.ceil(len(cohere_input) / 6),
+            output_tokens=math.ceil(len(cohere_output) / 6),
+            input_prompt=cohere_input,
+            output_prompt=cohere_output,
+        )
+
+        # BedrockRuntime - AI21 Jambda
+        self._test_patched_bedrock_runtime_invoke_model(
+            model_id="ai21.jamba-1-5-large-v1:0",
+            max_tokens=512,
+            temperature=0.5,
+            top_p=0.999,
+            finish_reason="end_turn",
+            input_tokens=23,
+            output_tokens=36,
+        )
+
+        # BedrockRuntime - Mistral
+        msg = "Hello World"
+        mistral_input = f"<s>[INST] {msg} [/INST]"
+        mistral_output = "Goodbye, World"
+
+        self._test_patched_bedrock_runtime_invoke_model(
+            model_id="mistral.mistral-7b-instruct-v0:2",
+            max_tokens=512,
+            temperature=0.5,
+            top_p=0.9,
+            finish_reason="stop",
+            input_tokens=math.ceil(len(mistral_input) / 6),
+            output_tokens=math.ceil(len(mistral_output) / 6),
+            input_prompt=mistral_input,
+            output_prompt=mistral_output,
+        )
 
         # SecretsManager
         self.assertTrue("secretsmanager" in _KNOWN_EXTENSIONS)
@@ -305,6 +391,146 @@ class TestInstrumentationPatch(TestCase):
         self.assertEqual(len(bedrock_sucess_attributes), 1)
         self.assertEqual(bedrock_sucess_attributes["aws.bedrock.guardrail.id"], _BEDROCK_GUARDRAIL_ID)
 
+    def _test_patched_bedrock_runtime_invoke_model(self, **args):
+        model_id = args.get("model_id", None)
+        max_tokens = args.get("max_tokens", None)
+        temperature = args.get("temperature", None)
+        top_p = args.get("top_p", None)
+        finish_reason = args.get("finish_reason", None)
+        input_tokens = args.get("input_tokens", None)
+        output_tokens = args.get("output_tokens", None)
+        input_prompt = args.get("input_prompt", None)
+        output_prompt = args.get("output_prompt", None)
+
+        def get_model_response_request():
+            request_body = {}
+            response_body = {}
+
+            if "amazon.titan" in model_id:
+                request_body = {
+                    "textGenerationConfig": {
+                        "maxTokenCount": max_tokens,
+                        "temperature": temperature,
+                        "topP": top_p,
+                    }
+                }
+
+                response_body = {
+                    "inputTextTokenCount": input_tokens,
+                    "results": [
+                        {
+                            "tokenCount": output_tokens,
+                            "outputText": "testing",
+                            "completionReason": finish_reason,
+                        }
+                    ],
+                }
+
+            if "amazon.nova" in model_id:
+                request_body = {
+                    "inferenceConfig": {
+                        "max_new_tokens": max_tokens,
+                        "temperature": temperature,
+                        "top_p": top_p,
+                    }
+                }
+
+                response_body = {
+                    "output": {"message": {"content": [{"text": ""}], "role": "assistant"}},
+                    "stopReason": finish_reason,
+                    "usage": {"inputTokens": input_tokens, "outputTokens": output_tokens},
+                }
+
+            if "anthropic.claude" in model_id:
+                request_body = {
+                    "anthropic_version": "bedrock-2023-05-31",
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "top_p": top_p,
+                }
+
+                response_body = {
+                    "stop_reason": finish_reason,
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
+                }
+
+            if "ai21.jamba" in model_id:
+                request_body = {
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "top_p": top_p,
+                }
+
+                response_body = {
+                    "choices": [{"finish_reason": finish_reason}],
+                    "usage": {
+                        "prompt_tokens": input_tokens,
+                        "completion_tokens": output_tokens,
+                        "total_tokens": (input_tokens + output_tokens),
+                    },
+                }
+
+            if "meta.llama" in model_id:
+                request_body = {
+                    "max_gen_len": max_tokens,
+                    "temperature": temperature,
+                    "top_p": top_p,
+                }
+
+                response_body = {
+                    "prompt_token_count": input_tokens,
+                    "generation_token_count": output_tokens,
+                    "stop_reason": finish_reason,
+                }
+
+            if "cohere.command" in model_id:
+                request_body = {
+                    "message": input_prompt,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "p": top_p,
+                }
+
+                response_body = {
+                    "text": output_prompt,
+                    "finish_reason": finish_reason,
+                }
+
+            if "mistral" in model_id:
+                request_body = {
+                    "prompt": input_prompt,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "top_p": top_p,
+                }
+
+                response_body = {"outputs": [{"text": output_prompt, "stop_reason": finish_reason}]}
+
+            json_bytes = json.dumps(response_body).encode("utf-8")
+
+            return json.dumps(request_body), StreamingBody(BytesIO(json_bytes), len(json_bytes))
+
+        request_body, response_body = get_model_response_request()
+
+        bedrock_runtime_attributes: Dict[str, str] = _do_extract_attributes_bedrock(
+            "bedrock-runtime", model_id=model_id, request_body=request_body
+        )
+        bedrock_runtime_success_attributes: Dict[str, str] = _do_on_success_bedrock(
+            "bedrock-runtime", model_id=model_id, streaming_body=response_body
+        )
+
+        bedrock_runtime_attributes.update(bedrock_runtime_success_attributes)
+
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.system"], _GEN_AI_SYSTEM)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.model"], model_id)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.max_tokens"], max_tokens)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.temperature"], temperature)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.top_p"], top_p)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.usage.input_tokens"], input_tokens)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.usage.output_tokens"], output_tokens)
+        self.assertEqual(bedrock_runtime_attributes["gen_ai.response.finish_reasons"], [finish_reason])
+
     def _test_patched_bedrock_agent_instrumentation(self):
         """For bedrock-agent service, both extract_attributes and on_success provides attributes,
         the attributes depend on the API being invoked."""
@@ -385,26 +611,27 @@ def _do_extract_sqs_attributes() -> Dict[str, str]:
     return _do_extract_attributes(service_name, params)
 
 
-def _do_extract_attributes_bedrock(service, operation=None) -> Dict[str, str]:
+def _do_extract_attributes_bedrock(service, operation=None, model_id=None, request_body=None) -> Dict[str, str]:
     params: Dict[str, Any] = {
         "agentId": _BEDROCK_AGENT_ID,
         "dataSourceId": _BEDROCK_DATASOURCE_ID,
         "knowledgeBaseId": _BEDROCK_KNOWLEDGEBASE_ID,
         "guardrailId": _BEDROCK_GUARDRAIL_ID,
-        "modelId": _GEN_AI_REQUEST_MODEL,
+        "modelId": model_id,
+        "body": request_body,
     }
     return _do_extract_attributes(service, params, operation)
 
 
-def _do_on_success_bedrock(service, operation=None) -> Dict[str, str]:
+def _do_on_success_bedrock(service, operation=None, model_id=None, streaming_body=None) -> Dict[str, str]:
     result: Dict[str, Any] = {
         "agentId": _BEDROCK_AGENT_ID,
         "dataSourceId": _BEDROCK_DATASOURCE_ID,
         "knowledgeBaseId": _BEDROCK_KNOWLEDGEBASE_ID,
         "guardrailId": _BEDROCK_GUARDRAIL_ID,
-        "modelId": _GEN_AI_REQUEST_MODEL,
+        "body": streaming_body,
     }
-    return _do_on_success(service, result, operation)
+    return _do_on_success(service, result, operation, params={"modelId": model_id})
 
 
 def _do_extract_secretsmanager_attributes() -> Dict[str, str]:
