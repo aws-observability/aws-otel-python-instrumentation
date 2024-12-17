@@ -44,6 +44,7 @@ _GEN_AI_REQUEST_MAX_TOKENS: str = "gen_ai.request.max_tokens"
 _GEN_AI_RESPONSE_FINISH_REASONS: str = "gen_ai.response.finish_reasons"
 _GEN_AI_USAGE_INPUT_TOKENS: str = "gen_ai.usage.input_tokens"
 _GEN_AI_USAGE_OUTPUT_TOKENS: str = "gen_ai.usage.output_tokens"
+_GEN_AI_SYSTEM: str = "gen_ai.system"
 
 _AWS_SECRET_ARN: str = "aws.secretsmanager.secret.arn"
 _AWS_STATE_MACHINE_ARN: str = "aws.stepfunctions.state_machine.arn"
@@ -429,6 +430,7 @@ class BotocoreTest(ContractTestBase):
             cloudformation_primary_identifier="amazon.titan-text-premier-v1:0",
             request_specific_attributes={
                 _GEN_AI_REQUEST_MODEL: "amazon.titan-text-premier-v1:0",
+                _GEN_AI_SYSTEM: "aws.bedrock",
                 _GEN_AI_REQUEST_MAX_TOKENS: 3072,
                 _GEN_AI_REQUEST_TEMPERATURE: 0.7,
                 _GEN_AI_REQUEST_TOP_P: 0.9,
@@ -483,6 +485,7 @@ class BotocoreTest(ContractTestBase):
             cloudformation_primary_identifier="anthropic.claude-v2:1",
             request_specific_attributes={
                 _GEN_AI_REQUEST_MODEL: "anthropic.claude-v2:1",
+                _GEN_AI_SYSTEM: "aws.bedrock",
                 _GEN_AI_REQUEST_MAX_TOKENS: 1000,
                 _GEN_AI_REQUEST_TEMPERATURE: 0.99,
                 _GEN_AI_REQUEST_TOP_P: 1,
@@ -510,6 +513,7 @@ class BotocoreTest(ContractTestBase):
             cloudformation_primary_identifier="meta.llama2-13b-chat-v1",
             request_specific_attributes={
                 _GEN_AI_REQUEST_MODEL: "meta.llama2-13b-chat-v1",
+                _GEN_AI_SYSTEM: "aws.bedrock",
                 _GEN_AI_REQUEST_MAX_TOKENS: 512,
                 _GEN_AI_REQUEST_TEMPERATURE: 0.5,
                 _GEN_AI_REQUEST_TOP_P: 0.9,
@@ -537,6 +541,7 @@ class BotocoreTest(ContractTestBase):
             cloudformation_primary_identifier="cohere.command-r-v1:0",
             request_specific_attributes={
                 _GEN_AI_REQUEST_MODEL: "cohere.command-r-v1:0",
+                _GEN_AI_SYSTEM: "aws.bedrock",
                 _GEN_AI_REQUEST_MAX_TOKENS: 512,
                 _GEN_AI_REQUEST_TEMPERATURE: 0.5,
                 _GEN_AI_REQUEST_TOP_P: 0.65,
@@ -566,6 +571,7 @@ class BotocoreTest(ContractTestBase):
             cloudformation_primary_identifier="ai21.jamba-1-5-large-v1:0",
             request_specific_attributes={
                 _GEN_AI_REQUEST_MODEL: "ai21.jamba-1-5-large-v1:0",
+                _GEN_AI_SYSTEM: "aws.bedrock",
                 _GEN_AI_REQUEST_MAX_TOKENS: 512,
                 _GEN_AI_REQUEST_TEMPERATURE: 0.6,
                 _GEN_AI_REQUEST_TOP_P: 0.8,
@@ -593,6 +599,7 @@ class BotocoreTest(ContractTestBase):
             cloudformation_primary_identifier="mistral.mistral-7b-instruct-v0:2",
             request_specific_attributes={
                 _GEN_AI_REQUEST_MODEL: "mistral.mistral-7b-instruct-v0:2",
+                _GEN_AI_SYSTEM: "aws.bedrock",
                 _GEN_AI_REQUEST_MAX_TOKENS: 4096,
                 _GEN_AI_REQUEST_TEMPERATURE: 0.75,
                 _GEN_AI_REQUEST_TOP_P: 0.99,
