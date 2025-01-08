@@ -18,7 +18,7 @@ ADD aws-opentelemetry-distro/ ./aws-opentelemetry-distro/
 # * https://github.com/MicrosoftDocs/azure-docs/blob/main/articles/azure-functions/recover-python-functions.md#troubleshoot-cannot-import-cygrpc
 RUN sed -i "/opentelemetry-exporter-otlp-proto-grpc/d" ./aws-opentelemetry-distro/pyproject.toml
 
-RUN mkdir workspace && pip install --target workspace ./aws-opentelemetry-distro
+RUN mkdir workspace && pip install urllib3==2.2.3 --target workspace ./aws-opentelemetry-distro
 
 # Stage 2: Build the cp-utility binary
 FROM public.ecr.aws/docker/library/rust:1.81 as builder
