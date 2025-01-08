@@ -24,7 +24,7 @@ RUN sed -i "/opentelemetry-exporter-otlp-proto-grpc/d" ./aws-opentelemetry-distr
 # otherwise it picks up the older urllib3 that is compatible with Python 3.8.
 # https://github.com/boto/botocore/blob/develop/requirements-docs.txt
 # Since this Dockerfile currently uses the fixed Python 3.11 base image to pull the required dependencies,
-# EKS and ECS applications will encounter a runtime error for Python 3.8 compatability.
+# EKS and ECS applications will encounter a runtime error for Python 3.8 compatibility.
 # Our fix is to temporarily restrict the urllib3 version to one that works for all supported Python versions 
 # that we currently commit to support (notably 3.8). 
 # TODO: Remove this temporary workaround once we deprecate Python 3.8 support since it has reached end-of-life.
