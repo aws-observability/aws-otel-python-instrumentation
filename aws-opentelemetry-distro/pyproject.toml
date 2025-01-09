@@ -80,6 +80,20 @@ dependencies = [
   "opentelemetry-instrumentation-urllib3 == 0.48b0",
   "opentelemetry-instrumentation-wsgi == 0.48b0",
   "opentelemetry-instrumentation-cassandra == 0.48b0",
+  # urllib3 recently made a release that drops support for Python 3.8
+  # Our sdk depends on botocore which pulls in the version of urllib3 based Python runtime it detects.
+  # The rule is that if current pip command version is > 3.9 botocore will pick up the latest urllib3,
+  # otherwise it picks up the older urllib3 that is compatible with Python 3.8.
+  # https://github.com/boto/botocore/blob/develop/requirements-docs.txt
+  # Since this Dockerfile currently uses the fixed Python 3.11 base image to pull the required dependencies,
+  # EKS and ECS applications will encounter a runtime error for Python 3.8 compatibility.
+  # Our fix is to temporarily restrict the urllib3 version to one that works for all supported Python versions 
+  # that we currently commit to support (notably 3.8). 
+  # We also pin the setuptools version for similar issues with the library dropping 3.8 support.
+  # https://github.com/pypa/setuptools/blame/main/pkg_resources/__init__.py#L24
+  # TODO: Remove these temporary workarounds once we deprecate Python 3.8 support since it has reached end-of-life.
+  "urllib3 == 2.2.3",
+  "setuptools == 75.2.0",
 ]
 
 [project.optional-dependencies]

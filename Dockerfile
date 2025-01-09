@@ -18,17 +18,7 @@ ADD aws-opentelemetry-distro/ ./aws-opentelemetry-distro/
 # * https://github.com/MicrosoftDocs/azure-docs/blob/main/articles/azure-functions/recover-python-functions.md#troubleshoot-cannot-import-cygrpc
 RUN sed -i "/opentelemetry-exporter-otlp-proto-grpc/d" ./aws-opentelemetry-distro/pyproject.toml
 
-# urllib3 recently made a release that drops support for Python 3.8
-# Our sdk depends on botocore which pulls in the version of urllib3 based Python runtime it detects.
-# The rule is that if current pip command version is > 3.9 botocore will pick up the latest urllib3,
-# otherwise it picks up the older urllib3 that is compatible with Python 3.8.
-# https://github.com/boto/botocore/blob/develop/requirements-docs.txt
-# Since this Dockerfile currently uses the fixed Python 3.11 base image to pull the required dependencies,
-# EKS and ECS applications will encounter a runtime error for Python 3.8 compatibility.
-# Our fix is to temporarily restrict the urllib3 version to one that works for all supported Python versions 
-# that we currently commit to support (notably 3.8). 
-# TODO: Remove this temporary workaround once we deprecate Python 3.8 support since it has reached end-of-life.
-RUN mkdir workspace && pip install urllib3==2.2.3 --target workspace ./aws-opentelemetry-distro
+RUN mkdir workspace && pip install --target workspace ./aws-opentelemetry-distro
 
 # Stage 2: Build the cp-utility binary
 FROM public.ecr.aws/docker/library/rust:1.81 as builder
