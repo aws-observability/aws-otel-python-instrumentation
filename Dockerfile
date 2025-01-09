@@ -27,8 +27,10 @@ RUN sed -i "/opentelemetry-exporter-otlp-proto-grpc/d" ./aws-opentelemetry-distr
 # EKS and ECS applications will encounter a runtime error for Python 3.8 compatibility.
 # Our fix is to temporarily restrict the urllib3 version to one that works for all supported Python versions 
 # that we currently commit to support (notably 3.8). 
-# TODO: Remove this temporary workaround once we deprecate Python 3.8 support since it has reached end-of-life.
-RUN mkdir workspace && pip install urllib3==2.2.3 --target workspace ./aws-opentelemetry-distro
+# We also pin the setuptools version for similar issues with the library dropping 3.8 support.
+# https://github.com/pypa/setuptools/blame/main/pkg_resources/__init__.py#L24
+# TODO: Remove these temporary workarounds once we deprecate Python 3.8 support since it has reached end-of-life.
+RUN mkdir workspace && pip install setuptools==75.2.0 urllib3==2.2.3 --target workspace ./aws-opentelemetry-distro
 
 # Stage 2: Build the cp-utility binary
 FROM public.ecr.aws/docker/library/rust:1.81 as builder
