@@ -158,14 +158,13 @@ jobs:
       - name: generate layer-note
         working-directory: ${{ env.LAYER_NAME }}
         run: |
-          echo "| Region | Layer ARN |" >> ../layer-note
-          echo "|  ----  | ----  |" >> ../layer-note
+          echo "| Region | Layer ARN |" >> layer-note
+          echo "|  ----  | ----  |" >> layer-note
           for file in *
           do
           read arn < $file
-          echo "| " $file " | " $arn " |" >> ../layer-note
+          echo "| " $file " | " $arn " |" >> layer-note
           done
-          cd ..
           cat layer-note
       - name: generate tf layer
         working-directory: ${{ env.LAYER_NAME }}
