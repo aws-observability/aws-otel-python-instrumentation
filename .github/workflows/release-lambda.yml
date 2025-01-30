@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: The version to tag the lambda release with, e.g., 1.2.0
+        description: The version to tag the lambda release with (should be the same as the ADOT SDK version, e.g., 0.8.0)
         required: true
       aws_region:
         description: 'Deploy to aws regions'
