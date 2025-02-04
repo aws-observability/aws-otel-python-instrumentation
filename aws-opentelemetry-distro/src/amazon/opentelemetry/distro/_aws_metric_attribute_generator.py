@@ -450,14 +450,22 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
             )[-1]
             cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_STEPFUNCTIONS_ACTIVITY_ARN))
         elif is_key_present(span, AWS_LAMBDA_FUNCTION_NAME):
-            # To fix lambda topology issue, we handle the downstream lambda as a service ONLY IF the method
-            # call is "Invoke". Otherwise, we treat the downstream lambda as an AWS resource.
+            # Handling downstream Lambda as a service vs. an AWS resource:
+            # - If the method call is "Invoke", we treat downstream Lambda as a service.
+            # - Otherwise, we treat it as an AWS resource.
+            #
+            # This addresses a Lambda topology issue in Application Signals.
+            # More context in PR: https://github.com/aws-observability/aws-otel-python-instrumentation/pull/319
+            #
+            # NOTE: The env vars LAMBDA_APPLICATION_SIGNALS_REMOTE_SERVICE and
+            # LAMBDA_APPLICATION_SIGNALS_REMOTE_ENVIRONMENT were introduced as part of this fix.
+            # They are optional and allow users to override the default values if needed.
             if span.attributes.get(_RPC_METHOD) == "Invoke":
                 attributes[AWS_REMOTE_SERVICE] = os.environ.get(
-                    "AWS_LAMBDA_REMOTE_SERVICE", span.attributes.get(AWS_LAMBDA_FUNCTION_NAME)
+                    "LAMBDA_APPLICATION_SIGNALS_REMOTE_SERVICE", span.attributes.get(AWS_LAMBDA_FUNCTION_NAME)
                 )
                 attributes[AWS_REMOTE_ENVIRONMENT] = (
-                    f"lambda:{os.environ.get('AWS_LAMBDA_REMOTE_ENVIRONMENT', 'default')}"
+                    f'lambda:{os.environ.get("LAMBDA_APPLICATION_SIGNALS_REMOTE_ENVIRONMENT", "default")}'
                 )
             else:
                 remote_resource_type = _NORMALIZED_LAMBDA_SERVICE_NAME + "::Function"

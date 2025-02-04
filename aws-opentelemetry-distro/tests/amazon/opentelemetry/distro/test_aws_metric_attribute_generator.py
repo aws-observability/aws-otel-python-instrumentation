@@ -1176,7 +1176,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._mock_attribute([AWS_LAMBDA_FUNCTION_NAME, SpanAttributes.RPC_METHOD], [None, None])
 
         # Test AWS Lambda Invoke scenario with user-configured lambda remote environment
-        os.environ["AWS_LAMBDA_REMOTE_ENVIRONMENT"] = "test"
+        os.environ["LAMBDA_APPLICATION_SIGNALS_REMOTE_ENVIRONMENT"] = "test"
         self.span_mock.kind = SpanKind.CLIENT
         self._mock_attribute(
             [AWS_LAMBDA_FUNCTION_NAME, SpanAttributes.RPC_METHOD],
@@ -1193,10 +1193,10 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.assertNotIn(AWS_REMOTE_RESOURCE_IDENTIFIER, dependency_attributes)
         self.assertNotIn(AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER, dependency_attributes)
         self._mock_attribute([AWS_LAMBDA_FUNCTION_NAME, SpanAttributes.RPC_METHOD], [None, None])
-        os.environ.pop("AWS_LAMBDA_REMOTE_ENVIRONMENT", None)
+        os.environ.pop("LAMBDA_APPLICATION_SIGNALS_REMOTE_ENVIRONMENT", None)
 
         # Test AWS Lambda Invoke scenario with user-configured lambda remote service
-        os.environ["AWS_LAMBDA_REMOTE_SERVICE"] = "test_downstream_lambda2"
+        os.environ["LAMBDA_APPLICATION_SIGNALS_REMOTE_SERVICE"] = "test_downstream_lambda2"
         self.span_mock.kind = SpanKind.CLIENT
         self._mock_attribute(
             [AWS_LAMBDA_FUNCTION_NAME, SpanAttributes.RPC_METHOD],
@@ -1213,7 +1213,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.assertNotIn(AWS_REMOTE_RESOURCE_IDENTIFIER, dependency_attributes)
         self.assertNotIn(AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER, dependency_attributes)
         self._mock_attribute([AWS_LAMBDA_FUNCTION_NAME, SpanAttributes.RPC_METHOD], [None, None])
-        os.environ.pop("AWS_LAMBDA_REMOTE_SERVICE", None)
+        os.environ.pop("LAMBDA_APPLICATION_SIGNALS_REMOTE_SERVICE", None)
 
         # Test AWS Lambda non-Invoke scenario
         self.span_mock.kind = SpanKind.CLIENT
