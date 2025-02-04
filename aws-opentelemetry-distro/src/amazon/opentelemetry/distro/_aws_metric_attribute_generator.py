@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import os
 import re
 from logging import DEBUG, Logger, getLogger
 from typing import Match, Optional
@@ -13,10 +14,13 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_KNOWLEDGE_BASE_ID,
     AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER,
     AWS_KINESIS_STREAM_NAME,
+    AWS_LAMBDA_FUNCTION_ARN,
+    AWS_LAMBDA_FUNCTION_NAME,
     AWS_LAMBDA_RESOURCEMAPPING_ID,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_REMOTE_DB_USER,
+    AWS_REMOTE_ENVIRONMENT,
     AWS_REMOTE_OPERATION,
     AWS_REMOTE_RESOURCE_IDENTIFIER,
     AWS_REMOTE_RESOURCE_TYPE,
@@ -445,6 +449,28 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
                 ":"
             )[-1]
             cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_STEPFUNCTIONS_ACTIVITY_ARN))
+        elif is_key_present(span, AWS_LAMBDA_FUNCTION_NAME):
+            # Handling downstream Lambda as a service vs. an AWS resource:
+            # - If the method call is "Invoke", we treat downstream Lambda as a service.
+            # - Otherwise, we treat it as an AWS resource.
+            #
+            # This addresses a Lambda topology issue in Application Signals.
+            # More context in PR: https://github.com/aws-observability/aws-otel-python-instrumentation/pull/319
+            #
+            # NOTE: The env vars LAMBDA_APPLICATION_SIGNALS_REMOTE_SERVICE and
+            # LAMBDA_APPLICATION_SIGNALS_REMOTE_ENVIRONMENT were introduced as part of this fix.
+            # They are optional and allow users to override the default values if needed.
+            if span.attributes.get(_RPC_METHOD) == "Invoke":
+                attributes[AWS_REMOTE_SERVICE] = os.environ.get(
+                    "LAMBDA_APPLICATION_SIGNALS_REMOTE_SERVICE", span.attributes.get(AWS_LAMBDA_FUNCTION_NAME)
+                )
+                attributes[AWS_REMOTE_ENVIRONMENT] = (
+                    f'lambda:{os.environ.get("LAMBDA_APPLICATION_SIGNALS_REMOTE_ENVIRONMENT", "default")}'
+                )
+            else:
+                remote_resource_type = _NORMALIZED_LAMBDA_SERVICE_NAME + "::Function"
+                remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_FUNCTION_NAME))
+                cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_FUNCTION_ARN))
         elif is_key_present(span, AWS_LAMBDA_RESOURCEMAPPING_ID):
             remote_resource_type = _NORMALIZED_LAMBDA_SERVICE_NAME + "::EventSourceMapping"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_RESOURCEMAPPING_ID))
