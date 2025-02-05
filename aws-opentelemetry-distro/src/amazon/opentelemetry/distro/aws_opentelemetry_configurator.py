@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
+import logging
 import os
 from logging import Logger, getLogger
 from typing import ClassVar, Dict, List, Type, Union
@@ -8,6 +9,7 @@ from typing import ClassVar, Dict, List, Type, Union
 from importlib_metadata import version
 from typing_extensions import override
 
+from amazon.opentelemetry.distro.otlp_sigv4_exporter import OTLPAwsSigV4Exporter
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE
 from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
@@ -85,6 +87,7 @@ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 LAMBDA_SPAN_EXPORT_BATCH_SIZE = 10
 
 _logger: Logger = getLogger(__name__)
+_logger.setLevel(logging.DEBUG)
 
 
 class AwsOpenTelemetryConfigurator(_OTelSDKConfigurator):
@@ -309,11 +312,16 @@ def _customize_sampler(sampler: Sampler) -> Sampler:
 
 
 def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> SpanExporter:
+    traces_endpoint = os.getenv(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
+    
     if _is_lambda_environment():
         # Override OTLP http default endpoint to UDP
-        if isinstance(span_exporter, OTLPSpanExporter) and os.getenv(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT) is None:
+        if isinstance(span_exporter, OTLPSpanExporter) and traces_endpoint is None:
             traces_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
             span_exporter = OTLPUdpSpanExporter(endpoint=traces_endpoint)
+    
+    if traces_endpoint and 'xray.' in traces_endpoint and '.amazonaws.com' in traces_endpoint:
+        span_exporter = OTLPAwsSigV4Exporter(endpoint=traces_endpoint)
 
     if not _is_application_signals_enabled():
         return span_exporter
