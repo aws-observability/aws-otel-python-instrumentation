@@ -1,7 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
-import logging
 import os
 from logging import Logger, getLogger
 from typing import ClassVar, Dict, List, Type, Union
@@ -87,8 +86,6 @@ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 LAMBDA_SPAN_EXPORT_BATCH_SIZE = 10
 
 _logger: Logger = getLogger(__name__)
-_logger.setLevel(logging.DEBUG)
-
 
 class AwsOpenTelemetryConfigurator(_OTelSDKConfigurator):
     """
