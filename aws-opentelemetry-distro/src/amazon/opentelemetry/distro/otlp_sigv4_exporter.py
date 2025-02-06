@@ -3,7 +3,6 @@ import re
 from typing import Dict, Optional
 from grpc import Compression
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.trace.export import SpanExportResult
 from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
 from botocore import session
@@ -28,10 +27,6 @@ class OTLPAwsSigV4Exporter(OTLPSpanExporter):
     ):
         
         self._aws_region = self._validate_exporter_endpoint(endpoint)   
-
-        if self._aws_region is None:
-            endpoint = None
-
         super().__init__(endpoint=endpoint, 
                         certificate_file=certificate_file,
                         client_key_file=client_key_file,
@@ -52,7 +47,6 @@ class OTLPAwsSigV4Exporter(OTLPSpanExporter):
             
             botocore_session = session.Session()
             credentials = botocore_session.get_credentials()
-            
             if credentials is not None:                
                 signer = SigV4Auth(credentials, AWS_SERVICE, self._aws_region)
 
@@ -80,18 +74,16 @@ class OTLPAwsSigV4Exporter(OTLPSpanExporter):
 
             if region in xray_regions:
                 return region
-            
-            _logger.error(f"Invalid AWS region: {region}. Valid regions are {xray_regions}. Resolving to default endpoint.")
+            _logger.error(f"Invalid AWS region: {region}. Valid regions are {xray_regions}.")
             
             return None
         
         else:
-            _logger.error(f"Invalid XRay traces endpoint: {endpoint}. Resolving to default endpoint. "
+            _logger.error(f"Invalid XRay traces endpoint: {endpoint}."
                         "The traces endpoint follows the pattern https://xray.[AWSRegion].amazonaws.com/v1/traces. "
                         "For example, for the US West (Oregon) (us-west-2) Region, the endpoint will be "
                         "https://xray.us-west-2.amazonaws.com/v1/traces.")
-            
-        
+    
         return None
         
 
