@@ -8,7 +8,6 @@ from typing import ClassVar, Dict, List, Type, Union
 from importlib_metadata import version
 from typing_extensions import override
 
-from amazon.opentelemetry.distro.otlp_sigv4_exporter import OTLPAwsSigV4Exporter
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE
 from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
@@ -20,6 +19,7 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
+from amazon.opentelemetry.distro.otlp_sigv4_exporter import OTLPAwsSigV4Exporter
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
@@ -86,6 +86,7 @@ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 LAMBDA_SPAN_EXPORT_BATCH_SIZE = 10
 
 _logger: Logger = getLogger(__name__)
+
 
 class AwsOpenTelemetryConfigurator(_OTelSDKConfigurator):
     """
@@ -308,13 +309,13 @@ def _customize_sampler(sampler: Sampler) -> Sampler:
     return AlwaysRecordSampler(sampler)
 
 
-def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> SpanExporter:    
+def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> SpanExporter:
     if _is_lambda_environment():
         # Override OTLP http default endpoint to UDP
         if isinstance(span_exporter, OTLPSpanExporter) and os.getenv(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT) is None:
             traces_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
             span_exporter = OTLPUdpSpanExporter(endpoint=traces_endpoint)
-    
+
     if _is_otlp_endpoint_cloudwatch():
         span_exporter = OTLPAwsSigV4Exporter(endpoint=os.getenv(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT))
 
@@ -334,12 +335,12 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource) -> 
     # Do not export metrics if it's CloudWatch OTLP endpoint
     if _is_otlp_endpoint_cloudwatch():
         return
-    
+
     # Export 100% spans and not export Application-Signals metrics if on Lambda.
     if _is_lambda_environment():
         _export_unsampled_span_for_lambda(provider, resource)
         return
-    
+
     # Construct meterProvider
     _logger.info("AWS Application Signals enabled")
     otel_metric_exporter = ApplicationSignalsExporterProvider().create_exporter()
@@ -443,9 +444,11 @@ def _is_lambda_environment():
     # detect if running in AWS Lambda environment
     return AWS_LAMBDA_FUNCTION_NAME_CONFIG in os.environ
 
+
 def _is_otlp_endpoint_cloudwatch():
     otlp_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
     return otlp_endpoint and "xray." in otlp_endpoint.lower() and ".amazonaws.com" in otlp_endpoint.lower()
+
 
 def _get_metric_export_interval():
     export_interval_millis = float(os.environ.get(METRIC_EXPORT_INTERVAL_CONFIG, DEFAULT_METRIC_EXPORT_INTERVAL))
