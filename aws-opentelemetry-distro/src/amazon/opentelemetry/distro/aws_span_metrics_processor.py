@@ -4,7 +4,8 @@ from typing import Callable, Dict, Optional
 
 from typing_extensions import override
 
-from amazon.opentelemetry.distro.metric_attribute_generator import MetricAttributeGenerator
+from amazon.opentelemetry.distro._aws_attribute_keys import AWS_REMOTE_SERVICE
+from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, MetricAttributeGenerator
 from opentelemetry.context import Context
 from opentelemetry.metrics import Histogram
 from opentelemetry.sdk.resources import Resource
@@ -19,6 +20,11 @@ _ERROR_CODE_LOWER_BOUND: int = 400
 _ERROR_CODE_UPPER_BOUND: int = 499
 _FAULT_CODE_LOWER_BOUND: int = 500
 _FAULT_CODE_UPPER_BOUND: int = 599
+
+
+# EC2 Metadata API IP Address
+# https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html#instancedata-inside-access
+_EC2_METADATA_API_IP: str = "169.254.169.254"
 
 
 class AwsSpanMetricsProcessor(SpanProcessor):
@@ -79,8 +85,10 @@ class AwsSpanMetricsProcessor(SpanProcessor):
         attribute_dict: Dict[str, BoundedAttributes] = self._generator.generate_metric_attributes_dict_from_span(
             span, self._resource
         )
-        for attributes in attribute_dict.values():
-            self._record_metrics(span, attributes)
+
+        if not _is_ec2_metadata_api_span(attribute_dict):
+            for attributes in attribute_dict.values():
+                self._record_metrics(span, attributes)
 
     @override
     def shutdown(self) -> None:
@@ -130,3 +138,7 @@ def _is_not_error_or_fault(http_status_code: int) -> bool:
         or http_status_code < _ERROR_CODE_LOWER_BOUND
         or http_status_code > _FAULT_CODE_UPPER_BOUND
     )
+
+
+def _is_ec2_metadata_api_span(attribute_dict: Dict[str, BoundedAttributes]) -> bool:
+    return attribute_dict.get(DEPENDENCY_METRIC, {}).get(AWS_REMOTE_SERVICE) == _EC2_METADATA_API_IP
