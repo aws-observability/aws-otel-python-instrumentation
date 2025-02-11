@@ -16,6 +16,7 @@ AWS_SERVICE = "xray"
 
 _logger = logging.getLogger(__name__)
 
+
 class OTLPAwsSigV4Exporter(OTLPSpanExporter):
 
     def __init__(
@@ -72,24 +73,26 @@ class OTLPAwsSigV4Exporter(OTLPSpanExporter):
     def _validate_exporter_endpoint(endpoint: str) -> Optional[str]:
         if not endpoint:
             return None
-        
-        match = re.search(f'{AWS_SERVICE}\.([a-z0-9-]+)\.amazonaws\.com', endpoint)
-        
+
+        match = re.search(f"{AWS_SERVICE}\.([a-z0-9-]+)\.amazonaws\.com", endpoint)
+
         if match:
             region = match.group(1)
             xray_regions = session.Session().get_available_regions(AWS_SERVICE)
             if region in xray_regions:
                 return region
-            
-            _logger.error("Invalid AWS region: %s. Valid regions are %s. Resolving to default endpoint.",
-                        region, xray_regions)
-            return None
-        
-        _logger.error("Invalid XRay traces endpoint: %s. Resolving to default endpoint. "
-                    "The traces endpoint follows the pattern https://xray.[AWSRegion].amazonaws.com/v1/traces. "
-                    "For example, for the US West (Oregon) (us-west-2) Region, the endpoint will be "
-                    "https://xray.us-west-2.amazonaws.com/v1/traces.",
-                    endpoint)
-        
-        return None
 
+            _logger.error(
+                "Invalid AWS region: %s. Valid regions are %s. Resolving to default endpoint.", region, xray_regions
+            )
+            return None
+
+        _logger.error(
+            "Invalid XRay traces endpoint: %s. Resolving to default endpoint. "
+            "The traces endpoint follows the pattern https://xray.[AWSRegion].amazonaws.com/v1/traces. "
+            "For example, for the US West (Oregon) (us-west-2) Region, the endpoint will be "
+            "https://xray.us-west-2.amazonaws.com/v1/traces.",
+            endpoint,
+        )
+
+        return None
