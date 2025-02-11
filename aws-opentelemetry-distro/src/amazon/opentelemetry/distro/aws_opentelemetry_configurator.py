@@ -450,12 +450,12 @@ def _is_otlp_endpoint_cloudwatch():
     otlp_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
     if not otlp_endpoint:
         return False
-    
+
     endpoint_lower = otlp_endpoint.lower()
-    
+
     has_xray = "xray." in endpoint_lower
     has_amazonaws = ".amazonaws.com" in endpoint_lower
-    
+
     return has_xray and has_amazonaws
 
 
