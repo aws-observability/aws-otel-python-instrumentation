@@ -36,10 +36,11 @@ class OTLPAwsSigV4Exporter(OTLPSpanExporter):
         self._aws_region = None
 
         if endpoint and is_otlp_endpoint_cloudwatch(endpoint):
-            try:
-                # Defensive check to verify that the application being auto instrumented has
-                # botocore installed.
 
+            # Defensive check to verify that the application being auto instrumented has
+            # botocore installed.
+            try:
+                # pylint: disable=import-outside-toplevel
                 from botocore import auth, awsrequest, session
 
                 self.boto_auth = auth
