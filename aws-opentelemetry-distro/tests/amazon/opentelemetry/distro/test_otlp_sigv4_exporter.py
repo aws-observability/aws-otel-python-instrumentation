@@ -264,7 +264,8 @@ class TestAwsSigV4Exporter(TestCase):
         )
         self.assertEqual(exporter._session.headers.get("User-Agent"), USER_AGENT)
 
-    def create_span(self, name="test_span", kind=SpanKind.INTERNAL):
+    @staticmethod
+    def create_span(name="test_span", kind=SpanKind.INTERNAL):
         span = _Span(
             name=name,
             context=SpanContext(

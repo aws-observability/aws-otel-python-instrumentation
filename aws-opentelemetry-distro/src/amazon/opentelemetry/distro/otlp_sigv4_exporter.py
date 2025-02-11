@@ -67,7 +67,8 @@ class OTLPAwsSigV4Exporter(OTLPSpanExporter):
 
         return super()._export(serialized_data)
 
-    def _validate_exporter_endpoint(self, endpoint: str) -> Optional[str]:
+    @staticmethod
+    def _validate_exporter_endpoint(endpoint: str) -> Optional[str]:
         if not endpoint:
             return None
 
@@ -83,12 +84,11 @@ class OTLPAwsSigV4Exporter(OTLPSpanExporter):
 
             return None
 
-        else:
-            _logger.error(
-                f"Invalid XRay traces endpoint: {endpoint}."
-                "The traces endpoint follows the pattern https://xray.[AWSRegion].amazonaws.com/v1/traces. "
-                "For example, for the US West (Oregon) (us-west-2) Region, the endpoint will be "
-                "https://xray.us-west-2.amazonaws.com/v1/traces."
-            )
+        _logger.error(
+            f"Invalid XRay traces endpoint: {endpoint}."
+            "The traces endpoint follows the pattern https://xray.[AWSRegion].amazonaws.com/v1/traces. "
+            "For example, for the US West (Oregon) (us-west-2) Region, the endpoint will be "
+            "https://xray.us-west-2.amazonaws.com/v1/traces."
+        )
 
         return None
