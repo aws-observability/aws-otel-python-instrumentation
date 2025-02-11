@@ -1,7 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import logging
-import re
 from typing import Dict, Optional
 
 import requests
@@ -12,6 +11,9 @@ from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExport
 
 AWS_SERVICE = "xray"
 _logger = logging.getLogger(__name__)
+
+"""The OTLPAwsSigV4Exporter extends the functionality of the OTLPSpanExporter to allow SigV4 authentication if the
+   configured traces endpoint is a CloudWatch OTLP endpoint https://xray.[AWSRegion].amazonaws.com/v1/traces"""
 
 
 class OTLPAwsSigV4Exporter(OTLPSpanExporter):
@@ -28,16 +30,21 @@ class OTLPAwsSigV4Exporter(OTLPSpanExporter):
         rsession: Optional[requests.Session] = None,
     ):
 
+        # Represents the region of the CloudWatch OTLP endpoint to send the traces to.
+        # If the endpoint has been verified to be valid, this should not be None
+
         self._aws_region = None
 
         if endpoint and is_otlp_endpoint_cloudwatch(endpoint):
             try:
+                # Defensive check to verify that the application being auto instrumented has
+                # botocore installed.
+
                 from botocore import auth, awsrequest, session
 
                 self.boto_auth = auth
                 self.boto_aws_request = awsrequest
                 self.boto_session = session.Session()
-
                 self._aws_region = self._validate_exporter_endpoint(endpoint)
 
             except ImportError:

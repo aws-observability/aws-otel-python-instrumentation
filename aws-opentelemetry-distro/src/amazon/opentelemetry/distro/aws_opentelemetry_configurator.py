@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import os
-import re
 from logging import Logger, getLogger
 from typing import ClassVar, Dict, List, Type, Union
 
