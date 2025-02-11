@@ -5,7 +5,7 @@ from typing import Callable, Dict, Optional
 from typing_extensions import override
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_REMOTE_SERVICE
-from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, MetricAttributeGenerator
+from amazon.opentelemetry.distro.metric_attribute_generator import MetricAttributeGenerator
 from opentelemetry.context import Context
 from opentelemetry.metrics import Histogram
 from opentelemetry.sdk.resources import Resource
@@ -86,9 +86,8 @@ class AwsSpanMetricsProcessor(SpanProcessor):
             span, self._resource
         )
 
-        if not _is_ec2_metadata_api_span(attribute_dict):
-            for attributes in attribute_dict.values():
-                self._record_metrics(span, attributes)
+        for attributes in attribute_dict.values():
+            self._record_metrics(span, attributes)
 
     @override
     def shutdown(self) -> None:
@@ -101,7 +100,7 @@ class AwsSpanMetricsProcessor(SpanProcessor):
 
     def _record_metrics(self, span: ReadableSpan, attributes: BoundedAttributes) -> None:
         # Only record metrics if non-empty attributes are returned.
-        if len(attributes) > 0:
+        if len(attributes) > 0 and not _is_ec2_metadata_api_span(attributes):
             self._record_error_or_fault(span, attributes)
             self._record_latency(span, attributes)
 
@@ -140,5 +139,5 @@ def _is_not_error_or_fault(http_status_code: int) -> bool:
     )
 
 
-def _is_ec2_metadata_api_span(attribute_dict: Dict[str, BoundedAttributes]) -> bool:
-    return attribute_dict.get(DEPENDENCY_METRIC, {}).get(AWS_REMOTE_SERVICE) == _EC2_METADATA_API_IP
+def _is_ec2_metadata_api_span(attributes: BoundedAttributes) -> bool:
+    return attributes.get(AWS_REMOTE_SERVICE) == _EC2_METADATA_API_IP
