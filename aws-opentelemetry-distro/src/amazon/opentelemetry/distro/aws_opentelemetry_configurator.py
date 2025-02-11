@@ -446,8 +446,17 @@ def _is_lambda_environment():
 
 
 def _is_otlp_endpoint_cloudwatch():
+    # Detects if it's the OTLP endpoint in CloudWatchs
     otlp_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
-    return otlp_endpoint and "xray." in otlp_endpoint.lower() and ".amazonaws.com" in otlp_endpoint.lower()
+    if not otlp_endpoint:
+        return False
+    
+    endpoint_lower = otlp_endpoint.lower()
+    
+    has_xray = "xray." in endpoint_lower
+    has_amazonaws = ".amazonaws.com" in endpoint_lower
+    
+    return has_xray and has_amazonaws
 
 
 def _get_metric_export_interval():
