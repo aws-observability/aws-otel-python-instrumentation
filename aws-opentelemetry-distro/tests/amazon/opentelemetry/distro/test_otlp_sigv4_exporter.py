@@ -1,7 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import os
-import time
 from unittest import TestCase
 from unittest.mock import ANY, MagicMock, PropertyMock, patch
 
@@ -71,7 +70,8 @@ class TestAwsSigV4Exporter(TestCase):
 
         mock_session.get_available_regions.assert_called_once_with("xray")
 
-    # Tests that the exporter constructor behavior is set by OTLP protobuf/http Span Exporter
+    # Tests that the exporter constructor behavior 
+    # is set by OTLP protobuf/http Span Exporter
     # if an invalid OTLP CloudWatch endpoint is set
     @patch("botocore.session.Session")
     def test_sigv4_exporter_init_invalid_cw_otlp_endpoint(self, botocore_mock):
@@ -89,8 +89,9 @@ class TestAwsSigV4Exporter(TestCase):
 
                     self.assertIsNone(exporter._aws_region)
 
-    # Tests that if the OTLP endpoint is not a valid CW endpoint but the credentials are valid, SigV4 authentication method is NOT called and
-    # is NOT injected into the existing Session headers.
+    # Tests that if the OTLP endpoint is not a valid CW endpoint but the credentials are valid, 
+    # SigV4 authentication method is NOT called and is 
+    # NOT injected into the existing Session headers.
     @patch("botocore.session.Session.get_available_regions")
     @patch("requests.Session.post")
     @patch("botocore.auth.SigV4Auth.add_auth")
@@ -153,8 +154,9 @@ class TestAwsSigV4Exporter(TestCase):
                         cert=ANY,
                     )
 
-    # Tests that if the OTLP endpoint is a valid CW endpoint but no credentials are returned, SigV4 authentication method is NOT called and
-    # is NOT injected into the existing Session headers.
+    # Tests that if the OTLP endpoint is a valid 
+    # CW endpoint but no credentials are returned, 
+    # SigV4 authentication method is NOT called and is NOT injected into the existing Session headers.
     @patch("botocore.session.Session")
     @patch("requests.Session")
     @patch("botocore.auth.SigV4Auth.add_auth")
@@ -198,7 +200,8 @@ class TestAwsSigV4Exporter(TestCase):
         self.assertNotIn(X_AMZ_DATE_HEADER, actual_headers)
         self.assertNotIn(X_AMZ_SECURITY_TOKEN_HEADER, actual_headers)
 
-    # Tests that if the OTLP endpoint is valid and credentials are valid, SigV4 authentication method is called and
+    # Tests that if the OTLP endpoint is valid 
+    # and credentials are valid, SigV4 authentication method is called and
     # is injected into the existing Session headers.
     @patch("botocore.session.Session")
     @patch("requests.Session")
