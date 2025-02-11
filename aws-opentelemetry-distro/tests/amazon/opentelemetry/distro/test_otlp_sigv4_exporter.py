@@ -16,13 +16,8 @@ from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
     DEFAULT_TRACES_EXPORT_PATH,
 )
 from opentelemetry.exporter.otlp.proto.http.version import __version__
-from opentelemetry.sdk.environment_variables import (
-    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
-)
-from opentelemetry.sdk.trace import Resource, SpanContext, SpanLimits, Tracer, _Span
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-from opentelemetry.sdk.trace.id_generator import RandomIdGenerator
-from opentelemetry.sdk.trace.sampling import ALWAYS_ON
+from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+from opentelemetry.sdk.trace import SpanContext, _Span
 from opentelemetry.trace import SpanKind, TraceFlags
 
 OTLP_CW_ENDPOINT = "https://xray.us-east-1.amazonaws.com/v1/traces"
