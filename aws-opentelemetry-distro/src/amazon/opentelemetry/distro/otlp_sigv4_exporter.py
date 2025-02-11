@@ -50,7 +50,7 @@ class OTLPAwsSigV4Exporter(OTLPSpanExporter):
 
             except ImportError:
                 _logger.error(
-                    "botocore is required to export traces to %s. " "Please install it using `pip install botocore`",
+                    "botocore is required to export traces to %s. Please install it using `pip install botocore`",
                     endpoint,
                 )
 
