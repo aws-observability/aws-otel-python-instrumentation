@@ -154,9 +154,9 @@ class TestAwsSigV4Exporter(TestCase):
                         cert=ANY,
                     )
 
-    # Tests that if the OTLP endpoint is a valid 
-    # CW endpoint but no credentials are returned, 
-    # SigV4 authentication method is NOT called and is NOT injected into the existing Session headers.
+    # Tests that if the OTLP endpoint is a valid CW endpoint but no credentials are returned, 
+    # SigV4 authentication method is NOT called and is NOT 
+    # injected into the existing Session headers.
     @patch("botocore.session.Session")
     @patch("requests.Session")
     @patch("botocore.auth.SigV4Auth.add_auth")
@@ -200,9 +200,9 @@ class TestAwsSigV4Exporter(TestCase):
         self.assertNotIn(X_AMZ_DATE_HEADER, actual_headers)
         self.assertNotIn(X_AMZ_SECURITY_TOKEN_HEADER, actual_headers)
 
-    # Tests that if the OTLP endpoint is valid 
-    # and credentials are valid, SigV4 authentication method is called and
-    # is injected into the existing Session headers.
+    # Tests that if the OTLP endpoint is valid and credentials are valid, 
+    # SigV4 authentication method is called and is 
+    # injected into the existing Session headers.
     @patch("botocore.session.Session")
     @patch("requests.Session")
     @patch("botocore.auth.SigV4Auth.add_auth")
