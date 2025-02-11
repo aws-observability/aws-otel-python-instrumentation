@@ -6,7 +6,7 @@ from typing import Dict, Optional
 
 import requests
 from botocore import session
-from botocore.auth import SigV4Auth
+from botocore.auth import NoCredentialsError, SigV4Auth
 from botocore.awsrequest import AWSRequest
 from grpc import Compression
 
@@ -61,7 +61,7 @@ class OTLPAwsSigV4Exporter(OTLPSpanExporter):
                     signer.add_auth(request)
                     self._session.headers.update(dict(request.headers))
 
-                except (BotoCoreError, ClientError, ValueError) as signing_error:
+                except NoCredentialsError as signing_error:
                     _logger.error(f"Failed to sign request: {signing_error}")
 
             else:
@@ -74,7 +74,7 @@ class OTLPAwsSigV4Exporter(OTLPSpanExporter):
         if not endpoint:
             return None
 
-        match = re.search(f"{AWS_SERVICE}\.([a-z0-9-]+)\.amazonaws\.com", endpoint)
+        match = re.search(rf"{AWS_SERVICE}\.([a-z0-9-]+)\.amazonaws\.com", endpoint)
 
         if match:
             region = match.group(1)
