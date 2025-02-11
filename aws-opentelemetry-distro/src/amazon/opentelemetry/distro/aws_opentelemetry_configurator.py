@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import os
+import re
 from logging import Logger, getLogger
 from typing import ClassVar, Dict, List, Type, Union
 
@@ -450,13 +451,9 @@ def _is_otlp_endpoint_cloudwatch():
     otlp_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
     if not otlp_endpoint:
         return False
+    pattern = r"xray\.([a-z0-9-]+)\.amazonaws\.com"
 
-    endpoint_lower = otlp_endpoint.lower()
-
-    has_xray = "xray." in endpoint_lower
-    has_amazonaws = ".amazonaws.com" in endpoint_lower
-
-    return has_xray and has_amazonaws
+    return bool(re.match(pattern, otlp_endpoint.lower()))
 
 
 def _get_metric_export_interval():
