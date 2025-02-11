@@ -1,3 +1,5 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
 import logging
 import re
 from typing import Dict, Optional
@@ -14,7 +16,6 @@ AWS_SERVICE = "xray"
 
 _logger = logging.getLogger(__name__)
 
-
 class OTLPAwsSigV4Exporter(OTLPSpanExporter):
 
     def __init__(
@@ -26,7 +27,7 @@ class OTLPAwsSigV4Exporter(OTLPSpanExporter):
         headers: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None,
         compression: Optional[Compression] = None,
-        session: Optional[requests.Session] = None,
+        rsession: Optional[requests.Session] = None,
     ):
 
         self._aws_region = self._validate_exporter_endpoint(endpoint)
@@ -38,7 +39,7 @@ class OTLPAwsSigV4Exporter(OTLPSpanExporter):
             headers=headers,
             timeout=timeout,
             compression=compression,
-            session=session,
+            session=rsession,
         )
 
     def _export(self, serialized_data: bytes):
@@ -59,7 +60,7 @@ class OTLPAwsSigV4Exporter(OTLPSpanExporter):
                     signer.add_auth(request)
                     self._session.headers.update(dict(request.headers))
 
-                except Exception as signing_error:
+                except (BotoCoreError, ClientError, ValueError) as signing_error:
                     _logger.error(f"Failed to sign request: {signing_error}")
 
             else:
@@ -71,24 +72,24 @@ class OTLPAwsSigV4Exporter(OTLPSpanExporter):
     def _validate_exporter_endpoint(endpoint: str) -> Optional[str]:
         if not endpoint:
             return None
-
-        match = re.search(rf"{AWS_SERVICE}\.([a-z0-9-]+)\.amazonaws\.com", endpoint)
-
+        
+        match = re.search(f'{AWS_SERVICE}\.([a-z0-9-]+)\.amazonaws\.com', endpoint)
+        
         if match:
             region = match.group(1)
             xray_regions = session.Session().get_available_regions(AWS_SERVICE)
-
             if region in xray_regions:
                 return region
-            _logger.error(f"Invalid AWS region: {region}. Valid regions are {xray_regions}.")
-
+            
+            _logger.error("Invalid AWS region: %s. Valid regions are %s. Resolving to default endpoint.",
+                        region, xray_regions)
             return None
-
-        _logger.error(
-            f"Invalid XRay traces endpoint: {endpoint}."
-            "The traces endpoint follows the pattern https://xray.[AWSRegion].amazonaws.com/v1/traces. "
-            "For example, for the US West (Oregon) (us-west-2) Region, the endpoint will be "
-            "https://xray.us-west-2.amazonaws.com/v1/traces."
-        )
-
+        
+        _logger.error("Invalid XRay traces endpoint: %s. Resolving to default endpoint. "
+                    "The traces endpoint follows the pattern https://xray.[AWSRegion].amazonaws.com/v1/traces. "
+                    "For example, for the US West (Oregon) (us-west-2) Region, the endpoint will be "
+                    "https://xray.us-west-2.amazonaws.com/v1/traces.",
+                    endpoint)
+        
         return None
+
