@@ -62,7 +62,7 @@ class OTLPAwsSigV4Exporter(OTLPSpanExporter):
                     self._session.headers.update(dict(request.headers))
 
                 except NoCredentialsError as signing_error:
-                    _logger.error(f"Failed to sign request: {signing_error}")
+                    _logger.error("Failed to sign request: %s", signing_error)
 
             else:
                 _logger.error("Failed to get credentials to export span to OTLP CloudWatch endpoint")

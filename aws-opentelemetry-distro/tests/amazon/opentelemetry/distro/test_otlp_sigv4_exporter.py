@@ -40,7 +40,8 @@ class TestAwsSigV4Exporter(TestCase):
         self.invalid_cw_otlp_tracing_endpoints = [
             "https://xray.bad-region-1.amazonaws.com/v1/traces",
             "https://xray.us-east-1.amaz.com/v1/traces",
-            "https://logs.us-east-1.amazonaws.com/v1/logs" "https://test-endpoint123.com/test",
+            "https://logs.us-east-1.amazonaws.com/v1/logs",
+            "https://test-endpoint123.com/test",
         ]
 
         self.expected_auth_header = "AWS4-HMAC-SHA256 Credential=test_key/some_date/us-east-1/xray/aws4_request"
