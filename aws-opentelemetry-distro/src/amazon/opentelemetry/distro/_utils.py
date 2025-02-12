@@ -24,7 +24,7 @@ def is_xray_otlp_endpoint(otlp_endpoint: str = None) -> bool:
 def is_installed(req: str) -> bool:
     """Is the given required package installed?"""
 
-    if req in sys.modules and sys.modules.get(req) != None:
+    if req in sys.modules and sys.modules[req] is not None:
         return True
 
     try:
