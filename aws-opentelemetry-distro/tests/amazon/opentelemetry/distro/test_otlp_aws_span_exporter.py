@@ -66,7 +66,7 @@ class TestAwsSpanExporter(TestCase):
         """Test that exporter defaults when using OTLP CW endpoint without botocore"""
 
         def throw_exception():
-            raise Exception()
+            raise ImportError("test error")
 
         mock_get_distribution.side_effect = throw_exception
 
