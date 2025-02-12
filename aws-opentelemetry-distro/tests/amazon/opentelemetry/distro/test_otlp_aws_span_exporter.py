@@ -39,7 +39,6 @@ class TestAwsSpanExporter(TestCase):
         ]
 
         self.invalid_otlp_tracing_endpoints = [
-            "https://xray.bad-region-1.amazonaws.com/v1/traces",
             "https://xray.us-east-1.amaz.com/v1/traces",
             "https://logs.us-east-1.amazonaws.com/v1/logs",
             "https://test-endpoint123.com/test",
@@ -89,8 +88,7 @@ class TestAwsSpanExporter(TestCase):
         self.assertEqual(exporter._aws_region, "us-east-1")
         self.validate_exporter_extends_http_span_exporter(exporter, OTLP_XRAY_ENDPOINT)
 
-    @patch("botocore.session.Session")
-    def test_sigv4_exporter_init_invalid_cw_otlp_endpoint(self, botocore_mock):
+    def test_sigv4_exporter_init_invalid_cw_otlp_endpoint(self):
         """Tests that the exporter constructor behavior is set by OTLP protobuf/http Span Exporter
         if an invalid OTLP CloudWatch endpoint is set"""
         for bad_endpoint in self.invalid_otlp_tracing_endpoints:
@@ -125,7 +123,8 @@ class TestAwsSpanExporter(TestCase):
         exporter = OTLPAwsSpanExporter(endpoint=OTLP_XRAY_ENDPOINT)
         exporter.export(self.testing_spans)
 
-        # For each invalid CW OTLP endpoint, vdalidate that SigV4 is not injected
+        # For each invalid CW OTLP endpoint, validate that SigV4 is not injected
+        self.invalid_otlp_tracing_endpoints.append("https://xray.bad-region-1.amazonaws.com/v1/traces")
         for bad_endpoint in self.invalid_otlp_tracing_endpoints:
             with self.subTest(endpoint=bad_endpoint):
                 with patch.dict(os.environ, {OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: bad_endpoint}):

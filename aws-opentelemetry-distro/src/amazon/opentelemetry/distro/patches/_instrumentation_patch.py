@@ -4,7 +4,7 @@
 import os
 from logging import Logger, getLogger
 
-import pkg_resources # noqa: F401
+import pkg_resources  # noqa: F401
 
 from amazon.opentelemetry.distro._utils import is_installed
 from amazon.opentelemetry.distro.patches._resource_detector_patches import _apply_resource_detector_patches
