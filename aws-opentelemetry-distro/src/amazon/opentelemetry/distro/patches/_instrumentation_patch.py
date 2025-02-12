@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import os
+import sys
 from logging import Logger, getLogger
+
+import pkg_resources  # noqa: F401
 
 from amazon.opentelemetry.distro._utils import is_installed
 from amazon.opentelemetry.distro.patches._resource_detector_patches import _apply_resource_detector_patches
