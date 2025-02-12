@@ -10,7 +10,7 @@ from typing_extensions import override
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE
 from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
-from amazon.opentelemetry.distro._utils import is_otlp_endpoint_cloudwatch
+from amazon.opentelemetry.distro._utils import is_xray_otlp_endpoint
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor_builder import (
     AttributePropagatingSpanProcessorBuilder,
@@ -20,7 +20,7 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
-from amazon.opentelemetry.distro.otlp_sigv4_exporter import OTLPAwsSigV4Exporter
+from amazon.opentelemetry.distro.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
@@ -317,8 +317,10 @@ def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> Span
             traces_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
             span_exporter = OTLPUdpSpanExporter(endpoint=traces_endpoint)
 
-    if is_otlp_endpoint_cloudwatch(os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)):
-        span_exporter = OTLPAwsSigV4Exporter(endpoint=os.getenv(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT))
+    if isinstance(span_exporter, OTLPSpanExporter) and is_xray_otlp_endpoint(
+        os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
+    ):
+        span_exporter = OTLPAwsSpanExporter(endpoint=os.getenv(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT))
 
     if not _is_application_signals_enabled():
         return span_exporter
@@ -333,8 +335,8 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource) -> 
     # Construct and set local and remote attributes span processor
     provider.add_span_processor(AttributePropagatingSpanProcessorBuilder().build())
 
-    # Do not export metrics if it's CloudWatch OTLP endpoint
-    if is_otlp_endpoint_cloudwatch():
+    # Do not export Application-Signals metrics if it's XRay OTLP endpoint
+    if is_xray_otlp_endpoint():
         return
 
     # Export 100% spans and not export Application-Signals metrics if on Lambda.

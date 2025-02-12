@@ -4,19 +4,23 @@ import logging
 from typing import Dict, Optional
 
 import requests
-from grpc import Compression
 
-from amazon.opentelemetry.distro._utils import is_otlp_endpoint_cloudwatch
+from amazon.opentelemetry.distro._utils import is_installed, is_xray_otlp_endpoint
+from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
 AWS_SERVICE = "xray"
 _logger = logging.getLogger(__name__)
 
-"""The OTLPAwsSigV4Exporter extends the functionality of the OTLPSpanExporter to allow SigV4 authentication if the
-   configured traces endpoint is a CloudWatch OTLP endpoint https://xray.[AWSRegion].amazonaws.com/v1/traces"""
 
+class OTLPAwsSpanExporter(OTLPSpanExporter):
+    """
+    This exporter extends the functionality of the OTLPSpanExporter to allow spans to be exported to the
+    XRay OTLP endpoint https://xray.[AWSRegion].amazonaws.com/v1/traces. Utilizes the botocore
+    library to sign and directly inject SigV4 Authentication to the exported request's headers.
 
-class OTLPAwsSigV4Exporter(OTLPSpanExporter):
+    https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-OTLPEndpoint.html
+    """
 
     def __init__(
         self,
@@ -35,33 +39,22 @@ class OTLPAwsSigV4Exporter(OTLPSpanExporter):
 
         self._aws_region = None
 
-        if endpoint and is_otlp_endpoint_cloudwatch(endpoint):
+        if endpoint and is_xray_otlp_endpoint(endpoint):
 
-            # Defensive check to verify that the application being auto instrumented has
-            # botocore installed.
-            try:
+            if is_installed("botocore"):
                 # pylint: disable=import-outside-toplevel
                 from botocore import auth, awsrequest, session
 
                 self.boto_auth = auth
                 self.boto_aws_request = awsrequest
                 self.boto_session = session.Session()
-                self._aws_region = self._validate_exporter_endpoint(endpoint)
+                self._aws_region = endpoint.split(".")[1]
 
-            except ImportError:
+            else:
                 _logger.error(
                     "botocore is required to export traces to %s. Please install it using `pip install botocore`",
                     endpoint,
                 )
-
-        else:
-            _logger.error(
-                "Invalid XRay traces endpoint: %s. Resolving to OTLPSpanExporter to handle exporting. "
-                "The traces endpoint follows the pattern https://xray.[AWSRegion].amazonaws.com/v1/traces. "
-                "For example, for the US West (Oregon) (us-west-2) Region, the endpoint will be "
-                "https://xray.us-west-2.amazonaws.com/v1/traces.",
-                endpoint,
-            )
 
         super().__init__(
             endpoint=endpoint,
@@ -99,20 +92,3 @@ class OTLPAwsSigV4Exporter(OTLPSpanExporter):
                 _logger.error("Failed to get credentials to export span to OTLP CloudWatch endpoint")
 
         return super()._export(serialized_data)
-
-    def _validate_exporter_endpoint(self, endpoint: str) -> Optional[str]:
-        if not endpoint:
-            return None
-
-        region = endpoint.split(".")[1]
-        xray_regions = self.boto_session.get_available_regions(AWS_SERVICE)
-
-        if region not in xray_regions:
-
-            _logger.error(
-                "Invalid AWS region: %s. Valid regions are %s. Resolving to default endpoint.", region, xray_regions
-            )
-
-            return None
-
-        return region

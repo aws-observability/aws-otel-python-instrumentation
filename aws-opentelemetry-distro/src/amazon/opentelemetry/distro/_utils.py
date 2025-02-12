@@ -2,13 +2,34 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import re
+import sys
+from logging import Logger, getLogger
+
+import pkg_resources
+
+_logger: Logger = getLogger(__name__)
+
+XRAY_OTLP_ENDPOINT_PATTERN = r"https://xray\.([a-z0-9-]+)\.amazonaws\.com/v1/traces$"
 
 
-def is_otlp_endpoint_cloudwatch(otlp_endpoint=None):
-    # Detects if it's the OTLP endpoint in CloudWatchs
+def is_xray_otlp_endpoint(otlp_endpoint: str = None) -> bool:
+    """Is the given endpoint the XRay OTLP endpoint?"""
+
     if not otlp_endpoint:
         return False
 
-    pattern = r"https://xray\.([a-z0-9-]+)\.amazonaws\.com/v1/traces$"
+    return bool(re.match(XRAY_OTLP_ENDPOINT_PATTERN, otlp_endpoint.lower()))
 
-    return bool(re.match(pattern, otlp_endpoint.lower()))
+
+def is_installed(req: str) -> bool:
+    """Is the given required package installed?"""
+
+    if req in sys.modules and sys.modules.get(req) != None:
+        return True
+
+    try:
+        pkg_resources.get_distribution(req)
+    except Exception as exc:  # pylint: disable=broad-except
+        _logger.debug("Skipping instrumentation patch: package %s, exception: %s", req, exc)
+        return False
+    return True
