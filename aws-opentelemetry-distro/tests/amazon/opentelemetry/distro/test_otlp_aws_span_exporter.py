@@ -119,10 +119,6 @@ class TestAwsSpanExporter(TestCase):
         # SigV4 mock authentication injection
         mock_sigv4_auth.side_effect = self.mock_add_auth
 
-        # Initialize and call exporter
-        exporter = OTLPAwsSpanExporter(endpoint=OTLP_XRAY_ENDPOINT)
-        exporter.export(self.testing_spans)
-
         # For each invalid CW OTLP endpoint, validate that SigV4 is not injected
         self.invalid_otlp_tracing_endpoints.append("https://xray.bad-region-1.amazonaws.com/v1/traces")
         for bad_endpoint in self.invalid_otlp_tracing_endpoints:
