@@ -38,9 +38,7 @@ _LAMBDA_FUNCTION_NAME: str = "lambdaFunctionName"
 _LAMBDA_SOURCE_MAPPING_ID: str = "lambdaEventSourceMappingID"
 
 # Patch names
-GET_DISTRIBUTION_PATCH: str = (
-    "amazon.opentelemetry.distro.patches._instrumentation_patch.pkg_resources.get_distribution"
-)
+GET_DISTRIBUTION_PATCH: str = "amazon.opentelemetry.distro._utils.pkg_resources.get_distribution"
 
 
 class TestInstrumentationPatch(TestCase):
