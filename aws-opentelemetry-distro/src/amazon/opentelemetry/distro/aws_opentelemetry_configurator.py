@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import os
+import re
 from logging import Logger, getLogger
 from typing import ClassVar, Dict, List, Type, Union
 
@@ -10,7 +11,6 @@ from typing_extensions import override
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE
 from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
-from amazon.opentelemetry.distro._utils import is_xray_otlp_endpoint
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor_builder import (
     AttributePropagatingSpanProcessorBuilder,
@@ -83,6 +83,7 @@ AWS_XRAY_DAEMON_ADDRESS_CONFIG = "AWS_XRAY_DAEMON_ADDRESS"
 OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED_CONFIG = "OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED"
 SYSTEM_METRICS_INSTRUMENTATION_SCOPE_NAME = "opentelemetry.instrumentation.system_metrics"
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
+XRAY_OTLP_ENDPOINT_PATTERN = r"https://xray\.([a-z0-9-]+)\.amazonaws\.com/v1/traces$"
 # UDP package size is not larger than 64KB
 LAMBDA_SPAN_EXPORT_BATCH_SIZE = 10
 
@@ -446,6 +447,15 @@ def _is_application_signals_runtime_enabled():
 def _is_lambda_environment():
     # detect if running in AWS Lambda environment
     return AWS_LAMBDA_FUNCTION_NAME_CONFIG in os.environ
+
+
+def is_xray_otlp_endpoint(otlp_endpoint: str = None) -> bool:
+    """Is the given endpoint the XRay OTLP endpoint?"""
+
+    if not otlp_endpoint:
+        return False
+
+    return bool(re.match(XRAY_OTLP_ENDPOINT_PATTERN, otlp_endpoint.lower()))
 
 
 def _get_metric_export_interval():

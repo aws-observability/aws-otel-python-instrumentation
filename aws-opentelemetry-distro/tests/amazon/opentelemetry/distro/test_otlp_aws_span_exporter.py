@@ -38,15 +38,6 @@ class TestAwsSpanExporter(TestCase):
             self.create_span("test_span5", SpanKind.CONSUMER),
         ]
 
-        self.invalid_otlp_tracing_endpoints = [
-            "https://xray.us-east-1.amaz.com/v1/traces",
-            "https://logs.us-east-1.amazonaws.com/v1/logs",
-            "https://test-endpoint123.com/test",
-            "xray.us-east-1.amazonaws.com/v1/traces",
-            "https://test-endpoint123.com/test https://xray.us-east-1.amazonaws.com/v1/traces",
-            "https://xray.us-east-1.amazonaws.com/v1/tracesssda",
-        ]
-
         self.expected_auth_header = "AWS4-HMAC-SHA256 Credential=test_key/some_date/us-east-1/xray/aws4_request"
         self.expected_auth_x_amz_date = "some_date"
         self.expected_auth_security_token = "test_token"
@@ -87,73 +78,6 @@ class TestAwsSpanExporter(TestCase):
 
         self.assertEqual(exporter._aws_region, "us-east-1")
         self.validate_exporter_extends_http_span_exporter(exporter, OTLP_XRAY_ENDPOINT)
-
-    def test_sigv4_exporter_init_invalid_cw_otlp_endpoint(self):
-        """Tests that the exporter constructor behavior is set by OTLP protobuf/http Span Exporter
-        if an invalid OTLP CloudWatch endpoint is set"""
-        for bad_endpoint in self.invalid_otlp_tracing_endpoints:
-            with self.subTest(endpoint=bad_endpoint):
-                with patch.dict(os.environ, {OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: bad_endpoint}):
-                    exporter = OTLPAwsSpanExporter(endpoint=bad_endpoint)
-                    self.validate_exporter_extends_http_span_exporter(exporter, bad_endpoint)
-
-                    self.assertIsNone(exporter._aws_region)
-
-    @patch("requests.Session.post")
-    @patch("botocore.auth.SigV4Auth.add_auth")
-    @patch("botocore.session.Session")
-    def test_sigv4_exporter_export_does_not_add_sigv4_if_not_valid_cw_endpoint(
-        self, botocore_mock, mock_sigv4_auth, requests_mock
-    ):
-        """Tests that if the OTLP endpoint is not a valid XRay endpoint but the credentials are valid,
-        SigV4 authentication method is called but fails so NO headers are injected into the existing Session headers."""
-
-        # Setting the exporter response
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        type(mock_response).ok = PropertyMock(return_value=True)
-
-        # Setting the request session headers to make the call to endpoint
-        mock_session = MagicMock()
-        mock_session.headers = {"User-Agent": USER_AGENT, "Content-Type": CONTENT_TYPE}
-        requests_mock.return_value = mock_session
-        mock_session.post.return_value = mock_response
-
-        # SigV4 mock authentication injection
-        mock_sigv4_auth.side_effect = self.mock_add_auth
-
-        mock_botocore_session = MagicMock()
-        botocore_mock.return_value = mock_botocore_session
-
-        mock_botocore_session.get_credentials.return_value = Credentials(
-            access_key="test_key", secret_key="test_secret", token="test_token"
-        )
-
-        # For each invalid CW OTLP endpoint, validate that SigV4 is not injected
-        self.invalid_otlp_tracing_endpoints.append("https://xray.bad-region-1.amazonaws.com/v1/traces")
-        for bad_endpoint in self.invalid_otlp_tracing_endpoints:
-            with self.subTest(endpoint=bad_endpoint):
-                with patch.dict(os.environ, {OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: bad_endpoint}):
-
-                    exporter = OTLPAwsSpanExporter(endpoint=bad_endpoint)
-
-                    self.validate_exporter_extends_http_span_exporter(exporter, bad_endpoint)
-
-                    exporter.export(self.testing_spans)
-
-                    # Verify that SigV4 request headers were not injected
-                    actual_headers = mock_session.headers
-                    self.assertNotIn(AUTHORIZATION_HEADER, actual_headers)
-                    self.assertNotIn(X_AMZ_DATE_HEADER, actual_headers)
-                    self.assertNotIn(X_AMZ_SECURITY_TOKEN_HEADER, actual_headers)
-
-                    requests_mock.assert_called_with(
-                        url=bad_endpoint,
-                        data=ANY,
-                        verify=ANY,
-                        timeout=ANY,
-                        cert=ANY,
-                    )
 
     @patch("botocore.session.Session")
     @patch("requests.Session")

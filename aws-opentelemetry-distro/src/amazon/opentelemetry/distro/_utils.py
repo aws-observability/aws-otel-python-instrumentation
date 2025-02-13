@@ -9,17 +9,6 @@ import pkg_resources
 
 _logger: Logger = getLogger(__name__)
 
-XRAY_OTLP_ENDPOINT_PATTERN = r"https://xray\.([a-z0-9-]+)\.amazonaws\.com/v1/traces$"
-
-
-def is_xray_otlp_endpoint(otlp_endpoint: str = None) -> bool:
-    """Is the given endpoint the XRay OTLP endpoint?"""
-
-    if not otlp_endpoint:
-        return False
-
-    return bool(re.match(XRAY_OTLP_ENDPOINT_PATTERN, otlp_endpoint.lower()))
-
 
 def is_installed(req: str) -> bool:
     """Is the given required package installed?"""

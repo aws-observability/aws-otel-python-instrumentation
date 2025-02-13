@@ -5,7 +5,7 @@ from typing import Dict, Optional
 
 import requests
 
-from amazon.opentelemetry.distro._utils import is_installed, is_xray_otlp_endpoint
+from amazon.opentelemetry.distro._utils import is_installed
 from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
@@ -40,22 +40,24 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
         # some users might not need to use this exporter. In order not conflict
         # with existing behavior, we check for botocore before initializing this exporter.
 
-        if endpoint and is_xray_otlp_endpoint(endpoint):
+        if endpoint and is_installed("botocore"):
+            # pylint: disable=import-outside-toplevel
+            from botocore import auth, awsrequest, session
 
-            if is_installed("botocore"):
-                # pylint: disable=import-outside-toplevel
-                from botocore import auth, awsrequest, session
+            self.boto_auth = auth
+            self.boto_aws_request = awsrequest
+            self.boto_session = session.Session()
 
-                self.boto_auth = auth
-                self.boto_aws_request = awsrequest
-                self.boto_session = session.Session()
-                self._aws_region = endpoint.split(".")[1]
+            # Assumes only valid endpoints passed are of XRay OTLP format.
+            # The only usecase for this class would be for ADOT Python Auto Instrumentation and that already validates
+            # the endpoint to be an XRay OTLP endpoint.
+            self._aws_region = endpoint.split(".")[1]
 
-            else:
-                _logger.error(
-                    "botocore is required to export traces to %s. Please install it using `pip install botocore`",
-                    endpoint,
-                )
+        else:
+            _logger.error(
+                "botocore is required to export traces to %s. Please install it using `pip install botocore`",
+                endpoint,
+            )
 
         super().__init__(
             endpoint=endpoint,
