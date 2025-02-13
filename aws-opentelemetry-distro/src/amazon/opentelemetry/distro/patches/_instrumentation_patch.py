@@ -5,6 +5,7 @@ import os
 from logging import Logger, getLogger
 
 # pylint: disable=unused-import
+# flake8: noqa: F401
 import pkg_resources
 
 from amazon.opentelemetry.distro._utils import is_installed
