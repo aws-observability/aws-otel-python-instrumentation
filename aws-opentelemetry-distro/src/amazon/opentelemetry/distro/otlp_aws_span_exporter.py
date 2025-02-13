@@ -74,28 +74,23 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
     # the same except if the endpoint is an XRay OTLP endpoint, we will sign the request
     # with SigV4 in headers before sending it to the endpoint. Otherwise, we will skip signing.
     def _export(self, serialized_data: bytes):
+        request = self.boto_aws_request.AWSRequest(
+            method="POST",
+            url=self._endpoint,
+            data=serialized_data,
+            headers={"Content-Type": "application/x-protobuf"},
+        )
 
-        if self._aws_region:
-            request = self.boto_aws_request.AWSRequest(
-                method="POST",
-                url=self._endpoint,
-                data=serialized_data,
-                headers={"Content-Type": "application/x-protobuf"},
-            )
+        credentials = self.boto_session.get_credentials()
 
-            credentials = self.boto_session.get_credentials()
+        if credentials is not None:
+            signer = self.boto_auth.SigV4Auth(credentials, AWS_SERVICE, self._aws_region)
 
-            if credentials is not None:
-                signer = self.boto_auth.SigV4Auth(credentials, AWS_SERVICE, self._aws_region)
+            try:
+                signer.add_auth(request)
+                self._session.headers.update(dict(request.headers))
 
-                try:
-                    signer.add_auth(request)
-                    self._session.headers.update(dict(request.headers))
-
-                except Exception as signing_error:  # pylint: disable=broad-except
-                    _logger.error("Failed to sign request: %s", signing_error)
-
-            else:
-                _logger.error("Failed to get credentials to export span to OTLP CloudWatch endpoint")
+            except Exception as signing_error:  # pylint: disable=broad-except
+                _logger.error("Failed to sign request: %s", signing_error)
 
         return super()._export(serialized_data)
