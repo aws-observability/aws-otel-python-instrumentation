@@ -90,7 +90,7 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
                     signer.add_auth(request)
                     self._session.headers.update(dict(request.headers))
 
-                except Exception as signing_error: # pylint: disable=broad-except
+                except Exception as signing_error:  # pylint: disable=broad-except
                     _logger.error("Failed to sign request: %s", signing_error)
 
             else:
