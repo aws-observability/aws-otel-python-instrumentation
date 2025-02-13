@@ -34,10 +34,11 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
         rsession: Optional[requests.Session] = None,
     ):
 
-        # Represents the region of the CloudWatch OTLP endpoint to send the traces to.
-        # If the endpoint has been verified to be valid, this should not be None
-
         self._aws_region = None
+
+        # Requires botocore to be installed to sign the headers. However,
+        # some users might not need to use this exporter. In order not conflict
+        # with existing behavior, we check for botocore before initializing this exporter.
 
         if endpoint and is_xray_otlp_endpoint(endpoint):
 
@@ -67,7 +68,11 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
             session=rsession,
         )
 
+    # Overrides upstream's private implementation of _export. All behaviors are
+    # the same except if the endpoint is an XRay OTLP endpoint, we will sign the request
+    # with SigV4 in headers before sending it to the endpoint. Otherwise, we will skip signing.
     def _export(self, serialized_data: bytes):
+
         if self._aws_region:
             request = self.boto_aws_request.AWSRequest(
                 method="POST",
@@ -85,7 +90,7 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
                     signer.add_auth(request)
                     self._session.headers.update(dict(request.headers))
 
-                except self.boto_auth.NoCredentialsError as signing_error:
+                except Exception as signing_error: # pylint: disable=broad-except
                     _logger.error("Failed to sign request: %s", signing_error)
 
             else:
