@@ -101,7 +101,10 @@ class TestAwsSpanExporter(TestCase):
 
     @patch("requests.Session.post")
     @patch("botocore.auth.SigV4Auth.add_auth")
-    def test_sigv4_exporter_export_does_not_add_sigv4_if_not_valid_cw_endpoint(self, mock_sigv4_auth, requests_mock):
+    @patch("botocore.session.Session")
+    def test_sigv4_exporter_export_does_not_add_sigv4_if_not_valid_cw_endpoint(
+        self, botocore_mock, mock_sigv4_auth, requests_mock
+    ):
         """Tests that if the OTLP endpoint is not a valid XRay endpoint but the credentials are valid,
         SigV4 authentication method is called but fails so NO headers are injected into the existing Session headers."""
 
@@ -118,6 +121,13 @@ class TestAwsSpanExporter(TestCase):
 
         # SigV4 mock authentication injection
         mock_sigv4_auth.side_effect = self.mock_add_auth
+
+        mock_botocore_session = MagicMock()
+        botocore_mock.return_value = mock_botocore_session
+
+        mock_botocore_session.get_credentials.return_value = Credentials(
+            access_key="test_key", secret_key="test_secret", token="test_token"
+        )
 
         # For each invalid CW OTLP endpoint, validate that SigV4 is not injected
         self.invalid_otlp_tracing_endpoints.append("https://xray.bad-region-1.amazonaws.com/v1/traces")

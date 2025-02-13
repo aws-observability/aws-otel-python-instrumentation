@@ -4,7 +4,8 @@
 import os
 from logging import Logger, getLogger
 
-import pkg_resources  # pylint: disable=unused-import
+# pylint: disable=unused-import
+import pkg_resources
 
 from amazon.opentelemetry.distro._utils import is_installed
 from amazon.opentelemetry.distro.patches._resource_detector_patches import _apply_resource_detector_patches
