@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import os
+import re
 from logging import Logger, getLogger
 from typing import ClassVar, Dict, List, Type, Union
 
@@ -19,6 +20,7 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
+from amazon.opentelemetry.distro.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
@@ -81,6 +83,7 @@ AWS_XRAY_DAEMON_ADDRESS_CONFIG = "AWS_XRAY_DAEMON_ADDRESS"
 OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED_CONFIG = "OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED"
 SYSTEM_METRICS_INSTRUMENTATION_SCOPE_NAME = "opentelemetry.instrumentation.system_metrics"
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
+XRAY_OTLP_ENDPOINT_PATTERN = r"https://xray\.([a-z0-9-]+)\.amazonaws\.com/v1/traces$"
 # UDP package size is not larger than 64KB
 LAMBDA_SPAN_EXPORT_BATCH_SIZE = 10
 
@@ -315,6 +318,11 @@ def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> Span
             traces_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
             span_exporter = OTLPUdpSpanExporter(endpoint=traces_endpoint)
 
+    if isinstance(span_exporter, OTLPSpanExporter) and is_xray_otlp_endpoint(
+        os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
+    ):
+        span_exporter = OTLPAwsSpanExporter(endpoint=os.getenv(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT))
+
     if not _is_application_signals_enabled():
         return span_exporter
 
@@ -327,6 +335,10 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource) -> 
 
     # Construct and set local and remote attributes span processor
     provider.add_span_processor(AttributePropagatingSpanProcessorBuilder().build())
+
+    # Do not export Application-Signals metrics if it's XRay OTLP endpoint
+    if is_xray_otlp_endpoint():
+        return
 
     # Export 100% spans and not export Application-Signals metrics if on Lambda.
     if _is_lambda_environment():
@@ -435,6 +447,15 @@ def _is_application_signals_runtime_enabled():
 def _is_lambda_environment():
     # detect if running in AWS Lambda environment
     return AWS_LAMBDA_FUNCTION_NAME_CONFIG in os.environ
+
+
+def is_xray_otlp_endpoint(otlp_endpoint: str = None) -> bool:
+    """Is the given endpoint the XRay OTLP endpoint?"""
+
+    if not otlp_endpoint:
+        return False
+
+    return bool(re.match(XRAY_OTLP_ENDPOINT_PATTERN, otlp_endpoint.lower()))
 
 
 def _get_metric_export_interval():
