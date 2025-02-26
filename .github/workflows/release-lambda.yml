@@ -197,7 +197,7 @@ jobs:
           echo "" >> release_notes.md
           echo "See new Lambda Layer ARNs:" >> release_notes.md
           echo "" >> release_notes.md
-          cat layer-note >> release_notes.md
+          cat ${{ env.LAYER_NAME }}/layer-note >> release_notes.md
           echo "" >> release_notes.md
           echo "Notes:" >> release_notes.md
       - name: Create GH release
