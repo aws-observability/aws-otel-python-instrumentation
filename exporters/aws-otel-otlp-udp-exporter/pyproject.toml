@@ -30,7 +30,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/aws-observability/aws-otel-python-instrumentation/tree/main/exporters"
+Homepage = "https://github.com/aws-observability/aws-otel-python-instrumentation/tree/main/exporters/aws-otel-otlp-udp-exporter"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/amazon"]
