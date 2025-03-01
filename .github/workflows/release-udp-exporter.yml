@@ -1,0 +1,117 @@
+name: Build, Test, and Publish ADOT OTLP UDP Exporter
+
+on:
+  push:
+    branches:
+      - "udp-*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number for deployment e.g. 0.1.0'
+        required: true
+        type: string
+
+jobs:
+  build-test-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install hatch pytest
+
+      - name: Build package
+        working-directory: exporters/aws-otel-otlp-udp-exporter
+        run: hatch build
+
+      - name: Setup X-Ray daemon
+        run: |
+          # Download X-Ray daemon
+          wget https://s3.us-east-2.amazonaws.com/aws-xray-assets.us-east-2/xray-daemon/aws-xray-daemon-linux-3.x.zip
+          unzip -o aws-xray-daemon-linux-3.x.zip
+          
+          # Create config file
+          echo '{
+            "Version": 2,
+            "TotalBufferSizeMB": 10,
+            "Logging": {
+              "LogLevel": "debug"
+            },
+          }' > xray-daemon-config.json
+
+          # Make sure xray is executable
+          chmod +x ./xray
+          
+          # Create logs directory
+          mkdir -p daemon-logs
+          
+          # Start X-Ray daemon
+          ./xray -o -n us-west-2 -c xray-daemon-config.json > daemon-logs/xray-daemon.log 2>&1 &
+          XRAY_PID=$!
+          echo "X-Ray daemon started with PID $XRAY_PID"
+          
+          # Wait for daemon to be ready
+          echo "Waiting for X-Ray daemon to start..."
+          sleep 5
+          
+          # Check if process is still running
+          if ps -p $XRAY_PID > /dev/null; then
+            echo "✅ X-Ray daemon process is running"
+          else
+            echo "❌ X-Ray daemon process is not running"
+            echo "Log contents:"
+            cat daemon-logs/xray-daemon.log
+            exit 1
+          fi
+          
+          # Try to connect to the daemon
+          if nc -zv 127.0.0.1 2000 2>&1; then
+            echo "✅ Successfully connected to X-Ray daemon on port 2000"
+          else
+            echo "❌ Cannot connect to X-Ray daemon on port 2000"
+            echo "Log contents:"
+            cat daemon-logs/xray-daemon.log
+            exit 1
+          fi
+          
+          # Extra verification with curl (might not work depending on daemon setup)
+          if curl -s http://localhost:2000/GetDaemonVersion; then
+            echo "✅ X-Ray daemon API responded"
+          else
+            echo "ℹ️ X-Ray daemon doesn't support API or not ready yet"
+            # Don't exit with error as this might not be reliable
+          fi
+          
+          echo "X-Ray daemon setup completed"
+
+      - name: Setup validation app
+        run: |
+          pip install ./exporters/aws-otel-otlp-udp-exporter/dist/*.whl
+
+      - name: Run validation test
+        working-directory: exporters/aws-otel-otlp-udp-exporter/validation-app
+        run: python app.py
+
+      - name: Verify X-Ray daemon received traces
+        run: |
+          echo "X-Ray daemon logs:"
+          cat daemon-logs/xray-daemon.log
+
+          # Check if the daemon received and processed some data
+          if grep -q "sending.*batch" daemon-logs/xray-daemon.log; then
+            echo "✅ X-Ray daemon processed trace data (AWS upload errors are expected)"
+            exit 0
+          elif grep -q "processor:.*segment" daemon-logs/xray-daemon.log; then
+            echo "✅ X-Ray daemon processed segment data (AWS upload errors are expected)"
+            exit 0
+          else
+            echo "❌ No evidence of traces being received by X-Ray daemon"
+            exit 1
+          fi
