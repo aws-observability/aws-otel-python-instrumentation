@@ -30,7 +30,7 @@ jobs:
         run: |
           mkdir -p validation_app
           cd validation_app
-          pip install ../exporters/aws-otel-otlp-udp-exporter/dist.*whl
+          pip install ../exporters/aws-otel-otlp-udp-exporter/dist/*.whl
 
       - name: Create test script
         working-directory: validation_app
