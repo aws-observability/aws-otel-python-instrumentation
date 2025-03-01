@@ -40,6 +40,13 @@ jobs:
               "LogLevel": "debug"
             }
           }' > xray-daemon-config.json
+
+          # Create dummy AWS credentials (the daemon requires credentials even if local)
+          mkdir -p ~/.aws
+          echo "[default]
+          aws_access_key_id=AKIAIOSFODNN7EXAMPLE
+          aws_secret_access_key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+          region=us-west-2" > ~/.aws/credentials
           
           # Make sure xray is executable
           chmod +x ./xray
