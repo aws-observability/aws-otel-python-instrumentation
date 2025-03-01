@@ -40,17 +40,50 @@ jobs:
             }
           }' > xray-daemon-config.json
           
-          # Start X-Ray daemon with a unique log file
+          # Make sure xray is executable
+          chmod +x ./xray
+          
+          # Create logs directory
           mkdir -p daemon-logs
+          
+          # Start X-Ray daemon
           ./xray -o -n us-west-2 -c xray-daemon-config.json > daemon-logs/xray-daemon.log 2>&1 &
-          echo "X-Ray daemon started with PID $!"
+          XRAY_PID=$!
+          echo "X-Ray daemon started with PID $XRAY_PID"
           
-          # Wait a bit for the daemon to start
-          sleep 3
+          # Wait for daemon to be ready
+          echo "Waiting for X-Ray daemon to start..."
+          sleep 5
           
-          # Verify daemon is running
-          ps aux | grep xray
-          curl -s http://localhost:2000/GetDaemonVersion
+          # Check if process is still running
+          if ps -p $XRAY_PID > /dev/null; then
+            echo "✅ X-Ray daemon process is running"
+          else
+            echo "❌ X-Ray daemon process is not running"
+            echo "Log contents:"
+            cat daemon-logs/xray-daemon.log
+            exit 1
+          fi
+          
+          # Try to connect to the daemon
+          if nc -zv 127.0.0.1 2000 2>&1; then
+            echo "✅ Successfully connected to X-Ray daemon on port 2000"
+          else
+            echo "❌ Cannot connect to X-Ray daemon on port 2000"
+            echo "Log contents:"
+            cat daemon-logs/xray-daemon.log
+            exit 1
+          fi
+          
+          # Extra verification with curl (might not work depending on daemon setup)
+          if curl -s http://localhost:2000/GetDaemonVersion; then
+            echo "✅ X-Ray daemon API responded"
+          else
+            echo "ℹ️ X-Ray daemon doesn't support API or not ready yet"
+            # Don't exit with error as this might not be reliable
+          fi
+          
+          echo "X-Ray daemon setup completed"
 
       - name: Setup validation app
         run: |
