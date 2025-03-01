@@ -38,7 +38,8 @@ jobs:
             "TotalBufferSizeMB": 10,
             "Logging": {
               "LogLevel": "debug"
-            }
+            },
+            "LocalMode": true
           }' > xray-daemon-config.json
 
           # Create dummy AWS credentials (the daemon requires credentials even if local)
