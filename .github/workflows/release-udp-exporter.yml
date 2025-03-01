@@ -26,6 +26,32 @@ jobs:
         working-directory: exporters/aws-otel-otlp-udp-exporter
         run: hatch build
 
+      - name: Setup X-Ray daemon
+        run: |
+          # Download X-Ray daemon
+          wget https://s3.us-east-2.amazonaws.com/aws-xray-assets.us-east-2/xray-daemon/aws-xray-daemon-linux-3.x.zip
+          unzip aws-xray-daemon-linux-3.x.zip
+          
+          # Create config file
+          echo '{
+            "TotalBufferSizeMB": 10,
+            "Logging": {
+              "LogLevel": "debug"
+            }
+          }' > xray-daemon-config.json
+          
+          # Start X-Ray daemon with a unique log file
+          mkdir -p daemon-logs
+          ./xray -o -n us-west-2 -c xray-daemon-config.json > daemon-logs/xray-daemon.log 2>&1 &
+          echo "X-Ray daemon started with PID $!"
+          
+          # Wait a bit for the daemon to start
+          sleep 3
+          
+          # Verify daemon is running
+          ps aux | grep xray
+          curl -s http://localhost:2000/GetDaemonVersion
+
       - name: Setup validation app
         run: |
           mkdir -p validation_app
@@ -103,3 +129,17 @@ jobs:
       - name: Run validation test
         working-directory: validation_app
         run: python test_exporter.py
+
+      - name: Verify X-Ray daemon recieved traces
+        run: |
+          echo "X-Ray daemon logs:"
+          cat daemon-logs/xray-daemon.log
+
+          # Check if the daemon received segments
+          if grep -q "Received segment" daemon-logs/xray-daemon.log; then
+            echo "✅ X-Ray daemon successfully received trace segments"
+            exit 0
+          else
+            echo "❌ No trace segments received by X-Ray daemon"
+            exit 1
+          fi
