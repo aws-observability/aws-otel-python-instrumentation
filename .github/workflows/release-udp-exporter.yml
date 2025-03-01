@@ -34,6 +34,7 @@ jobs:
           
           # Create config file
           echo '{
+            "Version": 2,
             "TotalBufferSizeMB": 10,
             "Logging": {
               "LogLevel": "debug"
