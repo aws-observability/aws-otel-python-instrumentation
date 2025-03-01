@@ -1,0 +1,58 @@
+name: Build, Test, and Publish ADOT OTLP UDP Exporter
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-test-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install hatch pytest
+
+      - name: Build package
+        working-directory: exporters/aws-otel-otlp-udp-exporter
+        run: hatch build
+
+      - name: Setup validation app
+        run: |
+          mkdir -p validation_app
+          cd validation_app
+          pip install ../exporters/aws-otel-otlp-udp-exporter/dist.*whl
+
+      - name: Create test script
+        working-directory: validation_app
+        run: |
+          cat > test_exporter.py << 'EOF'
+          from opentelemetry import trace
+          from opentelemetry.sdk.trace import TracerProvider
+          from amazon.opentelemetry.exporter.otlp.udp import OTLPSpanExporter
+          
+          # Set up tracer
+          tracer_provider = TracerProvider()
+          trace.set_tracer_provider(tracer_provider)
+          
+          # Set up UDP exporter
+          exporter = OTLPSpanExporter()
+          
+          # Create a span for testing
+          tracer = trace.get_tracer(__name__)
+          with tracer.start_as_current_span("test_span") as span:
+              span.set_attribute("test.attribute", "test_value")
+              print("Span created and exported via UDP")
+          
+          print("Validation successful!")
+          EOF
+
+      - name: Run validation test
+        working-directory: validation_app
+        run: python test_exporter.py
