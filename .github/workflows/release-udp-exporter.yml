@@ -30,7 +30,7 @@ jobs:
         run: |
           # Download X-Ray daemon
           wget https://s3.us-east-2.amazonaws.com/aws-xray-assets.us-east-2/xray-daemon/aws-xray-daemon-linux-3.x.zip
-          unzip aws-xray-daemon-linux-3.x.zip
+          unzip -o aws-xray-daemon-linux-3.x.zip
           
           # Create config file
           echo '{
