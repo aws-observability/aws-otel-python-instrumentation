@@ -26,7 +26,7 @@ classifiers = [
 
 dependencies = [
   "opentelemetry-sdk == 1.27.0",
-  "opentelemetry-exporter-otlp-proto-http == 1.27.0",
+  "opentelemetry-exporter-otlp-proto-common == 1.27.0",
 ]
 
 [project.urls]
