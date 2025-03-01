@@ -38,7 +38,7 @@ jobs:
           cat > test_exporter.py << 'EOF'
           from opentelemetry import trace
           from opentelemetry.sdk.trace import TracerProvider
-          from amazon.opentelemetry.exporter.otlp.udp import OTLPSpanExporter
+          from amazon.opentelemetry.exporters.otlp.udp import OTLPSpanExporter
           
           # Set up tracer
           tracer_provider = TracerProvider()
