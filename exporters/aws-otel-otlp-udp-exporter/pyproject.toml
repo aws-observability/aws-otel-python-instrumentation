@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aws-otel-otlp-udp-exporter"
+version = "0.1.0"
+description = "OTLP UDP Exporter for OpenTelemetry"
+readme = "README.rst"
+license = "Apache-2.0"
+requires-python = ">=3.8"
+authors = [
+    { name = "Amazon Web Services" }
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+]
+
+dependencies = [
+  "opentelemetry-sdk == 1.27.0",
+  "opentelemetry-exporter-otlp-proto-common == 1.27.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/aws-observability/aws-otel-python-instrumentation/tree/main/exporters/aws-otel-otlp-udp-exporter"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/amazon"]
