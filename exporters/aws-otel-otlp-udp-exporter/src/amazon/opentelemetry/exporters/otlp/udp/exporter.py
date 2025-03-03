@@ -4,23 +4,16 @@ import base64
 import os
 import socket
 from logging import Logger, getLogger
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Optional, Sequence, Tuple
 
 from typing_extensions import override
 
-from opentelemetry.exporter.otlp.proto.common.metrics_encoder import encode_metrics
 from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
-from opentelemetry.sdk.metrics._internal.aggregation import AggregationTemporality
-from opentelemetry.sdk.metrics._internal.export import MetricExportResult
-from opentelemetry.sdk.metrics._internal.point import MetricsData
-from opentelemetry.sdk.metrics.export import MetricExporter
-from opentelemetry.sdk.metrics.view import Aggregation
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
 DEFAULT_ENDPOINT = "127.0.0.1:2000"
 PROTOCOL_HEADER = '{"format":"json","version":1}\n'
-FORMAT_OTEL_METRICS_BINARY_PREFIX = "M1"
 
 FORMAT_OTEL_SAMPLED_TRACES_BINARY_PREFIX = "T1S"
 FORMAT_OTEL_UNSAMPLED_TRACES_BINARY_PREFIX = "T1U"
@@ -64,44 +57,6 @@ class UdpExporter:
             raise ValueError(f"Invalid endpoint: {endpoint}") from exc
 
         return host, port
-
-
-class OTLPUdpMetricExporter(MetricExporter):
-    def __init__(
-        self,
-        endpoint: Optional[str] = None,
-        preferred_temporality: Dict[type, AggregationTemporality] = None,
-        preferred_aggregation: Dict[type, Aggregation] = None,
-    ):
-        super().__init__(
-            preferred_temporality=preferred_temporality,
-            preferred_aggregation=preferred_aggregation,
-        )
-        self._udp_exporter = UdpExporter(endpoint=endpoint)
-
-    @override
-    def export(
-        self,
-        metrics_data: MetricsData,
-        timeout_millis: float = 10_000,
-        **kwargs,
-    ) -> MetricExportResult:
-        serialized_data = encode_metrics(metrics_data).SerializeToString()
-
-        try:
-            self._udp_exporter.send_data(data=serialized_data, signal_format_prefix=FORMAT_OTEL_METRICS_BINARY_PREFIX)
-            return MetricExportResult.SUCCESS
-        except Exception as exc:  # pylint: disable=broad-except
-            _logger.error("Error exporting metrics: %s", exc)
-            return MetricExportResult.FAILURE
-
-    # pylint: disable=no-self-use
-    def force_flush(self, timeout_millis: float = 10_000) -> bool:
-        # TODO: implement force flush
-        return True
-
-    def shutdown(self, timeout_millis: float = 30_000, **kwargs) -> None:
-        self._udp_exporter.shutdown()
 
 
 class OTLPUdpSpanExporter(SpanExporter):

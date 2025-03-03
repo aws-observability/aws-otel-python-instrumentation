@@ -11,11 +11,9 @@ from amazon.opentelemetry.exporters.otlp.udp import (
     FORMAT_OTEL_SAMPLED_TRACES_BINARY_PREFIX,
     FORMAT_OTEL_UNSAMPLED_TRACES_BINARY_PREFIX,
     PROTOCOL_HEADER,
-    OTLPUdpMetricExporter,
     OTLPUdpSpanExporter,
     UdpExporter,
 )
-from opentelemetry.sdk.metrics._internal.export import MetricExportResult
 from opentelemetry.sdk.trace.export import SpanExportResult
 
 
@@ -61,40 +59,6 @@ class TestUdpExporter(TestCase):
         exporter = UdpExporter()
         exporter.shutdown()
         mock_socket_instance.close.assert_called_once()
-
-
-class TestOTLPUdpMetricExporter(unittest.TestCase):
-
-    @patch("amazon.opentelemetry.exporters.otlp.udp.exporter.encode_metrics")
-    @patch("amazon.opentelemetry.exporters.otlp.udp.exporter.UdpExporter")
-    def test_export(self, mock_udp_exporter, mock_encode_metrics):
-        mock_udp_exporter_instance = mock_udp_exporter.return_value
-        mock_encoded_data = MagicMock()
-        mock_encode_metrics.return_value.SerializeToString.return_value = mock_encoded_data
-        exporter = OTLPUdpMetricExporter()
-        result = exporter.export(MagicMock())
-        mock_udp_exporter_instance.send_data.assert_called_once_with(data=mock_encoded_data, signal_format_prefix="M1")
-        self.assertEqual(result, MetricExportResult.SUCCESS)
-
-    @patch("amazon.opentelemetry.exporters.otlp.udp.exporter.encode_metrics")
-    @patch("amazon.opentelemetry.exporters.otlp.udp.exporter.UdpExporter")
-    def test_export_with_exception(self, mock_udp_exporter, mock_encode_metrics):
-        mock_udp_exporter_instance = mock_udp_exporter.return_value
-        mock_encoded_data = MagicMock()
-        mock_encode_metrics.return_value.SerializeToString.return_value = mock_encoded_data
-        mock_udp_exporter_instance.send_data.side_effect = Exception("Something went wrong")
-        exporter = OTLPUdpMetricExporter()
-        result = exporter.export(MagicMock())
-        self.assertEqual(result, MetricExportResult.FAILURE)
-
-    # pylint: disable=no-self-use
-    @patch("amazon.opentelemetry.exporters.otlp.udp.exporter.UdpExporter")
-    def test_shutdown(self, mock_udp_exporter):
-        mock_udp_exporter_instance = mock_udp_exporter.return_value
-        exporter = OTLPUdpMetricExporter()
-        exporter.force_flush()
-        exporter.shutdown()
-        mock_udp_exporter_instance.shutdown.assert_called_once()
 
 
 class TestOTLPUdpSpanExporter(unittest.TestCase):
