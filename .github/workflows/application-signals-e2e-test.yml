@@ -228,3 +228,12 @@ jobs:
       aws-region: us-east-1
       python-version: '3.12'
       caller-workflow-name: 'main-build'
+  #
+  # Stand-Alone ADOT/ADOT SigV4 test on EC2
+  adot-sigv4:
+    needs: [ upload-main-build ]
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-adot-sigv4-test.yml@main
+    secrets: inherit
+    with:
+      caller-workflow-name: 'main-build'
+      staging-wheel-name: ${{ inputs.staging-wheel-name }}
