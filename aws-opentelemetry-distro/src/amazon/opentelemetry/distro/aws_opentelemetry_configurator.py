@@ -24,6 +24,7 @@ from amazon.opentelemetry.distro.otlp_aws_span_exporter import OTLPAwsSpanExport
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
+from amazon.opentelemetry.distro.aws_lambda_span_processor import AwsLambdaSpanProcessor
 from amazon.opentelemetry.distro.scope_based_filtering_view import ScopeBasedRetainingView
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -343,6 +344,7 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource) -> 
     # Export 100% spans and not export Application-Signals metrics if on Lambda.
     if _is_lambda_environment():
         _export_unsampled_span_for_lambda(provider, resource)
+        provider.add_span_processor(AwsLambdaSpanProcessor())
         return
 
     # Construct meterProvider
