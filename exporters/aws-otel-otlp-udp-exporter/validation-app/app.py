@@ -1,15 +1,17 @@
 import socket
 import threading
 import time
+
+from amazon.opentelemetry.exporters.otlp.udp import OTLPUdpSpanExporter
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from amazon.opentelemetry.exporters.otlp.udp import OTLPUdpSpanExporter
+
 
 # Set up a UDP server to verify data is sent
 def udp_server():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(('127.0.0.1', 2000))
+    sock.bind(("127.0.0.1", 2000))
     sock.settimeout(5)
     print("UDP server listening on 127.0.0.1:2000")
     try:
@@ -23,6 +25,7 @@ def udp_server():
         return False
     finally:
         sock.close()
+
 
 # Start UDP server in a separate thread
 server_thread = threading.Thread(target=udp_server)
@@ -44,7 +47,7 @@ with tracer.start_as_current_span("test_parent_span") as parent:
     parent.set_attribute("service.name", "validation-app")
     parent.set_attribute("test.attribute", "test_value")
     parent.add_event("test-event", {"event.data": "some data"})
-    
+
     # Add a child span
     with tracer.start_as_current_span("test_child_span") as child:
         child.set_attribute("child.attribute", "child_value")
