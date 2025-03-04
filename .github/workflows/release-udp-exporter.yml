@@ -22,93 +22,60 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install hatch pytest
+          pip install hatch pytest flask
 
       - name: Build package
         working-directory: exporters/aws-otel-otlp-udp-exporter
         run: hatch build
 
-      - name: Setup X-Ray daemon
+      - name: Download and run X-Ray Daemon
         run: |
-          # Download X-Ray daemon
-          wget https://s3.us-east-2.amazonaws.com/aws-xray-assets.us-east-2/xray-daemon/aws-xray-daemon-linux-3.x.zip
-          unzip -o aws-xray-daemon-linux-3.x.zip
-          
-          # Create config file
-          echo '{
-            "Version": 2,
-            "TotalBufferSizeMB": 10,
-            "Logging": {
-              "LogLevel": "debug"
-            },
-          }' > xray-daemon-config.json
+          mkdir xray-daemon
+          cd xray-daemon
+          wget https://s3.us-west-2.amazonaws.com/aws-xray-assets.us-west-2/xray-daemon/aws-xray-daemon-linux-3.x.zip
+          unzip aws-xray-daemon-linux-3.x.zip
+          ./xray -o -n us-west-2 -f ./daemon-logs.log --log-level debug &
 
-          # Make sure xray is executable
-          chmod +x ./xray
-          
-          # Create logs directory
-          mkdir -p daemon-logs
-          
-          # Start X-Ray daemon
-          ./xray -o -n us-west-2 -c xray-daemon-config.json > daemon-logs/xray-daemon.log 2>&1 &
-          XRAY_PID=$!
-          echo "X-Ray daemon started with PID $XRAY_PID"
-          
-          # Wait for daemon to be ready
-          echo "Waiting for X-Ray daemon to start..."
-          sleep 5
-          
-          # Check if process is still running
-          if ps -p $XRAY_PID > /dev/null; then
-            echo "✅ X-Ray daemon process is running"
-          else
-            echo "❌ X-Ray daemon process is not running"
-            echo "Log contents:"
-            cat daemon-logs/xray-daemon.log
-            exit 1
-          fi
-          
-          # Try to connect to the daemon
-          if nc -zv 127.0.0.1 2000 2>&1; then
-            echo "✅ Successfully connected to X-Ray daemon on port 2000"
-          else
-            echo "❌ Cannot connect to X-Ray daemon on port 2000"
-            echo "Log contents:"
-            cat daemon-logs/xray-daemon.log
-            exit 1
-          fi
-          
-          # Extra verification with curl (might not work depending on daemon setup)
-          if curl -s http://localhost:2000/GetDaemonVersion; then
-            echo "✅ X-Ray daemon API responded"
-          else
-            echo "ℹ️ X-Ray daemon doesn't support API or not ready yet"
-            # Don't exit with error as this might not be reliable
-          fi
-          
-          echo "X-Ray daemon setup completed"
-
-      - name: Setup validation app
+      - name: Install UDP Exporter
         run: |
           pip install ./exporters/aws-otel-otlp-udp-exporter/dist/*.whl
 
-      - name: Run validation test
-        working-directory: exporters/aws-otel-otlp-udp-exporter/validation-app
-        run: python app.py
+      - name: Ensure Unit Tests are passing
+        run: |
+          pytest exporters/aws-otel-otlp-udp-exporter/tests/test_exporter.py
+
+      - name: Run Sample App in Background
+        working-directory: sample-applications/integ-test-app
+        run: |
+          # Start validation app
+          python udp_exporter_validation_app.py &
+          # Wait for validation app to initialize
+          sleep 5
+
+      - name: Call Sample App Endpoint
+        run: |
+          echo "traceId=$(curl localhost:8080/test)" >> $GITHUB_OUTPUT
+
+      - name: Print Daemon Logs
+        run: |
+          sleep 20
+          cat xray-daemon/daemon-logs.log
 
       - name: Verify X-Ray daemon received traces
         run: |
           echo "X-Ray daemon logs:"
-          cat daemon-logs/xray-daemon.log
+          cat xray-daemon/daemon-logs.log
 
           # Check if the daemon received and processed some data
-          if grep -q "sending.*batch" daemon-logs/xray-daemon.log; then
+          if grep -q "sending.*batch" xray-daemon/daemon-logs.log; then
             echo "✅ X-Ray daemon processed trace data (AWS upload errors are expected)"
             exit 0
-          elif grep -q "processor:.*segment" daemon-logs/xray-daemon.log; then
+          elif grep -q "processor:.*segment" xray-daemon/daemon-logs.log; then
             echo "✅ X-Ray daemon processed segment data (AWS upload errors are expected)"
             exit 0
           else
             echo "❌ No evidence of traces being received by X-Ray daemon"
             exit 1
           fi
+
+      # TODO: Steps to publish to PyPI
