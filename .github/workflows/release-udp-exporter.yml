@@ -1,4 +1,4 @@
-name: Build, Test, and Publish ADOT OTLP UDP Exporter
+name: Release ADOT OTLP UDP Exporter
 
 on:
   workflow_dispatch:
