@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_TRACE_LAMBDA_FLAG_MULTIPLE_SERVER
 from amazon.opentelemetry.distro.aws_lambda_span_processor import AwsLambdaSpanProcessor
-from opentelemetry.trace import Span, SpanContext, SpanKind, TraceFlags
+from opentelemetry.trace import Span, SpanContext, SpanKind
 
 
 class TestAwsLambdaSpanProcessor(TestCase):
