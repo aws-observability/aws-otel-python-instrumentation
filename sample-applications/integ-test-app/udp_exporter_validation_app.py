@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask
 
 from amazon.opentelemetry.exporters.otlp.udp import OTLPUdpSpanExporter
 from opentelemetry import trace
@@ -41,7 +41,7 @@ def create_trace():
     success = tracer_provider.force_flush()
     print(f"Force flush {'succeeded' if success else 'failed'}")
 
-    return jsonify({"trace_id": trace_id})
+    return trace_id
 
 
 if __name__ == "__main__":
