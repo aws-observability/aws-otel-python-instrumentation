@@ -16,6 +16,7 @@ from amazon.opentelemetry.distro.attribute_propagating_span_processor_builder im
     AttributePropagatingSpanProcessorBuilder,
 )
 from amazon.opentelemetry.distro.aws_batch_unsampled_span_processor import BatchUnsampledSpanProcessor
+from amazon.opentelemetry.distro.aws_lambda_span_processor import AwsLambdaSpanProcessor
 from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder import (
     AwsMetricAttributesSpanExporterBuilder,
 )
@@ -343,6 +344,7 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource) -> 
     # Export 100% spans and not export Application-Signals metrics if on Lambda.
     if _is_lambda_environment():
         _export_unsampled_span_for_lambda(provider, resource)
+        provider.add_span_processor(AwsLambdaSpanProcessor())
         return
 
     # Construct meterProvider
