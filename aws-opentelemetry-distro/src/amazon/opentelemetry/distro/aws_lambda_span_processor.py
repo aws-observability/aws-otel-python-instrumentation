@@ -4,17 +4,14 @@ from typing import Optional
 
 from typing_extensions import override
 
+from amazon.opentelemetry.distro._aws_attribute_keys import AWS_TRACE_LAMBDA_FLAG_MULTIPLE_SERVER
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
 from opentelemetry.trace import SpanKind
-from amazon.opentelemetry.distro._aws_attribute_keys import AWS_TRACE_LAMBDA_FLAG_MULTIPLE_SERVER
+
 
 class AwsLambdaSpanProcessor(SpanProcessor):
     def __init__(self, instrumentation_names=None):
-        """
-        :param instrumentation_names: A set or list of instrumentation scope names
-            for which we want to mark as SERVER spans if they are INTERNAL.
-        """
         self.instrumentation_names = set(instrumentation_names or ["opentelemetry.instrumentation.flask"])
         self.parent_lambda_span = None
 
@@ -23,9 +20,13 @@ class AwsLambdaSpanProcessor(SpanProcessor):
         scope = getattr(span, "instrumentation_scope", None)
         if span.kind == SpanKind.SERVER and scope.name == "opentelemetry.instrumentation.aws_lambda":
             self.parent_lambda_span = span
-        
-        if span.kind == SpanKind.INTERNAL and scope.name in self.instrumentation_names:
-            span._kind = SpanKind.SERVER
+
+        if (
+            scope.name in self.instrumentation_names
+            and self.parent_lambda_span.get_span_context().span_id == span.parent.span_id
+        ):
+            if span.kind == SpanKind.INTERNAL:
+                span._kind = SpanKind.SERVER
             self.parent_lambda_span.set_attribute(AWS_TRACE_LAMBDA_FLAG_MULTIPLE_SERVER, True)
         return
 
@@ -34,11 +35,10 @@ class AwsLambdaSpanProcessor(SpanProcessor):
         return
 
     @override
-    def force_flush(self, timeout_millis: int = 30000) -> bool:
-        """Flush any buffered data."""
-        return True
-
-    @override
     def shutdown(self) -> None:
-        """Clean up."""
         self.force_flush()
+
+    # pylint: disable=no-self-use
+    @override
+    def force_flush(self, timeout_millis: int = None) -> bool:
+        return True
