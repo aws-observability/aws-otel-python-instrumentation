@@ -23,10 +23,6 @@ _logger: Logger = getLogger(__name__)
 
 class UdpExporter:
     def __init__(self, endpoint: Optional[str] = None):
-        if endpoint is None and "AWS_LAMBDA_FUNCTION_NAME" in os.environ:
-            # If in an AWS Lambda Environment, `AWS_XRAY_DAEMON_ADDRESS` will be defined
-            endpoint = os.environ.get("AWS_XRAY_DAEMON_ADDRESS", DEFAULT_ENDPOINT)
-
         self._endpoint = endpoint or DEFAULT_ENDPOINT
         self._host, self._port = self._parse_endpoint(self._endpoint)
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -61,6 +57,10 @@ class UdpExporter:
 
 class OTLPUdpSpanExporter(SpanExporter):
     def __init__(self, endpoint: Optional[str] = None, sampled: bool = True):
+        if endpoint is None and "AWS_LAMBDA_FUNCTION_NAME" in os.environ:
+            # If in an AWS Lambda Environment, `AWS_XRAY_DAEMON_ADDRESS` will be defined
+            endpoint = os.environ.get("AWS_XRAY_DAEMON_ADDRESS", DEFAULT_ENDPOINT)
+
         self._udp_exporter = UdpExporter(endpoint=endpoint)
         self._sampled = sampled
 
