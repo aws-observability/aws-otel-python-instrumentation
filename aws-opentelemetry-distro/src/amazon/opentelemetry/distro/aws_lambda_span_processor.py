@@ -32,6 +32,7 @@ class AwsLambdaSpanProcessor(SpanProcessor):
 
         return
 
+    # pylint: disable=no-self-use
     @override
     def on_end(self, span: ReadableSpan) -> None:
         return
