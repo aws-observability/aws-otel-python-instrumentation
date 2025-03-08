@@ -57,7 +57,8 @@ def get_ingress_operation(__, span: ReadableSpan) -> str:
     with the first API path parameter" if the default span name is None, UnknownOperation or http.method value.
     """
     operation: str = span.name
-    if _AWS_LAMBDA_FUNCTION_NAME in os.environ:
+    scope = getattr(span, "instrumentation_scope", None)
+    if _AWS_LAMBDA_FUNCTION_NAME in os.environ and scope.name != "opentelemetry.instrumentation.flask":
         operation = os.environ.get(_AWS_LAMBDA_FUNCTION_NAME) + "/FunctionHandler"
     elif should_use_internal_operation(span):
         operation = INTERNAL_OPERATION
