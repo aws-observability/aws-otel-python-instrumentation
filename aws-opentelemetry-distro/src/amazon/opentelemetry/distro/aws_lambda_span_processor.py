@@ -26,7 +26,7 @@ class AwsLambdaSpanProcessor(SpanProcessor):
                 return
 
             parent_scope = getattr(parent_span, "instrumentation_scope", None)
-            if parent_span.kind == SpanKind.SERVER and parent_scope.name == "opentelemetry.instrumentation.aws_lambda":
+            if parent_scope.name == "opentelemetry.instrumentation.aws_lambda":
                 span._kind = SpanKind.SERVER
                 parent_span.set_attribute(AWS_TRACE_LAMBDA_FLAG_MULTIPLE_SERVER, True)
 
