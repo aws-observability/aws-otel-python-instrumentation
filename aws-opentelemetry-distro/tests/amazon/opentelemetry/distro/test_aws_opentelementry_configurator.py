@@ -318,7 +318,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
         os.environ.setdefault("AWS_LAMBDA_FUNCTION_NAME", "myLambdaFunc")
         _customize_span_processors(mock_tracer_provider, Resource.get_empty())
-        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 2)
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 3)
         first_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
         self.assertIsInstance(first_processor, AttributePropagatingSpanProcessor)
         second_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[1].args[0]
