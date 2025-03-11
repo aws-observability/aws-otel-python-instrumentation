@@ -10,6 +10,8 @@ on:
         description: 'Version number for deployment e.g. 0.1.0'
         required: true
         type: string
+env:
+  AWS_DEFAULT_REGION: us-east-1
 
 jobs:
   build-test-publish:
