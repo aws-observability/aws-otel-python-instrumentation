@@ -92,6 +92,7 @@ jobs:
         id: pypi_secrets
         with:
           secret-ids: |
+            PROD_PYPI_TOKEN,${{ secrets.PYPI_PROD_TOKEN_SECRET_ARN }}
             TEST_PYPI_TOKEN,${{ secrets.PYPI_TEST_TOKEN_SECRET_ARN }}
           parse-json-secrets: true
 
@@ -106,3 +107,11 @@ jobs:
           TWINE_PASSWORD: ${{ env.TEST_PYPI_TOKEN_API_TOKEN }}
         run: |
           twine upload --repository testpypi --skip-existing --verbose exporters/aws-otel-otlp-udp-exporter/dist/${{ env.ARTIFACT_NAME }}
+
+      # Publish to prod PyPI
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: '__token__'
+          TWINE_PASSWORD: ${{ env.PROD_PYPI_TOKEN_API_TOKEN }}
+        run: |
+          twine upload --skip-existing --verbose exporters/aws-otel-otlp-udp-exporter/dist/${{ env.ARTIFACT_NAME }}

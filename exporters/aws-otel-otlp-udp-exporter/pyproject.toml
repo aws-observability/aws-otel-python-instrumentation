@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aws-otel-otlp-udp-exporter"
-version = "0.0.1"
+version = "0.1.0"
 description = "OTLP UDP Exporter for OpenTelemetry"
 readme = "README.rst"
 license = "Apache-2.0"
