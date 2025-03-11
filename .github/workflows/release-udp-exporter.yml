@@ -1,6 +1,9 @@
 name: Release ADOT OTLP UDP Exporter
 
 on:
+  push:
+    branches:
+      - "test-pypi"
   workflow_dispatch:
     inputs:
       version:
@@ -74,4 +77,25 @@ jobs:
             exit 1
           fi
 
-      # TODO: Steps to publish to PyPI
+      - name: Configure AWS credentials for PyPI secrets
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_SECRETS_MANAGER }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+
+      - name: Get PyPI secrets
+        uses: aws-actions/aws-secretsmanager-get-secrets@v1
+        id: pypi_secrets
+        with:
+          secret-ids: |
+            TEST_PYPI_TOKEN,${{ secrets.PYPI_TEST_TOKEN_SECRET_ARN }}
+          parse-json-secrets: true
+
+      # The step below publishes to testpypi in order to catch any issues
+      # with the package configuration that would cause a failure to upload to PyPI.
+      - name: Publish to TestPyPI
+        env:
+          TWINE_USERNAME: '__token__'
+          TWINE_PASSWORD: ${{ env.TEST_PYPI_TOKEN_API_TOKEN }}
+        run: |
+          twine upload --repository testpypi --skip-existing --verbose dist/${{ env.ARTIFACT_NAME }}
