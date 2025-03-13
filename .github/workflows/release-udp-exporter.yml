@@ -7,6 +7,13 @@ on:
         description: 'Version number for deployment e.g. 0.1.0'
         required: true
         type: string
+env:
+  AWS_DEFAULT_REGION: us-east-1
+  ARTIFACT_NAME: aws_otel_otlp_udp_exporter-${{ github.event.inputs.version }}-py3-none-any.whl
+
+permissions:
+  id-token: write
+  contents: write
 
 jobs:
   build-test-publish:
@@ -74,4 +81,37 @@ jobs:
             exit 1
           fi
 
-      # TODO: Steps to publish to PyPI
+      - name: Configure AWS credentials for PyPI secrets
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_SECRETS_MANAGER }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+
+      - name: Get PyPI secrets
+        uses: aws-actions/aws-secretsmanager-get-secrets@v1
+        id: pypi_secrets
+        with:
+          secret-ids: |
+            PROD_PYPI_TOKEN,${{ secrets.PYPI_PROD_TOKEN_SECRET_ARN }}
+            TEST_PYPI_TOKEN,${{ secrets.PYPI_TEST_TOKEN_SECRET_ARN }}
+          parse-json-secrets: true
+
+      - name: Install twine
+        run: pip install twine
+
+      # The step below publishes to testpypi in order to catch any issues
+      # with the package configuration that would cause a failure to upload to PyPI.
+      - name: Publish to TestPyPI
+        env:
+          TWINE_USERNAME: '__token__'
+          TWINE_PASSWORD: ${{ env.TEST_PYPI_TOKEN_API_TOKEN }}
+        run: |
+          twine upload --repository testpypi --skip-existing --verbose exporters/aws-otel-otlp-udp-exporter/dist/${{ env.ARTIFACT_NAME }}
+
+      # Publish to prod PyPI
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: '__token__'
+          TWINE_PASSWORD: ${{ env.PROD_PYPI_TOKEN_API_TOKEN }}
+        run: |
+          twine upload --skip-existing --verbose exporters/aws-otel-otlp-udp-exporter/dist/${{ env.ARTIFACT_NAME }}
