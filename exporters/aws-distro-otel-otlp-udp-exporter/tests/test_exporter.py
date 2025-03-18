@@ -6,7 +6,7 @@ import unittest
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from amazon.opentelemetry.exporters.otlp.udp import (
+from amazon.distro.opentelemetry.exporters.otlp.udp import (
     DEFAULT_ENDPOINT,
     FORMAT_OTEL_SAMPLED_TRACES_BINARY_PREFIX,
     FORMAT_OTEL_UNSAMPLED_TRACES_BINARY_PREFIX,
@@ -19,7 +19,7 @@ from opentelemetry.sdk.trace.export import SpanExportResult
 
 class TestUdpExporter(TestCase):
 
-    @patch("amazon.opentelemetry.exporters.otlp.udp.exporter.socket.socket")
+    @patch("amazon.distro.opentelemetry.exporters.otlp.udp.exporter.socket.socket")
     def test_udp_exporter_init_default(self, mock_socket):
         exporter = UdpExporter()
         self.assertEqual(exporter._endpoint, DEFAULT_ENDPOINT)
@@ -28,7 +28,7 @@ class TestUdpExporter(TestCase):
         mock_socket.assert_called_once_with(socket.AF_INET, socket.SOCK_DGRAM)
         mock_socket().setblocking.assert_called_once_with(False)
 
-    @patch("amazon.opentelemetry.exporters.otlp.udp.exporter.socket.socket")
+    @patch("amazon.distro.opentelemetry.exporters.otlp.udp.exporter.socket.socket")
     def test_udp_exporter_init_with_endpoint(self, mock_socket):
         exporter = UdpExporter(endpoint="localhost:5000")
         self.assertNotEqual(exporter._endpoint, DEFAULT_ENDPOINT)
@@ -37,13 +37,13 @@ class TestUdpExporter(TestCase):
         mock_socket.assert_called_once_with(socket.AF_INET, socket.SOCK_DGRAM)
         mock_socket().setblocking.assert_called_once_with(False)
 
-    @patch("amazon.opentelemetry.exporters.otlp.udp.exporter.socket.socket")
+    @patch("amazon.distro.opentelemetry.exporters.otlp.udp.exporter.socket.socket")
     def test_udp_exporter_init_invalid_endpoint(self, mock_socket):
         with self.assertRaises(ValueError):
             UdpExporter(endpoint="invalidEndpoint:port")
 
     # pylint: disable=no-self-use
-    @patch("amazon.opentelemetry.exporters.otlp.udp.exporter.socket.socket")
+    @patch("amazon.distro.opentelemetry.exporters.otlp.udp.exporter.socket.socket")
     def test_send_data(self, mock_socket):
         mock_socket_instance = mock_socket.return_value
         exporter = UdpExporter()
@@ -53,7 +53,7 @@ class TestUdpExporter(TestCase):
         expected_message = PROTOCOL_HEADER + "signal_prefix" + encoded_bytes.decode("utf-8")
         mock_socket_instance.sendto.assert_called_once_with(expected_message.encode("utf-8"), ("127.0.0.1", 2000))
 
-    @patch("amazon.opentelemetry.exporters.otlp.udp.exporter.socket.socket")
+    @patch("amazon.distro.opentelemetry.exporters.otlp.udp.exporter.socket.socket")
     def test_shutdown(self, mock_socket):
         mock_socket_instance = mock_socket.return_value
         exporter = UdpExporter()
@@ -63,8 +63,8 @@ class TestUdpExporter(TestCase):
 
 class TestOTLPUdpSpanExporter(unittest.TestCase):
 
-    @patch("amazon.opentelemetry.exporters.otlp.udp.exporter.encode_spans")
-    @patch("amazon.opentelemetry.exporters.otlp.udp.exporter.UdpExporter")
+    @patch("amazon.distro.opentelemetry.exporters.otlp.udp.exporter.encode_spans")
+    @patch("amazon.distro.opentelemetry.exporters.otlp.udp.exporter.UdpExporter")
     def test_export_unsampled_span(self, mock_udp_exporter, mock_encode_spans):
         mock_udp_exporter_instance = mock_udp_exporter.return_value
         mock_encoded_data = MagicMock()
@@ -76,8 +76,8 @@ class TestOTLPUdpSpanExporter(unittest.TestCase):
         )
         self.assertEqual(result, SpanExportResult.SUCCESS)
 
-    @patch("amazon.opentelemetry.exporters.otlp.udp.exporter.encode_spans")
-    @patch("amazon.opentelemetry.exporters.otlp.udp.exporter.UdpExporter")
+    @patch("amazon.distro.opentelemetry.exporters.otlp.udp.exporter.encode_spans")
+    @patch("amazon.distro.opentelemetry.exporters.otlp.udp.exporter.UdpExporter")
     def test_export_sampled_span(self, mock_udp_exporter, mock_encode_spans):
         mock_udp_exporter_instance = mock_udp_exporter.return_value
         mock_encoded_data = MagicMock()
@@ -89,8 +89,8 @@ class TestOTLPUdpSpanExporter(unittest.TestCase):
         )
         self.assertEqual(result, SpanExportResult.SUCCESS)
 
-    @patch("amazon.opentelemetry.exporters.otlp.udp.exporter.encode_spans")
-    @patch("amazon.opentelemetry.exporters.otlp.udp.exporter.UdpExporter")
+    @patch("amazon.distro.opentelemetry.exporters.otlp.udp.exporter.encode_spans")
+    @patch("amazon.distro.opentelemetry.exporters.otlp.udp.exporter.UdpExporter")
     def test_export_with_exception(self, mock_udp_exporter, mock_encode_spans):
         mock_udp_exporter_instance = mock_udp_exporter.return_value
         mock_encoded_data = MagicMock()
@@ -101,7 +101,7 @@ class TestOTLPUdpSpanExporter(unittest.TestCase):
         self.assertEqual(result, SpanExportResult.FAILURE)
 
     # pylint: disable=no-self-use
-    @patch("amazon.opentelemetry.exporters.otlp.udp.exporter.UdpExporter")
+    @patch("amazon.distro.opentelemetry.exporters.otlp.udp.exporter.UdpExporter")
     def test_shutdown(self, mock_udp_exporter):
         mock_udp_exporter_instance = mock_udp_exporter.return_value
         exporter = OTLPUdpSpanExporter()

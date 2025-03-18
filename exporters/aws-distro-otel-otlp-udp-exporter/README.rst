@@ -6,7 +6,7 @@ Installation
 
 ::
 
-    pip install aws-otel-otlp-udp-exporter
+    pip install aws-distro-otel-otlp-udp-exporter
 
 
 This package provides a UDP exporter for OpenTelemetry.
