@@ -331,7 +331,7 @@ def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> Span
 
 
 def _customize_span_processors(provider: TracerProvider, resource: Resource) -> None:
-    # Export 100% spans and not export Application-Signals metrics if on Lambda.
+    # Add LambdaSpanProcessor to list of processors regardless of application signals.
     if _is_lambda_environment():
         provider.add_span_processor(AwsLambdaSpanProcessor())
 
