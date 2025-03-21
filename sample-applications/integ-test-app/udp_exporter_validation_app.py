@@ -1,6 +1,6 @@
 from flask import Flask
 
-from amazon.opentelemetry.exporters.otlp.udp import OTLPUdpSpanExporter
+from amazon.distro.opentelemetry.exporters.otlp.udp import OTLPUdpSpanExporter
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor

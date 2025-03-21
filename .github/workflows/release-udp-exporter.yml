@@ -9,7 +9,7 @@ on:
         type: string
 env:
   AWS_DEFAULT_REGION: us-east-1
-  ARTIFACT_NAME: aws_otel_otlp_udp_exporter-${{ github.event.inputs.version }}-py3-none-any.whl
+  ARTIFACT_NAME: aws_distro_otel_otlp_udp_exporter-${{ github.event.inputs.version }}-py3-none-any.whl
 
 permissions:
   id-token: write
@@ -32,7 +32,7 @@ jobs:
           pip install hatch pytest flask
 
       - name: Build package
-        working-directory: exporters/aws-otel-otlp-udp-exporter
+        working-directory: exporters/aws-distro-otel-otlp-udp-exporter
         run: hatch build
 
       - name: Download and run X-Ray Daemon
@@ -45,11 +45,11 @@ jobs:
 
       - name: Install UDP Exporter
         run: |
-          pip install ./exporters/aws-otel-otlp-udp-exporter/dist/*.whl
+          pip install ./exporters/aws-distro-otel-otlp-udp-exporter/dist/*.whl
 
       - name: Ensure Unit Tests are passing
         run: |
-          pytest exporters/aws-otel-otlp-udp-exporter/tests/
+          pytest exporters/aws-distro-otel-otlp-udp-exporter/tests/
 
       - name: Run Sample App in Background
         working-directory: sample-applications/integ-test-app
@@ -106,7 +106,7 @@ jobs:
           TWINE_USERNAME: '__token__'
           TWINE_PASSWORD: ${{ env.TEST_PYPI_TOKEN_API_TOKEN }}
         run: |
-          twine upload --repository testpypi --skip-existing --verbose exporters/aws-otel-otlp-udp-exporter/dist/${{ env.ARTIFACT_NAME }}
+          twine upload --repository testpypi --skip-existing --verbose exporters/aws-distro-otel-otlp-udp-exporter/dist/${{ env.ARTIFACT_NAME }}
 
       # Publish to prod PyPI
       - name: Publish to PyPI
@@ -114,4 +114,4 @@ jobs:
           TWINE_USERNAME: '__token__'
           TWINE_PASSWORD: ${{ env.PROD_PYPI_TOKEN_API_TOKEN }}
         run: |
-          twine upload --skip-existing --verbose exporters/aws-otel-otlp-udp-exporter/dist/${{ env.ARTIFACT_NAME }}
+          twine upload --skip-existing --verbose exporters/aws-distro-otel-otlp-udp-exporter/dist/${{ env.ARTIFACT_NAME }}
