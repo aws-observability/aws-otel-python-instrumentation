@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor import AttributePropagatingSpanProcessor
 from amazon.opentelemetry.distro.aws_batch_unsampled_span_processor import BatchUnsampledSpanProcessor
+from amazon.opentelemetry.distro.aws_lambda_span_processor import AwsLambdaSpanProcessor
 from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsMetricAttributesSpanExporter
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     LAMBDA_SPAN_EXPORT_BATCH_SIZE,
@@ -320,10 +321,12 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         _customize_span_processors(mock_tracer_provider, Resource.get_empty())
         self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 3)
         first_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
-        self.assertIsInstance(first_processor, AttributePropagatingSpanProcessor)
+        self.assertIsInstance(first_processor, AwsLambdaSpanProcessor)
         second_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[1].args[0]
-        self.assertIsInstance(second_processor, BatchUnsampledSpanProcessor)
-        self.assertEqual(second_processor.max_export_batch_size, LAMBDA_SPAN_EXPORT_BATCH_SIZE)
+        self.assertIsInstance(second_processor, AttributePropagatingSpanProcessor)
+        third_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[2].args[0]
+        self.assertIsInstance(third_processor, BatchUnsampledSpanProcessor)
+        self.assertEqual(third_processor.max_export_batch_size, LAMBDA_SPAN_EXPORT_BATCH_SIZE)
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
         os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
 
