@@ -18,6 +18,7 @@ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://xray.<AWS_REGION>.amazonaws.com/v1/tr
 # Configure OTLP export protocol
 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 
+OTEL_TRACES_EXPORTER=otlp
 OTEL_METRICS_EXPORTER=none
 OTEL_LOGS_EXPORTER=none
 OTEL_PYTHON_DISTRO=aws_distro
