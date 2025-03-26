@@ -76,7 +76,7 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
     # the same except if the endpoint is an XRay OTLP endpoint, we will sign the request
     # with SigV4 in headers before sending it to the endpoint. Otherwise, we will skip signing.
     def _export(self, serialized_data: bytes):
-        if(self._has_dependencies):
+        if self._has_dependencies:
             request = self.boto_aws_request.AWSRequest(
                 method="POST",
                 url=self._endpoint,
