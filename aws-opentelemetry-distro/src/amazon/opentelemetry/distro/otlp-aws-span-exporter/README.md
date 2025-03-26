@@ -5,7 +5,7 @@ This guide explains how to automatically configure ADOT environment variables fo
 ## Pre-requisites:
 1. Transaction Search must be enabled in order to send spans to the Xray OTLP endpoint. See [this doc](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search-getting-started.html) on how to enable Transaction Search.
 
-2. Ensure the AWS credentials in your application environment has the `xray:PutTraceSegments` action allowed.
+2. Ensure the AWS role in your application environment has [AWSXRayWRiteOnlyAccess](https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AWSXrayWriteOnlyAccess.html) managed policy attached.
 
 ## Environment Variables
 
