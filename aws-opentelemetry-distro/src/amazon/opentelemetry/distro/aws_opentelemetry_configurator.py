@@ -322,7 +322,7 @@ def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> Span
     if is_xray_otlp_endpoint(os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)):
         # TODO: Change this url once doc writer has added a section for using SigV4 without collector
         _logger.info(
-            "Detected using AWS OTLP XRay Endpoint. Please ensure you've followed the documentation to properly setup your environment to export traces to XRay. See: https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-OpenTelemetry-Sections.html"
+            "Detected using AWS OTLP XRay Endpoint."
         )
 
         if isinstance(span_exporter, OTLPSpanExporter):
@@ -330,7 +330,7 @@ def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> Span
         
         else:
             _logger.info(
-                "Improper configuration see: https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-OpenTelemetry-Sections.html"
+                "Improper configuration see: please export/set OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf and OTEL_TRACES_EXPORTER=otlp"
             )
 
     if not _is_application_signals_enabled():

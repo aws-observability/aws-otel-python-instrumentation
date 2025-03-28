@@ -95,6 +95,6 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
                 except Exception as signing_error:  # pylint: disable=broad-except
                     _logger.error("Failed to sign request: %s", signing_error)
         else:
-            _logger.error("SigV4 authentication headers not injected to export spans to %s endpoint.", self._endpoint)
+            _logger.debug("botocore is not installed. Failed to sign request to export traces to: %s", self._endpoint)
 
         return super()._export(serialized_data)
