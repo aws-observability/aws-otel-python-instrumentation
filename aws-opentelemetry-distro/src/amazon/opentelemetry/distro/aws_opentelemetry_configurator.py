@@ -321,13 +321,11 @@ def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> Span
 
     if is_xray_otlp_endpoint(os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)):
         # TODO: Change this url once doc writer has added a section for using SigV4 without collector
-        _logger.info(
-            "Detected using AWS OTLP XRay Endpoint."
-        )
+        _logger.info("Detected using AWS OTLP XRay Endpoint.")
 
         if isinstance(span_exporter, OTLPSpanExporter):
             span_exporter = OTLPAwsSpanExporter(endpoint=os.getenv(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT))
-        
+
         else:
             _logger.warning(
                 "Improper configuration see: please export/set OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf and OTEL_TRACES_EXPORTER=otlp"
