@@ -319,10 +319,18 @@ def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> Span
             traces_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
             span_exporter = OTLPUdpSpanExporter(endpoint=traces_endpoint)
 
-    if isinstance(span_exporter, OTLPSpanExporter) and is_xray_otlp_endpoint(
-        os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
-    ):
-        span_exporter = OTLPAwsSpanExporter(endpoint=os.getenv(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT))
+    if is_xray_otlp_endpoint(os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)):
+        # TODO: Change this url once doc writer has added a section for using SigV4 without collector
+        _logger.info("Detected using AWS OTLP XRay Endpoint.")
+
+        if isinstance(span_exporter, OTLPSpanExporter):
+            span_exporter = OTLPAwsSpanExporter(endpoint=os.getenv(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT))
+
+        else:
+            _logger.warning(
+                "Improper configuration see: please export/set "
+                "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf and OTEL_TRACES_EXPORTER=otlp"
+            )
 
     if not _is_application_signals_enabled():
         return span_exporter
@@ -456,7 +464,6 @@ def _is_lambda_environment():
 
 def is_xray_otlp_endpoint(otlp_endpoint: str = None) -> bool:
     """Is the given endpoint the XRay OTLP endpoint?"""
-
     if not otlp_endpoint:
         return False
 
