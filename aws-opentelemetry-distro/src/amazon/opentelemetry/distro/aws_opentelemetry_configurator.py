@@ -329,7 +329,7 @@ def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> Span
             span_exporter = OTLPAwsSpanExporter(endpoint=os.getenv(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT))
         
         else:
-            _logger.info(
+            _logger.warning(
                 "Improper configuration see: please export/set OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf and OTEL_TRACES_EXPORTER=otlp"
             )
 
