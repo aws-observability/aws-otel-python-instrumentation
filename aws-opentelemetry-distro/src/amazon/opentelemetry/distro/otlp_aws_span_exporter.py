@@ -35,7 +35,7 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
     ):
 
         self._aws_region = None
-
+        self._has_required_dependencies = False
         # Requires botocore to be installed to sign the headers. However,
         # some users might not need to use this exporter. In order not conflict
         # with existing behavior, we check for botocore before initializing this exporter.
@@ -52,6 +52,7 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
             # The only usecase for this class would be for ADOT Python Auto Instrumentation and that already validates
             # the endpoint to be an XRay OTLP endpoint.
             self._aws_region = endpoint.split(".")[1]
+            self._has_required_dependencies = True
 
         else:
             _logger.error(
@@ -74,23 +75,26 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
     # the same except if the endpoint is an XRay OTLP endpoint, we will sign the request
     # with SigV4 in headers before sending it to the endpoint. Otherwise, we will skip signing.
     def _export(self, serialized_data: bytes):
-        request = self.boto_aws_request.AWSRequest(
-            method="POST",
-            url=self._endpoint,
-            data=serialized_data,
-            headers={"Content-Type": "application/x-protobuf"},
-        )
+        if self._has_required_dependencies:
+            request = self.boto_aws_request.AWSRequest(
+                method="POST",
+                url=self._endpoint,
+                data=serialized_data,
+                headers={"Content-Type": "application/x-protobuf"},
+            )
 
-        credentials = self.boto_session.get_credentials()
+            credentials = self.boto_session.get_credentials()
 
-        if credentials is not None:
-            signer = self.boto_auth.SigV4Auth(credentials, AWS_SERVICE, self._aws_region)
+            if credentials is not None:
+                signer = self.boto_auth.SigV4Auth(credentials, AWS_SERVICE, self._aws_region)
 
-            try:
-                signer.add_auth(request)
-                self._session.headers.update(dict(request.headers))
+                try:
+                    signer.add_auth(request)
+                    self._session.headers.update(dict(request.headers))
 
-            except Exception as signing_error:  # pylint: disable=broad-except
-                _logger.error("Failed to sign request: %s", signing_error)
+                except Exception as signing_error:  # pylint: disable=broad-except
+                    _logger.error("Failed to sign request: %s", signing_error)
+        else:
+            _logger.debug("botocore is not installed. Failed to sign request to export traces to: %s", self._endpoint)
 
         return super()._export(serialized_data)
