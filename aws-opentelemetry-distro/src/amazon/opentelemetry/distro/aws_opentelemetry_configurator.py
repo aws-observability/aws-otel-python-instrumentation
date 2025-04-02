@@ -20,9 +20,9 @@ from amazon.opentelemetry.distro.aws_lambda_span_processor import AwsLambdaSpanP
 from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder import (
     AwsMetricAttributesSpanExporterBuilder,
 )
+from amazon.opentelemetry.distro.aws_span_exporter.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
-from amazon.opentelemetry.distro.aws_span_exporter.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
 from amazon.opentelemetry.distro.scope_based_filtering_view import ScopeBasedRetainingView
