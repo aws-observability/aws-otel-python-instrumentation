@@ -186,6 +186,9 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: layer.zip
+      - name: Rename layer file
+        run: |
+          cp aws-opentelemetry-python-layer.zip layer.zip
       - name: Get commit hash
         id: commit
         run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
