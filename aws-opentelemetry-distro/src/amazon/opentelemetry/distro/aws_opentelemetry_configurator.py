@@ -349,10 +349,6 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource) -> 
     # Construct and set local and remote attributes span processor
     provider.add_span_processor(AttributePropagatingSpanProcessorBuilder().build())
 
-    # Do not export Application-Signals metrics if it's XRay OTLP endpoint
-    if is_xray_otlp_endpoint():
-        return
-
     # Export 100% spans and not export Application-Signals metrics if on Lambda.
     if _is_lambda_environment():
         _export_unsampled_span_for_lambda(provider, resource)
