@@ -46,7 +46,7 @@ jobs:
   # DEFAULT SETTING: {Python Version}, EC2, AMD64, AL2
   #
 
-  default-v3-8-amd64:
+  default-v38-amd64:
     needs: [ upload-main-build ]
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
     secrets: inherit
@@ -57,7 +57,7 @@ jobs:
       cpu-architecture: 'x86_64'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
-  default-v3-9-amd64:
+  default-v39-amd64:
     needs: [ upload-main-build ]
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
     secrets: inherit
@@ -68,7 +68,7 @@ jobs:
       cpu-architecture: 'x86_64'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
-  default-v3-10-amd64:
+  default-v310-amd64:
     needs: [ upload-main-build ]
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
     secrets: inherit
@@ -79,7 +79,7 @@ jobs:
       cpu-architecture: 'x86_64'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
-  default-v3-11-amd64:
+  default-v311-amd64:
     needs: [ upload-main-build ]
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
     secrets: inherit
@@ -90,7 +90,7 @@ jobs:
       cpu-architecture: 'x86_64'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
-  default-v3-12-amd64:
+  default-v312-amd64:
     needs: [ upload-main-build ]
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
     secrets: inherit
@@ -106,7 +106,7 @@ jobs:
   # DEFAULT SETTING: {Python Version}, EKS, AMD64, AL2
   #
 
-  eks-v3-8-amd64:
+  eks-v38-amd64:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
@@ -116,9 +116,9 @@ jobs:
       caller-workflow-name: 'main-build'
       python-version: '3.8'
 
-  eks-v3-9-amd64:
+  eks-v39-amd64:
     if: ${{ always() }}
-    needs: eks-v3-8-amd64
+    needs: eks-v38-amd64
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
@@ -128,9 +128,9 @@ jobs:
       caller-workflow-name: 'main-build'
       python-version: '3.9'
 
-  eks-v3-10-amd64:
+  eks-v310-amd64:
     if: ${{ always() }}
-    needs: eks-v3-9-amd64
+    needs: eks-v39-amd64
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
@@ -140,9 +140,9 @@ jobs:
       caller-workflow-name: 'main-build'
       python-version: '3.10'
 
-  eks-v3-11-amd64:
+  eks-v311-amd64:
     if: ${{ always() }}
-    needs: eks-v3-10-amd64
+    needs: eks-v310-amd64
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
@@ -152,9 +152,9 @@ jobs:
       caller-workflow-name: 'main-build'
       python-version: '3.11'
 
-  eks-v3-12-amd64:
+  eks-v312-amd64:
     if: ${{ always() }}
-    needs: eks-v3-11-amd64
+    needs: eks-v311-amd64
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
@@ -169,7 +169,7 @@ jobs:
   # DEFAULT SETTING: Python 3.9, {Platform}, AMD64, AL2
   #
 
-  asg-v3-9-amd64:
+  asg-v39-amd64:
     needs: [ upload-main-build ]
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-asg-test.yml@main
     secrets: inherit
@@ -184,7 +184,7 @@ jobs:
   # DEFAULT SETTING: Python 3.10, {Platform}, AMD64, AL2
   #
 
-  k8s-v3-10-amd64:
+  k8s-v310-amd64:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-k8s-test.yml@main
     secrets: inherit
     with:
@@ -194,7 +194,7 @@ jobs:
       python-version: '3.10'
 
 
-  ecs-v3-10-amd64:
+  ecs-v310-amd64:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ecs-test.yml@main
     secrets: inherit
     with:
@@ -208,7 +208,7 @@ jobs:
   # DEFAULT SETTING: Python 3.9, EC2, {CPU Architecture}, AL2
   #
 
-  default-v3-9-arm64:
+  default-v39-arm64:
     needs: [ upload-main-build ]
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
     secrets: inherit
