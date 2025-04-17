@@ -1,10 +1,10 @@
-# AWS Lambda Application Signals Support
+# AWS Lambda Layer for OpenTelemetry Python
 
-This folder provides support for **Application Signals** in AWS Lambda environments. You can explore this repository to learn how to build a Lambda layer for AWS Python Runtimes from scratch in your AWS account. Alternatively, you can directly visit the AWS documentation, [Enable Application Signals on Lambda functions](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Application-Signals-Enable-Lambda.html), and use the AWS-managed Lambda layers we provide.
+This folder provides OpenTelemetry Python support for AWS Lambda. You can explore this repository to learn how to build a Lambda layer for AWS Python Runtimes from scratch in your AWS account. Alternatively, you can directly visit the AWS documentation, [Enable Application Signals on Lambda functions](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Application-Signals-Enable-Lambda.html), and use the AWS-managed Lambda layers we provide.
 
 ## Features
 
-- Supports Application Signals, including traces and metrics, for AWS Lambda Python Runtimes.
+- Supports traces, metrics, logs and AWS Application Signals for AWS Lambda Python Runtimes.
 - Automates the deployment process, including the creation of the Application Python Lambda Layer and a sample Lambda function.
 
 ## Prerequisites
