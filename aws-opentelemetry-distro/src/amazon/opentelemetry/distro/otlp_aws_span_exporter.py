@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import logging
+import os
 from typing import Dict, Optional
 
 import requests
@@ -10,6 +11,8 @@ from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
 AWS_SERVICE = "xray"
+AWS_CLOUDWATCH_LOG_GROUP_ENV = "AWS_CLOUDWATCH_LOG_GROUP"
+AWS_CLOUDWATCH_LOG_STREAM_ENV = "AWS_CLOUDWATCH_LOG_STREAM"
 _logger = logging.getLogger(__name__)
 
 
@@ -82,6 +85,18 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
                 data=serialized_data,
                 headers={"Content-Type": "application/x-protobuf"},
             )
+
+            # Add CloudWatch Log Group and Log Stream headers if configured
+            cloudwatch_log_group = os.environ.get(AWS_CLOUDWATCH_LOG_GROUP_ENV)
+            cloudwatch_log_stream = os.environ.get(AWS_CLOUDWATCH_LOG_STREAM_ENV)
+
+            if cloudwatch_log_group:
+                request.headers["x-aws-log-group"] = cloudwatch_log_group
+                _logger.debug("Adding CloudWatch Log Group header: %s", cloudwatch_log_group)
+
+            if cloudwatch_log_stream:
+                request.headers["x-aws-log-stream"] = cloudwatch_log_stream
+                _logger.debug("Adding CloudWatch Log Stream header: %s", cloudwatch_log_stream)
 
             credentials = self.boto_session.get_credentials()
 

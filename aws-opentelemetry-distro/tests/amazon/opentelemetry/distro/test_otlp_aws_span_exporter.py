@@ -26,6 +26,8 @@ CONTENT_TYPE = "application/x-protobuf"
 AUTHORIZATION_HEADER = "Authorization"
 X_AMZ_DATE_HEADER = "X-Amz-Date"
 X_AMZ_SECURITY_TOKEN_HEADER = "X-Amz-Security-Token"
+AWS_CLOUDWATCH_LOG_GROUP_ENV = "AWS_CLOUDWATCH_LOG_GROUP"
+AWS_CLOUDWATCH_LOG_STREAM_ENV = "AWS_CLOUDWATCH_LOG_STREAM"
 
 
 class TestAwsSpanExporter(TestCase):
@@ -170,6 +172,111 @@ class TestAwsSpanExporter(TestCase):
         self.assertEqual(actual_headers[AUTHORIZATION_HEADER], self.expected_auth_header)
         self.assertEqual(actual_headers[X_AMZ_DATE_HEADER], self.expected_auth_x_amz_date)
         self.assertEqual(actual_headers[X_AMZ_SECURITY_TOKEN_HEADER], self.expected_auth_security_token)
+
+    @patch("botocore.session.Session")
+    @patch("requests.Session")
+    @patch("botocore.auth.SigV4Auth.add_auth")
+    @patch.dict(os.environ, {
+        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: OTLP_XRAY_ENDPOINT,
+        AWS_CLOUDWATCH_LOG_GROUP_ENV: "my-log-group",
+        AWS_CLOUDWATCH_LOG_STREAM_ENV: "my-log-stream"
+    }, clear=True)
+    def test_sigv4_exporter_export_adds_cloudwatch_headers(
+        self, mock_sigv4_auth, requests_posts_mock, botocore_mock
+    ):
+        """Tests that CloudWatch Log Group and Log Stream headers are added when environment variables are set."""
+        # Setting the exporter resopnse
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        type(mock_response).ok = PropertyMock(return_value=True)
+
+        # Setting the request session headers
+        mock_session = MagicMock()
+        mock_session.headers = {"User-Agent": USER_AGENT, "Content-Type": CONTENT_TYPE}
+        requests_posts_mock.return_value = mock_session
+        mock_session.post.return_value = mock_response
+
+        mock_botocore_session = MagicMock()
+        botocore_mock.return_value = mock_botocore_session
+        mock_botocore_session.get_credentials.return_value = Credentials(
+            access_key="test_key", secret_key="test_secret", token="test_token"
+        )
+
+        # Mock for inspecting request headers before SigV4 signing
+        original_mock_add_auth = self.mock_add_auth
+        request_headers = {}
+
+        def extended_mock_add_auth(request):
+            # Save headers for inspection before they're modified by SigV4
+            nonlocal request_headers
+            request_headers = dict(request.headers)
+            # Call the original mock
+            original_mock_add_auth(request)
+
+        mock_sigv4_auth.side_effect = extended_mock_add_auth
+
+        # Initialize and call exporter
+        exporter = OTLPAwsSpanExporter(endpoint=OTLP_XRAY_ENDPOINT)
+        exporter.export(self.testing_spans)
+
+        # Verify SigV4 auth was called
+        mock_sigv4_auth.assert_called_once()
+
+        # Check that CloudWatch headers were added to the request before signing
+        self.assertEqual(request_headers.get("x-aws-log-group"), "my-log-group")
+        self.assertEqual(request_headers.get("x-aws-log-stream"), "my-log-stream")
+
+    @patch("botocore.session.Session")
+    @patch("requests.Session")
+    @patch("botocore.auth.SigV4Auth.add_auth")
+    @patch.dict(os.environ, {
+        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: OTLP_XRAY_ENDPOINT,
+        AWS_CLOUDWATCH_LOG_GROUP_ENV: "my-log-group"
+    }, clear=True)
+    def test_sigv4_exporter_export_adds_only_log_group_header(
+        self, mock_sigv4_auth, requests_posts_mock, botocore_mock
+    ):
+        """Tests that only CloudWatch Log Group header is added when only that environment variable is set."""
+        # Setting the exporter response
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        type(mock_response).ok = PropertyMock(return_value=True)
+
+        # Setting the request session headers
+        mock_session = MagicMock()
+        mock_session.headers = {"User-Agent": USER_AGENT, "Content-Type": CONTENT_TYPE}
+        requests_posts_mock.return_value = mock_session
+        mock_session.post.return_value = mock_response
+
+        mock_botocore_session = MagicMock()
+        botocore_mock.return_value = mock_botocore_session
+        mock_botocore_session.get_credentials.return_value = Credentials(
+            access_key="test_key", secret_key="test_secret", token="test_token"
+        )
+
+        # Mock for inspecting request headers before SigV4 signing
+        original_mock_add_auth = self.mock_add_auth
+        request_headers = {}
+
+        def extended_mock_add_auth(request):
+            # Save headers for inspection before they're modified by SigV4
+            nonlocal request_headers
+            request_headers = dict(request.headers)
+            # Call the original mock
+            original_mock_add_auth(request)
+
+        mock_sigv4_auth.side_effect = extended_mock_add_auth
+
+        # Initialize and call exporter
+        exporter = OTLPAwsSpanExporter(endpoint=OTLP_XRAY_ENDPOINT)
+        exporter.export(self.testing_spans)
+
+        # Verify SigV4 auth was called
+        mock_sigv4_auth.assert_called_once()
+
+        # Check that only CloudWatch Log Group header was added
+        self.assertEqual(request_headers.get("x-aws-log-group"), "my-log-group")
+        self.assertNotIn("x-aws-log-stream", request_headers)
 
     def validate_exporter_extends_http_span_exporter(self, exporter, endpoint):
         self.assertIsInstance(exporter, OTLPSpanExporter)
