@@ -33,7 +33,7 @@ dependencies = [
   "opentelemetry-propagator-jaeger == 1.32.1",
   "opentelemetry-exporter-otlp-proto-common == 1.32.1",
   "opentelemetry-sdk-extension-aws == 2.0.2",
-  "opentelemetry-propagator-aws-xray == 1.0.1",
+  "opentelemetry-propagator-aws-xray == 1.0.2",
   "opentelemetry-distro == 0.53b1",
   "opentelemetry-propagator-ot-trace == 0.53b1",
   "opentelemetry-instrumentation == 0.53b1",
