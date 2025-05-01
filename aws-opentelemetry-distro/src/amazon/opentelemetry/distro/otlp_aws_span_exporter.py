@@ -119,19 +119,24 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
         return super().export(modified_spans)
 
     def _should_offload(self, key):
-        """Determine if LLO based on the attribute key"""
+        """Determine if LLO based on the attribute key. Strict matching is enforced as to not introduce unintended behavior."""
         exact_match_patterns = [
             "traceloop.entity.input",
-            "traceloop.entity.output"
+            "traceloop.entity.output",
+            "message.content",
+            "input.value",
+            "output.value",
         ]
 
         regex_match_patterns = [
             r"^gen_ai\.prompt\.\d+\.content$",
-            r"^gen_ai\.completion\.\d+\.content$"
+            r"^gen_ai\.completion\.\d+\.content$",
+            r"^llm.input_messages\.\d+\.message.content$",
+            r"^llm.output_messages\.\d+\.message.content$",
         ]
 
         return (
-            any(pattern in key for pattern in exact_match_patterns) or
+            any(pattern == key for pattern in exact_match_patterns) or
             any(re.match(pattern, key) for pattern in regex_match_patterns)
         )
 
