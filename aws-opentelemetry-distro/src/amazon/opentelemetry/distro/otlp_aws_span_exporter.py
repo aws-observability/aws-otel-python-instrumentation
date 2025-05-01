@@ -3,6 +3,7 @@
 import logging
 from typing import Dict, Optional, Sequence
 
+import re
 import requests
 
 from amazon.opentelemetry.distro._utils import is_installed
@@ -119,11 +120,20 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
 
     def _should_offload(self, key):
         """Determine if LLO based on the attribute key"""
-        llo_attributes = [
-            "traceloop.entity.input", "traceloop.entity.output"
+        exact_match_patterns = [
+            "traceloop.entity.input",
+            "traceloop.entity.output"
         ]
 
-        return any(pattern in key for pattern in llo_attributes)
+        regex_match_patterns = [
+            r"^gen_ai\.prompt\.\d+\.content$",
+            r"^gen_ai\.completion\.\d+\.content$"
+        ]
+
+        return (
+            any(pattern in key for pattern in exact_match_patterns) or
+            any(re.match(pattern, key) for pattern in regex_match_patterns)
+        )
 
     # Overrides upstream's private implementation of _export. All behaviors are
     # the same except if the endpoint is an XRay OTLP endpoint, we will sign the request
