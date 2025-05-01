@@ -1,13 +1,17 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, Sequence
 
 import requests
 
 from amazon.opentelemetry.distro._utils import is_installed
+from amazon.opentelemetry.distro.llo_sender_client import LLOSenderClient
+from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.sdk.trace.export import SpanExportResult
 
 AWS_SERVICE = "xray"
 _logger = logging.getLogger(__name__)
@@ -36,6 +40,7 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
 
         self._aws_region = None
         self._has_required_dependencies = False
+        self._llo_sender_client = LLOSenderClient()
         # Requires botocore to be installed to sign the headers. However,
         # some users might not need to use this exporter. In order not conflict
         # with existing behavior, we check for botocore before initializing this exporter.
@@ -70,6 +75,55 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
             compression=compression,
             session=rsession,
         )
+
+    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        modified_spans = []
+
+        for span in spans:
+            updated_attributes = {}
+
+            # Copy all original attributes and handle LLO data
+            for key, value in span.attributes.items():
+                if self._should_offload(key):
+                    metadata = {
+                        "trace_id": format(span.context.trace_id, 'x'),
+                        "span_id": format(span.context.span_id, 'x'),
+                        "attribute_name": key,
+                        "span_name": span.name
+                    }
+
+                    # Get S3 pointer from LLOSenderClient
+                    s3_pointer = self._llo_sender_client.upload(value, metadata)
+
+                    # Store the S3 pointer instead of original value to trim span
+                    updated_attributes[key] = s3_pointer
+                else:
+                    # Keep original value if it is not LLO
+                    updated_attributes[key] = value
+
+            # Create a new span with updated attributes
+            if isinstance(span.attributes, BoundedAttributes):
+                span._attributes = BoundedAttributes(
+                    maxlen=span.attributes.maxlen,
+                    attributes=updated_attributes,
+                    immutable=span.attributes._immutable,
+                    max_value_len=span.attributes.max_value_len
+                )
+            else:
+                span._attributes = updated_attributes
+
+            modified_spans.append(span)
+
+        # Export the modified spans
+        return super().export(modified_spans)
+
+    def _should_offload(self, key):
+        """Determine if LLO based on the attribute key"""
+        llo_attributes = [
+            "traceloop.entity.input", "traceloop.entity.output"
+        ]
+
+        return any(pattern in key for pattern in llo_attributes)
 
     # Overrides upstream's private implementation of _export. All behaviors are
     # the same except if the endpoint is an XRay OTLP endpoint, we will sign the request
