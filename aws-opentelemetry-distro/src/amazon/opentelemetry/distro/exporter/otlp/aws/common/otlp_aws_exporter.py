@@ -1,3 +1,6 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 import logging
 from abc import ABC, abstractmethod
 from typing import Optional
@@ -10,6 +13,11 @@ _logger = logging.getLogger(__name__)
 
 
 class OTLPBaseAwsExporter(ABC):
+    """
+    Abstract base class providing shared functionality for AWS (OTLP) exporters authenticated with
+    Sigv4.
+    """
+
     def __init__(
         self,
         endpoint: Optional[str] = None,
@@ -49,7 +57,12 @@ class OTLPBaseAwsExporter(ABC):
     def get_service(self):
         pass
 
-    def sigv4_auth(self, serialized_data):
+    def inject_sigv4_auth(self, serialized_data):
+        """
+        Injects Sigv4 authentication headers to this exporter's session object.
+        Does nothing if obtaining or signing the credentials fails.
+        """
+
         if self._has_required_dependencies:
             request = self._boto_aws_request.AWSRequest(
                 method="POST",

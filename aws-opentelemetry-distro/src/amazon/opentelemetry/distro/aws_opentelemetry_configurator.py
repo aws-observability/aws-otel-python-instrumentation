@@ -28,6 +28,7 @@ from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayR
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
 from amazon.opentelemetry.distro.scope_based_filtering_view import ScopeBasedRetainingView
 from opentelemetry._logs import set_logger_provider
+from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.metrics import set_meter_provider
@@ -89,7 +90,9 @@ SYSTEM_METRICS_INSTRUMENTATION_SCOPE_NAME = "opentelemetry.instrumentation.syste
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
 
-XRAY_OTLP_ENDPOINT_PATTERN = r"https://xray\.([a-z0-9-]+)\.amazonaws\.com/v1/traces$"
+AWS_TRACES_OTLP_ENDPOINT_PATTERN = r"https://xray\.([a-z0-9-]+)\.amazonaws\.com/v1/traces$"
+AWS_LOGS_OTLP_ENDPOINT_PATTERN = r"https://logs\.([a-z0-9-]+)\.amazonaws\.com/v1/logs$"
+
 # UDP package size is not larger than 64KB
 LAMBDA_SPAN_EXPORT_BATCH_SIZE = 10
 
@@ -174,7 +177,7 @@ def _init_logging(
     set_logger_provider(provider)
 
     for _, exporter_class in exporters.items():
-        exporter_args = {}
+        exporter_args: Dict[str, any] = {}
         log_exporter = _customize_logs_exporter(exporter_class(**exporter_args), resource)
         provider.add_log_record_processor(BatchLogRecordProcessor(exporter=log_exporter))
 
@@ -200,7 +203,7 @@ def _init_tracing(
     for _, exporter_class in exporters.items():
         exporter_args: Dict[str, any] = {}
         span_exporter: SpanExporter = exporter_class(**exporter_args)
-        span_exporter = _customize_exporter(span_exporter, resource)
+        span_exporter = _customize_span_exporter(span_exporter, resource)
         trace_provider.add_span_processor(
             BatchSpanProcessor(span_exporter=span_exporter, max_export_batch_size=_span_export_batch_size())
         )
@@ -335,15 +338,14 @@ def _customize_sampler(sampler: Sampler) -> Sampler:
     return AlwaysRecordSampler(sampler)
 
 
-def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> SpanExporter:
+def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) -> SpanExporter:
     if _is_lambda_environment():
         # Override OTLP http default endpoint to UDP
         if isinstance(span_exporter, OTLPSpanExporter) and os.getenv(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT) is None:
             traces_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
             span_exporter = OTLPUdpSpanExporter(endpoint=traces_endpoint)
 
-    if is_xray_otlp_endpoint(os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)):
-        # TODO: Change this url once doc writer has added a section for using SigV4 without collector
+    if is_aws_otlp_endpoint(os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT), "xray"):
         _logger.info("Detected using AWS OTLP XRay Endpoint.")
 
         if isinstance(span_exporter, OTLPSpanExporter):
@@ -362,7 +364,13 @@ def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> Span
 
 
 def _customize_logs_exporter(log_exporter: LogExporter, resource: Resource) -> LogExporter:
-    return OTLPAwsLogExporter(endpoint=os.getenv(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT))
+    if is_aws_otlp_endpoint(os.environ.get(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT), "logs"):
+        _logger.info("Detected using AWS OTLP Logs Endpoint.")
+
+        if isinstance(log_exporter, OTLPLogExporter):
+            return OTLPAwsLogExporter(endpoint=os.getenv(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT))
+
+    return log_exporter
 
 
 def _customize_span_processors(provider: TracerProvider, resource: Resource) -> None:
@@ -485,12 +493,15 @@ def _is_lambda_environment():
     return AWS_LAMBDA_FUNCTION_NAME_CONFIG in os.environ
 
 
-def is_xray_otlp_endpoint(otlp_endpoint: str = None) -> bool:
-    """Is the given endpoint the XRay OTLP endpoint?"""
+def is_aws_otlp_endpoint(otlp_endpoint: str = None, service: str = "xray") -> bool:
+    """Is the given endpoint an AWS OTLP endpoint?"""
+
+    pattern = AWS_TRACES_OTLP_ENDPOINT_PATTERN if service == "xray" else AWS_LOGS_OTLP_ENDPOINT_PATTERN
+
     if not otlp_endpoint:
         return False
 
-    return bool(re.match(XRAY_OTLP_ENDPOINT_PATTERN, otlp_endpoint.lower()))
+    return bool(re.match(pattern, otlp_endpoint.lower()))
 
 
 def _get_metric_export_interval():
