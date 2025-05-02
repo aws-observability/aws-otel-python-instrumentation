@@ -11,7 +11,7 @@ from amazon.opentelemetry.distro.llo_sender_client import LLOSenderClient
 from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.sdk.trace import ReadableSpan, Event
 from opentelemetry.sdk.trace.export import SpanExportResult
 
 AWS_SERVICE = "xray"
@@ -81,6 +81,7 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
         modified_spans = []
 
         for span in spans:
+            # Process span attributes
             updated_attributes = {}
 
             # Copy all original attributes and handle LLO data
@@ -102,7 +103,7 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
                     # Keep original value if it is not LLO
                     updated_attributes[key] = value
 
-            # Create a new span with updated attributes
+            # Update span attributes
             if isinstance(span.attributes, BoundedAttributes):
                 span._attributes = BoundedAttributes(
                     maxlen=span.attributes.maxlen,
@@ -112,6 +113,57 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
                 )
             else:
                 span._attributes = updated_attributes
+
+            # Process span events
+            if span.events:
+                updated_events = []
+
+                for event in span.events:
+                    # Check if this event has any attributes to process
+                    if not event.attributes:
+                        updated_events.append(event) # Keep the original event
+                        continue
+
+                    # Process event attributes for LLO content
+                    updated_event_attributes = {}
+                    need_to_update = False
+
+                    for key, value in event.attributes.items():
+                        if self._should_offload(key):
+                            metadata = {
+                                "trace_id": format(span.context.trace_id, 'x'),
+                                "span_id": format(span.context.span_id, 'x'),
+                                "attribute_name": key,
+                                "event_name": event.name,
+                                "event_time": str(event.timestamp)
+                            }
+
+                            s3_pointer = self._llo_sender_client.upload(value, metadata)
+                            updated_event_attributes[key] = s3_pointer
+                            need_to_update = True
+                        else:
+                            updated_event_attributes[key] = value
+
+                    if need_to_update:
+                        # Create new Event with the updated attributes
+                        limit = None
+                        if isinstance(event.attributes, BoundedAttributes):
+                            limit = event.attributes.maxlen
+
+                        updated_event = Event(
+                            name=event.name,
+                            attributes=updated_event_attributes,
+                            timestamp=event.timestamp,
+                            limit=limit
+                        )
+
+                        updated_events.append(updated_event)
+                    else:
+                        # Keep the original event
+                        updated_events.append(event)
+
+                # Update the span's events with processed events
+                span._events = updated_events
 
             modified_spans.append(span)
 
@@ -126,6 +178,9 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
             "message.content",
             "input.value",
             "output.value",
+            "gen_ai.prompt",
+            "gen_ai.completion",
+            "gen_ai.content.revised_prompt",
         ]
 
         regex_match_patterns = [
