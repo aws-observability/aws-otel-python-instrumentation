@@ -3,7 +3,7 @@
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import os
 import re
-from logging import Logger, getLogger
+from logging import NOTSET, Logger, getLogger
 from typing import ClassVar, Dict, List, Type, Union
 
 from importlib_metadata import version
@@ -21,11 +21,13 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
+from amazon.opentelemetry.distro.otlp_aws_logs_exporter import OTLPAwsLogExporter
 from amazon.opentelemetry.distro.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
 from amazon.opentelemetry.distro.scope_based_filtering_view import ScopeBasedRetainingView
+from opentelemetry._logs import set_logger_provider
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.metrics import set_meter_provider
@@ -36,9 +38,10 @@ from opentelemetry.sdk._configuration import (
     _import_exporters,
     _import_id_generator,
     _import_sampler,
-    _init_logging,
     _OTelSDKConfigurator,
 )
+from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, LogExporter
 from opentelemetry.sdk.environment_variables import (
     _OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED,
     OTEL_EXPORTER_OTLP_METRICS_PROTOCOL,
@@ -84,6 +87,7 @@ AWS_XRAY_DAEMON_ADDRESS_CONFIG = "AWS_XRAY_DAEMON_ADDRESS"
 OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED_CONFIG = "OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED"
 SYSTEM_METRICS_INSTRUMENTATION_SCOPE_NAME = "opentelemetry.instrumentation.system_metrics"
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
+OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
 XRAY_OTLP_ENDPOINT_PATTERN = r"https://xray\.([a-z0-9-]+)\.amazonaws\.com/v1/traces$"
 # UDP package size is not larger than 64KB
 LAMBDA_SPAN_EXPORT_BATCH_SIZE = 10
@@ -158,6 +162,27 @@ def _initialize_components():
     logging_enabled = os.getenv(_OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED, "false")
     if logging_enabled.strip().lower() == "true":
         _init_logging(log_exporters, resource)
+
+
+def _init_logging(
+    exporters: Dict[str, Type[LogExporter]],
+    resource: Resource = None,
+):
+    provider = LoggerProvider(resource=resource)
+    set_logger_provider(provider)
+
+    for _, exporter_class in exporters.items():
+        exporter_args = {}
+        log_exporter = _customize_logs_exporter(exporter_class(**exporter_args), resource)
+        provider.add_log_record_processor(BatchLogRecordProcessor(exporter=log_exporter))
+
+    handler = LoggingHandler(level=NOTSET, logger_provider=provider)
+
+    getLogger().addHandler(handler)
+
+
+def _customize_logs_exporter(log_exporter: LogExporter, resource: Resource) -> LogExporter:
+    return OTLPAwsLogExporter(endpoint=os.getenv(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT))
 
 
 def _init_tracing(
