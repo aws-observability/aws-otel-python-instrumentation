@@ -28,7 +28,7 @@ class AwsAuthSession(requests.Session):
             self._has_required_dependencies = True
 
         else:
-            print(
+            _logger.error(
                 "botocore is required to enable SigV4 Authentication. Please install it using `pip install botocore`",
             )
 
@@ -62,5 +62,6 @@ class AwsAuthSession(requests.Session):
 
         return super().request(method, url, data=data, headers=headers, *args, **kwargs)
 
+    
     def close(self):
         super().close()
