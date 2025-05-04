@@ -15,7 +15,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     ApplicationSignalsExporterProvider,
     AwsOpenTelemetryConfigurator,
     _custom_import_sampler,
-    _customize_exporter,
+    _customize_span_exporter,
     _customize_metric_exporters,
     _customize_sampler,
     _customize_span_processors,
@@ -275,14 +275,14 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertIsInstance(customized_sampler, AlwaysRecordSampler)
         self.assertEqual(mock_sampler, customized_sampler._root_sampler)
 
-    def test_customize_exporter(self):
+    def test_customize_span_exporter(self):
         mock_exporter: SpanExporter = MagicMock(spec=OTLPSpanExporter)
-        customized_exporter: SpanExporter = _customize_exporter(mock_exporter, Resource.get_empty())
+        customized_exporter: SpanExporter = _customize_span_exporter(mock_exporter, Resource.get_empty())
         self.assertEqual(mock_exporter, customized_exporter)
 
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", "False")
-        customized_exporter = _customize_exporter(mock_exporter, Resource.get_empty())
+        customized_exporter = _customize_span_exporter(mock_exporter, Resource.get_empty())
         self.assertNotEqual(mock_exporter, customized_exporter)
         self.assertIsInstance(customized_exporter, AwsMetricAttributesSpanExporter)
         self.assertEqual(mock_exporter, customized_exporter._delegate)
@@ -291,7 +291,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", "False")
         os.environ.setdefault("AWS_LAMBDA_FUNCTION_NAME", "myLambdaFunc")
-        customized_exporter = _customize_exporter(mock_exporter, Resource.get_empty())
+        customized_exporter = _customize_span_exporter(mock_exporter, Resource.get_empty())
         self.assertNotEqual(mock_exporter, customized_exporter)
         self.assertIsInstance(customized_exporter, AwsMetricAttributesSpanExporter)
         self.assertIsInstance(customized_exporter._delegate, OTLPUdpSpanExporter)

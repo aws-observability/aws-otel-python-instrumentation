@@ -3,16 +3,14 @@
 
 from typing import Dict, Optional
 
-import requests
-
-from amazon.opentelemetry.distro.exporter.otlp.aws.common.otlp_aws_exporter import OTLPBaseAwsExporter
+from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 
 
-class OTLPAwsLogExporter(OTLPLogExporter, OTLPBaseAwsExporter):
+class OTLPAwsLogExporter(OTLPLogExporter):
     """
-    This exporter extends the functionality of the OTLPLogExporter to allow spans to be exported to the
+    This exporter extends the functionality of the OTLPLogExporter to allow logs to be exported to the
     CloudWatch Logs OTLP endpoint https://logs.[AWSRegion].amazonaws.com/v1/logs. Utilizes the botocore
     library to sign and directly inject SigV4 Authentication to the exported request's headers.
 
@@ -29,28 +27,19 @@ class OTLPAwsLogExporter(OTLPLogExporter, OTLPBaseAwsExporter):
         headers: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None,
         compression: Optional[Compression] = None,
-        session: Optional[requests.Session] = None,
     ):
-        OTLPBaseAwsExporter.__init__(self, endpoint, session)
-        OTLPLogExporter.__init__(
-            self,
-            endpoint,
-            certificate_file,
-            client_key_file,
-            client_certificate_file,
-            headers,
-            timeout,
-            compression,
-            session,
+        rsession = None
+
+        if endpoint:
+            rsession = AwsAuthSession(endpoint.split(".")[1], "logs")
+
+        super().__init__(
+            endpoint=endpoint,
+            certificate_file=certificate_file,
+            client_key_file=client_key_file,
+            client_certificate_file=client_certificate_file,
+            headers=headers,
+            timeout=timeout,
+            compression=compression,
+            session=rsession,
         )
-
-    # pylint: disable=no-self-use
-    def get_service(self):
-        return "logs"
-
-    # Overrides upstream's private implementation of _export. All behaviors are
-    # the same except if the endpoint is an CloudWatch Logs OTLP endpoint, we will sign the request
-    # with SigV4 in headers before sending it to the endpoint.
-    def _export(self, serialized_data: bytes):
-        self.inject_sigv4_auth(serialized_data)
-        return OTLPLogExporter._export(self, serialized_data)
