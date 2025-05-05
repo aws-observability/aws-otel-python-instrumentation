@@ -11,6 +11,8 @@ class AwsAuthSession(requests.Session):
 
     def __init__(self, aws_region, service):
 
+        self._has_required_dependencies = False
+
         # Requires botocore to be installed to sign the headers. However,
         # some users might not need to use this exporter. In order not conflict
         # with existing behavior, we check for botocore before initializing this exporter.
@@ -62,6 +64,5 @@ class AwsAuthSession(requests.Session):
 
         return super().request(method, url, data=data, headers=headers, *args, **kwargs)
 
-    
     def close(self):
         super().close()
