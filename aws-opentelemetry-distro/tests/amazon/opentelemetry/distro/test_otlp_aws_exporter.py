@@ -10,11 +10,7 @@ from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session impor
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
-    DEFAULT_COMPRESSION,
-    DEFAULT_TIMEOUT,
-    OTLPSpanExporter,
-)
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import DEFAULT_COMPRESSION, DEFAULT_TIMEOUT, OTLPSpanExporter
 from opentelemetry.exporter.otlp.proto.http.version import __version__
 
 AWS_OTLP_TRACES_ENDPOINT = "https://xray.us-east-1.amazonaws.com/v1/traces"
@@ -32,7 +28,7 @@ mock_credentials = Credentials(access_key="test_access_key", secret_key="test_se
 class TestAwsExporter(TestCase):
 
     def test_sigv4_exporter_init_default(self):
-        """Tests that the default exporter is is still an instance of upstream's exporter"""
+        """Tests that the Sigv4 exporters is is still an instance of upstream's exporter"""
 
         test_cases = [
             [OTLPAwsSpanExporter(endpoint=AWS_OTLP_TRACES_ENDPOINT), AWS_OTLP_TRACES_ENDPOINT, OTLPSpanExporter],
