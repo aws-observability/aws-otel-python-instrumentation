@@ -5,8 +5,6 @@ import time
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor import AttributePropagatingSpanProcessor
 from amazon.opentelemetry.distro.aws_batch_unsampled_span_processor import BatchUnsampledSpanProcessor
