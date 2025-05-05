@@ -1,9 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-import os
-import unittest
 from unittest import TestCase
-from unittest.mock import ANY, MagicMock, PropertyMock, patch
+from unittest.mock import ANY, patch
 
 import requests
 from botocore.credentials import Credentials
