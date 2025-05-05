@@ -1,3 +1,6 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 import logging
 
 import requests
@@ -36,7 +39,7 @@ class AwsAuthSession(requests.Session):
 
         super().__init__()
 
-    def request(self, method, url, data=None, headers=None, *args, **kwargs):
+    def request(self, method, url, *args, data=None, headers=None, **kwargs):
         if self._has_required_dependencies:
 
             credentials = self._boto_session.get_credentials()
@@ -62,7 +65,4 @@ class AwsAuthSession(requests.Session):
                 except Exception as signing_error:  # pylint: disable=broad-except
                     _logger.error("Failed to sign request: %s", signing_error)
 
-        return super().request(method, url, data=data, headers=headers, *args, **kwargs)
-
-    def close(self):
-        super().close()
+        return super().request(method=method, url=url, *args, data=data, headers=headers, **kwargs)

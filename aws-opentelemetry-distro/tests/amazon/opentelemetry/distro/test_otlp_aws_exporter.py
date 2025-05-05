@@ -36,7 +36,7 @@ class TestAwsExporter(TestCase):
         ]
 
         for tc in test_cases:
-            self.validate_exporter_extends_http_exporter(exporter=tc[0], endpoint=tc[1], type=tc[2])
+            self.validate_exporter_extends_http_exporter(exporter=tc[0], endpoint=tc[1], exporter_type=tc[2])
 
     @patch("pkg_resources.get_distribution", side_effect=ImportError("test error"))
     @patch.dict("sys.modules", {"botocore": None}, clear=False)
@@ -81,8 +81,8 @@ class TestAwsExporter(TestCase):
         self.assertIn(X_AMZ_DATE_HEADER, actual_headers)
         self.assertIn(X_AMZ_SECURITY_TOKEN_HEADER, actual_headers)
 
-    def validate_exporter_extends_http_exporter(self, exporter, endpoint, type):
-        self.assertIsInstance(exporter, type)
+    def validate_exporter_extends_http_exporter(self, exporter, endpoint, exporter_type):
+        self.assertIsInstance(exporter, exporter_type)
         self.assertIsInstance(exporter._session, AwsAuthSession)
         self.assertEqual(exporter._endpoint, endpoint)
         self.assertEqual(exporter._certificate_file, True)
