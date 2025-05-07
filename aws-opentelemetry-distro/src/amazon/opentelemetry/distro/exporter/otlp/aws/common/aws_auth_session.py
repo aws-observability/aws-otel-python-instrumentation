@@ -11,13 +11,34 @@ _logger = logging.getLogger(__name__)
 
 
 class AwsAuthSession(requests.Session):
+    """
+    A custom requests Session that adds AWS SigV4 authentication to HTTP requests.
+
+    This class extends the standard requests.Session to automatically sign requests
+    with AWS Signature Version 4 (SigV4) authentication. It's specifically designed
+    for use with the OpenTelemetry Logs and Traces exporters that send data to AWS OTLP endpoints:
+    X-Ray (traces) and CloudWatch Logs.
+
+    The session requires botocore to be installed for signing headers. If botocore
+    is not available, the session will fall back to standard unauthenticated requests
+    and log an error message.
+
+    Usage:
+        session = AwsAuthSession(aws_region="us-west-2", service="logs")
+        response = session.request("POST", "https://logs.us-west-2.amazonaws.com/v1/logs",
+                                    data=payload, headers=headers)
+
+    Args:
+        aws_region (str): The AWS region to use for signing (e.g., "us-east-1")
+        service (str): The AWS service name for signing (e.g., "logs" or "xray")
+    """
 
     def __init__(self, aws_region, service):
 
         self._has_required_dependencies = False
 
         # Requires botocore to be installed to sign the headers. However,
-        # some users might not need to use this exporter. In order not conflict
+        # some users might not need to use this authenticator. In order not conflict
         # with existing behavior, we check for botocore before initializing this exporter.
 
         if aws_region and service and is_installed("botocore"):

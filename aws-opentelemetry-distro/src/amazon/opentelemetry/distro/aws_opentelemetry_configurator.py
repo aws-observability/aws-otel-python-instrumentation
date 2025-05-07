@@ -21,8 +21,7 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
-from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
+from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
@@ -89,9 +88,13 @@ OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED_CONFIG = "OTEL_AWS_PYTHON_DEFER_TO_WORK
 SYSTEM_METRICS_INSTRUMENTATION_SCOPE_NAME = "opentelemetry.instrumentation.system_metrics"
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
+OTEL_EXPORTER_OTLP_LOGS_HEADERS = "OTEL_EXPORTER_OTLP_LOGS_HEADERS"
 
 AWS_TRACES_OTLP_ENDPOINT_PATTERN = r"https://xray\.([a-z0-9-]+)\.amazonaws\.com/v1/traces$"
 AWS_LOGS_OTLP_ENDPOINT_PATTERN = r"https://logs\.([a-z0-9-]+)\.amazonaws\.com/v1/logs$"
+
+AWS_OTLP_LOGS_GROUP_HEADER = "x-aws-log-group"
+AWS_OTLP_LOGS_STREAM_HEADER = "x-aws-log-stream"
 
 # UDP package size is not larger than 64KB
 LAMBDA_SPAN_EXPORT_BATCH_SIZE = 10
@@ -172,6 +175,11 @@ def _init_logging(
     exporters: Dict[str, Type[LogExporter]],
     resource: Resource = None,
 ):
+
+    # Provides a default OTLP log exporter when none is specified.
+    # This is the behavior for the logs exporters for other languages.
+    if not exporters:
+        exporters.setdefault("otlp", OTLPLogExporter)
 
     provider = LoggerProvider(resource=resource)
     set_logger_provider(provider)
@@ -339,17 +347,20 @@ def _customize_sampler(sampler: Sampler) -> Sampler:
 
 
 def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) -> SpanExporter:
+    traces_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
     if _is_lambda_environment():
         # Override OTLP http default endpoint to UDP
-        if isinstance(span_exporter, OTLPSpanExporter) and os.getenv(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT) is None:
+        if isinstance(span_exporter, OTLPSpanExporter) and traces_endpoint is None:
             traces_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
             span_exporter = OTLPUdpSpanExporter(endpoint=traces_endpoint)
 
-    if is_aws_otlp_endpoint(os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT), "xray"):
-        _logger.info("Detected using AWS OTLP XRay Endpoint.")
+    if is_aws_otlp_endpoint(traces_endpoint, "xray"):
+        _logger.info("Detected using AWS OTLP Traces Endpoint.")
 
         if isinstance(span_exporter, OTLPSpanExporter):
-            span_exporter = OTLPAwsSpanExporter(endpoint=os.getenv(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT))
+            span_exporter = OTLPSpanExporter(
+                endpoint=traces_endpoint, session=AwsAuthSession(traces_endpoint.split(".")[1], "xray")
+            )
 
         else:
             _logger.warning(
@@ -364,11 +375,18 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
 
 
 def _customize_logs_exporter(log_exporter: LogExporter, resource: Resource) -> LogExporter:
-    if is_aws_otlp_endpoint(os.environ.get(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT), "logs"):
+    logs_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT)
+
+    if is_aws_otlp_endpoint(logs_endpoint, "logs"):
         _logger.info("Detected using AWS OTLP Logs Endpoint.")
 
-        if isinstance(log_exporter, OTLPLogExporter):
-            return OTLPAwsLogExporter(endpoint=os.getenv(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT))
+        if isinstance(log_exporter, OTLPLogExporter) and validate_logs_headers():
+            return OTLPLogExporter(endpoint=logs_endpoint, session=AwsAuthSession(logs_endpoint.split(".")[1], "logs"))
+
+        _logger.warning(
+            "Improper configuration see: please export/set "
+            "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/protobuf and OTEL_LOGS_EXPORTER=otlp"
+        )
 
     return log_exporter
 
@@ -502,6 +520,37 @@ def is_aws_otlp_endpoint(otlp_endpoint: str = None, service: str = "xray") -> bo
         return False
 
     return bool(re.match(pattern, otlp_endpoint.lower()))
+
+
+def validate_logs_headers() -> bool:
+    """Checks if x-aws-log-group and x-aws-log-stream are present in the headers in order to send logs to
+    AWS OTLP Logs endpoint."""
+
+    logs_headers = os.environ.get(OTEL_EXPORTER_OTLP_LOGS_HEADERS)
+
+    if not logs_headers:
+        _logger.warning(
+            "Improper configuration: Please configure the environment variable OTEL_EXPORTER_OTLP_LOGS_HEADERS "
+            "to include x-aws-log-group and x-aws-log-stream"
+        )
+        return False
+
+    filtered_log_headers_count = 0
+
+    for pair in logs_headers.split(","):
+        if "=" in pair:
+            key = pair.split("=", 1)[0]
+            if key == AWS_OTLP_LOGS_GROUP_HEADER or key == AWS_OTLP_LOGS_STREAM_HEADER:
+                filtered_log_headers_count += 1
+
+    if filtered_log_headers_count != 2:
+        _logger.warning(
+            "Improper configuration: Please configure the environment variable OTEL_EXPORTER_OTLP_LOGS_HEADERS "
+            "to have values for x-aws-log-group and x-aws-log-stream"
+        )
+        return False
+
+    return True
 
 
 def _get_metric_export_interval():
