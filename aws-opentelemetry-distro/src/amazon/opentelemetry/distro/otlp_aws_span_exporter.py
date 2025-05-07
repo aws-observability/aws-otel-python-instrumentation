@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import logging
+import os
 from typing import Dict, Optional, Sequence
 
 import requests
@@ -13,6 +14,7 @@ from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExportResult
 
 AWS_SERVICE = "xray"
+AGENT_OBSERVABILITY_ENABLED = os.environ.get("AGENT_OBSERVABILITY_ENABLED", "false")
 _logger = logging.getLogger(__name__)
 
 
@@ -77,10 +79,13 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
 
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
         # Process spans to handle LLO attributes
-        modified_spans = self._llo_handler.process_spans(spans)
+        if AGENT_OBSERVABILITY_ENABLED == "true":
+            spans_to_export = self._llo_handler.process_spans(spans)
+        else:
+            spans_to_export = spans
 
         # Export the modified spans
-        return super().export(modified_spans)
+        return super().export(spans_to_export)
 
     # Overrides upstream's private implementation of _export. All behaviors are
     # the same except if the endpoint is an XRay OTLP endpoint, we will sign the request
