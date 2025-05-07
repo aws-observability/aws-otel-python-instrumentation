@@ -3,15 +3,13 @@
 import logging
 from typing import Dict, Optional, Sequence
 
-import re
 import requests
 
 from amazon.opentelemetry.distro._utils import is_installed
-from amazon.opentelemetry.distro.llo_sender_client import LLOSenderClient
-from opentelemetry.attributes import BoundedAttributes
+from amazon.opentelemetry.distro.llo_handler import LLOHandler
 from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.trace import ReadableSpan, Event
+from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExportResult
 
 AWS_SERVICE = "xray"
@@ -41,7 +39,7 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
 
         self._aws_region = None
         self._has_required_dependencies = False
-        self._llo_sender_client = LLOSenderClient()
+        self._llo_handler = LLOHandler()
         # Requires botocore to be installed to sign the headers. However,
         # some users might not need to use this exporter. In order not conflict
         # with existing behavior, we check for botocore before initializing this exporter.
@@ -78,122 +76,11 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
         )
 
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
-        modified_spans = []
-
-        for span in spans:
-            # Process span attributes
-            updated_attributes = {}
-
-            # Copy all original attributes and handle LLO data
-            for key, value in span.attributes.items():
-                if self._should_offload(key):
-                    metadata = {
-                        "trace_id": format(span.context.trace_id, 'x'),
-                        "span_id": format(span.context.span_id, 'x'),
-                        "attribute_name": key,
-                        "span_name": span.name
-                    }
-
-                    # Get S3 pointer from LLOSenderClient
-                    s3_pointer = self._llo_sender_client.upload(value, metadata)
-
-                    # Store the S3 pointer instead of original value to trim span
-                    updated_attributes[key] = s3_pointer
-                else:
-                    # Keep original value if it is not LLO
-                    updated_attributes[key] = value
-
-            # Update span attributes
-            if isinstance(span.attributes, BoundedAttributes):
-                span._attributes = BoundedAttributes(
-                    maxlen=span.attributes.maxlen,
-                    attributes=updated_attributes,
-                    immutable=span.attributes._immutable,
-                    max_value_len=span.attributes.max_value_len
-                )
-            else:
-                span._attributes = updated_attributes
-
-            # Process span events
-            if span.events:
-                updated_events = []
-
-                for event in span.events:
-                    # Check if this event has any attributes to process
-                    if not event.attributes:
-                        updated_events.append(event) # Keep the original event
-                        continue
-
-                    # Process event attributes for LLO content
-                    updated_event_attributes = {}
-                    need_to_update = False
-
-                    for key, value in event.attributes.items():
-                        if self._should_offload(key):
-                            metadata = {
-                                "trace_id": format(span.context.trace_id, 'x'),
-                                "span_id": format(span.context.span_id, 'x'),
-                                "attribute_name": key,
-                                "event_name": event.name,
-                                "event_time": str(event.timestamp)
-                            }
-
-                            s3_pointer = self._llo_sender_client.upload(value, metadata)
-                            updated_event_attributes[key] = s3_pointer
-                            need_to_update = True
-                        else:
-                            updated_event_attributes[key] = value
-
-                    if need_to_update:
-                        # Create new Event with the updated attributes
-                        limit = None
-                        if isinstance(event.attributes, BoundedAttributes):
-                            limit = event.attributes.maxlen
-
-                        updated_event = Event(
-                            name=event.name,
-                            attributes=updated_event_attributes,
-                            timestamp=event.timestamp,
-                            limit=limit
-                        )
-
-                        updated_events.append(updated_event)
-                    else:
-                        # Keep the original event
-                        updated_events.append(event)
-
-                # Update the span's events with processed events
-                span._events = updated_events
-
-            modified_spans.append(span)
+        # Process spans to handle LLO attributes
+        modified_spans = self._llo_handler.process_spans(spans)
 
         # Export the modified spans
         return super().export(modified_spans)
-
-    def _should_offload(self, key):
-        """Determine if LLO based on the attribute key. Strict matching is enforced as to not introduce unintended behavior."""
-        exact_match_patterns = [
-            "traceloop.entity.input",
-            "traceloop.entity.output",
-            "message.content",
-            "input.value",
-            "output.value",
-            "gen_ai.prompt",
-            "gen_ai.completion",
-            "gen_ai.content.revised_prompt",
-        ]
-
-        regex_match_patterns = [
-            r"^gen_ai\.prompt\.\d+\.content$",
-            r"^gen_ai\.completion\.\d+\.content$",
-            r"^llm.input_messages\.\d+\.message.content$",
-            r"^llm.output_messages\.\d+\.message.content$",
-        ]
-
-        return (
-            any(pattern == key for pattern in exact_match_patterns) or
-            any(re.match(pattern, key) for pattern in regex_match_patterns)
-        )
 
     # Overrides upstream's private implementation of _export. All behaviors are
     # the same except if the endpoint is an XRay OTLP endpoint, we will sign the request
