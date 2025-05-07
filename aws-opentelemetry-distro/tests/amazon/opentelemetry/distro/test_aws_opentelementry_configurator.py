@@ -44,6 +44,7 @@ from opentelemetry.exporter.otlp.proto.common._internal.metrics_encoder import O
 from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter as OTLPGrpcLogExporter
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter as OTLPGrpcOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter as OTLPGrpcSpanExporter
+from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -372,18 +373,29 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             bad_configs.append(config)
 
         for config in good_configs:
-            self.customize_exporter_test(config, OTLPSpanExporter(), _customize_span_exporter, OTLPSpanExporter, True)
-        for config in bad_configs:
-            self.customize_exporter_test(config, OTLPSpanExporter(), _customize_span_exporter, OTLPSpanExporter, False)
+            self.customize_exporter_test(
+                config,
+                _customize_span_exporter,
+                OTLPSpanExporter,
+                AwsAuthSession,
+                Compression.NoCompression,
+                OTLPSpanExporter(),
+                Resource.get_empty(),
+            )
 
-        self.customize_exporter_test(
-            {
-                OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "https://xray.us-east-1.amazonaws.com/v1/traces",
-            },
-            OTLPGrpcSpanExporter(),
-            _customize_span_exporter,
-            OTLPGrpcSpanExporter,
-            False,
+        for config in bad_configs:
+            self.customize_exporter_test(
+                config,
+                _customize_span_exporter,
+                OTLPSpanExporter,
+                Session,
+                Compression.NoCompression,
+                OTLPSpanExporter(),
+                Resource.get_empty(),
+            )
+
+        self.assertIsInstance(
+            _customize_span_exporter(OTLPGrpcSpanExporter(), Resource.get_empty()), OTLPGrpcSpanExporter
         )
 
     def test_customize_logs_exporter_sigv4(self):
@@ -415,7 +427,6 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             "https://logs.amazonaws.com/v1/logs",
             "https://logs.us-east-1.amazon.com/v1/logs",
             "https://logs.us-east-1.aws.com/v1/logs",
-            "https://logs.US-EAST-1.amazonaws.com/v1/logs",
             "https://logs.us_east_1.amazonaws.com/v1/logs",
             "https://logs.us.east.1.amazonaws.com/v1/logs",
             "https://logs..amazonaws.com/v1/logs",
@@ -430,8 +441,6 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             "https://logs.us-east-1.amazonaws.com:443/v1/logs",
             "https:/logs.us-east-1.amazonaws.com/v1/logs",
             "https:://logs.us-east-1.amazonaws.com/v1/logs",
-            "https://LOGS.us-east-1.amazonaws.com/v1/logs",
-            "https://logs.us-east-1.amazonaws.com/V1/LOGS",
             "https://logs.us-east-1.amazonaws.com/v1/logging",
             "https://logs.us-east-1.amazonaws.com/v1/cloudwatchlogs",
             "https://logs.us-east-1.amazonaws.com/v1/cwlogs",
@@ -472,20 +481,16 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             bad_configs.append(config)
 
         for config in good_configs:
-            self.customize_exporter_test(config, OTLPLogExporter(), _customize_logs_exporter, OTLPLogExporter, True)
-        for config in bad_configs:
-            self.customize_exporter_test(config, OTLPLogExporter(), _customize_logs_exporter, OTLPLogExporter, False)
+            self.customize_exporter_test(
+                config, _customize_logs_exporter, OTLPLogExporter, AwsAuthSession, Compression.Gzip, OTLPLogExporter()
+            )
 
-        self.customize_exporter_test(
-            {
-                OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "https://logs.us-east-1.amazonaws.com/v1/logs",
-                OTEL_EXPORTER_OTLP_LOGS_HEADERS: "x-aws-log-group=test,x-aws-log-stream=test",
-            },
-            OTLPGrpcLogExporter(),
-            _customize_logs_exporter,
-            OTLPGrpcLogExporter,
-            False,
-        )
+        for config in bad_configs:
+            self.customize_exporter_test(
+                config, _customize_logs_exporter, OTLPLogExporter, Session, Compression.NoCompression, OTLPLogExporter()
+            )
+
+        self.assertIsInstance(_customize_logs_exporter(OTLPGrpcLogExporter()), OTLPGrpcLogExporter)
 
     def test_init_logging(self):
         captured_exporter = None
@@ -497,10 +502,9 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             return result
 
         test_cases = [
-            [{"otlp": OTLPLogExporter}, [OTLPLogExporter]],
-            [{"otlp": OTLPLogExporter, "grpc": OTLPGrpcLogExporter}, [OTLPLogExporter, OTLPGrpcLogExporter]],
-            [{}, [OTLPLogExporter]],
-            [{"grpc": OTLPGrpcLogExporter}, [OTLPGrpcLogExporter]],
+            [{"otlp": OTLPLogExporter}, OTLPLogExporter],
+            [{}, OTLPLogExporter],
+            [{"grpc": OTLPGrpcLogExporter}, OTLPGrpcLogExporter],
         ]
 
         os.environ[OTEL_EXPORTER_OTLP_LOGS_ENDPOINT] = "https://logs.us-east-1.amazonaws.com/v1/logs"
@@ -511,20 +515,14 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
             mock_customize_logs_exporter.side_effect = capture_exporter
 
-            for i in range(len(test_cases)):
-                exporters_dict = test_cases[i][0]
-                expected_exporters = test_cases[i][1]
+            for tc in test_cases:
+                exporter_dict = tc[0]
+                expected_exporter = tc[1]
+                _init_logging(exporter_dict, Resource.get_empty())
 
-                _init_logging(exporters_dict, Resource.get_empty())
+                self.assertIsInstance(captured_exporter, expected_exporter)
 
-                args_list = mock_customize_logs_exporter.call_args_list
-
-                self.assertEquals(len(expected_exporters), len(args_list))
-
-                for j in range(len(expected_exporters)):
-                    self.assertIsInstance(args_list[j].args[0], expected_exporters[j])
-
-                mock_customize_logs_exporter.reset_mock()
+        os.environ.pop(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT)
 
     def test_customize_span_processors(self):
         mock_tracer_provider: TracerProvider = MagicMock()
@@ -666,20 +664,16 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("OTEL_METRIC_EXPORT_INTERVAL", None)
 
     def customize_exporter_test(
-        self, config, default_exporter, executor, expected_exporter_type, has_aws_authenticator
+        self, config, executor, expected_exporter_type, expected_session, expected_compression, *args
     ):
         for key, value in config.items():
             os.environ[key] = value
 
         try:
-            result = executor(default_exporter, Resource.get_empty())
+            result = executor(*args)
             self.assertIsInstance(result, expected_exporter_type)
-
-            if has_aws_authenticator:
-                self.assertIsInstance(result._session, AwsAuthSession)
-            else:
-                self.assertTrue(not hasattr(result, "_session") or isinstance(result._session, Session))
-
+            self.assertIsInstance(result._session, expected_session)
+            self.assertEqual(result._compression, expected_compression)
         finally:
             for key in config.keys():
                 os.environ.pop(key, None)

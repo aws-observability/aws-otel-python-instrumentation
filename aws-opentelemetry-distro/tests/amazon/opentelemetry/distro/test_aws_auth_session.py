@@ -7,14 +7,10 @@ import requests
 from botocore.credentials import Credentials
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import DEFAULT_COMPRESSION, DEFAULT_TIMEOUT
-from opentelemetry.exporter.otlp.proto.http.version import __version__
 
 AWS_OTLP_TRACES_ENDPOINT = "https://xray.us-east-1.amazonaws.com/v1/traces"
 AWS_OTLP_LOGS_ENDPOINT = "https://logs.us-east-1.amazonaws.com/v1/logs"
 
-USER_AGENT = "OTel-OTLP-Exporter-Python/" + __version__
-CONTENT_TYPE = "application/x-protobuf"
 AUTHORIZATION_HEADER = "Authorization"
 X_AMZ_DATE_HEADER = "X-Amz-Date"
 X_AMZ_SECURITY_TOKEN_HEADER = "X-Amz-Security-Token"
@@ -65,20 +61,3 @@ class TestAwsAuthSession(TestCase):
         self.assertIn(AUTHORIZATION_HEADER, actual_headers)
         self.assertIn(X_AMZ_DATE_HEADER, actual_headers)
         self.assertIn(X_AMZ_SECURITY_TOKEN_HEADER, actual_headers)
-
-    def validate_exporter_extends_http_exporter(self, exporter, endpoint, exporter_type):
-        self.assertIsInstance(exporter, exporter_type)
-        self.assertIsInstance(exporter._session, AwsAuthSession)
-        self.assertEqual(exporter._endpoint, endpoint)
-        self.assertEqual(exporter._certificate_file, True)
-        self.assertEqual(exporter._client_certificate_file, None)
-        self.assertEqual(exporter._client_key_file, None)
-        self.assertEqual(exporter._timeout, DEFAULT_TIMEOUT)
-        self.assertIs(exporter._compression, DEFAULT_COMPRESSION)
-        self.assertEqual(exporter._headers, {})
-        self.assertIn("User-Agent", exporter._session.headers)
-        self.assertEqual(
-            exporter._session.headers.get("Content-Type"),
-            CONTENT_TYPE,
-        )
-        self.assertEqual(exporter._session.headers.get("User-Agent"), USER_AGENT)

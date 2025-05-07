@@ -27,6 +27,7 @@ from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayR
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
 from amazon.opentelemetry.distro.scope_based_filtering_view import ScopeBasedRetainingView
 from opentelemetry._logs import set_logger_provider
+from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -186,7 +187,7 @@ def _init_logging(
 
     for _, exporter_class in exporters.items():
         exporter_args: Dict[str, any] = {}
-        log_exporter = _customize_logs_exporter(exporter_class(**exporter_args), resource)
+        log_exporter = _customize_logs_exporter(exporter_class(**exporter_args))
         provider.add_log_record_processor(BatchLogRecordProcessor(exporter=log_exporter))
 
     handler = LoggingHandler(level=NOTSET, logger_provider=provider)
@@ -359,7 +360,8 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
 
         if isinstance(span_exporter, OTLPSpanExporter):
             span_exporter = OTLPSpanExporter(
-                endpoint=traces_endpoint, session=AwsAuthSession(traces_endpoint.split(".")[1], "xray")
+                endpoint=traces_endpoint,
+                session=AwsAuthSession(traces_endpoint.split(".")[1], "xray"),
             )
 
         else:
@@ -374,14 +376,18 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
     return AwsMetricAttributesSpanExporterBuilder(span_exporter, resource).build()
 
 
-def _customize_logs_exporter(log_exporter: LogExporter, resource: Resource) -> LogExporter:
+def _customize_logs_exporter(log_exporter: LogExporter) -> LogExporter:
     logs_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT)
 
     if is_aws_otlp_endpoint(logs_endpoint, "logs"):
         _logger.info("Detected using AWS OTLP Logs Endpoint.")
 
         if isinstance(log_exporter, OTLPLogExporter) and validate_logs_headers():
-            return OTLPLogExporter(endpoint=logs_endpoint, session=AwsAuthSession(logs_endpoint.split(".")[1], "logs"))
+            return OTLPLogExporter(
+                endpoint=logs_endpoint,
+                compression=Compression.Gzip,
+                session=AwsAuthSession(logs_endpoint.split(".")[1], "logs"),
+            )
 
         _logger.warning(
             "Improper configuration see: please export/set "
@@ -539,8 +545,10 @@ def validate_logs_headers() -> bool:
 
     for pair in logs_headers.split(","):
         if "=" in pair:
-            key = pair.split("=", 1)[0]
-            if key == AWS_OTLP_LOGS_GROUP_HEADER or key == AWS_OTLP_LOGS_STREAM_HEADER:
+            split = pair.split("=", 1)
+            key = split[0]
+            value = split[1]
+            if (key == AWS_OTLP_LOGS_GROUP_HEADER or key == AWS_OTLP_LOGS_STREAM_HEADER) and value:
                 filtered_log_headers_count += 1
 
     if filtered_log_headers_count != 2:
