@@ -376,22 +376,20 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             self.customize_exporter_test(
                 config,
                 _customize_span_exporter,
+                OTLPSpanExporter(),
                 OTLPSpanExporter,
                 AwsAuthSession,
                 Compression.NoCompression,
-                OTLPSpanExporter(),
-                Resource.get_empty(),
             )
 
         for config in bad_configs:
             self.customize_exporter_test(
                 config,
                 _customize_span_exporter,
+                OTLPSpanExporter(),
                 OTLPSpanExporter,
                 Session,
                 Compression.NoCompression,
-                OTLPSpanExporter(),
-                Resource.get_empty(),
             )
 
         self.assertIsInstance(
@@ -482,17 +480,35 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         for config in good_configs:
             self.customize_exporter_test(
-                config, _customize_logs_exporter, OTLPLogExporter, AwsAuthSession, Compression.Gzip, OTLPLogExporter()
+                config, _customize_logs_exporter, OTLPLogExporter(), OTLPLogExporter, AwsAuthSession, Compression.Gzip
             )
 
         for config in bad_configs:
             self.customize_exporter_test(
-                config, _customize_logs_exporter, OTLPLogExporter, Session, Compression.NoCompression, OTLPLogExporter()
+                config, _customize_logs_exporter, OTLPLogExporter(), OTLPLogExporter, Session, Compression.NoCompression
             )
 
-        self.assertIsInstance(_customize_logs_exporter(OTLPGrpcLogExporter()), OTLPGrpcLogExporter)
+        self.assertIsInstance(
+            _customize_logs_exporter(OTLPGrpcLogExporter(), Resource.get_empty()), OTLPGrpcLogExporter
+        )
 
-    def test_init_logging(self):
+    # Need to patch all of these to prevent some weird multi-threading error with the LogProvider
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.LoggingHandler", return_value=MagicMock())
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.getLogger", return_value=MagicMock())
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._customize_logs_exporter")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.LoggerProvider", return_value=MagicMock())
+    @patch(
+        "amazon.opentelemetry.distro.aws_opentelemetry_configurator.BatchLogRecordProcessor", return_value=MagicMock()
+    )
+    def test_init_logging(
+        self,
+        mock_batch_processor,
+        mock_logger_provider,
+        mock_customize_logs_exporter,
+        mock_get_logger,
+        mock_logging_handler,
+    ):
+
         captured_exporter = None
 
         def capture_exporter(*args, **kwargs):
@@ -500,6 +516,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             result = _customize_logs_exporter(*args, **kwargs)
             captured_exporter = result
             return result
+
+        mock_customize_logs_exporter.side_effect = capture_exporter
 
         test_cases = [
             [{"otlp": OTLPLogExporter}, OTLPLogExporter],
@@ -509,18 +527,12 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         os.environ[OTEL_EXPORTER_OTLP_LOGS_ENDPOINT] = "https://logs.us-east-1.amazonaws.com/v1/logs"
 
-        with patch(
-            "amazon.opentelemetry.distro.aws_opentelemetry_configurator._customize_logs_exporter"
-        ) as mock_customize_logs_exporter:
+        for tc in test_cases:
+            exporter_dict = tc[0]
+            expected_exporter = tc[1]
+            _init_logging(exporter_dict, Resource.get_empty())
 
-            mock_customize_logs_exporter.side_effect = capture_exporter
-
-            for tc in test_cases:
-                exporter_dict = tc[0]
-                expected_exporter = tc[1]
-                _init_logging(exporter_dict, Resource.get_empty())
-
-                self.assertIsInstance(captured_exporter, expected_exporter)
+            self.assertIsInstance(captured_exporter, expected_exporter)
 
         os.environ.pop(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT)
 
@@ -664,13 +676,19 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("OTEL_METRIC_EXPORT_INTERVAL", None)
 
     def customize_exporter_test(
-        self, config, executor, expected_exporter_type, expected_session, expected_compression, *args
+        self,
+        config,
+        executor,
+        default_exporter,
+        expected_exporter_type,
+        expected_session,
+        expected_compression,
     ):
         for key, value in config.items():
             os.environ[key] = value
 
         try:
-            result = executor(*args)
+            result = executor(default_exporter, Resource.get_empty())
             self.assertIsInstance(result, expected_exporter_type)
             self.assertIsInstance(result._session, expected_session)
             self.assertEqual(result._compression, expected_compression)

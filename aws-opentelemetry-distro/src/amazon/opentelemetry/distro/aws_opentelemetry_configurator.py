@@ -180,14 +180,14 @@ def _init_logging(
     # Provides a default OTLP log exporter when none is specified.
     # This is the behavior for the logs exporters for other languages.
     if not exporters:
-        exporters.setdefault("otlp", OTLPLogExporter)
+        exporters = {"otlp": OTLPLogExporter}
 
     provider = LoggerProvider(resource=resource)
     set_logger_provider(provider)
 
     for _, exporter_class in exporters.items():
         exporter_args: Dict[str, any] = {}
-        log_exporter = _customize_logs_exporter(exporter_class(**exporter_args))
+        log_exporter = _customize_logs_exporter(exporter_class(**exporter_args), resource)
         provider.add_log_record_processor(BatchLogRecordProcessor(exporter=log_exporter))
 
     handler = LoggingHandler(level=NOTSET, logger_provider=provider)
@@ -376,7 +376,7 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
     return AwsMetricAttributesSpanExporterBuilder(span_exporter, resource).build()
 
 
-def _customize_logs_exporter(log_exporter: LogExporter) -> LogExporter:
+def _customize_logs_exporter(log_exporter: LogExporter, resource: Resource) -> LogExporter:
     logs_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT)
 
     if is_aws_otlp_endpoint(logs_endpoint, "logs"):
@@ -548,7 +548,7 @@ def validate_logs_headers() -> bool:
             split = pair.split("=", 1)
             key = split[0]
             value = split[1]
-            if (key == AWS_OTLP_LOGS_GROUP_HEADER or key == AWS_OTLP_LOGS_STREAM_HEADER) and value:
+            if key in (AWS_OTLP_LOGS_GROUP_HEADER, AWS_OTLP_LOGS_STREAM_HEADER) and value:
                 filtered_log_headers_count += 1
 
     if filtered_log_headers_count != 2:
