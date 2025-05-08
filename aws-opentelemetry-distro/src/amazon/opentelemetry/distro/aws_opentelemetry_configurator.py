@@ -88,6 +88,7 @@ OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED_CONFIG = "OTEL_AWS_PYTHON_DEFER_TO_WORK
 SYSTEM_METRICS_INSTRUMENTATION_SCOPE_NAME = "opentelemetry.instrumentation.system_metrics"
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
+AGENT_OBSERVABILITY_ENABLED = "true"
 XRAY_OTLP_ENDPOINT_PATTERN = r"https://xray\.([a-z0-9-]+)\.amazonaws\.com/v1/traces$"
 # UDP package size is not larger than 64KB
 LAMBDA_SPAN_EXPORT_BATCH_SIZE = 10
@@ -349,8 +350,15 @@ def _customize_exporter(span_exporter: SpanExporter, resource: Resource) -> Span
         _logger.info("Detected using AWS OTLP XRay Endpoint.")
 
         if isinstance(span_exporter, OTLPSpanExporter):
-            span_exporter = OTLPAwsSpanExporter(endpoint=os.getenv(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT))
-
+            if AGENT_OBSERVABILITY_ENABLED == "true":
+                logs_endpoint = os.getenv(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT)
+                logs_exporter = OTLPAwsLogExporter(endpoint=logs_endpoint)
+                span_exporter = OTLPAwsSpanExporter(
+                    endpoint=os.getenv(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT),
+                    logs_exporter=logs_exporter
+                )
+            else:
+                span_exporter = OTLPAwsSpanExporter(endpoint=os.getenv(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT))
         else:
             _logger.warning(
                 "Improper configuration see: please export/set "

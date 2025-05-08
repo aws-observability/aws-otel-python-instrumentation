@@ -25,7 +25,7 @@ class LLOHandler:
     and filters them out from telemetry data.
     """
 
-    def __init__(self):
+    def __init__(self, logs_exporter: OTLPAwsLogExporter):
         self._exact_match_patterns = [
             "traceloop.entity.input",
             "traceloop.entity.output",
@@ -44,24 +44,13 @@ class LLOHandler:
             r"^llm.output_messages\.\d+\.message.content$",
         ]
 
-        self._setup_logger()
+        self._logs_exporter = logs_exporter
+        self._logger_provider = LoggerProvider()
+        self._logger_provider.add_log_record_processor(
+            BatchLogRecordProcessor(self._logs_exporter)
+        )
+        self._logger = get_logger("llo_logger", logger_provider=self._logger_provider)
 
-    def _setup_logger(self):
-        """
-        Set up the logger with OTLP AWS Logs Exporter
-        """
-        logs_endpoint = os.getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
-        if logs_endpoint:
-            self._logs_exporter = OTLPAwsLogExporter(endpoint=logs_endpoint)
-            self._logger_provider = LoggerProvider()
-            self._logger_provider.add_log_record_processor(
-                BatchLogRecordProcessor(self._logs_exporter)
-            )
-            self._logger = get_logger("llo_logger", logger_provider=self._logger_provider)
-            _logger.debug(f"Initialized LLO logger with AWS OTLP Logs exporter at {logs_endpoint}")
-        else:
-            self._logger = None
-            _logger.warning("No OTEL_EXPORTER_OTLP_LOGS_ENDPOINT specified, LLO attributes will be filtered but not emitted as logs")
 
     def is_llo_attribute(self, key: str) -> bool:
         """

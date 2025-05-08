@@ -8,6 +8,7 @@ import requests
 
 from amazon.opentelemetry.distro._utils import is_installed
 from amazon.opentelemetry.distro.llo_handler import LLOHandler
+from amazon.opentelemetry.distro.otlp_aws_logs_exporter import OTLPAwsLogExporter
 from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.trace import ReadableSpan
@@ -37,11 +38,12 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
         timeout: Optional[int] = None,
         compression: Optional[Compression] = None,
         rsession: Optional[requests.Session] = None,
+        logs_exporter: Optional[OTLPAwsLogExporter] = None,
     ):
 
         self._aws_region = None
         self._has_required_dependencies = False
-        self._llo_handler = LLOHandler()
+        self._llo_handler = LLOHandler(logs_exporter)
         # Requires botocore to be installed to sign the headers. However,
         # some users might not need to use this exporter. In order not conflict
         # with existing behavior, we check for botocore before initializing this exporter.
