@@ -97,6 +97,8 @@ class LLOHandler:
         span_ctx = span.context
         gen_ai_system = span.attributes.get("gen_ai.system", "unknown")
 
+        prompt_timestamp = span.start_time
+
         prompt_content_pattern = re.compile(r"^gen_ai\.prompt\.(\d+)\.content$")
 
         for key, value in attributes.items():
@@ -112,11 +114,13 @@ class LLOHandler:
                 name=f"gen_ai.{role}.message",
                 attributes={
                     GenAIAttributes.GEN_AI_SYSTEM: gen_ai_system,
-                    "event.name": f"gen_ai.{role}.message"
+                    "event.name": f"gen_ai.{role}.message",
+                    "original_attribute.name": role_key
                 },
                 body={
                     "content": value
                 },
+                timestamp=prompt_timestamp,
                 trace_id=span_ctx.trace_id,
                 span_id=span_ctx.span_id,
                 trace_flags=span_ctx.trace_flags
@@ -137,6 +141,8 @@ class LLOHandler:
         span_ctx = span.context
         gen_ai_system = span.attributes.get("gen_ai.system", "unknown")
 
+        completion_timestamp = span.end_time
+
         completion_content_pattern = re.compile(r"^gen_ai\.completion\.(\d+)\.content$")
 
         for key, value in attributes.items():
@@ -152,7 +158,8 @@ class LLOHandler:
                 name="gen_ai.choice",
                 attributes={
                     GenAIAttributes.GEN_AI_SYSTEM: gen_ai_system,
-                    "event.name": "gen_ai.choice"
+                    "event.name": "gen_ai.choice",
+                    "original_attribute.name": role_key
                 },
                 body={
                     "index": int(index),
@@ -162,6 +169,7 @@ class LLOHandler:
                         "content": value
                     }
                 },
+                timestamp=completion_timestamp,
                 trace_id=span_ctx.trace_id,
                 span_id=span_ctx.span_id,
                 trace_flags=span_ctx.trace_flags
@@ -182,6 +190,9 @@ class LLOHandler:
         span_ctx = span.context
         gen_ai_system = span.attributes.get("gen_ai.system", "unknown")
 
+        start_timestamp = span.start_time
+        end_timestamp = span.end_time
+
         if "traceloop.entity.input" in attributes:
             input_content = attributes["traceloop.entity.input"]
 
@@ -190,11 +201,13 @@ class LLOHandler:
                 attributes={
                     GenAIAttributes.GEN_AI_SYSTEM: gen_ai_system,
                     "framework.name": "traceloop",
-                    "framework.event.type": "input"
+                    "framework.event.type": "input",
+                    "original_attribute.name": "traceloop.entity.input"
                 },
                 body={
                     "framework.traceloop.entity.input": input_content
                 },
+                timestamp=start_timestamp,
                 trace_id=span_ctx.trace_id,
                 span_id=span_ctx.span_id,
                 trace_flags=span_ctx.trace_flags
@@ -209,11 +222,13 @@ class LLOHandler:
                 attributes={
                     GenAIAttributes.GEN_AI_SYSTEM: gen_ai_system,
                     "framework.name": "traceloop",
-                    "framework.event.type": "output"
+                    "framework.event.type": "output",
+                    "original_attribute.name": "traceloop.entity.output"
                 },
                 body={
                     "framework.traceloop.entity.output": output_content
                 },
+                timestamp=end_timestamp,
                 trace_id=span_ctx.trace_id,
                 span_id=span_ctx.span_id,
                 trace_flags=span_ctx.trace_flags
