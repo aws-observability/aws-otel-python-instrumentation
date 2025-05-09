@@ -1,15 +1,21 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import logging
-from typing import Dict, Optional
+import os
+from typing import Dict, Optional, Sequence
 
 import requests
 
 from amazon.opentelemetry.distro._utils import is_installed
+from amazon.opentelemetry.distro.llo_handler import LLOHandler
+from amazon.opentelemetry.distro.otlp_aws_logs_exporter import OTLPAwsLogExporter
 from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.sdk.trace.export import SpanExportResult
 
 AWS_SERVICE = "xray"
+AGENT_OBSERVABILITY_ENABLED = os.environ.get("AGENT_OBSERVABILITY_ENABLED", "false")
 _logger = logging.getLogger(__name__)
 
 
@@ -32,10 +38,12 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
         timeout: Optional[int] = None,
         compression: Optional[Compression] = None,
         rsession: Optional[requests.Session] = None,
+        logs_exporter: Optional[OTLPAwsLogExporter] = None,
     ):
 
         self._aws_region = None
         self._has_required_dependencies = False
+        self._llo_handler = LLOHandler(logs_exporter)
         # Requires botocore to be installed to sign the headers. However,
         # some users might not need to use this exporter. In order not conflict
         # with existing behavior, we check for botocore before initializing this exporter.
@@ -70,6 +78,16 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
             compression=compression,
             session=rsession,
         )
+
+    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        # Process spans to handle LLO attributes
+        if AGENT_OBSERVABILITY_ENABLED == "true":
+            spans_to_export = self._llo_handler.process_spans(spans)
+        else:
+            spans_to_export = spans
+
+        # Export the modified spans
+        return super().export(spans_to_export)
 
     # Overrides upstream's private implementation of _export. All behaviors are
     # the same except if the endpoint is an XRay OTLP endpoint, we will sign the request
