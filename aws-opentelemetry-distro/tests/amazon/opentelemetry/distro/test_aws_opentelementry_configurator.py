@@ -5,6 +5,8 @@ import time
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
+from requests import Session
+
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor import AttributePropagatingSpanProcessor
 from amazon.opentelemetry.distro.aws_batch_unsampled_span_processor import BatchUnsampledSpanProcessor
@@ -12,14 +14,19 @@ from amazon.opentelemetry.distro.aws_lambda_span_processor import AwsLambdaSpanP
 from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsMetricAttributesSpanExporter
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     LAMBDA_SPAN_EXPORT_BATCH_SIZE,
+    OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
+    OTEL_EXPORTER_OTLP_LOGS_HEADERS,
+    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
     ApplicationSignalsExporterProvider,
     AwsOpenTelemetryConfigurator,
     _custom_import_sampler,
-    _customize_exporter,
+    _customize_logs_exporter,
     _customize_metric_exporters,
     _customize_sampler,
+    _customize_span_exporter,
     _customize_span_processors,
     _export_unsampled_span_for_lambda,
+    _init_logging,
     _is_application_signals_enabled,
     _is_application_signals_runtime_enabled,
     _is_defer_to_workers_enabled,
@@ -27,13 +34,18 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
+from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler._aws_xray_sampling_client import _AwsXRaySamplingClient
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import _AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
 from opentelemetry.environment_variables import OTEL_LOGS_EXPORTER, OTEL_METRICS_EXPORTER, OTEL_TRACES_EXPORTER
 from opentelemetry.exporter.otlp.proto.common._internal.metrics_encoder import OTLPMetricExporterMixin
+from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter as OTLPGrpcLogExporter
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter as OTLPGrpcOTLPMetricExporter
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter as OTLPGrpcSpanExporter
+from opentelemetry.exporter.otlp.proto.http import Compression
+from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.environment_variables import OTEL_TRACES_SAMPLER, OTEL_TRACES_SAMPLER_ARG
@@ -275,14 +287,14 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertIsInstance(customized_sampler, AlwaysRecordSampler)
         self.assertEqual(mock_sampler, customized_sampler._root_sampler)
 
-    def test_customize_exporter(self):
+    def test_customize_span_exporter(self):
         mock_exporter: SpanExporter = MagicMock(spec=OTLPSpanExporter)
-        customized_exporter: SpanExporter = _customize_exporter(mock_exporter, Resource.get_empty())
+        customized_exporter: SpanExporter = _customize_span_exporter(mock_exporter, Resource.get_empty())
         self.assertEqual(mock_exporter, customized_exporter)
 
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", "False")
-        customized_exporter = _customize_exporter(mock_exporter, Resource.get_empty())
+        customized_exporter = _customize_span_exporter(mock_exporter, Resource.get_empty())
         self.assertNotEqual(mock_exporter, customized_exporter)
         self.assertIsInstance(customized_exporter, AwsMetricAttributesSpanExporter)
         self.assertEqual(mock_exporter, customized_exporter._delegate)
@@ -291,11 +303,238 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", "False")
         os.environ.setdefault("AWS_LAMBDA_FUNCTION_NAME", "myLambdaFunc")
-        customized_exporter = _customize_exporter(mock_exporter, Resource.get_empty())
+        customized_exporter = _customize_span_exporter(mock_exporter, Resource.get_empty())
         self.assertNotEqual(mock_exporter, customized_exporter)
         self.assertIsInstance(customized_exporter, AwsMetricAttributesSpanExporter)
         self.assertIsInstance(customized_exporter._delegate, OTLPUdpSpanExporter)
         os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
+
+    def test_customize_span_exporter_sigv4(self):
+
+        traces_good_endpoints = [
+            "https://xray.us-east-1.amazonaws.com/v1/traces",
+            "https://XRAY.US-EAST-1.AMAZONAWS.COM/V1/TRACES",
+            "https://xray.us-east-1.amazonaws.com/v1/traces",
+            "https://XRAY.US-EAST-1.amazonaws.com/v1/traces",
+            "https://xray.US-EAST-1.AMAZONAWS.com/v1/traces",
+            "https://Xray.Us-East-1.amazonaws.com/v1/traces",
+            "https://xRAY.us-EAST-1.amazonaws.com/v1/traces",
+            "https://XRAY.us-EAST-1.AMAZONAWS.com/v1/TRACES",
+            "https://xray.US-EAST-1.amazonaws.com/V1/Traces",
+            "https://xray.us-east-1.AMAZONAWS.COM/v1/traces",
+            "https://XrAy.Us-EaSt-1.AmAzOnAwS.cOm/V1/TrAcEs",
+            "https://xray.US-EAST-1.amazonaws.com/v1/traces",
+            "https://xray.us-east-1.amazonaws.com/V1/TRACES",
+            "https://XRAY.US-EAST-1.AMAZONAWS.COM/v1/traces",
+            "https://xray.us-east-1.AMAZONAWS.COM/V1/traces",
+        ]
+
+        traces_bad_endpoints = [
+            "http://localhost:4318/v1/traces",
+            "http://xray.us-east-1.amazonaws.com/v1/traces",
+            "ftp://xray.us-east-1.amazonaws.com/v1/traces",
+            "https://ray.us-east-1.amazonaws.com/v1/traces",
+            "https://xra.us-east-1.amazonaws.com/v1/traces",
+            "https://x-ray.us-east-1.amazonaws.com/v1/traces",
+            "https://xray.amazonaws.com/v1/traces",
+            "https://xray.us-east-1.amazon.com/v1/traces",
+            "https://xray.us-east-1.aws.com/v1/traces",
+            "https://xray.us_east_1.amazonaws.com/v1/traces",
+            "https://xray.us.east.1.amazonaws.com/v1/traces",
+            "https://xray..amazonaws.com/v1/traces",
+            "https://xray.us-east-1.amazonaws.com/traces",
+            "https://xray.us-east-1.amazonaws.com/v2/traces",
+            "https://xray.us-east-1.amazonaws.com/v1/trace",
+            "https://xray.us-east-1.amazonaws.com/v1/traces/",
+            "https://xray.us-east-1.amazonaws.com//v1/traces",
+            "https://xray.us-east-1.amazonaws.com/v1//traces",
+            "https://xray.us-east-1.amazonaws.com/v1/traces?param=value",
+            "https://xray.us-east-1.amazonaws.com/v1/traces#fragment",
+            "https://xray.us-east-1.amazonaws.com:443/v1/traces",
+            "https:/xray.us-east-1.amazonaws.com/v1/traces",
+            "https:://xray.us-east-1.amazonaws.com/v1/traces",
+        ]
+
+        good_configs = []
+        bad_configs = []
+
+        for endpoint in traces_good_endpoints:
+            config = {
+                OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: endpoint,
+            }
+
+            good_configs.append(config)
+
+        for endpoint in traces_bad_endpoints:
+            config = {
+                OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: endpoint,
+            }
+
+            bad_configs.append(config)
+
+        for config in good_configs:
+            self.customize_exporter_test(
+                config,
+                _customize_span_exporter,
+                OTLPSpanExporter(),
+                OTLPSpanExporter,
+                AwsAuthSession,
+                Compression.NoCompression,
+            )
+
+        for config in bad_configs:
+            self.customize_exporter_test(
+                config,
+                _customize_span_exporter,
+                OTLPSpanExporter(),
+                OTLPSpanExporter,
+                Session,
+                Compression.NoCompression,
+            )
+
+        self.assertIsInstance(
+            _customize_span_exporter(OTLPGrpcSpanExporter(), Resource.get_empty()), OTLPGrpcSpanExporter
+        )
+
+    def test_customize_logs_exporter_sigv4(self):
+        logs_good_endpoints = [
+            "https://logs.us-east-1.amazonaws.com/v1/logs",
+            "https://LOGS.US-EAST-1.AMAZONAWS.COM/V1/LOGS",
+            "https://logs.us-east-1.amazonaws.com/v1/logs",
+            "https://LOGS.US-EAST-1.amazonaws.com/v1/logs",
+            "https://logs.US-EAST-1.AMAZONAWS.com/v1/logs",
+            "https://Logs.Us-East-1.amazonaws.com/v1/logs",
+            "https://lOGS.us-EAST-1.amazonaws.com/v1/logs",
+            "https://LOGS.us-EAST-1.AMAZONAWS.com/v1/LOGS",
+            "https://logs.US-EAST-1.amazonaws.com/V1/Logs",
+            "https://logs.us-east-1.AMAZONAWS.COM/v1/logs",
+            "https://LoGs.Us-EaSt-1.AmAzOnAwS.cOm/V1/LoGs",
+            "https://logs.US-EAST-1.amazonaws.com/v1/logs",
+            "https://logs.us-east-1.amazonaws.com/V1/LOGS",
+            "https://LOGS.US-EAST-1.AMAZONAWS.COM/v1/logs",
+            "https://logs.us-east-1.AMAZONAWS.COM/V1/logs",
+        ]
+
+        logs_bad_endpoints = [
+            "http://localhost:4318/v1/logs",
+            "http://logs.us-east-1.amazonaws.com/v1/logs",
+            "ftp://logs.us-east-1.amazonaws.com/v1/logs",
+            "https://log.us-east-1.amazonaws.com/v1/logs",
+            "https://logging.us-east-1.amazonaws.com/v1/logs",
+            "https://cloud-logs.us-east-1.amazonaws.com/v1/logs",
+            "https://logs.amazonaws.com/v1/logs",
+            "https://logs.us-east-1.amazon.com/v1/logs",
+            "https://logs.us-east-1.aws.com/v1/logs",
+            "https://logs.us_east_1.amazonaws.com/v1/logs",
+            "https://logs.us.east.1.amazonaws.com/v1/logs",
+            "https://logs..amazonaws.com/v1/logs",
+            "https://logs.us-east-1.amazonaws.com/logs",
+            "https://logs.us-east-1.amazonaws.com/v2/logs",
+            "https://logs.us-east-1.amazonaws.com/v1/log",
+            "https://logs.us-east-1.amazonaws.com/v1/logs/",
+            "https://logs.us-east-1.amazonaws.com//v1/logs",
+            "https://logs.us-east-1.amazonaws.com/v1//logs",
+            "https://logs.us-east-1.amazonaws.com/v1/logs?param=value",
+            "https://logs.us-east-1.amazonaws.com/v1/logs#fragment",
+            "https://logs.us-east-1.amazonaws.com:443/v1/logs",
+            "https:/logs.us-east-1.amazonaws.com/v1/logs",
+            "https:://logs.us-east-1.amazonaws.com/v1/logs",
+            "https://logs.us-east-1.amazonaws.com/v1/logging",
+            "https://logs.us-east-1.amazonaws.com/v1/cloudwatchlogs",
+            "https://logs.us-east-1.amazonaws.com/v1/cwlogs",
+        ]
+
+        logs_bad_headers = [
+            "x-aws-log-group=,x-aws-log-stream=test",
+            "x-aws-log-stream=test",
+            "x-aws-log-group=test",
+            "",
+        ]
+
+        good_configs = []
+        bad_configs = []
+
+        for endpoint in logs_good_endpoints:
+            config = {
+                OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: endpoint,
+                OTEL_EXPORTER_OTLP_LOGS_HEADERS: "x-aws-log-group=test,x-aws-log-stream=test",
+            }
+
+            good_configs.append(config)
+
+        for endpoint in logs_bad_endpoints:
+            config = {
+                OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: endpoint,
+                OTEL_EXPORTER_OTLP_LOGS_HEADERS: "x-aws-log-group=test,x-aws-log-stream=test",
+            }
+
+            bad_configs.append(config)
+
+        for headers in logs_bad_headers:
+            config = {
+                OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "https://logs.us-east-1.amazonaws.com/v1/logs",
+                OTEL_EXPORTER_OTLP_LOGS_HEADERS: headers,
+            }
+
+            bad_configs.append(config)
+
+        for config in good_configs:
+            self.customize_exporter_test(
+                config, _customize_logs_exporter, OTLPLogExporter(), OTLPLogExporter, AwsAuthSession, Compression.Gzip
+            )
+
+        for config in bad_configs:
+            self.customize_exporter_test(
+                config, _customize_logs_exporter, OTLPLogExporter(), OTLPLogExporter, Session, Compression.NoCompression
+            )
+
+        self.assertIsInstance(
+            _customize_logs_exporter(OTLPGrpcLogExporter(), Resource.get_empty()), OTLPGrpcLogExporter
+        )
+
+    # Need to patch all of these to prevent some weird multi-threading error with the LogProvider
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.LoggingHandler", return_value=MagicMock())
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.getLogger", return_value=MagicMock())
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._customize_logs_exporter")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.LoggerProvider", return_value=MagicMock())
+    @patch(
+        "amazon.opentelemetry.distro.aws_opentelemetry_configurator.BatchLogRecordProcessor", return_value=MagicMock()
+    )
+    def test_init_logging(
+        self,
+        mock_batch_processor,
+        mock_logger_provider,
+        mock_customize_logs_exporter,
+        mock_get_logger,
+        mock_logging_handler,
+    ):
+
+        captured_exporter = None
+
+        def capture_exporter(*args, **kwargs):
+            nonlocal captured_exporter
+            result = _customize_logs_exporter(*args, **kwargs)
+            captured_exporter = result
+            return result
+
+        mock_customize_logs_exporter.side_effect = capture_exporter
+
+        test_cases = [
+            [{"otlp": OTLPLogExporter}, OTLPLogExporter],
+            [{}, OTLPLogExporter],
+            [{"grpc": OTLPGrpcLogExporter}, OTLPGrpcLogExporter],
+        ]
+
+        os.environ[OTEL_EXPORTER_OTLP_LOGS_ENDPOINT] = "https://logs.us-east-1.amazonaws.com/v1/logs"
+
+        for tc in test_cases:
+            exporter_dict = tc[0]
+            expected_exporter = tc[1]
+            _init_logging(exporter_dict, Resource.get_empty())
+
+            self.assertIsInstance(captured_exporter, expected_exporter)
+
+        os.environ.pop(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT)
 
     def test_customize_span_processors(self):
         mock_tracer_provider: TracerProvider = MagicMock()
@@ -435,6 +674,27 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(5, len(views))
 
         os.environ.pop("OTEL_METRIC_EXPORT_INTERVAL", None)
+
+    def customize_exporter_test(
+        self,
+        config,
+        executor,
+        default_exporter,
+        expected_exporter_type,
+        expected_session,
+        expected_compression,
+    ):
+        for key, value in config.items():
+            os.environ[key] = value
+
+        try:
+            result = executor(default_exporter, Resource.get_empty())
+            self.assertIsInstance(result, expected_exporter_type)
+            self.assertIsInstance(result._session, expected_session)
+            self.assertEqual(result._compression, expected_compression)
+        finally:
+            for key in config.keys():
+                os.environ.pop(key, None)
 
 
 def validate_distro_environ():
