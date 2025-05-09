@@ -355,7 +355,7 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
             traces_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
             span_exporter = OTLPUdpSpanExporter(endpoint=traces_endpoint)
 
-    if is_aws_otlp_endpoint(traces_endpoint, "xray"):
+    if _is_aws_otlp_endpoint(traces_endpoint, "xray"):
         _logger.info("Detected using AWS OTLP Traces Endpoint.")
 
         if isinstance(span_exporter, OTLPSpanExporter):
@@ -379,10 +379,12 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
 def _customize_logs_exporter(log_exporter: LogExporter, resource: Resource) -> LogExporter:
     logs_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT)
 
-    if is_aws_otlp_endpoint(logs_endpoint, "logs"):
+    if _is_aws_otlp_endpoint(logs_endpoint, "logs"):
         _logger.info("Detected using AWS OTLP Logs Endpoint.")
 
-        if isinstance(log_exporter, OTLPLogExporter) and validate_logs_headers():
+        if isinstance(log_exporter, OTLPLogExporter) and _validate_logs_headers():
+            # Setting default compression mode to Gzip as this is the behavior in upstream's
+            # collector otlp http exporter: https://github.com/open-telemetry/opentelemetry-collector/tree/main/exporter/otlphttpexporter
             return OTLPLogExporter(
                 endpoint=logs_endpoint,
                 compression=Compression.Gzip,
@@ -517,7 +519,7 @@ def _is_lambda_environment():
     return AWS_LAMBDA_FUNCTION_NAME_CONFIG in os.environ
 
 
-def is_aws_otlp_endpoint(otlp_endpoint: str = None, service: str = "xray") -> bool:
+def _is_aws_otlp_endpoint(otlp_endpoint: str = None, service: str = "xray") -> bool:
     """Is the given endpoint an AWS OTLP endpoint?"""
 
     pattern = AWS_TRACES_OTLP_ENDPOINT_PATTERN if service == "xray" else AWS_LOGS_OTLP_ENDPOINT_PATTERN
@@ -528,7 +530,7 @@ def is_aws_otlp_endpoint(otlp_endpoint: str = None, service: str = "xray") -> bo
     return bool(re.match(pattern, otlp_endpoint.lower()))
 
 
-def validate_logs_headers() -> bool:
+def _validate_logs_headers() -> bool:
     """Checks if x-aws-log-group and x-aws-log-stream are present in the headers in order to send logs to
     AWS OTLP Logs endpoint."""
 
