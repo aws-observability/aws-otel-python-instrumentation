@@ -384,7 +384,8 @@ def _customize_logs_exporter(log_exporter: LogExporter, resource: Resource) -> L
 
         if isinstance(log_exporter, OTLPLogExporter) and _validate_logs_headers():
             # Setting default compression mode to Gzip as this is the behavior in upstream's
-            # collector otlp http exporter: https://github.com/open-telemetry/opentelemetry-collector/tree/main/exporter/otlphttpexporter
+            # collector otlp http exporter:
+            # https://github.com/open-telemetry/opentelemetry-collector/tree/main/exporter/otlphttpexporter
             return OTLPLogExporter(
                 endpoint=logs_endpoint,
                 compression=Compression.Gzip,
