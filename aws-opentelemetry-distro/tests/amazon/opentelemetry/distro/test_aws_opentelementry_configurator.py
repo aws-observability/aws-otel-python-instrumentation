@@ -35,6 +35,8 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
+from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler._aws_xray_sampling_client import _AwsXRaySamplingClient
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import _AwsXRayRemoteSampler
@@ -377,7 +379,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
                 config,
                 _customize_span_exporter,
                 OTLPSpanExporter(),
-                OTLPSpanExporter,
+                OTLPAwsSpanExporter,
                 AwsAuthSession,
                 Compression.NoCompression,
             )
@@ -480,7 +482,12 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         for config in good_configs:
             self.customize_exporter_test(
-                config, _customize_logs_exporter, OTLPLogExporter(), OTLPLogExporter, AwsAuthSession, Compression.Gzip
+                config,
+                _customize_logs_exporter,
+                OTLPLogExporter(),
+                OTLPAwsLogExporter,
+                AwsAuthSession,
+                Compression.Gzip,
             )
 
         for config in bad_configs:
