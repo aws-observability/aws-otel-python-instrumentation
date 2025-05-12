@@ -131,30 +131,32 @@ class LLOHandler:
                 "original_attribute": key
             }
 
+            body = {
+                "content": value,
+                "role": role
+            }
+
             event = None
             if role == "system":
                 event = self._get_gen_ai_system_message_event(
                     span_ctx,
                     prompt_timestamp,
                     event_attributes,
-                    value,
-                    role
+                    body
                 )
             elif role == "user":
                 event = self._get_gen_ai_user_message_event(
                     span_ctx,
                     prompt_timestamp,
                     event_attributes,
-                    value,
-                    role
+                    body
                 )
             elif role == "assistant":
                 event = self._get_gen_ai_assistant_message_event(
                     span_ctx,
                     prompt_timestamp,
                     event_attributes,
-                    value,
-                    role,
+                    body
                 )
             elif role in ["function", "unknown"]:
                 # TODO: Need to define a custom event and emit
@@ -170,19 +172,11 @@ class LLOHandler:
         span_ctx,
         timestamp,
         event_attributes,
-        content,
-        role
+        body
     ):
         """
         Create and return a `gen_ai.system.message` Event.
         """
-        body = {"content": content}
-
-        # According to OTel spec, this body field is only required if available and not equal to `system`.
-        # ref: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/#event-gen_aisystemmessage
-        if role != "system":
-            body["role"] = role
-
         return Event(
             name="gen_ai.system.message",
             timestamp=timestamp,
@@ -198,19 +192,11 @@ class LLOHandler:
         span_ctx,
         timestamp,
         event_attributes,
-        content,
-        role
+        body
     ):
         """
         Create and return a `gen_ai.user.message` Event.
         """
-        body = {"content": content}
-
-        # According to OTel spec, this body field is only required if available and not equal to `user`.
-        # ref: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/#event-gen_aiusermessage
-        if role != "user":
-            body["role"] = role
-
         return Event(
             name="gen_ai.user.message",
             timestamp=timestamp,
@@ -226,8 +212,7 @@ class LLOHandler:
         span_ctx,
         timestamp,
         event_attributes,
-        content,
-        role,
+        body
     ):
         """
         Create and return a `gen_ai.assistant.message` Event.
@@ -244,13 +229,6 @@ class LLOHandler:
 
         ref: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/#event-gen_aiassistantmessage
         """
-        body = {"content": content}
-
-        # According to the OTel spec, this body field is only required if available and not equal to `assistant`.
-        # ref: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/#event-gen_aiassistantmessage
-        if role != "assistant":
-            body["role"] = role
-
         return Event(
             name="gen_ai.assistant.message",
             timestamp=timestamp,
