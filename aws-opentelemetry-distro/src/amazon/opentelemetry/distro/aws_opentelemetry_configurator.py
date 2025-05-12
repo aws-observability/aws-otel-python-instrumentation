@@ -21,13 +21,13 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
-from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
+from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
 from amazon.opentelemetry.distro.scope_based_filtering_view import ScopeBasedRetainingView
 from opentelemetry._logs import set_logger_provider
-from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -359,10 +359,7 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
         _logger.info("Detected using AWS OTLP Traces Endpoint.")
 
         if isinstance(span_exporter, OTLPSpanExporter):
-            span_exporter = OTLPSpanExporter(
-                endpoint=traces_endpoint,
-                session=AwsAuthSession(traces_endpoint.split(".")[1], "xray"),
-            )
+            span_exporter = OTLPAwsSpanExporter(endpoint=traces_endpoint)
 
         else:
             _logger.warning(
@@ -386,11 +383,7 @@ def _customize_logs_exporter(log_exporter: LogExporter, resource: Resource) -> L
             # Setting default compression mode to Gzip as this is the behavior in upstream's
             # collector otlp http exporter:
             # https://github.com/open-telemetry/opentelemetry-collector/tree/main/exporter/otlphttpexporter
-            return OTLPLogExporter(
-                endpoint=logs_endpoint,
-                compression=Compression.Gzip,
-                session=AwsAuthSession(logs_endpoint.split(".")[1], "logs"),
-            )
+            return OTLPAwsLogExporter(endpoint=logs_endpoint)
 
         _logger.warning(
             "Improper configuration see: please export/set "
