@@ -10,6 +10,7 @@ from importlib_metadata import version
 from typing_extensions import override
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE
+from amazon.opentelemetry.distro._utils import is_agent_observability_enabled
 from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor_builder import (
@@ -90,6 +91,8 @@ SYSTEM_METRICS_INSTRUMENTATION_SCOPE_NAME = "opentelemetry.instrumentation.syste
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
 OTEL_EXPORTER_OTLP_LOGS_HEADERS = "OTEL_EXPORTER_OTLP_LOGS_HEADERS"
+
+AGENT_OBSERVABILITY_ENABLED = "AGENT_OBSERVABILITY_ENABLED"
 
 AWS_TRACES_OTLP_ENDPOINT_PATTERN = r"https://xray\.([a-z0-9-]+)\.amazonaws\.com/v1/traces$"
 AWS_LOGS_OTLP_ENDPOINT_PATTERN = r"https://logs\.([a-z0-9-]+)\.amazonaws\.com/v1/logs$"
@@ -359,7 +362,15 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
         _logger.info("Detected using AWS OTLP Traces Endpoint.")
 
         if isinstance(span_exporter, OTLPSpanExporter):
-            span_exporter = OTLPAwsSpanExporter(endpoint=traces_endpoint)
+            if is_agent_observability_enabled():
+                logs_endpoint = os.getenv(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT)
+                logs_exporter = OTLPAwsLogExporter(endpoint=logs_endpoint)
+                span_exporter = OTLPAwsSpanExporter(
+                    endpoint=traces_endpoint,
+                    logs_exporter=logs_exporter
+                )
+            else:
+                span_exporter = OTLPAwsSpanExporter(endpoint=traces_endpoint)
 
         else:
             _logger.warning(
