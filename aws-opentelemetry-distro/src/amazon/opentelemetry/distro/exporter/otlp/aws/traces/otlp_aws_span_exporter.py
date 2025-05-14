@@ -5,8 +5,8 @@ from typing import Dict, Optional, Sequence
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 from amazon.opentelemetry.distro.llo_handler import LLOHandler
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
 from amazon.opentelemetry.distro._utils import is_agent_observability_enabled
+from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.trace import ReadableSpan
@@ -25,12 +25,12 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
         headers: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None,
         compression: Optional[Compression] = None,
-        logs_exporter: Optional[OTLPAwsLogExporter] = None
+        logger_provider: Optional[LoggerProvider] = None
     ):
         self._aws_region = None
 
-        if logs_exporter:
-            self._llo_handler = LLOHandler(logs_exporter)
+        if logger_provider:
+            self._llo_handler = LLOHandler(logger_provider)
 
         if endpoint:
             self._aws_region = endpoint.split(".")[1]

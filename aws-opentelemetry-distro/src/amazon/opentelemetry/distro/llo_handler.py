@@ -20,12 +20,8 @@ class LLOHandler:
     This class identifies LLO attributes, emits them as log records, and filters
     them out from telemetry data.
     """
-    def __init__(self, logs_exporter: OTLPAwsLogExporter):
-        self._logs_exporter = logs_exporter
-        self._logger_provider = LoggerProvider()
-        self._logger_provider.add_log_record_processor(
-            BatchLogRecordProcessor(self._logs_exporter)
-        )
+    def __init__(self, logger_provider: LoggerProvider):
+        self._logger_provider = logger_provider
 
         self._event_logger_provider = EventLoggerProvider(logger_provider=self._logger_provider)
         self._event_logger = self._event_logger_provider.get_event_logger("gen_ai.events")

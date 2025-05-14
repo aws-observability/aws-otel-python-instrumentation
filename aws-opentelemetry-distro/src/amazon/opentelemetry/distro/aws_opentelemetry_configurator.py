@@ -28,7 +28,7 @@ from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
 from amazon.opentelemetry.distro.scope_based_filtering_view import ScopeBasedRetainingView
-from opentelemetry._logs import set_logger_provider
+from opentelemetry._logs import set_logger_provider, get_logger_provider
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -163,6 +163,10 @@ def _initialize_components():
     sampler_name = _get_sampler()
     sampler = _custom_import_sampler(sampler_name, resource)
 
+    logging_enabled = os.getenv(_OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED, "false")
+    if logging_enabled.strip().lower() == "true":
+        _init_logging(log_exporters, resource)
+
     _init_tracing(
         exporters=trace_exporters,
         id_generator=id_generator,
@@ -170,9 +174,6 @@ def _initialize_components():
         resource=resource,
     )
     _init_metrics(metric_exporters, resource)
-    logging_enabled = os.getenv(_OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED, "false")
-    if logging_enabled.strip().lower() == "true":
-        _init_logging(log_exporters, resource)
 
 
 def _init_logging(
@@ -367,7 +368,7 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
                 logs_exporter = OTLPAwsLogExporter(endpoint=logs_endpoint)
                 span_exporter = OTLPAwsSpanExporter(
                     endpoint=traces_endpoint,
-                    logs_exporter=logs_exporter
+                    logger_provider=get_logger_provider()
                 )
             else:
                 span_exporter = OTLPAwsSpanExporter(endpoint=traces_endpoint)
