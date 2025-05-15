@@ -3,14 +3,15 @@ import re
 
 from typing import Any, Dict, List, Sequence
 
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
-
 from opentelemetry.attributes import BoundedAttributes
 from opentelemetry._events import Event
 from opentelemetry.sdk._logs import LoggerProvider
-from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk._events import EventLoggerProvider
 from opentelemetry.sdk.trace import ReadableSpan
+
+GEN_AI_SYSTEM_MESSAGE = "gen_ai.system.message"
+GEN_AI_USER_MESSAGE = "gen_ai.user.message"
+GEN_AI_ASSISTANT_MESSAGE = "gen_ai.assistant.message"
 
 _logger = logging.getLogger(__name__)
 
@@ -134,103 +135,57 @@ class LLOHandler:
 
             event = None
             if role == "system":
-                event = self._get_gen_ai_system_message_event(
-                    span_ctx,
-                    prompt_timestamp,
-                    event_attributes,
-                    body
+                event = self._get_gen_ai_event(
+                    name=GEN_AI_SYSTEM_MESSAGE,
+                    span_ctx=span_ctx,
+                    timestamp=prompt_timestamp,
+                    attributes=event_attributes,
+                    body=body
                 )
             elif role == "user":
-                event = self._get_gen_ai_user_message_event(
-                    span_ctx,
-                    prompt_timestamp,
-                    event_attributes,
-                    body
+                event = self._get_gen_ai_event(
+                    name=GEN_AI_USER_MESSAGE,
+                    span_ctx=span_ctx,
+                    timestamp=prompt_timestamp,
+                    attributes=event_attributes,
+                    body=body
                 )
             elif role == "assistant":
-                event = self._get_gen_ai_assistant_message_event(
-                    span_ctx,
-                    prompt_timestamp,
-                    event_attributes,
-                    body
+                event = self._get_gen_ai_event(
+                    name=GEN_AI_ASSISTANT_MESSAGE,
+                    span_ctx=span_ctx,
+                    timestamp=prompt_timestamp,
+                    attributes=event_attributes,
+                    body=body
                 )
             elif role in ["function", "unknown"]:
-                # TODO: Need to define a custom event and emit
-                pass
+                event = self._get_gen_ai_event(
+                    name=f"gen_ai.{gen_ai_system}.message",
+                    span_ctx=span_ctx,
+                    timestamp=prompt_timestamp,
+                    attributes=event_attributes,
+                    body=body
+                )
 
             if event:
                 events.append(event)
 
         return events
 
-    def _get_gen_ai_system_message_event(
+    def _get_gen_ai_event(
         self,
+        name,
         span_ctx,
         timestamp,
-        event_attributes,
+        attributes,
         body
     ):
-        """
-        Create and return a `gen_ai.system.message` Event.
-        """
         return Event(
-            name="gen_ai.system.message",
+            name=name,
             timestamp=timestamp,
-            attributes=event_attributes,
+            attributes=attributes,
             body=body,
             trace_id=span_ctx.trace_id,
             span_id=span_ctx.span_id,
-            trace_flags=span_ctx.trace_flags,
-        )
-
-    def _get_gen_ai_user_message_event(
-        self,
-        span_ctx,
-        timestamp,
-        event_attributes,
-        body
-    ):
-        """
-        Create and return a `gen_ai.user.message` Event.
-        """
-        return Event(
-            name="gen_ai.user.message",
-            timestamp=timestamp,
-            attributes=event_attributes,
-            body=body,
-            trace_id=span_ctx.trace_id,
-            span_id=span_ctx.span_id,
-            trace_flags=span_ctx.trace_flags,
-        )
-
-    def _get_gen_ai_assistant_message_event(
-        self,
-        span_ctx,
-        timestamp,
-        event_attributes,
-        body
-    ):
-        """
-        Create and return a `gen_ai.assistant.message` Event.
-
-        According to the OTel spec, assistant message events may contain tool_calls,
-        if available. In our implementation, tool call information is not available
-        directly in the span attributes we're processing - it exists in separate
-        related spans.
-
-        Thus without implementing complex span correlation, we cannot reliable extract
-        tool_calls for assistant messages. This limitation is acceptable per the OTel
-        spec since tool_calls are only required when available. However, this will
-        lead to reduction in data quality.
-
-        ref: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/#event-gen_aiassistantmessage
-        """
-        return Event(
-            name="gen_ai.assistant.message",
-            timestamp=timestamp,
-            attributes=event_attributes,
-            body=body,
-            trace_id=span_ctx.trace_id,
-            span_id=span_ctx.span_id,
-            trace_flags=span_ctx.trace_flags,
+            trace_flags=span_ctx.trace_flags
         )
