@@ -192,7 +192,7 @@ class _BedrockAgentExtension(_AwsSdkExtension):
             if request_param_value:
                 attributes[attribute_key] = request_param_value
 
-    def on_success(self, span: Span, result: _BotoResultT):
+    def on_success(self, span: Span, result: _BotoResultT, instrumentor_context=None):
         if self._operation_class is None:
             return
 
@@ -220,6 +220,10 @@ class _BedrockAgentRuntimeExtension(_AwsSdkExtension):
         knowledge_base_id = self._call_context.params.get(_KNOWLEDGE_BASE_ID)
         if knowledge_base_id:
             attributes[AWS_BEDROCK_KNOWLEDGE_BASE_ID] = knowledge_base_id
+            
+    def on_success(self, span: Span, result: _BotoResultT, instrumentor_context=None):
+        # Currently no attributes to extract from the result
+        pass
 
 
 class _BedrockExtension(_AwsSdkExtension):
@@ -229,7 +233,7 @@ class _BedrockExtension(_AwsSdkExtension):
     """
 
     # pylint: disable=no-self-use
-    def on_success(self, span: Span, result: _BotoResultT):
+    def on_success(self, span: Span, result: _BotoResultT, instrumentor_context=None):
         # _GUARDRAIL_ID can only be retrieved from the response, not from the request
         guardrail_id = result.get(_GUARDRAIL_ID)
         if guardrail_id:
@@ -333,7 +337,7 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
             attributes[key] = value
 
     # pylint: disable=too-many-branches
-    def on_success(self, span: Span, result: Dict[str, Any]):
+    def on_success(self, span: Span, result: Dict[str, Any], instrumentor_context=None):
         model_id = self._call_context.params.get(_MODEL_ID)
 
         if not model_id:
