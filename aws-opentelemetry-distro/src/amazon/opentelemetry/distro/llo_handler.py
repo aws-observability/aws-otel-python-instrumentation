@@ -17,11 +17,21 @@ _logger = logging.getLogger(__name__)
 
 class LLOHandler:
     """
-    Utility class for handling Large Language Objects (LLO).
-    This class identifies LLO attributes, emits them as log records, and filters
-    them out from telemetry data.
+    Utility class for handling Large Language Objects (LLO) in OpenTelemetry spans.
+
+    LLOHandler performs three primary functions:
+    1. Identifies Large Language Objects (LLO) content in spans
+    2. Extracts and transforms these attributes into OpenTelemetry Gen AI Events
+    3. Filters LLO from spans
     """
     def __init__(self, logger_provider: LoggerProvider):
+        """
+        Initialize an LLOHandler with the specified logger provider.
+
+        Args:
+            logger_provider: The OpenTelemetry LoggerProvider used for emitting events.
+                            Global LoggerProvider instance injected from our AwsOpenTelemetryConfigurator
+        """
         self._logger_provider = logger_provider
 
         self._event_logger_provider = EventLoggerProvider(logger_provider=self._logger_provider)
@@ -35,9 +45,15 @@ class LLOHandler:
 
     def process_spans(self, spans: Sequence[ReadableSpan]) -> List[ReadableSpan]:
         """
-        Perform LLO processing for each span:
+        Performs LLO processing for each span:
         1. Emitting LLO attributes as Gen AI Events
         2. Filtering out LLO attributes from the span
+
+        Args:
+            spans: A sequence of OpenTelemetry ReadableSpan objects to process
+
+        Returns:
+            List of processed spans with LLO attributes removed
         """
         modified_spans = []
 
@@ -62,7 +78,15 @@ class LLOHandler:
 
     def _emit_llo_attributes(self, span: ReadableSpan, attributes: Dict[str, Any]) -> None:
         """
-        Extract, transform, and emit LLO attributes as Gen AI Events
+        Collects the Gen AI Events for each LLO attribute in the span and emits them
+        using the event logger.
+
+        Args:
+            span: The source ReadableSpan that potentially contains LLO attributes
+            attributes: Dictionary of span attributes to process
+
+        Returns:
+            None: Events are emitted via the event logger
         """
         all_events = []
         all_events.extend(self._extract_gen_ai_prompt_events(span, attributes))
@@ -74,7 +98,15 @@ class LLOHandler:
 
     def _filter_attributes(self, attributes: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Filter out attributes that contain LLO from the span's attributes.
+        Filter out attributes that contain LLO from the span's attributes. This
+        method creates a new attributes dictionary that excludes any keys identified
+        as containing LLO data (based on the configured patterns).
+
+        Args:
+            attributes: Original dictionary of span attributes
+
+        Returns:
+            Dict[str, Any]: New dictionary with LLO attributes removed
         """
         filtered_attributes = {}
 
@@ -87,7 +119,17 @@ class LLOHandler:
 
     def _is_llo_attribute(self, key: str) -> bool:
         """
-        Determine if a span attribute contains an LLO based on its key.
+        Determine if a span attribute contains an LLO based on its key name.
+
+        Checks if theattribute key matches any of the configured patterns:
+        1. Exact math patterns (complete string equality)
+        2. Regex match patterns (regular expression matching)
+
+        Args:
+            key: The attribute key to check
+
+        Returns:
+            bool: True if the key matches an LLO pattern, False otherwise
         """
         return (
             any(pattern == key for pattern in self._exact_match_patterns) or
@@ -98,14 +140,22 @@ class LLOHandler:
     def _extract_gen_ai_prompt_events(self, span: ReadableSpan, attributes: Dict[str, Any]) -> List[Event]:
         """
         Extract gen_ai prompt events from attributes. Each item `gen_ai.prompt.{n}.content`
-        maps has an associated `gen_ai.prompt.{n}.role` that we map to an Event type.
+        maps has an associated `gen_ai.prompt.{n}.role` that determines the Event
+        type to be created.
 
         `gen_ai.prompt.{n}.role`:
         1. `system` -> `gen_ai.system.message` Event
         2. `user` -> `gen_ai.user.message` Event
         3. `assistant` -> `gen_ai.assistant.message` Event
-        4. `function` -> custom Event - TBD
-        5. `unknown` -> custom Event - TBD
+        4. `function` -> `gen_ai.{gen_ai.system}.message` custom Event
+        5. `unknown` -> `gen_ai.{gen_ai.system}.message` custom Event
+
+        Args:
+            span: The source ReadableSpan that potentially contains LLO attributes
+            attributes: Dictionary of span attributes to process
+
+        Returns:
+            List[Event]: List of OpenTelemetry Events created from prompt attributes
         """
         events = []
         span_ctx = span.context
@@ -180,6 +230,19 @@ class LLOHandler:
         attributes,
         body
     ):
+        """
+        Create and return a Gen AI Event with the provided parameters.
+
+        Args:
+            name: The name/type of the event (e.g., gen_ai.system.message)
+            span_ctx: The span context to extract trace/span IDs from
+            timestamp: The timestamp for the event
+            attributes: Additional attributes to include with the event
+            body: The event body containing content and role information
+
+        Returns:
+            Event: A fully configured OpenTelemetry Gen AI Event object
+        """
         return Event(
             name=name,
             timestamp=timestamp,
