@@ -12,8 +12,11 @@ from opentelemetry.sdk.trace import ReadableSpan
 GEN_AI_SYSTEM_MESSAGE = "gen_ai.system.message"
 GEN_AI_USER_MESSAGE = "gen_ai.user.message"
 GEN_AI_ASSISTANT_MESSAGE = "gen_ai.assistant.message"
+TRACELOOP_ENTITY_INPUT = "traceloop.entity.input"
+TRACELOOP_ENTITY_OUTPUT = "traceloop.entity.output"
 
 _logger = logging.getLogger(__name__)
+
 
 class LLOHandler:
     """
@@ -24,6 +27,7 @@ class LLOHandler:
     2. Extracts and transforms these attributes into OpenTelemetry Gen AI Events
     3. Filters LLO from spans
     """
+
     def __init__(self, logger_provider: LoggerProvider):
         """
         Initialize an LLOHandler with the specified logger provider.
@@ -37,11 +41,14 @@ class LLOHandler:
         self._event_logger_provider = EventLoggerProvider(logger_provider=self._logger_provider)
         self._event_logger = self._event_logger_provider.get_event_logger("gen_ai.events")
 
-        self._exact_match_patterns = []
-        self._regex_match_patterns = [
-            r"^gen_ai\.prompt\.\d+\.content$"
+        self._exact_match_patterns = [
+            "traceloop.entity.input",
+            "traceloop.entity.output",
         ]
-
+        self._regex_match_patterns = [
+            r"^gen_ai\.prompt\.\d+\.content$",
+            r"^gen_ai\.completion\.\d+\.content$",
+        ]
 
     def process_spans(self, spans: Sequence[ReadableSpan]) -> List[ReadableSpan]:
         """
@@ -66,7 +73,7 @@ class LLOHandler:
                     maxlen=span.attributes.maxlen,
                     attributes=updated_attributes,
                     immutable=span.attributes._immutable,
-                    max_value_len=span.attributes.max_value_len
+                    max_value_len=span.attributes.max_value_len,
                 )
             else:
                 span._attributes = updated_attributes
@@ -74,7 +81,6 @@ class LLOHandler:
             modified_spans.append(span)
 
         return modified_spans
-
 
     def _emit_llo_attributes(self, span: ReadableSpan, attributes: Dict[str, Any]) -> None:
         """
@@ -90,11 +96,12 @@ class LLOHandler:
         """
         all_events = []
         all_events.extend(self._extract_gen_ai_prompt_events(span, attributes))
+        all_events.extend(self._extract_gen_ai_completion_events(span, attributes))
+        all_events.extend(self._extract_traceloop_events(span, attributes))
 
         for event in all_events:
             self._event_logger.emit(event)
             _logger.debug(f"Emitted Gen AI Event: {event.name}")
-
 
     def _filter_attributes(self, attributes: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -116,7 +123,6 @@ class LLOHandler:
 
         return filtered_attributes
 
-
     def _is_llo_attribute(self, key: str) -> bool:
         """
         Determine if a span attribute contains an LLO based on its key name.
@@ -131,11 +137,9 @@ class LLOHandler:
         Returns:
             bool: True if the key matches an LLO pattern, False otherwise
         """
-        return (
-            any(pattern == key for pattern in self._exact_match_patterns) or
-            any(re.match(pattern, key) for pattern in self._regex_match_patterns)
+        return any(pattern == key for pattern in self._exact_match_patterns) or any(
+            re.match(pattern, key) for pattern in self._regex_match_patterns
         )
-
 
     def _extract_gen_ai_prompt_events(self, span: ReadableSpan, attributes: Dict[str, Any]) -> List[Event]:
         """
@@ -173,15 +177,9 @@ class LLOHandler:
             role_key = f"gen_ai.prompt.{index}.role"
             role = attributes.get(role_key, "unknown")
 
-            event_attributes = {
-                "gen_ai.system": gen_ai_system,
-                "original_attribute": key
-            }
+            event_attributes = {"gen_ai.system": gen_ai_system, "original_attribute": key}
 
-            body = {
-                "content": value,
-                "role": role
-            }
+            body = {"content": value, "role": role}
 
             event = None
             if role == "system":
@@ -190,7 +188,7 @@ class LLOHandler:
                     span_ctx=span_ctx,
                     timestamp=prompt_timestamp,
                     attributes=event_attributes,
-                    body=body
+                    body=body,
                 )
             elif role == "user":
                 event = self._get_gen_ai_event(
@@ -198,7 +196,7 @@ class LLOHandler:
                     span_ctx=span_ctx,
                     timestamp=prompt_timestamp,
                     attributes=event_attributes,
-                    body=body
+                    body=body,
                 )
             elif role == "assistant":
                 event = self._get_gen_ai_event(
@@ -206,7 +204,7 @@ class LLOHandler:
                     span_ctx=span_ctx,
                     timestamp=prompt_timestamp,
                     attributes=event_attributes,
-                    body=body
+                    body=body,
                 )
             elif role in ["function", "unknown"]:
                 event = self._get_gen_ai_event(
@@ -214,7 +212,7 @@ class LLOHandler:
                     span_ctx=span_ctx,
                     timestamp=prompt_timestamp,
                     attributes=event_attributes,
-                    body=body
+                    body=body,
                 )
 
             if event:
@@ -222,14 +220,72 @@ class LLOHandler:
 
         return events
 
-    def _get_gen_ai_event(
-        self,
-        name,
-        span_ctx,
-        timestamp,
-        attributes,
-        body
-    ):
+    def _extract_gen_ai_completion_events(self, span: ReadableSpan, attributes: Dict[str, Any]) -> List[Event]:
+        events = []
+        span_ctx = span.context
+        gen_ai_system = span.attributes.get("gen_ai.system", "unknown")
+
+        completion_timestamp = span.end_time
+
+        completion_content_pattern = re.compile(r"^gen_ai\.completion\.(\d+)\.content$")
+
+        for key, value in attributes.items():
+            match = completion_content_pattern.match(key)
+            if not match:
+                continue
+
+            index = match.group(1)
+            role_key = f"gen_ai.completion.{index}.role"
+            role = attributes.get(role_key, "unknown")
+
+            event_attributes = {"gen_ai.system": gen_ai_system, "original_attribute": key}
+
+            body = {"content": value, "role": role}
+
+            event = None
+            if role == "assistant":
+                event = self._get_gen_ai_event(
+                    name=GEN_AI_ASSISTANT_MESSAGE,
+                    span_ctx=span_ctx,
+                    timestamp=completion_timestamp,
+                    attributes=event_attributes,
+                    body=body,
+                )
+            else:
+                event = self._get_gen_ai_event(
+                    name=f"gen_ai.{gen_ai_system}.message",
+                    span_ctx=span_ctx,
+                    timestamp=completion_timestamp,
+                    attributes=event_attributes,
+                    body=body,
+                )
+
+            if event:
+                events.append(event)
+
+        return events
+
+    def _extract_traceloop_events(self, span: ReadableSpan, attributes: Dict[str, Any]) -> List[Event]:
+        events = []
+        span_ctx = span.context
+        gen_ai_system = span.attributes.get("traceloop.entity.name", "unknown")
+
+        traceloop_attrs = [(TRACELOOP_ENTITY_INPUT, span.start_time), (TRACELOOP_ENTITY_OUTPUT, span.end_time)]
+
+        for attr_key, timestamp in traceloop_attrs:
+            if attr_key in attributes:
+                event = self._get_gen_ai_event(
+                    name=f"gen_ai.{gen_ai_system}.message",
+                    span_ctx=span_ctx,
+                    timestamp=timestamp,
+                    attributes={"gen_ai.system": gen_ai_system, "original_attribute": attr_key},
+                    body={"content": attributes[attr_key]},
+                )
+                events.append(event)
+
+        return events
+
+    def _get_gen_ai_event(self, name, span_ctx, timestamp, attributes, body):
         """
         Create and return a Gen AI Event with the provided parameters.
 
@@ -250,5 +306,5 @@ class LLOHandler:
             body=body,
             trace_id=span_ctx.trace_id,
             span_id=span_ctx.span_id,
-            trace_flags=span_ctx.trace_flags
+            trace_flags=span_ctx.trace_flags,
         )
