@@ -14,6 +14,8 @@ GEN_AI_USER_MESSAGE = "gen_ai.user.message"
 GEN_AI_ASSISTANT_MESSAGE = "gen_ai.assistant.message"
 TRACELOOP_ENTITY_INPUT = "traceloop.entity.input"
 TRACELOOP_ENTITY_OUTPUT = "traceloop.entity.output"
+OPENINFERENCE_INPUT_VALUE = "input.value"
+OPENINFERENCE_OUTPUT_VALUE = "output.value"
 
 _logger = logging.getLogger(__name__)
 
@@ -47,10 +49,14 @@ class LLOHandler:
             "gen_ai.prompt",
             "gen_ai.completion",
             "gen_ai.content.revised_prompt",
+            "input.value",
+            "output.value",
         ]
         self._regex_match_patterns = [
             r"^gen_ai\.prompt\.\d+\.content$",
             r"^gen_ai\.completion\.\d+\.content$",
+            r"^llm\.input_messages\.\d+\.message\.content$",
+            r"^llm\.output_messages\.\d+\.message\.content$",
         ]
 
     def process_spans(self, spans: Sequence[ReadableSpan]) -> List[ReadableSpan]:
@@ -141,6 +147,7 @@ class LLOHandler:
         all_events.extend(self._extract_gen_ai_completion_events(span, attributes, event_timestamp))
         all_events.extend(self._extract_traceloop_events(span, attributes, event_timestamp))
         all_events.extend(self._extract_openlit_span_event_attributes(span, attributes, event_timestamp))
+        all_events.extend(self._extract_openinference_attributes(span, attributes, event_timestamp))
 
         for event in all_events:
             self._event_logger.emit(event)
@@ -398,6 +405,100 @@ class LLOHandler:
                 )
 
                 events.append(event)
+
+        return events
+
+    def _extract_openinference_attributes(
+        self, span: ReadableSpan, attributes: Dict[str, Any], event_timestamp: Optional[int] = None
+    ):
+        """
+        Extract Gen AI Events from LLO attributes in OpenInference spans
+        """
+        events = []
+        span_ctx = span.context
+        gen_ai_system = span.attributes.get("llm.model_name", "unknown")
+
+        input_timestamp = event_timestamp if event_timestamp is not None else span.start_time
+        output_timestamp = event_timestamp if event_timestamp is not None else span.end_time
+
+        openinference_direct_attrs = [
+            (OPENINFERENCE_INPUT_VALUE, input_timestamp, "user"),
+            (OPENINFERENCE_OUTPUT_VALUE, output_timestamp, "assistant"),
+        ]
+
+        for attr_key, timestamp, role in openinference_direct_attrs:
+            if attr_key in attributes:
+                event_attributes = {"gen_ai.system": gen_ai_system, "original_attribute": attr_key}
+                body = {"content": attributes[attr_key], "role": role}
+
+                if role == "user":
+                    event_name = GEN_AI_USER_MESSAGE
+                elif role == "assistant":
+                    event_name = GEN_AI_ASSISTANT_MESSAGE
+                else:
+                    event_name = f"gen_ai.{gen_ai_system}.message"
+
+                event = self._get_gen_ai_event(
+                    name=event_name, span_ctx=span_ctx, timestamp=timestamp, attributes=event_attributes, body=body
+                )
+
+                events.append(event)
+
+        input_msg_pattern = re.compile(r"^llm\.input_messages\.(\d+)\.message\.content$")
+
+        for key, value in attributes.items():
+            match = input_msg_pattern.match(key)
+            if not match:
+                continue
+
+            index = match.group(1)
+            role_key = f"llm.input_messages.{index}.message.role"
+            role = attributes.get(role_key, "user")  # Default to user if role not specified
+
+            event_attributes = {"gen_ai.system": gen_ai_system, "original_attribute": key}
+            body = {"content": value, "role": role}
+
+            event_name = GEN_AI_USER_MESSAGE
+            if role == "system":
+                event_name = GEN_AI_SYSTEM_MESSAGE
+            elif role == "assistant":
+                event_name = GEN_AI_ASSISTANT_MESSAGE
+            elif role not in ["user", "system", "assistant"]:
+                event_name = f"gen_ai.{gen_ai_system}.message"
+
+            event = self._get_gen_ai_event(
+                name=event_name, span_ctx=span_ctx, timestamp=input_timestamp, attributes=event_attributes, body=body
+            )
+
+            events.append(event)
+
+        output_msg_pattern = re.compile(r"^llm\.output_messages\.(\d+)\.message\.content$")
+
+        for key, value in attributes.items():
+            match = output_msg_pattern.match(key)
+            if not match:
+                continue
+
+            index = match.group(1)
+            role_key = f"llm.output_messages.{index}.message.role"
+            role = attributes.get(role_key, "assistant")  # Default to assistant if role not specified
+
+            event_attributes = {"gen_ai.system": gen_ai_system, "original_attribute": key}
+            body = {"content": value, "role": role}
+
+            event_name = GEN_AI_ASSISTANT_MESSAGE
+            if role == "system":
+                event_name = GEN_AI_SYSTEM_MESSAGE
+            elif role == "user":
+                event_name = GEN_AI_USER_MESSAGE
+            elif role not in ["user", "system", "assistant"]:
+                event_name = f"gen_ai.{gen_ai_system}.message"
+
+            event = self._get_gen_ai_event(
+                name=event_name, span_ctx=span_ctx, timestamp=output_timestamp, attributes=event_attributes, body=body
+            )
+
+            events.append(event)
 
         return events
 
