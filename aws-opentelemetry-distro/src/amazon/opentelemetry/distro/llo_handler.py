@@ -9,13 +9,24 @@ from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk._events import EventLoggerProvider
 from opentelemetry.sdk.trace import ReadableSpan, Event as SpanEvent
 
+# Message event types
 GEN_AI_SYSTEM_MESSAGE = "gen_ai.system.message"
 GEN_AI_USER_MESSAGE = "gen_ai.user.message"
 GEN_AI_ASSISTANT_MESSAGE = "gen_ai.assistant.message"
+
+# Framework-specific attribute keys
 TRACELOOP_ENTITY_INPUT = "traceloop.entity.input"
 TRACELOOP_ENTITY_OUTPUT = "traceloop.entity.output"
 OPENINFERENCE_INPUT_VALUE = "input.value"
 OPENINFERENCE_OUTPUT_VALUE = "output.value"
+OPENLIT_PROMPT = "gen_ai.prompt"
+OPENLIT_COMPLETION = "gen_ai.completion"
+OPENLIT_REVISED_PROMPT = "gen_ai.content.revised_prompt"
+
+# Roles
+ROLE_SYSTEM = "system"
+ROLE_USER = "user"
+ROLE_ASSISTANT = "assistant"
 
 _logger = logging.getLogger(__name__)
 
@@ -72,21 +83,30 @@ class LLOHandler:
         self._event_logger_provider = EventLoggerProvider(logger_provider=self._logger_provider)
         self._event_logger = self._event_logger_provider.get_event_logger("gen_ai.events")
 
+        # Patterns for attribute filtering
         self._exact_match_patterns = [
-            "traceloop.entity.input",
-            "traceloop.entity.output",
-            "gen_ai.prompt",
-            "gen_ai.completion",
-            "gen_ai.content.revised_prompt",
-            "input.value",
-            "output.value",
+            TRACELOOP_ENTITY_INPUT,
+            TRACELOOP_ENTITY_OUTPUT,
+            OPENLIT_PROMPT,
+            OPENLIT_COMPLETION,
+            OPENLIT_REVISED_PROMPT,
+            OPENINFERENCE_INPUT_VALUE,
+            OPENINFERENCE_OUTPUT_VALUE,
         ]
-        self._regex_match_patterns = [
-            r"^gen_ai\.prompt\.\d+\.content$",
-            r"^gen_ai\.completion\.\d+\.content$",
-            r"^llm\.input_messages\.\d+\.message\.content$",
-            r"^llm\.output_messages\.\d+\.message\.content$",
+
+        # Pre-compile regex patterns for better performance
+        self._regex_patterns = [
+            re.compile(r"^gen_ai\.prompt\.\d+\.content$"),
+            re.compile(r"^gen_ai\.completion\.\d+\.content$"),
+            re.compile(r"^llm\.input_messages\.\d+\.message\.content$"),
+            re.compile(r"^llm\.output_messages\.\d+\.message\.content$"),
         ]
+
+        # Additional pre-compiled patterns used in extraction methods
+        self._prompt_content_pattern = re.compile(r"^gen_ai\.prompt\.(\d+)\.content$")
+        self._completion_content_pattern = re.compile(r"^gen_ai\.completion\.(\d+)\.content$")
+        self._openinference_input_msg_pattern = re.compile(r"^llm\.input_messages\.(\d+)\.message\.content$")
+        self._openinference_output_msg_pattern = re.compile(r"^llm\.output_messages\.(\d+)\.message\.content$")
 
     def process_spans(self, spans: Sequence[ReadableSpan]) -> List[ReadableSpan]:
         """
@@ -259,9 +279,12 @@ class LLOHandler:
         Returns:
             bool: True if the key matches any LLO pattern, False otherwise
         """
-        return any(pattern == key for pattern in self._exact_match_patterns) or any(
-            re.match(pattern, key) for pattern in self._regex_match_patterns
-        )
+        # Check exact matches first (faster)
+        if key in self._exact_match_patterns:
+            return True
+
+        # Then check regex patterns
+        return any(pattern.match(key) for pattern in self._regex_patterns)
 
     def _extract_gen_ai_prompt_events(
         self, span: ReadableSpan, attributes: Dict[str, Any], event_timestamp: Optional[int] = None
@@ -291,11 +314,11 @@ class LLOHandler:
         span_ctx = span.context
         gen_ai_system = span.attributes.get("gen_ai.system", "unknown")
 
-        prompt_timestamp = event_timestamp if event_timestamp is not None else span.start_time
-        prompt_content_pattern = re.compile(r"^gen_ai\.prompt\.(\d+)\.content$")
+        # Use helper method to get appropriate timestamp (prompts are inputs)
+        prompt_timestamp = self._get_timestamp(span, event_timestamp, is_input=True)
 
         for key, value in attributes.items():
-            match = prompt_content_pattern.match(key)
+            match = self._prompt_content_pattern.match(key)
             if not match:
                 continue
 
@@ -304,45 +327,20 @@ class LLOHandler:
             role = attributes.get(role_key, "unknown")
 
             event_attributes = {"gen_ai.system": gen_ai_system, "original_attribute": key}
-
             body = {"content": value, "role": role}
 
-            event = None
-            if role == "system":
-                event = self._get_gen_ai_event(
-                    name=GEN_AI_SYSTEM_MESSAGE,
-                    span_ctx=span_ctx,
-                    timestamp=prompt_timestamp,
-                    attributes=event_attributes,
-                    body=body,
-                )
-            elif role == "user":
-                event = self._get_gen_ai_event(
-                    name=GEN_AI_USER_MESSAGE,
-                    span_ctx=span_ctx,
-                    timestamp=prompt_timestamp,
-                    attributes=event_attributes,
-                    body=body,
-                )
-            elif role == "assistant":
-                event = self._get_gen_ai_event(
-                    name=GEN_AI_ASSISTANT_MESSAGE,
-                    span_ctx=span_ctx,
-                    timestamp=prompt_timestamp,
-                    attributes=event_attributes,
-                    body=body,
-                )
-            elif role in ["function", "unknown"]:
-                event = self._get_gen_ai_event(
-                    name=f"gen_ai.{gen_ai_system}.message",
-                    span_ctx=span_ctx,
-                    timestamp=prompt_timestamp,
-                    attributes=event_attributes,
-                    body=body,
-                )
+            # Use helper method to determine event name based on role
+            event_name = self._get_event_name_for_role(role, gen_ai_system)
 
-            if event:
-                events.append(event)
+            event = self._get_gen_ai_event(
+                name=event_name,
+                span_ctx=span_ctx,
+                timestamp=prompt_timestamp,
+                attributes=event_attributes,
+                body=body,
+            )
+
+            events.append(event)
 
         return events
 
@@ -371,12 +369,11 @@ class LLOHandler:
         span_ctx = span.context
         gen_ai_system = span.attributes.get("gen_ai.system", "unknown")
 
-        completion_timestamp = event_timestamp if event_timestamp is not None else span.end_time
-
-        completion_content_pattern = re.compile(r"^gen_ai\.completion\.(\d+)\.content$")
+        # Use helper method to get appropriate timestamp (completions are outputs)
+        completion_timestamp = self._get_timestamp(span, event_timestamp, is_input=False)
 
         for key, value in attributes.items():
-            match = completion_content_pattern.match(key)
+            match = self._completion_content_pattern.match(key)
             if not match:
                 continue
 
@@ -385,29 +382,20 @@ class LLOHandler:
             role = attributes.get(role_key, "unknown")
 
             event_attributes = {"gen_ai.system": gen_ai_system, "original_attribute": key}
-
             body = {"content": value, "role": role}
 
-            event = None
-            if role == "assistant":
-                event = self._get_gen_ai_event(
-                    name=GEN_AI_ASSISTANT_MESSAGE,
-                    span_ctx=span_ctx,
-                    timestamp=completion_timestamp,
-                    attributes=event_attributes,
-                    body=body,
-                )
-            else:
-                event = self._get_gen_ai_event(
-                    name=f"gen_ai.{gen_ai_system}.message",
-                    span_ctx=span_ctx,
-                    timestamp=completion_timestamp,
-                    attributes=event_attributes,
-                    body=body,
-                )
+            # Use helper method to determine event name based on role
+            event_name = self._get_event_name_for_role(role, gen_ai_system)
 
-            if event:
-                events.append(event)
+            event = self._get_gen_ai_event(
+                name=event_name,
+                span_ctx=span_ctx,
+                timestamp=completion_timestamp,
+                attributes=event_attributes,
+                body=body,
+            )
+
+            events.append(event)
 
         return events
 
@@ -436,19 +424,29 @@ class LLOHandler:
         span_ctx = span.context
         gen_ai_system = span.attributes.get("traceloop.entity.name", "unknown")
 
-        input_timestamp = event_timestamp if event_timestamp is not None else span.start_time
-        output_timestamp = event_timestamp if event_timestamp is not None else span.end_time
+        # Use helper methods to get appropriate timestamps
+        input_timestamp = self._get_timestamp(span, event_timestamp, is_input=True)
+        output_timestamp = self._get_timestamp(span, event_timestamp, is_input=False)
 
-        traceloop_attrs = [(TRACELOOP_ENTITY_INPUT, input_timestamp), (TRACELOOP_ENTITY_OUTPUT, output_timestamp)]
+        traceloop_attrs = [
+            (TRACELOOP_ENTITY_INPUT, input_timestamp, ROLE_USER),  # Treat input as user role
+            (TRACELOOP_ENTITY_OUTPUT, output_timestamp, ROLE_ASSISTANT),  # Treat output as assistant role
+        ]
 
-        for attr_key, timestamp in traceloop_attrs:
+        for attr_key, timestamp, role in traceloop_attrs:
             if attr_key in attributes:
+                event_attributes = {"gen_ai.system": gen_ai_system, "original_attribute": attr_key}
+                body = {"content": attributes[attr_key], "role": role}
+
+                # Custom event name for Traceloop (always use system-specific format)
+                event_name = f"gen_ai.{gen_ai_system}.message"
+
                 event = self._get_gen_ai_event(
-                    name=f"gen_ai.{gen_ai_system}.message",
+                    name=event_name,
                     span_ctx=span_ctx,
                     timestamp=timestamp,
-                    attributes={"gen_ai.system": gen_ai_system, "original_attribute": attr_key},
-                    body={"content": attributes[attr_key]},
+                    attributes=event_attributes,
+                    body=body,
                 )
                 events.append(event)
 
@@ -481,13 +479,14 @@ class LLOHandler:
         span_ctx = span.context
         gen_ai_system = span.attributes.get("gen_ai.system", "unknown")
 
-        prompt_timestamp = event_timestamp if event_timestamp is not None else span.start_time
-        completion_timestamp = event_timestamp if event_timestamp is not None else span.end_time
+        # Use helper methods to get appropriate timestamps
+        prompt_timestamp = self._get_timestamp(span, event_timestamp, is_input=True)
+        completion_timestamp = self._get_timestamp(span, event_timestamp, is_input=False)
 
         openlit_event_attrs = [
-            ("gen_ai.prompt", prompt_timestamp, "user"),  # Assume user role for direct prompts
-            ("gen_ai.completion", completion_timestamp, "assistant"),  # Assume assistant role for completions
-            ("gen_ai.content.revised_prompt", prompt_timestamp, "system"),  # Assume system role for revised prompts
+            (OPENLIT_PROMPT, prompt_timestamp, ROLE_USER),  # Assume user role for direct prompts
+            (OPENLIT_COMPLETION, completion_timestamp, ROLE_ASSISTANT),  # Assume assistant role for completions
+            (OPENLIT_REVISED_PROMPT, prompt_timestamp, ROLE_SYSTEM),  # Assume system role for revised prompts
         ]
 
         for attr_key, timestamp, role in openlit_event_attrs:
@@ -495,17 +494,15 @@ class LLOHandler:
                 event_attributes = {"gen_ai.system": gen_ai_system, "original_attribute": attr_key}
                 body = {"content": attributes[attr_key], "role": role}
 
-                if role == "user":
-                    event_name = GEN_AI_USER_MESSAGE
-                elif role == "assistant":
-                    event_name = GEN_AI_ASSISTANT_MESSAGE
-                elif role == "system":
-                    event_name = GEN_AI_SYSTEM_MESSAGE
-                else:
-                    event_name = f"gen_ai.{gen_ai_system}.message"
+                # Use helper method to determine event name based on role
+                event_name = self._get_event_name_for_role(role, gen_ai_system)
 
                 event = self._get_gen_ai_event(
-                    name=event_name, span_ctx=span_ctx, timestamp=timestamp, attributes=event_attributes, body=body
+                    name=event_name,
+                    span_ctx=span_ctx,
+                    timestamp=timestamp,
+                    attributes=event_attributes,
+                    body=body,
                 )
 
                 events.append(event)
@@ -548,12 +545,14 @@ class LLOHandler:
         span_ctx = span.context
         gen_ai_system = span.attributes.get("llm.model_name", "unknown")
 
-        input_timestamp = event_timestamp if event_timestamp is not None else span.start_time
-        output_timestamp = event_timestamp if event_timestamp is not None else span.end_time
+        # Use helper methods to get appropriate timestamps
+        input_timestamp = self._get_timestamp(span, event_timestamp, is_input=True)
+        output_timestamp = self._get_timestamp(span, event_timestamp, is_input=False)
 
+        # Process direct value attributes
         openinference_direct_attrs = [
-            (OPENINFERENCE_INPUT_VALUE, input_timestamp, "user"),
-            (OPENINFERENCE_OUTPUT_VALUE, output_timestamp, "assistant"),
+            (OPENINFERENCE_INPUT_VALUE, input_timestamp, ROLE_USER),
+            (OPENINFERENCE_OUTPUT_VALUE, output_timestamp, ROLE_ASSISTANT),
         ]
 
         for attr_key, timestamp, role in openinference_direct_attrs:
@@ -561,12 +560,8 @@ class LLOHandler:
                 event_attributes = {"gen_ai.system": gen_ai_system, "original_attribute": attr_key}
                 body = {"content": attributes[attr_key], "role": role}
 
-                if role == "user":
-                    event_name = GEN_AI_USER_MESSAGE
-                elif role == "assistant":
-                    event_name = GEN_AI_ASSISTANT_MESSAGE
-                else:
-                    event_name = f"gen_ai.{gen_ai_system}.message"
+                # Use helper method to determine event name based on role
+                event_name = self._get_event_name_for_role(role, gen_ai_system)
 
                 event = self._get_gen_ai_event(
                     name=event_name, span_ctx=span_ctx, timestamp=timestamp, attributes=event_attributes, body=body
@@ -574,27 +569,21 @@ class LLOHandler:
 
                 events.append(event)
 
-        input_msg_pattern = re.compile(r"^llm\.input_messages\.(\d+)\.message\.content$")
-
+        # Process input messages
         for key, value in attributes.items():
-            match = input_msg_pattern.match(key)
+            match = self._openinference_input_msg_pattern.match(key)
             if not match:
                 continue
 
             index = match.group(1)
             role_key = f"llm.input_messages.{index}.message.role"
-            role = attributes.get(role_key, "user")  # Default to user if role not specified
+            role = attributes.get(role_key, ROLE_USER)  # Default to user if role not specified
 
             event_attributes = {"gen_ai.system": gen_ai_system, "original_attribute": key}
             body = {"content": value, "role": role}
 
-            event_name = GEN_AI_USER_MESSAGE
-            if role == "system":
-                event_name = GEN_AI_SYSTEM_MESSAGE
-            elif role == "assistant":
-                event_name = GEN_AI_ASSISTANT_MESSAGE
-            elif role not in ["user", "system", "assistant"]:
-                event_name = f"gen_ai.{gen_ai_system}.message"
+            # Use helper method to determine event name based on role
+            event_name = self._get_event_name_for_role(role, gen_ai_system)
 
             event = self._get_gen_ai_event(
                 name=event_name, span_ctx=span_ctx, timestamp=input_timestamp, attributes=event_attributes, body=body
@@ -602,27 +591,21 @@ class LLOHandler:
 
             events.append(event)
 
-        output_msg_pattern = re.compile(r"^llm\.output_messages\.(\d+)\.message\.content$")
-
+        # Process output messages
         for key, value in attributes.items():
-            match = output_msg_pattern.match(key)
+            match = self._openinference_output_msg_pattern.match(key)
             if not match:
                 continue
 
             index = match.group(1)
             role_key = f"llm.output_messages.{index}.message.role"
-            role = attributes.get(role_key, "assistant")  # Default to assistant if role not specified
+            role = attributes.get(role_key, ROLE_ASSISTANT)  # Default to assistant if role not specified
 
             event_attributes = {"gen_ai.system": gen_ai_system, "original_attribute": key}
             body = {"content": value, "role": role}
 
-            event_name = GEN_AI_ASSISTANT_MESSAGE
-            if role == "system":
-                event_name = GEN_AI_SYSTEM_MESSAGE
-            elif role == "user":
-                event_name = GEN_AI_USER_MESSAGE
-            elif role not in ["user", "system", "assistant"]:
-                event_name = f"gen_ai.{gen_ai_system}.message"
+            # Use helper method to determine event name based on role
+            event_name = self._get_event_name_for_role(role, gen_ai_system)
 
             event = self._get_gen_ai_event(
                 name=event_name, span_ctx=span_ctx, timestamp=output_timestamp, attributes=event_attributes, body=body
@@ -631,6 +614,43 @@ class LLOHandler:
             events.append(event)
 
         return events
+
+    def _get_event_name_for_role(self, role: str, gen_ai_system: str) -> str:
+        """
+        Map a message role to the appropriate event name.
+
+        Args:
+            role: The role of the message (system, user, assistant, etc.)
+            gen_ai_system: The gen_ai system identifier
+
+        Returns:
+            str: The appropriate event name for the given role
+        """
+        if role == ROLE_SYSTEM:
+            return GEN_AI_SYSTEM_MESSAGE
+        elif role == ROLE_USER:
+            return GEN_AI_USER_MESSAGE
+        elif role == ROLE_ASSISTANT:
+            return GEN_AI_ASSISTANT_MESSAGE
+        else:
+            return f"gen_ai.{gen_ai_system}.message"
+
+    def _get_timestamp(self, span: ReadableSpan, event_timestamp: Optional[int], is_input: bool) -> int:
+        """
+        Determine the appropriate timestamp to use for an event.
+
+        Args:
+            span: The source span
+            event_timestamp: Optional override timestamp
+            is_input: Whether this is an input (True) or output (False) message
+
+        Returns:
+            int: The timestamp to use for the event
+        """
+        if event_timestamp is not None:
+            return event_timestamp
+
+        return span.start_time if is_input else span.end_time
 
     def _get_gen_ai_event(self, name, span_ctx, timestamp, attributes, body):
         """
