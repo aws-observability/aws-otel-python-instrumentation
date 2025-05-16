@@ -1,13 +1,13 @@
 import logging
 import re
 
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 from opentelemetry.attributes import BoundedAttributes
 from opentelemetry._events import Event
 from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk._events import EventLoggerProvider
-from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.sdk.trace import ReadableSpan, Event as SpanEvent
 
 GEN_AI_SYSTEM_MESSAGE = "gen_ai.system.message"
 GEN_AI_USER_MESSAGE = "gen_ai.user.message"
@@ -44,6 +44,9 @@ class LLOHandler:
         self._exact_match_patterns = [
             "traceloop.entity.input",
             "traceloop.entity.output",
+            "gen_ai.prompt",
+            "gen_ai.completion",
+            "gen_ai.content.revised_prompt",
         ]
         self._regex_match_patterns = [
             r"^gen_ai\.prompt\.\d+\.content$",
@@ -78,11 +81,50 @@ class LLOHandler:
             else:
                 span._attributes = updated_attributes
 
+            self.process_span_events(span)
+
             modified_spans.append(span)
 
         return modified_spans
 
-    def _emit_llo_attributes(self, span: ReadableSpan, attributes: Dict[str, Any]) -> None:
+    def process_span_events(self, span: ReadableSpan) -> None:
+        """
+        Process events within a span by:
+        1. Emitting LLO attributes as Gen AI Events
+        2. Filtering out LLO attributes from event attributes
+        """
+        if not span.events:
+            return
+
+        updated_events = []
+
+        for event in span.events:
+            if not event.attributes:
+                updated_events.append(event)
+                continue
+
+            self._emit_llo_attributes(span, event.attributes, event_timestamp=event.timestamp)
+
+            updated_event_attributes = self._filter_attributes(event.attributes)
+
+            if len(updated_event_attributes) != len(event.attributes):
+                limit = None
+                if isinstance(event.attributes, BoundedAttributes):
+                    limit = event.attributes.maxlen
+
+                updated_event = SpanEvent(
+                    name=event.name, attributes=updated_event_attributes, timestamp=event.timestamp, limit=limit
+                )
+
+                updated_events.append(updated_event)
+            else:
+                updated_events.append(event)
+
+        span._events = updated_events
+
+    def _emit_llo_attributes(
+        self, span: ReadableSpan, attributes: Dict[str, Any], event_timestamp: Optional[int] = None
+    ) -> None:
         """
         Collects the Gen AI Events for each LLO attribute in the span and emits them
         using the event logger.
@@ -95,9 +137,10 @@ class LLOHandler:
             None: Events are emitted via the event logger
         """
         all_events = []
-        all_events.extend(self._extract_gen_ai_prompt_events(span, attributes))
-        all_events.extend(self._extract_gen_ai_completion_events(span, attributes))
-        all_events.extend(self._extract_traceloop_events(span, attributes))
+        all_events.extend(self._extract_gen_ai_prompt_events(span, attributes, event_timestamp))
+        all_events.extend(self._extract_gen_ai_completion_events(span, attributes, event_timestamp))
+        all_events.extend(self._extract_traceloop_events(span, attributes, event_timestamp))
+        all_events.extend(self._extract_openlit_span_event_attributes(span, attributes, event_timestamp))
 
         for event in all_events:
             self._event_logger.emit(event)
@@ -141,7 +184,9 @@ class LLOHandler:
             re.match(pattern, key) for pattern in self._regex_match_patterns
         )
 
-    def _extract_gen_ai_prompt_events(self, span: ReadableSpan, attributes: Dict[str, Any]) -> List[Event]:
+    def _extract_gen_ai_prompt_events(
+        self, span: ReadableSpan, attributes: Dict[str, Any], event_timestamp: Optional[int] = None
+    ) -> List[Event]:
         """
         Extract gen_ai prompt events from attributes. Each item `gen_ai.prompt.{n}.content`
         maps has an associated `gen_ai.prompt.{n}.role` that determines the Event
@@ -165,7 +210,7 @@ class LLOHandler:
         span_ctx = span.context
         gen_ai_system = span.attributes.get("gen_ai.system", "unknown")
 
-        prompt_timestamp = span.start_time
+        prompt_timestamp = event_timestamp if event_timestamp is not None else span.start_time
         prompt_content_pattern = re.compile(r"^gen_ai\.prompt\.(\d+)\.content$")
 
         for key, value in attributes.items():
@@ -220,12 +265,25 @@ class LLOHandler:
 
         return events
 
-    def _extract_gen_ai_completion_events(self, span: ReadableSpan, attributes: Dict[str, Any]) -> List[Event]:
+    def _extract_gen_ai_completion_events(
+        self, span: ReadableSpan, attributes: Dict[str, Any], event_timestamp: Optional[int] = None
+    ) -> List[Event]:
+        """
+        Extract gen_ai completion events from attributes.
+
+        Args:
+            span: The source ReadableSpan that potentially contains LLO attributes
+            attributes: Dictionary of span attributes to process
+            event_timestamp: Optional timestamp to use instead of span.end_time
+
+        Returns:
+            List[Event]: List of OpenTelemetry Events created from completion attributes
+        """
         events = []
         span_ctx = span.context
         gen_ai_system = span.attributes.get("gen_ai.system", "unknown")
 
-        completion_timestamp = span.end_time
+        completion_timestamp = event_timestamp if event_timestamp is not None else span.end_time
 
         completion_content_pattern = re.compile(r"^gen_ai\.completion\.(\d+)\.content$")
 
@@ -265,12 +323,28 @@ class LLOHandler:
 
         return events
 
-    def _extract_traceloop_events(self, span: ReadableSpan, attributes: Dict[str, Any]) -> List[Event]:
+    def _extract_traceloop_events(
+        self, span: ReadableSpan, attributes: Dict[str, Any], event_timestamp: Optional[int] = None
+    ) -> List[Event]:
+        """
+        Extract traceloop events from attributes.
+
+        Args:
+            span: The source ReadableSpan that potentially contains LLO attributes
+            attributes: Dictionary of span attributes to process
+            event_timestamp: Optional timestamp to use instead of span timestamps
+
+        Returns:
+            List[Event]: List of OpenTelemetry Events created from traceloop attributes
+        """
         events = []
         span_ctx = span.context
         gen_ai_system = span.attributes.get("traceloop.entity.name", "unknown")
 
-        traceloop_attrs = [(TRACELOOP_ENTITY_INPUT, span.start_time), (TRACELOOP_ENTITY_OUTPUT, span.end_time)]
+        input_timestamp = event_timestamp if event_timestamp is not None else span.start_time
+        output_timestamp = event_timestamp if event_timestamp is not None else span.end_time
+
+        traceloop_attrs = [(TRACELOOP_ENTITY_INPUT, input_timestamp), (TRACELOOP_ENTITY_OUTPUT, output_timestamp)]
 
         for attr_key, timestamp in traceloop_attrs:
             if attr_key in attributes:
@@ -281,6 +355,48 @@ class LLOHandler:
                     attributes={"gen_ai.system": gen_ai_system, "original_attribute": attr_key},
                     body={"content": attributes[attr_key]},
                 )
+                events.append(event)
+
+        return events
+
+    def _extract_openlit_span_event_attributes(
+        self, span: ReadableSpan, attributes: Dict[str, Any], event_timestamp: Optional[int] = None
+    ) -> List[Event]:
+        """
+        Extract LLO attributes specifically from OpenLit span events, which use direct key-value pairs
+        like `gen_ai.prompt` or `gen_ai.completion` in event attributes.
+        """
+        events = []
+        span_ctx = span.context
+        gen_ai_system = span.attributes.get("gen_ai.system", "unknown")
+
+        prompt_timestamp = event_timestamp if event_timestamp is not None else span.start_time
+        completion_timestamp = event_timestamp if event_timestamp is not None else span.end_time
+
+        openlit_event_attrs = [
+            ("gen_ai.prompt", prompt_timestamp, "user"),  # Assume user role for direct prompts
+            ("gen_ai.completion", completion_timestamp, "assistant"),  # Assume assistant role for completions
+            ("gen_ai.content.revised_prompt", prompt_timestamp, "system"),  # Assume system role for revised prompts
+        ]
+
+        for attr_key, timestamp, role in openlit_event_attrs:
+            if attr_key in attributes:
+                event_attributes = {"gen_ai.system": gen_ai_system, "original_attribute": attr_key}
+                body = {"content": attributes[attr_key], "role": role}
+
+                if role == "user":
+                    event_name = GEN_AI_USER_MESSAGE
+                elif role == "assistant":
+                    event_name = GEN_AI_ASSISTANT_MESSAGE
+                elif role == "system":
+                    event_name = GEN_AI_SYSTEM_MESSAGE
+                else:
+                    event_name = f"gen_ai.{gen_ai_system}.message"
+
+                event = self._get_gen_ai_event(
+                    name=event_name, span_ctx=span_ctx, timestamp=timestamp, attributes=event_attributes, body=body
+                )
+
                 events.append(event)
 
         return events
