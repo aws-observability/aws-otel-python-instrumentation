@@ -1,17 +1,15 @@
 import logging
 import re
-
 from typing import Any, Dict, List, Sequence
 
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
-
-from opentelemetry.attributes import BoundedAttributes
 from opentelemetry._events import Event
-from opentelemetry.sdk._logs import LoggerProvider
+from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.sdk._events import EventLoggerProvider
+from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk.trace import ReadableSpan
 
 _logger = logging.getLogger(__name__)
+
 
 class LLOHandler:
     """
@@ -19,16 +17,14 @@ class LLOHandler:
     This class identifies LLO attributes, emits them as log records, and filters
     them out from telemetry data.
     """
+
     def __init__(self, logger_provider: LoggerProvider):
 
         self._event_logger_provider = EventLoggerProvider(logger_provider=logger_provider)
         self._event_logger = self._event_logger_provider.get_event_logger("gen_ai.events")
 
         self._exact_match_patterns = []
-        self._regex_match_patterns = [
-            r"^gen_ai\.prompt\.\d+\.content$"
-        ]
-
+        self._regex_match_patterns = [r"^gen_ai\.prompt\.\d+\.content$"]
 
     def process_spans(self, spans: Sequence[ReadableSpan]) -> List[ReadableSpan]:
         """
@@ -47,7 +43,7 @@ class LLOHandler:
                     maxlen=span.attributes.maxlen,
                     attributes=updated_attributes,
                     immutable=span.attributes._immutable,
-                    max_value_len=span.attributes.max_value_len
+                    max_value_len=span.attributes.max_value_len,
                 )
             else:
                 span._attributes = updated_attributes
@@ -55,7 +51,6 @@ class LLOHandler:
             modified_spans.append(span)
 
         return modified_spans
-
 
     def _emit_llo_attributes(self, span: ReadableSpan, attributes: Dict[str, Any]) -> None:
         """
@@ -67,7 +62,6 @@ class LLOHandler:
         for event in all_events:
             self._event_logger.emit(event)
             _logger.debug(f"Emitted Gen AI Event: {event.name}")
-
 
     def _filter_attributes(self, attributes: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -81,16 +75,13 @@ class LLOHandler:
 
         return filtered_attributes
 
-
     def _is_llo_attribute(self, key: str) -> bool:
         """
         Determine if a span attribute contains an LLO based on its key.
         """
-        return (
-            any(pattern == key for pattern in self._exact_match_patterns) or
-            any(re.match(pattern, key) for pattern in self._regex_match_patterns)
+        return any(pattern == key for pattern in self._exact_match_patterns) or any(
+            re.match(pattern, key) for pattern in self._regex_match_patterns
         )
-
 
     def _extract_gen_ai_prompt_events(self, span: ReadableSpan, attributes: Dict[str, Any]) -> List[Event]:
         """
@@ -119,28 +110,13 @@ class LLOHandler:
             role_key = f"gen_ai.prompt.{index}.role"
             role = attributes.get(role_key, "unknown")
 
-            event_attributes = {
-                "gen_ai.system": gen_ai_system,
-                "original_attribute": key
-            }
+            event_attributes = {"gen_ai.system": gen_ai_system, "original_attribute": key}
 
             event = None
             if role == "system":
-                event = self._get_gen_ai_system_message_event(
-                    span_ctx,
-                    prompt_timestamp,
-                    event_attributes,
-                    value,
-                    role
-                )
+                event = self._get_gen_ai_system_message_event(span_ctx, prompt_timestamp, event_attributes, value, role)
             elif role == "user":
-                event = self._get_gen_ai_user_message_event(
-                    span_ctx,
-                    prompt_timestamp,
-                    event_attributes,
-                    value,
-                    role
-                )
+                event = self._get_gen_ai_user_message_event(span_ctx, prompt_timestamp, event_attributes, value, role)
             elif role == "assistant":
                 event = self._get_gen_ai_assistant_message_event(
                     span_ctx,
@@ -158,14 +134,7 @@ class LLOHandler:
 
         return events
 
-    def _get_gen_ai_system_message_event(
-        self,
-        span_ctx,
-        timestamp,
-        event_attributes,
-        content,
-        role
-    ):
+    def _get_gen_ai_system_message_event(self, span_ctx, timestamp, event_attributes, content, role):
         """
         Create and return a `gen_ai.system.message` Event.
         """
@@ -186,14 +155,7 @@ class LLOHandler:
             trace_flags=span_ctx.trace_flags,
         )
 
-    def _get_gen_ai_user_message_event(
-        self,
-        span_ctx,
-        timestamp,
-        event_attributes,
-        content,
-        role
-    ):
+    def _get_gen_ai_user_message_event(self, span_ctx, timestamp, event_attributes, content, role):
         """
         Create and return a `gen_ai.user.message` Event.
         """
