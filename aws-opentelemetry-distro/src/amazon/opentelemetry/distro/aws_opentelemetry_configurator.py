@@ -3,7 +3,7 @@
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import os
 import re
-from logging import NOTSET, Logger, getLogger
+from logging import NOTSET, CRITICAL, Logger, getLogger
 from typing import ClassVar, Dict, List, Type, Union
 
 from importlib_metadata import version
@@ -83,6 +83,7 @@ APPLICATION_SIGNALS_RUNTIME_ENABLED_CONFIG = "OTEL_AWS_APPLICATION_SIGNALS_RUNTI
 DEPRECATED_APP_SIGNALS_EXPORTER_ENDPOINT_CONFIG = "OTEL_AWS_APP_SIGNALS_EXPORTER_ENDPOINT"
 APPLICATION_SIGNALS_EXPORTER_ENDPOINT_CONFIG = "OTEL_AWS_APPLICATION_SIGNALS_EXPORTER_ENDPOINT"
 METRIC_EXPORT_INTERVAL_CONFIG = "OTEL_METRIC_EXPORT_INTERVAL"
+OTEL_LOGS_EXPORTER = "OTEL_LOGS_EXPORTER"
 DEFAULT_METRIC_EXPORT_INTERVAL = 60000.0
 AWS_LAMBDA_FUNCTION_NAME_CONFIG = "AWS_LAMBDA_FUNCTION_NAME"
 AWS_XRAY_DAEMON_ADDRESS_CONFIG = "AWS_XRAY_DAEMON_ADDRESS"
@@ -122,6 +123,24 @@ class AwsOpenTelemetryConfigurator(_OTelSDKConfigurator):
     # pylint: disable=no-self-use
     @override
     def _configure(self, **kwargs):
+
+        print(f"OTEL_EXPORTER_OTLP_LOGS_HEADERS: {os.environ.get('OTEL_EXPORTER_OTLP_LOGS_HEADERS', 'Not set')}")
+        print(f"OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED: {os.environ.get('OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED', 'Not set')}")
+        print(f"OTEL_METRICS_EXPORTER: {os.environ.get('OTEL_METRICS_EXPORTER', 'Not set')}")
+        print(f"OTEL_TRACES_EXPORTER: {os.environ.get('OTEL_TRACES_EXPORTER', 'Not set')}")
+        print(f"OTEL_LOGS_EXPORTER: {os.environ.get('OTEL_LOGS_EXPORTER', 'Not set')}")
+        print(f"OTEL_PYTHON_DISTRO: {os.environ.get('OTEL_PYTHON_DISTRO', 'Not set')}")
+        print(f"OTEL_PYTHON_CONFIGURATOR: {os.environ.get('OTEL_PYTHON_CONFIGURATOR', 'Not set')}")
+        print(f"OTEL_EXPORTER_OTLP_PROTOCOL: {os.environ.get('OTEL_EXPORTER_OTLP_PROTOCOL', 'Not set')}")
+        print(f"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: {os.environ.get('OTEL_EXPORTER_OTLP_TRACES_ENDPOINT', 'Not set')}")
+        print(f"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: {os.environ.get('OTEL_EXPORTER_OTLP_LOGS_ENDPOINT', 'Not set')}")
+        print(f"OTEL_RESOURCE_ATTRIBUTES: {os.environ.get('OTEL_RESOURCE_ATTRIBUTES', 'Not set')}")
+        print(f"AGENT_OBSERVABILITY_ENABLED: {os.environ.get('AGENT_OBSERVABILITY_ENABLED', 'Not set')}")
+        print(f"AWS_CLOUDWATCH_LOG_GROUP: {os.environ.get('AWS_CLOUDWATCH_LOG_GROUP', 'Not set')}")
+        print(f"AWS_CLOUDWATCH_LOG_STREAM: {os.environ.get('AWS_CLOUDWATCH_LOG_STREAM', 'Not set')}")
+        print(f"OTEL_PYTHON_DISABLED_INSTRUMENTATIONS: {os.environ.get('OTEL_PYTHON_DISABLED_INSTRUMENTATIONS', 'Not set')}")
+        print(f"PYTHONPATH: {os.environ.get('PYTHONPATH', 'Not set')}")
+
         if _is_defer_to_workers_enabled() and _is_wsgi_master_process():
             _logger.info(
                 "Skipping ADOT initialization since deferral to worker is enabled, and this is a master process."
@@ -174,6 +193,9 @@ def _initialize_components():
         resource=resource,
     )
     _init_metrics(metric_exporters, resource)
+    logging_enabled = os.getenv(_OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED, "false")
+    if logging_enabled.strip().lower() == "true":
+        _init_logging(log_exporters, resource)
 
 
 def _init_logging(
@@ -181,9 +203,9 @@ def _init_logging(
     resource: Resource = None,
 ):
 
-    # Provides a default OTLP log exporter when none is specified.
+    # Provides a default OTLP log exporter when the environment is not set.
     # This is the behavior for the logs exporters for other languages.
-    if not exporters:
+    if not exporters and os.environ.get(OTEL_LOGS_EXPORTER) == None:
         exporters = {"otlp": OTLPLogExporter}
 
     provider = LoggerProvider(resource=resource)
@@ -192,7 +214,7 @@ def _init_logging(
     for _, exporter_class in exporters.items():
         exporter_args: Dict[str, any] = {}
         log_exporter = _customize_logs_exporter(exporter_class(**exporter_args), resource)
-        provider.add_log_record_processor(BatchLogRecordProcessor(exporter=log_exporter))
+        provider.add_log_record_processor(AwsBatchLogRecordProcessor(exporter=log_exporter))
 
     handler = LoggingHandler(level=NOTSET, logger_provider=provider)
 
@@ -363,15 +385,7 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
         _logger.info("Detected using AWS OTLP Traces Endpoint.")
 
         if isinstance(span_exporter, OTLPSpanExporter):
-            if is_agent_observability_enabled():
-                logs_endpoint = os.getenv(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT)
-                logs_exporter = OTLPAwsLogExporter(endpoint=logs_endpoint)
-                span_exporter = OTLPAwsSpanExporter(
-                    endpoint=traces_endpoint,
-                    logger_provider=get_logger_provider()
-                )
-            else:
-                span_exporter = OTLPAwsSpanExporter(endpoint=traces_endpoint)
+            span_exporter = OTLPAwsSpanExporter(endpoint=traces_endpoint)
 
         else:
             _logger.warning(
