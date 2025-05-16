@@ -3,15 +3,16 @@
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import os
 import re
-from logging import CRITICAL, NOTSET, Logger, getLogger
+from logging import NOTSET, CRITICAL, Logger, getLogger
 from typing import ClassVar, Dict, List, Type, Union
 
 from importlib_metadata import version
 from typing_extensions import override
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE
-from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor import AwsBatchLogRecordProcessor
 from amazon.opentelemetry.distro._utils import is_agent_observability_enabled
+from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor_builder import (
     AttributePropagatingSpanProcessorBuilder,
@@ -22,14 +23,13 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor import AwsBatchLogRecordProcessor
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
 from amazon.opentelemetry.distro.scope_based_filtering_view import ScopeBasedRetainingView
-from opentelemetry._logs import get_logger_provider, set_logger_provider
+from opentelemetry._logs import set_logger_provider, get_logger_provider
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -166,7 +166,7 @@ def _initialize_components():
     sampler = _custom_import_sampler(sampler_name, resource)
 
     logging_enabled = os.getenv(_OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED, "false")
-
+    
     if logging_enabled.strip().lower() == "true":
         _init_logging(log_exporters, resource)
 
@@ -177,6 +177,7 @@ def _initialize_components():
         resource=resource,
     )
     _init_metrics(metric_exporters, resource)
+    
 
 
 def _init_logging(
@@ -198,7 +199,6 @@ def _init_logging(
 
         if isinstance(log_exporter, OTLPAwsLogExporter):
             provider.add_log_record_processor(AwsBatchLogRecordProcessor(exporter=log_exporter))
-
         else:
             provider.add_log_record_processor(BatchLogRecordProcessor(exporter=log_exporter))
 
@@ -373,7 +373,10 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
         if isinstance(span_exporter, OTLPSpanExporter):
             if is_agent_observability_enabled():
 
-                span_exporter = OTLPAwsSpanExporter(endpoint=traces_endpoint, logs_provider=get_logger_provider())
+                span_exporter = OTLPAwsSpanExporter(
+                    endpoint=traces_endpoint,
+                    logs_provider=get_logger_provider()
+                )
             else:
                 span_exporter = OTLPAwsSpanExporter(endpoint=traces_endpoint)
 
