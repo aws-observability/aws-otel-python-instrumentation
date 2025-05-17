@@ -75,8 +75,8 @@ def _apply_botocore_lambda_patch() -> None:
 
     old_on_success = _LambdaExtension.on_success
 
-    def patch_on_success(self, span: Span, result: _BotoResultT):
-        old_on_success(self, span, result)
+    def patch_on_success(self, span: Span, result: _BotoResultT, instrumentor_context=None):
+        old_on_success(self, span, result, instrumentor_context)
         lambda_configuration = result.get("Configuration", {})
         function_arn = lambda_configuration.get("FunctionArn")
         if function_arn:
@@ -180,8 +180,8 @@ def _apply_botocore_sqs_patch() -> None:
 
     old_on_success = _SqsExtension.on_success
 
-    def patch_on_success(self, span: Span, result: _BotoResultT):
-        old_on_success(self, span, result)
+    def patch_on_success(self, span: Span, result: _BotoResultT, instrumentor_context=None):
+        old_on_success(self, span, result, instrumentor_context)
         queue_url = result.get("QueueUrl")
         if queue_url:
             span.set_attribute(AWS_SQS_QUEUE_URL, queue_url)
@@ -243,7 +243,7 @@ class _SecretsManagerExtension(_AwsSdkExtension):
             attributes[AWS_SECRETSMANAGER_SECRET_ARN] = secret_id
 
     # pylint: disable=no-self-use
-    def on_success(self, span: Span, result: _BotoResultT):
+    def on_success(self, span: Span, result: _BotoResultT, instrumentor_context=None):
         secret_arn = result.get("ARN")
         if secret_arn:
             span.set_attribute(AWS_SECRETSMANAGER_SECRET_ARN, secret_arn)
