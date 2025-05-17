@@ -1,8 +1,4 @@
-import json
 import logging
-import os
-import threading
-from time import sleep
 from typing import Mapping, Sequence
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.constants import (
@@ -48,8 +44,8 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
     def _export(self, batch_strategy: BatchLogExportStrategy) -> None:
         """
         Overrides the batching behavior of upstream's export method. Preserves existing batching behavior but
-        will intermediarly export small log batches if the size of the data in the batch is at or above AWS CloudWatch's maximum request size limit
-        of 1 MB.
+        will intermediarly export small log batches if the size of the data in the batch is at or
+        above AWS CloudWatch's maximum request size limit of 1 MB.
 
         - Data size of exported batches will ALWAYS be <= 1 MB except for the case below:
         - If the data size of an exported batch is ever > 1 MB then the batch size is guaranteed to be 1
@@ -97,8 +93,8 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
 
     def _get_size_of_log(self, log_data: LogData) -> int:
         """
-        Estimates the size of a given LogData based on the size of the body + a buffer amount representing a rough guess of other data present
-        in the log.
+        Estimates the size of a given LogData based on the size of the body + a buffer
+        amount representing a rough guess of other data present in the log.
         """
         size = BASE_LOG_BUFFER_BYTE_SIZE
         body = log_data.log_record.body

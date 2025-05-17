@@ -2,11 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import gzip
-import itertools
 import logging
 from io import BytesIO
 from time import sleep
-from typing import Dict, Iterator, Mapping, Optional, Sequence
+from typing import Dict, Mapping, Optional, Sequence
 
 import requests
 
@@ -26,6 +25,7 @@ _logger = logging.getLogger(__name__)
 
 
 class OTLPAwsLogExporter(OTLPLogExporter):
+    COUNT = 0
     _LARGE_LOG_HEADER = {"x-aws-log-semantics": "otel"}
     _RETRY_AFTER_HEADER = "Retry-After"  # https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
 
@@ -62,7 +62,8 @@ class OTLPAwsLogExporter(OTLPLogExporter):
 
         print(f"Exporting batch of {len(batch)} logs")
         print("TOTAL DATA SIZE " + str(sum(self._get_size_of_log(logz) for logz in batch)))
-        print("GEN_AI_FLAG " + str(self._gen_ai_flag))
+        self.COUNT += len(batch)
+        print("COUNT " + str(self.COUNT))
 
         """
         Exports the given batch of OTLP log data.
@@ -74,8 +75,8 @@ class OTLPAwsLogExporter(OTLPLogExporter):
             - inject the 'x-aws-log-semantics' flag into the header.
 
         3. Retry behavior is now the following:
-            - if the response contains a status code that is retryable and the response contains Retry-After in its headers,
-              the serialized data will be exported after that set delay
+            - if the response contains a status code that is retryable and the response contains Retry-After in its
+              headers, the serialized data will be exported after that set delay
 
             - if the response does not contain that Retry-After header, default back to the current iteration of the
               exponential backoff delay
@@ -93,10 +94,17 @@ class OTLPAwsLogExporter(OTLPLogExporter):
 
         data = gzip_data.getvalue()
 
-        backoff = _create_exp_backoff_generator(self._MAX_RETRY_TIMEOUT)
+        backoff = _create_exp_backoff_generator(max_value=self._MAX_RETRY_TIMEOUT)
 
         while True:
             resp = self._send(data)
+
+            print(f"Response status: {resp.status_code}")
+            print(f"Response headers: {resp.headers}")
+            try:
+                print(f"Response body: {resp.text}")
+            except:
+                print("Could not print response body")
 
             if resp.ok:
                 return LogExportResult.SUCCESS
@@ -111,13 +119,18 @@ class OTLPAwsLogExporter(OTLPLogExporter):
                 return LogExportResult.FAILURE
 
             # https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
-            retry_after = resp.headers.get(self._RETRY_AFTER_HEADER, None)
+            maybe_retry_after = resp.headers.get(self._RETRY_AFTER_HEADER, None)
 
             # Set the next retry delay to the value of the Retry-After response in the headers.
-            # If Retry-After is not present in the headers, default to the next iteration of the exponential backoff strategy.
-            delay = next(backoff, -1) if retry_after == None else self._parse_retryable_header(retry_after)
+            # If Retry-After is not present in the headers, default to the next iteration of the
+            # exponential backoff strategy.
+
+            delay = self._parse_retryable_header(maybe_retry_after)
 
             if delay == -1:
+                delay = next(backoff, self._MAX_RETRY_TIMEOUT)
+
+            if delay == self._MAX_RETRY_TIMEOUT:
                 _logger.error(
                     "Transient error %s encountered while exporting logs batch. "
                     "No Retry-After header found and all backoff retries exhausted. "
@@ -134,7 +147,7 @@ class OTLPAwsLogExporter(OTLPLogExporter):
             )
 
             sleep(delay)
-    
+
     def set_gen_ai_flag(self):
         """
         Sets the gen_ai flag to true to signal injecting the LLO flag to the headers of the export request.
@@ -171,10 +184,15 @@ class OTLPAwsLogExporter(OTLPLogExporter):
 
         return OTLPLogExporter._retryable(resp)
 
-    def _parse_retryable_header(self, retry_header: str) -> float:
+    def _parse_retryable_header(self, retry_header: Optional[str]) -> float:
         """
-        Converts the given retryable header into a delay in seconds, returns -1 if there's an error with the parsing
+        Converts the given retryable header into a delay in seconds, returns -1 if there's no header
+        or error with the parsing
         """
+
+        if not retry_header:
+            return -1
+
         try:
             return float(retry_header)
         except ValueError:
