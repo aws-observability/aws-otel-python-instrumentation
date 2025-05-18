@@ -67,21 +67,21 @@ class TestLLOHandler(TestCase):
         self.assertFalse(self.llo_handler._is_llo_attribute("some.other.attribute"))
 
     def test_is_llo_attribute_traceloop_match(self):
-      """
-      Test _is_llo_attribute method with Traceloop patterns
-      """
-      # Test exact matches for Traceloop attributes
-      self.assertTrue(self.llo_handler._is_llo_attribute("traceloop.entity.input"))
-      self.assertTrue(self.llo_handler._is_llo_attribute("traceloop.entity.output"))
+        """
+        Test _is_llo_attribute method with Traceloop patterns
+        """
+        # Test exact matches for Traceloop attributes
+        self.assertTrue(self.llo_handler._is_llo_attribute("traceloop.entity.input"))
+        self.assertTrue(self.llo_handler._is_llo_attribute("traceloop.entity.output"))
 
     def test_is_llo_attribute_openlit_match(self):
-      """
-      Test _is_llo_attribute method with OpenLit patterns
-      """
-      # Test exact matches for direct OpenLit attributes
-      self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.prompt"))
-      self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.completion"))
-      self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.content.revised_prompt"))
+        """
+        Test _is_llo_attribute method with OpenLit patterns
+        """
+        # Test exact matches for direct OpenLit attributes
+        self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.prompt"))
+        self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.completion"))
+        self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.content.revised_prompt"))
 
     def test_is_llo_attribute_openinference_match(self):
         """
@@ -94,6 +94,16 @@ class TestLLOHandler(TestCase):
         # Test regex matches
         self.assertTrue(self.llo_handler._is_llo_attribute("llm.input_messages.0.message.content"))
         self.assertTrue(self.llo_handler._is_llo_attribute("llm.output_messages.123.message.content"))
+
+    def test_is_llo_attribute_crewai_match(self):
+        """
+        Test _is_llo_attribute method with CrewAI patterns
+        """
+        # Test exact match for CrewAI attributes (handled by Traceloop and OpenLit)
+        self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.agent.actual_output"))
+        self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.agent.human_input"))
+        self.assertTrue(self.llo_handler._is_llo_attribute("crewai.crew.tasks_output"))
+        self.assertTrue(self.llo_handler._is_llo_attribute("crewai.crew.result"))
 
     def test_filter_attributes(self):
         """
@@ -266,7 +276,7 @@ class TestLLOHandler(TestCase):
 
     def test_extract_traceloop_events(self):
         """
-        Test _extract_traceloop_events
+        Test _extract_traceloop_events with standard Traceloop attributes
         """
         attributes = {
             "traceloop.entity.input": "input data",
@@ -295,106 +305,151 @@ class TestLLOHandler(TestCase):
         self.assertEqual(output_event.attributes["original_attribute"], "traceloop.entity.output")
         self.assertEqual(output_event.timestamp, 1234567899)  # end_time
 
+    def test_extract_traceloop_all_attributes(self):
+        """
+        Test _extract_traceloop_events with all Traceloop attributes including CrewAI outputs
+        """
+        attributes = {
+            "traceloop.entity.input": "input data",
+            "traceloop.entity.output": "output data",
+            "crewai.crew.tasks_output": "[TaskOutput(description='Task 1', output='Result 1')]",
+            "crewai.crew.result": "Final crew result",
+            "traceloop.entity.name": "crewai_agent",
+        }
+
+        span = self._create_mock_span(attributes)
+        span.end_time = 1234567899
+
+        events = self.llo_handler._extract_traceloop_events(span, attributes)
+
+        self.assertEqual(len(events), 4)
+
+        # Get a map of original attributes to events
+        events_by_attr = {event.attributes["original_attribute"]: event for event in events}
+
+        # Check all expected attributes are present
+        self.assertIn("traceloop.entity.input", events_by_attr)
+        self.assertIn("traceloop.entity.output", events_by_attr)
+        self.assertIn("crewai.crew.tasks_output", events_by_attr)
+        self.assertIn("crewai.crew.result", events_by_attr)
+
+        # Check standard Traceloop events
+        input_event = events_by_attr["traceloop.entity.input"]
+        self.assertEqual(input_event.name, "gen_ai.crewai_agent.message")
+        self.assertEqual(input_event.body["role"], "user")
+
+        output_event = events_by_attr["traceloop.entity.output"]
+        self.assertEqual(output_event.name, "gen_ai.crewai_agent.message")
+        self.assertEqual(output_event.body["role"], "assistant")
+
+        # Check CrewAI events
+        tasks_event = events_by_attr["crewai.crew.tasks_output"]
+        self.assertEqual(tasks_event.name, "gen_ai.assistant.message")
+        self.assertEqual(tasks_event.body["role"], "assistant")
+
+        result_event = events_by_attr["crewai.crew.result"]
+        self.assertEqual(result_event.name, "gen_ai.assistant.message")
+        self.assertEqual(result_event.body["role"], "assistant")
+
     def test_extract_openlit_direct_prompt(self):
-      """
-      Test _extract_openlit_span_event_attributes with direct prompt attribute
-      """
-      attributes = {
-          "gen_ai.prompt": "user direct prompt",
-          "gen_ai.system": "openlit"
-      }
+        """
+        Test _extract_openlit_span_event_attributes with direct prompt attribute
+        """
+        attributes = {"gen_ai.prompt": "user direct prompt", "gen_ai.system": "openlit"}
 
-      span = self._create_mock_span(attributes)
+        span = self._create_mock_span(attributes)
 
-      events = self.llo_handler._extract_openlit_span_event_attributes(span, attributes)
+        events = self.llo_handler._extract_openlit_span_event_attributes(span, attributes)
 
-      self.assertEqual(len(events), 1)
-      event = events[0]
-      self.assertEqual(event.name, "gen_ai.user.message")
-      self.assertEqual(event.body["content"], "user direct prompt")
-      self.assertEqual(event.body["role"], "user")
-      self.assertEqual(event.attributes["gen_ai.system"], "openlit")
-      self.assertEqual(event.attributes["original_attribute"], "gen_ai.prompt")
-      self.assertEqual(event.timestamp, 1234567890)  # start_time
+        self.assertEqual(len(events), 1)
+        event = events[0]
+        self.assertEqual(event.name, "gen_ai.user.message")
+        self.assertEqual(event.body["content"], "user direct prompt")
+        self.assertEqual(event.body["role"], "user")
+        self.assertEqual(event.attributes["gen_ai.system"], "openlit")
+        self.assertEqual(event.attributes["original_attribute"], "gen_ai.prompt")
+        self.assertEqual(event.timestamp, 1234567890)  # start_time
 
     def test_extract_openlit_direct_completion(self):
-      """
-      Test _extract_openlit_span_event_attributes with direct completion attribute
-      """
-      attributes = {
-          "gen_ai.completion": "assistant direct completion",
-          "gen_ai.system": "openlit"
-      }
+        """
+        Test _extract_openlit_span_event_attributes with direct completion attribute
+        """
+        attributes = {"gen_ai.completion": "assistant direct completion", "gen_ai.system": "openlit"}
 
-      span = self._create_mock_span(attributes)
-      span.end_time = 1234567899
+        span = self._create_mock_span(attributes)
+        span.end_time = 1234567899
 
-      events = self.llo_handler._extract_openlit_span_event_attributes(span, attributes)
+        events = self.llo_handler._extract_openlit_span_event_attributes(span, attributes)
 
-      self.assertEqual(len(events), 1)
-      event = events[0]
-      self.assertEqual(event.name, "gen_ai.assistant.message")
-      self.assertEqual(event.body["content"], "assistant direct completion")
-      self.assertEqual(event.body["role"], "assistant")
-      self.assertEqual(event.attributes["gen_ai.system"], "openlit")
-      self.assertEqual(event.attributes["original_attribute"], "gen_ai.completion")
-      self.assertEqual(event.timestamp, 1234567899)  # end_time
+        self.assertEqual(len(events), 1)
+        event = events[0]
+        self.assertEqual(event.name, "gen_ai.assistant.message")
+        self.assertEqual(event.body["content"], "assistant direct completion")
+        self.assertEqual(event.body["role"], "assistant")
+        self.assertEqual(event.attributes["gen_ai.system"], "openlit")
+        self.assertEqual(event.attributes["original_attribute"], "gen_ai.completion")
+        self.assertEqual(event.timestamp, 1234567899)  # end_time
 
     def test_extract_openlit_all_attributes(self):
-      """
-      Test _extract_openlit_span_event_attributes with all OpenLit attributes
-      """
-      attributes = {
-          "gen_ai.prompt": "user prompt",
-          "gen_ai.completion": "assistant response",
-          "gen_ai.content.revised_prompt": "revised prompt",
-          "gen_ai.system": "langchain"
-      }
+        """
+        Test _extract_openlit_span_event_attributes with all OpenLit attributes
+        """
+        attributes = {
+            "gen_ai.prompt": "user prompt",
+            "gen_ai.completion": "assistant response",
+            "gen_ai.content.revised_prompt": "revised prompt",
+            "gen_ai.agent.actual_output": "agent output",
+            "gen_ai.agent.human_input": "human input to agent",
+            "gen_ai.system": "langchain",
+        }
 
-      span = self._create_mock_span(attributes)
-      span.end_time = 1234567899
+        span = self._create_mock_span(attributes)
+        span.end_time = 1234567899
 
-      events = self.llo_handler._extract_openlit_span_event_attributes(span, attributes)
+        events = self.llo_handler._extract_openlit_span_event_attributes(span, attributes)
 
-      self.assertEqual(len(events), 3)
+        self.assertEqual(len(events), 5)
 
-      # Check that all events have the correct system
-      for event in events:
-          self.assertEqual(event.attributes["gen_ai.system"], "langchain")
+        # Check that all events have the correct system
+        for event in events:
+            self.assertEqual(event.attributes["gen_ai.system"], "langchain")
 
-      # Check we have the expected event types
-      event_types = {event.name for event in events}
-      self.assertIn("gen_ai.user.message", event_types)
-      self.assertIn("gen_ai.assistant.message", event_types)
-      self.assertIn("gen_ai.system.message", event_types)
+        # Check we have the expected event types
+        event_types = {event.name for event in events}
+        self.assertIn("gen_ai.user.message", event_types)
+        self.assertIn("gen_ai.assistant.message", event_types)
+        self.assertIn("gen_ai.system.message", event_types)
 
-      # Check original attributes
-      original_attrs = {event.attributes["original_attribute"] for event in events}
-      self.assertIn("gen_ai.prompt", original_attrs)
-      self.assertIn("gen_ai.completion", original_attrs)
-      self.assertIn("gen_ai.content.revised_prompt", original_attrs)
+        # Verify counts of user messages (should be 2 - prompt and human input)
+        user_events = [e for e in events if e.name == "gen_ai.user.message"]
+        self.assertEqual(len(user_events), 2)
+
+        # Check original attributes
+        original_attrs = {event.attributes["original_attribute"] for event in events}
+        self.assertIn("gen_ai.prompt", original_attrs)
+        self.assertIn("gen_ai.completion", original_attrs)
+        self.assertIn("gen_ai.content.revised_prompt", original_attrs)
+        self.assertIn("gen_ai.agent.actual_output", original_attrs)
+        self.assertIn("gen_ai.agent.human_input", original_attrs)
 
     def test_extract_openlit_revised_prompt(self):
-      """
-      Test _extract_openlit_span_event_attributes with revised prompt attribute
-      """
-      attributes = {
-          "gen_ai.content.revised_prompt": "revised system prompt",
-          "gen_ai.system": "openlit"
-      }
+        """
+        Test _extract_openlit_span_event_attributes with revised prompt attribute
+        """
+        attributes = {"gen_ai.content.revised_prompt": "revised system prompt", "gen_ai.system": "openlit"}
 
-      span = self._create_mock_span(attributes)
+        span = self._create_mock_span(attributes)
 
-      events = self.llo_handler._extract_openlit_span_event_attributes(span, attributes)
+        events = self.llo_handler._extract_openlit_span_event_attributes(span, attributes)
 
-      self.assertEqual(len(events), 1)
-      event = events[0]
-      self.assertEqual(event.name, "gen_ai.system.message")
-      self.assertEqual(event.body["content"], "revised system prompt")
-      self.assertEqual(event.body["role"], "system")
-      self.assertEqual(event.attributes["gen_ai.system"], "openlit")
-      self.assertEqual(event.attributes["original_attribute"], "gen_ai.content.revised_prompt")
-      self.assertEqual(event.timestamp, 1234567890)  # start_time
+        self.assertEqual(len(events), 1)
+        event = events[0]
+        self.assertEqual(event.name, "gen_ai.system.message")
+        self.assertEqual(event.body["content"], "revised system prompt")
+        self.assertEqual(event.body["role"], "system")
+        self.assertEqual(event.attributes["gen_ai.system"], "openlit")
+        self.assertEqual(event.attributes["original_attribute"], "gen_ai.content.revised_prompt")
+        self.assertEqual(event.timestamp, 1234567890)  # start_time
 
     def test_extract_openinference_direct_attributes(self):
         """
@@ -524,6 +579,152 @@ class TestLLOHandler(TestCase):
         self.assertIn("llm.input_messages.0.message.content", original_attrs)
         self.assertIn("llm.output_messages.0.message.content", original_attrs)
 
+    def test_extract_openlit_agent_actual_output(self):
+        """
+        Test _extract_openlit_span_event_attributes with agent actual output attribute
+        """
+        attributes = {"gen_ai.agent.actual_output": "Agent task output result", "gen_ai.system": "crewai"}
+
+        span = self._create_mock_span(attributes)
+        span.end_time = 1234567899
+
+        events = self.llo_handler._extract_openlit_span_event_attributes(span, attributes)
+
+        self.assertEqual(len(events), 1)
+
+        event = events[0]
+        self.assertEqual(event.name, "gen_ai.assistant.message")
+        self.assertEqual(event.body["content"], "Agent task output result")
+        self.assertEqual(event.body["role"], "assistant")
+        self.assertEqual(event.attributes["gen_ai.system"], "crewai")
+        self.assertEqual(event.attributes["original_attribute"], "gen_ai.agent.actual_output")
+        self.assertEqual(event.timestamp, 1234567899)  # end_time
+
+    def test_extract_openlit_agent_human_input(self):
+        """
+        Test _extract_openlit_span_event_attributes with agent human input attribute
+        """
+        attributes = {"gen_ai.agent.human_input": "Human input to the agent", "gen_ai.system": "crewai"}
+
+        span = self._create_mock_span(attributes)
+
+        events = self.llo_handler._extract_openlit_span_event_attributes(span, attributes)
+
+        self.assertEqual(len(events), 1)
+        event = events[0]
+        self.assertEqual(event.name, "gen_ai.user.message")
+        self.assertEqual(event.body["content"], "Human input to the agent")
+        self.assertEqual(event.body["role"], "user")
+        self.assertEqual(event.attributes["gen_ai.system"], "crewai")
+        self.assertEqual(event.attributes["original_attribute"], "gen_ai.agent.human_input")
+        self.assertEqual(event.timestamp, 1234567890)  # start_time
+
+    def test_extract_traceloop_crew_outputs(self):
+        """
+        Test _extract_traceloop_events with CrewAI specific attributes
+        """
+        attributes = {
+            "crewai.crew.tasks_output": "[TaskOutput(description='Task description', output='Task result')]",
+            "crewai.crew.result": "Final crew execution result",
+            "traceloop.entity.name": "crewai",
+        }
+
+        span = self._create_mock_span(attributes)
+        span.end_time = 1234567899
+
+        events = self.llo_handler._extract_traceloop_events(span, attributes)
+
+        self.assertEqual(len(events), 2)
+
+        # Get a map of original attributes to their content
+        events_by_attr = {event.attributes["original_attribute"]: event for event in events}
+
+        # Check the tasks output event
+        self.assertIn("crewai.crew.tasks_output", events_by_attr)
+        tasks_event = events_by_attr["crewai.crew.tasks_output"]
+        self.assertEqual(tasks_event.name, "gen_ai.assistant.message")
+        self.assertEqual(
+            tasks_event.body["content"], "[TaskOutput(description='Task description', output='Task result')]"
+        )
+        self.assertEqual(tasks_event.body["role"], "assistant")
+        self.assertEqual(tasks_event.attributes["gen_ai.system"], "crewai")
+        self.assertEqual(tasks_event.timestamp, 1234567899)  # end_time
+
+        # Check the result event
+        self.assertIn("crewai.crew.result", events_by_attr)
+        result_event = events_by_attr["crewai.crew.result"]
+        self.assertEqual(result_event.name, "gen_ai.assistant.message")
+        self.assertEqual(result_event.body["content"], "Final crew execution result")
+        self.assertEqual(result_event.body["role"], "assistant")
+        self.assertEqual(result_event.attributes["gen_ai.system"], "crewai")
+        self.assertEqual(result_event.timestamp, 1234567899)  # end_time
+
+    def test_extract_traceloop_crew_outputs_with_gen_ai_system(self):
+        """
+        Test _extract_traceloop_events with CrewAI specific attributes when gen_ai.system is available
+        """
+        attributes = {
+            "crewai.crew.tasks_output": "[TaskOutput(description='Task description', output='Task result')]",
+            "crewai.crew.result": "Final crew execution result",
+            "traceloop.entity.name": "oldvalue",
+            "gen_ai.system": "crewai-agent",
+        }
+
+        span = self._create_mock_span(attributes)
+        span.end_time = 1234567899
+
+        events = self.llo_handler._extract_traceloop_events(span, attributes)
+
+        self.assertEqual(len(events), 2)
+
+        # Get a map of original attributes to their content
+        events_by_attr = {event.attributes["original_attribute"]: event for event in events}
+
+        # Check the tasks output event
+        self.assertIn("crewai.crew.tasks_output", events_by_attr)
+        tasks_event = events_by_attr["crewai.crew.tasks_output"]
+        self.assertEqual(tasks_event.name, "gen_ai.assistant.message")
+        # Should use gen_ai.system attribute instead of traceloop.entity.name
+        self.assertEqual(tasks_event.attributes["gen_ai.system"], "crewai-agent")
+
+        # Check the result event
+        self.assertIn("crewai.crew.result", events_by_attr)
+        result_event = events_by_attr["crewai.crew.result"]
+        self.assertEqual(result_event.name, "gen_ai.assistant.message")
+        # Should use gen_ai.system attribute instead of traceloop.entity.name
+        self.assertEqual(result_event.attributes["gen_ai.system"], "crewai-agent")
+
+    def test_extract_traceloop_entity_with_gen_ai_system(self):
+        """
+        Test that traceloop.entity.input and traceloop.entity.output still use traceloop.entity.name
+        even when gen_ai.system is available
+        """
+        attributes = {
+            "traceloop.entity.input": "input data",
+            "traceloop.entity.output": "output data",
+            "traceloop.entity.name": "my_entity",
+            "gen_ai.system": "should-not-be-used",
+        }
+
+        span = self._create_mock_span(attributes)
+        span.end_time = 1234567899
+
+        events = self.llo_handler._extract_traceloop_events(span, attributes)
+
+        self.assertEqual(len(events), 2)
+
+        # Get a map of original attributes to their content
+        events_by_attr = {event.attributes["original_attribute"]: event for event in events}
+
+        # Regular traceloop entity attributes should still use traceloop.entity.name
+        input_event = events_by_attr["traceloop.entity.input"]
+        self.assertEqual(input_event.name, "gen_ai.my_entity.message")
+        self.assertEqual(input_event.attributes["gen_ai.system"], "my_entity")
+
+        output_event = events_by_attr["traceloop.entity.output"]
+        self.assertEqual(output_event.name, "gen_ai.my_entity.message")
+        self.assertEqual(output_event.attributes["gen_ai.system"], "my_entity")
+
     def test_emit_llo_attributes(self):
         """
         Test _emit_llo_attributes
@@ -536,6 +737,9 @@ class TestLLOHandler(TestCase):
             "traceloop.entity.input": "traceloop input",
             "traceloop.entity.name": "entity_name",
             "gen_ai.system": "openai",
+            "gen_ai.agent.actual_output": "agent output",
+            "crewai.crew.tasks_output": "tasks output",
+            "crewai.crew.result": "crew result",
         }
 
         span = self._create_mock_span(attributes)

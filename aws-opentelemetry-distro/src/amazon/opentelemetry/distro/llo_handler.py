@@ -17,11 +17,15 @@ GEN_AI_ASSISTANT_MESSAGE = "gen_ai.assistant.message"
 # Framework-specific attribute keys
 TRACELOOP_ENTITY_INPUT = "traceloop.entity.input"
 TRACELOOP_ENTITY_OUTPUT = "traceloop.entity.output"
+TRACELOOP_CREW_TASKS_OUTPUT = "crewai.crew.tasks_output"
+TRACELOOP_CREW_RESULT = "crewai.crew.result"
 OPENINFERENCE_INPUT_VALUE = "input.value"
 OPENINFERENCE_OUTPUT_VALUE = "output.value"
 OPENLIT_PROMPT = "gen_ai.prompt"
 OPENLIT_COMPLETION = "gen_ai.completion"
 OPENLIT_REVISED_PROMPT = "gen_ai.content.revised_prompt"
+OPENLIT_AGENT_ACTUAL_OUTPUT = "gen_ai.agent.actual_output"
+OPENLIT_AGENT_HUMAN_INPUT = "gen_ai.agent.human_input"
 
 # Roles
 ROLE_SYSTEM = "system"
@@ -51,11 +55,14 @@ class LLOHandler:
       - traceloop.entity.input: Input text for LLM operations
       - traceloop.entity.output: Output text from LLM operations
       - traceloop.entity.name: Name of the entity processing the LLO
+      - crewai.crew.tasks_output: Tasks output data from CrewAI (uses gen_ai.system if available)
+      - crewai.crew.result: Final result from CrewAI crew (uses gen_ai.system if available)
 
     - OpenLit:
       - gen_ai.prompt: Direct prompt text (treated as user message)
       - gen_ai.completion: Direct completion text (treated as assistant message)
       - gen_ai.content.revised_prompt: Revised prompt text (treated as system message)
+      - gen_ai.agent.actual_output: Output from CrewAI agent (treated as assistant message)
 
     - OpenInference:
       - input.value: Direct input prompt
@@ -87,9 +94,13 @@ class LLOHandler:
         self._exact_match_patterns = [
             TRACELOOP_ENTITY_INPUT,
             TRACELOOP_ENTITY_OUTPUT,
+            TRACELOOP_CREW_TASKS_OUTPUT,
+            TRACELOOP_CREW_RESULT,
             OPENLIT_PROMPT,
             OPENLIT_COMPLETION,
             OPENLIT_REVISED_PROMPT,
+            OPENLIT_AGENT_ACTUAL_OUTPUT,
+            OPENLIT_AGENT_HUMAN_INPUT,
             OPENINFERENCE_INPUT_VALUE,
             OPENINFERENCE_OUTPUT_VALUE,
         ]
@@ -213,8 +224,8 @@ class LLOHandler:
 
         Supported frameworks:
         - Standard Gen AI: Structured prompt/completion with roles
-        - Traceloop: Entity input/output
-        - OpenLit: Direct prompt/completion/revised prompt
+        - Traceloop: Entity input/output and CrewAI outputs
+        - OpenLit: Direct prompt/completion/revised prompt and agent outputs
         - OpenInference: Direct values and structured messages
 
         Args:
@@ -408,9 +419,15 @@ class LLOHandler:
         Processes Traceloop-specific attributes:
         - `traceloop.entity.input`: Input data (uses span.start_time)
         - `traceloop.entity.output`: Output data (uses span.end_time)
-        - `traceloop.entity.name`: Used as the gen_ai.system value
+        - `traceloop.entity.name`: Used as the gen_ai.system value when gen_ai.system isn't available
+        - `crewai.crew.tasks_output`: Tasks output data from CrewAI (uses span.end_time)
+        - `crewai.crew.result`: Final result from CrewAI crew (uses span.end_time)
 
-        Creates generic `gen_ai.{entity_name}.message` events for both input and output.
+        Creates generic `gen_ai.{entity_name}.message` events for both input and output,
+        and assistant message events for CrewAI outputs.
+
+        For CrewAI-specific attributes (crewai.crew.tasks_output and crewai.crew.result),
+        uses span's gen_ai.system attribute if available, otherwise falls back to traceloop.entity.name.
 
         Args:
             span: The source ReadableSpan containing the attributes
@@ -422,12 +439,14 @@ class LLOHandler:
         """
         events = []
         span_ctx = span.context
+        # Use traceloop.entity.name for the gen_ai.system value
         gen_ai_system = span.attributes.get("traceloop.entity.name", "unknown")
 
         # Use helper methods to get appropriate timestamps
         input_timestamp = self._get_timestamp(span, event_timestamp, is_input=True)
         output_timestamp = self._get_timestamp(span, event_timestamp, is_input=False)
 
+        # Standard Traceloop entity attributes
         traceloop_attrs = [
             (TRACELOOP_ENTITY_INPUT, input_timestamp, ROLE_USER),  # Treat input as user role
             (TRACELOOP_ENTITY_OUTPUT, output_timestamp, ROLE_ASSISTANT),  # Treat output as assistant role
@@ -450,6 +469,32 @@ class LLOHandler:
                 )
                 events.append(event)
 
+        # CrewAI-specific Traceloop attributes
+        # For CrewAI attributes, prefer gen_ai.system if available, otherwise use traceloop.entity.name
+        crewai_gen_ai_system = span.attributes.get("gen_ai.system", gen_ai_system)
+
+        crewai_attrs = [
+            (TRACELOOP_CREW_TASKS_OUTPUT, output_timestamp, ROLE_ASSISTANT),
+            (TRACELOOP_CREW_RESULT, output_timestamp, ROLE_ASSISTANT),
+        ]
+
+        for attr_key, timestamp, role in crewai_attrs:
+            if attr_key in attributes:
+                event_attributes = {"gen_ai.system": crewai_gen_ai_system, "original_attribute": attr_key}
+                body = {"content": attributes[attr_key], "role": role}
+
+                # For CrewAI outputs, use the assistant message event
+                event_name = GEN_AI_ASSISTANT_MESSAGE
+
+                event = self._get_gen_ai_event(
+                    name=event_name,
+                    span_ctx=span_ctx,
+                    timestamp=timestamp,
+                    attributes=event_attributes,
+                    body=body,
+                )
+                events.append(event)
+
         return events
 
     def _extract_openlit_span_event_attributes(
@@ -462,10 +507,11 @@ class LLOHandler:
         - `gen_ai.prompt`: Direct prompt text (treated as user message)
         - `gen_ai.completion`: Direct completion text (treated as assistant message)
         - `gen_ai.content.revised_prompt`: Revised prompt text (treated as system message)
+        - `gen_ai.agent.actual_output`: Output from CrewAI agent (treated as assistant message)
 
         The event timestamps are set based on attribute type:
         - Prompt and revised prompt: span.start_time
-        - Completion: span.end_time
+        - Completion and agent output: span.end_time
 
         Args:
             span: The source ReadableSpan containing the attributes
@@ -487,6 +533,16 @@ class LLOHandler:
             (OPENLIT_PROMPT, prompt_timestamp, ROLE_USER),  # Assume user role for direct prompts
             (OPENLIT_COMPLETION, completion_timestamp, ROLE_ASSISTANT),  # Assume assistant role for completions
             (OPENLIT_REVISED_PROMPT, prompt_timestamp, ROLE_SYSTEM),  # Assume system role for revised prompts
+            (
+                OPENLIT_AGENT_ACTUAL_OUTPUT,
+                completion_timestamp,
+                ROLE_ASSISTANT,
+            ),  # Assume assistant role for agent output
+            (
+                OPENLIT_AGENT_HUMAN_INPUT,
+                prompt_timestamp,
+                ROLE_USER,
+            ),  # Assume user role for agent human input
         ]
 
         for attr_key, timestamp, role in openlit_event_attrs:
