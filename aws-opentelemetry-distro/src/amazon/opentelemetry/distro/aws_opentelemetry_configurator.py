@@ -3,15 +3,15 @@
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import os
 import re
-from logging import NOTSET, CRITICAL, Logger, getLogger
+from logging import NOTSET, Logger, getLogger
 from typing import ClassVar, Dict, List, Type, Union
 
 from importlib_metadata import version
 from typing_extensions import override
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE
-from amazon.opentelemetry.distro._utils import is_agent_observability_enabled
 from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
+from amazon.opentelemetry.distro._utils import is_agent_observability_enabled
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor_builder import (
     AttributePropagatingSpanProcessorBuilder,
@@ -22,13 +22,14 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor import AwsBatchLogRecordProcessor
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
 from amazon.opentelemetry.distro.scope_based_filtering_view import ScopeBasedRetainingView
-from opentelemetry._logs import set_logger_provider, get_logger_provider
+from opentelemetry._logs import get_logger_provider, set_logger_provider
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -123,24 +124,6 @@ class AwsOpenTelemetryConfigurator(_OTelSDKConfigurator):
     # pylint: disable=no-self-use
     @override
     def _configure(self, **kwargs):
-
-        print(f"OTEL_EXPORTER_OTLP_LOGS_HEADERS: {os.environ.get('OTEL_EXPORTER_OTLP_LOGS_HEADERS', 'Not set')}")
-        print(f"OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED: {os.environ.get('OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED', 'Not set')}")
-        print(f"OTEL_METRICS_EXPORTER: {os.environ.get('OTEL_METRICS_EXPORTER', 'Not set')}")
-        print(f"OTEL_TRACES_EXPORTER: {os.environ.get('OTEL_TRACES_EXPORTER', 'Not set')}")
-        print(f"OTEL_LOGS_EXPORTER: {os.environ.get('OTEL_LOGS_EXPORTER', 'Not set')}")
-        print(f"OTEL_PYTHON_DISTRO: {os.environ.get('OTEL_PYTHON_DISTRO', 'Not set')}")
-        print(f"OTEL_PYTHON_CONFIGURATOR: {os.environ.get('OTEL_PYTHON_CONFIGURATOR', 'Not set')}")
-        print(f"OTEL_EXPORTER_OTLP_PROTOCOL: {os.environ.get('OTEL_EXPORTER_OTLP_PROTOCOL', 'Not set')}")
-        print(f"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: {os.environ.get('OTEL_EXPORTER_OTLP_TRACES_ENDPOINT', 'Not set')}")
-        print(f"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: {os.environ.get('OTEL_EXPORTER_OTLP_LOGS_ENDPOINT', 'Not set')}")
-        print(f"OTEL_RESOURCE_ATTRIBUTES: {os.environ.get('OTEL_RESOURCE_ATTRIBUTES', 'Not set')}")
-        print(f"AGENT_OBSERVABILITY_ENABLED: {os.environ.get('AGENT_OBSERVABILITY_ENABLED', 'Not set')}")
-        print(f"AWS_CLOUDWATCH_LOG_GROUP: {os.environ.get('AWS_CLOUDWATCH_LOG_GROUP', 'Not set')}")
-        print(f"AWS_CLOUDWATCH_LOG_STREAM: {os.environ.get('AWS_CLOUDWATCH_LOG_STREAM', 'Not set')}")
-        print(f"OTEL_PYTHON_DISABLED_INSTRUMENTATIONS: {os.environ.get('OTEL_PYTHON_DISABLED_INSTRUMENTATIONS', 'Not set')}")
-        print(f"PYTHONPATH: {os.environ.get('PYTHONPATH', 'Not set')}")
-
         if _is_defer_to_workers_enabled() and _is_wsgi_master_process():
             _logger.info(
                 "Skipping ADOT initialization since deferral to worker is enabled, and this is a master process."
@@ -193,9 +176,6 @@ def _initialize_components():
         resource=resource,
     )
     _init_metrics(metric_exporters, resource)
-    logging_enabled = os.getenv(_OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED, "false")
-    if logging_enabled.strip().lower() == "true":
-        _init_logging(log_exporters, resource)
 
 
 def _init_logging(
@@ -205,7 +185,7 @@ def _init_logging(
 
     # Provides a default OTLP log exporter when the environment is not set.
     # This is the behavior for the logs exporters for other languages.
-    if not exporters and os.environ.get(OTEL_LOGS_EXPORTER) == None:
+    if not exporters and os.environ.get(OTEL_LOGS_EXPORTER) is None:
         exporters = {"otlp": OTLPLogExporter}
 
     provider = LoggerProvider(resource=resource)
@@ -214,7 +194,11 @@ def _init_logging(
     for _, exporter_class in exporters.items():
         exporter_args: Dict[str, any] = {}
         log_exporter = _customize_logs_exporter(exporter_class(**exporter_args), resource)
-        provider.add_log_record_processor(AwsBatchLogRecordProcessor(exporter=log_exporter))
+
+        if isinstance(log_exporter, OTLPAwsLogExporter):
+            provider.add_log_record_processor(AwsBatchLogRecordProcessor(exporter=log_exporter))
+        else:
+            provider.add_log_record_processor(BatchLogRecordProcessor(exporter=log_exporter))
 
     handler = LoggingHandler(level=NOTSET, logger_provider=provider)
 
@@ -385,7 +369,10 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
         _logger.info("Detected using AWS OTLP Traces Endpoint.")
 
         if isinstance(span_exporter, OTLPSpanExporter):
-            span_exporter = OTLPAwsSpanExporter(endpoint=traces_endpoint)
+            if is_agent_observability_enabled():
+                span_exporter = OTLPAwsSpanExporter(endpoint=traces_endpoint, logger_provider=get_logger_provider())
+            else:
+                span_exporter = OTLPAwsSpanExporter(endpoint=traces_endpoint)
 
         else:
             _logger.warning(

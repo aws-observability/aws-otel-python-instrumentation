@@ -225,6 +225,10 @@ class _BedrockAgentRuntimeExtension(_AwsSdkExtension):
         # Currently no attributes to extract from the result
         pass
 
+    def on_success(self, span: Span, result: _BotoResultT, instrumentor_context=None):
+        # Currently no attributes to extract from the result
+        pass
+
 
 class _BedrockExtension(_AwsSdkExtension):
     """

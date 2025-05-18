@@ -1,13 +1,42 @@
 import logging
 import re
+from typing import Any, Dict, List, Optional, Sequence
 
+<<<<<<< HEAD
 from typing import Any, Dict, List, Optional, Sequence
 
 from opentelemetry.attributes import BoundedAttributes
+=======
+>>>>>>> 770f906 (add custom batch export)
 from opentelemetry._events import Event
-from opentelemetry.sdk._logs import LoggerProvider
+from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.sdk._events import EventLoggerProvider
+<<<<<<< HEAD
 from opentelemetry.sdk.trace import ReadableSpan, Event as SpanEvent
+
+# Message event types
+GEN_AI_SYSTEM_MESSAGE = "gen_ai.system.message"
+GEN_AI_USER_MESSAGE = "gen_ai.user.message"
+GEN_AI_ASSISTANT_MESSAGE = "gen_ai.assistant.message"
+
+# Framework-specific attribute keys
+TRACELOOP_ENTITY_INPUT = "traceloop.entity.input"
+TRACELOOP_ENTITY_OUTPUT = "traceloop.entity.output"
+OPENINFERENCE_INPUT_VALUE = "input.value"
+OPENINFERENCE_OUTPUT_VALUE = "output.value"
+OPENLIT_PROMPT = "gen_ai.prompt"
+OPENLIT_COMPLETION = "gen_ai.completion"
+OPENLIT_REVISED_PROMPT = "gen_ai.content.revised_prompt"
+
+# Roles
+ROLE_SYSTEM = "system"
+ROLE_USER = "user"
+ROLE_ASSISTANT = "assistant"
+=======
+from opentelemetry.sdk._logs import LoggerProvider
+from opentelemetry.sdk.trace import Event as SpanEvent
+from opentelemetry.sdk.trace import ReadableSpan
+>>>>>>> 770f906 (add custom batch export)
 
 # Message event types
 GEN_AI_SYSTEM_MESSAGE = "gen_ai.system.message"
@@ -678,4 +707,8 @@ class LLOHandler:
             trace_id=span_ctx.trace_id,
             span_id=span_ctx.span_id,
             trace_flags=span_ctx.trace_flags,
+<<<<<<< HEAD
         )
+=======
+        )
+>>>>>>> 770f906 (add custom batch export)
