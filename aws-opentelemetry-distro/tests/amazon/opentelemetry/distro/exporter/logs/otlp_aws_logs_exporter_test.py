@@ -14,7 +14,7 @@ from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 from opentelemetry.trace import TraceFlags
 
 
-class TestAwsOTLPLogsExporter(TestCase):
+class TestOTLPAwsLogsExporter(TestCase):
     _ENDPOINT = "https://logs.us-west-2.amazonaws.com/v1/logs"
     good_response = requests.Response()
     good_response.status_code = 200
@@ -35,7 +35,6 @@ class TestAwsOTLPLogsExporter(TestCase):
 
     def setUp(self):
         self.logs = self.generate_test_log_data()
-
         self.exporter = OTLPAwsLogExporter(endpoint=self._ENDPOINT)
 
     @patch("requests.Session.request", return_value=good_response)
