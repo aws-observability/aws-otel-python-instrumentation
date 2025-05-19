@@ -5,12 +5,11 @@ import gzip
 import logging
 from io import BytesIO
 from time import sleep
-from typing import Dict, Mapping, Optional, Sequence
+from typing import Dict, Optional, Sequence
 
 import requests
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
-from amazon.opentelemetry.distro.exporter.otlp.aws.common.constants import BASE_LOG_BUFFER_BYTE_SIZE
 from opentelemetry.exporter.otlp.proto.common._log_encoder import encode_logs
 from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter, _create_exp_backoff_generator
@@ -56,12 +55,8 @@ class OTLPAwsLogExporter(OTLPLogExporter):
             session=AwsAuthSession(aws_region=self._aws_region, service="logs"),
         )
 
-    # Code based off of:
     # https://github.com/open-telemetry/opentelemetry-python/blob/main/exporter/opentelemetry-exporter-otlp-proto-http/src/opentelemetry/exporter/otlp/proto/http/_log_exporter/__init__.py#L167
     def export(self, batch: Sequence[LogData]) -> LogExportResult:
-
-        print(f"Exporting batch of {len(batch)} logs")
-        print("TOTAL DATA SIZE " + str(sum(self._get_size_of_log(logz) for logz in batch)))
         self.COUNT += len(batch)
         print("COUNT " + str(self.COUNT))
 
@@ -99,13 +94,6 @@ class OTLPAwsLogExporter(OTLPLogExporter):
 
         while True:
             resp = self._send(data)
-
-            print(f"Response status: {resp.status_code}")
-            print(f"Response headers: {resp.headers}")
-            try:
-                print(f"Response body: {resp.text}")
-            except:
-                print("Could not print response body")
 
             if resp.ok:
                 return LogExportResult.SUCCESS
@@ -180,56 +168,22 @@ class OTLPAwsLogExporter(OTLPLogExporter):
         """
         Is it a retryable response?
         """
-        if resp.status_code == 429 or resp.status_code == 503:
+        if resp.status_code in (429, 503):
             return True
 
         return OTLPLogExporter._retryable(resp)
 
-    def _parse_retryable_header(self, retry_header: Optional[str]) -> float:
+    @staticmethod
+    def _parse_retryable_header(retry_header: Optional[str]) -> float:
         """
         Converts the given retryable header into a delay in seconds, returns -1 if there's no header
         or error with the parsing
         """
-
         if not retry_header:
             return -1
 
         try:
-            return float(retry_header)
+            val = float(retry_header)
+            return val if val >= 0 else -1
         except ValueError:
             return -1
-
-    def _get_size_of_log(self, log_data: LogData):
-        # Rough estimate of the size of the LogData based on size of
-        # the content body + a buffer to account for other information in logs.
-        size = BASE_LOG_BUFFER_BYTE_SIZE
-        body = log_data.log_record.body
-
-        if body:
-            size += self._get_size_of_any_value(log_data.log_record.body)
-
-        return size
-
-    def _get_size_of_any_value(self, val) -> int:
-        size = 0
-
-        if isinstance(val, str) or isinstance(val, bytes):
-            return len(val)
-
-        if isinstance(val, bool):
-            if val:
-                return 4  # len(True) = 4
-            return 5  # len(False) = 5
-
-        if isinstance(val, int) or isinstance(val, float):
-            return len(str(val))
-
-        if isinstance(val, Sequence):
-            for content in val:
-                size += self._get_size_of_any_value(content)
-
-        if isinstance(val, Mapping):
-            for _, content in val.items():
-                size += self._get_size_of_any_value(content)
-
-        return size

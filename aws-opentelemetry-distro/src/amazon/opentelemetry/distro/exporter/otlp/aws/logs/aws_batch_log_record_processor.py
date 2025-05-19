@@ -1,10 +1,6 @@
 import logging
 from typing import Mapping, Sequence
 
-from amazon.opentelemetry.distro.exporter.otlp.aws.common.constants import (
-    BASE_LOG_BUFFER_BYTE_SIZE,
-    MAX_LOG_REQUEST_BYTE_SIZE,
-)
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
 from opentelemetry.sdk._logs import LogData
 from opentelemetry.sdk._logs._internal.export import (
@@ -18,6 +14,11 @@ from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.util.types import AnyValue
 
 _logger = logging.getLogger(__name__)
+
+BASE_LOG_BUFFER_BYTE_SIZE = 2000
+MAX_LOG_REQUEST_BYTE_SIZE = (
+    1048576  # https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-OTLPEndpoint.html
+)
 
 
 class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
@@ -110,13 +111,13 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
         """
         size = 0
 
-        if isinstance(val, str) or isinstance(val, bytes):
+        if isinstance(val, (str, bytes)):
             return len(val)
 
         if isinstance(val, bool):
             return 4 if val else 5
 
-        if isinstance(val, int) or isinstance(val, float):
+        if isinstance(val, (float, int)):
             return len(str(val))
 
         if isinstance(val, Sequence):
