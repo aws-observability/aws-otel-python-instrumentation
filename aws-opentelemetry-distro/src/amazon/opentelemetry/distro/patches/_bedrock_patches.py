@@ -220,7 +220,7 @@ class _BedrockAgentRuntimeExtension(_AwsSdkExtension):
         knowledge_base_id = self._call_context.params.get(_KNOWLEDGE_BASE_ID)
         if knowledge_base_id:
             attributes[AWS_BEDROCK_KNOWLEDGE_BASE_ID] = knowledge_base_id
-            
+
     def on_success(self, span: Span, result: _BotoResultT, instrumentor_context=None):
         # Currently no attributes to extract from the result
         pass

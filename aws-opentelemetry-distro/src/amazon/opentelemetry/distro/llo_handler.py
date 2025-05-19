@@ -1,13 +1,13 @@
 import logging
 import re
-
 from typing import Any, Dict, List, Optional, Sequence
 
-from opentelemetry.attributes import BoundedAttributes
 from opentelemetry._events import Event
-from opentelemetry.sdk._logs import LoggerProvider
+from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.sdk._events import EventLoggerProvider
-from opentelemetry.sdk.trace import ReadableSpan, Event as SpanEvent
+from opentelemetry.sdk._logs import LoggerProvider
+from opentelemetry.sdk.trace import Event as SpanEvent
+from opentelemetry.sdk.trace import ReadableSpan
 
 # Message event types
 GEN_AI_SYSTEM_MESSAGE = "gen_ai.system.message"
