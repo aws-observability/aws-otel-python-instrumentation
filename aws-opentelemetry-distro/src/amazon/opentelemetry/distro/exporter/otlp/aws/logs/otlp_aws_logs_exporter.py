@@ -24,7 +24,6 @@ _logger = logging.getLogger(__name__)
 
 
 class OTLPAwsLogExporter(OTLPLogExporter):
-    COUNT = 0
     _LARGE_LOG_HEADER = {"x-aws-log-semantics": "otel"}
     _RETRY_AFTER_HEADER = "Retry-After"  # https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
 
@@ -57,9 +56,6 @@ class OTLPAwsLogExporter(OTLPLogExporter):
 
     # https://github.com/open-telemetry/opentelemetry-python/blob/main/exporter/opentelemetry-exporter-otlp-proto-http/src/opentelemetry/exporter/otlp/proto/http/_log_exporter/__init__.py#L167
     def export(self, batch: Sequence[LogData]) -> LogExportResult:
-        self.COUNT += len(batch)
-        print("COUNT " + str(self.COUNT))
-
         """
         Exports the given batch of OTLP log data.
         Behaviors of how this export will work -

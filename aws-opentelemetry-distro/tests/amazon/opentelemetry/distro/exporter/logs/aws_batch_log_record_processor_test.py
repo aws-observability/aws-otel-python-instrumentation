@@ -1,6 +1,6 @@
 import time
 import unittest
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor import (
     BASE_LOG_BUFFER_BYTE_SIZE,
