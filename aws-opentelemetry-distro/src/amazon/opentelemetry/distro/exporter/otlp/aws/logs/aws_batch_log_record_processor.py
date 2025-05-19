@@ -20,6 +20,7 @@ MAX_LOG_REQUEST_BYTE_SIZE = (
     1048576  # https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-OTLPEndpoint.html
 )
 
+
 class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
 
     def __init__(
@@ -109,14 +110,6 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
         Recursively calculates the size of an AnyValue type in bytes.
         """
 
-        seen = set() if seen is None else seen
-        obj_id = id(val)
-
-        if obj_id in seen:
-            return 0
-
-        size = 0
-
         if isinstance(val, (str, bytes)):
             return len(val)
 
@@ -126,16 +119,4 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
         if isinstance(val, (float, int)):
             return len(str(val))
 
-        if isinstance(val, Sequence):
-            seen.add(obj_id)
-
-            for content in val:
-                size += AwsBatchLogRecordProcessor._get_size_of_any_value(content, seen)
-
-        if isinstance(val, Mapping):
-            seen.add(obj_id)
-
-            for key, content in val.items():
-                size += len(key) + AwsBatchLogRecordProcessor._get_size_of_any_value(content, seen)
-
-        return size
+        return 0
