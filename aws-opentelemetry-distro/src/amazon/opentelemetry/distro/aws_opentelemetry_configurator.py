@@ -156,7 +156,7 @@ def _initialize_components():
             AwsEksResourceDetector(),
             AwsEcsResourceDetector(),
         ]
-        if not _is_lambda_environment()
+        if not (_is_lambda_environment() or is_agent_observability_enabled())
         else []
     )
 
@@ -195,7 +195,7 @@ def _init_logging(
         exporter_args: Dict[str, any] = {}
         log_exporter = _customize_logs_exporter(exporter_class(**exporter_args), resource)
 
-        if isinstance(log_exporter, OTLPAwsLogExporter):
+        if isinstance(log_exporter, OTLPAwsLogExporter) and is_agent_observability_enabled():
             provider.add_log_record_processor(AwsBatchLogRecordProcessor(exporter=log_exporter))
         else:
             provider.add_log_record_processor(BatchLogRecordProcessor(exporter=log_exporter))
