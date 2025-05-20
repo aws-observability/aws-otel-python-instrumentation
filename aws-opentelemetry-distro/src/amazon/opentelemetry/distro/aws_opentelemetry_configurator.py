@@ -156,7 +156,7 @@ def _initialize_components():
             AwsEksResourceDetector(),
             AwsEcsResourceDetector(),
         ]
-        if not _is_lambda_environment() or is_agent_observability_enabled()
+        if not (_is_lambda_environment() or is_agent_observability_enabled())
         else []
     )
 
