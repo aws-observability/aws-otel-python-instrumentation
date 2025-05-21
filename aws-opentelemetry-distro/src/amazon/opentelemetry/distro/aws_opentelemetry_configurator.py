@@ -144,8 +144,10 @@ class AwsOpenTelemetryConfigurator(_OTelSDKConfigurator):
 # Long term, we wish to contribute this to upstream to improve initialization customizability and reduce dependency on
 # internal logic.
 def _initialize_components():
-
+    # Remove 'awsemf' from OTEL_METRICS_EXPORTER if present to prevent import errors
+    # This is done before calling _import_exporters which would try to load exporters
     is_emf_enabled = _check_emf_exporter_enabled()
+    
     trace_exporters, metric_exporters, log_exporters = _import_exporters(
         _get_exporter_names("traces"),
         _get_exporter_names("metrics"),
@@ -185,6 +187,7 @@ def _initialize_components():
         sampler=sampler,
         resource=resource,
     )
+    
     _init_metrics(
         exporters_or_readers=metric_exporters,
         resource=resource,
