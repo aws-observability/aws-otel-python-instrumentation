@@ -68,8 +68,8 @@ class TestOTLPAwsLogsExporter(TestCase):
 
         self.assertEqual(result, LogExportResult.SUCCESS)
         self.assertIsNotNone(headers)
-        self.assertIn("x-aws-log-semantics", headers)
-        self.assertEqual(headers["x-aws-log-semantics"], "otel")
+        self.assertIn("x-aws-large-log-path", headers)
+        self.assertEqual(headers["x-aws-large-log-path"], "body.content")
 
     @patch("requests.Session.request", return_value=good_response)
     def test_should_not_export_if_shutdown(self, mock_request):

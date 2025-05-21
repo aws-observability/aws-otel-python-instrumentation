@@ -105,9 +105,9 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
         return size
 
     @staticmethod
-    def _get_size_of_any_value(val: AnyValue, seen=None) -> int:
+    def _get_size_of_any_value(val: AnyValue) -> int:
         """
-        Recursively calculates the size of an AnyValue type in bytes.
+        Calculates the size of an AnyValue type in bytes.
         """
 
         if isinstance(val, (str, bytes)):
@@ -118,5 +118,9 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
 
         if isinstance(val, (float, int)):
             return len(str(val))
+
+        if isinstance(val, Mapping):
+            content = val.get("content", None)
+            return len(content) if content else 0
 
         return 0
