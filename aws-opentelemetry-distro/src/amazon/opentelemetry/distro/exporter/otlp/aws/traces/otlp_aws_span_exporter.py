@@ -28,10 +28,9 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
         logger_provider: Optional[LoggerProvider] = None,
     ):
         self._aws_region = None
-
-        if logger_provider:
-            self._llo_handler = LLOHandler(logger_provider)
-
+        self._llo_handler = None
+        self._logger_provider = logger_provider
+        
         if endpoint:
             self._aws_region = endpoint.split(".")[1]
 
@@ -47,8 +46,26 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
             session=AwsAuthSession(aws_region=self._aws_region, service="xray"),
         )
 
+    def _ensure_llo_handler(self):
+        """Lazily initialize LLO handler when needed to avoid initialization order issues"""
+        if self._llo_handler is None and is_agent_observability_enabled():
+            # If logger_provider wasn't provided, try to get the current one
+            if self._logger_provider is None:
+                from opentelemetry._logs import get_logger_provider
+                try:
+                    self._logger_provider = get_logger_provider()
+                except Exception:
+                    # If logger provider can't be found, we can't process LLO
+                    return False
+                    
+            if self._logger_provider:
+                self._llo_handler = LLOHandler(self._logger_provider)
+                return True
+            
+        return self._llo_handler is not None
+
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
-        if is_agent_observability_enabled():
+        if is_agent_observability_enabled() and self._ensure_llo_handler():
             llo_processed_spans = self._llo_handler.process_spans(spans)
             return super().export(llo_processed_spans)
 

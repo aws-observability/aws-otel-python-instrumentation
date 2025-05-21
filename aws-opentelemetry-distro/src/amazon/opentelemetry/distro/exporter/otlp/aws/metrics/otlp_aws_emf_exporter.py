@@ -150,6 +150,13 @@ class CloudWatchEMFExporter(MetricExporter):
         self.parse_json_encoded_attr_values = parse_json_encoded_attr_values
         
         # Initialize CloudWatch Logs client
+        # If aws_region is not provided, boto3 will check environment variables AWS_REGION or AWS_DEFAULT_REGION
+        # Make sure we have a region specified somehow
+        if aws_region is None:
+            aws_region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+            if aws_region is None:
+                raise ValueError("No AWS region specified. Set aws_region parameter or AWS_REGION environment variable.")
+        
         session = boto3.Session(region_name=aws_region)
         self.logs_client = session.client("logs", **kwargs)
         
