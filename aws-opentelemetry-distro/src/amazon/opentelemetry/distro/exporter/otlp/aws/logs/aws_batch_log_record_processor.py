@@ -107,20 +107,45 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
     @staticmethod
     def _get_size_of_any_value(val: AnyValue) -> int:
         """
-        Calculates the size of an AnyValue type in bytes.
+        Calculates the size of an AnyValue type.
+        If AnyValue is an instance of a Map or Array, calculation is truncated to one layer.
         """
 
-        if isinstance(val, (str, bytes)):
-            return len(val)
+        # Use a stack to prevent excessive recursive calls.
+        stack = [val]
+        size = 0
+        depth = 0
 
-        if isinstance(val, bool):
-            return 4 if val else 5
+        while stack:
+            next = stack.pop()
 
-        if isinstance(val, (float, int)):
-            return len(str(val))
+            if isinstance(next, (str, bytes)):
+                size += len(next)
+                continue
 
-        if isinstance(val, Mapping):
-            content = val.get("content", None)
-            return len(content) if content else 0
+            if isinstance(next, bool):
+                size += 4 if next else 5
+                continue
 
-        return 0
+            if isinstance(next, (float, int)):
+                size += len(str(next))
+                continue
+
+            if isinstance(next, Mapping):
+                if depth < 1:
+                    for key, content in next.items():
+                        size += len(key)
+                        stack.append(content)
+
+                    depth += 1
+                continue
+
+            if isinstance(next, Sequence):
+                if depth < 1:
+                    for content in next:
+                        stack.append(content)
+
+                    depth += 1
+                continue
+
+        return size
