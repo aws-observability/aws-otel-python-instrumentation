@@ -24,7 +24,7 @@ _logger = logging.getLogger(__name__)
 
 
 class OTLPAwsLogExporter(OTLPLogExporter):
-    _LARGE_LOG_HEADER = {"x-aws-large-log-path": "body.content"}
+    _LARGE_LOG_HEADER = {"x-aws-extractable-fields": "body/content"}
     _RETRY_AFTER_HEADER = "Retry-After"  # https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
 
     def __init__(
