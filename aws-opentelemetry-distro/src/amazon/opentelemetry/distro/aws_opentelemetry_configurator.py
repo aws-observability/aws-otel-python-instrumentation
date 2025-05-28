@@ -149,6 +149,9 @@ def _initialize_components():
     # This is done before calling _import_exporters which would try to load exporters
     is_emf_enabled = _check_emf_exporter_enabled()
 
+    # Set up inferred headers before importing exporters
+    _setup_inferred_headers()
+
     trace_exporters, metric_exporters, log_exporters = _import_exporters(
         _get_exporter_names("traces"),
         _get_exporter_names("metrics"),
@@ -407,11 +410,17 @@ def _customize_logs_exporter(log_exporter: LogExporter, resource: Resource) -> L
     if _is_aws_otlp_endpoint(logs_endpoint, "logs"):
         _logger.info("Detected using AWS OTLP Logs Endpoint.")
 
-        if isinstance(log_exporter, OTLPLogExporter) and _validate_logs_headers().is_valid:
+        headers_result = _validate_logs_headers()
+        if isinstance(log_exporter, OTLPLogExporter) and headers_result.is_valid:
+            # Get the headers from the OTLPLogExporter
+            headers = {}
+            if hasattr(log_exporter, "_headers") and log_exporter._headers:
+                headers.update(log_exporter._headers)
+
             # Setting default compression mode to Gzip as this is the behavior in upstream's
             # collector otlp http exporter:
             # https://github.com/open-telemetry/opentelemetry-collector/tree/main/exporter/otlphttpexporter
-            return OTLPAwsLogExporter(endpoint=logs_endpoint)
+            return OTLPAwsLogExporter(endpoint=logs_endpoint, headers=headers)
 
         _logger.warning(
             "Improper configuration see: please export/set "
@@ -568,14 +577,65 @@ def _is_aws_otlp_endpoint(otlp_endpoint: str = None, service: str = "xray") -> b
     return bool(re.match(pattern, otlp_endpoint.lower()))
 
 
+def _setup_inferred_headers() -> None:
+    """
+    Set up inferred OTLP logs headers from resource attributes if needed.
+    This must be called before exporters are imported.
+    """
+    # Only infer if headers are not already set and agent observability is enabled
+    if not os.environ.get(OTEL_EXPORTER_OTLP_LOGS_HEADERS) and is_agent_observability_enabled():
+        resource_attrs = _parse_resource_attributes()
+
+        # Extract log group and stream from resource attributes
+        log_group_names = resource_attrs.get("aws.log.group.names", "")
+        log_stream_names = resource_attrs.get("aws.log.stream.names", "")
+
+        if log_group_names and log_stream_names:
+            # Construct and set the headers environment variable
+            inferred_headers = []
+            inferred_headers.append(f"{AWS_OTLP_LOGS_GROUP_HEADER}={log_group_names}")
+            inferred_headers.append(f"{AWS_OTLP_LOGS_STREAM_HEADER}={log_stream_names}")
+
+            os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = ",".join(inferred_headers)
+            _logger.info(
+                "Set OTEL_EXPORTER_OTLP_LOGS_HEADERS from OTEL_RESOURCE_ATTRIBUTES: %s",
+                os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS],
+            )
+
+
+def _parse_resource_attributes() -> Dict[str, str]:
+    """
+    Parse OTEL_RESOURCE_ATTRIBUTES environment variable into a dictionary.
+
+    Returns:
+        Dictionary of resource attributes
+    """
+    resource_attributes = {}
+    resource_attrs_str = os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "")
+
+    if not resource_attrs_str:
+        return resource_attributes
+
+    for pair in resource_attrs_str.split(","):
+        if "=" in pair:
+            key, value = pair.split("=", 1)
+            resource_attributes[key.strip()] = value.strip()
+
+    return resource_attributes
+
+
 def _validate_logs_headers() -> OtlpLogHeaderSetting:
     """
     Checks if x-aws-log-group and x-aws-log-stream are present in the headers in order to send logs to
     AWS OTLP Logs endpoint.
 
+    Note: Header inference from OTEL_RESOURCE_ATTRIBUTES is now handled by _setup_inferred_headers()
+    which runs before exporters are created.
+
     Returns:
         LogHeadersResult with log_group, log_stream, namespace and is_valid flag
     """
+    # Headers should already be set by _setup_inferred_headers if inference was needed
     logs_headers = os.environ.get(OTEL_EXPORTER_OTLP_LOGS_HEADERS)
 
     log_group = None

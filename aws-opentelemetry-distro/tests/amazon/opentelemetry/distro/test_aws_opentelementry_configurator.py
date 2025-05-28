@@ -703,6 +703,115 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             for key in config.keys():
                 os.environ.pop(key, None)
 
+    def test_validate_logs_headers_infers_from_resource_attributes(self):
+        """Test that _setup_inferred_headers can infer headers from OTEL_RESOURCE_ATTRIBUTES"""
+        from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
+            _validate_logs_headers,
+            _parse_resource_attributes,
+            _setup_inferred_headers,
+        )
+
+        # Test _parse_resource_attributes function
+        os.environ["OTEL_RESOURCE_ATTRIBUTES"] = (
+            "service.name=TestService,aws.log.group.names=/aws/genesis/TestAgent,aws.log.stream.names=test-stream"
+        )
+        attrs = _parse_resource_attributes()
+        self.assertEqual(attrs["service.name"], "TestService")
+        self.assertEqual(attrs["aws.log.group.names"], "/aws/genesis/TestAgent")
+        self.assertEqual(attrs["aws.log.stream.names"], "test-stream")
+
+        # Test inference when AGENT_OBSERVABILITY_ENABLED is true and OTEL_EXPORTER_OTLP_LOGS_HEADERS is not set
+        os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
+        os.environ["OTEL_RESOURCE_ATTRIBUTES"] = (
+            "service.name=TestService,aws.log.group.names=/aws/genesis/TestAgent,aws.log.stream.names=test-stream"
+        )
+        os.environ.pop("OTEL_EXPORTER_OTLP_LOGS_HEADERS", None)
+
+        # Call _setup_inferred_headers to set the environment variable
+        _setup_inferred_headers()
+
+        # Verify the environment variable was set correctly
+        self.assertEqual(
+            os.environ.get("OTEL_EXPORTER_OTLP_LOGS_HEADERS"),
+            "x-aws-log-group=/aws/genesis/TestAgent,x-aws-log-stream=test-stream",
+        )
+
+        # Now validate headers should find the inferred values
+        result = _validate_logs_headers()
+        self.assertTrue(result.is_valid)
+        self.assertEqual(result.log_group, "/aws/genesis/TestAgent")
+        self.assertEqual(result.log_stream, "test-stream")
+
+        # Clean up
+        os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+        os.environ.pop("OTEL_RESOURCE_ATTRIBUTES", None)
+        os.environ.pop("OTEL_EXPORTER_OTLP_LOGS_HEADERS", None)
+
+    def test_validate_logs_headers_explicit_takes_priority(self):
+        """Test that explicit OTEL_EXPORTER_OTLP_LOGS_HEADERS takes priority over inference"""
+        from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
+            _validate_logs_headers,
+            _setup_inferred_headers,
+        )
+
+        # Set both explicit headers and resource attributes
+        os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
+        os.environ["OTEL_RESOURCE_ATTRIBUTES"] = (
+            "aws.log.group.names=/aws/genesis/InferredAgent,aws.log.stream.names=inferred-stream"
+        )
+        os.environ["OTEL_EXPORTER_OTLP_LOGS_HEADERS"] = (
+            "x-aws-log-group=/aws/genesis/ExplicitAgent,x-aws-log-stream=explicit-stream"
+        )
+
+        # Call _setup_inferred_headers - it should not override explicit headers
+        _setup_inferred_headers()
+
+        # Verify explicit headers were not overridden
+        self.assertEqual(
+            os.environ.get("OTEL_EXPORTER_OTLP_LOGS_HEADERS"),
+            "x-aws-log-group=/aws/genesis/ExplicitAgent,x-aws-log-stream=explicit-stream",
+        )
+
+        result = _validate_logs_headers()
+        self.assertTrue(result.is_valid)
+        # Should use explicit headers, not inferred ones
+        self.assertEqual(result.log_group, "/aws/genesis/ExplicitAgent")
+        self.assertEqual(result.log_stream, "explicit-stream")
+
+        # Clean up
+        os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+        os.environ.pop("OTEL_RESOURCE_ATTRIBUTES", None)
+        os.environ.pop("OTEL_EXPORTER_OTLP_LOGS_HEADERS", None)
+
+    def test_validate_logs_headers_no_inference_when_agent_observability_disabled(self):
+        """Test that no inference happens when AGENT_OBSERVABILITY_ENABLED is false"""
+        from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
+            _validate_logs_headers,
+            _setup_inferred_headers,
+        )
+
+        # Set resource attributes but keep agent observability disabled
+        os.environ["AGENT_OBSERVABILITY_ENABLED"] = "false"
+        os.environ["OTEL_RESOURCE_ATTRIBUTES"] = (
+            "aws.log.group.names=/aws/genesis/TestAgent,aws.log.stream.names=test-stream"
+        )
+        os.environ.pop("OTEL_EXPORTER_OTLP_LOGS_HEADERS", None)
+
+        # Call _setup_inferred_headers - it should not set headers when agent observability is disabled
+        _setup_inferred_headers()
+
+        # Verify no headers were set
+        self.assertIsNone(os.environ.get("OTEL_EXPORTER_OTLP_LOGS_HEADERS"))
+
+        result = _validate_logs_headers()
+        self.assertFalse(result.is_valid)
+        self.assertIsNone(result.log_group)
+        self.assertIsNone(result.log_stream)
+
+        # Clean up
+        os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+        os.environ.pop("OTEL_RESOURCE_ATTRIBUTES", None)
+
 
 def validate_distro_environ():
     tc: TestCase = TestCase()
