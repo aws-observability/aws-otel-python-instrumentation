@@ -109,6 +109,7 @@ LAMBDA_SPAN_EXPORT_BATCH_SIZE = 10
 
 _logger: Logger = getLogger(__name__)
 
+
 class OtlpLogHeaderSetting(NamedTuple):
     log_group: Optional[str]
     log_stream: Optional[str]
@@ -147,7 +148,7 @@ def _initialize_components():
     # Remove 'awsemf' from OTEL_METRICS_EXPORTER if present to prevent import errors
     # This is done before calling _import_exporters which would try to load exporters
     is_emf_enabled = _check_emf_exporter_enabled()
-    
+
     trace_exporters, metric_exporters, log_exporters = _import_exporters(
         _get_exporter_names("traces"),
         _get_exporter_names("metrics"),
@@ -187,11 +188,9 @@ def _initialize_components():
         sampler=sampler,
         resource=resource,
     )
-    
-    _init_metrics(
-        exporters_or_readers=metric_exporters,
-        resource=resource,
-        is_emf_enabled=is_emf_enabled)
+
+    _init_metrics(exporters_or_readers=metric_exporters, resource=resource, is_emf_enabled=is_emf_enabled)
+
 
 def _init_logging(
     exporters: Dict[str, Type[LogExporter]],
@@ -250,7 +249,7 @@ def _init_tracing(
 def _init_metrics(
     exporters_or_readers: Dict[str, Union[Type[MetricExporter], Type[MetricReader]]],
     resource: Resource = None,
-    is_emf_enabled: bool = False
+    is_emf_enabled: bool = False,
 ):
     metric_readers = []
     views = []
@@ -467,21 +466,19 @@ def _customize_metric_exporters(metric_readers: List[MetricReader], views: List[
     if is_emf_enabled:
         headers_result = _validate_logs_headers()
         if not headers_result.log_group:
-            _logger.warning(
-                "Log group is not set. Set Log Group with OTEL_EXPORTER_OTLP_LOGS_HEADERS=<EMF Log Group>"
-            )
+            _logger.warning("Log group is not set. Set Log Group with OTEL_EXPORTER_OTLP_LOGS_HEADERS=<EMF Log Group>")
             return
 
         emf_exporter = create_emf_exporter(
             log_group_name=headers_result.log_group,
             log_stream_name=headers_result.log_stream,
-            namespace=headers_result.namespace
+            namespace=headers_result.namespace,
         )
         metric_reader = PeriodicExportingMetricReader(
-            exporter=emf_exporter,
-            export_interval_millis=_get_metric_export_interval()
+            exporter=emf_exporter, export_interval_millis=_get_metric_export_interval()
         )
         metric_readers.append(metric_reader)
+
 
 def _get_runtime_metric_views(views: List[View], retain_runtime_only: bool) -> None:
     runtime_metrics_scope_name = SYSTEM_METRICS_INSTRUMENTATION_SCOPE_NAME
@@ -632,6 +629,7 @@ def _get_metric_export_interval():
 def _span_export_batch_size():
     return LAMBDA_SPAN_EXPORT_BATCH_SIZE if _is_lambda_environment() else None
 
+
 def _check_emf_exporter_enabled() -> bool:
     """
     Checks if OTEL_METRICS_EXPORTER contains "awsemf", removes it if present,
@@ -668,12 +666,13 @@ def _check_emf_exporter_enabled() -> bool:
 
     return True
 
+
 def create_emf_exporter(
     log_group_name: str = None,
     log_stream_name: Optional[str] = None,
     namespace: Optional[str] = None,
     aws_region: Optional[str] = None,
-    **kwargs
+    **kwargs,
 ) -> CloudWatchEMFExporter:
     """
     Convenience function to create a CloudWatch EMF exporter with DELTA temporality.
@@ -690,8 +689,12 @@ def create_emf_exporter(
     """
     # Import all instrument types for temporality dictionary
     from opentelemetry.sdk.metrics import (
-        Counter, Histogram, ObservableCounter,
-        ObservableGauge, ObservableUpDownCounter, UpDownCounter
+        Counter,
+        Histogram,
+        ObservableCounter,
+        ObservableGauge,
+        ObservableUpDownCounter,
+        UpDownCounter,
     )
 
     # Set up temporality preference - always use DELTA for CloudWatch
@@ -701,7 +704,7 @@ def create_emf_exporter(
         ObservableCounter: AggregationTemporality.DELTA,
         ObservableGauge: AggregationTemporality.DELTA,
         ObservableUpDownCounter: AggregationTemporality.DELTA,
-        UpDownCounter: AggregationTemporality.DELTA
+        UpDownCounter: AggregationTemporality.DELTA,
     }
 
     # Create and return the exporter
@@ -711,8 +714,9 @@ def create_emf_exporter(
         log_stream_name=log_stream_name,
         aws_region=aws_region,
         preferred_temporality=temporality_dict,
-        **kwargs
+        **kwargs,
     )
+
 
 class ApplicationSignalsExporterProvider:
     _instance: ClassVar["ApplicationSignalsExporterProvider"] = None

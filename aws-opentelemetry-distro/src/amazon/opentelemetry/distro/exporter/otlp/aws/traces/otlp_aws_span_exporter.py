@@ -30,7 +30,7 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
         self._aws_region = None
         self._llo_handler = None
         self._logger_provider = logger_provider
-        
+
         if endpoint:
             self._aws_region = endpoint.split(".")[1]
 
@@ -52,16 +52,17 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
             # If logger_provider wasn't provided, try to get the current one
             if self._logger_provider is None:
                 from opentelemetry._logs import get_logger_provider
+
                 try:
                     self._logger_provider = get_logger_provider()
                 except Exception:
                     # If logger provider can't be found, we can't process LLO
                     return False
-                    
+
             if self._logger_provider:
                 self._llo_handler = LLOHandler(self._logger_provider)
                 return True
-            
+
         return self._llo_handler is not None
 
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:

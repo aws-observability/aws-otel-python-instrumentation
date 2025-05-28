@@ -4,6 +4,7 @@ import os
 import sys
 from logging import Logger, getLogger
 
+from amazon.opentelemetry.distro._utils import get_aws_region, is_agent_observability_enabled
 from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_instrumentation_patches
 from opentelemetry.distro import OpenTelemetryDistro
 from opentelemetry.environment_variables import OTEL_PROPAGATORS, OTEL_PYTHON_ID_GENERATOR
@@ -56,6 +57,31 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             sys.path.insert(0, cwd_path)
 
         os.environ.setdefault(OTEL_EXPORTER_OTLP_PROTOCOL, "http/protobuf")
+
+        # Set agent observability defaults when AGENT_OBSERVABILITY_ENABLED=true
+        if is_agent_observability_enabled():
+            # Set exporter defaults
+            os.environ.setdefault("OTEL_TRACES_EXPORTER", "otlp")
+            os.environ.setdefault("OTEL_LOGS_EXPORTER", "otlp")
+            os.environ.setdefault("OTEL_METRICS_EXPORTER", "awsemf")
+
+            # Set GenAI capture content default
+            os.environ.setdefault("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "true")
+
+            # Set OTLP endpoints with AWS region if not already set
+            region = get_aws_region()
+            if region:
+                os.environ.setdefault(
+                    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", f"https://xray.{region}.amazonaws.com/v1/traces"
+                )
+                os.environ.setdefault(
+                    "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", f"https://logs.{region}.amazonaws.com/v1/logs"
+                )
+            else:
+                _logger.warning(
+                    "AWS region could not be determined. OTLP endpoints will not be automatically configured. "
+                    "Please set AWS_REGION environment variable or configure OTLP endpoints manually."
+                )
 
         super(AwsOpenTelemetryDistro, self)._configure()
 
