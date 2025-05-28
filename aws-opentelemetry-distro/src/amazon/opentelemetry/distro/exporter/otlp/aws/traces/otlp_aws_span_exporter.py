@@ -65,8 +65,11 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
         return self._llo_handler is not None
 
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
-        if is_agent_observability_enabled() and self._ensure_llo_handler():
-            llo_processed_spans = self._llo_handler.process_spans(spans)
-            return super().export(llo_processed_spans)
+        try:
+            if is_agent_observability_enabled() and self._ensure_llo_handler():
+                llo_processed_spans = self._llo_handler.process_spans(spans)
+                return super().export(llo_processed_spans)
+        except Exception:
+            return SpanExportResult.FAILURE
 
         return super().export(spans)
