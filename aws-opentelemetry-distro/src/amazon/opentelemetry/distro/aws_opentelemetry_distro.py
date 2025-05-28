@@ -68,6 +68,21 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             # Set GenAI capture content default
             os.environ.setdefault("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "true")
 
+            # Set sampler default
+            os.environ.setdefault("OTEL_TRACES_SAMPLER", "parentbased_always_on")
+
+            # Set disabled instrumentations default
+            os.environ.setdefault(
+                "OTEL_PYTHON_DISABLED_INSTRUMENTATIONS",
+                "http,sqlalchemy,psycopg2,pymysql,sqlite3,aiopg,asyncpg,mysql_connector,botocore,boto3,urllib3,requests,starlette",
+            )
+
+            # Set logging auto instrumentation default
+            os.environ.setdefault("OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED", "true")
+
+            # Disable AWS Application Signals by default
+            os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "false")
+
             # Set OTLP endpoints with AWS region if not already set
             region = get_aws_region()
             if region:
