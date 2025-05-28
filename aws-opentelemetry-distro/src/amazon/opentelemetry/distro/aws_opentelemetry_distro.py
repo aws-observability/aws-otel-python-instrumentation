@@ -70,10 +70,18 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
 
             # Set OTLP endpoints with AWS region if not already set
             region = get_aws_region()
-            os.environ.setdefault(
-                "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", f"https://xray.{region}.amazonaws.com/v1/traces"
-            )
-            os.environ.setdefault("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", f"https://logs.{region}.amazonaws.com/v1/logs")
+            if region:
+                os.environ.setdefault(
+                    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", f"https://xray.{region}.amazonaws.com/v1/traces"
+                )
+                os.environ.setdefault(
+                    "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", f"https://logs.{region}.amazonaws.com/v1/logs"
+                )
+            else:
+                _logger.warning(
+                    "AWS region could not be determined. OTLP endpoints will not be automatically configured. "
+                    "Please set AWS_REGION environment variable or configure OTLP endpoints manually."
+                )
 
         super(AwsOpenTelemetryDistro, self)._configure()
 

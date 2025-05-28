@@ -37,7 +37,7 @@ def get_aws_region() -> str:
     1. AWS_REGION environment variable
     2. AWS_DEFAULT_REGION environment variable
     3. boto3 session's region (if boto3 is available)
-    4. Default to 'us-east-1' with warning
+    4. None if no region can be determined
     """
     # Check AWS environment variables first
     region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
@@ -58,8 +58,6 @@ def get_aws_region() -> str:
 
     _logger.warning(
         "AWS region not found in environment variables (AWS_REGION, AWS_DEFAULT_REGION) "
-        "or boto3 configuration. Defaulting to 'us-east-1'. "
-        "This may cause issues if your resources are in a different region. "
-        "Please set AWS_REGION environment variable explicitly."
+        "or boto3 configuration. Please set AWS_REGION environment variable explicitly."
     )
-    return "us-east-1"
+    return None
