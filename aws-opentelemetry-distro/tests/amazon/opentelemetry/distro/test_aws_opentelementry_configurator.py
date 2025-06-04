@@ -26,6 +26,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _customize_span_exporter,
     _customize_span_processors,
     _export_unsampled_span_for_lambda,
+    _export_unsampled_span_for_agent_observability,
     _init_logging,
     _is_application_signals_enabled,
     _is_application_signals_runtime_enabled,
@@ -576,6 +577,24 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
         os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
 
+    def test_customize_span_processors_with_agent_observability(self):
+        """Test that _customize_span_processors calls _export_unsampled_span_for_agent_observability"""
+        mock_tracer_provider: TracerProvider = MagicMock()
+
+        with patch(
+            "amazon.opentelemetry.distro.aws_opentelemetry_configurator._export_unsampled_span_for_agent_observability"
+        ) as mock_agent_observability:
+            # Test that agent observability function is called regardless of application signals
+            _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+            mock_agent_observability.assert_called_once_with(mock_tracer_provider, Resource.get_empty())
+
+            # Reset and test with application signals enabled
+            mock_agent_observability.reset_mock()
+            os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
+            _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+            mock_agent_observability.assert_called_once_with(mock_tracer_provider, Resource.get_empty())
+            os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
+
     def test_application_signals_exporter_provider(self):
         # Check default protocol - HTTP, as specified by AwsOpenTelemetryDistro.
         exporter: OTLPMetricExporterMixin = ApplicationSignalsExporterProvider().create_exporter()
@@ -652,6 +671,57 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertIsInstance(first_processor, BatchUnsampledSpanProcessor)
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
         os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
+
+    def test_export_unsampled_span_for_agent_observability(self):
+        mock_tracer_provider: TracerProvider = MagicMock()
+
+        # Test when agent observability is disabled (default)
+        _export_unsampled_span_for_agent_observability(mock_tracer_provider, Resource.get_empty())
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 0)
+
+        # Test when agent observability is enabled with AWS endpoint (the default case)
+        os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
+        os.environ["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] = "https://xray.us-east-1.amazonaws.com/v1/traces"
+        _export_unsampled_span_for_agent_observability(mock_tracer_provider, Resource.get_empty())
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 1)
+        processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
+        self.assertIsInstance(processor, BatchUnsampledSpanProcessor)
+
+        # Clean up
+        os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+        os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", None)
+
+    def test_export_unsampled_span_for_agent_observability_uses_aws_exporter(self):
+        """Test that OTLPAwsSpanExporter is used for AWS endpoints"""
+        mock_tracer_provider: TracerProvider = MagicMock()
+
+        with patch(
+            "amazon.opentelemetry.distro.aws_opentelemetry_configurator.OTLPAwsSpanExporter"
+        ) as mock_aws_exporter:
+            with patch(
+                "amazon.opentelemetry.distro.aws_opentelemetry_configurator.BatchUnsampledSpanProcessor"
+            ) as mock_processor:
+                with patch(
+                    "amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_logger_provider"
+                ) as mock_logger_provider:
+                    os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
+                    os.environ["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] = "https://xray.us-east-1.amazonaws.com/v1/traces"
+
+                    _export_unsampled_span_for_agent_observability(mock_tracer_provider, Resource.get_empty())
+
+                    # Verify OTLPAwsSpanExporter is created with correct parameters
+                    mock_aws_exporter.assert_called_once_with(
+                        endpoint="https://xray.us-east-1.amazonaws.com/v1/traces",
+                        logger_provider=mock_logger_provider.return_value,
+                    )
+                    # Verify BatchUnsampledSpanProcessor wraps the exporter
+                    mock_processor.assert_called_once_with(span_exporter=mock_aws_exporter.return_value)
+                    # Verify processor is added to tracer provider
+                    mock_tracer_provider.add_span_processor.assert_called_once_with(mock_processor.return_value)
+
+        # Clean up
+        os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+        os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", None)
 
     def test_customize_metric_exporter(self):
         metric_readers = []
