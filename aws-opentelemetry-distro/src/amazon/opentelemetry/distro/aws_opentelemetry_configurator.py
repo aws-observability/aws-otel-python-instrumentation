@@ -289,6 +289,30 @@ def _export_unsampled_span_for_lambda(trace_provider: TracerProvider, resource: 
     )
 
 
+def _export_unsampled_span_for_agent_observability(trace_provider: TracerProvider, resource: Resource = None):
+    if not is_agent_observability_enabled():
+        return
+
+    # Get the traces endpoint from environment
+    traces_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
+    
+    if not traces_endpoint:
+        # No traces endpoint configured, skip unsampled span export
+        _logger.warning("No traces endpoint configured for agent observability unsampled spans")
+        return
+    
+    # Create the appropriate span exporter based on the endpoint
+    if _is_aws_otlp_endpoint(traces_endpoint, "xray"):
+        span_exporter = OTLPAwsSpanExporter(endpoint=traces_endpoint, logger_provider=get_logger_provider())
+    else:
+        span_exporter = OTLPSpanExporter(endpoint=traces_endpoint)
+    
+    # Add the unsampled span processor
+    trace_provider.add_span_processor(
+        BatchUnsampledSpanProcessor(span_exporter=span_exporter)
+    )
+
+
 def _is_defer_to_workers_enabled():
     return os.environ.get(OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED_CONFIG, "false").strip().lower() == "true"
 
@@ -435,6 +459,9 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource) -> 
             return baggage_key == "session.id"
 
         provider.add_span_processor(BaggageSpanProcessor(session_id_predicate))
+    
+    # Add unsampled span export for agent observability
+    _export_unsampled_span_for_agent_observability(provider, resource)
 
     if not _is_application_signals_enabled():
         return
