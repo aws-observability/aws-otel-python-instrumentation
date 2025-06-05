@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
       matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11"]
+        python-version: ["3.9", "3.10", "3.11"]
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@v4
