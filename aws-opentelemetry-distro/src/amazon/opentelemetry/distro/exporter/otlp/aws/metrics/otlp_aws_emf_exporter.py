@@ -7,9 +7,8 @@ import json
 import os
 import time
 import logging
-from typing import Dict, List, Optional, Any, Union, Tuple
+from typing import Dict, List, Optional, Any, Tuple
 from collections import defaultdict
-from dataclasses import dataclass, field
 
 import boto3
 from opentelemetry.sdk.metrics import (
@@ -30,67 +29,8 @@ from opentelemetry.metrics import Instrument
 from opentelemetry.sdk.metrics.export import (
     AggregationTemporality,
 )
-from opentelemetry.util.types import Attributes
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class EMFMetricData:
-    """Represents an EMF metric data point."""
-
-    unit: Optional[str] = None
-    timestamp: Optional[int] = None
-    values: List[Union[int, float]] = field(default_factory=list)
-    counts: List[int] = field(default_factory=list)
-
-    def to_dict(self) -> Dict:
-        """Convert to dictionary for JSON serialization."""
-        return {
-            "unit": self.unit,
-            "values": self.values,
-            "counts": self.counts,
-        }
-
-
-@dataclass
-class EMFLog:
-    """Represents a complete EMF log entry."""
-
-    version: str = "0"
-    dimensions: List[List[str]] = field(default_factory=list)
-    metrics: List[Dict[str, Any]] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    _aws: Dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> Dict:
-        """Convert EMF log to dictionary format."""
-        result = {
-            "_aws": self._aws,
-            **self.metadata,
-        }
-
-        if self.dimensions:
-            metrics_list = []
-            for metric_dict in self.metrics:
-                # Convert each metric dict with EMFMetricData to serializable dict
-                serialized_metric = {}
-                for metric_name, metric_data in metric_dict.items():
-                    if isinstance(metric_data, EMFMetricData):
-                        serialized_metric[metric_name] = metric_data.to_dict()
-                    else:
-                        serialized_metric[metric_name] = metric_data
-                metrics_list.append(serialized_metric)
-
-            result["_aws"]["CloudWatchMetrics"] = [
-                {
-                    "Namespace": self._aws.get("Namespace", "default"),
-                    "Dimensions": self.dimensions,
-                    "Metrics": metrics_list,
-                }
-            ]
-
-        return result
 
 
 class CloudWatchEMFExporter(MetricExporter):
@@ -314,7 +254,8 @@ class CloudWatchEMFExporter(MetricExporter):
         record.attributes = dp.attributes
 
         # For Sum, set the sum_data
-        record.value = dp.value
+        record.sum_data = type('SumData', (), {})()
+        record.sum_data.value = dp.value
 
         return record, timestamp_ms
 
@@ -343,8 +284,13 @@ class CloudWatchEMFExporter(MetricExporter):
         record.attributes = dp.attributes
 
         # For Histogram, set the histogram_data
-        record.value = {"Count": dp.count, "Sum": dp.sum, "Min": dp.min, "Max": dp.max}
-
+        record.histogram_data = type('Histogram', (), {})()
+        record.histogram_data.value = {
+            "Count": dp.count,
+            "Sum": dp.sum,
+            "Min": dp.min,
+            "Max": dp.max
+        }
         return record, timestamp_ms
 
     def _convert_exp_histogram(self, metric, dp) -> Tuple[Any, int]:
@@ -353,6 +299,9 @@ class CloudWatchEMFExporter(MetricExporter):
 
         This function follows the logic of CalculateDeltaDatapoints in the Go implementation,
         converting exponential buckets to their midpoint values.
+
+        Ref:
+            https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/22626
 
         Args:
             metric: The metric object
@@ -443,13 +392,14 @@ class CloudWatchEMFExporter(MetricExporter):
                     array_counts.append(float(count))
 
         # Set the histogram data in the format expected by CloudWatch EMF
-        record.value = {
+        record.exp_histogram_data = type('ExpHistogram', (), {})()
+        record.exp_histogram_data.value = {
             "Values": array_values,
             "Counts": array_counts,
             "Count": dp.count,
             "Sum": dp.sum,
             "Max": dp.max,
-            "Min": dp.min,
+            "Min": dp.min
         }
 
         return record, timestamp_ms
@@ -477,6 +427,9 @@ class CloudWatchEMFExporter(MetricExporter):
         """
         # Start with base structure
         emf_log = {"_aws": {"Timestamp": timestamp or int(time.time() * 1000), "CloudWatchMetrics": []}}
+        
+        # Set with latest EMF version schema
+        emf_log["Version"] = "1"
 
         # Add resource attributes to EMF log but not as dimensions
         if resource and resource.attributes:
@@ -502,36 +455,25 @@ class CloudWatchEMFExporter(MetricExporter):
             if unit:
                 metric_data["Unit"] = unit
 
-            # TODO - add metric value into record for all kinds of metric type
-            emf_log[metric_name] = record.value
-
             # Process different types of aggregations
-            if hasattr(record, "histogram_data"):
-                # Histogram
-                histogram = record.histogram_data
-                if histogram.count > 0:
-                    bucket_boundaries = (
-                        list(histogram.bucket_boundaries) if hasattr(histogram, "bucket_boundaries") else []
-                    )
-                    bucket_counts = list(histogram.bucket_counts) if hasattr(histogram, "bucket_counts") else []
-
-                    # Format for CloudWatch EMF histogram format
-                    emf_log[metric_name] = {
-                        "Values": bucket_boundaries,
-                        "Counts": bucket_counts,
-                        "Max": 0,
-                        "Min": 0,
-                        "Count": 1,
-                        "Sum": 0,
-                    }
-            elif hasattr(record, "sum_data"):
+            if hasattr(record, 'exp_histogram_data'):
+                # Base2 Exponential Histogram
+                exp_histogram = record.exp_histogram_data
+                # Store value directly in emf_log
+                emf_log[metric_name] = exp_histogram.value
+            elif hasattr(record, 'histogram_data'):
+                # Regular Histogram metrics
+                histogram_data = record.histogram_data
+                # Store value directly in emf_log
+                emf_log[metric_name] = histogram_data.value
+            elif hasattr(record, 'sum_data'):
                 # Counter/UpDownCounter
                 sum_data = record.sum_data
                 # Store value directly in emf_log
                 emf_log[metric_name] = sum_data.value
             else:
                 # Other aggregations (e.g., LastValue)
-                if hasattr(record, "value"):
+                if hasattr(record, 'value'):
                     # Store value directly in emf_log
                     emf_log[metric_name] = record.value
 
@@ -644,7 +586,7 @@ class CloudWatchEMFExporter(MetricExporter):
 
             logger.error(traceback.format_exc())
             return MetricExportResult.FAILURE
-
+        
     # Constants for CloudWatch Logs limits
     CW_MAX_EVENT_PAYLOAD_BYTES = 256 * 1024  # 256KB
     CW_MAX_REQUEST_EVENT_COUNT = 10000
@@ -654,7 +596,7 @@ class CloudWatchEMFExporter(MetricExporter):
     CW_TRUNCATED_SUFFIX = "[Truncated...]"
     CW_EVENT_TIMESTAMP_LIMIT_PAST = 14 * 24 * 60 * 60 * 1000  # 14 days in milliseconds
     CW_EVENT_TIMESTAMP_LIMIT_FUTURE = 2 * 60 * 60 * 1000  # 2 hours in milliseconds
-
+    
     def _validate_log_event(self, log_event: Dict) -> bool:
         """
         Validate the log event according to CloudWatch Logs constraints.
@@ -816,7 +758,7 @@ class CloudWatchEMFExporter(MetricExporter):
             # Create log group and stream if they don't exist
             try:
                 self.logs_client.create_log_group(logGroupName=self.log_group_name)
-                logger.info(f"Created log group: {self.log_group_name}")
+                logger.debug(f"Created log group: {self.log_group_name}")
             except self.logs_client.exceptions.ResourceAlreadyExistsException:
                 # Log group already exists, this is fine
                 logger.debug(f"Log group {self.log_group_name} already exists")
@@ -824,7 +766,7 @@ class CloudWatchEMFExporter(MetricExporter):
             # Create log stream if it doesn't exist
             try:
                 self.logs_client.create_log_stream(logGroupName=self.log_group_name, logStreamName=self.log_stream_name)
-                logger.info(f"Created log stream: {self.log_stream_name}")
+                logger.debug(f"Created log stream: {self.log_stream_name}")
             except self.logs_client.exceptions.ResourceAlreadyExistsException:
                 # Log stream already exists, this is fine
                 logger.debug(f"Log stream {self.log_stream_name} already exists")
@@ -908,7 +850,7 @@ class CloudWatchEMFExporter(MetricExporter):
             current_batch = self._event_batch
             self._send_log_batch(current_batch)
             self._event_batch = self._create_event_batch()
-        logger.debug(f"CloudWatchEMFExporter force flushes the bufferred metrics")
+        logger.debug("CloudWatchEMFExporter force flushes the bufferred metrics")
         return True
 
     def shutdown(self, timeout_millis=None, **kwargs):
