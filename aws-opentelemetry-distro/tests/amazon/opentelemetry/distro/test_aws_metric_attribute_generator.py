@@ -1286,6 +1286,62 @@ class TestAwsMetricAttributeGenerator(TestCase):
             [AWS_LAMBDA_FUNCTION_NAME, AWS_LAMBDA_FUNCTION_ARN, SpanAttributes.RPC_METHOD], [None, None, None]
         )
 
+        # Validate behaviour of AWS_LAMBDA_NAME for non-Invoke operations (treated as resource)
+        self._mock_attribute(
+            [
+                SpanAttributes.RPC_SYSTEM,
+                SpanAttributes.RPC_SERVICE,
+                SpanAttributes.RPC_METHOD,
+                AWS_LAMBDA_FUNCTION_NAME,
+                AWS_LAMBDA_FUNCTION_ARN,
+            ],
+            [
+                "aws-api",
+                "Lambda",
+                "GetFunction",
+                "testLambdaName",
+                "arn:aws:lambda:us-east-1:123456789012:function:testLambdaName",
+            ],
+            keys,
+            values,
+        )
+        self._validate_remote_resource_attributes(
+            "AWS::Lambda::Function", "testLambdaName", "arn:aws:lambda:us-east-1:123456789012:function:testLambdaName"
+        )
+        self._mock_attribute(
+            [
+                SpanAttributes.RPC_SYSTEM,
+                SpanAttributes.RPC_SERVICE,
+                SpanAttributes.RPC_METHOD,
+                AWS_LAMBDA_FUNCTION_NAME,
+                AWS_LAMBDA_FUNCTION_ARN,
+            ],
+            [None, None, None, None, None],
+        )
+
+        # Validate that Lambda Invoke with function name treats Lambda as a service, not a resource
+        self._mock_attribute(
+            [
+                SpanAttributes.RPC_SYSTEM,
+                SpanAttributes.RPC_SERVICE,
+                SpanAttributes.RPC_METHOD,
+                AWS_LAMBDA_FUNCTION_NAME,
+            ],
+            ["aws-api", "Lambda", "Invoke", "testLambdaName"],
+            keys,
+            values,
+        )
+        self._validate_remote_resource_attributes(None, None)
+        self._mock_attribute(
+            [
+                SpanAttributes.RPC_SYSTEM,
+                SpanAttributes.RPC_SERVICE,
+                SpanAttributes.RPC_METHOD,
+                AWS_LAMBDA_FUNCTION_NAME,
+            ],
+            [None, None, None, None],
+        )
+
         self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None])
 
     def test_client_db_span_with_remote_resource_attributes(self):
