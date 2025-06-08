@@ -413,7 +413,9 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         elif is_key_present(span, AWS_SQS_QUEUE_NAME):
             remote_resource_type = _NORMALIZED_SQS_SERVICE_NAME + "::Queue"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_SQS_QUEUE_NAME))
-            cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_SQS_QUEUE_URL))
+            # If queue URL is also present, use it as the CloudFormation primary identifier
+            if is_key_present(span, AWS_SQS_QUEUE_URL):
+                cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_SQS_QUEUE_URL))
         elif is_key_present(span, AWS_SQS_QUEUE_URL):
             remote_resource_type = _NORMALIZED_SQS_SERVICE_NAME + "::Queue"
             remote_resource_identifier = _escape_delimiters(
