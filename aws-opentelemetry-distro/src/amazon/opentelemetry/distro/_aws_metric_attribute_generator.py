@@ -499,6 +499,10 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
 
 
 def _set_remote_environment(span: ReadableSpan, attributes: BoundedAttributes) -> None:
+    """
+    Remote environment is used to identify the environment of downstream services. Currently only
+    set to "lambda:default" for Lambda Invoke operations when aws-api system is detected.
+    """
     # We want to treat downstream Lambdas as a service rather than a resource because
     # Application Signals topology map gets disconnected due to conflicting Lambda Entity
     # definitions
