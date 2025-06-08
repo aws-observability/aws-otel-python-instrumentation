@@ -1592,3 +1592,86 @@ class TestAwsMetricAttributeGenerator(TestCase):
                 self.assertIsNone(dependency_attributes)
                 self.assertEqual(len(service_attributes), len(BoundedAttributes(attributes=expected_attributes)))
                 self.assertEqual(service_attributes, BoundedAttributes(attributes=expected_attributes))
+
+    def test_set_remote_environment(self):
+        """Test remote environment setting for Lambda invoke operations."""
+        keys = []
+        values = []
+
+        # Test 1: Setting remote environment when all relevant attributes are present
+        self.span_mock.kind = SpanKind.CLIENT
+        self._mock_attribute(
+            [
+                SpanAttributes.RPC_SYSTEM,
+                SpanAttributes.RPC_SERVICE,
+                SpanAttributes.RPC_METHOD,
+                AWS_LAMBDA_FUNCTION_NAME,
+            ],
+            ["aws-api", "Lambda", "Invoke", "testFunction"],
+            keys,
+            values,
+        )
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertEqual(actual_attributes.get(AWS_REMOTE_ENVIRONMENT), "lambda:default")
+
+        # Test 2: NOT setting it when RPC_SYSTEM is missing
+        self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None])
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertIsNone(actual_attributes.get(AWS_REMOTE_ENVIRONMENT))
+        self._mock_attribute([SpanAttributes.RPC_SYSTEM], ["aws-api"], keys, values)
+
+        # Test 3: NOT setting it when RPC_METHOD is missing
+        self._mock_attribute([SpanAttributes.RPC_METHOD], [None])
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertIsNone(actual_attributes.get(AWS_REMOTE_ENVIRONMENT))
+        self._mock_attribute([SpanAttributes.RPC_METHOD], ["Invoke"], keys, values)
+
+        # Test 4: Still setting it to lambda:default when AWS_LAMBDA_FUNCTION_NAME is missing
+        # Keep the other attributes but remove AWS_LAMBDA_FUNCTION_NAME
+        self._mock_attribute(
+            [
+                SpanAttributes.RPC_SYSTEM,
+                SpanAttributes.RPC_SERVICE,
+                SpanAttributes.RPC_METHOD,
+                AWS_LAMBDA_FUNCTION_NAME,
+            ],
+            ["aws-api", "Lambda", "Invoke", None],
+            keys,
+            values,
+        )
+
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertEqual(actual_attributes.get(AWS_REMOTE_ENVIRONMENT), "lambda:default")
+        self._mock_attribute([AWS_LAMBDA_FUNCTION_NAME], ["testFunction"], keys, values)
+
+        # Test 5: NOT setting it for non-Lambda services
+        self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, SpanAttributes.RPC_METHOD],
+            ["S3", "GetObject"],
+            keys,
+            values,
+        )
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertIsNone(actual_attributes.get(AWS_REMOTE_ENVIRONMENT))
+
+        # Test 6: NOT setting it for Lambda non-Invoke operations
+        self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, SpanAttributes.RPC_METHOD],
+            ["Lambda", "GetFunction"],
+            keys,
+            values,
+        )
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertIsNone(actual_attributes.get(AWS_REMOTE_ENVIRONMENT))
