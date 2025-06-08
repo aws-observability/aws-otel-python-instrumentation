@@ -892,6 +892,40 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.validate_aws_sdk_service_normalization("SNS", "AWS::SNS")
         self.validate_aws_sdk_service_normalization("SFN", "AWS::StepFunctions")
 
+        # AWS SDK Lambda tests - non-Invoke operations
+        self.validate_aws_sdk_service_normalization("Lambda", "AWS::Lambda")
+
+        # Lambda Invoke with function name
+        self._mock_attribute(
+            [
+                SpanAttributes.RPC_SYSTEM,
+                SpanAttributes.RPC_SERVICE,
+                SpanAttributes.RPC_METHOD,
+                AWS_LAMBDA_FUNCTION_NAME,
+            ],
+            ["aws-api", "Lambda", "Invoke", "testFunction"],
+        )
+        self.span_mock.kind = SpanKind.CLIENT
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertEqual(actual_attributes.get(AWS_REMOTE_SERVICE), "testFunction")
+
+        # Lambda Invoke without AWS_LAMBDA_NAME - should fall back to UnknownRemoteService
+        self._mock_attribute(
+            [
+                SpanAttributes.RPC_SYSTEM,
+                SpanAttributes.RPC_SERVICE,
+                SpanAttributes.RPC_METHOD,
+                AWS_LAMBDA_FUNCTION_NAME,
+            ],
+            ["aws-api", "Lambda", "Invoke", None],
+        )
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertEqual(actual_attributes.get(AWS_REMOTE_SERVICE), "UnknownRemoteService")
+
     def validate_aws_sdk_service_normalization(self, service_name: str, expected_remote_service: str):
         self._mock_attribute([SpanAttributes.RPC_SYSTEM, SpanAttributes.RPC_SERVICE], ["aws-api", service_name])
         self.span_mock.kind = SpanKind.CLIENT
