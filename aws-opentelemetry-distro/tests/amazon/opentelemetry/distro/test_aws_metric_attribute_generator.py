@@ -1765,3 +1765,90 @@ class TestAwsMetricAttributeGenerator(TestCase):
             DEPENDENCY_METRIC
         )
         self.assertIsNone(actual_attributes.get(AWS_REMOTE_ENVIRONMENT))
+
+    def test_cloudformation_primary_identifier_fallback_to_remote_resource_identifier(self):
+        """Test that when cloudformationPrimaryIdentifier is not explicitly set,
+        it falls back to use the same value as remoteResourceIdentifier."""
+        keys = []
+        values = []
+
+        keys, values = self._mock_attribute([SpanAttributes.RPC_SYSTEM], ["aws-api"], keys, values)
+        self.span_mock.kind = SpanKind.CLIENT
+
+        # Test case 1: S3 Bucket (no ARN available, should use bucket name for both)
+        keys, values = self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, SpanAttributes.AWS_S3_BUCKET], ["S3", "my-test-bucket"], keys, values
+        )
+        self._validate_remote_resource_attributes("AWS::S3::Bucket", "my-test-bucket")
+
+        # Test S3 bucket with special characters
+        keys, values = self._mock_attribute([SpanAttributes.AWS_S3_BUCKET], ["my-test|bucket^name"], keys, values)
+        self._validate_remote_resource_attributes("AWS::S3::Bucket", "my-test^|bucket^^name")
+        keys, values = self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, SpanAttributes.AWS_S3_BUCKET], [None, None], keys, values
+        )
+
+        # Test case 2: SQS Queue by name (no ARN, should use queue name for both)
+        keys, values = self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, AWS_SQS_QUEUE_NAME], ["SQS", "my-test-queue"], keys, values
+        )
+        self._validate_remote_resource_attributes("AWS::SQS::Queue", "my-test-queue")
+
+        # Test SQS queue with special characters
+        keys, values = self._mock_attribute([AWS_SQS_QUEUE_NAME], ["my^queue|name"], keys, values)
+        self._validate_remote_resource_attributes("AWS::SQS::Queue", "my^^queue^|name")
+        keys, values = self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, AWS_SQS_QUEUE_NAME], [None, None], keys, values
+        )
+
+        # Test case 3: DynamoDB Table (no ARN, should use table name for both)
+        keys, values = self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, SpanAttributes.AWS_DYNAMODB_TABLE_NAMES],
+            ["DynamoDB", ["my-test-table"]],
+            keys,
+            values,
+        )
+        self._validate_remote_resource_attributes("AWS::DynamoDB::Table", "my-test-table")
+
+        # Test DynamoDB table with special characters
+        keys, values = self._mock_attribute(
+            [SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [["my|test^table"]], keys, values
+        )
+        self._validate_remote_resource_attributes("AWS::DynamoDB::Table", "my^|test^^table")
+        keys, values = self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [None, None], keys, values
+        )
+
+        # Test case 4: Kinesis Stream
+        keys, values = self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, AWS_KINESIS_STREAM_NAME], ["Kinesis", "my-test-stream"], keys, values
+        )
+        self._validate_remote_resource_attributes("AWS::Kinesis::Stream", "my-test-stream")
+
+        # Test Kinesis stream with special characters
+        keys, values = self._mock_attribute([AWS_KINESIS_STREAM_NAME], ["my-stream^with|chars"], keys, values)
+        self._validate_remote_resource_attributes("AWS::Kinesis::Stream", "my-stream^^with^|chars")
+        keys, values = self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, AWS_KINESIS_STREAM_NAME], [None, None], keys, values
+        )
+
+        # Test case 5: Lambda Function (non-invoke operation, no ARN)
+        keys, values = self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, SpanAttributes.RPC_METHOD, AWS_LAMBDA_FUNCTION_NAME],
+            ["Lambda", "GetFunction", "my-test-function"],
+            keys,
+            values,
+        )
+        self._validate_remote_resource_attributes("AWS::Lambda::Function", "my-test-function")
+
+        # Test Lambda function with special characters
+        keys, values = self._mock_attribute([AWS_LAMBDA_FUNCTION_NAME], ["my-function|with^chars"], keys, values)
+        self._validate_remote_resource_attributes("AWS::Lambda::Function", "my-function^|with^^chars")
+        keys, values = self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, SpanAttributes.RPC_METHOD, AWS_LAMBDA_FUNCTION_NAME],
+            [None, None, None],
+            keys,
+            values,
+        )
+
+        keys, values = self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None], keys, values)
