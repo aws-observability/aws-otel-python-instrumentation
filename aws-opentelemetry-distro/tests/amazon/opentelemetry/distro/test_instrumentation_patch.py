@@ -147,7 +147,7 @@ class TestInstrumentationPatch(TestCase):
         )
 
         # BedrockRuntime
-        self.assertFalse("bedrock-runtime" in _KNOWN_EXTENSIONS, "Upstream has added a bedrock-runtime extension")
+        self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS, "Upstream has added a bedrock-runtime extension")
 
         # SecretsManager
         self.assertFalse("secretsmanager" in _KNOWN_EXTENSIONS, "Upstream has added a SecretsManager extension")
