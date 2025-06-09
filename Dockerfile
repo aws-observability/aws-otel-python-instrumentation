@@ -21,7 +21,7 @@ RUN sed -i "/opentelemetry-exporter-otlp-proto-grpc/d" ./aws-opentelemetry-distr
 RUN mkdir workspace && pip install --target workspace ./aws-opentelemetry-distro
 
 # Stage 2: Build the cp-utility binary
-FROM public.ecr.aws/docker/library/rust:1.82 as builder
+FROM public.ecr.aws/docker/library/rust:1.87 as builder
 
 WORKDIR /usr/src/cp-utility
 COPY ./tools/cp-utility .
