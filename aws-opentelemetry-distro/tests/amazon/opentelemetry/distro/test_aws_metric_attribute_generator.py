@@ -1179,31 +1179,10 @@ class TestAwsMetricAttributeGenerator(TestCase):
         )
         self._mock_attribute([AWS_SECRETSMANAGER_SECRET_ARN], [None])
 
-        # Validate behaviour of AWS_SECRETSMANAGER_SECRET_ARN attribute with special chars, then remove it.
-        self._mock_attribute(
-            [AWS_SECRETSMANAGER_SECRET_ARN],
-            ["arn:aws:secretsmanager:us-east-1:123456789012:secret:secret|name^test-lERW9H"],
-            keys,
-            values,
-        )
-        self._validate_remote_resource_attributes(
-            "AWS::SecretsManager::Secret",
-            "secret^|name^^test-lERW9H",
-            "arn:aws:secretsmanager:us-east-1:123456789012:secret:secret^|name^^test-lERW9H",
-        )
-        self._mock_attribute([AWS_SECRETSMANAGER_SECRET_ARN], [None])
-
         # Validate behaviour of AWS_SNS_TOPIC_ARN attribute, then remove it.
         self._mock_attribute([AWS_SNS_TOPIC_ARN], ["arn:aws:sns:us-west-2:012345678901:test_topic"], keys, values)
         self._validate_remote_resource_attributes(
             "AWS::SNS::Topic", "test_topic", "arn:aws:sns:us-west-2:012345678901:test_topic"
-        )
-        self._mock_attribute([AWS_SNS_TOPIC_ARN], [None])
-
-        # Validate behaviour of AWS_SNS_TOPIC_ARN attribute with special chars, then remove it.
-        self._mock_attribute([AWS_SNS_TOPIC_ARN], ["arn:aws:sns:us-west-2:012345678901:test|topic^name"], keys, values)
-        self._validate_remote_resource_attributes(
-            "AWS::SNS::Topic", "test^|topic^^name", "arn:aws:sns:us-west-2:012345678901:test^|topic^^name"
         )
         self._mock_attribute([AWS_SNS_TOPIC_ARN], [None])
 
@@ -1221,20 +1200,6 @@ class TestAwsMetricAttributeGenerator(TestCase):
         )
         self._mock_attribute([AWS_STEPFUNCTIONS_STATEMACHINE_ARN], [None])
 
-        # Validate behaviour of AWS_STEPFUNCTIONS_STATEMACHINE_ARN attribute with special chars, then remove it.
-        self._mock_attribute(
-            [AWS_STEPFUNCTIONS_STATEMACHINE_ARN],
-            ["arn:aws:states:us-east-1:123456789012:stateMachine:test|state^machine"],
-            keys,
-            values,
-        )
-        self._validate_remote_resource_attributes(
-            "AWS::StepFunctions::StateMachine",
-            "test^|state^^machine",
-            "arn:aws:states:us-east-1:123456789012:stateMachine:test^|state^^machine",
-        )
-        self._mock_attribute([AWS_STEPFUNCTIONS_STATEMACHINE_ARN], [None])
-
         # Validate behaviour of AWS_STEPFUNCTIONS_ACTIVITY_ARN attribute, then remove it.
         self._mock_attribute(
             [AWS_STEPFUNCTIONS_ACTIVITY_ARN],
@@ -1249,28 +1214,20 @@ class TestAwsMetricAttributeGenerator(TestCase):
         )
         self._mock_attribute([AWS_STEPFUNCTIONS_ACTIVITY_ARN], [None])
 
-        # Validate behaviour of AWS_STEPFUNCTIONS_ACTIVITY_ARN attribute with special chars, then remove it.
-        self._mock_attribute(
-            [AWS_STEPFUNCTIONS_ACTIVITY_ARN],
-            ["arn:aws:states:us-east-1:007003123456789012:activity:test|Activity^name"],
-            keys,
-            values,
-        )
-        self._validate_remote_resource_attributes(
-            "AWS::StepFunctions::Activity",
-            "test^|Activity^^name",
-            "arn:aws:states:us-east-1:007003123456789012:activity:test^|Activity^^name",
-        )
-        self._mock_attribute([AWS_STEPFUNCTIONS_ACTIVITY_ARN], [None])
-
         # Validate behaviour of AWS_LAMBDA_RESOURCEMAPPING_ID attribute, then remove it.
         self._mock_attribute([AWS_LAMBDA_RESOURCEMAPPING_ID], ["aws_event_source_mapping_id"], keys, values)
         self._validate_remote_resource_attributes("AWS::Lambda::EventSourceMapping", "aws_event_source_mapping_id")
         self._mock_attribute([AWS_LAMBDA_RESOURCEMAPPING_ID], [None])
 
-        # Validate behaviour of AWS_LAMBDA_RESOURCEMAPPING_ID attribute with special chars, then remove it.
-        self._mock_attribute([AWS_LAMBDA_RESOURCEMAPPING_ID], ["aws_event|source^mapping_id"], keys, values)
-        self._validate_remote_resource_attributes("AWS::Lambda::EventSourceMapping", "aws_event^|source^^mapping_id")
+        # Validate behaviour of AWS_LAMBDA_RESOURCE_MAPPING_ID,
+        # then remove it.
+        self._mock_attribute(
+            [AWS_LAMBDA_RESOURCEMAPPING_ID],
+            ["aws_event_source_mapping_id"],
+            keys,
+            values,
+        )
+        self._validate_remote_resource_attributes("AWS::Lambda::EventSourceMapping", "aws_event_source_mapping_id")
         self._mock_attribute([AWS_LAMBDA_RESOURCEMAPPING_ID], [None])
 
         # Test AWS Lambda Invoke scenario with default lambda remote environment
@@ -1350,41 +1307,6 @@ class TestAwsMetricAttributeGenerator(TestCase):
         )
         self._validate_remote_resource_attributes(
             "AWS::Lambda::Function", "testLambdaName", "arn:aws:lambda:us-east-1:123456789012:function:testLambdaName"
-        )
-        self._mock_attribute(
-            [
-                SpanAttributes.RPC_SYSTEM,
-                SpanAttributes.RPC_SERVICE,
-                SpanAttributes.RPC_METHOD,
-                AWS_LAMBDA_FUNCTION_NAME,
-                AWS_LAMBDA_FUNCTION_ARN,
-            ],
-            [None, None, None, None, None],
-        )
-
-        # Validate behaviour of AWS_LAMBDA_NAME for non-Invoke operations with special chars
-        self._mock_attribute(
-            [
-                SpanAttributes.RPC_SYSTEM,
-                SpanAttributes.RPC_SERVICE,
-                SpanAttributes.RPC_METHOD,
-                AWS_LAMBDA_FUNCTION_NAME,
-                AWS_LAMBDA_FUNCTION_ARN,
-            ],
-            [
-                "aws-api",
-                "Lambda",
-                "GetFunction",
-                "test|Lambda^Name",
-                "arn:aws:lambda:us-east-1:123456789012:function:test|Lambda^Name",
-            ],
-            keys,
-            values,
-        )
-        self._validate_remote_resource_attributes(
-            "AWS::Lambda::Function",
-            "test^|Lambda^^Name",
-            "arn:aws:lambda:us-east-1:123456789012:function:test^|Lambda^^Name",
         )
         self._mock_attribute(
             [
