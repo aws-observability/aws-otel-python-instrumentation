@@ -1,12 +1,15 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
 import sys
 from logging import Logger, getLogger
 
 import pkg_resources
 
 _logger: Logger = getLogger(__name__)
+
+AGENT_OBSERVABILITY_ENABLED = "AGENT_OBSERVABILITY_ENABLED"
 
 
 def is_installed(req: str) -> bool:
@@ -21,3 +24,8 @@ def is_installed(req: str) -> bool:
         _logger.debug("Skipping instrumentation patch: package %s, exception: %s", req, exc)
         return False
     return True
+
+
+def is_agent_observability_enabled() -> bool:
+    """Is the Agentic AI monitoring flag set to true?"""
+    return os.environ.get(AGENT_OBSERVABILITY_ENABLED, "false").lower() == "true"
