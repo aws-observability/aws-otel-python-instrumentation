@@ -313,7 +313,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
     def test_customize_span_exporter_with_agent_observability(self):
         # Test that logger_provider is passed when agent observability is enabled
-        os.environ["AGENT_OBSERVABIILTY_ENABLED"] = "true"
+        os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
         os.environ[OTEL_EXPORTER_OTLP_TRACES_ENDPOINT] = "https://xray.us-east-1.amazonaws.com/v1/traces"
 
         mock_logger_provider = MagicMock()
@@ -328,7 +328,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             self.assertEqual(result._logger_provider, mock_logger_provider)
 
         # Test that logger_provider is not passed when agent observability is disabled
-        os.environ["AGENT_OBSERVABIILTY_ENABLED"] = "false"
+        os.environ["AGENT_OBSERVABILITY_ENABLED"] = "false"
 
         mock_exporter = MagicMock(spec=OTLPSpanExporter)
         result = _customize_span_exporter(mock_exporter, Resource.get_empty())
@@ -337,7 +337,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertIsNone(result._logger_provider)
 
         # Clean up
-        os.environ.pop("AGENT_OBSERVABIILTY_ENABLED", None)
+        os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
         os.environ.pop(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, None)
 
     def test_customize_span_exporter_sigv4(self):
