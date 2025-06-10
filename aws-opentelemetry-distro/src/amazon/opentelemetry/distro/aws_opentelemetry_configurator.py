@@ -361,6 +361,11 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
 
         if isinstance(span_exporter, OTLPSpanExporter):
             if is_agent_observability_enabled():
+                # Span exporter needs an instance of logger provider in ai agent
+                # observability case because we need to split input/output prompts
+                # from span attributes and send them to the logs pipeline per
+                # the new Gen AI semantic convention from OTel
+                # ref: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/
                 span_exporter = OTLPAwsSpanExporter(endpoint=traces_endpoint, logger_provider=get_logger_provider())
             else:
                 span_exporter = OTLPAwsSpanExporter(endpoint=traces_endpoint)
