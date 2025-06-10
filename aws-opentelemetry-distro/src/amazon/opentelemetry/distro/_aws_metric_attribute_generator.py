@@ -327,8 +327,6 @@ def _normalize_remote_service_name(span: ReadableSpan, service_name: str) -> str
 
         # Special handling for Lambda invoke operations
         if _is_lambda_invoke_operation(span):
-            # AWS_LAMBDA_FUNCTION_NAME is guaranteed to contain function name (not ARN)
-            # due to logic in Lambda botocore patches during instrumentation
             lambda_function_name = span.attributes.get(AWS_LAMBDA_FUNCTION_NAME)
             # If Lambda name is not present, use UnknownRemoteService
             # This is intentional - we want to clearly indicate when the Lambda function name
@@ -471,8 +469,6 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
             # see normalize_remote_service_name for more information.
             if not _is_lambda_invoke_operation(span):
                 remote_resource_type = _NORMALIZED_LAMBDA_SERVICE_NAME + "::Function"
-                # AWS_LAMBDA_FUNCTION_NAME is guaranteed to contain function name (not ARN)
-                # due to logic in Lambda botocore patches during instrumentation
                 remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_FUNCTION_NAME))
                 cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_FUNCTION_ARN))
         elif is_key_present(span, AWS_LAMBDA_RESOURCEMAPPING_ID):
