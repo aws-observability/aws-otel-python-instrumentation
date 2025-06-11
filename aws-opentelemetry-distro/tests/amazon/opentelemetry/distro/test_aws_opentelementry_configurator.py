@@ -50,6 +50,7 @@ from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.processor.baggage import BaggageSpanProcessor
 from opentelemetry.sdk.environment_variables import OTEL_TRACES_SAMPLER, OTEL_TRACES_SAMPLER_ARG
 from opentelemetry.sdk.metrics._internal.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
@@ -340,6 +341,29 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
         os.environ.pop(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, None)
 
+    def test_customize_span_processors_with_agent_observability(self):
+        mock_tracer_provider: TracerProvider = MagicMock()
+
+        # Test that BaggageSpanProcessor is not added when agent observability is disabled
+        os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+        _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 0)
+
+        # Reset mock for next test
+        mock_tracer_provider.reset_mock()
+
+        # Test that BaggageSpanProcessor is added when agent observability is enabled
+        os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
+        _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 1)
+
+        # Verify the added processor is BaggageSpanProcessor
+        added_processor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
+        self.assertIsInstance(added_processor, BaggageSpanProcessor)
+
+        # Clean up
+        os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+
     def test_customize_span_exporter_sigv4(self):
 
         traces_good_endpoints = [
@@ -574,9 +598,18 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
     def test_customize_span_processors(self):
         mock_tracer_provider: TracerProvider = MagicMock()
+        # Clean up environment to ensure consistent test state
+        os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
+        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", None)
+
         _customize_span_processors(mock_tracer_provider, Resource.get_empty())
         self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 0)
 
+        # Reset mock for next test
+        mock_tracer_provider.reset_mock()
+
+        # Test application signals only
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", "False")
         _customize_span_processors(mock_tracer_provider, Resource.get_empty())
@@ -586,8 +619,27 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         second_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[1].args[0]
         self.assertIsInstance(second_processor, AwsSpanMetricsProcessor)
 
+        # Reset mock for next test
+        mock_tracer_provider.reset_mock()
+
+        # Test both agent observability and application signals enabled
+        os.environ.setdefault("AGENT_OBSERVABILITY_ENABLED", "true")
+        _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 3)
+
+        # Verify processors are added in the expected order
+        processors = [call.args[0] for call in mock_tracer_provider.add_span_processor.call_args_list]
+        self.assertIsInstance(processors[0], BaggageSpanProcessor)  # Agent observability processor added first
+        self.assertIsInstance(processors[1], AttributePropagatingSpanProcessor)  # Application signals processors
+        self.assertIsInstance(processors[2], AwsSpanMetricsProcessor)
+
     def test_customize_span_processors_lambda(self):
         mock_tracer_provider: TracerProvider = MagicMock()
+        # Clean up environment to ensure consistent test state
+        os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
+        os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
+
         _customize_span_processors(mock_tracer_provider, Resource.get_empty())
         self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 0)
 
