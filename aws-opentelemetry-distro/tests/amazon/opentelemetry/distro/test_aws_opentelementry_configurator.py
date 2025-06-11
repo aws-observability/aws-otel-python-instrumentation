@@ -683,6 +683,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
         os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
 
+    # pylint: disable=no-self-use
     def test_export_unsampled_span_for_agent_observability(self):
         mock_tracer_provider: TracerProvider = MagicMock()
 
@@ -702,6 +703,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
         os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", None)
 
+    # pylint: disable=no-self-use
     def test_export_unsampled_span_for_agent_observability_uses_aws_exporter(self):
         """Test that OTLPAwsSpanExporter is used for AWS endpoints"""
         mock_tracer_provider: TracerProvider = MagicMock()
@@ -734,6 +736,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
         os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", None)
 
+    # pylint: disable=no-self-use
     def test_customize_span_processors_with_agent_observability(self):
         """Test that _customize_span_processors calls _export_unsampled_span_for_agent_observability"""
         mock_tracer_provider: TracerProvider = MagicMock()
