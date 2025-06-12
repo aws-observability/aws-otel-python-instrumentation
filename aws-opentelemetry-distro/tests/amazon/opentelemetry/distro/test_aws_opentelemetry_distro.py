@@ -6,6 +6,8 @@ from unittest.mock import patch
 
 from pkg_resources import DistributionNotFound, require
 
+from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
+
 
 class TestAwsOpenTelemetryDistro(TestCase):
     def test_package_available(self):
@@ -41,8 +43,6 @@ class TestAwsOpenTelemetryDistro(TestCase):
         os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
 
         # Import and configure
-        from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
-
         with patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches"):
             with patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.get_aws_region", return_value="us-west-2"):
                 # We need to mock the parent class to avoid its side effects
@@ -54,7 +54,8 @@ class TestAwsOpenTelemetryDistro(TestCase):
         self.assertEqual(os.environ.get("OTEL_TRACES_SAMPLER"), "parentbased_always_on")
         self.assertEqual(
             os.environ.get("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS"),
-            "http,sqlalchemy,psycopg2,pymysql,sqlite3,aiopg,asyncpg,mysql_connector,botocore,boto3,urllib3,requests,starlette",
+            "http,sqlalchemy,psycopg2,pymysql,sqlite3,aiopg,asyncpg,mysql_connector,"
+            "botocore,boto3,urllib3,requests,starlette",
         )
         self.assertEqual(os.environ.get("OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED"), "true")
         self.assertEqual(os.environ.get("OTEL_AWS_APPLICATION_SIGNALS_ENABLED"), "false")
@@ -62,8 +63,6 @@ class TestAwsOpenTelemetryDistro(TestCase):
     def test_new_defaults_not_set_when_agent_observability_disabled(self):
         # Don't set AGENT_OBSERVABILITY_ENABLED or set it to false
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
-
-        from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 
         with patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches"):
             with patch("opentelemetry.distro.OpenTelemetryDistro._configure"):

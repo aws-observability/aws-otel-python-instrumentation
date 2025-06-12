@@ -49,12 +49,12 @@ def get_aws_region() -> str:
     # This will automatically check AWS CLI config, instance metadata, etc.
     if is_installed("botocore"):
         try:
-            from botocore import session
+            from botocore import session  # pylint: disable=import-outside-toplevel
 
             botocore_session = session.Session()
-            if botocore_session.region_name:
+            if hasattr(botocore_session, "region_name") and botocore_session.region_name:
                 return botocore_session.region_name
-        except Exception:
+        except (ImportError, AttributeError):
             # botocore failed to determine region
             pass
 

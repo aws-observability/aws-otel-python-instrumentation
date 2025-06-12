@@ -107,7 +107,8 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             # Set disabled instrumentations default
             os.environ.setdefault(
                 OTEL_PYTHON_DISABLED_INSTRUMENTATIONS,
-                "http,sqlalchemy,psycopg2,pymysql,sqlite3,aiopg,asyncpg,mysql_connector,botocore,boto3,urllib3,requests,starlette",
+                "http,sqlalchemy,psycopg2,pymysql,sqlite3,aiopg,asyncpg,mysql_connector,"
+                "botocore,boto3,urllib3,requests,starlette",
             )
 
             # Set logging auto instrumentation default
