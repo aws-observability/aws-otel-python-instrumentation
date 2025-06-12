@@ -105,23 +105,6 @@ class TestCreateEMFExporter(unittest.TestCase):
         self.assertEqual(exporter.namespace, "CustomNamespace")
         self.assertEqual(exporter.log_group_name, "/custom/log/group")
 
-    @patch("botocore.session.Session")
-    @patch("logging.basicConfig")
-    def test_create_emf_exporter_debug_mode(self, mock_logging_config, mock_session):
-        """Test creating exporter with debug mode enabled."""
-        # Mock the botocore session to avoid AWS calls
-        mock_client = Mock()
-        mock_session_instance = Mock()
-        mock_session.return_value = mock_session_instance
-        mock_session_instance.create_client.return_value = mock_client
-        mock_client.describe_log_groups.return_value = {"logGroups": []}
-        mock_client.create_log_group.return_value = {}
-
-        exporter = create_emf_exporter(debug=True)
-
-        self.assertIsInstance(exporter, CloudWatchEMFExporter)
-        mock_logging_config.assert_called_once()
-
 
 # pylint: disable=too-many-public-methods
 class TestCloudWatchEMFExporter(unittest.TestCase):
@@ -190,17 +173,17 @@ class TestCloudWatchEMFExporter(unittest.TestCase):
         record = Mock()
         record.instrument = Mock()
         record.instrument.name = "test_metric"
-        del record.name  # Ensure record.name doesn't exist
 
         result = self.exporter._get_metric_name(record)
         self.assertEqual(result, "test_metric")
 
-        # Test with record that has direct name attribute
-        record_with_name = Mock()
-        record_with_name.name = "direct_metric"
+        # Test with record that has empty instrument name (should return None)
+        record_empty = Mock()
+        record_empty.instrument = Mock()
+        record_empty.instrument.name = ""
 
-        result2 = self.exporter._get_metric_name(record_with_name)
-        self.assertEqual(result2, "direct_metric")
+        result_empty = self.exporter._get_metric_name(record_empty)
+        self.assertIsNone(result_empty)
 
     def test_get_dimension_names(self):
         """Test dimension names extraction."""
@@ -445,30 +428,18 @@ class TestCloudWatchEMFExporter(unittest.TestCase):
 
     def test_get_metric_name_fallback(self):
         """Test metric name extraction fallback."""
-        # Test with record that has no name or instrument
+        # Test with record that has no instrument attribute
         record = Mock(spec=[])
 
         result = self.exporter._get_metric_name(record)
-        # Note: This test may fail against old installed version which returns "unknown_metric"
-        # The new implementation correctly returns None
-        self.assertTrue(result is None or result == "unknown_metric")
+        self.assertIsNone(result)
 
     def test_get_metric_name_empty_name(self):
-        """Test metric name extraction with empty name."""
-        # Test with record that has empty name
-        record = Mock()
-        record.name = ""
-
-        self.exporter._get_metric_name(record)
-        # Just verify the method can handle empty names without crashing
-        # The method should return some value and not crash
-        self.assertIsNotNone(self.exporter._get_metric_name)  # Method exists
-
+        """Test metric name extraction with empty instrument name."""
         # Test with record that has empty instrument name
         record = Mock()
         record.instrument = Mock()
         record.instrument.name = ""
-        del record.name  # Ensure record.name doesn't exist
 
         result = self.exporter._get_metric_name(record)
         self.assertIsNone(result)
@@ -496,10 +467,9 @@ class TestCloudWatchEMFExporter(unittest.TestCase):
         self.assertIn("valid_metric", result)
         self.assertEqual(result["valid_metric"], 20.0)
 
-        # Check that the valid metric is in the definitions
+        # Check that only the valid metric is in the definitions (empty names are skipped)
         cw_metrics = result["_aws"]["CloudWatchMetrics"][0]
-        # Note: Old version may include both metrics (1 or 2), new version skips empty names (only 1)
-        self.assertTrue(len(cw_metrics["Metrics"]) >= 1)
+        self.assertEqual(len(cw_metrics["Metrics"]), 1)
         # Ensure our valid metric is present
         metric_names = [m["Name"] for m in cw_metrics["Metrics"]]
         self.assertIn("valid_metric", metric_names)
@@ -542,6 +512,25 @@ class TestCloudWatchEMFExporter(unittest.TestCase):
 
         with self.assertRaises(ClientError):
             CloudWatchEMFExporter(namespace="TestNamespace", log_group_name="test-log-group")
+
+    @patch("botocore.session.Session")
+    def test_ensure_log_group_exists_success(self, mock_session):
+        """Test log group existence check when log group already exists."""
+        # Mock the botocore session
+        mock_client = Mock()
+        mock_session_instance = Mock()
+        mock_session.return_value = mock_session_instance
+        mock_session_instance.create_client.return_value = mock_client
+
+        # Make describe succeed (log group exists)
+        mock_client.describe_log_groups.return_value = {"logGroups": [{"logGroupName": "test-log-group"}]}
+
+        # This should not raise an exception
+        exporter = CloudWatchEMFExporter(namespace="TestNamespace", log_group_name="test-log-group")
+        self.assertIsNotNone(exporter)
+        # Verify describe was called but create was not
+        mock_client.describe_log_groups.assert_called_once_with(logGroupNamePrefix="test-log-group", limit=1)
+        mock_client.create_log_group.assert_not_called()
 
     def test_export_with_unsupported_metric_type(self):
         """Test export with unsupported metric types."""

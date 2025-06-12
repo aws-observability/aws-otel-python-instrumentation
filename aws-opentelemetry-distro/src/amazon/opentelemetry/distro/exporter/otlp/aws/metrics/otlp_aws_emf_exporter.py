@@ -120,18 +120,15 @@ class CloudWatchEMFExporter(MetricExporter):
                 logger.error("Failed to create log group %s : %s", self.log_group_name, error)
                 raise
 
-    def _get_metric_name(self, record) -> Optional[str]:
+    def _get_metric_name(self, record: Any) -> Optional[str]:
         """Get the metric name from the metric record or data point."""
-        # For metrics in MetricsData format
-        if hasattr(record, "name") and record.name.strip():
-            return record.name
         # For compatibility with older record format
-        if hasattr(record, "instrument") and hasattr(record.instrument, "name") and record.instrument.name.strip():
+        if hasattr(record, "instrument") and hasattr(record.instrument, "name") and record.instrument.name:
             return record.instrument.name
         # Return None if no valid metric name found
         return None
 
-    def _get_unit(self, instrument_or_metric) -> Optional[str]:
+    def _get_unit(self, instrument_or_metric: Any) -> Optional[str]:
         """Get CloudWatch unit from OTel instrument or metric unit."""
         # Check if we have an Instrument object or a metric with unit attribute
         if isinstance(instrument_or_metric, Instrument):
@@ -198,7 +195,7 @@ class CloudWatchEMFExporter(MetricExporter):
 
         return record
 
-    def _convert_gauge(self, metric, dp) -> Tuple[Any, int]:
+    def _convert_gauge(self, metric: Any, dp: Any) -> Tuple[Any, int]:
         """Convert a Gauge metric datapoint to a metric record.
 
         Args:
@@ -225,7 +222,7 @@ class CloudWatchEMFExporter(MetricExporter):
 
         return record, timestamp_ms
 
-    def _group_by_attributes_and_timestamp(self, record, timestamp_ms) -> Tuple[str, int]:
+    def _group_by_attributes_and_timestamp(self, record: Any, timestamp_ms: int) -> Tuple[str, int]:
         """Group metric record by attributes and timestamp.
 
         Args:
@@ -239,7 +236,7 @@ class CloudWatchEMFExporter(MetricExporter):
         attrs_key = self._get_attributes_key(record.attributes)
         return (attrs_key, timestamp_ms)
 
-    def _create_emf_log(self, metric_records, resource: Resource, timestamp: Optional[int] = None) -> Dict:
+    def _create_emf_log(self, metric_records: List[Any], resource: Resource, timestamp: Optional[int] = None) -> Dict:
         """
         Create EMF log dictionary from metric records.
 
@@ -305,31 +302,13 @@ class CloudWatchEMFExporter(MetricExporter):
         return emf_log
 
     # pylint: disable=no-member
-    def _send_log_event(self, log_event: Dict):
+    def _send_log_event(self, log_event: Dict[str, Any]):
         """
         Send a log event to CloudWatch Logs.
 
         Basic implementation for PR 1 - sends individual events directly.
         """
         try:
-            # Create log group and stream if they don't exist
-            try:
-                self.logs_client.create_log_group(logGroupName=self.log_group_name)
-                logger.debug("Created log group: %s", self.log_group_name)
-            except ClientError as error:
-                # Check if it's a ResourceAlreadyExistsException (botocore exception handling)
-                if error.response.get("Error", {}).get("Code") == "ResourceAlreadyExistsException":
-                    logger.debug("Log group %s already exists", self.log_group_name)
-
-            # Create log stream if it doesn't exist
-            try:
-                self.logs_client.create_log_stream(logGroupName=self.log_group_name, logStreamName=self.log_stream_name)
-                logger.debug("Created log stream: %s", self.log_stream_name)
-            except ClientError as error:
-                # Check if it's a ResourceAlreadyExistsException (botocore exception handling)
-                if error.response.get("Error", {}).get("Code") == "ResourceAlreadyExistsException":
-                    logger.debug("Log stream %s already exists", self.log_stream_name)
-
             # Send the log event
             response = self.logs_client.put_log_events(
                 logGroupName=self.log_group_name, logStreamName=self.log_stream_name, logEvents=[log_event]
@@ -343,7 +322,9 @@ class CloudWatchEMFExporter(MetricExporter):
             raise
 
     # pylint: disable=too-many-nested-blocks
-    def export(self, metrics_data: MetricsData, timeout_millis: Optional[int] = None, **kwargs) -> MetricExportResult:
+    def export(
+        self, metrics_data: MetricsData, timeout_millis: Optional[int] = None, **kwargs: Any
+    ) -> MetricExportResult:
         """
         Export metrics as EMF logs to CloudWatch.
 
@@ -418,7 +399,7 @@ class CloudWatchEMFExporter(MetricExporter):
         logger.debug("CloudWatchEMFExporter force flushes the buffered metrics")
         return True
 
-    def shutdown(self, timeout_millis=None, **kwargs):
+    def shutdown(self, timeout_millis: Optional[int] = None, **kwargs: Any) -> bool:
         """
         Shutdown the exporter.
         Override to handle timeout and other keyword arguments, but do nothing.
@@ -438,7 +419,6 @@ def create_emf_exporter(
     log_group_name: str = "/aws/otel/python",
     log_stream_name: Optional[str] = None,
     aws_region: Optional[str] = None,
-    debug: bool = False,
     **kwargs,
 ) -> CloudWatchEMFExporter:
     """
@@ -465,11 +445,6 @@ def create_emf_exporter(
         ObservableUpDownCounter: AggregationTemporality.DELTA,
         UpDownCounter: AggregationTemporality.DELTA,
     }
-
-    # Configure logging if debug is enabled
-    if debug:
-        logging.basicConfig(level=logging.DEBUG)
-        logger.setLevel(logging.DEBUG)
 
     # Create and return the exporter
     return CloudWatchEMFExporter(
