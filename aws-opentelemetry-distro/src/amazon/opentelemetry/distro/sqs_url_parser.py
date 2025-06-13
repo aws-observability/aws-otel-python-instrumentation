@@ -23,6 +23,50 @@ class SqsUrlParser:
             return split_url[2]
         return None
 
+    @staticmethod
+    def get_account_id(url: str) -> Optional[str]:
+        """
+        Extracts the account ID from an SQS URL.
+        """
+        if url is None:
+            return None
+        url = url.replace(_HTTP_SCHEMA, "").replace(_HTTPS_SCHEMA, "")
+        split_url: List[Optional[str]] = url.split("/")
+        if _is_valid_sqs_url(url):
+            return split_url[1]
+        return None
+
+    @staticmethod
+    def get_region(url: str) -> Optional[str]:
+        """
+        Extracts the region from an SQS URL.
+        """
+        if url is None:
+            return None
+        url = url.replace(_HTTP_SCHEMA, "").replace(_HTTPS_SCHEMA, "")
+        split_url: List[Optional[str]] = url.split("/")
+        if _is_valid_sqs_url(url):
+            domain: str = split_url[0]
+            domain_parts: List[str] = domain.split(".")
+            if len(domain_parts) == 4:
+                return domain_parts[1]
+        return None
+
+
+def _is_valid_sqs_url(url: str) -> bool:
+    """
+    Checks if the URL is a valid SQS URL.
+    """
+    if url is None:
+        return False
+    split_url: List[str] = url.split("/")
+    return (
+        len(split_url) == 3
+        and split_url[0].lower().startswith("sqs")
+        and _is_account_id(split_url[1])
+        and _is_valid_queue_name(split_url[2])
+    )
+
 
 def _is_account_id(input_str: str) -> bool:
     if input_str is None or len(input_str) != 12:
