@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_AGENT_ID,
     AWS_BEDROCK_DATA_SOURCE_ID,
+    AWS_BEDROCK_GUARDRAIL_ARN,
     AWS_BEDROCK_GUARDRAIL_ID,
     AWS_BEDROCK_KNOWLEDGE_BASE_ID,
     AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER,
@@ -891,6 +892,40 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.validate_aws_sdk_service_normalization("SNS", "AWS::SNS")
         self.validate_aws_sdk_service_normalization("SFN", "AWS::StepFunctions")
 
+        # AWS SDK Lambda tests - non-Invoke operations
+        self.validate_aws_sdk_service_normalization("Lambda", "AWS::Lambda")
+
+        # Lambda Invoke with function name
+        self._mock_attribute(
+            [
+                SpanAttributes.RPC_SYSTEM,
+                SpanAttributes.RPC_SERVICE,
+                SpanAttributes.RPC_METHOD,
+                AWS_LAMBDA_FUNCTION_NAME,
+            ],
+            ["aws-api", "Lambda", "Invoke", "testFunction"],
+        )
+        self.span_mock.kind = SpanKind.CLIENT
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertEqual(actual_attributes.get(AWS_REMOTE_SERVICE), "testFunction")
+
+        # Lambda Invoke without AWS_LAMBDA_NAME - should fall back to UnknownRemoteService
+        self._mock_attribute(
+            [
+                SpanAttributes.RPC_SYSTEM,
+                SpanAttributes.RPC_SERVICE,
+                SpanAttributes.RPC_METHOD,
+                AWS_LAMBDA_FUNCTION_NAME,
+            ],
+            ["aws-api", "Lambda", "Invoke", None],
+        )
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertEqual(actual_attributes.get(AWS_REMOTE_SERVICE), "UnknownRemoteService")
+
     def validate_aws_sdk_service_normalization(self, service_name: str, expected_remote_service: str):
         self._mock_attribute([SpanAttributes.RPC_SYSTEM, SpanAttributes.RPC_SERVICE], ["aws-api", service_name])
         self.span_mock.kind = SpanKind.CLIENT
@@ -1006,12 +1041,14 @@ class TestAwsMetricAttributeGenerator(TestCase):
             keys,
             values,
         )
-        self._validate_remote_resource_attributes("AWS::SQS::Queue", "aws_queue_name")
+        self._validate_remote_resource_attributes(
+            "AWS::SQS::Queue", "aws_queue_name", "https://sqs.us-east-2.amazonaws.com/123456789012/Queue"
+        )
         self._mock_attribute([AWS_SQS_QUEUE_URL, AWS_SQS_QUEUE_NAME], [None, None])
 
         # Valid queue name with invalid queue URL, we should default to using the queue name.
         self._mock_attribute([AWS_SQS_QUEUE_URL, AWS_SQS_QUEUE_NAME], ["invalidUrl", "aws_queue_name"], keys, values)
-        self._validate_remote_resource_attributes("AWS::SQS::Queue", "aws_queue_name")
+        self._validate_remote_resource_attributes("AWS::SQS::Queue", "aws_queue_name", "invalidUrl")
         self._mock_attribute([AWS_SQS_QUEUE_URL, AWS_SQS_QUEUE_NAME], [None, None])
 
         # Validate behaviour of AWS_KINESIS_STREAM_NAME attribute, then remove it.
@@ -1063,7 +1100,9 @@ class TestAwsMetricAttributeGenerator(TestCase):
             keys,
             values,
         )
-        self._validate_remote_resource_attributes("AWS::Bedrock::DataSource", "test_datasource_id")
+        self._validate_remote_resource_attributes(
+            "AWS::Bedrock::DataSource", "test_datasource_id", "test_knowledge_base_id|test_datasource_id"
+        )
         self._mock_attribute([AWS_BEDROCK_DATA_SOURCE_ID, AWS_BEDROCK_KNOWLEDGE_BASE_ID], [None, None])
 
         # Validate behaviour of AWS_BEDROCK_DATA_SOURCE_ID attribute with special chars(^), then remove it.
@@ -1073,18 +1112,38 @@ class TestAwsMetricAttributeGenerator(TestCase):
             keys,
             values,
         )
-        self._validate_remote_resource_attributes("AWS::Bedrock::DataSource", "test_datasource_^^id")
+        self._validate_remote_resource_attributes(
+            "AWS::Bedrock::DataSource", "test_datasource_^^id", "test_knowledge_base_^^id|test_datasource_^^id"
+        )
         self._mock_attribute([AWS_BEDROCK_DATA_SOURCE_ID, AWS_BEDROCK_KNOWLEDGE_BASE_ID], [None, None])
 
         # Validate behaviour of AWS_BEDROCK_GUARDRAIL_ID attribute, then remove it.
-        self._mock_attribute([AWS_BEDROCK_GUARDRAIL_ID], ["test_guardrail_id"], keys, values)
-        self._validate_remote_resource_attributes("AWS::Bedrock::Guardrail", "test_guardrail_id")
-        self._mock_attribute([AWS_BEDROCK_GUARDRAIL_ID], [None])
+        self._mock_attribute(
+            [AWS_BEDROCK_GUARDRAIL_ID, AWS_BEDROCK_GUARDRAIL_ARN],
+            ["test_guardrail_id", "arn:aws:bedrock:us-east-1:123456789012:guardrail/test_guardrail_id"],
+            keys,
+            values,
+        )
+        self._validate_remote_resource_attributes(
+            "AWS::Bedrock::Guardrail",
+            "test_guardrail_id",
+            "arn:aws:bedrock:us-east-1:123456789012:guardrail/test_guardrail_id",
+        )
+        self._mock_attribute([AWS_BEDROCK_GUARDRAIL_ID, AWS_BEDROCK_GUARDRAIL_ARN], [None, None])
 
         # Validate behaviour of AWS_BEDROCK_GUARDRAIL_ID attribute with special chars(^), then remove it.
-        self._mock_attribute([AWS_BEDROCK_GUARDRAIL_ID], ["test_guardrail_^id"], keys, values)
-        self._validate_remote_resource_attributes("AWS::Bedrock::Guardrail", "test_guardrail_^^id")
-        self._mock_attribute([AWS_BEDROCK_GUARDRAIL_ID], [None])
+        self._mock_attribute(
+            [AWS_BEDROCK_GUARDRAIL_ID, AWS_BEDROCK_GUARDRAIL_ARN],
+            ["test_guardrail_^id", "arn:aws:bedrock:us-east-1:123456789012:guardrail/test_guardrail_^id"],
+            keys,
+            values,
+        )
+        self._validate_remote_resource_attributes(
+            "AWS::Bedrock::Guardrail",
+            "test_guardrail_^^id",
+            "arn:aws:bedrock:us-east-1:123456789012:guardrail/test_guardrail_^^id",
+        )
+        self._mock_attribute([AWS_BEDROCK_GUARDRAIL_ID, AWS_BEDROCK_GUARDRAIL_ARN], [None, None])
 
         # Validate behaviour of AWS_BEDROCK_KNOWLEDGE_BASE_ID attribute, then remove it.
         self._mock_attribute([AWS_BEDROCK_KNOWLEDGE_BASE_ID], ["test_knowledgeBase_id"], keys, values)
@@ -1113,12 +1172,18 @@ class TestAwsMetricAttributeGenerator(TestCase):
             keys,
             values,
         )
-        self._validate_remote_resource_attributes("AWS::SecretsManager::Secret", "secret_name-lERW9H")
+        self._validate_remote_resource_attributes(
+            "AWS::SecretsManager::Secret",
+            "secret_name-lERW9H",
+            "arn:aws:secretsmanager:us-east-1:123456789012:secret:secret_name-lERW9H",
+        )
         self._mock_attribute([AWS_SECRETSMANAGER_SECRET_ARN], [None])
 
         # Validate behaviour of AWS_SNS_TOPIC_ARN attribute, then remove it.
         self._mock_attribute([AWS_SNS_TOPIC_ARN], ["arn:aws:sns:us-west-2:012345678901:test_topic"], keys, values)
-        self._validate_remote_resource_attributes("AWS::SNS::Topic", "test_topic")
+        self._validate_remote_resource_attributes(
+            "AWS::SNS::Topic", "test_topic", "arn:aws:sns:us-west-2:012345678901:test_topic"
+        )
         self._mock_attribute([AWS_SNS_TOPIC_ARN], [None])
 
         # Validate behaviour of AWS_STEPFUNCTIONS_STATEMACHINE_ARN attribute, then remove it.
@@ -1128,7 +1193,11 @@ class TestAwsMetricAttributeGenerator(TestCase):
             keys,
             values,
         )
-        self._validate_remote_resource_attributes("AWS::StepFunctions::StateMachine", "test_state_machine")
+        self._validate_remote_resource_attributes(
+            "AWS::StepFunctions::StateMachine",
+            "test_state_machine",
+            "arn:aws:states:us-east-1:123456789012:stateMachine:test_state_machine",
+        )
         self._mock_attribute([AWS_STEPFUNCTIONS_STATEMACHINE_ARN], [None])
 
         # Validate behaviour of AWS_STEPFUNCTIONS_ACTIVITY_ARN attribute, then remove it.
@@ -1138,7 +1207,11 @@ class TestAwsMetricAttributeGenerator(TestCase):
             keys,
             values,
         )
-        self._validate_remote_resource_attributes("AWS::StepFunctions::Activity", "testActivity")
+        self._validate_remote_resource_attributes(
+            "AWS::StepFunctions::Activity",
+            "testActivity",
+            "arn:aws:states:us-east-1:007003123456789012:activity:testActivity",
+        )
         self._mock_attribute([AWS_STEPFUNCTIONS_ACTIVITY_ARN], [None])
 
         # Validate behaviour of AWS_LAMBDA_RESOURCEMAPPING_ID attribute, then remove it.
@@ -1160,8 +1233,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         # Test AWS Lambda Invoke scenario with default lambda remote environment
         self.span_mock.kind = SpanKind.CLIENT
         self._mock_attribute(
-            [AWS_LAMBDA_FUNCTION_NAME, SpanAttributes.RPC_METHOD],
-            ["test_downstream_lambda1", "Invoke"],
+            [AWS_LAMBDA_FUNCTION_NAME, SpanAttributes.RPC_METHOD, SpanAttributes.RPC_SERVICE],
+            ["test_downstream_lambda1", "Invoke", "Lambda"],
             keys,
             values,
         )
@@ -1173,14 +1246,16 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.assertNotIn(AWS_REMOTE_RESOURCE_TYPE, dependency_attributes)
         self.assertNotIn(AWS_REMOTE_RESOURCE_IDENTIFIER, dependency_attributes)
         self.assertNotIn(AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER, dependency_attributes)
-        self._mock_attribute([AWS_LAMBDA_FUNCTION_NAME, SpanAttributes.RPC_METHOD], [None, None])
+        self._mock_attribute(
+            [AWS_LAMBDA_FUNCTION_NAME, SpanAttributes.RPC_METHOD, SpanAttributes.RPC_SERVICE], [None, None, None]
+        )
 
         # Test AWS Lambda Invoke scenario with user-configured lambda remote environment
         os.environ["LAMBDA_APPLICATION_SIGNALS_REMOTE_ENVIRONMENT"] = "test"
         self.span_mock.kind = SpanKind.CLIENT
         self._mock_attribute(
-            [AWS_LAMBDA_FUNCTION_NAME, SpanAttributes.RPC_METHOD],
-            ["testLambdaFunction", "Invoke"],
+            [AWS_LAMBDA_FUNCTION_NAME, SpanAttributes.RPC_METHOD, SpanAttributes.RPC_SERVICE],
+            ["testLambdaFunction", "Invoke", "Lambda"],
             keys,
             values,
         )
@@ -1192,7 +1267,9 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.assertNotIn(AWS_REMOTE_RESOURCE_TYPE, dependency_attributes)
         self.assertNotIn(AWS_REMOTE_RESOURCE_IDENTIFIER, dependency_attributes)
         self.assertNotIn(AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER, dependency_attributes)
-        self._mock_attribute([AWS_LAMBDA_FUNCTION_NAME, SpanAttributes.RPC_METHOD], [None, None])
+        self._mock_attribute(
+            [AWS_LAMBDA_FUNCTION_NAME, SpanAttributes.RPC_METHOD, SpanAttributes.RPC_SERVICE], [None, None, None]
+        )
         os.environ.pop("LAMBDA_APPLICATION_SIGNALS_REMOTE_ENVIRONMENT", None)
 
         # Test AWS Lambda non-Invoke scenario
@@ -1204,9 +1281,65 @@ class TestAwsMetricAttributeGenerator(TestCase):
             keys,
             values,
         )
-        self._validate_remote_resource_attributes("AWS::Lambda::Function", "testLambdaFunction")
+        self._validate_remote_resource_attributes("AWS::Lambda::Function", "testLambdaFunction", lambda_arn)
         self._mock_attribute(
             [AWS_LAMBDA_FUNCTION_NAME, AWS_LAMBDA_FUNCTION_ARN, SpanAttributes.RPC_METHOD], [None, None, None]
+        )
+
+        # Validate behaviour of AWS_LAMBDA_NAME for non-Invoke operations (treated as resource)
+        self._mock_attribute(
+            [
+                SpanAttributes.RPC_SYSTEM,
+                SpanAttributes.RPC_SERVICE,
+                SpanAttributes.RPC_METHOD,
+                AWS_LAMBDA_FUNCTION_NAME,
+                AWS_LAMBDA_FUNCTION_ARN,
+            ],
+            [
+                "aws-api",
+                "Lambda",
+                "GetFunction",
+                "testLambdaName",
+                "arn:aws:lambda:us-east-1:123456789012:function:testLambdaName",
+            ],
+            keys,
+            values,
+        )
+        self._validate_remote_resource_attributes(
+            "AWS::Lambda::Function", "testLambdaName", "arn:aws:lambda:us-east-1:123456789012:function:testLambdaName"
+        )
+        self._mock_attribute(
+            [
+                SpanAttributes.RPC_SYSTEM,
+                SpanAttributes.RPC_SERVICE,
+                SpanAttributes.RPC_METHOD,
+                AWS_LAMBDA_FUNCTION_NAME,
+                AWS_LAMBDA_FUNCTION_ARN,
+            ],
+            [None, None, None, None, None],
+        )
+
+        # Validate that Lambda Invoke with function name treats Lambda as a service, not a resource
+        self._mock_attribute(
+            [
+                SpanAttributes.RPC_SYSTEM,
+                SpanAttributes.RPC_SERVICE,
+                SpanAttributes.RPC_METHOD,
+                AWS_LAMBDA_FUNCTION_NAME,
+            ],
+            ["aws-api", "Lambda", "Invoke", "testLambdaName"],
+            keys,
+            values,
+        )
+        self._validate_remote_resource_attributes(None, None)
+        self._mock_attribute(
+            [
+                SpanAttributes.RPC_SYSTEM,
+                SpanAttributes.RPC_SERVICE,
+                SpanAttributes.RPC_METHOD,
+                AWS_LAMBDA_FUNCTION_NAME,
+            ],
+            [None, None, None, None],
         )
 
         self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None])
@@ -1487,7 +1620,13 @@ class TestAwsMetricAttributeGenerator(TestCase):
             [None],
         )
 
-    def _validate_remote_resource_attributes(self, expected_type: str, expected_identifier: str) -> None:
+    def _validate_remote_resource_attributes(
+        self, expected_type: str, expected_identifier: str, expected_cfn_primary_id: str = None
+    ) -> None:
+        # If expected_cfn_primary_id is not provided, it defaults to expected_identifier
+        if expected_cfn_primary_id is None:
+            expected_cfn_primary_id = expected_identifier
+
         # Client, Producer, and Consumer spans should generate the expected remote resource attribute
         self.span_mock.kind = SpanKind.CLIENT
         actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
@@ -1495,6 +1634,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         )
         self.assertEqual(expected_type, actual_attributes.get(AWS_REMOTE_RESOURCE_TYPE))
         self.assertEqual(expected_identifier, actual_attributes.get(AWS_REMOTE_RESOURCE_IDENTIFIER))
+        self.assertEqual(expected_cfn_primary_id, actual_attributes.get(AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER))
 
         self.span_mock.kind = SpanKind.PRODUCER
         actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
@@ -1502,6 +1642,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         )
         self.assertEqual(expected_type, actual_attributes.get(AWS_REMOTE_RESOURCE_TYPE))
         self.assertEqual(expected_identifier, actual_attributes.get(AWS_REMOTE_RESOURCE_IDENTIFIER))
+        self.assertEqual(expected_cfn_primary_id, actual_attributes.get(AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER))
 
         self.span_mock.kind = SpanKind.CONSUMER
         actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
@@ -1509,6 +1650,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         )
         self.assertEqual(expected_type, actual_attributes.get(AWS_REMOTE_RESOURCE_TYPE))
         self.assertEqual(expected_identifier, actual_attributes.get(AWS_REMOTE_RESOURCE_IDENTIFIER))
+        self.assertEqual(expected_cfn_primary_id, actual_attributes.get(AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER))
 
         # Server span should not generate remote resource attribute
         self.span_mock.kind = SpanKind.SERVER
@@ -1517,6 +1659,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         )
         self.assertNotIn(AWS_REMOTE_RESOURCE_TYPE, actual_attributes)
         self.assertNotIn(AWS_REMOTE_RESOURCE_IDENTIFIER, actual_attributes)
+        self.assertNotIn(AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER, actual_attributes)
 
         self._mock_attribute([SpanAttributes.DB_SYSTEM], [None])
 
@@ -1539,3 +1682,173 @@ class TestAwsMetricAttributeGenerator(TestCase):
                 self.assertIsNone(dependency_attributes)
                 self.assertEqual(len(service_attributes), len(BoundedAttributes(attributes=expected_attributes)))
                 self.assertEqual(service_attributes, BoundedAttributes(attributes=expected_attributes))
+
+    def test_set_remote_environment(self):
+        """Test remote environment setting for Lambda invoke operations."""
+        keys = []
+        values = []
+
+        # Test 1: Setting remote environment when all relevant attributes are present
+        self.span_mock.kind = SpanKind.CLIENT
+        self._mock_attribute(
+            [
+                SpanAttributes.RPC_SYSTEM,
+                SpanAttributes.RPC_SERVICE,
+                SpanAttributes.RPC_METHOD,
+                AWS_LAMBDA_FUNCTION_NAME,
+            ],
+            ["aws-api", "Lambda", "Invoke", "testFunction"],
+            keys,
+            values,
+        )
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertEqual(actual_attributes.get(AWS_REMOTE_ENVIRONMENT), "lambda:default")
+
+        # Test 2: NOT setting it when RPC_SYSTEM is missing
+        self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None])
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertIsNone(actual_attributes.get(AWS_REMOTE_ENVIRONMENT))
+        self._mock_attribute([SpanAttributes.RPC_SYSTEM], ["aws-api"], keys, values)
+
+        # Test 3: NOT setting it when RPC_METHOD is missing
+        self._mock_attribute([SpanAttributes.RPC_METHOD], [None])
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertIsNone(actual_attributes.get(AWS_REMOTE_ENVIRONMENT))
+        self._mock_attribute([SpanAttributes.RPC_METHOD], ["Invoke"], keys, values)
+
+        # Test 4: Still setting it to lambda:default when AWS_LAMBDA_FUNCTION_NAME is missing
+        # Keep the other attributes but remove AWS_LAMBDA_FUNCTION_NAME
+        self._mock_attribute(
+            [
+                SpanAttributes.RPC_SYSTEM,
+                SpanAttributes.RPC_SERVICE,
+                SpanAttributes.RPC_METHOD,
+                AWS_LAMBDA_FUNCTION_NAME,
+            ],
+            ["aws-api", "Lambda", "Invoke", None],
+            keys,
+            values,
+        )
+
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertEqual(actual_attributes.get(AWS_REMOTE_ENVIRONMENT), "lambda:default")
+        self._mock_attribute([AWS_LAMBDA_FUNCTION_NAME], ["testFunction"], keys, values)
+
+        # Test 5: NOT setting it for non-Lambda services
+        self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, SpanAttributes.RPC_METHOD],
+            ["S3", "GetObject"],
+            keys,
+            values,
+        )
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertIsNone(actual_attributes.get(AWS_REMOTE_ENVIRONMENT))
+
+        # Test 6: NOT setting it for Lambda non-Invoke operations
+        self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, SpanAttributes.RPC_METHOD],
+            ["Lambda", "GetFunction"],
+            keys,
+            values,
+        )
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertIsNone(actual_attributes.get(AWS_REMOTE_ENVIRONMENT))
+
+    def test_cloudformation_primary_identifier_fallback_to_remote_resource_identifier(self):
+        """Test that when cloudformationPrimaryIdentifier is not explicitly set,
+        it falls back to use the same value as remoteResourceIdentifier."""
+        keys = []
+        values = []
+
+        keys, values = self._mock_attribute([SpanAttributes.RPC_SYSTEM], ["aws-api"], keys, values)
+        self.span_mock.kind = SpanKind.CLIENT
+
+        # Test case 1: S3 Bucket (no ARN available, should use bucket name for both)
+        keys, values = self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, SpanAttributes.AWS_S3_BUCKET], ["S3", "my-test-bucket"], keys, values
+        )
+        self._validate_remote_resource_attributes("AWS::S3::Bucket", "my-test-bucket")
+
+        # Test S3 bucket with special characters
+        keys, values = self._mock_attribute([SpanAttributes.AWS_S3_BUCKET], ["my-test|bucket^name"], keys, values)
+        self._validate_remote_resource_attributes("AWS::S3::Bucket", "my-test^|bucket^^name")
+        keys, values = self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, SpanAttributes.AWS_S3_BUCKET], [None, None], keys, values
+        )
+
+        # Test case 2: SQS Queue by name (no ARN, should use queue name for both)
+        keys, values = self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, AWS_SQS_QUEUE_NAME], ["SQS", "my-test-queue"], keys, values
+        )
+        self._validate_remote_resource_attributes("AWS::SQS::Queue", "my-test-queue")
+
+        # Test SQS queue with special characters
+        keys, values = self._mock_attribute([AWS_SQS_QUEUE_NAME], ["my^queue|name"], keys, values)
+        self._validate_remote_resource_attributes("AWS::SQS::Queue", "my^^queue^|name")
+        keys, values = self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, AWS_SQS_QUEUE_NAME], [None, None], keys, values
+        )
+
+        # Test case 3: DynamoDB Table (no ARN, should use table name for both)
+        keys, values = self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, SpanAttributes.AWS_DYNAMODB_TABLE_NAMES],
+            ["DynamoDB", ["my-test-table"]],
+            keys,
+            values,
+        )
+        self._validate_remote_resource_attributes("AWS::DynamoDB::Table", "my-test-table")
+
+        # Test DynamoDB table with special characters
+        keys, values = self._mock_attribute(
+            [SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [["my|test^table"]], keys, values
+        )
+        self._validate_remote_resource_attributes("AWS::DynamoDB::Table", "my^|test^^table")
+        keys, values = self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [None, None], keys, values
+        )
+
+        # Test case 4: Kinesis Stream
+        keys, values = self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, AWS_KINESIS_STREAM_NAME], ["Kinesis", "my-test-stream"], keys, values
+        )
+        self._validate_remote_resource_attributes("AWS::Kinesis::Stream", "my-test-stream")
+
+        # Test Kinesis stream with special characters
+        keys, values = self._mock_attribute([AWS_KINESIS_STREAM_NAME], ["my-stream^with|chars"], keys, values)
+        self._validate_remote_resource_attributes("AWS::Kinesis::Stream", "my-stream^^with^|chars")
+        keys, values = self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, AWS_KINESIS_STREAM_NAME], [None, None], keys, values
+        )
+
+        # Test case 5: Lambda Function (non-invoke operation, no ARN)
+        keys, values = self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, SpanAttributes.RPC_METHOD, AWS_LAMBDA_FUNCTION_NAME],
+            ["Lambda", "GetFunction", "my-test-function"],
+            keys,
+            values,
+        )
+        self._validate_remote_resource_attributes("AWS::Lambda::Function", "my-test-function")
+
+        # Test Lambda function with special characters
+        keys, values = self._mock_attribute([AWS_LAMBDA_FUNCTION_NAME], ["my-function|with^chars"], keys, values)
+        self._validate_remote_resource_attributes("AWS::Lambda::Function", "my-function^|with^^chars")
+        keys, values = self._mock_attribute(
+            [SpanAttributes.RPC_SERVICE, SpanAttributes.RPC_METHOD, AWS_LAMBDA_FUNCTION_NAME],
+            [None, None, None],
+            keys,
+            values,
+        )
+
+        keys, values = self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None], keys, values)

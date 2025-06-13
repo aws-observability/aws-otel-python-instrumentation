@@ -6,6 +6,7 @@ from typing import Dict, Optional
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk._logs import LoggerProvider
 
 
 class OTLPAwsSpanExporter(OTLPSpanExporter):
@@ -18,8 +19,10 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
         headers: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None,
         compression: Optional[Compression] = None,
+        logger_provider: Optional[LoggerProvider] = None,
     ):
         self._aws_region = None
+        self._logger_provider = logger_provider
 
         if endpoint:
             self._aws_region = endpoint.split(".")[1]
