@@ -147,7 +147,7 @@ class TestInstrumentationPatch(TestCase):
         )
 
         # BedrockRuntime
-        self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS, "Upstream has added a bedrock-runtime extension")
+        self.assertFalse("bedrock-runtime" in _KNOWN_EXTENSIONS, "Upstream has added a bedrock-runtime extension")
 
         # SecretsManager
         self.assertFalse("secretsmanager" in _KNOWN_EXTENSIONS, "Upstream has added a SecretsManager extension")
@@ -678,7 +678,6 @@ def _do_on_success(
 ) -> Dict[str, str]:
     span_mock: Span = MagicMock()
     mock_call_context = MagicMock()
-    mock_instrumentor_context = MagicMock()
     span_attributes: Dict[str, str] = {}
 
     def set_side_effect(set_key, set_value):
@@ -693,6 +692,6 @@ def _do_on_success(
         mock_call_context.params = params
 
     extension = _KNOWN_EXTENSIONS[service_name]()(mock_call_context)
-    extension.on_success(span_mock, result, mock_instrumentor_context)
+    extension.on_success(span_mock, result)
 
     return span_attributes
