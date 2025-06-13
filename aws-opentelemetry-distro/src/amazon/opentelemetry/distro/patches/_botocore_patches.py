@@ -3,7 +3,13 @@
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import importlib
 
+from botocore.exceptions import ClientError
+
 from amazon.opentelemetry.distro._aws_attribute_keys import (
+    AWS_AUTH_ACCESS_KEY,
+    AWS_AUTH_REGION,
+    AWS_DYNAMODB_TABLE_ARN,
+    AWS_KINESIS_STREAM_ARN,
     AWS_KINESIS_STREAM_NAME,
     AWS_LAMBDA_FUNCTION_ARN,
     AWS_LAMBDA_FUNCTION_NAME,
@@ -20,7 +26,14 @@ from amazon.opentelemetry.distro.patches._bedrock_patches import (  # noqa # pyl
     _BedrockAgentRuntimeExtension,
     _BedrockExtension,
 )
-from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
+from opentelemetry.instrumentation.botocore import (
+    BotocoreInstrumentor,
+    _apply_response_attributes,
+    _determine_call_context,
+    _safe_invoke,
+)
+from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS, _find_extension
+from opentelemetry.instrumentation.botocore.extensions.dynamodb import _DynamoDbExtension
 from opentelemetry.instrumentation.botocore.extensions.lmbd import _LambdaExtension
 from opentelemetry.instrumentation.botocore.extensions.sns import _SnsExtension
 from opentelemetry.instrumentation.botocore.extensions.sqs import _SqsExtension
@@ -29,6 +42,10 @@ from opentelemetry.instrumentation.botocore.extensions.types import (
     _AwsSdkExtension,
     _BotocoreInstrumentorContext,
     _BotoResultT,
+)
+from opentelemetry.instrumentation.utils import (
+    is_instrumentation_enabled,
+    suppress_http_instrumentation,
 )
 from opentelemetry.semconv.trace import SpanAttributes
 from opentelemetry.trace.span import Span
@@ -39,6 +56,7 @@ def _apply_botocore_instrumentation_patches() -> None:
 
     Adds patches to provide additional support and Java parity for Kinesis, S3, and SQS.
     """
+    _apply_botocore_api_call_patch()
     _apply_botocore_kinesis_patch()
     _apply_botocore_s3_patch()
     _apply_botocore_sqs_patch()
@@ -47,6 +65,7 @@ def _apply_botocore_instrumentation_patches() -> None:
     _apply_botocore_sns_patch()
     _apply_botocore_stepfunctions_patch()
     _apply_botocore_lambda_patch()
+    _apply_botocore_dynamodb_patch()
 
 
 def _apply_botocore_lambda_patch() -> None:
@@ -208,6 +227,85 @@ def _apply_botocore_bedrock_patch() -> None:
     # bedrock-runtime is handled by upstream
 
 
+def _apply_botocore_dynamodb_patch() -> None:
+    """Botocore instrumentation patch for DynamoDB
+
+    This patch adds an extension to the upstream's list of known extensions for DynamoDB.
+    Extensions allow for custom logic for adding service-specific information to
+    spans, such as attributes. Specifically, we are adding logic to add the
+    `aws.table.arn` attribute, to be used to generate RemoteTarget and achieve
+    parity with the Java instrumentation.
+    """
+    old_on_success = _DynamoDbExtension.on_success
+
+    def patch_on_success(self, span: Span, result: _BotoResultT):
+        old_on_success(self, span, result)
+        table = result.get("Table", {})
+        table_arn = table.get("TableArn")
+        if table_arn:
+            span.set_attribute(AWS_DYNAMODB_TABLE_ARN, table_arn)
+
+    _DynamoDbExtension.on_success = patch_on_success
+
+
+def _apply_botocore_api_call_patch() -> None:
+    def patched_api_call(self, original_func, instance, args, kwargs):
+        if not is_instrumentation_enabled():
+            return original_func(*args, **kwargs)
+
+        call_context = _determine_call_context(instance, args)
+        if call_context is None:
+            return original_func(*args, **kwargs)
+
+        extension = _find_extension(call_context)
+        if not extension.should_trace_service_call():
+            return original_func(*args, **kwargs)
+
+        attributes = {
+            SpanAttributes.RPC_SYSTEM: "aws-api",
+            SpanAttributes.RPC_SERVICE: call_context.service_id,
+            SpanAttributes.RPC_METHOD: call_context.operation,
+            "aws.region": call_context.region,
+            AWS_AUTH_REGION: call_context.region,
+        }
+        credentials = instance._get_credentials()
+
+        if credentials is not None:
+            access_key = credentials.access_key
+            if access_key is not None:
+                attributes[AWS_AUTH_ACCESS_KEY] = access_key
+
+        _safe_invoke(extension.extract_attributes, attributes)
+
+        with self._tracer.start_as_current_span(
+            call_context.span_name,
+            kind=call_context.span_kind,
+            attributes=attributes,
+        ) as span:
+            _safe_invoke(extension.before_service_call, span)
+            self._call_request_hook(span, call_context)
+
+            try:
+                with suppress_http_instrumentation():
+                    result = None
+                    try:
+                        result = original_func(*args, **kwargs)
+                    except ClientError as error:
+                        result = getattr(error, "response", None)
+                        _apply_response_attributes(span, result)
+                        _safe_invoke(extension.on_error, span, error)
+                        raise
+                    _apply_response_attributes(span, result)
+                    _safe_invoke(extension.on_success, span, result)
+            finally:
+                _safe_invoke(extension.after_service_call)
+                self._call_response_hook(span, call_context, result)
+
+            return result
+
+    BotocoreInstrumentor._patched_api_call = patched_api_call
+
+
 # The OpenTelemetry Authors code
 def _lazy_load(module, cls):
     """Clone of upstream opentelemetry.instrumentation.botocore.extensions.lazy_load
@@ -265,3 +363,6 @@ class _KinesisExtension(_AwsSdkExtension):
         stream_name = self._call_context.params.get("StreamName")
         if stream_name:
             attributes[AWS_KINESIS_STREAM_NAME] = stream_name
+        stream_arn = self._call_context.params.get("StreamARN")
+        if stream_arn:
+            attributes[AWS_KINESIS_STREAM_ARN] = stream_arn
