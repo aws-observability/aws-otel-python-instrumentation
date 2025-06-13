@@ -35,34 +35,28 @@ from opentelemetry.sdk.resources import Resource
 logger = logging.getLogger(__name__)
 
 
-class CloudWatchEMFExporter(MetricExporter):
+class AwsCloudWatchEMFExporter(MetricExporter):
     """
     OpenTelemetry metrics exporter for CloudWatch EMF format.
 
     This exporter converts OTel metrics into CloudWatch EMF logs which are then
     sent to CloudWatch Logs. CloudWatch Logs automatically extracts the metrics
     from the EMF logs.
+
+    https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Embedded_Metric_Format_Specification.html
+
     """
 
     # OTel to CloudWatch unit mapping
+    # Ref: opentelemetry-collector-contrib/blob/main/exporter/awsemfexporter/grouped_metric.go#L188
     UNIT_MAPPING = {
+        "1": "",
+        "ns": "",
         "ms": "Milliseconds",
         "s": "Seconds",
         "us": "Microseconds",
-        "ns": "Nanoseconds",
         "By": "Bytes",
-        "KiBy": "Kilobytes",
-        "MiBy": "Megabytes",
-        "GiBy": "Gigabytes",
-        "TiBy": "Terabytes",
-        "Bi": "Bits",
-        "KiBi": "Kilobits",
-        "MiBi": "Megabits",
-        "GiBi": "Gigabits",
-        "TiBi": "Terabits",
-        "%": "Percent",
-        "1": "Count",
-        "{count}": "Count",
+        "bit": "Bits",
     }
 
     def __init__(
@@ -102,6 +96,9 @@ class CloudWatchEMFExporter(MetricExporter):
         # Ensure log group exists
         self._ensure_log_group_exists()
 
+        # Ensure log stream exists
+        self._ensure_log_stream_exists()
+
     def _generate_log_stream_name(self) -> str:
         """Generate a unique log stream name."""
 
@@ -118,6 +115,17 @@ class CloudWatchEMFExporter(MetricExporter):
                 logger.info("Created log group: %s", self.log_group_name)
             except ClientError as error:
                 logger.error("Failed to create log group %s : %s", self.log_group_name, error)
+                raise
+
+    def _ensure_log_stream_exists(self):
+        try:
+            self.logs_client.create_log_stream(logGroupName=self.log_group_name, logStreamName=self.log_stream_name)
+            logger.info("Created log stream: %s", self.log_stream_name)
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") == "ResourceAlreadyExistsException":
+                logger.debug("Log stream %s already exists", self.log_stream_name)
+            else:
+                logger.error("Failed to create log stream %s : %s", self.log_group_name, error)
                 raise
 
     def _get_metric_name(self, record: Any) -> Optional[str]:
@@ -250,20 +258,28 @@ class CloudWatchEMFExporter(MetricExporter):
         emf_log["Version"] = "1"
 
         # Add resource attributes to EMF log but not as dimensions
+        # OTel collector EMF Exporter has a resource_to_telemetry_conversion flag that will convert resource attributes
+        # as regular metric attributes(potential dimensions). However, for this SDK EMF implementation,
+        # we align with the OpenTelemetry concept that all metric attributes are treated as dimensions.
+        # And have resource attributes as just additional metadata in EMF, added otel.resource as prefix to distinguish.
         if resource and resource.attributes:
             for key, value in resource.attributes.items():
-                emf_log[f"resource.{key}"] = str(value)
+                emf_log[f"otel.resource.{key}"] = str(value)
 
         # Initialize collections for dimensions and metrics
-        all_attributes = {}
+
         metric_definitions = []
+
+        # Collect attributes from all records (they should be the same for all records in the group)
+        # Only collect once from the first record and apply to all records
+        all_attributes = (
+            metric_records[0].attributes
+            if metric_records and hasattr(metric_records[0], "attributes") and metric_records[0].attributes
+            else {}
+        )
 
         # Process each metric record
         for record in metric_records:
-            # Collect attributes from all records (they should be the same for all records in the group)
-            if hasattr(record, "attributes") and record.attributes:
-                for key, value in record.attributes.items():
-                    all_attributes[key] = value
 
             metric_name = self._get_metric_name(record)
 
@@ -279,9 +295,12 @@ class CloudWatchEMFExporter(MetricExporter):
                 metric_data["Unit"] = unit
 
             # Process gauge metrics (only type supported in PR 1)
-            if hasattr(record, "value"):
+            if not hasattr(record, "value"):
                 # Store value directly in emf_log
-                emf_log[metric_name] = record.value
+                logger.debug("Skipping metric %s as it does not have valid metric value", metric_name)
+                continue
+
+            emf_log[metric_name] = record.value
 
             # Add to metric definitions list
             metric_definitions.append({"Name": metric_name, **metric_data})
@@ -307,6 +326,8 @@ class CloudWatchEMFExporter(MetricExporter):
         Send a log event to CloudWatch Logs.
 
         Basic implementation for PR 1 - sends individual events directly.
+
+        TODO: Batching event and follow CloudWatch Logs quato constraints - number of events & size limit per payload
         """
         try:
             # Send the log event
@@ -354,15 +375,16 @@ class CloudWatchEMFExporter(MetricExporter):
                         if not (hasattr(metric, "data") and hasattr(metric.data, "data_points")):
                             continue
 
-                        # Process only Gauge metrics in PR 1
-                        if isinstance(metric.data, Gauge):
+                        # Process metrics based on type
+                        metric_type = type(metric.data)
+                        if metric_type == Gauge:
                             for dp in metric.data.data_points:
                                 record, timestamp_ms = self._convert_gauge(metric, dp)
                                 grouped_metrics[self._group_by_attributes_and_timestamp(record, timestamp_ms)].append(
                                     record
                                 )
                         else:
-                            logger.warning("Unsupported Metric Type: %s", type(metric.data))
+                            logger.debug("Unsupported Metric Type: %s", metric_type)
 
                     # Now process each group separately to create one EMF log per group
                     for (_, timestamp_ms), metric_records in grouped_metrics.items():
@@ -390,13 +412,15 @@ class CloudWatchEMFExporter(MetricExporter):
         """
         Force flush any pending metrics.
 
+        TODO: will add logic to handle gracefule shutdown
+
         Args:
             timeout_millis: Timeout in milliseconds
 
         Returns:
             True if successful, False otherwise
         """
-        logger.debug("CloudWatchEMFExporter force flushes the buffered metrics")
+        logger.debug("AWsCloudWatchEMFExporter force flushes the buffered metrics")
         return True
 
     def shutdown(self, timeout_millis: Optional[int] = None, **kwargs: Any) -> bool:
@@ -404,13 +428,15 @@ class CloudWatchEMFExporter(MetricExporter):
         Shutdown the exporter.
         Override to handle timeout and other keyword arguments, but do nothing.
 
+        TODO: will add logic to handle gracefule shutdown
+
         Args:
             timeout_millis: Ignored timeout in milliseconds
             **kwargs: Ignored additional keyword arguments
         """
         # Intentionally do nothing
         self.force_flush(timeout_millis)
-        logger.debug("CloudWatchEMFExporter shutdown called with timeout_millis=%s", timeout_millis)
+        logger.debug("AwsCloudWatchEMFExporter shutdown called with timeout_millis=%s", timeout_millis)
         return True
 
 
@@ -420,7 +446,7 @@ def create_emf_exporter(
     log_stream_name: Optional[str] = None,
     aws_region: Optional[str] = None,
     **kwargs,
-) -> CloudWatchEMFExporter:
+) -> AwsCloudWatchEMFExporter:
     """
     Convenience function to create a CloudWatch EMF exporter with DELTA temporality.
 
@@ -430,10 +456,10 @@ def create_emf_exporter(
         log_stream_name: CloudWatch log stream name (auto-generated if None)
         aws_region: AWS region (auto-detected if None)
         debug: Whether to enable debug printing of EMF logs
-        **kwargs: Additional arguments passed to the CloudWatchEMFExporter
+        **kwargs: Additional arguments passed to the AwsCloudWatchEMFExporter
 
     Returns:
-        Configured CloudWatchEMFExporter instance
+        Configured AwsCloudWatchEMFExporter instance
     """
 
     # Set up temporality preference - always use DELTA for CloudWatch
@@ -447,7 +473,7 @@ def create_emf_exporter(
     }
 
     # Create and return the exporter
-    return CloudWatchEMFExporter(
+    return AwsCloudWatchEMFExporter(
         namespace=namespace,
         log_group_name=log_group_name,
         log_stream_name=log_stream_name,

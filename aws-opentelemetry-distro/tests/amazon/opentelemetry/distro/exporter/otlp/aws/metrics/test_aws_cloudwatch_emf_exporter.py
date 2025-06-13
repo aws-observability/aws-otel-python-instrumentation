@@ -8,8 +8,8 @@ from unittest.mock import Mock, patch
 
 from botocore.exceptions import ClientError
 
-from amazon.opentelemetry.distro.exporter.otlp.aws.metrics.otlp_aws_emf_exporter import (
-    CloudWatchEMFExporter,
+from amazon.opentelemetry.distro.exporter.otlp.aws.metrics.aws_cloudwatch_emf_exporter import (
+    AwsCloudWatchEMFExporter,
     create_emf_exporter,
 )
 from opentelemetry.sdk.metrics.export import Gauge, MetricExportResult
@@ -83,7 +83,7 @@ class TestCreateEMFExporter(unittest.TestCase):
 
         exporter = create_emf_exporter()
 
-        self.assertIsInstance(exporter, CloudWatchEMFExporter)
+        self.assertIsInstance(exporter, AwsCloudWatchEMFExporter)
         self.assertEqual(exporter.namespace, "OTelPython")
 
     @patch("botocore.session.Session")
@@ -101,14 +101,14 @@ class TestCreateEMFExporter(unittest.TestCase):
             namespace="CustomNamespace", log_group_name="/custom/log/group", aws_region="us-west-2"
         )
 
-        self.assertIsInstance(exporter, CloudWatchEMFExporter)
+        self.assertIsInstance(exporter, AwsCloudWatchEMFExporter)
         self.assertEqual(exporter.namespace, "CustomNamespace")
         self.assertEqual(exporter.log_group_name, "/custom/log/group")
 
 
 # pylint: disable=too-many-public-methods
-class TestCloudWatchEMFExporter(unittest.TestCase):
-    """Test CloudWatchEMFExporter class."""
+class TestAwsCloudWatchEMFExporter(unittest.TestCase):
+    """Test AwsCloudWatchEMFExporter class."""
 
     def setUp(self):
         """Set up test fixtures."""
@@ -121,7 +121,7 @@ class TestCloudWatchEMFExporter(unittest.TestCase):
             mock_client.describe_log_groups.return_value = {"logGroups": []}
             mock_client.create_log_group.return_value = {}
 
-            self.exporter = CloudWatchEMFExporter(namespace="TestNamespace", log_group_name="test-log-group")
+            self.exporter = AwsCloudWatchEMFExporter(namespace="TestNamespace", log_group_name="test-log-group")
 
     def test_initialization(self):
         """Test exporter initialization."""
@@ -140,7 +140,7 @@ class TestCloudWatchEMFExporter(unittest.TestCase):
         mock_client.describe_log_groups.return_value = {"logGroups": []}
         mock_client.create_log_group.return_value = {}
 
-        exporter = CloudWatchEMFExporter(
+        exporter = AwsCloudWatchEMFExporter(
             namespace="CustomNamespace",
             log_group_name="custom-log-group",
             log_stream_name="custom-stream",
@@ -152,13 +152,18 @@ class TestCloudWatchEMFExporter(unittest.TestCase):
 
     def test_get_unit_mapping(self):
         """Test unit mapping functionality."""
-        # Test known units
+        # Test known units from UNIT_MAPPING
         self.assertEqual(self.exporter._get_unit(Mock(unit="ms")), "Milliseconds")
         self.assertEqual(self.exporter._get_unit(Mock(unit="s")), "Seconds")
+        self.assertEqual(self.exporter._get_unit(Mock(unit="us")), "Microseconds")
         self.assertEqual(self.exporter._get_unit(Mock(unit="By")), "Bytes")
-        self.assertEqual(self.exporter._get_unit(Mock(unit="%")), "Percent")
+        self.assertEqual(self.exporter._get_unit(Mock(unit="bit")), "Bits")
 
-        # Test unknown unit
+        # Test units that map to empty string
+        self.assertEqual(self.exporter._get_unit(Mock(unit="1")), "")
+        self.assertEqual(self.exporter._get_unit(Mock(unit="ns")), "")
+
+        # Test unknown unit (returns as-is)
         self.assertEqual(self.exporter._get_unit(Mock(unit="unknown")), "unknown")
 
         # Test empty unit (should return None due to falsy check)
@@ -326,7 +331,7 @@ class TestCloudWatchEMFExporter(unittest.TestCase):
 
         self.assertTrue(result)
 
-    @patch.object(CloudWatchEMFExporter, "force_flush")
+    @patch.object(AwsCloudWatchEMFExporter, "force_flush")
     def test_shutdown(self, mock_force_flush):
         """Test shutdown functionality."""
         mock_force_flush.return_value = True
@@ -375,8 +380,8 @@ class TestCloudWatchEMFExporter(unittest.TestCase):
         self.assertEqual(result["Version"], "1")
 
         # Check resource attributes are prefixed
-        self.assertEqual(result["resource.service.name"], "test-service")
-        self.assertEqual(result["resource.service.version"], "1.0.0")
+        self.assertEqual(result["otel.resource.service.name"], "test-service")
+        self.assertEqual(result["otel.resource.service.version"], "1.0.0")
 
         # Check metric attributes
         self.assertEqual(result["env"], "test")
@@ -489,7 +494,7 @@ class TestCloudWatchEMFExporter(unittest.TestCase):
         mock_client.describe_log_groups.return_value = {"logGroups": []}
         mock_client.create_log_group.return_value = {}
 
-        exporter = CloudWatchEMFExporter(namespace="TestNamespace", log_group_name="test-log-group")
+        exporter = AwsCloudWatchEMFExporter(namespace="TestNamespace", log_group_name="test-log-group")
 
         # Just verify the exporter was created successfully with region handling
         self.assertIsNotNone(exporter)
@@ -511,7 +516,7 @@ class TestCloudWatchEMFExporter(unittest.TestCase):
         mock_client.create_log_group.side_effect = ClientError({"Error": {"Code": "AccessDenied"}}, "CreateLogGroup")
 
         with self.assertRaises(ClientError):
-            CloudWatchEMFExporter(namespace="TestNamespace", log_group_name="test-log-group")
+            AwsCloudWatchEMFExporter(namespace="TestNamespace", log_group_name="test-log-group")
 
     @patch("botocore.session.Session")
     def test_ensure_log_group_exists_success(self, mock_session):
@@ -526,7 +531,7 @@ class TestCloudWatchEMFExporter(unittest.TestCase):
         mock_client.describe_log_groups.return_value = {"logGroups": [{"logGroupName": "test-log-group"}]}
 
         # This should not raise an exception
-        exporter = CloudWatchEMFExporter(namespace="TestNamespace", log_group_name="test-log-group")
+        exporter = AwsCloudWatchEMFExporter(namespace="TestNamespace", log_group_name="test-log-group")
         self.assertIsNotNone(exporter)
         # Verify describe was called but create was not
         mock_client.describe_log_groups.assert_called_once_with(logGroupNamePrefix="test-log-group", limit=1)
