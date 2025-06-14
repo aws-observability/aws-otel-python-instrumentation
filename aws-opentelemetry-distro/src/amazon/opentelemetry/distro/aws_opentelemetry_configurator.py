@@ -411,9 +411,10 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource) -> 
     # Add session.id baggage attribute to span attributes to support AI Agent use cases
     # enabling session ID tracking in spans.
     if is_agent_observability_enabled():
+
         def session_id_predicate(baggage_key: str) -> bool:
             return baggage_key == "session.id"
-        
+
         provider.add_span_processor(BaggageSpanProcessor(session_id_predicate))
 
     if not _is_application_signals_enabled():

@@ -364,6 +364,50 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         # Clean up
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
 
+    def test_baggage_span_processor_session_id_filtering(self):
+        """Test that BaggageSpanProcessor only set session.id filter by default"""
+
+        # Set up agent observability
+        os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
+
+        # Create a new tracer provider for this test
+        tracer_provider = TracerProvider()
+
+        # Add our span processors
+        _customize_span_processors(tracer_provider, Resource.get_empty())
+
+        # Verify that the BaggageSpanProcessor was added
+        # The _active_span_processor is a composite processor containing all processors
+        active_processor = tracer_provider._active_span_processor
+
+        # Check if it's a composite processor with multiple processors
+        if hasattr(active_processor, "_span_processors"):
+            processors = active_processor._span_processors
+        else:
+            # If it's a single processor, wrap it in a list
+            processors = [active_processor]
+
+        baggage_processors = [
+            processor for processor in processors if processor.__class__.__name__ == "BaggageSpanProcessor"
+        ]
+        self.assertEqual(len(baggage_processors), 1)
+
+        # Verify the predicate function only accepts session.id
+        baggage_processor = baggage_processors[0]
+        predicate = baggage_processor._baggage_key_predicate
+
+        # Test the predicate function directly
+        self.assertTrue(predicate("session.id"))
+        self.assertFalse(predicate("user.id"))
+        self.assertFalse(predicate("request.id"))
+        self.assertFalse(predicate("other.key"))
+        self.assertFalse(predicate(""))
+        self.assertFalse(predicate("session"))
+        self.assertFalse(predicate("id"))
+
+        # Clean up
+        os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+
     def test_customize_span_exporter_sigv4(self):
 
         traces_good_endpoints = [

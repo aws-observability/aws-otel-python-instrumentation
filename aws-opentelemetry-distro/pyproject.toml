@@ -26,7 +26,6 @@ classifiers = [
 dependencies = [
   "opentelemetry-api == 1.27.0",
   "opentelemetry-sdk == 1.27.0",
-  "opentelemetry-processor-baggage == 0.48b0",
   "opentelemetry-exporter-otlp-proto-grpc == 1.27.0",
   "opentelemetry-exporter-otlp-proto-http == 1.27.0",
   "opentelemetry-propagator-b3 == 1.27.0",
@@ -35,6 +34,7 @@ dependencies = [
   "opentelemetry-sdk-extension-aws == 2.0.2",
   "opentelemetry-propagator-aws-xray == 1.0.1",
   "opentelemetry-distro == 0.48b0",
+  "opentelemetry-processor-baggage == 0.48b0",
   "opentelemetry-propagator-ot-trace == 0.48b0",
   "opentelemetry-instrumentation == 0.48b0",
   "opentelemetry-instrumentation-aws-lambda == 0.48b0",
