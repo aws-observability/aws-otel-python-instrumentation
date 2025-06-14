@@ -8,10 +8,7 @@ from unittest.mock import Mock, patch
 
 from botocore.exceptions import ClientError
 
-from amazon.opentelemetry.distro.exporter.otlp.aws.metrics.aws_cloudwatch_emf_exporter import (
-    AwsCloudWatchEMFExporter,
-    create_emf_exporter,
-)
+from amazon.opentelemetry.distro.exporter.otlp.aws.metrics.aws_cloudwatch_emf_exporter import AwsCloudWatchEMFExporter
 from opentelemetry.sdk.metrics.export import Gauge, MetricExportResult
 from opentelemetry.sdk.resources import Resource
 
@@ -67,45 +64,6 @@ class MockScopeMetrics:
         self.metrics = metrics or []
 
 
-class TestCreateEMFExporter(unittest.TestCase):
-    """Test the create_emf_exporter function."""
-
-    @patch("botocore.session.Session")
-    def test_create_emf_exporter_default_args(self, mock_session):
-        """Test creating exporter with default arguments."""
-        # Mock the botocore session to avoid AWS calls
-        mock_client = Mock()
-        mock_session_instance = Mock()
-        mock_session.return_value = mock_session_instance
-        mock_session_instance.create_client.return_value = mock_client
-        mock_client.describe_log_groups.return_value = {"logGroups": []}
-        mock_client.create_log_group.return_value = {}
-
-        exporter = create_emf_exporter()
-
-        self.assertIsInstance(exporter, AwsCloudWatchEMFExporter)
-        self.assertEqual(exporter.namespace, "OTelPython")
-
-    @patch("botocore.session.Session")
-    def test_create_emf_exporter_custom_args(self, mock_session):
-        """Test creating exporter with custom arguments."""
-        # Mock the botocore session to avoid AWS calls
-        mock_client = Mock()
-        mock_session_instance = Mock()
-        mock_session.return_value = mock_session_instance
-        mock_session_instance.create_client.return_value = mock_client
-        mock_client.describe_log_groups.return_value = {"logGroups": []}
-        mock_client.create_log_group.return_value = {}
-
-        exporter = create_emf_exporter(
-            namespace="CustomNamespace", log_group_name="/custom/log/group", aws_region="us-west-2"
-        )
-
-        self.assertIsInstance(exporter, AwsCloudWatchEMFExporter)
-        self.assertEqual(exporter.namespace, "CustomNamespace")
-        self.assertEqual(exporter.log_group_name, "/custom/log/group")
-
-
 # pylint: disable=too-many-public-methods
 class TestAwsCloudWatchEMFExporter(unittest.TestCase):
     """Test AwsCloudWatchEMFExporter class."""
@@ -118,8 +76,8 @@ class TestAwsCloudWatchEMFExporter(unittest.TestCase):
             mock_session_instance = Mock()
             mock_session.return_value = mock_session_instance
             mock_session_instance.create_client.return_value = mock_client
-            mock_client.describe_log_groups.return_value = {"logGroups": []}
             mock_client.create_log_group.return_value = {}
+            mock_client.create_log_stream.return_value = {}
 
             self.exporter = AwsCloudWatchEMFExporter(namespace="TestNamespace", log_group_name="test-log-group")
 
@@ -137,8 +95,8 @@ class TestAwsCloudWatchEMFExporter(unittest.TestCase):
         mock_session_instance = Mock()
         mock_session.return_value = mock_session_instance
         mock_session_instance.create_client.return_value = mock_client
-        mock_client.describe_log_groups.return_value = {"logGroups": []}
         mock_client.create_log_group.return_value = {}
+        mock_client.create_log_stream.return_value = {}
 
         exporter = AwsCloudWatchEMFExporter(
             namespace="CustomNamespace",
@@ -159,12 +117,17 @@ class TestAwsCloudWatchEMFExporter(unittest.TestCase):
         self.assertEqual(self.exporter._get_unit(Mock(unit="By")), "Bytes")
         self.assertEqual(self.exporter._get_unit(Mock(unit="bit")), "Bits")
 
-        # Test units that map to empty string
+        # Test units that map to empty string (should return empty string from mapping)
         self.assertEqual(self.exporter._get_unit(Mock(unit="1")), "")
         self.assertEqual(self.exporter._get_unit(Mock(unit="ns")), "")
 
-        # Test unknown unit (returns as-is)
-        self.assertEqual(self.exporter._get_unit(Mock(unit="unknown")), "unknown")
+        # Test EMF supported units directly (should return as-is)
+        self.assertEqual(self.exporter._get_unit(Mock(unit="Count")), "Count")
+        self.assertEqual(self.exporter._get_unit(Mock(unit="Percent")), "Percent")
+        self.assertEqual(self.exporter._get_unit(Mock(unit="Kilobytes")), "Kilobytes")
+
+        # Test unknown unit (not in mapping and not in supported units, returns None)
+        self.assertIsNone(self.exporter._get_unit(Mock(unit="unknown")))
 
         # Test empty unit (should return None due to falsy check)
         self.assertIsNone(self.exporter._get_unit(Mock(unit="")))
@@ -491,8 +454,8 @@ class TestAwsCloudWatchEMFExporter(unittest.TestCase):
         mock_session_instance = Mock()
         mock_session.return_value = mock_session_instance
         mock_session_instance.create_client.return_value = mock_client
-        mock_client.describe_log_groups.return_value = {"logGroups": []}
         mock_client.create_log_group.return_value = {}
+        mock_client.create_log_stream.return_value = {}
 
         exporter = AwsCloudWatchEMFExporter(namespace="TestNamespace", log_group_name="test-log-group")
 
@@ -509,11 +472,9 @@ class TestAwsCloudWatchEMFExporter(unittest.TestCase):
         mock_session.return_value = mock_session_instance
         mock_session_instance.create_client.return_value = mock_client
 
-        # Make describe fail and create fail with a different error
-        mock_client.describe_log_groups.side_effect = ClientError(
-            {"Error": {"Code": "AccessDenied"}}, "DescribeLogGroups"
-        )
+        # Make create fail with access denied error
         mock_client.create_log_group.side_effect = ClientError({"Error": {"Code": "AccessDenied"}}, "CreateLogGroup")
+        mock_client.create_log_stream.return_value = {}
 
         with self.assertRaises(ClientError):
             AwsCloudWatchEMFExporter(namespace="TestNamespace", log_group_name="test-log-group")
@@ -527,15 +488,17 @@ class TestAwsCloudWatchEMFExporter(unittest.TestCase):
         mock_session.return_value = mock_session_instance
         mock_session_instance.create_client.return_value = mock_client
 
-        # Make describe succeed (log group exists)
-        mock_client.describe_log_groups.return_value = {"logGroups": [{"logGroupName": "test-log-group"}]}
+        # Make create fail with ResourceAlreadyExistsException (log group exists)
+        mock_client.create_log_group.side_effect = ClientError(
+            {"Error": {"Code": "ResourceAlreadyExistsException"}}, "CreateLogGroup"
+        )
+        mock_client.create_log_stream.return_value = {}
 
         # This should not raise an exception
         exporter = AwsCloudWatchEMFExporter(namespace="TestNamespace", log_group_name="test-log-group")
         self.assertIsNotNone(exporter)
-        # Verify describe was called but create was not
-        mock_client.describe_log_groups.assert_called_once_with(logGroupNamePrefix="test-log-group", limit=1)
-        mock_client.create_log_group.assert_not_called()
+        # Verify create was called once
+        mock_client.create_log_group.assert_called_once_with(logGroupName="test-log-group")
 
     def test_export_with_unsupported_metric_type(self):
         """Test export with unsupported metric types."""

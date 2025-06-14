@@ -5,7 +5,6 @@
 
 import json
 import logging
-import os
 import time
 import uuid
 from collections import defaultdict
@@ -47,6 +46,38 @@ class AwsCloudWatchEMFExporter(MetricExporter):
 
     """
 
+    # CloudWatch EMF supported units
+    # Ref: https://docs.aws.amazon.com/AmazonCloudWatch/latest/APIReference/API_MetricDatum.html
+    EMF_SUPPORTED_UNITS = {
+        "Seconds",
+        "Microseconds",
+        "Milliseconds",
+        "Bytes",
+        "Kilobytes",
+        "Megabytes",
+        "Gigabytes",
+        "Terabytes",
+        "Bits",
+        "Kilobits",
+        "Megabits",
+        "Gigabits",
+        "Terabits",
+        "Percent",
+        "Count",
+        "Bytes/Second",
+        "Kilobytes/Second",
+        "Megabytes/Second",
+        "Gigabytes/Second",
+        "Terabytes/Second",
+        "Bits/Second",
+        "Kilobits/Second",
+        "Megabits/Second",
+        "Gigabits/Second",
+        "Terabits/Second",
+        "Count/Second",
+        "None",
+    }
+
     # OTel to CloudWatch unit mapping
     # Ref: opentelemetry-collector-contrib/blob/main/exporter/awsemfexporter/grouped_metric.go#L188
     UNIT_MAPPING = {
@@ -79,16 +110,22 @@ class AwsCloudWatchEMFExporter(MetricExporter):
             preferred_temporality: Optional dictionary mapping instrument types to aggregation temporality
             **kwargs: Additional arguments passed to botocore client
         """
+        # Set up temporality preference default to DELTA if customers not set
+        if preferred_temporality is None:
+            preferred_temporality = {
+                Counter: AggregationTemporality.DELTA,
+                Histogram: AggregationTemporality.DELTA,
+                ObservableCounter: AggregationTemporality.DELTA,
+                ObservableGauge: AggregationTemporality.DELTA,
+                ObservableUpDownCounter: AggregationTemporality.DELTA,
+                UpDownCounter: AggregationTemporality.DELTA,
+            }
+
         super().__init__(preferred_temporality)
 
         self.namespace = namespace
         self.log_group_name = log_group_name
         self.log_stream_name = log_stream_name or self._generate_log_stream_name()
-
-        # Initialize CloudWatch Logs client using botocore
-        # If aws_region is not provided, botocore will check environment variables AWS_REGION or AWS_DEFAULT_REGION
-        if aws_region is None:
-            aws_region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
 
         session = botocore.session.Session()
         self.logs_client = session.create_client("logs", region_name=aws_region, **kwargs)
@@ -99,6 +136,8 @@ class AwsCloudWatchEMFExporter(MetricExporter):
         # Ensure log stream exists
         self._ensure_log_stream_exists()
 
+    # Default to unique log stream name matching OTel Collector
+    # EMF Exporter behavior with language for source identification
     def _generate_log_stream_name(self) -> str:
         """Generate a unique log stream name."""
 
@@ -108,12 +147,12 @@ class AwsCloudWatchEMFExporter(MetricExporter):
     def _ensure_log_group_exists(self):
         """Ensure the log group exists, create if it doesn't."""
         try:
-            self.logs_client.describe_log_groups(logGroupNamePrefix=self.log_group_name, limit=1)
-        except ClientError:
-            try:
-                self.logs_client.create_log_group(logGroupName=self.log_group_name)
-                logger.info("Created log group: %s", self.log_group_name)
-            except ClientError as error:
+            self.logs_client.create_log_group(logGroupName=self.log_group_name)
+            logger.info("Created log group: %s", self.log_group_name)
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") == "ResourceAlreadyExistsException":
+                logger.debug("Log group %s already exists", self.log_group_name)
+            else:
                 logger.error("Failed to create log group %s : %s", self.log_group_name, error)
                 raise
 
@@ -130,7 +169,7 @@ class AwsCloudWatchEMFExporter(MetricExporter):
 
     def _get_metric_name(self, record: Any) -> Optional[str]:
         """Get the metric name from the metric record or data point."""
-        # For compatibility with older record format
+
         if hasattr(record, "instrument") and hasattr(record.instrument, "name") and record.instrument.name:
             return record.instrument.name
         # Return None if no valid metric name found
@@ -147,7 +186,17 @@ class AwsCloudWatchEMFExporter(MetricExporter):
         if not unit:
             return None
 
-        return self.UNIT_MAPPING.get(unit, unit)
+        # First check if unit is already a supported EMF unit
+        if unit in self.EMF_SUPPORTED_UNITS:
+            return unit
+
+        # Otherwise, try to map from OTel unit to CloudWatch unit
+        mapped_unit = self.UNIT_MAPPING.get(unit)
+        if mapped_unit is not None:
+            return mapped_unit
+
+        # If unit is not supported, return None
+        return None
 
     def _get_dimension_names(self, attributes: Dict[str, Any]) -> List[str]:
         """Extract dimension names from attributes."""
@@ -185,7 +234,11 @@ class AwsCloudWatchEMFExporter(MetricExporter):
 
     # pylint: disable=no-member
     def _create_metric_record(self, metric_name: str, metric_unit: str, metric_description: str) -> Any:
-        """Create a base metric record with instrument information.
+        """
+        Creates the intermediate metric data structure that standardizes different otel metric representation
+        and will be used to generate EMF events. The base record
+        establishes the instrument schema (name/unit/description) that will be populated
+        with dimensions, timestamps, and values during metric processing.
 
         Args:
             metric_name: Name of the metric
@@ -255,6 +308,7 @@ class AwsCloudWatchEMFExporter(MetricExporter):
         emf_log = {"_aws": {"Timestamp": timestamp or int(time.time() * 1000), "CloudWatchMetrics": []}}
 
         # Set with latest EMF version schema
+        # opentelemetry-collector-contrib/blob/main/exporter/awsemfexporter/metric_translator.go#L414
         emf_log["Version"] = "1"
 
         # Add resource attributes to EMF log but not as dimensions
@@ -267,9 +321,7 @@ class AwsCloudWatchEMFExporter(MetricExporter):
                 emf_log[f"otel.resource.{key}"] = str(value)
 
         # Initialize collections for dimensions and metrics
-
         metric_definitions = []
-
         # Collect attributes from all records (they should be the same for all records in the group)
         # Only collect once from the first record and apply to all records
         all_attributes = (
@@ -339,7 +391,7 @@ class AwsCloudWatchEMFExporter(MetricExporter):
             return response
 
         except ClientError as error:
-            logger.error("Failed to send log event: %s", error)
+            logger.debug("Failed to send log event: %s", error)
             raise
 
     # pylint: disable=too-many-nested-blocks
@@ -438,46 +490,3 @@ class AwsCloudWatchEMFExporter(MetricExporter):
         self.force_flush(timeout_millis)
         logger.debug("AwsCloudWatchEMFExporter shutdown called with timeout_millis=%s", timeout_millis)
         return True
-
-
-def create_emf_exporter(
-    namespace: str = "OTelPython",
-    log_group_name: str = "/aws/otel/python",
-    log_stream_name: Optional[str] = None,
-    aws_region: Optional[str] = None,
-    **kwargs,
-) -> AwsCloudWatchEMFExporter:
-    """
-    Convenience function to create a CloudWatch EMF exporter with DELTA temporality.
-
-    Args:
-        namespace: CloudWatch namespace for metrics
-        log_group_name: CloudWatch log group name
-        log_stream_name: CloudWatch log stream name (auto-generated if None)
-        aws_region: AWS region (auto-detected if None)
-        debug: Whether to enable debug printing of EMF logs
-        **kwargs: Additional arguments passed to the AwsCloudWatchEMFExporter
-
-    Returns:
-        Configured AwsCloudWatchEMFExporter instance
-    """
-
-    # Set up temporality preference - always use DELTA for CloudWatch
-    temporality_dict = {
-        Counter: AggregationTemporality.DELTA,
-        Histogram: AggregationTemporality.DELTA,
-        ObservableCounter: AggregationTemporality.DELTA,
-        ObservableGauge: AggregationTemporality.DELTA,
-        ObservableUpDownCounter: AggregationTemporality.DELTA,
-        UpDownCounter: AggregationTemporality.DELTA,
-    }
-
-    # Create and return the exporter
-    return AwsCloudWatchEMFExporter(
-        namespace=namespace,
-        log_group_name=log_group_name,
-        log_stream_name=log_stream_name,
-        aws_region=aws_region,
-        preferred_temporality=temporality_dict,
-        **kwargs,
-    )
