@@ -89,6 +89,8 @@ class ContractTestBase(TestCase):
             DockerContainer(self.get_application_image_name())
             .with_exposed_ports(self.get_application_port())
             .with_env("OTEL_METRIC_EXPORT_INTERVAL", "50")
+            .with_env("OTEL_PYTHON_DISTRO", "aws_distro")
+            .with_env("OTEL_PYTHON_CONFIGURATOR", "aws_configurator")
             .with_env("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "true")
             .with_env("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", self.is_runtime_enabled())
             .with_env("OTEL_METRICS_EXPORTER", "none")
