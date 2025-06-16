@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
+import sys
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
@@ -19,31 +20,97 @@ class TestGetAwsRegion(TestCase):
         os.environ.pop("AWS_REGION", None)
         os.environ.pop("AWS_DEFAULT_REGION", None)
 
-    def test_get_aws_region_from_aws_region_env(self):
-        os.environ["AWS_REGION"] = "us-west-2"
-        self.assertEqual(get_aws_region(), "us-west-2")
-
-    def test_get_aws_region_from_aws_default_region_env(self):
-        os.environ["AWS_DEFAULT_REGION"] = "eu-central-1"
-        self.assertEqual(get_aws_region(), "eu-central-1")
-
-    def test_get_aws_region_prefers_aws_region_over_default(self):
-        os.environ["AWS_REGION"] = "us-east-1"
-        os.environ["AWS_DEFAULT_REGION"] = "eu-west-1"
-        self.assertEqual(get_aws_region(), "us-east-1")
-
     @patch("amazon.opentelemetry.distro._utils.is_installed")
-    @patch("botocore.session.Session")
-    def test_get_aws_region_from_botocore_session(self, mock_session_class, mock_is_installed):
+    def test_get_aws_region_from_aws_region_env(self, mock_is_installed):
         mock_is_installed.return_value = True
 
-        mock_session = MagicMock()
-        mock_session.region_name = "ap-southeast-1"
-        mock_session_class.return_value = mock_session
+        # Mock botocore module and session
+        mock_botocore = MagicMock()
+        mock_session_instance = MagicMock()
+        mock_session_instance.region_name = "us-west-2"
+        mock_botocore.session.Session.return_value = mock_session_instance
+        sys.modules["botocore"] = mock_botocore
+        sys.modules["botocore.session"] = mock_botocore.session
 
-        result = get_aws_region()
+        os.environ["AWS_REGION"] = "us-west-2"
 
-        self.assertEqual(result, "ap-southeast-1")
+        try:
+            self.assertEqual(get_aws_region(), "us-west-2")
+        finally:
+            # Clean up mock
+            if "botocore" in sys.modules:
+                del sys.modules["botocore"]
+            if "botocore.session" in sys.modules:
+                del sys.modules["botocore.session"]
+
+    @patch("amazon.opentelemetry.distro._utils.is_installed")
+    def test_get_aws_region_from_aws_default_region_env(self, mock_is_installed):
+        mock_is_installed.return_value = True
+
+        # Mock botocore module and session
+        mock_botocore = MagicMock()
+        mock_session_instance = MagicMock()
+        mock_session_instance.region_name = "eu-central-1"
+        mock_botocore.session.Session.return_value = mock_session_instance
+        sys.modules["botocore"] = mock_botocore
+        sys.modules["botocore.session"] = mock_botocore.session
+
+        os.environ["AWS_DEFAULT_REGION"] = "eu-central-1"
+
+        try:
+            self.assertEqual(get_aws_region(), "eu-central-1")
+        finally:
+            # Clean up mock
+            if "botocore" in sys.modules:
+                del sys.modules["botocore"]
+            if "botocore.session" in sys.modules:
+                del sys.modules["botocore.session"]
+
+    @patch("amazon.opentelemetry.distro._utils.is_installed")
+    def test_get_aws_region_prefers_aws_region_over_default(self, mock_is_installed):
+        mock_is_installed.return_value = True
+
+        # Mock botocore module and session
+        mock_botocore = MagicMock()
+        mock_session_instance = MagicMock()
+        mock_session_instance.region_name = "us-east-1"
+        mock_botocore.session.Session.return_value = mock_session_instance
+        sys.modules["botocore"] = mock_botocore
+        sys.modules["botocore.session"] = mock_botocore.session
+
+        os.environ["AWS_REGION"] = "us-east-1"
+        os.environ["AWS_DEFAULT_REGION"] = "eu-west-1"
+
+        try:
+            self.assertEqual(get_aws_region(), "us-east-1")
+        finally:
+            # Clean up mock
+            if "botocore" in sys.modules:
+                del sys.modules["botocore"]
+            if "botocore.session" in sys.modules:
+                del sys.modules["botocore.session"]
+
+    @patch("amazon.opentelemetry.distro._utils.is_installed")
+    def test_get_aws_region_from_botocore_session(self, mock_is_installed):
+        mock_is_installed.return_value = True
+
+        # Mock botocore module and session
+        mock_botocore = MagicMock()
+        mock_session_instance = MagicMock()
+        mock_session_instance.region_name = "ap-southeast-1"
+        mock_botocore.session.Session.return_value = mock_session_instance
+        sys.modules["botocore"] = mock_botocore
+        sys.modules["botocore.session"] = mock_botocore.session
+
+        try:
+            result = get_aws_region()
+            self.assertEqual(result, "ap-southeast-1")
+        finally:
+            # Clean up mock
+            if "botocore" in sys.modules:
+                del sys.modules["botocore"]
+            if "botocore.session" in sys.modules:
+                del sys.modules["botocore.session"]
 
     @patch("amazon.opentelemetry.distro._utils.is_installed")
     @patch("amazon.opentelemetry.distro._utils._logger")
@@ -54,3 +121,27 @@ class TestGetAwsRegion(TestCase):
 
         self.assertIsNone(result)
         mock_logger.warning.assert_called_once()
+
+    @patch("amazon.opentelemetry.distro._utils.is_installed")
+    @patch("amazon.opentelemetry.distro._utils._logger")
+    def test_get_aws_region_returns_none_when_botocore_has_no_region(self, mock_logger, mock_is_installed):
+        mock_is_installed.return_value = True
+
+        # Mock botocore module with no region
+        mock_botocore = MagicMock()
+        mock_session_instance = MagicMock()
+        mock_session_instance.region_name = None
+        mock_botocore.session.Session.return_value = mock_session_instance
+        sys.modules["botocore"] = mock_botocore
+        sys.modules["botocore.session"] = mock_botocore.session
+
+        try:
+            result = get_aws_region()
+            self.assertIsNone(result)
+            mock_logger.warning.assert_called_once()
+        finally:
+            # Clean up mock
+            if "botocore" in sys.modules:
+                del sys.modules["botocore"]
+            if "botocore.session" in sys.modules:
+                del sys.modules["botocore.session"]
