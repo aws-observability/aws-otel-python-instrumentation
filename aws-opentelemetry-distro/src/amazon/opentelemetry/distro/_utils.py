@@ -55,6 +55,6 @@ def get_aws_region() -> str:
             pass
 
     _logger.warning(
-        "AWS region not found. Please set AWS_REGION environment variable or configure " "AWS CLI with 'aws configure'."
+        "AWS region not found. Please set AWS_REGION environment variable or configure AWS CLI with 'aws configure'."
     )
     return None
