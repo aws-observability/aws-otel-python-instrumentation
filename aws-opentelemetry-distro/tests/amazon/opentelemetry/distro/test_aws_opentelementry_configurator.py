@@ -50,6 +50,7 @@ from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.metrics import get_meter_provider
 from opentelemetry.processor.baggage import BaggageSpanProcessor
 from opentelemetry.sdk.environment_variables import OTEL_TRACES_SAMPLER, OTEL_TRACES_SAMPLER_ARG
 from opentelemetry.sdk.metrics._internal.export import PeriodicExportingMetricReader
@@ -86,6 +87,22 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         aws_otel_configurator: AwsOpenTelemetryConfigurator = AwsOpenTelemetryConfigurator()
         aws_otel_configurator.configure()
         cls.tracer_provider: TracerProvider = get_tracer_provider()
+
+    @classmethod
+    def tearDownClass(cls):
+        # Explicitly shut down meter provider to avoid I/O errors on Python 3.9 with gevent
+        # This ensures ConsoleMetricExporter is properly closed before Python cleanup
+        try:
+            meter_provider = get_meter_provider()
+            if hasattr(meter_provider, "force_flush"):
+                meter_provider.force_flush()
+            if hasattr(meter_provider, "shutdown"):
+                meter_provider.shutdown()
+        except (ValueError, RuntimeError):
+            # Ignore errors during cleanup:
+            # - ValueError: I/O operation on closed file (the exact error we're trying to prevent)
+            # - RuntimeError: Provider already shut down or threading issues
+            pass
 
     def tearDown(self):
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
