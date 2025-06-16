@@ -103,6 +103,10 @@ _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME: str = "AWS::StepFunctions"
 _NORMALIZED_LAMBDA_SERVICE_NAME: str = "AWS::Lambda"
 _DB_CONNECTION_STRING_TYPE: str = "DB::Connection"
 
+# Constants for Lambda operations
+_LAMBDA_APPLICATION_SIGNALS_REMOTE_ENVIRONMENT: str = "LAMBDA_APPLICATION_SIGNALS_REMOTE_ENVIRONMENT"
+_LAMBDA_INVOKE_OPERATION: str = "Invoke"
+
 # Special DEPENDENCY attribute value if GRAPHQL_OPERATION_TYPE attribute key is present.
 _GRAPHQL: str = "graphql"
 
@@ -145,6 +149,7 @@ def _generate_dependency_metric_attributes(span: ReadableSpan, resource: Resourc
     _set_egress_operation(span, attributes)
     _set_remote_service_and_operation(span, attributes)
     _set_remote_type_and_identifier(span, attributes)
+    _set_remote_environment(span, attributes)
     _set_remote_db_user(span, attributes)
     _set_span_kind_for_dependency(span, attributes)
     return attributes
@@ -317,7 +322,17 @@ def _normalize_remote_service_name(span: ReadableSpan, service_name: str) -> str
             "Secrets Manager": _NORMALIZED_SECRETSMANAGER_SERVICE_NAME,
             "SNS": _NORMALIZED_SNS_SERVICE_NAME,
             "SFN": _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME,
+            "Lambda": _NORMALIZED_LAMBDA_SERVICE_NAME,
         }
+
+        # Special handling for Lambda invoke operations
+        if _is_lambda_invoke_operation(span):
+            lambda_function_name = span.attributes.get(AWS_LAMBDA_FUNCTION_NAME)
+            # If Lambda name is not present, use UnknownRemoteService
+            # This is intentional - we want to clearly indicate when the Lambda function name
+            # is missing rather than falling back to a generic service name
+            return lambda_function_name if lambda_function_name else UNKNOWN_REMOTE_SERVICE
+
         return aws_sdk_service_mapping.get(service_name, "AWS::" + service_name)
     return service_name
 
@@ -450,22 +465,9 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
             )[-1]
             cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_STEPFUNCTIONS_ACTIVITY_ARN))
         elif is_key_present(span, AWS_LAMBDA_FUNCTION_NAME):
-            # Handling downstream Lambda as a service vs. an AWS resource:
-            # - If the method call is "Invoke", we treat downstream Lambda as a service.
-            # - Otherwise, we treat it as an AWS resource.
-            #
-            # This addresses a Lambda topology issue in Application Signals.
-            # More context in PR: https://github.com/aws-observability/aws-otel-python-instrumentation/pull/319
-            #
-            # NOTE: The env var LAMBDA_APPLICATION_SIGNALS_REMOTE_ENVIRONMENT was introduced as part of this fix.
-            # It is optional and allows users to override the default value if needed.
-            if span.attributes.get(_RPC_METHOD) == "Invoke":
-                attributes[AWS_REMOTE_SERVICE] = _escape_delimiters(span.attributes.get(AWS_LAMBDA_FUNCTION_NAME))
-
-                attributes[AWS_REMOTE_ENVIRONMENT] = (
-                    f'lambda:{os.environ.get("LAMBDA_APPLICATION_SIGNALS_REMOTE_ENVIRONMENT", "default")}'
-                )
-            else:
+            # For non-Invoke Lambda operations, treat Lambda as a resource,
+            # see normalize_remote_service_name for more information.
+            if not _is_lambda_invoke_operation(span):
                 remote_resource_type = _NORMALIZED_LAMBDA_SERVICE_NAME + "::Function"
                 remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_FUNCTION_NAME))
                 cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_FUNCTION_ARN))
@@ -489,6 +491,32 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         attributes[AWS_REMOTE_RESOURCE_TYPE] = remote_resource_type
         attributes[AWS_REMOTE_RESOURCE_IDENTIFIER] = remote_resource_identifier
         attributes[AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER] = cloudformation_primary_identifier
+
+
+def _set_remote_environment(span: ReadableSpan, attributes: BoundedAttributes) -> None:
+    """
+    Remote environment is used to identify the environment of downstream services. Currently only
+    set to "lambda:default" for Lambda Invoke operations when aws-api system is detected.
+    """
+    # We want to treat downstream Lambdas as a service rather than a resource because
+    # Application Signals topology map gets disconnected due to conflicting Lambda Entity
+    # definitions
+    # Additional context can be found in
+    # https://github.com/aws-observability/aws-otel-python-instrumentation/pull/319
+    if _is_lambda_invoke_operation(span):
+        remote_environment = os.environ.get(_LAMBDA_APPLICATION_SIGNALS_REMOTE_ENVIRONMENT, "").strip()
+        if not remote_environment:
+            remote_environment = "default"
+        attributes[AWS_REMOTE_ENVIRONMENT] = f"lambda:{remote_environment}"
+
+
+def _is_lambda_invoke_operation(span: ReadableSpan) -> bool:
+    """Check if the span represents a Lambda Invoke operation."""
+    if not is_aws_sdk_span(span):
+        return False
+
+    rpc_service = _get_remote_service(span, _RPC_SERVICE)
+    return rpc_service == "Lambda" and span.attributes.get(_RPC_METHOD) == _LAMBDA_INVOKE_OPERATION
 
 
 def _get_db_connection(span: ReadableSpan) -> None:
