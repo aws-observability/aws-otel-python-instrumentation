@@ -13,7 +13,7 @@ dependencies = [
     "grpcio ~= 1.66.0",
     "opentelemetry-proto==1.25.0",
     "opentelemetry-sdk==1.25.0",
-    "protobuf==4.25.2",
+    "protobuf==4.25.8",
     "typing-extensions==4.12.2"
 ]
 
