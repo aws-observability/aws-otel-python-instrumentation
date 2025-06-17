@@ -31,7 +31,6 @@ from opentelemetry.instrumentation.botocore.extensions.types import (
     _AttributeMapT,
     _AwsSdkCallContext,
     _AwsSdkExtension,
-    _BotocoreInstrumentorContext,
     _BotoResultT,
 )
 from opentelemetry.trace.span import Span
@@ -193,7 +192,7 @@ class _BedrockAgentExtension(_AwsSdkExtension):
             if request_param_value:
                 attributes[attribute_key] = request_param_value
 
-    def on_success(self, span: Span, result: _BotoResultT, instrumentor_context: _BotocoreInstrumentorContext):
+    def on_success(self, span: Span, result: _BotoResultT):
         if self._operation_class is None:
             return
 
@@ -230,7 +229,7 @@ class _BedrockExtension(_AwsSdkExtension):
     """
 
     # pylint: disable=no-self-use
-    def on_success(self, span: Span, result: _BotoResultT, instrumentor_context: _BotocoreInstrumentorContext):
+    def on_success(self, span: Span, result: _BotoResultT):
         # _GUARDRAIL_ID can only be retrieved from the response, not from the request
         guardrail_id = result.get(_GUARDRAIL_ID)
         if guardrail_id:
@@ -334,7 +333,7 @@ class _BedrockRuntimeExtension(_AwsSdkExtension):
             attributes[key] = value
 
     # pylint: disable=too-many-branches
-    def on_success(self, span: Span, result: Dict[str, Any], instrumentor_context: _BotocoreInstrumentorContext):
+    def on_success(self, span: Span, result: Dict[str, Any]):
         model_id = self._call_context.params.get(_MODEL_ID)
 
         if not model_id:

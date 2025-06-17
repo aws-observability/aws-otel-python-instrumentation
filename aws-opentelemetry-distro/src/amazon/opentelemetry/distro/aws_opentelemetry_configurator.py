@@ -33,6 +33,7 @@ from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.metrics import set_meter_provider
+from opentelemetry.processor.baggage import BaggageSpanProcessor
 from opentelemetry.sdk._configuration import (
     _get_exporter_names,
     _get_id_generator,
@@ -422,8 +423,15 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource) -> 
     # AI applications typically have low throughput traffic patterns and require
     # comprehensive monitoring to catch subtle failure modes like hallucinations
     # and quality degradation that sampling could miss.
+    # Add session.id baggage attribute to span attributes to support AI Agent use cases
+    # enabling session ID tracking in spans.
     if is_agent_observability_enabled():
         _export_unsampled_span_for_agent_observability(provider, resource)
+
+        def session_id_predicate(baggage_key: str) -> bool:
+            return baggage_key == "session.id"
+
+        provider.add_span_processor(BaggageSpanProcessor(session_id_predicate))
 
     if not _is_application_signals_enabled():
         return
