@@ -90,6 +90,17 @@ jobs:
       cpu-architecture: 'x86_64'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
+  default-py313-amd64:
+    needs: [ upload-main-build ]
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      caller-workflow-name: 'main-build'
+      python-version: '3.13'
+      cpu-architecture: 'x86_64'
+      staging-wheel-name: ${{ inputs.staging-wheel-name }}
+
   #
   # DOCKER DISTRIBUTION LANGUAGE VERSION COVERAGE
   # DEFAULT SETTING: {Python Version}, EKS, AMD64, AL2
@@ -141,6 +152,18 @@ jobs:
       adot-image-name: ${{ inputs.adot-image-name }}
       caller-workflow-name: 'main-build'
       python-version: '3.12'
+
+  eks-py313-amd64:
+    if: ${{ always() }}
+    needs: eks-py312-amd64
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      test-cluster-name: 'e2e-python-adot-test'
+      adot-image-name: ${{ inputs.adot-image-name }}
+      caller-workflow-name: 'main-build'
+      python-version: '3.13'
 
   #
   # PACKAGED DISTRIBUTION PLATFORM COVERAGE
