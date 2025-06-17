@@ -833,7 +833,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", None)
 
     # pylint: disable=no-self-use
-    def test_customize_span_processors_with_agent_observability(self):
+    def test_customize_span_processors_calls_export_unsampled_span(self):
         """Test that _customize_span_processors calls _export_unsampled_span_for_agent_observability"""
         mock_tracer_provider: TracerProvider = MagicMock()
 
