@@ -3,9 +3,10 @@
 
 import os
 import sys
+from importlib.metadata import PackageNotFoundError, version
 from logging import Logger, getLogger
 
-import pkg_resources
+from packaging.requirements import Requirement
 
 _logger: Logger = getLogger(__name__)
 
@@ -18,10 +19,23 @@ def is_installed(req: str) -> bool:
     if req in sys.modules and sys.modules[req] is not None:
         return True
 
+    return _is_installed(req)
+
+
+def _is_installed(req):
+    req = Requirement(req)
+
     try:
-        pkg_resources.get_distribution(req)
-    except Exception as exc:  # pylint: disable=broad-except
-        _logger.debug("Skipping instrumentation patch: package %s, exception: %s", req, exc)
+        dist_version = version(req.name)
+    except PackageNotFoundError:
+        return False
+
+    if not req.specifier.filter(dist_version):
+        _logger.warning(
+            "instrumentation for package %s is available but version %s is installed. Skipping.",
+            req,
+            dist_version,
+        )
         return False
     return True
 

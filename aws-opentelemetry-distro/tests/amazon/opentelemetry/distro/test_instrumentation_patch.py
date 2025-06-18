@@ -3,13 +3,13 @@
 import json
 import math
 import os
+from importlib.metadata import PackageNotFoundError
 from io import BytesIO
 from typing import Any, Dict
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 import gevent.monkey
-import pkg_resources
 from botocore.response import StreamingBody
 
 from amazon.opentelemetry.distro.patches._instrumentation_patch import (
@@ -38,7 +38,7 @@ _LAMBDA_FUNCTION_NAME: str = "lambdaFunctionName"
 _LAMBDA_SOURCE_MAPPING_ID: str = "lambdaEventSourceMappingID"
 
 # Patch names
-GET_DISTRIBUTION_PATCH: str = "amazon.opentelemetry.distro._utils.pkg_resources.get_distribution"
+GET_DISTRIBUTION_PATCH: str = "amazon.opentelemetry.distro._utils.version"
 
 
 class TestInstrumentationPatch(TestCase):
@@ -73,7 +73,7 @@ class TestInstrumentationPatch(TestCase):
 
     def _run_patch_behaviour_tests(self):
         # Test setup
-        self.method_patches[GET_DISTRIBUTION_PATCH].return_value = "CorrectDistributionObject"
+        self.method_patches[GET_DISTRIBUTION_PATCH].return_value = "1.0.0"
         # Test setup to not patch gevent
         os.environ[AWS_GEVENT_PATCH_MODULES] = "none"
 
@@ -359,16 +359,12 @@ class TestInstrumentationPatch(TestCase):
             "amazon.opentelemetry.distro.patches._botocore_patches._apply_botocore_instrumentation_patches"
         ) as mock_apply_patches:
             get_distribution_patch: patch = self.method_patches[GET_DISTRIBUTION_PATCH]
-            get_distribution_patch.side_effect = pkg_resources.DistributionNotFound
-            apply_instrumentation_patches()
-            mock_apply_patches.assert_not_called()
-
-            get_distribution_patch.side_effect = pkg_resources.VersionConflict("botocore==1.0.0", "botocore==0.0.1")
+            get_distribution_patch.side_effect = PackageNotFoundError
             apply_instrumentation_patches()
             mock_apply_patches.assert_not_called()
 
             get_distribution_patch.side_effect = None
-            get_distribution_patch.return_value = "CorrectDistributionObject"
+            get_distribution_patch.return_value = "1.0.0"
             apply_instrumentation_patches()
             mock_apply_patches.assert_called()
 
