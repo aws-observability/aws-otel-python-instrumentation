@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import botocore.session
 from botocore.exceptions import ClientError
 
-from opentelemetry.metrics import Instrument
 from opentelemetry.sdk.metrics import (
     Counter,
     Histogram,
@@ -22,19 +21,50 @@ from opentelemetry.sdk.metrics import (
     ObservableUpDownCounter,
     UpDownCounter,
 )
+from opentelemetry.sdk.metrics._internal.point import Metric
 from opentelemetry.sdk.metrics.export import (
     AggregationTemporality,
     Gauge,
     MetricExporter,
     MetricExportResult,
     MetricsData,
+    NumberDataPoint,
 )
 from opentelemetry.sdk.resources import Resource
+from opentelemetry.util.types import Attributes
 
 logger = logging.getLogger(__name__)
 
 
-class AwsCloudWatchEMFExporter(MetricExporter):
+class MetricRecord:
+    """The metric data unified representation of all OTel metrics for OTel to CW EMF conversion."""
+
+    def __init__(self, metric_name: str, metric_unit: str, metric_description: str):
+        """
+        Initialize metric record.
+
+        Args:
+            metric_name: Name of the metric
+            metric_unit: Unit of the metric
+            metric_description: Description of the metric
+        """
+        # Instrument metadata
+        self.name = metric_name
+        self.unit = metric_unit
+        self.description = metric_description
+
+        # Will be set by conversion methods
+        self.timestamp: Optional[int] = None
+        self.attributes: Attributes = {}
+
+        # Different metric type data - only one will be set per record
+        self.value: Optional[float] = None
+        self.sum_data: Optional[Any] = None
+        self.histogram_data: Optional[Any] = None
+        self.exp_histogram_data: Optional[Any] = None
+
+
+class AwsCloudWatchEmfExporter(MetricExporter):
     """
     OpenTelemetry metrics exporter for CloudWatch EMF format.
 
@@ -167,21 +197,20 @@ class AwsCloudWatchEMFExporter(MetricExporter):
                 logger.error("Failed to create log stream %s : %s", self.log_group_name, error)
                 raise
 
-    def _get_metric_name(self, record: Any) -> Optional[str]:
+    def _get_metric_name(self, record: MetricRecord) -> Optional[str]:
         """Get the metric name from the metric record or data point."""
 
-        if hasattr(record, "instrument") and hasattr(record.instrument, "name") and record.instrument.name:
-            return record.instrument.name
+        try:
+            if record.name:
+                return record.name
+        except AttributeError:
+            pass
         # Return None if no valid metric name found
         return None
 
-    def _get_unit(self, instrument_or_metric: Any) -> Optional[str]:
-        """Get CloudWatch unit from OTel instrument or metric unit."""
-        # Check if we have an Instrument object or a metric with unit attribute
-        if isinstance(instrument_or_metric, Instrument):
-            unit = instrument_or_metric.unit
-        else:
-            unit = getattr(instrument_or_metric, "unit", None)
+    def _get_unit(self, record: MetricRecord) -> Optional[str]:
+        """Get CloudWatch unit from MetricRecord unit."""
+        unit = record.unit
 
         if not unit:
             return None
@@ -190,21 +219,18 @@ class AwsCloudWatchEMFExporter(MetricExporter):
         if unit in self.EMF_SUPPORTED_UNITS:
             return unit
 
-        # Otherwise, try to map from OTel unit to CloudWatch unit
+        # Map from OTel unit to CloudWatch unit
         mapped_unit = self.UNIT_MAPPING.get(unit)
-        if mapped_unit is not None:
-            return mapped_unit
 
-        # If unit is not supported, return None
-        return None
+        return mapped_unit
 
-    def _get_dimension_names(self, attributes: Dict[str, Any]) -> List[str]:
+    def _get_dimension_names(self, attributes: Attributes) -> List[str]:
         """Extract dimension names from attributes."""
         # Implement dimension selection logic
         # For now, use all attributes as dimensions
         return list(attributes.keys())
 
-    def _get_attributes_key(self, attributes: Dict[str, Any]) -> str:
+    def _get_attributes_key(self, attributes: Attributes) -> str:
         """
         Create a hashable key from attributes for grouping metrics.
 
@@ -232,8 +258,7 @@ class AwsCloudWatchEMFExporter(MetricExporter):
         # Convert from nanoseconds to milliseconds
         return timestamp_ns // 1_000_000
 
-    # pylint: disable=no-member
-    def _create_metric_record(self, metric_name: str, metric_unit: str, metric_description: str) -> Any:
+    def _create_metric_record(self, metric_name: str, metric_unit: str, metric_description: str) -> MetricRecord:
         """
         Creates the intermediate metric data structure that standardizes different otel metric representation
         and will be used to generate EMF events. The base record
@@ -246,58 +271,67 @@ class AwsCloudWatchEMFExporter(MetricExporter):
             metric_description: Description of the metric
 
         Returns:
-            A base metric record object
+            A MetricRecord object
         """
-        record = type("MetricRecord", (), {})()
-        record.instrument = type("Instrument", (), {})()
-        record.instrument.name = metric_name
-        record.instrument.unit = metric_unit
-        record.instrument.description = metric_description
+        return MetricRecord(metric_name, metric_unit, metric_description)
 
-        return record
-
-    def _convert_gauge(self, metric: Any, dp: Any) -> Tuple[Any, int]:
+    def _convert_gauge(self, metric: Metric, data_point: NumberDataPoint) -> MetricRecord:
         """Convert a Gauge metric datapoint to a metric record.
 
         Args:
             metric: The metric object
-            dp: The datapoint to convert
+            data_point: The datapoint to convert
 
         Returns:
-            Tuple of (metric record, timestamp in ms)
+            MetricRecord with populated timestamp, attributes, and value
         """
         # Create base record
         record = self._create_metric_record(metric.name, metric.unit, metric.description)
 
         # Set timestamp
-        timestamp_ms = (
-            self._normalize_timestamp(dp.time_unix_nano) if hasattr(dp, "time_unix_nano") else int(time.time() * 1000)
-        )
+        try:
+            timestamp_ms = (
+                self._normalize_timestamp(data_point.time_unix_nano)
+                if data_point.time_unix_nano is not None
+                else int(time.time() * 1000)
+            )
+        except AttributeError:
+            # data_point doesn't have time_unix_nano attribute
+            timestamp_ms = int(time.time() * 1000)
         record.timestamp = timestamp_ms
 
         # Set attributes
-        record.attributes = dp.attributes
+        try:
+            record.attributes = data_point.attributes
+        except AttributeError:
+            # data_point doesn't have attributes
+            record.attributes = {}
 
         # For Gauge, set the value directly
-        record.value = dp.value
+        try:
+            record.value = data_point.value
+        except AttributeError:
+            # data_point doesn't have value
+            record.value = None
 
-        return record, timestamp_ms
+        return record
 
-    def _group_by_attributes_and_timestamp(self, record: Any, timestamp_ms: int) -> Tuple[str, int]:
+    def _group_by_attributes_and_timestamp(self, record: MetricRecord) -> Tuple[str, int]:
         """Group metric record by attributes and timestamp.
 
         Args:
             record: The metric record
-            timestamp_ms: The timestamp in milliseconds
 
         Returns:
             A tuple key for grouping
         """
         # Create a key for grouping based on attributes
         attrs_key = self._get_attributes_key(record.attributes)
-        return (attrs_key, timestamp_ms)
+        return (attrs_key, record.timestamp)
 
-    def _create_emf_log(self, metric_records: List[Any], resource: Resource, timestamp: Optional[int] = None) -> Dict:
+    def _create_emf_log(
+        self, metric_records: List[MetricRecord], resource: Resource, timestamp: Optional[int] = None
+    ) -> Dict:
         """
         Create EMF log dictionary from metric records.
 
@@ -324,11 +358,7 @@ class AwsCloudWatchEMFExporter(MetricExporter):
         metric_definitions = []
         # Collect attributes from all records (they should be the same for all records in the group)
         # Only collect once from the first record and apply to all records
-        all_attributes = (
-            metric_records[0].attributes
-            if metric_records and hasattr(metric_records[0], "attributes") and metric_records[0].attributes
-            else {}
-        )
+        all_attributes = metric_records[0].attributes if metric_records and metric_records[0].attributes else {}
 
         # Process each metric record
         for record in metric_records:
@@ -339,23 +369,22 @@ class AwsCloudWatchEMFExporter(MetricExporter):
             if not metric_name:
                 continue
 
-            unit = self._get_unit(record.instrument)
-
-            # Create metric data dict
-            metric_data = {}
-            if unit:
-                metric_data["Unit"] = unit
-
-            # Process gauge metrics (only type supported in PR 1)
-            if not hasattr(record, "value"):
-                # Store value directly in emf_log
+            # Skip processing if metric value is None or empty
+            if record.value is None:
                 logger.debug("Skipping metric %s as it does not have valid metric value", metric_name)
                 continue
 
-            emf_log[metric_name] = record.value
+            # Create metric data dict
+            metric_data = {"Name": metric_name}
+
+            unit = self._get_unit(record)
+            if unit:
+                metric_data["Unit"] = unit
 
             # Add to metric definitions list
-            metric_definitions.append({"Name": metric_name, **metric_data})
+            metric_definitions.append(metric_data)
+
+            emf_log[metric_name] = record.value
 
         # Get dimension names from collected attributes
         dimension_names = self._get_dimension_names(all_attributes)
@@ -423,18 +452,20 @@ class AwsCloudWatchEMFExporter(MetricExporter):
 
                     # Process all metrics in this scope
                     for metric in scope_metrics.metrics:
-                        # Convert metrics to a format compatible with _create_emf_log
-                        if not (hasattr(metric, "data") and hasattr(metric.data, "data_points")):
+                        # Skip if metric.data is None or no data_points exists
+                        try:
+                            if not (metric.data and metric.data.data_points):
+                                continue
+                        except AttributeError:
+                            # Metric doesn't have data or data_points attribute
                             continue
 
                         # Process metrics based on type
                         metric_type = type(metric.data)
                         if metric_type == Gauge:
                             for dp in metric.data.data_points:
-                                record, timestamp_ms = self._convert_gauge(metric, dp)
-                                grouped_metrics[self._group_by_attributes_and_timestamp(record, timestamp_ms)].append(
-                                    record
-                                )
+                                record = self._convert_gauge(metric, dp)
+                                grouped_metrics[self._group_by_attributes_and_timestamp(record)].append(record)
                         else:
                             logger.debug("Unsupported Metric Type: %s", metric_type)
 
@@ -472,7 +503,7 @@ class AwsCloudWatchEMFExporter(MetricExporter):
         Returns:
             True if successful, False otherwise
         """
-        logger.debug("AWsCloudWatchEMFExporter force flushes the buffered metrics")
+        logger.debug("AwsCloudWatchEmfExporter force flushes the buffered metrics")
         return True
 
     def shutdown(self, timeout_millis: Optional[int] = None, **kwargs: Any) -> bool:
@@ -488,5 +519,5 @@ class AwsCloudWatchEMFExporter(MetricExporter):
         """
         # Intentionally do nothing
         self.force_flush(timeout_millis)
-        logger.debug("AwsCloudWatchEMFExporter shutdown called with timeout_millis=%s", timeout_millis)
+        logger.debug("AwsCloudWatchEmfExporter shutdown called with timeout_millis=%s", timeout_millis)
         return True

@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 from botocore.exceptions import ClientError
 
-from amazon.opentelemetry.distro.exporter.otlp.aws.metrics.aws_cloudwatch_emf_exporter import AwsCloudWatchEMFExporter
+from amazon.opentelemetry.distro.exporter.aws.metrics.aws_cloudwatch_emf_exporter import AwsCloudWatchEmfExporter
 from opentelemetry.sdk.metrics.export import Gauge, MetricExportResult
 from opentelemetry.sdk.resources import Resource
 
@@ -65,8 +65,8 @@ class MockScopeMetrics:
 
 
 # pylint: disable=too-many-public-methods
-class TestAwsCloudWatchEMFExporter(unittest.TestCase):
-    """Test AwsCloudWatchEMFExporter class."""
+class TestAwsCloudWatchEmfExporter(unittest.TestCase):
+    """Test AwsCloudWatchEmfExporter class."""
 
     def setUp(self):
         """Set up test fixtures."""
@@ -79,7 +79,7 @@ class TestAwsCloudWatchEMFExporter(unittest.TestCase):
             mock_client.create_log_group.return_value = {}
             mock_client.create_log_stream.return_value = {}
 
-            self.exporter = AwsCloudWatchEMFExporter(namespace="TestNamespace", log_group_name="test-log-group")
+            self.exporter = AwsCloudWatchEmfExporter(namespace="TestNamespace", log_group_name="test-log-group")
 
     def test_initialization(self):
         """Test exporter initialization."""
@@ -98,7 +98,7 @@ class TestAwsCloudWatchEMFExporter(unittest.TestCase):
         mock_client.create_log_group.return_value = {}
         mock_client.create_log_stream.return_value = {}
 
-        exporter = AwsCloudWatchEMFExporter(
+        exporter = AwsCloudWatchEmfExporter(
             namespace="CustomNamespace",
             log_group_name="custom-log-group",
             log_stream_name="custom-stream",
@@ -111,44 +111,50 @@ class TestAwsCloudWatchEMFExporter(unittest.TestCase):
     def test_get_unit_mapping(self):
         """Test unit mapping functionality."""
         # Test known units from UNIT_MAPPING
-        self.assertEqual(self.exporter._get_unit(Mock(unit="ms")), "Milliseconds")
-        self.assertEqual(self.exporter._get_unit(Mock(unit="s")), "Seconds")
-        self.assertEqual(self.exporter._get_unit(Mock(unit="us")), "Microseconds")
-        self.assertEqual(self.exporter._get_unit(Mock(unit="By")), "Bytes")
-        self.assertEqual(self.exporter._get_unit(Mock(unit="bit")), "Bits")
+        self.assertEqual(
+            self.exporter._get_unit(self.exporter._create_metric_record("test", "ms", "test")), "Milliseconds"
+        )
+        self.assertEqual(self.exporter._get_unit(self.exporter._create_metric_record("test", "s", "test")), "Seconds")
+        self.assertEqual(
+            self.exporter._get_unit(self.exporter._create_metric_record("test", "us", "test")), "Microseconds"
+        )
+        self.assertEqual(self.exporter._get_unit(self.exporter._create_metric_record("test", "By", "test")), "Bytes")
+        self.assertEqual(self.exporter._get_unit(self.exporter._create_metric_record("test", "bit", "test")), "Bits")
 
         # Test units that map to empty string (should return empty string from mapping)
-        self.assertEqual(self.exporter._get_unit(Mock(unit="1")), "")
-        self.assertEqual(self.exporter._get_unit(Mock(unit="ns")), "")
+        self.assertEqual(self.exporter._get_unit(self.exporter._create_metric_record("test", "1", "test")), "")
+        self.assertEqual(self.exporter._get_unit(self.exporter._create_metric_record("test", "ns", "test")), "")
 
         # Test EMF supported units directly (should return as-is)
-        self.assertEqual(self.exporter._get_unit(Mock(unit="Count")), "Count")
-        self.assertEqual(self.exporter._get_unit(Mock(unit="Percent")), "Percent")
-        self.assertEqual(self.exporter._get_unit(Mock(unit="Kilobytes")), "Kilobytes")
+        self.assertEqual(self.exporter._get_unit(self.exporter._create_metric_record("test", "Count", "test")), "Count")
+        self.assertEqual(
+            self.exporter._get_unit(self.exporter._create_metric_record("test", "Percent", "test")), "Percent"
+        )
+        self.assertEqual(
+            self.exporter._get_unit(self.exporter._create_metric_record("test", "Kilobytes", "test")), "Kilobytes"
+        )
 
         # Test unknown unit (not in mapping and not in supported units, returns None)
-        self.assertIsNone(self.exporter._get_unit(Mock(unit="unknown")))
+        self.assertIsNone(self.exporter._get_unit(self.exporter._create_metric_record("test", "unknown", "test")))
 
         # Test empty unit (should return None due to falsy check)
-        self.assertIsNone(self.exporter._get_unit(Mock(unit="")))
+        self.assertIsNone(self.exporter._get_unit(self.exporter._create_metric_record("test", "", "test")))
 
         # Test None unit
-        self.assertIsNone(self.exporter._get_unit(Mock(unit=None)))
+        self.assertIsNone(self.exporter._get_unit(self.exporter._create_metric_record("test", None, "test")))
 
     def test_get_metric_name(self):
         """Test metric name extraction."""
-        # Test with record that has instrument.name
+        # Test with record that has name attribute
         record = Mock()
-        record.instrument = Mock()
-        record.instrument.name = "test_metric"
+        record.name = "test_metric"
 
         result = self.exporter._get_metric_name(record)
         self.assertEqual(result, "test_metric")
 
-        # Test with record that has empty instrument name (should return None)
+        # Test with record that has empty name (should return None)
         record_empty = Mock()
-        record_empty.instrument = Mock()
-        record_empty.instrument.name = ""
+        record_empty.name = ""
 
         result_empty = self.exporter._get_metric_name(record_empty)
         self.assertIsNone(result_empty)
@@ -190,14 +196,14 @@ class TestAwsCloudWatchEMFExporter(unittest.TestCase):
         """Test grouping by attributes and timestamp."""
         record = Mock()
         record.attributes = {"env": "test"}
-        timestamp_ms = 1234567890
+        record.timestamp = 1234567890
 
-        result = self.exporter._group_by_attributes_and_timestamp(record, timestamp_ms)
+        result = self.exporter._group_by_attributes_and_timestamp(record)
 
         # Should return a tuple with attributes key and timestamp
         self.assertIsInstance(result, tuple)
         self.assertEqual(len(result), 2)
-        self.assertEqual(result[1], timestamp_ms)
+        self.assertEqual(result[1], 1234567890)
 
     def test_generate_log_stream_name(self):
         """Test log stream name generation."""
@@ -222,23 +228,22 @@ class TestAwsCloudWatchEMFExporter(unittest.TestCase):
         record = self.exporter._create_metric_record("test_metric", "Count", "Test description")
 
         self.assertIsNotNone(record)
-        self.assertIsNotNone(record.instrument)
-        self.assertEqual(record.instrument.name, "test_metric")
-        self.assertEqual(record.instrument.unit, "Count")
-        self.assertEqual(record.instrument.description, "Test description")
+        self.assertEqual(record.name, "test_metric")
+        self.assertEqual(record.unit, "Count")
+        self.assertEqual(record.description, "Test description")
 
     def test_convert_gauge(self):
         """Test gauge conversion."""
         metric = MockMetric("gauge_metric", "Count", "Gauge description")
         dp = MockDataPoint(value=42.5, attributes={"key": "value"})
 
-        record, timestamp = self.exporter._convert_gauge(metric, dp)
+        record = self.exporter._convert_gauge(metric, dp)
 
         self.assertIsNotNone(record)
-        self.assertEqual(record.instrument.name, "gauge_metric")
+        self.assertEqual(record.name, "gauge_metric")
         self.assertEqual(record.value, 42.5)
         self.assertEqual(record.attributes, {"key": "value"})
-        self.assertIsInstance(timestamp, int)
+        self.assertIsInstance(record.timestamp, int)
 
     def test_create_emf_log(self):
         """Test EMF log creation."""
@@ -294,7 +299,7 @@ class TestAwsCloudWatchEMFExporter(unittest.TestCase):
 
         self.assertTrue(result)
 
-    @patch.object(AwsCloudWatchEMFExporter, "force_flush")
+    @patch.object(AwsCloudWatchEmfExporter, "force_flush")
     def test_shutdown(self, mock_force_flush):
         """Test shutdown functionality."""
         mock_force_flush.return_value = True
@@ -403,23 +408,21 @@ class TestAwsCloudWatchEMFExporter(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_get_metric_name_empty_name(self):
-        """Test metric name extraction with empty instrument name."""
-        # Test with record that has empty instrument name
+        """Test metric name extraction with empty name."""
+        # Test with record that has empty name
         record = Mock()
-        record.instrument = Mock()
-        record.instrument.name = ""
+        record.name = ""
 
         result = self.exporter._get_metric_name(record)
         self.assertIsNone(result)
 
     def test_create_emf_log_skips_empty_metric_names(self):
         """Test that EMF log creation skips records with empty metric names."""
-        # Create a record with no metric name but with proper instrument
+        # Create a record with no metric name
         record_without_name = Mock()
         record_without_name.attributes = {"key": "value"}
         record_without_name.value = 10.0
-        record_without_name.instrument = Mock()
-        record_without_name.instrument.name = None  # No valid name
+        record_without_name.name = None  # No valid name
 
         # Create a record with valid metric name
         valid_record = self.exporter._create_metric_record("valid_metric", "Count", "Valid metric")
@@ -457,7 +460,7 @@ class TestAwsCloudWatchEMFExporter(unittest.TestCase):
         mock_client.create_log_group.return_value = {}
         mock_client.create_log_stream.return_value = {}
 
-        exporter = AwsCloudWatchEMFExporter(namespace="TestNamespace", log_group_name="test-log-group")
+        exporter = AwsCloudWatchEmfExporter(namespace="TestNamespace", log_group_name="test-log-group")
 
         # Just verify the exporter was created successfully with region handling
         self.assertIsNotNone(exporter)
@@ -477,7 +480,7 @@ class TestAwsCloudWatchEMFExporter(unittest.TestCase):
         mock_client.create_log_stream.return_value = {}
 
         with self.assertRaises(ClientError):
-            AwsCloudWatchEMFExporter(namespace="TestNamespace", log_group_name="test-log-group")
+            AwsCloudWatchEmfExporter(namespace="TestNamespace", log_group_name="test-log-group")
 
     @patch("botocore.session.Session")
     def test_ensure_log_group_exists_success(self, mock_session):
@@ -495,7 +498,7 @@ class TestAwsCloudWatchEMFExporter(unittest.TestCase):
         mock_client.create_log_stream.return_value = {}
 
         # This should not raise an exception
-        exporter = AwsCloudWatchEMFExporter(namespace="TestNamespace", log_group_name="test-log-group")
+        exporter = AwsCloudWatchEmfExporter(namespace="TestNamespace", log_group_name="test-log-group")
         self.assertIsNotNone(exporter)
         # Verify create was called once
         mock_client.create_log_group.assert_called_once_with(logGroupName="test-log-group")
