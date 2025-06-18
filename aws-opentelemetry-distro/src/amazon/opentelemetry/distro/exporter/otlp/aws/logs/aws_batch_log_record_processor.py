@@ -63,7 +63,7 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
                     batch_data_size = 0
                     batch = []
 
-                    for i in range(batch_length):
+                    for _ in range(batch_length):
                         log_data: LogData = self._queue.pop()
                         log_size, paths = self._traverse_log_and_calculate_size(log_data.log_record.body)
                         log_size += self._BASE_LOG_BUFFER_BYTE_SIZE
