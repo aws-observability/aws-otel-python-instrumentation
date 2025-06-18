@@ -274,17 +274,6 @@ class TestInstrumentationPatch(TestCase):
             output_prompt=cohere_output,
         )
 
-        # BedrockRuntime - AI21 Jambda
-        self._test_patched_bedrock_runtime_invoke_model(
-            model_id="ai21.jamba-1-5-large-v1:0",
-            max_tokens=512,
-            temperature=0.5,
-            top_p=0.999,
-            finish_reason="end_turn",
-            input_tokens=23,
-            output_tokens=36,
-        )
-
         # BedrockRuntime - Mistral
         msg = "Hello World"
         mistral_input = f"<s>[INST] {msg} [/INST]"
@@ -429,7 +418,7 @@ class TestInstrumentationPatch(TestCase):
                     "inferenceConfig": {
                         "max_new_tokens": max_tokens,
                         "temperature": temperature,
-                        "top_p": top_p,
+                        "topP": top_p,
                     }
                 }
 
@@ -451,22 +440,6 @@ class TestInstrumentationPatch(TestCase):
                     "stop_reason": finish_reason,
                     "stop_sequence": None,
                     "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
-                }
-
-            if "ai21.jamba" in model_id:
-                request_body = {
-                    "max_tokens": max_tokens,
-                    "temperature": temperature,
-                    "top_p": top_p,
-                }
-
-                response_body = {
-                    "choices": [{"finish_reason": finish_reason}],
-                    "usage": {
-                        "prompt_tokens": input_tokens,
-                        "completion_tokens": output_tokens,
-                        "total_tokens": (input_tokens + output_tokens),
-                    },
                 }
 
             if "meta.llama" in model_id:
@@ -512,10 +485,10 @@ class TestInstrumentationPatch(TestCase):
         request_body, response_body = get_model_response_request()
 
         bedrock_runtime_attributes: Dict[str, str] = _do_extract_attributes_bedrock(
-            "bedrock-runtime", model_id=model_id, request_body=request_body
+            "bedrock-runtime", operation="InvokeModel", model_id=model_id, request_body=request_body
         )
         bedrock_runtime_success_attributes: Dict[str, str] = _do_on_success_bedrock(
-            "bedrock-runtime", model_id=model_id, streaming_body=response_body
+            "bedrock-runtime", operation="InvokeModel", model_id=model_id, streaming_body=response_body
         )
 
         bedrock_runtime_attributes.update(bedrock_runtime_success_attributes)
