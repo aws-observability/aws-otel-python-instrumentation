@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
 from unittest import TestCase
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro._utils import get_aws_region, is_agent_observability_enabled
 

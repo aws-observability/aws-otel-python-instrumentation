@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import os
 from unittest import TestCase
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from pkg_resources import DistributionNotFound, require
 

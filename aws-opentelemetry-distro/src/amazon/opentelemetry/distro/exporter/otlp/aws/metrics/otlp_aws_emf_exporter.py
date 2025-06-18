@@ -4,13 +4,15 @@ This exporter converts OTel metrics into CloudWatch EMF format.
 """
 
 import json
+import logging
 import os
 import time
-import logging
-from typing import Dict, List, Optional, Any, Tuple
 from collections import defaultdict
+from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
+
+from opentelemetry.metrics import Instrument
 from opentelemetry.sdk.metrics import (
     Counter,
     Histogram,
@@ -20,15 +22,12 @@ from opentelemetry.sdk.metrics import (
     UpDownCounter,
 )
 from opentelemetry.sdk.metrics.export import (
+    AggregationTemporality,
     MetricExporter,
     MetricExportResult,
     MetricsData,
 )
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.metrics import Instrument
-from opentelemetry.sdk.metrics.export import (
-    AggregationTemporality,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -254,7 +253,7 @@ class CloudWatchEMFExporter(MetricExporter):
         record.attributes = dp.attributes
 
         # For Sum, set the sum_data
-        record.sum_data = type('SumData', (), {})()
+        record.sum_data = type("SumData", (), {})()
         record.sum_data.value = dp.value
 
         return record, timestamp_ms
@@ -284,13 +283,8 @@ class CloudWatchEMFExporter(MetricExporter):
         record.attributes = dp.attributes
 
         # For Histogram, set the histogram_data
-        record.histogram_data = type('Histogram', (), {})()
-        record.histogram_data.value = {
-            "Count": dp.count,
-            "Sum": dp.sum,
-            "Min": dp.min,
-            "Max": dp.max
-        }
+        record.histogram_data = type("Histogram", (), {})()
+        record.histogram_data.value = {"Count": dp.count, "Sum": dp.sum, "Min": dp.min, "Max": dp.max}
         return record, timestamp_ms
 
     def _convert_exp_histogram(self, metric, dp) -> Tuple[Any, int]:
@@ -392,14 +386,14 @@ class CloudWatchEMFExporter(MetricExporter):
                     array_counts.append(float(count))
 
         # Set the histogram data in the format expected by CloudWatch EMF
-        record.exp_histogram_data = type('ExpHistogram', (), {})()
+        record.exp_histogram_data = type("ExpHistogram", (), {})()
         record.exp_histogram_data.value = {
             "Values": array_values,
             "Counts": array_counts,
             "Count": dp.count,
             "Sum": dp.sum,
             "Max": dp.max,
-            "Min": dp.min
+            "Min": dp.min,
         }
 
         return record, timestamp_ms
@@ -427,7 +421,7 @@ class CloudWatchEMFExporter(MetricExporter):
         """
         # Start with base structure
         emf_log = {"_aws": {"Timestamp": timestamp or int(time.time() * 1000), "CloudWatchMetrics": []}}
-        
+
         # Set with latest EMF version schema
         emf_log["Version"] = "1"
 
@@ -456,24 +450,24 @@ class CloudWatchEMFExporter(MetricExporter):
                 metric_data["Unit"] = unit
 
             # Process different types of aggregations
-            if hasattr(record, 'exp_histogram_data'):
+            if hasattr(record, "exp_histogram_data"):
                 # Base2 Exponential Histogram
                 exp_histogram = record.exp_histogram_data
                 # Store value directly in emf_log
                 emf_log[metric_name] = exp_histogram.value
-            elif hasattr(record, 'histogram_data'):
+            elif hasattr(record, "histogram_data"):
                 # Regular Histogram metrics
                 histogram_data = record.histogram_data
                 # Store value directly in emf_log
                 emf_log[metric_name] = histogram_data.value
-            elif hasattr(record, 'sum_data'):
+            elif hasattr(record, "sum_data"):
                 # Counter/UpDownCounter
                 sum_data = record.sum_data
                 # Store value directly in emf_log
                 emf_log[metric_name] = sum_data.value
             else:
                 # Other aggregations (e.g., LastValue)
-                if hasattr(record, 'value'):
+                if hasattr(record, "value"):
                     # Store value directly in emf_log
                     emf_log[metric_name] = record.value
 
@@ -511,7 +505,7 @@ class CloudWatchEMFExporter(MetricExporter):
         """
         try:
             # Import metric data types within the method to avoid circular imports
-            from opentelemetry.sdk.metrics.export import Gauge, Sum, Histogram, ExponentialHistogram
+            from opentelemetry.sdk.metrics.export import ExponentialHistogram, Gauge, Histogram, Sum
 
             if not metrics_data.resource_metrics:
                 return MetricExportResult.SUCCESS
@@ -586,7 +580,7 @@ class CloudWatchEMFExporter(MetricExporter):
 
             logger.error(traceback.format_exc())
             return MetricExportResult.FAILURE
-        
+
     # Constants for CloudWatch Logs limits
     CW_MAX_EVENT_PAYLOAD_BYTES = 256 * 1024  # 256KB
     CW_MAX_REQUEST_EVENT_COUNT = 10000
@@ -596,7 +590,7 @@ class CloudWatchEMFExporter(MetricExporter):
     CW_TRUNCATED_SUFFIX = "[Truncated...]"
     CW_EVENT_TIMESTAMP_LIMIT_PAST = 14 * 24 * 60 * 60 * 1000  # 14 days in milliseconds
     CW_EVENT_TIMESTAMP_LIMIT_FUTURE = 2 * 60 * 60 * 1000  # 2 hours in milliseconds
-    
+
     def _validate_log_event(self, log_event: Dict) -> bool:
         """
         Validate the log event according to CloudWatch Logs constraints.
@@ -850,7 +844,7 @@ class CloudWatchEMFExporter(MetricExporter):
             current_batch = self._event_batch
             self._send_log_batch(current_batch)
             self._event_batch = self._create_event_batch()
-        logger.debug("CloudWatchEMFExporter force flushes the bufferred metrics")
+        logger.debug("CloudWatchEMFExporter force flushes the buffered metrics")
         return True
 
     def shutdown(self, timeout_millis=None, **kwargs):

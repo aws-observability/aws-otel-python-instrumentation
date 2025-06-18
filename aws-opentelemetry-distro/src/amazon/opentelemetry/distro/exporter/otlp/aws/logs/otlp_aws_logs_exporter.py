@@ -10,9 +10,12 @@ from typing import Dict, Optional, Sequence
 import requests
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
+from opentelemetry.exporter.otlp.proto.common._internal import (
+    _create_exp_backoff_generator,
+)
 from opentelemetry.exporter.otlp.proto.common._log_encoder import encode_logs
 from opentelemetry.exporter.otlp.proto.http import Compression
-from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter, _create_exp_backoff_generator
+from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.sdk._logs import (
     LogData,
 )
@@ -24,7 +27,7 @@ _logger = logging.getLogger(__name__)
 
 
 class OTLPAwsLogExporter(OTLPLogExporter):
-    _LARGE_LOG_HEADER = {"x-aws-extractable-fields": "body/content"}
+    _LARGE_LOG_HEADER = "x-aws-truncatable-fields"
     _RETRY_AFTER_HEADER = "Retry-After"  # https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
 
     def __init__(
@@ -36,7 +39,7 @@ class OTLPAwsLogExporter(OTLPLogExporter):
         headers: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None,
     ):
-        self._gen_ai_flag = False
+        self._llo_paths = []
         self._aws_region = None
 
         if endpoint:
@@ -62,7 +65,7 @@ class OTLPAwsLogExporter(OTLPLogExporter):
 
         1. Always compresses the serialized data into gzip before sending.
 
-        2. If self._gen_ai_flag is enabled, the log data is > 1 MB a
+        2. If self._llo_flag is enabled, the log data is > 1 MB a
            and the assumption is that the log is a normalized gen.ai LogEvent.
             - inject the 'x-aws-log-semantics' flag into the header.
 
@@ -100,7 +103,7 @@ class OTLPAwsLogExporter(OTLPLogExporter):
                     resp.status_code,
                     resp.text,
                 )
-                self._gen_ai_flag = False
+                self._llo_paths = []
                 return LogExportResult.FAILURE
 
             # https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
@@ -122,7 +125,7 @@ class OTLPAwsLogExporter(OTLPLogExporter):
                     "Logs will not be exported.",
                     resp.reason,
                 )
-                self._gen_ai_flag = False
+                self._llo_paths = []
                 return LogExportResult.FAILURE
 
             _logger.warning(
@@ -133,41 +136,52 @@ class OTLPAwsLogExporter(OTLPLogExporter):
 
             sleep(delay)
 
-    def set_gen_ai_flag(self):
+    def set_llo_paths(self, paths):
         """
         Sets the gen_ai flag to true to signal injecting the LLO flag to the headers of the export request.
         """
-        self._gen_ai_flag = True
+        self._llo_paths = paths
 
     def _send(self, serialized_data: bytes):
+        headers = None
+
+        if self._llo_paths:
+            base_path = "['resourceLogs'][0]['scopeLogs'][0]['logRecords'][0]"
+
+            for i in range(len(self._llo_paths)):
+                original_path = self._llo_paths[i]
+                self._llo_paths[i] = base_path + original_path
+
+            headers = {self._LARGE_LOG_HEADER: ",".join(self._llo_paths)}
+
         try:
-            return self._session.post(
+            response = self._session.post(
                 url=self._endpoint,
-                headers=self._LARGE_LOG_HEADER if self._gen_ai_flag else None,
+                headers=headers,
                 data=serialized_data,
                 verify=self._certificate_file,
                 timeout=self._timeout,
                 cert=self._client_cert,
             )
-        except ConnectionError:
-            return self._session.post(
+            return response
+        except ConnectionError as e:
+            response = self._session.post(
                 url=self._endpoint,
-                headers=self._LARGE_LOG_HEADER if self._gen_ai_flag else None,
+                headers=headers,
                 data=serialized_data,
                 verify=self._certificate_file,
                 timeout=self._timeout,
                 cert=self._client_cert,
             )
+            return response
 
     @staticmethod
     def _retryable(resp: requests.Response) -> bool:
         """
         Is it a retryable response?
         """
-        if resp.status_code in (429, 503):
-            return True
 
-        return OTLPLogExporter._retryable(resp)
+        return resp.status_code in (429, 503) or OTLPLogExporter._retryable(resp)
 
     @staticmethod
     def _parse_retryable_header(retry_header: Optional[str]) -> float:

@@ -3,6 +3,7 @@ from unittest import TestCase
 from unittest.mock import patch
 
 import requests
+from requests.structures import CaseInsensitiveDict
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
 from opentelemetry._logs.severity import SeverityNumber
@@ -26,11 +27,11 @@ class TestOTLPAwsLogsExporter(TestCase):
     retryable_response_no_header.status_code = 429
 
     retryable_response_header = requests.Response()
-    retryable_response_header.headers = {"Retry-After": "10"}
+    retryable_response_header.headers = CaseInsensitiveDict({"Retry-After": "10"})
     retryable_response_header.status_code = 503
 
     retryable_response_bad_header = requests.Response()
-    retryable_response_bad_header.headers = {"Retry-After": "-12"}
+    retryable_response_bad_header.headers = CaseInsensitiveDict({"Retry-After": "-12"})
     retryable_response_bad_header.status_code = 503
 
     def setUp(self):
@@ -56,9 +57,15 @@ class TestOTLPAwsLogsExporter(TestCase):
         self.assertEqual(data[0:2], b"\x1f\x8b")
 
     @patch("requests.Session.request", return_value=good_response)
-    def test_export_gen_ai(self, mock_request):
-        """Tests that when gen_ai_flag is set, the exporter includes the x-aws-log-semantics header in the request."""
-        self.exporter.set_gen_ai_flag()
+    def test_export_llo(self, mock_request):
+        """Tests that when llo_paths is set, the exporter includes the LLO header in the request."""
+        base_path = "['resourceLogs'][0]['scopeLogs'][0]['logRecords'][0]"
+        input_paths = ["['kvlistValue']['values'][1]['value']['stringValue']", "['kvlistValue']['values'][0]['value']['stringValue']"]
+
+        expected_llo_header = f"{base_path}['kvlistValue']['values'][1]['value']['stringValue'],{base_path}['kvlistValue']['values'][0]['value']['stringValue']"
+        
+        self.exporter.set_llo_paths(input_paths)
+        
         result = self.exporter.export(self.logs)
 
         mock_request.assert_called_once()
@@ -68,8 +75,8 @@ class TestOTLPAwsLogsExporter(TestCase):
 
         self.assertEqual(result, LogExportResult.SUCCESS)
         self.assertIsNotNone(headers)
-        self.assertIn("x-aws-large-log-path", headers)
-        self.assertEqual(headers["x-aws-large-log-path"], "body.content")
+        self.assertIn(self.exporter._LARGE_LOG_HEADER, headers)
+        self.assertEqual(headers[self.exporter._LARGE_LOG_HEADER], expected_llo_header)
 
     @patch("requests.Session.request", return_value=good_response)
     def test_should_not_export_if_shutdown(self, mock_request):
