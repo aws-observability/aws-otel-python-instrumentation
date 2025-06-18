@@ -27,11 +27,12 @@ def _is_installed(req):
 
     try:
         dist_version = version(req.name)
-    except PackageNotFoundError:
+    except PackageNotFoundError as exc:
+        _logger.debug("Skipping instrumentation patch: package %s, exception: %s", req, exc)
         return False
 
     if not req.specifier.filter(dist_version):
-        _logger.warning(
+        _logger.debug(
             "instrumentation for package %s is available but version %s is installed. Skipping.",
             req,
             dist_version,
