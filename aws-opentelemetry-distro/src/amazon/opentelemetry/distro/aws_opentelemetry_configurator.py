@@ -4,7 +4,7 @@
 import os
 import re
 from logging import NOTSET, Logger, getLogger
-from typing import ClassVar, Dict, List, Type, Union
+from typing import ClassVar, Dict, List, Optional, Type, Union
 
 from importlib_metadata import version
 from typing_extensions import override
@@ -22,6 +22,7 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor import AwsBatchLogRecordProcessor
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
@@ -181,7 +182,9 @@ def _init_logging(
 
     # Provides a default OTLP log exporter when none is specified.
     # This is the behavior for the logs exporters for other languages.
-    if not exporters:
+    logs_exporter = os.environ.get("OTEL_LOGS_EXPORTER")
+
+    if not exporters and logs_exporter and (logs_exporter.lower() != "none"):
         exporters = {"otlp": OTLPLogExporter}
 
     provider = LoggerProvider(resource=resource)
@@ -190,7 +193,11 @@ def _init_logging(
     for _, exporter_class in exporters.items():
         exporter_args: Dict[str, any] = {}
         log_exporter = _customize_logs_exporter(exporter_class(**exporter_args), resource)
-        provider.add_log_record_processor(BatchLogRecordProcessor(exporter=log_exporter))
+
+        if isinstance(log_exporter, OTLPAwsLogExporter) and is_agent_observability_enabled():
+            provider.add_log_record_processor(AwsBatchLogRecordProcessor(exporter=log_exporter))
+        else:
+            provider.add_log_record_processor(BatchLogRecordProcessor(exporter=log_exporter))
 
     handler = LoggingHandler(level=NOTSET, logger_provider=provider)
 
@@ -532,7 +539,7 @@ def _is_lambda_environment():
     return AWS_LAMBDA_FUNCTION_NAME_CONFIG in os.environ
 
 
-def _is_aws_otlp_endpoint(otlp_endpoint: str = None, service: str = "xray") -> bool:
+def _is_aws_otlp_endpoint(otlp_endpoint: Optional[str] = None, service: str = "xray") -> bool:
     """Is the given endpoint an AWS OTLP endpoint?"""
 
     pattern = AWS_TRACES_OTLP_ENDPOINT_PATTERN if service == "xray" else AWS_LOGS_OTLP_ENDPOINT_PATTERN
