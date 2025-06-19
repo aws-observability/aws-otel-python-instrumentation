@@ -35,7 +35,7 @@ This project is licensed under the Apache-2.0 License.
 ## Notices
 
 ### Python Version Support
-This project ensures compatibility with the following supported Python versions: 3.8, 3.9, 3.10, 3.11, 3.12
+This project ensures compatibility with the following supported Python versions: 3.9, 3.10, 3.11, 3.12, 3.13
 
 ### Note on Amazon CloudWatch Application Signals
 [Amazon CloudWatch Application Signals](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Application-Monitoring-Sections.html) components are designed to seamlessly work with all library instrumentations offered by [OpenTelemetry Python auto-instrumentation](https://github.com/open-telemetry/opentelemetry-python-contrib/blob/main/instrumentation/README.md). While upstream OpenTelemetry Python instrumentations are in beta, Application Signals components are stable, production ready and have also been tested for popular libraries/frameworks such as [Django, Boto3, and others](https://github.com/aws-observability/aws-otel-python-instrumentation/tree/main/contract-tests/images/applications). We will prioritize backward compatibility for Application Signals components, striving to ensure that they remain functional even in the face of potential breaking changes introduced by OpenTelemetry upstream libraries. Please [raise an issue](https://github.com/aws-observability/aws-otel-python-instrumentation/blob/main/CONTRIBUTING.md#reporting-bugsfeature-requests) if you notice Application Signals doesn't work for a particular OpenTelemetry supported library.

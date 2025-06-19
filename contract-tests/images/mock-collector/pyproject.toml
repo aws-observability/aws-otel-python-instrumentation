@@ -7,14 +7,14 @@ name = "mock-collector"
 description = "Mock Collector used by contract tests for AWS OTEL Python Instrumentation"
 version = "1.0.0"
 license = "Apache-2.0"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 
 dependencies = [
-    "grpcio ~= 1.60.0",
+    "grpcio ~= 1.66.0",
     "opentelemetry-proto==1.25.0",
     "opentelemetry-sdk==1.25.0",
     "protobuf==4.25.2",
-    "typing-extensions==4.9.0"
+    "typing-extensions==4.12.2"
 ]
 
 [tool.hatch.build.targets.sdist]
