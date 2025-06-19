@@ -34,7 +34,7 @@ _LAMBDA_FUNCTION_NAME: str = "lambdaFunctionName"
 _LAMBDA_SOURCE_MAPPING_ID: str = "lambdaEventSourceMappingID"
 
 # Patch names
-GET_DISTRIBUTION_PATCH: str = "amazon.opentelemetry.distro._utils.version"
+IMPORTLIB_METADATA_VERSION_PATCH: str = "amazon.opentelemetry.distro._utils.version"
 
 
 class TestInstrumentationPatch(TestCase):
@@ -56,7 +56,7 @@ class TestInstrumentationPatch(TestCase):
 
     def test_instrumentation_patch(self):
         # Set up method patches used by all tests
-        self.method_patches[GET_DISTRIBUTION_PATCH] = patch(GET_DISTRIBUTION_PATCH).start()
+        self.method_patches[IMPORTLIB_METADATA_VERSION_PATCH] = patch(IMPORTLIB_METADATA_VERSION_PATCH).start()
 
         # Run tests that validate patch behaviour before and after patching
         self._run_patch_behaviour_tests()
@@ -69,7 +69,7 @@ class TestInstrumentationPatch(TestCase):
 
     def _run_patch_behaviour_tests(self):
         # Test setup
-        self.method_patches[GET_DISTRIBUTION_PATCH].return_value = "1.0.0"
+        self.method_patches[IMPORTLIB_METADATA_VERSION_PATCH].return_value = "1.0.0"
         # Test setup to not patch gevent
         os.environ[AWS_GEVENT_PATCH_MODULES] = "none"
 
@@ -279,7 +279,7 @@ class TestInstrumentationPatch(TestCase):
         with patch(
             "amazon.opentelemetry.distro.patches._botocore_patches._apply_botocore_instrumentation_patches"
         ) as mock_apply_patches:
-            get_distribution_patch: patch = self.method_patches[GET_DISTRIBUTION_PATCH]
+            get_distribution_patch: patch = self.method_patches[IMPORTLIB_METADATA_VERSION_PATCH]
             get_distribution_patch.side_effect = PackageNotFoundError
             apply_instrumentation_patches()
             mock_apply_patches.assert_not_called()
