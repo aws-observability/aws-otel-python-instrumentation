@@ -57,15 +57,11 @@ class TestOTLPAwsLogsExporter(TestCase):
         self.assertEqual(data[0:2], b"\x1f\x8b")
 
     @patch("requests.Session.request", return_value=good_response)
-    def test_export_llo(self, mock_request):
-        """Tests that when llo_paths is set, the exporter includes the LLO header in the request."""
-        base_path = "['resourceLogs'][0]['scopeLogs'][0]['logRecords'][0]"
-        input_paths = ["['kvlistValue']['values'][1]['value']['stringValue']", "['kvlistValue']['values'][0]['value']['stringValue']"]
+    def test_export_gen_ai_logs(self, mock_request):
+        """Tests that when set_gen_ai_log_flag is set, the exporter includes the LLO header in the request."""
 
-        expected_llo_header = f"{base_path}['kvlistValue']['values'][1]['value']['stringValue'],{base_path}['kvlistValue']['values'][0]['value']['stringValue']"
-        
-        self.exporter.set_llo_paths(input_paths)
-        
+        self.exporter.set_gen_ai_log_flag()
+
         result = self.exporter.export(self.logs)
 
         mock_request.assert_called_once()
@@ -76,7 +72,7 @@ class TestOTLPAwsLogsExporter(TestCase):
         self.assertEqual(result, LogExportResult.SUCCESS)
         self.assertIsNotNone(headers)
         self.assertIn(self.exporter._LARGE_LOG_HEADER, headers)
-        self.assertEqual(headers[self.exporter._LARGE_LOG_HEADER], expected_llo_header)
+        self.assertEqual(headers[self.exporter._LARGE_LOG_HEADER], self.exporter._LARGE_GEN_AI_LOG_PATH_HEADER)
 
     @patch("requests.Session.request", return_value=good_response)
     def test_should_not_export_if_shutdown(self, mock_request):
