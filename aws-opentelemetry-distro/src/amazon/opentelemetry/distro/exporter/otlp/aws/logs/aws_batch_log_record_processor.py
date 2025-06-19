@@ -17,11 +17,12 @@ _logger = logging.getLogger(__name__)
 
 
 class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
-    _BASE_LOG_BUFFER_BYTE_SIZE = 2000 # Buffer size in bytes to account for log metadata not included in the body size calculation
+    _BASE_LOG_BUFFER_BYTE_SIZE = (
+        1500  # Buffer size in bytes to account for log metadata not included in the body or attribute size calculation
+    )
     _MAX_LOG_REQUEST_BYTE_SIZE = (
         1048576  # https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-OTLPEndpoint.html
     )
-    _MAX_LOG_DEPTH = 3 # Maximum depth to traverse in the log body structures; deeper levels are ignored for size calculation
 
     def __init__(
         self,
@@ -65,13 +66,13 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
 
                     for _ in range(batch_length):
                         log_data: LogData = self._queue.pop()
-                        log_size, paths = self._traverse_log_and_calculate_size(log_data.log_record.body)
-                        log_size += self._BASE_LOG_BUFFER_BYTE_SIZE
+                        log_size = self._estimate_log_size(log_data)
 
                         if batch and (batch_data_size + log_size > self._MAX_LOG_REQUEST_BYTE_SIZE):
                             # if batch_data_size > MAX_LOG_REQUEST_BYTE_SIZE then len(batch) == 1
                             if batch_data_size > self._MAX_LOG_REQUEST_BYTE_SIZE:
-                                self._exporter.set_llo_paths(paths)
+                                if self._is_gen_ai_log(batch[0]):
+                                    self._exporter.set_gen_ai_log_flag()
 
                             self._exporter.export(batch)
                             batch_data_size = 0
@@ -83,58 +84,84 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
                     if batch:
                         # if batch_data_size > MAX_LOG_REQUEST_BYTE_SIZE then len(batch) == 1
                         if batch_data_size > self._MAX_LOG_REQUEST_BYTE_SIZE:
-                            _, paths = self._traverse_log_and_calculate_size(batch[0].log_record.body)
-                            self._exporter.set_llo_paths(paths)
+                            if self._is_gen_ai_log(batch[0]):
+                                self._exporter.set_gen_ai_log_flag()
 
                         self._exporter.export(batch)
-                except Exception as e:  # pylint: disable=broad-exception-caught
-                    _logger.exception("Exception while exporting logs.")
+                except Exception as exception:  # pylint: disable=broad-exception-caught
+                    _logger.exception("Exception while exporting logs: " + str(exception))
                 detach(token)
 
-    def _traverse_log_and_calculate_size(self, val: AnyValue) -> tuple[int, List[str]]:
-        starting_path: str = "['body']"
+    def _estimate_log_size(self, log: LogData, depth: int = 3) -> int:
+        """
+        Estimates the size in bytes of a log by calculating the size of its body and its attributes
+        and adding a buffer amount to account for other log metadata information.
+        Will process complex log structures up to the specified depth limit.
+        If the depth limit of the log structure is exceeded, returns 0.
 
-        # Use a stack to prevent excessive recursive calls.
-        paths: List[str] = []
-        stack = [(val, starting_path, 0)]
-        size: int = 0
+        Args:
+            log: The Log object to calculate size for
+            depth: Maximum depth to traverse in nested structures (default: 3)
 
-        while stack:
-            next_val, current_path, current_depth = stack.pop()
+        Returns:
+            int: The estimated size of the log object in bytes
+        """
 
-            if isinstance(next_val, str):
-                size += len(next_val)
-                paths.append(f"{current_path}['stringValue']")
-                continue
+        # Use a queue to prevent excessive recursive calls.
+        queue: List[tuple[AnyValue, int]] = [(log.log_record.body, 0), (log.log_record.attributes, -1)]
 
-            if isinstance(next_val, bytes):
-                size += len(next_val)
-                continue
+        size: int = self._BASE_LOG_BUFFER_BYTE_SIZE
 
-            if isinstance(next_val, bool):
-                size += 4 if next_val else 5
-                continue
+        while queue:
+            new_queue: List[tuple[AnyValue, int]] = []
 
-            if isinstance(next_val, (float, int)):
-                size += len(str(next_val))
-                continue
+            for data in queue:
+                # small optimization, can stop calculating the size once it reaches the 1 MB limit.
+                if size >= self._MAX_LOG_REQUEST_BYTE_SIZE:
+                    return size
 
-            if current_depth <= self._MAX_LOG_DEPTH:
-                if isinstance(next_val, Sequence):
-                    array_path = f"{current_path}['arrayValue']['values']"
-                    for i, content in enumerate(next_val):
-                        new_path = f"{array_path}[{i}]"
-                        stack.append((cast(AnyValue, content), new_path, current_depth + 1))
+                next_val, current_depth = data
 
-                if isinstance(next_val, Mapping):
-                    kv_path = f"{current_path}['kvlistValue']['values']"
-                    for i, (key, content) in enumerate(next_val.items()):
-                        entry_path = f"{kv_path}[{i}]"
-                        new_path = f"{entry_path}['value']"
-                        size += len(key)
-                        stack.append((content, new_path, current_depth + 1))
-            else:
-                _logger.debug("Max log depth exceeded. Log data size will not be calculated.")
-                return 0, []
+                if isinstance(next_val, (str, bytes)):
+                    size += len(next_val)
+                    continue
 
-        return size, paths
+                if isinstance(next_val, bool):
+                    size += 4 if next_val else 5
+                    continue
+
+                if isinstance(next_val, (float, int)):
+                    size += len(str(next_val))
+                    continue
+
+                if current_depth <= depth:
+                    # Sequence has to be
+                    if isinstance(next_val, Sequence):
+                        for content in next_val:
+                            new_queue.append((cast(AnyValue, content), current_depth + 1))
+
+                    if isinstance(next_val, Mapping):
+                        for key, content in next_val.items():
+                            size += len(key)
+                            new_queue.append((content, current_depth + 1))
+                else:
+                    _logger.debug(f"Max log dept of {depth} exceeded. Log data size will not be accurately calculated.")
+
+            queue = new_queue
+
+        return size
+
+    @staticmethod
+    def _is_gen_ai_log(log: LogData) -> bool:
+        """
+        Is the log a Gen AI log event?
+        """
+        gen_ai_instrumentations = {
+            "openinference.instrumentation.langchain",
+            "openinference.instrumentation.crewai",
+            "opentelemetry.instrumentation.langchain",
+            "crewai.telemetry",
+            "openlit.otel.tracing",
+        }
+
+        return log.instrumentation_scope.name in gen_ai_instrumentations

@@ -27,7 +27,41 @@ _logger = logging.getLogger(__name__)
 
 
 class OTLPAwsLogExporter(OTLPLogExporter):
+    """
+    Below is the protobuf-JSON formatted path to "content" and "role" for the following GenAI Consolidated Log Event Schema:
+
+    "body": {
+        "output": {
+            "messages": [
+                {
+                    "content": "hi",
+                    "role": "assistant"
+                }
+            ]
+        },
+        "input": {
+            "messages": [
+                {
+                    "content": "hello",
+                    "role": "user"
+                }
+            ]
+        }
+    }
+
+    """
+
+    _LARGE_GEN_AI_LOG_PATH_HEADER = (
+        "\\$['resourceLogs'][0]['scopeLogs'][0]['logRecords'][0]['body']"  # body
+        "['kvlistValue']['values'][*]['value']"  # body['output'], body['input']
+        "['kvlistValue']['values'][0]['value']"  # body['output']['messages'], body['input']['messages']
+        "['arrayValue']['values'][*]"  # body['output']['messages'][0..999], body['input']['messages'][0..999]
+        "['kvlistValue']['values'][*]['value']['stringValue']"  # body['output']['messages'][0..999]['content'/'role'],
+        # body['input']['messages'][0..999]['content'/'role']
+    )
+
     _LARGE_LOG_HEADER = "x-aws-truncatable-fields"
+
     _RETRY_AFTER_HEADER = "Retry-After"  # https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
 
     def __init__(
@@ -39,7 +73,7 @@ class OTLPAwsLogExporter(OTLPLogExporter):
         headers: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None,
     ):
-        self._llo_paths = []
+        self._gen_ai_log_flag = False
         self._aws_region = None
 
         if endpoint:
@@ -65,9 +99,9 @@ class OTLPAwsLogExporter(OTLPLogExporter):
 
         1. Always compresses the serialized data into gzip before sending.
 
-        2. If self._llo_flag is enabled, the log data is > 1 MB a
+        2. If self._gen_ai_log_flag is enabled, the log data is > 1 MB a
            and the assumption is that the log is a normalized gen.ai LogEvent.
-            - inject the 'x-aws-log-semantics' flag into the header.
+            - inject the {LARGE_LOG_HEADER} into the header.
 
         3. Retry behavior is now the following:
             - if the response contains a status code that is retryable and the response contains Retry-After in its
@@ -103,7 +137,7 @@ class OTLPAwsLogExporter(OTLPLogExporter):
                     resp.status_code,
                     resp.text,
                 )
-                self._llo_paths = []
+                self._gen_ai_log_flag = False
                 return LogExportResult.FAILURE
 
             # https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
@@ -125,7 +159,7 @@ class OTLPAwsLogExporter(OTLPLogExporter):
                     "Logs will not be exported.",
                     resp.reason,
                 )
-                self._llo_paths = []
+                self._gen_ai_log_flag = False
                 return LogExportResult.FAILURE
 
             _logger.warning(
@@ -136,38 +170,28 @@ class OTLPAwsLogExporter(OTLPLogExporter):
 
             sleep(delay)
 
-    def set_llo_paths(self, paths):
+    def set_gen_ai_log_flag(self):
         """
-        Sets the gen_ai flag to true to signal injecting the LLO flag to the headers of the export request.
+        Sets a flag that indicates the current log batch contains
+        a generative AI log record that exceeds the CloudWatch Logs size limit (1MB).
         """
-        self._llo_paths = paths
+        self._gen_ai_log_flag = True
 
     def _send(self, serialized_data: bytes):
-        headers = None
-
-        if self._llo_paths:
-            base_path = "['resourceLogs'][0]['scopeLogs'][0]['logRecords'][0]"
-
-            for i in range(len(self._llo_paths)):
-                original_path = self._llo_paths[i]
-                self._llo_paths[i] = base_path + original_path
-
-            headers = {self._LARGE_LOG_HEADER: ",".join(self._llo_paths)}
-
         try:
             response = self._session.post(
                 url=self._endpoint,
-                headers=headers,
+                headers={self._LARGE_LOG_HEADER: self._LARGE_GEN_AI_LOG_PATH_HEADER} if self._gen_ai_log_flag else None,
                 data=serialized_data,
                 verify=self._certificate_file,
                 timeout=self._timeout,
                 cert=self._client_cert,
             )
             return response
-        except ConnectionError as e:
+        except ConnectionError:
             response = self._session.post(
                 url=self._endpoint,
-                headers=headers,
+                headers={self._LARGE_LOG_HEADER: self._LARGE_GEN_AI_LOG_PATH_HEADER} if self._gen_ai_log_flag else None,
                 data=serialized_data,
                 verify=self._certificate_file,
                 timeout=self._timeout,
