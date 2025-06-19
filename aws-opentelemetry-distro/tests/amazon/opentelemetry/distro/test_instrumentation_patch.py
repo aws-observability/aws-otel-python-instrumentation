@@ -8,6 +8,8 @@ from unittest.mock import MagicMock, patch
 
 import gevent.monkey
 
+import opentelemetry.sdk.extension.aws.resource.ec2 as ec2_resource
+import opentelemetry.sdk.extension.aws.resource.eks as eks_resource
 from amazon.opentelemetry.distro.patches._instrumentation_patch import (
     AWS_GEVENT_PATCH_MODULES,
     apply_instrumentation_patches,
@@ -115,6 +117,8 @@ class TestInstrumentationPatch(TestCase):
             etc.
         """
         self._test_botocore_installed_flag()
+        self._reset_mocks()
+        self._test_resource_detector_patches()
         self._reset_mocks()
 
     def _test_unpatched_botocore_instrumentation(self):
@@ -351,6 +355,53 @@ class TestInstrumentationPatch(TestCase):
             bedrock_agent_success_attributes: Dict[str, str] = _do_on_success_bedrock("bedrock-agent", operation)
             self.assertEqual(len(bedrock_agent_success_attributes), 1)
             self.assertEqual(bedrock_agent_success_attributes[attribute_tuple[0]], attribute_tuple[1])
+
+    def _test_resource_detector_patches(self):
+        """Test that resource detector patches are applied and work correctly"""
+        # Test that the functions were patched
+        self.assertIsNotNone(ec2_resource._aws_http_request)
+        self.assertIsNotNone(eks_resource._aws_http_request)
+
+        # Test EC2 patched function
+        with patch("amazon.opentelemetry.distro.patches._resource_detector_patches.urlopen") as mock_urlopen:
+            mock_response = MagicMock()
+            mock_response.read.return_value = b'{"test": "ec2-data"}'
+            mock_urlopen.return_value.__enter__.return_value = mock_response
+
+            result = ec2_resource._aws_http_request("GET", "/test/path", {"X-Test": "header"})
+            self.assertEqual(result, '{"test": "ec2-data"}')
+
+            # Verify the request was made correctly
+            args, kwargs = mock_urlopen.call_args
+            request = args[0]
+            self.assertEqual(request.full_url, "http://169.254.169.254/test/path")
+            self.assertEqual(request.headers, {"X-test": "header"})
+            self.assertEqual(kwargs["timeout"], 5)
+
+        # Test EKS patched function
+        with patch("amazon.opentelemetry.distro.patches._resource_detector_patches.urlopen") as mock_urlopen, patch(
+            "amazon.opentelemetry.distro.patches._resource_detector_patches.ssl.create_default_context"
+        ) as mock_ssl:
+            mock_response = MagicMock()
+            mock_response.read.return_value = b'{"test": "eks-data"}'
+            mock_urlopen.return_value.__enter__.return_value = mock_response
+
+            mock_context = MagicMock()
+            mock_ssl.return_value = mock_context
+
+            result = eks_resource._aws_http_request("GET", "/api/v1/test", "Bearer token123")
+            self.assertEqual(result, '{"test": "eks-data"}')
+
+            # Verify the request was made correctly
+            args, kwargs = mock_urlopen.call_args
+            request = args[0]
+            self.assertEqual(request.full_url, "https://kubernetes.default.svc/api/v1/test")
+            self.assertEqual(request.headers, {"Authorization": "Bearer token123"})
+            self.assertEqual(kwargs["timeout"], 5)
+            self.assertEqual(kwargs["context"], mock_context)
+
+            # Verify SSL context was created with correct CA file
+            mock_ssl.assert_called_once_with(cafile="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
 
     def _reset_mocks(self):
         for method_patch in self.method_patches.values():
