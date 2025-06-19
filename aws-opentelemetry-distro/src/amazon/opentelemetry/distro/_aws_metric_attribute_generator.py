@@ -35,7 +35,6 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
 )
 from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
 from amazon.opentelemetry.distro._aws_span_processing_util import (
-    GEN_AI_REQUEST_MODEL,
     LOCAL_ROOT,
     MAX_KEYWORD_LENGTH,
     SQL_KEYWORD_PATTERN,
@@ -60,6 +59,7 @@ from amazon.opentelemetry.distro.metric_attribute_generator import (
 from amazon.opentelemetry.distro.sqs_url_parser import SqsUrlParser
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import BoundedAttributes, ReadableSpan
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import GEN_AI_REQUEST_MODEL
 from opentelemetry.semconv.trace import SpanAttributes
 
 # Pertinent OTEL attribute keys

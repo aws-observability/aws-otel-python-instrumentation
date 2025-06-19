@@ -37,12 +37,12 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_STEPFUNCTIONS_STATEMACHINE_ARN,
 )
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
-from amazon.opentelemetry.distro._aws_span_processing_util import GEN_AI_REQUEST_MODEL
 from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, SERVICE_METRIC
 from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.sdk.resources import _DEFAULT_RESOURCE, SERVICE_NAME
 from opentelemetry.sdk.trace import ReadableSpan, Resource
 from opentelemetry.sdk.util.instrumentation import InstrumentationScope
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import GEN_AI_REQUEST_MODEL
 from opentelemetry.semconv.trace import MessagingOperationValues, SpanAttributes
 from opentelemetry.trace import SpanContext, SpanKind
 from opentelemetry.util.types import Attributes
