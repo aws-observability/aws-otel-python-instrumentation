@@ -440,7 +440,7 @@ class BotocoreTest(ContractTestBase):
                 _GEN_AI_USAGE_INPUT_TOKENS: 15,
                 _GEN_AI_USAGE_OUTPUT_TOKENS: 13,
             },
-            span_name="Bedrock Runtime.InvokeModel",
+            span_name="text_completion amazon.titan-text-premier-v1:0",
         )
 
     def test_bedrock_runtime_invoke_model_amazon_nova(self):
@@ -458,6 +458,7 @@ class BotocoreTest(ContractTestBase):
             cloudformation_primary_identifier="amazon.nova-pro-v1:0",
             request_specific_attributes={
                 _GEN_AI_REQUEST_MODEL: "amazon.nova-pro-v1:0",
+                _GEN_AI_SYSTEM: "aws.bedrock",
                 _GEN_AI_REQUEST_MAX_TOKENS: 800,
                 _GEN_AI_REQUEST_TEMPERATURE: 0.9,
                 _GEN_AI_REQUEST_TOP_P: 0.7,
@@ -467,7 +468,7 @@ class BotocoreTest(ContractTestBase):
                 _GEN_AI_USAGE_INPUT_TOKENS: 432,
                 _GEN_AI_USAGE_OUTPUT_TOKENS: 681,
             },
-            span_name="Bedrock Runtime.InvokeModel",
+            span_name="chat amazon.nova-pro-v1:0",
         )
 
     def test_bedrock_runtime_invoke_model_anthropic_claude(self):
@@ -495,7 +496,7 @@ class BotocoreTest(ContractTestBase):
                 _GEN_AI_USAGE_INPUT_TOKENS: 15,
                 _GEN_AI_USAGE_OUTPUT_TOKENS: 13,
             },
-            span_name="Bedrock Runtime.InvokeModel",
+            span_name="chat anthropic.claude-v2:1",
         )
 
     def test_bedrock_runtime_invoke_model_meta_llama(self):
@@ -523,7 +524,7 @@ class BotocoreTest(ContractTestBase):
                 _GEN_AI_USAGE_INPUT_TOKENS: 31,
                 _GEN_AI_USAGE_OUTPUT_TOKENS: 49,
             },
-            span_name="Bedrock Runtime.InvokeModel",
+            span_name="chat meta.llama2-13b-chat-v1",
         )
 
     def test_bedrock_runtime_invoke_model_cohere_command(self):
@@ -553,35 +554,7 @@ class BotocoreTest(ContractTestBase):
                 ),
                 _GEN_AI_USAGE_OUTPUT_TOKENS: math.ceil(len("test-generation-text") / 6),
             },
-            span_name="Bedrock Runtime.InvokeModel",
-        )
-
-    def test_bedrock_runtime_invoke_model_ai21_jamba(self):
-        self.do_test_requests(
-            "bedrock/invokemodel/invoke-model/ai21.jamba-1-5-large-v1:0",
-            "GET",
-            200,
-            0,
-            0,
-            rpc_service="Bedrock Runtime",
-            remote_service="AWS::BedrockRuntime",
-            remote_operation="InvokeModel",
-            remote_resource_type="AWS::Bedrock::Model",
-            remote_resource_identifier="ai21.jamba-1-5-large-v1:0",
-            cloudformation_primary_identifier="ai21.jamba-1-5-large-v1:0",
-            request_specific_attributes={
-                _GEN_AI_REQUEST_MODEL: "ai21.jamba-1-5-large-v1:0",
-                _GEN_AI_SYSTEM: "aws.bedrock",
-                _GEN_AI_REQUEST_MAX_TOKENS: 512,
-                _GEN_AI_REQUEST_TEMPERATURE: 0.6,
-                _GEN_AI_REQUEST_TOP_P: 0.8,
-            },
-            response_specific_attributes={
-                _GEN_AI_RESPONSE_FINISH_REASONS: ["stop"],
-                _GEN_AI_USAGE_INPUT_TOKENS: 21,
-                _GEN_AI_USAGE_OUTPUT_TOKENS: 24,
-            },
-            span_name="Bedrock Runtime.InvokeModel",
+            span_name="chat cohere.command-r-v1:0",
         )
 
     def test_bedrock_runtime_invoke_model_mistral(self):
@@ -611,7 +584,7 @@ class BotocoreTest(ContractTestBase):
                 ),
                 _GEN_AI_USAGE_OUTPUT_TOKENS: math.ceil(len("test-output-text") / 6),
             },
-            span_name="Bedrock Runtime.InvokeModel",
+            span_name="chat mistral.mistral-7b-instruct-v0:2",
         )
 
     def test_bedrock_get_guardrail(self):

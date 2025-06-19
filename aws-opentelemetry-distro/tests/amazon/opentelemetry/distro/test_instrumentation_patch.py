@@ -1,17 +1,15 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-import json
-import math
 import os
-from io import BytesIO
+from importlib.metadata import PackageNotFoundError
 from typing import Any, Dict
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 import gevent.monkey
-import pkg_resources
-from botocore.response import StreamingBody
 
+import opentelemetry.sdk.extension.aws.resource.ec2 as ec2_resource
+import opentelemetry.sdk.extension.aws.resource.eks as eks_resource
 from amazon.opentelemetry.distro.patches._instrumentation_patch import (
     AWS_GEVENT_PATCH_MODULES,
     apply_instrumentation_patches,
@@ -38,7 +36,7 @@ _LAMBDA_FUNCTION_NAME: str = "lambdaFunctionName"
 _LAMBDA_SOURCE_MAPPING_ID: str = "lambdaEventSourceMappingID"
 
 # Patch names
-GET_DISTRIBUTION_PATCH: str = "amazon.opentelemetry.distro._utils.pkg_resources.get_distribution"
+IMPORTLIB_METADATA_VERSION_PATCH: str = "amazon.opentelemetry.distro._utils.version"
 
 
 class TestInstrumentationPatch(TestCase):
@@ -60,7 +58,7 @@ class TestInstrumentationPatch(TestCase):
 
     def test_instrumentation_patch(self):
         # Set up method patches used by all tests
-        self.method_patches[GET_DISTRIBUTION_PATCH] = patch(GET_DISTRIBUTION_PATCH).start()
+        self.method_patches[IMPORTLIB_METADATA_VERSION_PATCH] = patch(IMPORTLIB_METADATA_VERSION_PATCH).start()
 
         # Run tests that validate patch behaviour before and after patching
         self._run_patch_behaviour_tests()
@@ -73,7 +71,7 @@ class TestInstrumentationPatch(TestCase):
 
     def _run_patch_behaviour_tests(self):
         # Test setup
-        self.method_patches[GET_DISTRIBUTION_PATCH].return_value = "CorrectDistributionObject"
+        self.method_patches[IMPORTLIB_METADATA_VERSION_PATCH].return_value = "1.0.0"
         # Test setup to not patch gevent
         os.environ[AWS_GEVENT_PATCH_MODULES] = "none"
 
@@ -120,6 +118,8 @@ class TestInstrumentationPatch(TestCase):
         """
         self._test_botocore_installed_flag()
         self._reset_mocks()
+        self._test_resource_detector_patches()
+        self._reset_mocks()
 
     def _test_unpatched_botocore_instrumentation(self):
         # Kinesis
@@ -147,7 +147,7 @@ class TestInstrumentationPatch(TestCase):
         )
 
         # BedrockRuntime
-        self.assertFalse("bedrock-runtime" in _KNOWN_EXTENSIONS, "Upstream has added a bedrock-runtime extension")
+        self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS, "Upstream has added a bedrock-runtime extension")
 
         # SecretsManager
         self.assertFalse("secretsmanager" in _KNOWN_EXTENSIONS, "Upstream has added a SecretsManager extension")
@@ -213,94 +213,8 @@ class TestInstrumentationPatch(TestCase):
         bedrock_agent_runtime_sucess_attributes: Dict[str, str] = _do_on_success_bedrock("bedrock-agent-runtime")
         self.assertEqual(len(bedrock_agent_runtime_sucess_attributes), 0)
 
-        # BedrockRuntime - Amazon Titan
+        # BedrockRuntime
         self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
-
-        self._test_patched_bedrock_runtime_invoke_model(
-            model_id="amazon.titan-embed-text-v1",
-            max_tokens=512,
-            temperature=0.9,
-            top_p=0.75,
-            finish_reason="FINISH",
-            input_tokens=123,
-            output_tokens=456,
-        )
-
-        self._test_patched_bedrock_runtime_invoke_model(
-            model_id="amazon.nova-pro-v1:0",
-            max_tokens=500,
-            temperature=0.9,
-            top_p=0.7,
-            finish_reason="FINISH",
-            input_tokens=123,
-            output_tokens=456,
-        )
-
-        # BedrockRuntime - Anthropic Claude
-        self._test_patched_bedrock_runtime_invoke_model(
-            model_id="anthropic.claude-v2:1",
-            max_tokens=512,
-            temperature=0.5,
-            top_p=0.999,
-            finish_reason="end_turn",
-            input_tokens=23,
-            output_tokens=36,
-        )
-
-        # BedrockRuntime - Meta LLama
-        self._test_patched_bedrock_runtime_invoke_model(
-            model_id="meta.llama2-13b-chat-v1",
-            max_tokens=512,
-            temperature=0.5,
-            top_p=0.9,
-            finish_reason="stop",
-            input_tokens=31,
-            output_tokens=36,
-        )
-
-        # BedrockRuntime - Cohere Command-r
-        cohere_input = "Hello, world"
-        cohere_output = "Goodbye, world"
-
-        self._test_patched_bedrock_runtime_invoke_model(
-            model_id="cohere.command-r-v1:0",
-            max_tokens=512,
-            temperature=0.5,
-            top_p=0.75,
-            finish_reason="COMPLETE",
-            input_tokens=math.ceil(len(cohere_input) / 6),
-            output_tokens=math.ceil(len(cohere_output) / 6),
-            input_prompt=cohere_input,
-            output_prompt=cohere_output,
-        )
-
-        # BedrockRuntime - AI21 Jambda
-        self._test_patched_bedrock_runtime_invoke_model(
-            model_id="ai21.jamba-1-5-large-v1:0",
-            max_tokens=512,
-            temperature=0.5,
-            top_p=0.999,
-            finish_reason="end_turn",
-            input_tokens=23,
-            output_tokens=36,
-        )
-
-        # BedrockRuntime - Mistral
-        msg = "Hello World"
-        mistral_input = f"<s>[INST] {msg} [/INST]"
-        mistral_output = "Goodbye, World"
-
-        self._test_patched_bedrock_runtime_invoke_model(
-            model_id="mistral.mistral-7b-instruct-v0:2",
-            max_tokens=512,
-            temperature=0.5,
-            top_p=0.9,
-            finish_reason="stop",
-            input_tokens=math.ceil(len(mistral_input) / 6),
-            output_tokens=math.ceil(len(mistral_output) / 6),
-            input_prompt=mistral_input,
-            output_prompt=mistral_output,
-        )
 
         # SecretsManager
         self.assertTrue("secretsmanager" in _KNOWN_EXTENSIONS)
@@ -369,17 +283,13 @@ class TestInstrumentationPatch(TestCase):
         with patch(
             "amazon.opentelemetry.distro.patches._botocore_patches._apply_botocore_instrumentation_patches"
         ) as mock_apply_patches:
-            get_distribution_patch: patch = self.method_patches[GET_DISTRIBUTION_PATCH]
-            get_distribution_patch.side_effect = pkg_resources.DistributionNotFound
-            apply_instrumentation_patches()
-            mock_apply_patches.assert_not_called()
-
-            get_distribution_patch.side_effect = pkg_resources.VersionConflict("botocore==1.0.0", "botocore==0.0.1")
+            get_distribution_patch: patch = self.method_patches[IMPORTLIB_METADATA_VERSION_PATCH]
+            get_distribution_patch.side_effect = PackageNotFoundError
             apply_instrumentation_patches()
             mock_apply_patches.assert_not_called()
 
             get_distribution_patch.side_effect = None
-            get_distribution_patch.return_value = "CorrectDistributionObject"
+            get_distribution_patch.return_value = "1.0.0"
             apply_instrumentation_patches()
             mock_apply_patches.assert_called()
 
@@ -388,146 +298,6 @@ class TestInstrumentationPatch(TestCase):
         bedrock_sucess_attributes: Dict[str, str] = _do_on_success_bedrock("bedrock")
         self.assertEqual(len(bedrock_sucess_attributes), 1)
         self.assertEqual(bedrock_sucess_attributes["aws.bedrock.guardrail.id"], _BEDROCK_GUARDRAIL_ID)
-
-    def _test_patched_bedrock_runtime_invoke_model(self, **args):
-        model_id = args.get("model_id", None)
-        max_tokens = args.get("max_tokens", None)
-        temperature = args.get("temperature", None)
-        top_p = args.get("top_p", None)
-        finish_reason = args.get("finish_reason", None)
-        input_tokens = args.get("input_tokens", None)
-        output_tokens = args.get("output_tokens", None)
-        input_prompt = args.get("input_prompt", None)
-        output_prompt = args.get("output_prompt", None)
-
-        def get_model_response_request():
-            request_body = {}
-            response_body = {}
-
-            if "amazon.titan" in model_id:
-                request_body = {
-                    "textGenerationConfig": {
-                        "maxTokenCount": max_tokens,
-                        "temperature": temperature,
-                        "topP": top_p,
-                    }
-                }
-
-                response_body = {
-                    "inputTextTokenCount": input_tokens,
-                    "results": [
-                        {
-                            "tokenCount": output_tokens,
-                            "outputText": "testing",
-                            "completionReason": finish_reason,
-                        }
-                    ],
-                }
-
-            if "amazon.nova" in model_id:
-                request_body = {
-                    "inferenceConfig": {
-                        "max_new_tokens": max_tokens,
-                        "temperature": temperature,
-                        "top_p": top_p,
-                    }
-                }
-
-                response_body = {
-                    "output": {"message": {"content": [{"text": ""}], "role": "assistant"}},
-                    "stopReason": finish_reason,
-                    "usage": {"inputTokens": input_tokens, "outputTokens": output_tokens},
-                }
-
-            if "anthropic.claude" in model_id:
-                request_body = {
-                    "anthropic_version": "bedrock-2023-05-31",
-                    "max_tokens": max_tokens,
-                    "temperature": temperature,
-                    "top_p": top_p,
-                }
-
-                response_body = {
-                    "stop_reason": finish_reason,
-                    "stop_sequence": None,
-                    "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
-                }
-
-            if "ai21.jamba" in model_id:
-                request_body = {
-                    "max_tokens": max_tokens,
-                    "temperature": temperature,
-                    "top_p": top_p,
-                }
-
-                response_body = {
-                    "choices": [{"finish_reason": finish_reason}],
-                    "usage": {
-                        "prompt_tokens": input_tokens,
-                        "completion_tokens": output_tokens,
-                        "total_tokens": (input_tokens + output_tokens),
-                    },
-                }
-
-            if "meta.llama" in model_id:
-                request_body = {
-                    "max_gen_len": max_tokens,
-                    "temperature": temperature,
-                    "top_p": top_p,
-                }
-
-                response_body = {
-                    "prompt_token_count": input_tokens,
-                    "generation_token_count": output_tokens,
-                    "stop_reason": finish_reason,
-                }
-
-            if "cohere.command" in model_id:
-                request_body = {
-                    "message": input_prompt,
-                    "max_tokens": max_tokens,
-                    "temperature": temperature,
-                    "p": top_p,
-                }
-
-                response_body = {
-                    "text": output_prompt,
-                    "finish_reason": finish_reason,
-                }
-
-            if "mistral" in model_id:
-                request_body = {
-                    "prompt": input_prompt,
-                    "max_tokens": max_tokens,
-                    "temperature": temperature,
-                    "top_p": top_p,
-                }
-
-                response_body = {"outputs": [{"text": output_prompt, "stop_reason": finish_reason}]}
-
-            json_bytes = json.dumps(response_body).encode("utf-8")
-
-            return json.dumps(request_body), StreamingBody(BytesIO(json_bytes), len(json_bytes))
-
-        request_body, response_body = get_model_response_request()
-
-        bedrock_runtime_attributes: Dict[str, str] = _do_extract_attributes_bedrock(
-            "bedrock-runtime", model_id=model_id, request_body=request_body
-        )
-        bedrock_runtime_success_attributes: Dict[str, str] = _do_on_success_bedrock(
-            "bedrock-runtime", model_id=model_id, streaming_body=response_body
-        )
-
-        bedrock_runtime_attributes.update(bedrock_runtime_success_attributes)
-
-        self.assertEqual(bedrock_runtime_attributes["gen_ai.system"], _GEN_AI_SYSTEM)
-        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.model"], model_id)
-        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.max_tokens"], max_tokens)
-        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.temperature"], temperature)
-        self.assertEqual(bedrock_runtime_attributes["gen_ai.request.top_p"], top_p)
-        self.assertEqual(bedrock_runtime_attributes["gen_ai.usage.input_tokens"], input_tokens)
-        self.assertEqual(bedrock_runtime_attributes["gen_ai.usage.output_tokens"], output_tokens)
-        self.assertEqual(bedrock_runtime_attributes["gen_ai.response.finish_reasons"], [finish_reason])
 
     def _test_patched_bedrock_agent_instrumentation(self):
         """For bedrock-agent service, both extract_attributes and on_success provides attributes,
@@ -585,6 +355,53 @@ class TestInstrumentationPatch(TestCase):
             bedrock_agent_success_attributes: Dict[str, str] = _do_on_success_bedrock("bedrock-agent", operation)
             self.assertEqual(len(bedrock_agent_success_attributes), 1)
             self.assertEqual(bedrock_agent_success_attributes[attribute_tuple[0]], attribute_tuple[1])
+
+    def _test_resource_detector_patches(self):
+        """Test that resource detector patches are applied and work correctly"""
+        # Test that the functions were patched
+        self.assertIsNotNone(ec2_resource._aws_http_request)
+        self.assertIsNotNone(eks_resource._aws_http_request)
+
+        # Test EC2 patched function
+        with patch("amazon.opentelemetry.distro.patches._resource_detector_patches.urlopen") as mock_urlopen:
+            mock_response = MagicMock()
+            mock_response.read.return_value = b'{"test": "ec2-data"}'
+            mock_urlopen.return_value.__enter__.return_value = mock_response
+
+            result = ec2_resource._aws_http_request("GET", "/test/path", {"X-Test": "header"})
+            self.assertEqual(result, '{"test": "ec2-data"}')
+
+            # Verify the request was made correctly
+            args, kwargs = mock_urlopen.call_args
+            request = args[0]
+            self.assertEqual(request.full_url, "http://169.254.169.254/test/path")
+            self.assertEqual(request.headers, {"X-test": "header"})
+            self.assertEqual(kwargs["timeout"], 5)
+
+        # Test EKS patched function
+        with patch("amazon.opentelemetry.distro.patches._resource_detector_patches.urlopen") as mock_urlopen, patch(
+            "amazon.opentelemetry.distro.patches._resource_detector_patches.ssl.create_default_context"
+        ) as mock_ssl:
+            mock_response = MagicMock()
+            mock_response.read.return_value = b'{"test": "eks-data"}'
+            mock_urlopen.return_value.__enter__.return_value = mock_response
+
+            mock_context = MagicMock()
+            mock_ssl.return_value = mock_context
+
+            result = eks_resource._aws_http_request("GET", "/api/v1/test", "Bearer token123")
+            self.assertEqual(result, '{"test": "eks-data"}')
+
+            # Verify the request was made correctly
+            args, kwargs = mock_urlopen.call_args
+            request = args[0]
+            self.assertEqual(request.full_url, "https://kubernetes.default.svc/api/v1/test")
+            self.assertEqual(request.headers, {"Authorization": "Bearer token123"})
+            self.assertEqual(kwargs["timeout"], 5)
+            self.assertEqual(kwargs["context"], mock_context)
+
+            # Verify SSL context was created with correct CA file
+            mock_ssl.assert_called_once_with(cafile="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
 
     def _reset_mocks(self):
         for method_patch in self.method_patches.values():
@@ -678,6 +495,7 @@ def _do_on_success(
 ) -> Dict[str, str]:
     span_mock: Span = MagicMock()
     mock_call_context = MagicMock()
+    mock_instrumentor_context = MagicMock()
     span_attributes: Dict[str, str] = {}
 
     def set_side_effect(set_key, set_value):
@@ -692,6 +510,6 @@ def _do_on_success(
         mock_call_context.params = params
 
     extension = _KNOWN_EXTENSIONS[service_name]()(mock_call_context)
-    extension.on_success(span_mock, result)
+    extension.on_success(span_mock, result, mock_instrumentor_context)
 
     return span_attributes
