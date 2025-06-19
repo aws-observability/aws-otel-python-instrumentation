@@ -22,7 +22,7 @@ def is_installed(req: str) -> bool:
         _logger.debug("Skipping instrumentation patch: package %s, exception: %s", req, exc)
         return False
 
-    if not req.specifier.filter([dist_version]):
+    if not list(req.specifier.filter([dist_version])):
         _logger.debug(
             "instrumentation for package %s is available but version %s is installed. Skipping.",
             req,
