@@ -1,4 +1,2 @@
-opentelemetry-distro==0.54b1
-opentelemetry-exporter-otlp-proto-grpc==1.33.1
 typing-extensions==4.12.2
 psycopg2==2.9.9
