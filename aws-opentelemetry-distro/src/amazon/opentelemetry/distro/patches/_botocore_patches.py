@@ -19,13 +19,17 @@ from amazon.opentelemetry.distro.patches._bedrock_patches import (  # noqa # pyl
     _BedrockAgentExtension,
     _BedrockAgentRuntimeExtension,
     _BedrockExtension,
-    _BedrockRuntimeExtension,
 )
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
 from opentelemetry.instrumentation.botocore.extensions.lmbd import _LambdaExtension
 from opentelemetry.instrumentation.botocore.extensions.sns import _SnsExtension
 from opentelemetry.instrumentation.botocore.extensions.sqs import _SqsExtension
-from opentelemetry.instrumentation.botocore.extensions.types import _AttributeMapT, _AwsSdkExtension, _BotoResultT
+from opentelemetry.instrumentation.botocore.extensions.types import (
+    _AttributeMapT,
+    _AwsSdkExtension,
+    _BotocoreInstrumentorContext,
+    _BotoResultT,
+)
 from opentelemetry.semconv.trace import SpanAttributes
 from opentelemetry.trace.span import Span
 
@@ -75,8 +79,8 @@ def _apply_botocore_lambda_patch() -> None:
 
     old_on_success = _LambdaExtension.on_success
 
-    def patch_on_success(self, span: Span, result: _BotoResultT):
-        old_on_success(self, span, result)
+    def patch_on_success(self, span: Span, result: _BotoResultT, instrumentor_context: _BotocoreInstrumentorContext):
+        old_on_success(self, span, result, instrumentor_context)
         lambda_configuration = result.get("Configuration", {})
         function_arn = lambda_configuration.get("FunctionArn")
         if function_arn:
@@ -180,8 +184,8 @@ def _apply_botocore_sqs_patch() -> None:
 
     old_on_success = _SqsExtension.on_success
 
-    def patch_on_success(self, span: Span, result: _BotoResultT):
-        old_on_success(self, span, result)
+    def patch_on_success(self, span: Span, result: _BotoResultT, instrumentor_context: _BotocoreInstrumentorContext):
+        old_on_success(self, span, result, instrumentor_context)
         queue_url = result.get("QueueUrl")
         if queue_url:
             span.set_attribute(AWS_SQS_QUEUE_URL, queue_url)
@@ -191,17 +195,17 @@ def _apply_botocore_sqs_patch() -> None:
 
 
 def _apply_botocore_bedrock_patch() -> None:
-    """Botocore instrumentation patch for Bedrock, Bedrock Agent, Bedrock Runtime and Bedrock Agent Runtime
+    """Botocore instrumentation patch for Bedrock, Bedrock Agent, and Bedrock Agent Runtime
 
     This patch adds an extension to the upstream's list of known extension for Bedrock.
     Extensions allow for custom logic for adding service-specific information to spans, such as attributes.
-    Specifically, we are adding logic to add the AWS_BEDROCK attributes referenced in _aws_attribute_keys,
-    GEN_AI_REQUEST_MODEL and GEN_AI_SYSTEM attributes referenced in _aws_span_processing_util.
+    Specifically, we are adding logic to add the AWS_BEDROCK attributes referenced in _aws_attribute_keys.
+    Note: Bedrock Runtime uses the upstream extension directly.
     """
     _KNOWN_EXTENSIONS["bedrock"] = _lazy_load(".", "_BedrockExtension")
     _KNOWN_EXTENSIONS["bedrock-agent"] = _lazy_load(".", "_BedrockAgentExtension")
     _KNOWN_EXTENSIONS["bedrock-agent-runtime"] = _lazy_load(".", "_BedrockAgentRuntimeExtension")
-    _KNOWN_EXTENSIONS["bedrock-runtime"] = _lazy_load(".", "_BedrockRuntimeExtension")
+    # bedrock-runtime is handled by upstream
 
 
 # The OpenTelemetry Authors code
@@ -243,7 +247,7 @@ class _SecretsManagerExtension(_AwsSdkExtension):
             attributes[AWS_SECRETSMANAGER_SECRET_ARN] = secret_id
 
     # pylint: disable=no-self-use
-    def on_success(self, span: Span, result: _BotoResultT):
+    def on_success(self, span: Span, result: _BotoResultT, instrumentor_context: _BotocoreInstrumentorContext):
         secret_arn = result.get("ARN")
         if secret_arn:
             span.set_attribute(AWS_SECRETSMANAGER_SECRET_ARN, secret_arn)

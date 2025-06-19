@@ -435,7 +435,7 @@ def get_model_request_response(path):
             "inferenceConfig": {
                 "max_new_tokens": 800,
                 "temperature": 0.9,
-                "top_p": 0.7,
+                "topP": 0.7,
             },
         }
 
@@ -494,32 +494,6 @@ def get_model_request_response(path):
             ],
             "finish_reason": "COMPLETE",
             "text": "test-generation-text",
-        }
-
-    if "ai21.jamba" in path:
-        model_id = "ai21.jamba-1-5-large-v1:0"
-
-        request_body = {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
-            ],
-            "top_p": 0.8,
-            "temperature": 0.6,
-            "max_tokens": 512,
-        }
-
-        response_body = {
-            "stop_reason": "end_turn",
-            "usage": {
-                "prompt_tokens": 21,
-                "completion_tokens": 24,
-            },
-            "choices": [
-                {"finish_reason": "stop"},
-            ],
         }
 
     if "mistral" in path:
