@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 from botocore.exceptions import ClientError
 
-from amazon.opentelemetry.distro.exporter.otlp.aws.metrics.aws_cloudwatch_emf_exporter import AwsCloudWatchEmfExporter
+from amazon.opentelemetry.distro.exporter.aws.metrics.aws_cloudwatch_emf_exporter import AwsCloudWatchEmfExporter
 from opentelemetry.sdk.metrics.export import Gauge, MetricExportResult
 from opentelemetry.sdk.resources import Resource
 

@@ -105,8 +105,8 @@ class TestOTLPAwsLogsExporter(TestCase):
 
         delays = mock_sleep.call_args_list
 
-        for i, delay in enumerate(delays):
-            self.assertEqual(delay[0][0], 2**i)
+        for index, delay in enumerate(delays):
+            self.assertEqual(delay[0][0], 2**index)
 
         # Number of calls: 1 + len(1, 2, 4, 8, 16, 32 delays)
         self.assertEqual(mock_request.call_count, 7)
