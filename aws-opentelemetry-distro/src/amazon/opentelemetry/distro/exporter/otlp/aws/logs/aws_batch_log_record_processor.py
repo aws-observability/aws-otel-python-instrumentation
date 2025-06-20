@@ -66,7 +66,9 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
                         log_data: LogData = self._queue.pop()
                         log_size = self._estimate_log_size(log_data)
 
-                        if batch and (batch_data_size + log_size > self._MAX_LOG_REQUEST_BYTE_SIZE):  # pylint: disable=too-many-nested-blocks
+                        if batch and (
+                            batch_data_size + log_size > self._MAX_LOG_REQUEST_BYTE_SIZE
+                        ):  # pylint: disable=too-many-nested-blocks
                             # if batch_data_size > MAX_LOG_REQUEST_BYTE_SIZE then len(batch) == 1
                             if batch_data_size > self._MAX_LOG_REQUEST_BYTE_SIZE:
                                 if self._is_gen_ai_log(batch[0]):
