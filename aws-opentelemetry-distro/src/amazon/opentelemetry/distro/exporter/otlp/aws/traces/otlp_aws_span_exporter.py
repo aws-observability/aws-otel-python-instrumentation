@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import logging
 from typing import Dict, Optional, Sequence
 
 from amazon.opentelemetry.distro._utils import is_agent_observability_enabled
@@ -12,6 +13,8 @@ from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExport
 from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExportResult
+
+logger = logging.getLogger(__name__)
 
 
 class OTLPAwsSpanExporter(OTLPSpanExporter):
@@ -51,7 +54,8 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
             if self._logger_provider is None:
                 try:
                     self._logger_provider = get_logger_provider()
-                except Exception:  # pylint: disable=broad-exception-caught
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    logger.debug("Failed to get logger provider: %s", exc)
                     return False
 
             if self._logger_provider:
