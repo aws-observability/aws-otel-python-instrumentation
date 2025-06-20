@@ -1,13 +1,12 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+from importlib.metadata import PackageNotFoundError, version
 from unittest import TestCase
-
-from pkg_resources import DistributionNotFound, require
 
 
 class TestAwsOpenTelemetryDistro(TestCase):
     def test_package_available(self):
         try:
-            require(["aws-opentelemetry-distro"])
-        except DistributionNotFound:
+            version("aws-opentelemetry-distro")
+        except PackageNotFoundError:
             self.fail("aws-opentelemetry-distro not installed")

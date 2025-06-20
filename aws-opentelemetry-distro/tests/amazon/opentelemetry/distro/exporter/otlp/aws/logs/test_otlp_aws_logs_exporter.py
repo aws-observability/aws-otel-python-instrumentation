@@ -8,9 +8,7 @@ from requests.structures import CaseInsensitiveDict
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
 from opentelemetry._logs.severity import SeverityNumber
 from opentelemetry.sdk._logs import LogData, LogRecord
-from opentelemetry.sdk._logs.export import (
-    LogExportResult,
-)
+from opentelemetry.sdk._logs.export import LogExportResult
 from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 from opentelemetry.trace import TraceFlags
 
@@ -38,7 +36,7 @@ class TestOTLPAwsLogsExporter(TestCase):
         self.logs = self.generate_test_log_data()
         self.exporter = OTLPAwsLogExporter(endpoint=self._ENDPOINT)
 
-    @patch("requests.Session.request", return_value=good_response)
+    @patch("requests.Session.post", return_value=good_response)
     def test_export_success(self, mock_request):
         """Tests that the exporter always compresses the serialized logs with gzip before exporting."""
         result = self.exporter.export(self.logs)
@@ -56,7 +54,7 @@ class TestOTLPAwsLogsExporter(TestCase):
         self.assertTrue(len(data) >= 10)
         self.assertEqual(data[0:2], b"\x1f\x8b")
 
-    @patch("requests.Session.request", return_value=good_response)
+    @patch("requests.Session.post", return_value=good_response)
     def test_export_gen_ai_logs(self, mock_request):
         """Tests that when set_gen_ai_log_flag is set, the exporter includes the LLO header in the request."""
 
@@ -74,7 +72,7 @@ class TestOTLPAwsLogsExporter(TestCase):
         self.assertIn(self.exporter._LARGE_LOG_HEADER, headers)
         self.assertEqual(headers[self.exporter._LARGE_LOG_HEADER], self.exporter._LARGE_GEN_AI_LOG_PATH_HEADER)
 
-    @patch("requests.Session.request", return_value=good_response)
+    @patch("requests.Session.post", return_value=good_response)
     def test_should_not_export_if_shutdown(self, mock_request):
         """Tests that no export request is made if the exporter is shutdown."""
         self.exporter.shutdown()
@@ -83,7 +81,7 @@ class TestOTLPAwsLogsExporter(TestCase):
         mock_request.assert_not_called()
         self.assertEqual(result, LogExportResult.FAILURE)
 
-    @patch("requests.Session.request", return_value=non_retryable_response)
+    @patch("requests.Session.post", return_value=non_retryable_response)
     def test_should_not_export_again_if_not_retryable(self, mock_request):
         """Tests that only one export request is made if the response status code is non-retryable."""
         result = self.exporter.export(self.logs)
@@ -94,7 +92,7 @@ class TestOTLPAwsLogsExporter(TestCase):
     @patch(
         "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter.sleep", side_effect=lambda x: None
     )
-    @patch("requests.Session.request", return_value=retryable_response_no_header)
+    @patch("requests.Session.post", return_value=retryable_response_no_header)
     def test_should_export_again_with_backoff_if_retryable_and_no_retry_after_header(self, mock_request, mock_sleep):
         """Tests that multiple export requests are made with exponential delay if the response status code is retryable.
         But there is no Retry-After header."""
@@ -116,7 +114,7 @@ class TestOTLPAwsLogsExporter(TestCase):
         "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter.sleep", side_effect=lambda x: None
     )
     @patch(
-        "requests.Session.request",
+        "requests.Session.post",
         side_effect=[retryable_response_header, retryable_response_header, retryable_response_header, good_response],
     )
     def test_should_export_again_with_server_delay_if_retryable_and_retry_after_header(self, mock_request, mock_sleep):
@@ -136,7 +134,7 @@ class TestOTLPAwsLogsExporter(TestCase):
         "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter.sleep", side_effect=lambda x: None
     )
     @patch(
-        "requests.Session.request",
+        "requests.Session.post",
         side_effect=[
             retryable_response_bad_header,
             retryable_response_bad_header,
@@ -157,6 +155,14 @@ class TestOTLPAwsLogsExporter(TestCase):
 
         self.assertEqual(mock_sleep.call_count, 3)
         self.assertEqual(mock_request.call_count, 4)
+        self.assertEqual(result, LogExportResult.SUCCESS)
+
+    @patch("requests.Session.post", side_effect=[requests.exceptions.ConnectionError(), good_response])
+    def test_export_connection_error_retry(self, mock_request):
+        """Tests that the exporter retries on ConnectionError."""
+        result = self.exporter.export(self.logs)
+
+        self.assertEqual(mock_request.call_count, 2)
         self.assertEqual(result, LogExportResult.SUCCESS)
 
     def generate_test_log_data(self, count=5):

@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
-import sys
+from importlib.metadata import PackageNotFoundError, version
 from logging import Logger, getLogger
 
-import pkg_resources
+from packaging.requirements import Requirement
 
 _logger: Logger = getLogger(__name__)
 
@@ -14,14 +14,20 @@ AGENT_OBSERVABILITY_ENABLED = "AGENT_OBSERVABILITY_ENABLED"
 
 def is_installed(req: str) -> bool:
     """Is the given required package installed?"""
-
-    if req in sys.modules and sys.modules[req] is not None:
-        return True
+    req = Requirement(req)
 
     try:
-        pkg_resources.get_distribution(req)
-    except Exception as exc:  # pylint: disable=broad-except
+        dist_version = version(req.name)
+    except PackageNotFoundError as exc:
         _logger.debug("Skipping instrumentation patch: package %s, exception: %s", req, exc)
+        return False
+
+    if not list(req.specifier.filter([dist_version])):
+        _logger.debug(
+            "instrumentation for package %s is available but version %s is installed. Skipping.",
+            req,
+            dist_version,
+        )
         return False
     return True
 

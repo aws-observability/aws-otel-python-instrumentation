@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+from importlib.metadata import PackageNotFoundError
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -19,11 +20,12 @@ mock_credentials = Credentials(access_key="test_access_key", secret_key="test_se
 
 
 class TestAwsAuthSession(TestCase):
-    @patch("pkg_resources.get_distribution", side_effect=ImportError("test error"))
-    @patch.dict("sys.modules", {"botocore": None}, clear=False)
+    @patch("amazon.opentelemetry.distro._utils.version")
+    @patch.dict("sys.modules", {"botocore": None})
     @patch("requests.Session.request", return_value=requests.Response())
-    def test_aws_auth_session_no_botocore(self, _, __):
+    def test_aws_auth_session_no_botocore(self, mock_request, mock_version):
         """Tests that aws_auth_session will not inject SigV4 Headers if botocore is not installed."""
+        mock_version.side_effect = PackageNotFoundError("botocore")
 
         session = AwsAuthSession("us-east-1", "xray")
         actual_headers = {"test": "test"}
@@ -61,3 +63,18 @@ class TestAwsAuthSession(TestCase):
         self.assertIn(AUTHORIZATION_HEADER, actual_headers)
         self.assertIn(X_AMZ_DATE_HEADER, actual_headers)
         self.assertIn(X_AMZ_SECURITY_TOKEN_HEADER, actual_headers)
+
+    @patch("requests.Session.request", return_value=requests.Response())
+    @patch("botocore.session.Session.get_credentials", return_value=mock_credentials)
+    @patch("botocore.auth.SigV4Auth.add_auth", side_effect=Exception("Signing failed"))
+    def test_aws_auth_session_signing_error(self, mock_add_auth, mock_get_credentials, mock_request):
+        """Tests that aws_auth_session does not any Sigv4 headers if signing errors."""
+
+        session = AwsAuthSession("us-east-1", "xray")
+        actual_headers = {"test": "test"}
+
+        session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers=actual_headers)
+
+        self.assertNotIn(AUTHORIZATION_HEADER, actual_headers)
+        self.assertNotIn(X_AMZ_DATE_HEADER, actual_headers)
+        self.assertNotIn(X_AMZ_SECURITY_TOKEN_HEADER, actual_headers)

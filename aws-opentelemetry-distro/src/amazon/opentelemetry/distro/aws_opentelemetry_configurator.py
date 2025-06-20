@@ -180,11 +180,11 @@ def _init_logging(
     resource: Resource = None,
 ):
 
-    # Provides a default OTLP log exporter when none is specified.
+    # Provides a default OTLP log exporter when it's not set.
     # This is the behavior for the logs exporters for other languages.
-    logs_exporter = os.environ.get("OTEL_LOGS_EXPORTER")
+    logs_exporters = os.environ.get("OTEL_LOGS_EXPORTER")
 
-    if not exporters and logs_exporter and (logs_exporter.lower() != "none"):
+    if not exporters and logs_exporters and logs_exporters.lower() != "none":
         exporters = {"otlp": OTLPLogExporter}
 
     provider = LoggerProvider(resource=resource)

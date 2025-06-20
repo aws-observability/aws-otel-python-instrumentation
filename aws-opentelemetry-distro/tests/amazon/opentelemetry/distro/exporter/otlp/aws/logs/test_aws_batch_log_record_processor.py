@@ -22,55 +22,75 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         self.mock_exporter.export.return_value = LogExportResult.SUCCESS
 
         self.processor = AwsBatchLogRecordProcessor(exporter=self.mock_exporter)
+        self.max_log_size = self.processor._MAX_LOG_REQUEST_BYTE_SIZE
+        self.base_log_size = self.processor._BASE_LOG_BUFFER_BYTE_SIZE
 
     def test_process_log_data_nested_structure(self):
         """Tests that the processor correctly handles nested structures (dict/list)"""
         message_size = 400
-        depth = 2
+        message = "X" * message_size
 
-        nested_dict_log_body = self.generate_nested_log_body(
-            depth=depth, expected_body="X" * message_size, create_map=True
+        nest_dict_log = self.generate_test_log_data(
+            log_body=message, attr_key="t", attr_val=message, log_body_depth=2, attr_depth=2, count=1, create_map=True
         )
-        nested_array_log_body = self.generate_nested_log_body(
-            depth=depth, expected_body="X" * message_size, create_map=False
+        nest_array_log = self.generate_test_log_data(
+            log_body=message, attr_key="t", attr_val=message, log_body_depth=2, attr_depth=2, count=1, create_map=False
         )
 
-        dict_size = self.processor._get_any_value_size(val=nested_dict_log_body, depth=depth)
-        array_size = self.processor._get_any_value_size(val=nested_array_log_body, depth=depth)
+        expected_size = self.base_log_size + message_size * 2
 
-        # Asserting almost equal to account for key lengths in the Log object body
-        self.assertAlmostEqual(dict_size, message_size, delta=20)
-        self.assertAlmostEqual(array_size, message_size, delta=20)
+        dict_size = self.processor._estimate_log_size(log=nest_dict_log[0], depth=2)
+        array_size = self.processor._estimate_log_size(log=nest_array_log[0], depth=2)
+
+        # Asserting almost equal to account for dictionary keys in the Log object
+        self.assertAlmostEqual(dict_size, expected_size, delta=10)
+        self.assertAlmostEqual(array_size, expected_size, delta=10)
 
     def test_process_log_data_nested_structure_exceeds_depth(self):
-        """Tests that the processor returns 0 for nested structure that exceeds the depth limit"""
-        message_size = 400
-        log_body = "X" * message_size
+        """Tests that the processor cuts off calculation for nested structure that exceeds the depth limit"""
+        calculated = "X" * 400
+        message = {"calculated": calculated, "truncated": {"truncated": {"test": "X" * self.max_log_size}}}
 
-        nested_dict_log_body = self.generate_nested_log_body(depth=4, expected_body=log_body, create_map=True)
-        nested_array_log_body = self.generate_nested_log_body(depth=4, expected_body=log_body, create_map=False)
+        # *2 since we set this message in both body and attributes
+        expected_size = self.base_log_size + (len("calculated") + len(calculated) + len("truncated")) * 2
 
-        dict_size = self.processor._get_any_value_size(val=nested_dict_log_body, depth=3)
-        array_size = self.processor._get_any_value_size(val=nested_array_log_body, depth=3)
+        nest_dict_log = self.generate_test_log_data(
+            log_body=message, attr_key="t", attr_val=message, log_body_depth=3, attr_depth=3, count=1, create_map=True
+        )
+        nest_array_log = self.generate_test_log_data(
+            log_body=message, attr_key="t", attr_val=message, log_body_depth=3, attr_depth=3, count=1, create_map=False
+        )
 
-        self.assertEqual(dict_size, 0)
-        self.assertEqual(array_size, 0)
+        # Only calculates log size of up to depth of 4
+        dict_size = self.processor._estimate_log_size(log=nest_dict_log[0], depth=4)
+        array_size = self.processor._estimate_log_size(log=nest_array_log[0], depth=4)
+
+        # Asserting almost equal to account for dictionary keys in the Log object body
+        self.assertAlmostEqual(dict_size, expected_size, delta=10)
+        self.assertAlmostEqual(array_size, expected_size, delta=10)
 
     def test_process_log_data_nested_structure_size_exceeds_max_log_size(self):
         """Tests that the processor returns prematurely if the size already exceeds _MAX_LOG_REQUEST_BYTE_SIZE"""
-        log_body = {
-            "smallKey": "X" * (self.processor._MAX_LOG_REQUEST_BYTE_SIZE // 2),
-            "bigKey": "X" * (self.processor._MAX_LOG_REQUEST_BYTE_SIZE + 1),
+        # Should stop calculation at bigKey
+        message = {
+            "bigKey": "X" * (self.max_log_size),
+            "smallKey": "X" * (self.max_log_size * 10),
         }
 
-        nested_dict_log_body = self.generate_nested_log_body(depth=0, expected_body=log_body, create_map=True)
-        nested_array_log_body = self.generate_nested_log_body(depth=0, expected_body=log_body, create_map=False)
+        expected_size = self.base_log_size + self.max_log_size + len("bigKey")
 
-        dict_size = self.processor._get_any_value_size(val=nested_dict_log_body)
-        array_size = self.processor._get_any_value_size(val=nested_array_log_body)
+        nest_dict_log = self.generate_test_log_data(
+            log_body=message, attr_key="", attr_val="", log_body_depth=-1, attr_depth=-1, count=1, create_map=True
+        )
+        nest_array_log = self.generate_test_log_data(
+            log_body=message, attr_key="", attr_val="", log_body_depth=-1, attr_depth=-1, count=1, create_map=False
+        )
 
-        self.assertAlmostEqual(dict_size, self.processor._MAX_LOG_REQUEST_BYTE_SIZE, delta=20)
-        self.assertAlmostEqual(array_size, self.processor._MAX_LOG_REQUEST_BYTE_SIZE, delta=20)
+        dict_size = self.processor._estimate_log_size(log=nest_dict_log[0])
+        array_size = self.processor._estimate_log_size(log=nest_array_log[0])
+
+        self.assertAlmostEqual(dict_size, expected_size, delta=10)
+        self.assertAlmostEqual(array_size, expected_size, delta=10)
 
     def test_process_log_data_primitive(self):
 
@@ -78,10 +98,18 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         expected_sizes = [4, 4, 1, 3, 4, 5, 0]
 
         for i in range(len(primitives)):
-            body = primitives[i]
-            expected_size = expected_sizes[i]
+            log = self.generate_test_log_data(
+                log_body=primitives[i],
+                attr_key="",
+                attr_val="",
+                log_body_depth=-1,
+                attr_depth=-1,
+                count=1,
+            )
 
-            actual_size = self.processor._get_any_value_size(body)
+            expected_size = self.base_log_size + expected_sizes[i]
+            actual_size = self.processor._estimate_log_size(log[0])
+
             self.assertEqual(actual_size, expected_size)
 
     @patch(
@@ -94,11 +122,13 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         """Tests that export is only called once if a single batch is under the size limit"""
         log_count = 10
         log_body = "test"
-        test_logs = self.generate_test_log_data(count=log_count, log_body=log_body)
+        test_logs = self.generate_test_log_data(
+            log_body=log_body, attr_key="", attr_val="", log_body_depth=-1, attr_depth=-1, count=log_count
+        )
         total_data_size = 0
 
         for log in test_logs:
-            size = self.processor._get_any_value_size(log.log_record.body)
+            size = self.processor._estimate_log_size(log)
             total_data_size += size
             self.processor._queue.appendleft(log)
 
@@ -123,7 +153,9 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         But should only call set_gen_ai_log_flag if it's a Gen AI log event."""
 
         large_log_body = "X" * (self.processor._MAX_LOG_REQUEST_BYTE_SIZE + 1)
-        non_gen_ai_test_logs = self.generate_test_log_data(count=3, log_body=large_log_body)
+        non_gen_ai_test_logs = self.generate_test_log_data(
+            log_body=large_log_body, attr_key="", attr_val="", log_body_depth=-1, attr_depth=-1, count=3
+        )
         gen_ai_test_logs = []
 
         gen_ai_scopes = [
@@ -137,7 +169,13 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         for gen_ai_scope in gen_ai_scopes:
             gen_ai_test_logs.extend(
                 self.generate_test_log_data(
-                    count=1, log_body=large_log_body, instrumentation_scope=InstrumentationScope(gen_ai_scope, "1.0.0")
+                    log_body=large_log_body,
+                    attr_key="",
+                    attr_val="",
+                    log_body_depth=-1,
+                    attr_depth=-1,
+                    count=3,
+                    instrumentation_scope=InstrumentationScope(gen_ai_scope, "1.0.0"),
                 )
             )
 
@@ -165,18 +203,35 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.set_value")
     def test_export_single_batch_some_logs_over_size_limit(self, _, __, ___):
         """Should make calls to export smaller sub-batch logs"""
-        large_log_body = "X" * (self.processor._MAX_LOG_REQUEST_BYTE_SIZE + 1)
+        large_log_body = "X" * (self.max_log_size + 1)
+        small_log_body = "X" * (self.max_log_size // 10 - self.base_log_size)
+
         gen_ai_scope = InstrumentationScope("openinference.instrumentation.langchain", "1.0.0")
-        small_log_body = "X" * (
-            int(self.processor._MAX_LOG_REQUEST_BYTE_SIZE / 10) - self.processor._BASE_LOG_BUFFER_BYTE_SIZE
+
+        large_logs = self.generate_test_log_data(
+            log_body=large_log_body,
+            attr_key="",
+            attr_val="",
+            log_body_depth=-1,
+            attr_depth=-1,
+            count=3,
+            instrumentation_scope=gen_ai_scope,
         )
-        test_logs = self.generate_test_log_data(count=3, log_body=large_log_body, instrumentation_scope=gen_ai_scope)
+
+        small_logs = self.generate_test_log_data(
+            log_body=small_log_body,
+            attr_key="",
+            attr_val="",
+            log_body_depth=-1,
+            attr_depth=-1,
+            count=12,
+            instrumentation_scope=gen_ai_scope,
+        )
+
         # 1st, 2nd, 3rd batch = size 1
         # 4th batch = size 10
         # 5th batch = size 2
-        small_logs = self.generate_test_log_data(count=12, log_body=small_log_body, instrumentation_scope=gen_ai_scope)
-
-        test_logs.extend(small_logs)
+        test_logs = large_logs + small_logs
 
         for log in test_logs:
             self.processor._queue.appendleft(log)
@@ -202,10 +257,29 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
             expected_size = expected_sizes[i]
             self.assertEqual(len(batch), expected_size)
 
+    @staticmethod
     def generate_test_log_data(
-        self, log_body: AnyValue, count=5, instrumentation_scope=InstrumentationScope("test-scope", "1.0.0")
+        log_body,
+        attr_key,
+        attr_val,
+        log_body_depth=3,
+        attr_depth=3,
+        count=5,
+        create_map=True,
+        instrumentation_scope=InstrumentationScope("test-scope", "1.0.0"),
     ) -> List[LogData]:
+
+        def generate_nested_value(depth, value, create_map=True) -> AnyValue:
+            if depth < 0:
+                return value
+
+            if create_map:
+                return {"t": generate_nested_value(depth - 1, value, True)}
+
+            return [generate_nested_value(depth - 1, value, False)]
+
         logs = []
+
         for i in range(count):
             record = LogRecord(
                 timestamp=int(time.time_ns()),
@@ -214,23 +288,11 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
                 trace_flags=TraceFlags(1),
                 severity_text="INFO",
                 severity_number=SeverityNumber.INFO,
-                body=log_body,
-                attributes={"test.attribute": f"value-{i + 1}"},
+                body=generate_nested_value(log_body_depth, log_body, create_map),
+                attributes={attr_key: generate_nested_value(attr_depth, attr_val, create_map)},
             )
 
             log_data = LogData(log_record=record, instrumentation_scope=instrumentation_scope)
             logs.append(log_data)
 
         return logs
-
-    @staticmethod
-    def generate_nested_log_body(depth=0, expected_body: AnyValue = "test", create_map=True):
-        if depth < 0:
-            return expected_body
-
-        if create_map:
-            return {
-                "key": TestAwsBatchLogRecordProcessor.generate_nested_log_body(depth - 1, expected_body, create_map)
-            }
-
-        return [TestAwsBatchLogRecordProcessor.generate_nested_log_body(depth - 1, expected_body, create_map)]

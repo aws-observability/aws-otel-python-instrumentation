@@ -10,30 +10,53 @@ from typing import Dict, Optional, Sequence
 import requests
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
-from opentelemetry.exporter.otlp.proto.common._internal import (
-    _create_exp_backoff_generator,
-)
+from opentelemetry.exporter.otlp.proto.common._internal import _create_exp_backoff_generator
 from opentelemetry.exporter.otlp.proto.common._log_encoder import encode_logs
 from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
-from opentelemetry.sdk._logs import (
-    LogData,
-)
-from opentelemetry.sdk._logs.export import (
-    LogExportResult,
-)
+from opentelemetry.sdk._logs import LogData
+from opentelemetry.sdk._logs.export import LogExportResult
 
 _logger = logging.getLogger(__name__)
 
 
 class OTLPAwsLogExporter(OTLPLogExporter):
-    _LARGE_LOG_HEADER = "x-aws-truncatable-fields"
+    """
+    Below is the protobuf-JSON formatted path to "content" and "role" for the
+    following GenAI Consolidated Log Event Schema:
+
+    "body": {
+        "output": {
+            "messages": [
+                {
+                    "content": "hi",
+                    "role": "assistant"
+                }
+            ]
+        },
+        "input": {
+            "messages": [
+                {
+                    "content": "hello",
+                    "role": "user"
+                }
+            ]
+        }
+    }
+
+    """
+
     _LARGE_GEN_AI_LOG_PATH_HEADER = (
-        "\\$['resourceLogs'][0]['scopeLogs'][0]['logRecords'][0]['body']"
-        "['kvlistValue']['values'][*]['value']['kvlistValue']['values'][*]"
-        "['value']['arrayValue']['values'][*]['kvlistValue']['values'][*]"
-        "['value']['stringValue']"
+        "\\$['resourceLogs'][0]['scopeLogs'][0]['logRecords'][0]['body']"  # body
+        "['kvlistValue']['values'][*]['value']"  # body['output'], body['input']
+        "['kvlistValue']['values'][0]['value']"  # body['output']['messages'], body['input']['messages']
+        "['arrayValue']['values'][*]"  # body['output']['messages'][0..999], body['input']['messages'][0..999]
+        "['kvlistValue']['values'][*]['value']['stringValue']"  # body['output']['messages'][0..999]['content'/'role'],
+        # body['input']['messages'][0..999]['content'/'role']
     )
+
+    _LARGE_LOG_HEADER = "x-aws-truncatable-fields"
+
     _RETRY_AFTER_HEADER = "Retry-After"  # https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
 
     def __init__(
@@ -160,7 +183,7 @@ class OTLPAwsLogExporter(OTLPLogExporter):
                 cert=self._client_cert,
             )
             return response
-        except ConnectionError:
+        except requests.exceptions.ConnectionError:
             response = self._session.post(
                 url=self._endpoint,
                 headers={self._LARGE_LOG_HEADER: self._LARGE_GEN_AI_LOG_PATH_HEADER} if self._gen_ai_log_flag else None,

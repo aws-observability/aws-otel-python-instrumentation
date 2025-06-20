@@ -1,13 +1,11 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 import logging
-from typing import Mapping, Optional, Sequence, cast
+from typing import List, Mapping, Optional, Sequence, cast
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
-from opentelemetry.context import (
-    _SUPPRESS_INSTRUMENTATION_KEY,
-    attach,
-    detach,
-    set_value,
-)
+from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY, attach, detach, set_value
 from opentelemetry.sdk._logs import LogData
 from opentelemetry.sdk._logs._internal.export import BatchLogExportStrategy
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
@@ -18,7 +16,7 @@ _logger = logging.getLogger(__name__)
 
 class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
     _BASE_LOG_BUFFER_BYTE_SIZE = (
-        2000  # Buffer size in bytes to account for log metadata not included in the body size calculation
+        1000  # Buffer size in bytes to account for log metadata not included in the body or attribute size calculation
     )
     _MAX_LOG_REQUEST_BYTE_SIZE = (
         1048576  # https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-OTLPEndpoint.html
@@ -66,7 +64,7 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
 
                     for _ in range(batch_length):
                         log_data: LogData = self._queue.pop()
-                        log_size = self._BASE_LOG_BUFFER_BYTE_SIZE + self._get_any_value_size(log_data.log_record.body)
+                        log_size = self._estimate_log_size(log_data)
 
                         if batch and (batch_data_size + log_size > self._MAX_LOG_REQUEST_BYTE_SIZE):
                             # if batch_data_size > MAX_LOG_REQUEST_BYTE_SIZE then len(batch) == 1
@@ -88,64 +86,74 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
                                 self._exporter.set_gen_ai_log_flag()
 
                         self._exporter.export(batch)
-                except Exception as e:  # pylint: disable=broad-exception-caught
-                    _logger.exception("Exception while exporting logs: " + str(e))
+                except Exception as exception:  # pylint: disable=broad-exception-caught
+                    _logger.exception("Exception while exporting logs: " + str(exception))
                 detach(token)
 
-    def _get_any_value_size(self, val: AnyValue, depth: int = 3) -> int:
+    def _estimate_log_size(self, log: LogData, depth: int = 3) -> int:
         """
-        Only used to indicate whether we should export a batch log size of 1 or not.
-        Calculates the size in bytes of an AnyValue object.
-        Will processs complex AnyValue structures up to the specified depth limit.
-        If the depth limit of the AnyValue structure is exceeded, returns 0.
+        Estimates the size in bytes of a log by calculating the size of its body and its attributes
+        and adding a buffer amount to account for other log metadata information.
+        Will process complex log structures up to the specified depth limit.
+        If the depth limit of the log structure is exceeded, returns truncates calculation
+        to everything up to that point.
 
         Args:
-            val: The AnyValue object to calculate size for
+            log: The Log object to calculate size for
             depth: Maximum depth to traverse in nested structures (default: 3)
 
         Returns:
-            int: Total size of the AnyValue object in bytes
+            int: The estimated size of the log object in bytes
         """
-        # Use a stack to prevent excessive recursive calls.
-        stack = [(val, 0)]
-        size: int = 0
 
-        while stack:
-            # small optimization. We can stop calculating the size once it reaches the 1 MB limit.
-            if size >= self._MAX_LOG_REQUEST_BYTE_SIZE:
-                return size
+        # Use a queue to prevent excessive recursive calls.
+        # We calculate based on the size of the log record body and attributes for the log.
+        queue: List[tuple[AnyValue, int]] = [(log.log_record.body, 0), (log.log_record.attributes, -1)]
 
-            next_val, current_depth = stack.pop()
+        size: int = self._BASE_LOG_BUFFER_BYTE_SIZE
 
-            if isinstance(next_val, (str, bytes)):
-                size += len(next_val)
-                continue
+        while queue:
+            new_queue: List[tuple[AnyValue, int]] = []
 
-            if isinstance(next_val, bool):
-                size += 4 if next_val else 5
-                continue
+            for data in queue:
+                # small optimization, can stop calculating the size once it reaches the 1 MB limit.
+                if size >= self._MAX_LOG_REQUEST_BYTE_SIZE:
+                    return size
 
-            if isinstance(next_val, (float, int)):
-                size += len(str(next_val))
-                continue
+                next_val, current_depth = data
 
-            if current_depth <= depth:
-                if isinstance(next_val, Sequence):
-                    for content in next_val:
-                        stack.append((cast(AnyValue, content), current_depth + 1))
+                if isinstance(next_val, (str, bytes)):
+                    size += len(next_val)
+                    continue
 
-                if isinstance(next_val, Mapping):
-                    for key, content in next_val.items():
-                        size += len(key)
-                        stack.append((content, current_depth + 1))
-            else:
-                _logger.debug("Max log depth exceeded. Log data size will not be accurately calculated.")
-                return 0
+                if isinstance(next_val, bool):
+                    size += 4 if next_val else 5
+                    continue
+
+                if isinstance(next_val, (float, int)):
+                    size += len(str(next_val))
+                    continue
+
+                if current_depth <= depth:
+                    if isinstance(next_val, Sequence):
+                        for content in next_val:
+                            new_queue.append((cast(AnyValue, content), current_depth + 1))
+
+                    if isinstance(next_val, Mapping):
+                        for key, content in next_val.items():
+                            size += len(key)
+                            new_queue.append((content, current_depth + 1))
+                else:
+                    _logger.debug(
+                        f"Max log depth of {depth} exceeded. Log data size will not be accurately calculated."
+                    )
+
+            queue = new_queue
 
         return size
 
     @staticmethod
-    def _is_gen_ai_log(log_data: LogData) -> bool:
+    def _is_gen_ai_log(log: LogData) -> bool:
         """
         Is the log a Gen AI log event?
         """
@@ -157,4 +165,4 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
             "openlit.otel.tracing",
         }
 
-        return log_data.instrumentation_scope.name in gen_ai_instrumentations
+        return log.instrumentation_scope.name in gen_ai_instrumentations
