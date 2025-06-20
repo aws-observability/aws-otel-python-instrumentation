@@ -94,17 +94,9 @@ class CloudWatchEMFExporter(MetricExporter):
         self.metric_declarations = metric_declarations or []
         self.parse_json_encoded_attr_values = parse_json_encoded_attr_values
 
-        # Initialize CloudWatch Logs client
-        # If aws_region is not provided, boto3 will check environment variables AWS_REGION or AWS_DEFAULT_REGION
-        # Make sure we have a region specified somehow
-        if aws_region is None:
-            aws_region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
-
         session = boto3.Session(region_name=aws_region)
         self.logs_client = session.client("logs", **kwargs)
 
-        # Ensure log group exists
-        self._ensure_log_group_exists()
 
     def _generate_log_stream_name(self) -> str:
         """Generate a unique log stream name."""
@@ -112,18 +104,6 @@ class CloudWatchEMFExporter(MetricExporter):
 
         unique_id = str(uuid.uuid4())[:8]
         return f"otel-python-{unique_id}"
-
-    def _ensure_log_group_exists(self):
-        """Ensure the log group exists, create if it doesn't."""
-        try:
-            self.logs_client.describe_log_groups(logGroupNamePrefix=self.log_group_name, limit=1)
-        except Exception:
-            try:
-                self.logs_client.create_log_group(logGroupName=self.log_group_name)
-                logger.info(f"Created log group: {self.log_group_name}")
-            except Exception as e:
-                logger.error(f"Failed to create log group {self.log_group_name}: {e}")
-                raise
 
     def _get_metric_name(self, record) -> str:
         """Get the metric name from the metric record or data point."""
@@ -749,23 +729,8 @@ class CloudWatchEMFExporter(MetricExporter):
         start_time = time.time()
 
         try:
-            # Create log group and stream if they don't exist
-            try:
-                self.logs_client.create_log_group(logGroupName=self.log_group_name)
-                logger.debug(f"Created log group: {self.log_group_name}")
-            except self.logs_client.exceptions.ResourceAlreadyExistsException:
-                # Log group already exists, this is fine
-                logger.debug(f"Log group {self.log_group_name} already exists")
 
-            # Create log stream if it doesn't exist
-            try:
-                self.logs_client.create_log_stream(logGroupName=self.log_group_name, logStreamName=self.log_stream_name)
-                logger.debug(f"Created log stream: {self.log_stream_name}")
-            except self.logs_client.exceptions.ResourceAlreadyExistsException:
-                # Log stream already exists, this is fine
-                logger.debug(f"Log stream {self.log_stream_name} already exists")
-
-            # Make the PutLogEvents call
+            # Attempt to send log events directly first
             response = self.logs_client.put_log_events(**put_log_events_input)
 
             elapsed_ms = int((time.time() - start_time) * 1000)
@@ -777,11 +742,58 @@ class CloudWatchEMFExporter(MetricExporter):
             return response
 
         except Exception as e:
-            logger.error(f"Failed to send log events: {e}")
-            import traceback
+            # Check if the error is due to missing log group or log stream
+            error_code = getattr(e, 'response', {}).get('Error', {}).get('Code')
+            
+            if error_code == 'ResourceNotFoundException':
+                logger.debug(f"Log group or stream not found, attempting to create them: {e}")
+                
+                # Try to create log group first
+                try:
+                    self.logs_client.create_log_group(logGroupName=self.log_group_name)
+                    logger.info(f"Created log group: {self.log_group_name}")
+                except self.logs_client.exceptions.ResourceAlreadyExistsException:
+                    logger.debug(f"Log group {self.log_group_name} already exists")
+                except Exception as create_group_error:
+                    logger.error(f"Failed to create log group {self.log_group_name}: {create_group_error}")
+                    raise
 
-            logger.error(traceback.format_exc())
-            raise
+                # Try to create log stream
+                try:
+                    self.logs_client.create_log_stream(
+                        logGroupName=self.log_group_name, 
+                        logStreamName=self.log_stream_name
+                    )
+                    logger.info(f"Created log stream: {self.log_stream_name}")
+                except self.logs_client.exceptions.ResourceAlreadyExistsException:
+                    logger.debug(f"Log stream {self.log_stream_name} already exists")
+                except Exception as create_stream_error:
+                    logger.error(f"Failed to create log stream {self.log_stream_name}: {create_stream_error}")
+                    raise
+
+                # Retry the put_log_events call
+                try:
+                    response = self.logs_client.put_log_events(**put_log_events_input)
+                    
+                    elapsed_ms = int((time.time() - start_time) * 1000)
+                    logger.debug(
+                        f"Successfully sent {len(batch['logEvents'])} log events after creating resources "
+                        f"({batch['byteTotal'] / 1024:.2f} KB) in {elapsed_ms} ms"
+                    )
+                    
+                    return response
+                    
+                except Exception as retry_error:
+                    logger.error(f"Failed to send log events after creating resources: {retry_error}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    raise
+            else:
+                # For other errors, just re-raise
+                logger.error(f"Failed to send log events: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                raise
 
     # Event batch to store logs before sending to CloudWatch
     _event_batch = None
