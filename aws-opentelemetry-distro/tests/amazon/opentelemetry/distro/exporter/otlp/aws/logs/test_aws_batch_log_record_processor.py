@@ -99,9 +99,9 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         primitives: List[AnyValue] = ["test", b"test", 1, 1.2, True, False, None]
         expected_sizes = [4, 4, 1, 3, 4, 5, 0]
 
-        for i in range(len(primitives)):
+        for index, primitive in enumerate(primitives):
             log = self.generate_test_log_data(
-                log_body=primitives[i],
+                log_body=primitive,
                 attr_key="",
                 attr_val="",
                 log_body_depth=-1,
@@ -109,7 +109,7 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
                 count=1,
             )
 
-            expected_size = self.base_log_size + expected_sizes[i]
+            expected_size = self.base_log_size + expected_sizes[index]
             actual_size = self.processor._estimate_log_size(log[0])
 
             self.assertEqual(actual_size, expected_size)
@@ -254,9 +254,9 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
             4: 2,  # 5th batch (index 4) should have 2 logs
         }
 
-        for i, call in enumerate(batches):
+        for index, call in enumerate(batches):
             batch = call[0][0]
-            expected_size = expected_sizes[i]
+            expected_size = expected_sizes[index]
             self.assertEqual(len(batch), expected_size)
 
     @staticmethod
@@ -282,11 +282,11 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
 
         logs = []
 
-        for i in range(count):
+        for index in range(count):
             record = LogRecord(
                 timestamp=int(time.time_ns()),
-                trace_id=int(f"0x{i + 1:032x}", 16),
-                span_id=int(f"0x{i + 1:016x}", 16),
+                trace_id=int(f"0x{index + 1:032x}", 16),
+                span_id=int(f"0x{index + 1:016x}", 16),
                 trace_flags=TraceFlags(1),
                 severity_text="INFO",
                 severity_number=SeverityNumber.INFO,

@@ -87,7 +87,7 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
 
                         self._exporter.export(batch)
                 except Exception as exception:  # pylint: disable=broad-exception-caught
-                    _logger.exception("Exception while exporting logs: " + str(exception))
+                    _logger.exception("Exception while exporting logs: %s", exception)
                 detach(token)
 
     def _estimate_log_size(self, log: LogData, depth: int = 3) -> int:
@@ -145,7 +145,7 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
                             new_queue.append((content, current_depth + 1))
                 else:
                     _logger.debug(
-                        f"Max log depth of {depth} exceeded. Log data size will not be accurately calculated."
+                        "Max log depth of %s exceeded. Log data size will not be accurately calculated.", depth
                     )
 
             queue = new_queue

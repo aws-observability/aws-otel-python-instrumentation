@@ -105,8 +105,8 @@ class TestOTLPAwsLogsExporter(TestCase):
 
         delays = mock_sleep.call_args_list
 
-        for i in range(len(delays)):
-            self.assertEqual(delays[i][0][0], 2**i)
+        for i, delay in enumerate(delays):
+            self.assertEqual(delay[0][0], 2**i)
 
         # Number of calls: 1 + len(1, 2, 4, 8, 16, 32 delays)
         self.assertEqual(mock_request.call_count, 7)
@@ -125,8 +125,8 @@ class TestOTLPAwsLogsExporter(TestCase):
         result = self.exporter.export(self.logs)
         delays = mock_sleep.call_args_list
 
-        for i in range(len(delays)):
-            self.assertEqual(delays[i][0][0], 10)
+        for delay in delays:
+            self.assertEqual(delay[0][0], 10)
 
         self.assertEqual(mock_sleep.call_count, 3)
         self.assertEqual(mock_request.call_count, 4)
@@ -152,8 +152,8 @@ class TestOTLPAwsLogsExporter(TestCase):
         result = self.exporter.export(self.logs)
         delays = mock_sleep.call_args_list
 
-        for i in range(len(delays)):
-            self.assertEqual(delays[i][0][0], 2**i)
+        for index, delay in enumerate(delays):
+            self.assertEqual(delay[0][0], 2**index)
 
         self.assertEqual(mock_sleep.call_count, 3)
         self.assertEqual(mock_request.call_count, 4)
@@ -167,18 +167,19 @@ class TestOTLPAwsLogsExporter(TestCase):
         self.assertEqual(mock_request.call_count, 2)
         self.assertEqual(result, LogExportResult.SUCCESS)
 
-    def generate_test_log_data(self, count=5):
+    @staticmethod
+    def generate_test_log_data(count=5):
         logs = []
-        for i in range(count):
+        for index in range(count):
             record = LogRecord(
                 timestamp=int(time.time_ns()),
-                trace_id=int(f"0x{i + 1:032x}", 16),
-                span_id=int(f"0x{i + 1:016x}", 16),
+                trace_id=int(f"0x{index + 1:032x}", 16),
+                span_id=int(f"0x{index + 1:016x}", 16),
                 trace_flags=TraceFlags(1),
                 severity_text="INFO",
                 severity_number=SeverityNumber.INFO,
-                body=f"Test log {i + 1}",
-                attributes={"test.attribute": f"value-{i + 1}"},
+                body=f"Test log {index + 1}",
+                attributes={"test.attribute": f"value-{index + 1}"},
             )
 
             log_data = LogData(log_record=record, instrumentation_scope=InstrumentationScope("test-scope", "1.0.0"))
