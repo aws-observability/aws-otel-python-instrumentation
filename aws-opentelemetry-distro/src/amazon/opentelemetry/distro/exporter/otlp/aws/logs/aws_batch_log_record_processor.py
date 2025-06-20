@@ -42,7 +42,7 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
         self._exporter = exporter
 
     # https://github.com/open-telemetry/opentelemetry-python/blob/main/opentelemetry-sdk/src/opentelemetry/sdk/_shared_internal/__init__.py#L143
-    def _export(self, batch_strategy: BatchLogExportStrategy) -> None:
+    def _export(self, batch_strategy: BatchLogExportStrategy) -> None:  # pylint: disable=too-many-nested-blocks
         """
         Preserves existing batching behavior but will intermediarly export small log batches if
         the size of the data in the batch is at orabove AWS CloudWatch's maximum request size limit of 1 MB.
