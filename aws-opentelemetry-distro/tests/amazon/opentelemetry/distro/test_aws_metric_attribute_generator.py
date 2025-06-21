@@ -14,7 +14,6 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_AGENT_ID,
     AWS_BEDROCK_DATA_SOURCE_ID,
     AWS_BEDROCK_GUARDRAIL_ARN,
-    AWS_BEDROCK_GUARDRAIL_ARN,
     AWS_BEDROCK_GUARDRAIL_ID,
     AWS_BEDROCK_KNOWLEDGE_BASE_ID,
     AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER,
@@ -1034,14 +1033,24 @@ class TestAwsMetricAttributeGenerator(TestCase):
         # Validate behaviour of aws bucket name attribute, then remove it.
         self._mock_attribute([SpanAttributes.AWS_S3_BUCKET], ["aws_s3_bucket_name"], keys, values)
         self._validate_remote_resource_attributes(
-            "AWS::S3::Bucket", "aws_s3_bucket_name", None,  _AWS_REMOTE_RESOURCE_REGION, None, _AWS_REMOTE_RESOURCE_ACCESS_KEY
+            "AWS::S3::Bucket",
+            "aws_s3_bucket_name",
+            None,
+            _AWS_REMOTE_RESOURCE_REGION,
+            None,
+            _AWS_REMOTE_RESOURCE_ACCESS_KEY,
         )
         self._mock_attribute([SpanAttributes.AWS_S3_BUCKET], [None])
 
         # Validate behaviour of AWS_SQS_QUEUE_NAME attribute, then remove it
         self._mock_attribute([AWS_SQS_QUEUE_NAME], ["aws_queue_name"], keys, values)
         self._validate_remote_resource_attributes(
-            "AWS::SQS::Queue", "aws_queue_name",  None, _AWS_REMOTE_RESOURCE_REGION, None, _AWS_REMOTE_RESOURCE_ACCESS_KEY
+            "AWS::SQS::Queue",
+            "aws_queue_name",
+            None,
+            _AWS_REMOTE_RESOURCE_REGION,
+            None,
+            _AWS_REMOTE_RESOURCE_ACCESS_KEY,
         )
         self._mock_attribute([AWS_SQS_QUEUE_NAME], [None])
 
@@ -1082,7 +1091,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._validate_remote_resource_attributes(
             "AWS::Kinesis::Stream",
             "aws_stream_name",
-            None, 
+            None,
             "us-west-2",
             "123456789012",
             None,
@@ -1094,7 +1103,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._validate_remote_resource_attributes(
             "AWS::Kinesis::Stream",
             "aws_stream_name",
-             None, 
+            None,
             _AWS_REMOTE_RESOURCE_REGION,
             None,
             _AWS_REMOTE_RESOURCE_ACCESS_KEY,
@@ -1106,14 +1115,19 @@ class TestAwsMetricAttributeGenerator(TestCase):
             [AWS_DYNAMODB_TABLE_ARN], ["arn:aws:dynamodb:us-west-2:123456789012:table/aws_table_name"], keys, values
         )
         self._validate_remote_resource_attributes(
-            "AWS::DynamoDB::Table", "aws_table_name",  None,  "us-west-2", "123456789012", None
+            "AWS::DynamoDB::Table", "aws_table_name", None, "us-west-2", "123456789012", None
         )
         self._mock_attribute([AWS_DYNAMODB_TABLE_ARN], [None])
 
         # Validate behaviour of SpanAttributes.AWS_DYNAMODB_TABLE_NAMES attribute with one table name, then remove it.
         self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [["aws_table_name"]], keys, values)
         self._validate_remote_resource_attributes(
-            "AWS::DynamoDB::Table", "aws_table_name", None,  _AWS_REMOTE_RESOURCE_REGION, None, _AWS_REMOTE_RESOURCE_ACCESS_KEY
+            "AWS::DynamoDB::Table",
+            "aws_table_name",
+            None,
+            _AWS_REMOTE_RESOURCE_REGION,
+            None,
+            _AWS_REMOTE_RESOURCE_ACCESS_KEY,
         )
         self._mock_attribute([SpanAttributes.AWS_DYNAMODB_TABLE_NAMES], [None])
 
@@ -1134,7 +1148,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._validate_remote_resource_attributes(
             "AWS::DynamoDB::Table",
             "aws_table^|name",
-             None, 
+            None,
             _AWS_REMOTE_RESOURCE_REGION,
             None,
             _AWS_REMOTE_RESOURCE_ACCESS_KEY,
@@ -1146,7 +1160,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._validate_remote_resource_attributes(
             "AWS::DynamoDB::Table",
             "aws_table^^name",
-             None, 
+            None,
             _AWS_REMOTE_RESOURCE_REGION,
             None,
             _AWS_REMOTE_RESOURCE_ACCESS_KEY,
@@ -1156,14 +1170,24 @@ class TestAwsMetricAttributeGenerator(TestCase):
         # Validate behaviour of AWS_BEDROCK_AGENT_ID attribute, then remove it.
         self._mock_attribute([AWS_BEDROCK_AGENT_ID], ["test_agent_id"], keys, values)
         self._validate_remote_resource_attributes(
-            "AWS::Bedrock::Agent", "test_agent_id",  None, _AWS_REMOTE_RESOURCE_REGION, None, _AWS_REMOTE_RESOURCE_ACCESS_KEY
+            "AWS::Bedrock::Agent",
+            "test_agent_id",
+            None,
+            _AWS_REMOTE_RESOURCE_REGION,
+            None,
+            _AWS_REMOTE_RESOURCE_ACCESS_KEY,
         )
         self._mock_attribute([AWS_BEDROCK_AGENT_ID], [None])
 
         # Validate behaviour of AWS_BEDROCK_AGENT_ID attribute with special chars(^), then remove it.
         self._mock_attribute([AWS_BEDROCK_AGENT_ID], ["test_agent_^id"], keys, values)
         self._validate_remote_resource_attributes(
-            "AWS::Bedrock::Agent", "test_agent_^^id",  None, _AWS_REMOTE_RESOURCE_REGION, None, _AWS_REMOTE_RESOURCE_ACCESS_KEY
+            "AWS::Bedrock::Agent",
+            "test_agent_^^id",
+            None,
+            _AWS_REMOTE_RESOURCE_REGION,
+            None,
+            _AWS_REMOTE_RESOURCE_ACCESS_KEY,
         )
         self._mock_attribute([AWS_BEDROCK_AGENT_ID], [None])
 
@@ -1240,7 +1264,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._validate_remote_resource_attributes(
             "AWS::Bedrock::KnowledgeBase",
             "test_knowledgeBase_id",
-             None, 
+            None,
             _AWS_REMOTE_RESOURCE_REGION,
             None,
             _AWS_REMOTE_RESOURCE_ACCESS_KEY,
@@ -1252,7 +1276,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._validate_remote_resource_attributes(
             "AWS::Bedrock::KnowledgeBase",
             "test_knowledgeBase_^^id",
-             None, 
+            None,
             _AWS_REMOTE_RESOURCE_REGION,
             None,
             _AWS_REMOTE_RESOURCE_ACCESS_KEY,
@@ -1262,7 +1286,12 @@ class TestAwsMetricAttributeGenerator(TestCase):
         # Validate behaviour of GEN_AI_REQUEST_MODEL attribute, then remove it.
         self._mock_attribute([GEN_AI_REQUEST_MODEL], ["test.service_id"], keys, values)
         self._validate_remote_resource_attributes(
-            "AWS::Bedrock::Model", "test.service_id",  None,  _AWS_REMOTE_RESOURCE_REGION, None, _AWS_REMOTE_RESOURCE_ACCESS_KEY
+            "AWS::Bedrock::Model",
+            "test.service_id",
+            None,
+            _AWS_REMOTE_RESOURCE_REGION,
+            None,
+            _AWS_REMOTE_RESOURCE_ACCESS_KEY,
         )
         self._mock_attribute([GEN_AI_REQUEST_MODEL], [None])
 
@@ -1271,7 +1300,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._validate_remote_resource_attributes(
             "AWS::Bedrock::Model",
             "test.service_^^id",
-             None, 
+            None,
             _AWS_REMOTE_RESOURCE_REGION,
             None,
             _AWS_REMOTE_RESOURCE_ACCESS_KEY,
@@ -1346,7 +1375,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._validate_remote_resource_attributes(
             "AWS::Lambda::EventSourceMapping",
             "aws_event_source_mapping_id",
-             None, 
+            None,
             _AWS_REMOTE_RESOURCE_REGION,
             None,
             _AWS_REMOTE_RESOURCE_ACCESS_KEY,
@@ -1364,7 +1393,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._validate_remote_resource_attributes(
             "AWS::Lambda::EventSourceMapping",
             "aws_event_source_mapping_id",
-             None, 
+            None,
             _AWS_REMOTE_RESOURCE_REGION,
             None,
             _AWS_REMOTE_RESOURCE_ACCESS_KEY,
@@ -1449,7 +1478,12 @@ class TestAwsMetricAttributeGenerator(TestCase):
             values,
         )
         self._validate_remote_resource_attributes(
-            "AWS::Lambda::Function", "testLambdaName", "arn:aws:lambda:us-east-1:123456789012:function:testLambdaName", "us-east-1", "123456789012", None
+            "AWS::Lambda::Function",
+            "testLambdaName",
+            "arn:aws:lambda:us-east-1:123456789012:function:testLambdaName",
+            "us-east-1",
+            "123456789012",
+            None,
         )
         self._mock_attribute(
             [
@@ -1496,7 +1530,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self._validate_remote_resource_attributes(
             "AWS::StepFunctions::StateMachine",
             "invalid_arn",
-             None, 
+            None,
             _AWS_REMOTE_RESOURCE_REGION,
             None,
             _AWS_REMOTE_RESOURCE_ACCESS_KEY,
@@ -1523,7 +1557,12 @@ class TestAwsMetricAttributeGenerator(TestCase):
             ["arn:aws:states:us-east-1:123456789123:stateMachine:testStateMachine", "aws-api"],
         )
         self._validate_remote_resource_attributes(
-            "AWS::StepFunctions::StateMachine", "testStateMachine", "arn:aws:states:us-east-1:123456789123:stateMachine:testStateMachine", "us-east-1", "123456789123", None
+            "AWS::StepFunctions::StateMachine",
+            "testStateMachine",
+            "arn:aws:states:us-east-1:123456789123:stateMachine:testStateMachine",
+            "us-east-1",
+            "123456789123",
+            None,
         )
         self._mock_attribute([AWS_STEPFUNCTIONS_STATEMACHINE_ARN], [None])
 
@@ -1532,7 +1571,11 @@ class TestAwsMetricAttributeGenerator(TestCase):
             [AWS_STEPFUNCTIONS_STATEMACHINE_ARN, SpanAttributes.RPC_SYSTEM],
             ["arn:aws:states:us-east-1:invalid_account_id:stateMachine:testStateMachine", "aws-api"],
         )
-        self._validate_remote_resource_attributes("AWS::StepFunctions::StateMachine", "testStateMachine", "arn:aws:states:us-east-1:invalid_account_id:stateMachine:testStateMachine")
+        self._validate_remote_resource_attributes(
+            "AWS::StepFunctions::StateMachine",
+            "testStateMachine",
+            "arn:aws:states:us-east-1:invalid_account_id:stateMachine:testStateMachine",
+        )
         self._mock_attribute([AWS_STEPFUNCTIONS_STATEMACHINE_ARN], [None])
 
         # Arn with invalid region
@@ -1541,7 +1584,12 @@ class TestAwsMetricAttributeGenerator(TestCase):
             ["arn:aws:states:invalid_region:123456789123:stateMachine:testStateMachine", "aws-api"],
         )
         self._validate_remote_resource_attributes(
-            "AWS::StepFunctions::StateMachine", "testStateMachine",  "arn:aws:states:invalid_region:123456789123:stateMachine:testStateMachine", "invalid_region", "123456789123", None
+            "AWS::StepFunctions::StateMachine",
+            "testStateMachine",
+            "arn:aws:states:invalid_region:123456789123:stateMachine:testStateMachine",
+            "invalid_region",
+            "123456789123",
+            None,
         )
         self._mock_attribute([AWS_STEPFUNCTIONS_STATEMACHINE_ARN], [None])
 
