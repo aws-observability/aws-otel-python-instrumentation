@@ -43,6 +43,7 @@ from opentelemetry.instrumentation.botocore.extensions.types import (
     _BotocoreInstrumentorContext,
     _BotoResultT,
 )
+from opentelemetry.instrumentation.botocore.utils import get_server_attributes
 from opentelemetry.instrumentation.utils import (
     is_instrumentation_enabled,
     suppress_http_instrumentation,
@@ -238,8 +239,8 @@ def _apply_botocore_dynamodb_patch() -> None:
     """
     old_on_success = _DynamoDbExtension.on_success
 
-    def patch_on_success(self, span: Span, result: _BotoResultT):
-        old_on_success(self, span, result)
+    def patch_on_success(self, span: Span, result: _BotoResultT, instrumentor_context: _BotocoreInstrumentorContext):
+        old_on_success(self, span, result, instrumentor_context)
         table = result.get("Table", {})
         table_arn = table.get("TableArn")
         if table_arn:
@@ -250,6 +251,19 @@ def _apply_botocore_dynamodb_patch() -> None:
 
 def _apply_botocore_api_call_patch() -> None:
     def patched_api_call(self, original_func, instance, args, kwargs):
+        """Botocore instrumentation patch to capture AWS authentication details
+
+        This patch extends the upstream implementation to include additional AWS authentication
+        attributes:
+            - aws.auth.account.access_key
+            - aws.auth.region
+
+        Note: Current implementation duplicates upstream code in v1.33.x-0.54bx. Future improvements should:
+        1. Propose refactoring upstream _patched_api_call into smaller components
+        2. Apply targeted patches to these components to reduce code duplication
+
+        Reference: https://github.com/open-telemetry/opentelemetry-python-contrib/blob/release/v1.33.x-0.54bx/instrumentation/opentelemetry-instrumentation-botocore/src/opentelemetry/instrumentation/botocore/__init__.py#L263
+        """
         if not is_instrumentation_enabled():
             return original_func(*args, **kwargs)
 
@@ -265,7 +279,9 @@ def _apply_botocore_api_call_patch() -> None:
             SpanAttributes.RPC_SYSTEM: "aws-api",
             SpanAttributes.RPC_SERVICE: call_context.service_id,
             SpanAttributes.RPC_METHOD: call_context.operation,
+            # TODO: update when semantic conventions exist
             "aws.region": call_context.region,
+            **get_server_attributes(call_context.endpoint_url),
             AWS_AUTH_REGION: call_context.region,
         }
         credentials = instance._get_credentials()
@@ -276,13 +292,25 @@ def _apply_botocore_api_call_patch() -> None:
                 attributes[AWS_AUTH_ACCESS_KEY] = access_key
 
         _safe_invoke(extension.extract_attributes, attributes)
+        end_span_on_exit = extension.should_end_span_on_exit()
 
-        with self._tracer.start_as_current_span(
+        tracer = self._get_tracer(extension)
+        event_logger = self._get_event_logger(extension)
+        meter = self._get_meter(extension)
+        metrics = self._get_metrics(extension, meter)
+        instrumentor_ctx = _BotocoreInstrumentorContext(
+            event_logger=event_logger,
+            metrics=metrics,
+        )
+        with tracer.start_as_current_span(
             call_context.span_name,
             kind=call_context.span_kind,
             attributes=attributes,
+            # tracing streaming services require to close the span manually
+            # at a later time after the stream has been consumed
+            end_on_exit=end_span_on_exit,
         ) as span:
-            _safe_invoke(extension.before_service_call, span)
+            _safe_invoke(extension.before_service_call, span, instrumentor_ctx)
             self._call_request_hook(span, call_context)
 
             try:
@@ -293,12 +321,12 @@ def _apply_botocore_api_call_patch() -> None:
                     except ClientError as error:
                         result = getattr(error, "response", None)
                         _apply_response_attributes(span, result)
-                        _safe_invoke(extension.on_error, span, error)
+                        _safe_invoke(extension.on_error, span, error, instrumentor_ctx)
                         raise
                     _apply_response_attributes(span, result)
-                    _safe_invoke(extension.on_success, span, result)
+                    _safe_invoke(extension.on_success, span, result, instrumentor_ctx)
             finally:
-                _safe_invoke(extension.after_service_call)
+                _safe_invoke(extension.after_service_call, instrumentor_ctx)
                 self._call_response_hook(span, call_context, result)
 
             return result
