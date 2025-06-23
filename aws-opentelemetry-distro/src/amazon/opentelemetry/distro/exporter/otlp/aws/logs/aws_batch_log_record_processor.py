@@ -19,7 +19,8 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
         1000  # Buffer size in bytes to account for log metadata not included in the body or attribute size calculation
     )
     _MAX_LOG_REQUEST_BYTE_SIZE = (
-        1048576  # https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-OTLPEndpoint.html
+        1048576  # Maximum uncompressed/unserialized bytes / request -
+        # https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-OTLPEndpoint.html
     )
 
     def __init__(
@@ -41,11 +42,15 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
 
         self._exporter = exporter
 
-    # https://github.com/open-telemetry/opentelemetry-python/blob/main/opentelemetry-sdk/src/opentelemetry/sdk/_shared_internal/__init__.py#L143
     def _export(self, batch_strategy: BatchLogExportStrategy) -> None:
         """
+
+        Explictily overrides upstream _export method to add AWS CloudWatch size-based batching
+        See:
+        https://github.com/open-telemetry/opentelemetry-python/blob/bb21ebd46d070c359eee286c97bdf53bfd06759d/opentelemetry-sdk/src/opentelemetry/sdk/_shared_internal/__init__.py#L143
+
         Preserves existing batching behavior but will intermediarly export small log batches if
-        the size of the data in the batch is at orabove AWS CloudWatch's maximum request size limit of 1 MB.
+        the size of the data in the batch is at or above AWS CloudWatch's maximum request size limit of 1 MB.
 
         - Data size of exported batches will ALWAYS be <= 1 MB except for the case below:
         - If the data size of an exported batch is ever > 1 MB then the batch size is guaranteed to be 1
@@ -66,14 +71,7 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
                         log_data: LogData = self._queue.pop()
                         log_size = self._estimate_log_size(log_data)
 
-                        if batch and (
-                            batch_data_size + log_size > self._MAX_LOG_REQUEST_BYTE_SIZE
-                        ):  # pylint: disable=too-many-nested-blocks
-                            # if batch_data_size > MAX_LOG_REQUEST_BYTE_SIZE then len(batch) == 1
-                            if batch_data_size > self._MAX_LOG_REQUEST_BYTE_SIZE:
-                                if self._is_gen_ai_log(batch[0]):
-                                    self._exporter.set_gen_ai_log_flag()
-
+                        if batch and (batch_data_size + log_size > self._MAX_LOG_REQUEST_BYTE_SIZE):
                             self._exporter.export(batch)
                             batch_data_size = 0
                             batch = []
@@ -82,11 +80,6 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
                         batch.append(log_data)
 
                     if batch:
-                        # if batch_data_size > MAX_LOG_REQUEST_BYTE_SIZE then len(batch) == 1
-                        if batch_data_size > self._MAX_LOG_REQUEST_BYTE_SIZE:
-                            if self._is_gen_ai_log(batch[0]):
-                                self._exporter.set_gen_ai_log_flag()
-
                         self._exporter.export(batch)
                 except Exception as exception:  # pylint: disable=broad-exception-caught
                     _logger.exception("Exception while exporting logs: %s", exception)
@@ -97,7 +90,7 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
         Estimates the size in bytes of a log by calculating the size of its body and its attributes
         and adding a buffer amount to account for other log metadata information.
         Will process complex log structures up to the specified depth limit.
-        If the depth limit of the log structure is exceeded, returns truncates calculation
+        If the depth limit of the log structure is exceeded, returns the truncated calculation
         to everything up to that point.
 
         Args:
@@ -153,18 +146,3 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
             queue = new_queue
 
         return size
-
-    @staticmethod
-    def _is_gen_ai_log(log: LogData) -> bool:
-        """
-        Is the log a Gen AI log event?
-        """
-        gen_ai_instrumentations = {
-            "openinference.instrumentation.langchain",
-            "openinference.instrumentation.crewai",
-            "opentelemetry.instrumentation.langchain",
-            "crewai.telemetry",
-            "openlit.otel.tracing",
-        }
-
-        return log.instrumentation_scope.name in gen_ai_instrumentations

@@ -142,7 +142,6 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         self.assertEqual(len(self.processor._queue), 0)
         self.assertEqual(len(actual_batch), log_count)
         self.mock_exporter.export.assert_called_once()
-        self.mock_exporter.set_gen_ai_log_flag.assert_not_called()
 
     @patch(
         "amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.attach",
@@ -151,37 +150,12 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.detach")
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.set_value")
     def test_export_single_batch_all_logs_over_size_limit(self, _, __, ___):
-        """Should make multiple export calls of batch size 1 to export logs of size > 1 MB.
-        But should only call set_gen_ai_log_flag if it's a Gen AI log event."""
+        """Should make multiple export calls of batch size 1 to export logs of size > 1 MB."""
 
         large_log_body = "X" * (self.processor._MAX_LOG_REQUEST_BYTE_SIZE + 1)
-        non_gen_ai_test_logs = self.generate_test_log_data(
-            log_body=large_log_body, attr_key="", attr_val="", log_body_depth=-1, attr_depth=-1, count=3
+        test_logs = self.generate_test_log_data(
+            log_body=large_log_body, attr_key="", attr_val="", log_body_depth=-1, attr_depth=-1, count=15
         )
-        gen_ai_test_logs = []
-
-        gen_ai_scopes = [
-            "openinference.instrumentation.langchain",
-            "openinference.instrumentation.crewai",
-            "opentelemetry.instrumentation.langchain",
-            "crewai.telemetry",
-            "openlit.otel.tracing",
-        ]
-
-        for gen_ai_scope in gen_ai_scopes:
-            gen_ai_test_logs.extend(
-                self.generate_test_log_data(
-                    log_body=large_log_body,
-                    attr_key="",
-                    attr_val="",
-                    log_body_depth=-1,
-                    attr_depth=-1,
-                    count=3,
-                    instrumentation_scope=InstrumentationScope(gen_ai_scope, "1.0.0"),
-                )
-            )
-
-        test_logs = gen_ai_test_logs + non_gen_ai_test_logs
 
         for log in test_logs:
             self.processor._queue.appendleft(log)
@@ -189,8 +163,7 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         self.processor._export(batch_strategy=BatchLogExportStrategy.EXPORT_ALL)
 
         self.assertEqual(len(self.processor._queue), 0)
-        self.assertEqual(self.mock_exporter.export.call_count, 3 + len(gen_ai_test_logs))
-        self.assertEqual(self.mock_exporter.set_gen_ai_log_flag.call_count, len(gen_ai_test_logs))
+        self.assertEqual(self.mock_exporter.export.call_count, len(test_logs))
 
         batches = self.mock_exporter.export.call_args_list
 
@@ -208,8 +181,6 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         large_log_body = "X" * (self.max_log_size + 1)
         small_log_body = "X" * (self.max_log_size // 10 - self.base_log_size)
 
-        gen_ai_scope = InstrumentationScope("openinference.instrumentation.langchain", "1.0.0")
-
         large_logs = self.generate_test_log_data(
             log_body=large_log_body,
             attr_key="",
@@ -217,7 +188,6 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
             log_body_depth=-1,
             attr_depth=-1,
             count=3,
-            instrumentation_scope=gen_ai_scope,
         )
 
         small_logs = self.generate_test_log_data(
@@ -227,7 +197,6 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
             log_body_depth=-1,
             attr_depth=-1,
             count=12,
-            instrumentation_scope=gen_ai_scope,
         )
 
         # 1st, 2nd, 3rd batch = size 1
@@ -242,7 +211,6 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
 
         self.assertEqual(len(self.processor._queue), 0)
         self.assertEqual(self.mock_exporter.export.call_count, 5)
-        self.assertEqual(self.mock_exporter.set_gen_ai_log_flag.call_count, 3)
 
         batches = self.mock_exporter.export.call_args_list
 
@@ -294,7 +262,7 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
                 attributes={attr_key: generate_nested_value(attr_depth, attr_val, create_map)},
             )
 
-            log_data = LogData(log_record=record, instrumentation_scope=instrumentation_scope)
+            log_data = LogData(log_record=record, instrumentation_scope=InstrumentationScope("test-scope", "1.0.0"))
             logs.append(log_data)
 
         return logs

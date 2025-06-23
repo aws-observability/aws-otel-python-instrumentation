@@ -57,24 +57,6 @@ class TestOTLPAwsLogsExporter(TestCase):
         self.assertEqual(data[0:2], b"\x1f\x8b")
 
     @patch("requests.Session.post", return_value=good_response)
-    def test_export_gen_ai_logs(self, mock_request):
-        """Tests that when set_gen_ai_log_flag is set, the exporter includes the LLO header in the request."""
-
-        self.exporter.set_gen_ai_log_flag()
-
-        result = self.exporter.export(self.logs)
-
-        mock_request.assert_called_once()
-
-        _, kwargs = mock_request.call_args
-        headers = kwargs.get("headers", None)
-
-        self.assertEqual(result, LogExportResult.SUCCESS)
-        self.assertIsNotNone(headers)
-        self.assertIn(self.exporter._LARGE_LOG_HEADER, headers)
-        self.assertEqual(headers[self.exporter._LARGE_LOG_HEADER], self.exporter._LARGE_GEN_AI_LOG_PATH_HEADER)
-
-    @patch("requests.Session.post", return_value=good_response)
     def test_should_not_export_if_shutdown(self, mock_request):
         """Tests that no export request is made if the exporter is shutdown."""
         self.exporter.shutdown()
