@@ -611,9 +611,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
                 config, _customize_logs_exporter, OTLPLogExporter(), OTLPLogExporter, Session, Compression.NoCompression
             )
 
-        self.assertIsInstance(
-            _customize_logs_exporter(OTLPGrpcLogExporter()), OTLPGrpcLogExporter
-        )
+        self.assertIsInstance(_customize_logs_exporter(OTLPGrpcLogExporter()), OTLPGrpcLogExporter)
 
     # Need to patch all of these to prevent some weird multi-threading error with the LogProvider
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.LoggingHandler", return_value=MagicMock())
@@ -827,14 +825,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("OTEL_METRIC_EXPORT_INTERVAL", None)
 
     def customize_exporter_test(
-        self,
-        config,
-        executor,
-        default_exporter,
-        expected_exporter_type,
-        expected_session,
-        expected_compression,
-        *args
+        self, config, executor, default_exporter, expected_exporter_type, expected_session, expected_compression, *args
     ):
         for key, value in config.items():
             os.environ[key] = value
