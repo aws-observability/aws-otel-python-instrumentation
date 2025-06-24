@@ -185,7 +185,7 @@ def _initialize_components(setup_logging_handler: Optional[bool] = None):
 
 def _init_logging(
     exporters: dict[str, Type[LogExporter]],
-    resource: Resource | None = None,
+    resource: Optional[Resource] = None,
     setup_logging_handler: bool = True,
 ):
     provider = LoggerProvider(resource=resource)
