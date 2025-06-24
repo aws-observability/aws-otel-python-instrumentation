@@ -7,7 +7,7 @@ from io import BytesIO
 from time import sleep
 from typing import Dict, Optional, Sequence
 
-import requests
+from requests import Response
 from requests.exceptions import ConnectionError
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
@@ -34,7 +34,6 @@ class OTLPAwsLogExporter(OTLPLogExporter):
         headers: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None,
     ):
-        self._gen_ai_log_flag = False
         self._aws_region = None
 
         if endpoint:
@@ -77,6 +76,10 @@ class OTLPAwsLogExporter(OTLPLogExporter):
 
         backoff = _create_exp_backoff_generator(max_value=self._MAX_RETRY_TIMEOUT)
 
+        # This loop will eventually exit via one of three conditions:
+        # 1. Successful response (resp.ok)
+        # 2. Non-retryable error (4xx status codes except 429)
+        # 3. Retry exponential backoff timeout exhausted and no Retry-After header available
         while True:
             resp = self._send(data)
 
@@ -141,7 +144,7 @@ class OTLPAwsLogExporter(OTLPLogExporter):
             return response
 
     @staticmethod
-    def _retryable(resp: requests.Response) -> bool:
+    def _retryable(resp: Response) -> bool:
         """
         Is it a retryable response?
         """

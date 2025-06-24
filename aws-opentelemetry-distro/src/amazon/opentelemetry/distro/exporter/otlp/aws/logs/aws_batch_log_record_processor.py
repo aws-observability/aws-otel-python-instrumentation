@@ -44,7 +44,6 @@ class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
 
     def _export(self, batch_strategy: BatchLogExportStrategy) -> None:
         """
-
         Explicitly overrides upstream _export method to add AWS CloudWatch size-based batching
         See:
         https://github.com/open-telemetry/opentelemetry-python/blob/bb21ebd46d070c359eee286c97bdf53bfd06759d/opentelemetry-sdk/src/opentelemetry/sdk/_shared_internal/__init__.py#L143
