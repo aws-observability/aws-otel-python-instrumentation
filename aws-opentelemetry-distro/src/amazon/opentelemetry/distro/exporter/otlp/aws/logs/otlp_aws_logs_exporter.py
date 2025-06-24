@@ -8,7 +8,7 @@ from time import sleep
 from typing import Dict, Optional, Sequence
 
 from requests import Response
-from requests.exceptions import ConnectionError
+from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.structures import CaseInsensitiveDict
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
@@ -119,7 +119,7 @@ class OTLPAwsLogExporter(OTLPLogExporter):
                 cert=self._client_cert,
             )
             return response
-        except ConnectionError:
+        except RequestsConnectionError:
             response = self._session.post(
                 url=self._endpoint,
                 data=serialized_data,
