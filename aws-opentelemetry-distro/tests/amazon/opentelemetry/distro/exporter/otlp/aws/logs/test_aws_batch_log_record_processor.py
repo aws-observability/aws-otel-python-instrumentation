@@ -6,7 +6,7 @@ from typing import List
 from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor import (
-    AwsBatchLogRecordProcessor,
+    AwsCloudWatchOtlpBatchLogRecordProcessor,
     BatchLogExportStrategy,
 )
 from opentelemetry._logs.severity import SeverityNumber
@@ -23,7 +23,7 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         self.mock_exporter = MagicMock()
         self.mock_exporter.export.return_value = LogExportResult.SUCCESS
 
-        self.processor = AwsBatchLogRecordProcessor(exporter=self.mock_exporter)
+        self.processor = AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=self.mock_exporter)
         self.max_log_size = self.processor._MAX_LOG_REQUEST_BYTE_SIZE
         self.base_log_size = self.processor._BASE_LOG_BUFFER_BYTE_SIZE
 

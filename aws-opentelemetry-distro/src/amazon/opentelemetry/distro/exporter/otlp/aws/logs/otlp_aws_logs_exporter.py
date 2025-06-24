@@ -9,6 +9,7 @@ from typing import Dict, Optional, Sequence
 
 from requests import Response
 from requests.exceptions import ConnectionError
+from requests.structures import CaseInsensitiveDict
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 from opentelemetry.exporter.otlp.proto.common._internal import _create_exp_backoff_generator
@@ -76,43 +77,28 @@ class OTLPAwsLogExporter(OTLPLogExporter):
 
         backoff = _create_exp_backoff_generator(max_value=self._MAX_RETRY_TIMEOUT)
 
-        # This loop will eventually exit via one of three conditions:
-        # 1. Successful response (resp.ok)
-        # 2. Non-retryable error (4xx status codes except 429)
-        # 3. Retry exponential backoff timeout exhausted and no Retry-After header available
         while True:
             resp = self._send(data)
 
             if resp.ok:
                 return LogExportResult.SUCCESS
 
-            if not self._retryable(resp):
-                _logger.error(
-                    "Failed to export logs batch code: %s, reason: %s",
-                    resp.status_code,
-                    resp.text,
-                )
-                return LogExportResult.FAILURE
+            delay = self._get_retry_delay_sec(resp.headers, backoff)
+            is_retryable = self._retryable(resp)
 
-            # See: https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
-            maybe_retry_after = resp.headers.get(self._RETRY_AFTER_HEADER, None)
-
-            # Set the next retry delay to the value of the Retry-After response in the headers.
-            # If Retry-After is not present in the headers, default to the next iteration of the
-            # exponential backoff strategy.
-
-            delay = self._parse_retryable_header(maybe_retry_after)
-
-            if delay == -1:
-                delay = next(backoff, self._MAX_RETRY_TIMEOUT)
-
-            if delay == self._MAX_RETRY_TIMEOUT:
-                _logger.error(
-                    "Transient error %s encountered while exporting logs batch. "
-                    "No Retry-After header found and all backoff retries exhausted. "
-                    "Logs will not be exported.",
-                    resp.reason,
-                )
+            if not is_retryable or delay == self._MAX_RETRY_TIMEOUT:
+                if is_retryable:
+                    _logger.error(
+                        "Failed to export logs due to retries exhausted "
+                        "after transient error %s encountered while exporting logs batch",
+                        resp.reason,
+                    )
+                else:
+                    _logger.error(
+                        "Failed to export logs batch code: %s, reason: %s",
+                        resp.status_code,
+                        resp.text,
+                    )
                 return LogExportResult.FAILURE
 
             _logger.warning(
@@ -151,6 +137,24 @@ class OTLPAwsLogExporter(OTLPLogExporter):
         # See: https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
 
         return resp.status_code in (429, 503) or OTLPLogExporter._retryable(resp)
+
+    def _get_retry_delay_sec(self, headers: CaseInsensitiveDict, backoff) -> float:
+        """
+        Get retry delay in seconds from headers or backoff strategy.
+        """
+        # See: https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
+        maybe_retry_after = headers.get(self._RETRY_AFTER_HEADER, None)
+
+        # Set the next retry delay to the value of the Retry-After response in the headers.
+        # If Retry-After is not present in the headers, default to the next iteration of the
+        # exponential backoff strategy.
+
+        delay = self._parse_retryable_header(maybe_retry_after)
+
+        if delay == -1:
+            delay = next(backoff, self._MAX_RETRY_TIMEOUT)
+
+        return delay
 
     @staticmethod
     def _parse_retryable_header(retry_header: Optional[str]) -> float:

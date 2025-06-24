@@ -14,7 +14,20 @@ from opentelemetry.util.types import AnyValue
 _logger = logging.getLogger(__name__)
 
 
-class AwsBatchLogRecordProcessor(BatchLogRecordProcessor):
+class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
+    """
+    Custom implementation of BatchLogRecordProcessor that manages log record batching
+    with size-based constraints to prevent exceeding AWS CloudWatch Logs OTLP endpoint request size limits.
+
+    This processor still exports all logs up to _max_export_batch_size but rather than doing exactly
+    one export, we will estimate log sizes and do multiple batch exports
+    where each exported batch will have an additonal constraint:
+
+    If the batch to be exported will have a data size of > 1 MB:
+    The batch will be split into multiple exports of sub-batches of data size <= 1 MB.
+
+    A unique case is if the sub-batch is of data size > 1 MB, then the sub-batch will have exactly 1 log in it.
+    """
     _BASE_LOG_BUFFER_BYTE_SIZE = (
         1000  # Buffer size in bytes to account for log metadata not included in the body or attribute size calculation
     )

@@ -22,7 +22,7 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor import AwsBatchLogRecordProcessor
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor import AwsCloudWatchOtlpBatchLogRecordProcessor
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
@@ -106,7 +106,7 @@ AWS_OTLP_LOGS_STREAM_HEADER = "x-aws-log-stream"
 # UDP package size is not larger than 64KB
 LAMBDA_SPAN_EXPORT_BATCH_SIZE = 10
 
-_logger: Logger = getLogger(__name__)
+_logger: logging.Logger = logging.getLogger(__name__)
 
 
 class AwsOpenTelemetryConfigurator(_OTelSDKConfigurator):
@@ -394,7 +394,7 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
 
 def _customize_log_record_processor(log_exporter: LogExporter):
     if isinstance(log_exporter, OTLPAwsLogExporter) and is_agent_observability_enabled():
-        return AwsBatchLogRecordProcessor(exporter=log_exporter)
+        return AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=log_exporter)
 
     return BatchLogRecordProcessor(exporter=log_exporter)
 
