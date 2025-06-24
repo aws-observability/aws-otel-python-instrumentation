@@ -80,7 +80,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
-    def test_configure_without_patches(self, mock_super_configure, mock_apply_patches):
+    def test_configure_without_patches(self, mock_super_configure, mock_apply_patches):  # pylint: disable=no-self-use
         """Test that _configure can skip applying patches"""
         distro = AwsOpenTelemetryDistro()
         distro._configure(apply_patches=False)
