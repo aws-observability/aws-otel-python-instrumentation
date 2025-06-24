@@ -138,7 +138,7 @@ class AwsOpenTelemetryConfigurator(_OTelSDKConfigurator):
 # The OpenTelemetry Authors code
 # Long term, we wish to contribute this to upstream to improve initialization customizability and reduce dependency on
 # internal logic.
-def _initialize_components(setup_logging_handler: bool | None = None):
+def _initialize_components(setup_logging_handler: Optional[bool] = None):
     trace_exporters, metric_exporters, log_exporters = _import_exporters(
         _get_exporter_names("traces"),
         _get_exporter_names("metrics"),
