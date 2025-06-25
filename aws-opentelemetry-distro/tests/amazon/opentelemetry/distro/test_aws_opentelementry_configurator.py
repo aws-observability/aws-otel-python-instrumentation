@@ -1,5 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+
+# pylint: disable=too-many-lines
+
 import os
 import time
 from unittest import TestCase
@@ -19,6 +22,8 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
     ApplicationSignalsExporterProvider,
     AwsOpenTelemetryConfigurator,
+    OtlpLogHeaderSetting,
+    _check_emf_exporter_enabled,
     _custom_import_sampler,
     _customize_logs_exporter,
     _customize_metric_exporters,
@@ -31,9 +36,12 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _is_application_signals_runtime_enabled,
     _is_defer_to_workers_enabled,
     _is_wsgi_master_process,
+    _validate_and_fetch_logs_header,
+    create_emf_exporter,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
+from amazon.opentelemetry.distro.exporter.aws.metrics.aws_cloudwatch_emf_exporter import AwsCloudWatchEmfExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
@@ -844,6 +852,177 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         finally:
             for key in config.keys():
                 os.environ.pop(key, None)
+
+    def test_check_emf_exporter_enabled(self):
+        # Test when OTEL_METRICS_EXPORTER is not set
+        os.environ.pop("OTEL_METRICS_EXPORTER", None)
+        self.assertFalse(_check_emf_exporter_enabled())
+
+        # Test when OTEL_METRICS_EXPORTER is empty
+        os.environ["OTEL_METRICS_EXPORTER"] = ""
+        self.assertFalse(_check_emf_exporter_enabled())
+
+        # Test when awsemf is not in the list
+        os.environ["OTEL_METRICS_EXPORTER"] = "console,otlp"
+        self.assertFalse(_check_emf_exporter_enabled())
+
+        # Test when awsemf is in the list
+        os.environ["OTEL_METRICS_EXPORTER"] = "console,awsemf,otlp"
+        self.assertTrue(_check_emf_exporter_enabled())
+        # Should remove awsemf from the list
+        self.assertEqual(os.environ["OTEL_METRICS_EXPORTER"], "console,otlp")
+
+        # Test when awsemf is the only exporter
+        os.environ["OTEL_METRICS_EXPORTER"] = "awsemf"
+        self.assertTrue(_check_emf_exporter_enabled())
+        # Should remove the environment variable entirely
+        self.assertNotIn("OTEL_METRICS_EXPORTER", os.environ)
+
+        # Test with spaces in the list
+        os.environ["OTEL_METRICS_EXPORTER"] = " console , awsemf , otlp "
+        self.assertTrue(_check_emf_exporter_enabled())
+        self.assertEqual(os.environ["OTEL_METRICS_EXPORTER"], "console,otlp")
+
+        # Clean up
+        os.environ.pop("OTEL_METRICS_EXPORTER", None)
+
+    def test_validate_and_fetch_logs_header(self):
+        # Test when headers are not set
+        os.environ.pop(OTEL_EXPORTER_OTLP_LOGS_HEADERS, None)
+        result = _validate_and_fetch_logs_header()
+        self.assertIsInstance(result, OtlpLogHeaderSetting)
+        self.assertIsNone(result.log_group)
+        self.assertIsNone(result.log_stream)
+        self.assertIsNone(result.namespace)
+        self.assertFalse(result.is_valid)
+
+        # Test with valid headers
+        os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=test-group,x-aws-log-stream=test-stream"
+        result = _validate_and_fetch_logs_header()
+        self.assertEqual(result.log_group, "test-group")
+        self.assertEqual(result.log_stream, "test-stream")
+        self.assertIsNone(result.namespace)
+        self.assertTrue(result.is_valid)
+
+        # Test with valid headers including namespace
+        os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = (
+            "x-aws-log-group=test-group,x-aws-log-stream=test-stream,x-aws-metric-namespace=test-namespace"
+        )
+        result = _validate_and_fetch_logs_header()
+        self.assertEqual(result.log_group, "test-group")
+        self.assertEqual(result.log_stream, "test-stream")
+        self.assertEqual(result.namespace, "test-namespace")
+        self.assertTrue(result.is_valid)
+
+        # Test with missing log group
+        os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-stream=test-stream"
+        result = _validate_and_fetch_logs_header()
+        self.assertIsNone(result.log_group)
+        self.assertEqual(result.log_stream, "test-stream")
+        self.assertFalse(result.is_valid)
+
+        # Test with missing log stream
+        os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=test-group"
+        result = _validate_and_fetch_logs_header()
+        self.assertEqual(result.log_group, "test-group")
+        self.assertIsNone(result.log_stream)
+        self.assertFalse(result.is_valid)
+
+        # Test with empty value in log group
+        os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=,x-aws-log-stream=test-stream"
+        result = _validate_and_fetch_logs_header()
+        self.assertIsNone(result.log_group)
+        self.assertEqual(result.log_stream, "test-stream")
+        self.assertFalse(result.is_valid)
+
+        # Test with empty value in log stream
+        os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=test-group,x-aws-log-stream="
+        result = _validate_and_fetch_logs_header()
+        self.assertEqual(result.log_group, "test-group")
+        self.assertIsNone(result.log_stream)
+        self.assertFalse(result.is_valid)
+
+        # Clean up
+        os.environ.pop(OTEL_EXPORTER_OTLP_LOGS_HEADERS, None)
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._validate_and_fetch_logs_header")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_installed")
+    def test_create_emf_exporter(self, mock_is_installed, mock_validate):
+        # Test when botocore is not installed
+        mock_is_installed.return_value = False
+        result = create_emf_exporter()
+        self.assertIsNone(result)
+        mock_is_installed.assert_called_with("botocore")
+
+        # Reset mock for subsequent tests
+        mock_is_installed.reset_mock()
+        mock_is_installed.return_value = True
+
+        # Mock the EMF exporter class import by patching the module import
+        with patch(
+            "amazon.opentelemetry.distro.exporter.aws.metrics.aws_cloudwatch_emf_exporter.AwsCloudWatchEmfExporter"
+        ) as mock_emf_exporter_class:
+            mock_exporter_instance = MagicMock()
+            mock_exporter_instance.namespace = "default"
+            mock_exporter_instance.log_group_name = "test-group"
+            mock_emf_exporter_class.return_value = mock_exporter_instance
+
+            # Test when headers are invalid
+            mock_validate.return_value = OtlpLogHeaderSetting(None, None, None, False)
+            result = create_emf_exporter()
+            self.assertIsNone(result)
+
+            # Test when namespace is missing (should still create exporter with default namespace)
+            mock_validate.return_value = OtlpLogHeaderSetting("test-group", "test-stream", None, True)
+            result = create_emf_exporter()
+            self.assertIsNotNone(result)
+            self.assertEqual(result, mock_exporter_instance)
+            # Verify that the EMF exporter was called with correct parameters
+            mock_emf_exporter_class.assert_called_with(
+                namespace=None, log_group_name="test-group", log_stream_name="test-stream"
+            )
+
+            # Test with valid configuration
+            mock_validate.return_value = OtlpLogHeaderSetting("test-group", "test-stream", "test-namespace", True)
+            result = create_emf_exporter()
+            self.assertIsNotNone(result)
+            self.assertEqual(result, mock_exporter_instance)
+            # Verify that the EMF exporter was called with correct parameters
+            mock_emf_exporter_class.assert_called_with(
+                namespace="test-namespace", log_group_name="test-group", log_stream_name="test-stream"
+            )
+
+            # Test exception handling
+            mock_validate.side_effect = Exception("Test exception")
+            result = create_emf_exporter()
+            self.assertIsNone(result)
+
+    def test_customize_metric_exporters_with_emf(self):
+        metric_readers = []
+        views = []
+
+        # Test with EMF disabled
+        _customize_metric_exporters(metric_readers, views, is_emf_enabled=False)
+        self.assertEqual(len(metric_readers), 0)
+
+        # Test with EMF enabled but create_emf_exporter returns None
+        with patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.create_emf_exporter", return_value=None):
+            _customize_metric_exporters(metric_readers, views, is_emf_enabled=True)
+            self.assertEqual(len(metric_readers), 0)
+
+        # Test with EMF enabled and valid exporter
+        mock_emf_exporter = MagicMock(spec=AwsCloudWatchEmfExporter)
+        # Add the required attributes that PeriodicExportingMetricReader expects
+        mock_emf_exporter._preferred_temporality = {}
+        mock_emf_exporter._preferred_aggregation = {}
+
+        with patch(
+            "amazon.opentelemetry.distro.aws_opentelemetry_configurator.create_emf_exporter",
+            return_value=mock_emf_exporter,
+        ):
+            _customize_metric_exporters(metric_readers, views, is_emf_enabled=True)
+            self.assertEqual(len(metric_readers), 1)
+            self.assertIsInstance(metric_readers[0], PeriodicExportingMetricReader)
 
 
 def validate_distro_environ():
