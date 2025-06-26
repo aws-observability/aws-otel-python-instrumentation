@@ -102,6 +102,14 @@ AWS_OTLP_LOGS_STREAM_HEADER = "x-aws-log-stream"
 # UDP package size is not larger than 64KB
 LAMBDA_SPAN_EXPORT_BATCH_SIZE = 10
 
+OTEL_TRACES_EXPORTER = "OTEL_TRACES_EXPORTER"
+OTEL_LOGS_EXPORTER = "OTEL_LOGS_EXPORTER"
+OTEL_METRICS_EXPORTER = "OTEL_METRICS_EXPORTER"
+OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT = "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"
+OTEL_TRACES_SAMPLER = "OTEL_TRACES_SAMPLER"
+OTEL_PYTHON_DISABLED_INSTRUMENTATIONS = "OTEL_PYTHON_DISABLED_INSTRUMENTATIONS"
+OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED = "OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED"
+
 _logger: Logger = getLogger(__name__)
 
 
@@ -265,6 +273,17 @@ def _export_unsampled_span_for_lambda(trace_provider: TracerProvider, resource: 
     )
 
 
+def _export_unsampled_span_for_agent_observability(trace_provider: TracerProvider, resource: Resource = None):
+    if not is_agent_observability_enabled():
+        return
+
+    traces_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
+
+    span_exporter = OTLPAwsSpanExporter(endpoint=traces_endpoint, logger_provider=get_logger_provider())
+
+    trace_provider.add_span_processor(BatchUnsampledSpanProcessor(span_exporter=span_exporter))
+
+
 def _is_defer_to_workers_enabled():
     return os.environ.get(OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED_CONFIG, "false").strip().lower() == "true"
 
@@ -408,9 +427,14 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource) -> 
     if _is_lambda_environment():
         provider.add_span_processor(AwsLambdaSpanProcessor())
 
+    # We always send 100% spans to Genesis platform for agent observability because
+    # AI applications typically have low throughput traffic patterns and require
+    # comprehensive monitoring to catch subtle failure modes like hallucinations
+    # and quality degradation that sampling could miss.
     # Add session.id baggage attribute to span attributes to support AI Agent use cases
     # enabling session ID tracking in spans.
     if is_agent_observability_enabled():
+        _export_unsampled_span_for_agent_observability(provider, resource)
 
         def session_id_predicate(baggage_key: str) -> bool:
             return baggage_key == "session.id"
