@@ -482,14 +482,18 @@ class LLOHandler:
         if not event_body:
             return
 
-        # Create and emit the event
         timestamp = event_timestamp if event_timestamp is not None else span.end_time
         event_logger = self._event_logger_provider.get_event_logger(span.instrumentation_scope.name)
+
+        event_attributes = {}
+        if span.attributes and "session.id" in span.attributes:
+            event_attributes["session.id"] = span.attributes["session.id"]
 
         event = Event(
             name=span.instrumentation_scope.name,
             timestamp=timestamp,
             body=event_body,
+            attributes=event_attributes if event_attributes else None,
             trace_id=span.context.trace_id,
             span_id=span.context.span_id,
             trace_flags=span.context.trace_flags,

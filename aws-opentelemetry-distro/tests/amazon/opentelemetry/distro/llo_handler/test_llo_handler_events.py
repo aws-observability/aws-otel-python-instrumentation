@@ -561,3 +561,91 @@ class TestLLOHandlerEvents(LLOHandlerTestBase):
         self.assertEqual(len(output_messages), 1)
         self.assertEqual(output_messages[0]["content"], "Quantum computing is...")
         self.assertEqual(output_messages[0]["role"], "assistant")
+
+    def test_emit_llo_attributes_with_session_id(self):
+        """
+        Verify session.id attribute from span is copied to event attributes when present.
+        """
+        attributes = {
+            "session.id": "test-session-123",
+            "gen_ai.prompt": "Hello, AI",
+            "gen_ai.completion": "Hello! How can I help you?",
+        }
+
+        span = self._create_mock_span(attributes)
+        span.end_time = 1234567899
+        span.instrumentation_scope = MagicMock()
+        span.instrumentation_scope.name = "test.scope"
+
+        self.llo_handler._emit_llo_attributes(span, attributes)
+
+        self.event_logger_mock.emit.assert_called_once()
+        emitted_event = self.event_logger_mock.emit.call_args[0][0]
+
+        # Verify session.id was copied to event attributes
+        self.assertIsNotNone(emitted_event.attributes)
+        self.assertEqual(emitted_event.attributes.get("session.id"), "test-session-123")
+        # Event class always adds event.name
+        self.assertIn("event.name", emitted_event.attributes)
+
+        # Verify event body still contains LLO data
+        event_body = emitted_event.body
+        self.assertIn("input", event_body)
+        self.assertIn("output", event_body)
+
+    def test_emit_llo_attributes_without_session_id(self):
+        """
+        Verify event attributes do not contain session.id when not present in span attributes.
+        """
+        attributes = {
+            "gen_ai.prompt": "Hello, AI",
+            "gen_ai.completion": "Hello! How can I help you?",
+        }
+
+        span = self._create_mock_span(attributes)
+        span.end_time = 1234567899
+        span.instrumentation_scope = MagicMock()
+        span.instrumentation_scope.name = "test.scope"
+
+        self.llo_handler._emit_llo_attributes(span, attributes)
+
+        self.event_logger_mock.emit.assert_called_once()
+        emitted_event = self.event_logger_mock.emit.call_args[0][0]
+
+        # Verify session.id is not in event attributes
+        self.assertIsNotNone(emitted_event.attributes)
+        self.assertNotIn("session.id", emitted_event.attributes)
+        # Event class always adds event.name
+        self.assertIn("event.name", emitted_event.attributes)
+
+    def test_emit_llo_attributes_with_session_id_and_other_attributes(self):
+        """
+        Verify only session.id is copied from span attributes when mixed with other attributes.
+        """
+        attributes = {
+            "session.id": "session-456",
+            "user.id": "user-789",
+            "gen_ai.prompt": "What's the weather?",
+            "gen_ai.completion": "I can't check the weather.",
+            "other.attribute": "some-value",
+        }
+
+        span = self._create_mock_span(attributes)
+        span.end_time = 1234567899
+        span.instrumentation_scope = MagicMock()
+        span.instrumentation_scope.name = "test.scope"
+
+        self.llo_handler._emit_llo_attributes(span, attributes)
+
+        self.event_logger_mock.emit.assert_called_once()
+        emitted_event = self.event_logger_mock.emit.call_args[0][0]
+
+        # Verify only session.id was copied to event attributes (plus event.name from Event class)
+        self.assertIsNotNone(emitted_event.attributes)
+        self.assertEqual(emitted_event.attributes.get("session.id"), "session-456")
+        self.assertIn("event.name", emitted_event.attributes)
+        # Verify other span attributes were not copied
+        self.assertNotIn("user.id", emitted_event.attributes)
+        self.assertNotIn("other.attribute", emitted_event.attributes)
+        self.assertNotIn("gen_ai.prompt", emitted_event.attributes)
+        self.assertNotIn("gen_ai.completion", emitted_event.attributes)
