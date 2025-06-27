@@ -64,3 +64,15 @@ def get_aws_region() -> str:
         "AWS region not found. Please set AWS_REGION environment variable or configure AWS CLI with 'aws configure'."
     )
     return None
+
+
+def is_account_id(input_str: str) -> bool:
+    if input_str is None:
+        return False
+
+    try:
+        int(input_str)
+    except ValueError:
+        return False
+
+    return True

@@ -54,6 +54,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._handle_stepfunctions_request()
         if self.in_path("sns"):
             self._handle_sns_request()
+        if self.in_path("cross-account"):
+            self._handle_cross_account_request()
 
         self._end_request(self.main_status)
 
@@ -84,6 +86,23 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def in_path(self, sub_path: str) -> bool:
         return sub_path in self.path
+
+    def _handle_cross_account_request(self) -> None:
+        s3_client = boto3.client(
+            "s3",
+            endpoint_url=_AWS_SDK_S3_ENDPOINT,
+            region_name="eu-central-1",
+            aws_access_key_id="account_b_access_key_id",
+            aws_secret_access_key="account_b_secret_access_key",
+            aws_session_token="account_b_token",
+        )
+        if self.in_path("createbucket/account_b"):
+            set_main_status(200)
+            s3_client.create_bucket(
+                Bucket="cross-account-bucket", CreateBucketConfiguration={"LocationConstraint": "eu-central-1"}
+            )
+        else:
+            set_main_status(404)
 
     def _handle_s3_request(self) -> None:
         s3_client: BaseClient = boto3.client("s3", endpoint_url=_AWS_SDK_S3_ENDPOINT, region_name=_AWS_REGION)
@@ -151,6 +170,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                 ],
                 BillingMode="PAY_PER_REQUEST",
             )
+        elif self.in_path("describetable/some-table"):
+            set_main_status(200)
+            ddb_client.describe_table(
+                TableName="put_test_table",
+            )
         elif self.in_path("putitem/putitem-table/key"):
             set_main_status(200)
             item: dict = {"id": {"S": "1"}}
@@ -213,6 +237,11 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif self.in_path("putrecord/my-stream"):
             set_main_status(200)
             kinesis_client.put_record(StreamName="test_stream", Data=b"test", PartitionKey="partition_key")
+        elif self.in_path("describestream/my-stream"):
+            set_main_status(200)
+            kinesis_client.describe_stream(
+                StreamName="test_stream", StreamARN="arn:aws:kinesis:us-west-2:000000000000:stream/test_stream"
+            )
         else:
             set_main_status(404)
 

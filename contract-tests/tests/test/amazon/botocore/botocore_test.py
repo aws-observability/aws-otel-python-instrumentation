@@ -16,7 +16,10 @@ from amazon.utils.application_signals_constants import (
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_REMOTE_OPERATION,
+    AWS_REMOTE_RESOURCE_ACCESS_KEY,
+    AWS_REMOTE_RESOURCE_ACCOUNT_ID,
     AWS_REMOTE_RESOURCE_IDENTIFIER,
+    AWS_REMOTE_RESOURCE_REGION,
     AWS_REMOTE_RESOURCE_TYPE,
     AWS_REMOTE_SERVICE,
     AWS_SPAN_KIND,
@@ -50,6 +53,8 @@ _AWS_SECRET_ARN: str = "aws.secretsmanager.secret.arn"
 _AWS_STATE_MACHINE_ARN: str = "aws.stepfunctions.state_machine.arn"
 _AWS_ACTIVITY_ARN: str = "aws.stepfunctions.activity.arn"
 _AWS_SNS_TOPIC_ARN: str = "aws.sns.topic.arn"
+_AWS_DYNAMODB_TABLE_ARN: str = "aws.dynamodb.table.arn"
+_AWS_KINESIS_STREAM_ARN: str = "aws.kinesis.stream.arn"
 
 
 # pylint: disable=too-many-public-methods,too-many-lines
@@ -210,6 +215,29 @@ class BotocoreTest(ContractTestBase):
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["test_table"],
             },
             span_name="DynamoDB.CreateTable",
+        )
+
+    def test_dynamodb_describe_table(self):
+        self.do_test_requests(
+            "ddb/describetable/some-table",
+            "GET",
+            200,
+            0,
+            0,
+            remote_service="AWS::DynamoDB",
+            remote_operation="DescribeTable",
+            remote_resource_type="AWS::DynamoDB::Table",
+            remote_resource_identifier="put_test_table",
+            remote_resource_account_id="000000000000",
+            remote_resource_region="us-west-2",
+            cloudformation_primary_identifier="put_test_table",
+            request_specific_attributes={
+                SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["put_test_table"],
+            },
+            response_specific_attributes={
+                _AWS_DYNAMODB_TABLE_ARN: r"arn:aws:dynamodb:us-west-2:000000000000:table/put_test_table",
+            },
+            span_name="DynamoDB.DescribeTable",
         )
 
     def test_dynamodb_put_item(self):
@@ -377,6 +405,26 @@ class BotocoreTest(ContractTestBase):
                 _AWS_KINESIS_STREAM_NAME: "test_stream",
             },
             span_name="Kinesis.PutRecord",
+        )
+
+    def test_kinesis_describe_stream(self):
+        self.do_test_requests(
+            "kinesis/describestream/my-stream",
+            "GET",
+            200,
+            0,
+            0,
+            remote_service="AWS::Kinesis",
+            remote_operation="DescribeStream",
+            remote_resource_type="AWS::Kinesis::Stream",
+            remote_resource_identifier="test_stream",
+            cloudformation_primary_identifier="test_stream",
+            remote_resource_account_id="000000000000",
+            remote_resource_region="us-west-2",
+            request_specific_attributes={
+                _AWS_KINESIS_STREAM_NAME: "test_stream",
+            },
+            span_name="Kinesis.DescribeStream",
         )
 
     def test_kinesis_error(self):
@@ -878,6 +926,26 @@ class BotocoreTest(ContractTestBase):
             span_name="SFN.ListStateMachineVersions",
         )
 
+    def test_cross_account(self):
+        self.do_test_requests(
+            "cross-account/createbucket/account_b",
+            "GET",
+            200,
+            0,
+            0,
+            remote_service="AWS::S3",
+            remote_operation="CreateBucket",
+            remote_resource_type="AWS::S3::Bucket",
+            remote_resource_identifier="cross-account-bucket",
+            cloudformation_primary_identifier="cross-account-bucket",
+            request_specific_attributes={
+                SpanAttributes.AWS_S3_BUCKET: "cross-account-bucket",
+            },
+            remote_resource_access_key="account_b_access_key_id",
+            remote_resource_region="eu-central-1",
+            span_name="S3.CreateBucket",
+        )
+
     # TODO: Add contract test for lambda event source mapping resource
 
     @override
@@ -897,6 +965,9 @@ class BotocoreTest(ContractTestBase):
             kwargs.get("remote_resource_type", "None"),
             kwargs.get("remote_resource_identifier", "None"),
             kwargs.get("cloudformation_primary_identifier", "None"),
+            kwargs.get("remote_resource_account_id", "None"),
+            kwargs.get("remote_resource_access_key", "None"),
+            kwargs.get("remote_resource_region", "None"),
         )
 
     def _assert_aws_attributes(
@@ -908,6 +979,9 @@ class BotocoreTest(ContractTestBase):
         remote_resource_type: str,
         remote_resource_identifier: str,
         cloudformation_primary_identifier: str,
+        remote_resource_account_id: str,
+        remote_resource_access_key: str,
+        remote_resource_region: str,
     ) -> None:
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self._assert_str_attribute(attributes_dict, AWS_LOCAL_SERVICE, self.get_application_otel_service_name())
@@ -934,8 +1008,16 @@ class BotocoreTest(ContractTestBase):
                 self._assert_str_attribute(
                     attributes_dict, AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER, cloudformation_primary_identifier
                 )
-        # See comment above AWS_LOCAL_OPERATION
-        self._assert_str_attribute(attributes_dict, AWS_SPAN_KIND, span_kind)
+        if remote_resource_account_id != "None":
+            assert remote_resource_identifier != "None"
+            self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_ACCOUNT_ID, remote_resource_account_id)
+            self.assertIsNone(attributes_dict.get(AWS_REMOTE_RESOURCE_ACCESS_KEY))
+        if remote_resource_access_key != "None":
+            assert remote_resource_identifier != "None"
+            self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_ACCESS_KEY, remote_resource_access_key)
+            self.assertIsNone(attributes_dict.get(AWS_REMOTE_RESOURCE_ACCOUNT_ID))
+        if remote_resource_region != "None":
+            self._assert_str_attribute(attributes_dict, AWS_REMOTE_RESOURCE_REGION, remote_resource_region)
 
     @override
     def _assert_semantic_conventions_span_attributes(
@@ -1023,6 +1105,9 @@ class BotocoreTest(ContractTestBase):
         self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "CLIENT")
         remote_resource_type = kwargs.get("remote_resource_type", "None")
         remote_resource_identifier = kwargs.get("remote_resource_identifier", "None")
+        remote_resource_account_id = kwargs.get("remote_resource_account_id", "None")
+        remote_resource_access_key = kwargs.get("remote_resource_access_key", "None")
+        remote_resource_region = kwargs.get("remote_resource_region", "None")
         if remote_resource_type != "None":
             self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_TYPE, remote_resource_type)
         if remote_resource_identifier != "None":
@@ -1030,6 +1115,16 @@ class BotocoreTest(ContractTestBase):
                 self._assert_match_attribute(attribute_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
             else:
                 self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_IDENTIFIER, remote_resource_identifier)
+        if remote_resource_account_id != "None":
+            assert remote_resource_identifier != "None"
+            self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_ACCOUNT_ID, remote_resource_account_id)
+            self.assertIsNone(attribute_dict.get(AWS_REMOTE_RESOURCE_ACCESS_KEY))
+        if remote_resource_access_key != "None":
+            assert remote_resource_identifier != "None"
+            self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_ACCESS_KEY, remote_resource_access_key)
+            self.assertIsNone(attribute_dict.get(AWS_REMOTE_RESOURCE_ACCOUNT_ID))
+        if remote_resource_region != "None":
+            self._assert_str_attribute(attribute_dict, AWS_REMOTE_RESOURCE_REGION, remote_resource_region)
         self.check_sum(metric_name, dependency_dp.sum, expected_sum)
 
         attribute_dict: Dict[str, AnyValue] = self._get_attributes_dict(service_dp.attributes)
