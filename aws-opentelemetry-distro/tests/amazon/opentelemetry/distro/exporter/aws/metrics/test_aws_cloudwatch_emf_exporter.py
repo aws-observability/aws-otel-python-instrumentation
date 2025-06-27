@@ -6,10 +6,8 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
-from botocore.exceptions import ClientError
-
 from amazon.opentelemetry.distro.exporter.aws.metrics.aws_cloudwatch_emf_exporter import AwsCloudWatchEmfExporter
-from opentelemetry.sdk.metrics.export import Gauge, MetricExportResult
+from opentelemetry.sdk.metrics.export import Gauge, Histogram, MetricExportResult, Sum
 from opentelemetry.sdk.resources import Resource
 
 
@@ -31,8 +29,65 @@ class MockMetric:
         self.description = description
 
 
+class MockHistogramDataPoint(MockDataPoint):
+    """Mock histogram datapoint for testing."""
+
+    def __init__(self, count=5, sum_val=25.0, min_val=1.0, max_val=10.0, **kwargs):
+        super().__init__(**kwargs)
+        self.count = count
+        self.sum = sum_val
+        self.min = min_val
+        self.max = max_val
+
+
+class MockExpHistogramDataPoint(MockDataPoint):
+    """Mock exponential histogram datapoint for testing."""
+
+    def __init__(self, count=10, sum_val=50.0, min_val=1.0, max_val=20.0, scale=2, **kwargs):
+        super().__init__(**kwargs)
+        self.count = count
+        self.sum = sum_val
+        self.min = min_val
+        self.max = max_val
+        self.scale = scale
+
+        # Mock positive buckets
+        self.positive = Mock()
+        self.positive.offset = 0
+        self.positive.bucket_counts = [1, 2, 3, 4]
+
+        # Mock negative buckets
+        self.negative = Mock()
+        self.negative.offset = 0
+        self.negative.bucket_counts = []
+
+        # Mock zero count
+        self.zero_count = 0
+
+
 class MockGaugeData:
     """Mock gauge data that passes isinstance checks."""
+
+    def __init__(self, data_points=None):
+        self.data_points = data_points or []
+
+
+class MockSumData:
+    """Mock sum data that passes isinstance checks."""
+
+    def __init__(self, data_points=None):
+        self.data_points = data_points or []
+
+
+class MockHistogramData:
+    """Mock histogram data that passes isinstance checks."""
+
+    def __init__(self, data_points=None):
+        self.data_points = data_points or []
+
+
+class MockExpHistogramData:
+    """Mock exponential histogram data that passes isinstance checks."""
 
     def __init__(self, data_points=None):
         self.data_points = data_points or []
@@ -76,16 +131,14 @@ class TestAwsCloudWatchEmfExporter(unittest.TestCase):
             mock_session_instance = Mock()
             mock_session.return_value = mock_session_instance
             mock_session_instance.create_client.return_value = mock_client
-            mock_client.create_log_group.return_value = {}
-            mock_client.create_log_stream.return_value = {}
 
             self.exporter = AwsCloudWatchEmfExporter(namespace="TestNamespace", log_group_name="test-log-group")
 
     def test_initialization(self):
         """Test exporter initialization."""
         self.assertEqual(self.exporter.namespace, "TestNamespace")
-        self.assertIsNotNone(self.exporter.log_stream_name)
         self.assertEqual(self.exporter.log_group_name, "test-log-group")
+        self.assertIsNotNone(self.exporter.log_client)
 
     @patch("botocore.session.Session")
     def test_initialization_with_custom_params(self, mock_session):
@@ -95,8 +148,6 @@ class TestAwsCloudWatchEmfExporter(unittest.TestCase):
         mock_session_instance = Mock()
         mock_session.return_value = mock_session_instance
         mock_session_instance.create_client.return_value = mock_client
-        mock_client.create_log_group.return_value = {}
-        mock_client.create_log_stream.return_value = {}
 
         exporter = AwsCloudWatchEmfExporter(
             namespace="CustomNamespace",
@@ -106,7 +157,6 @@ class TestAwsCloudWatchEmfExporter(unittest.TestCase):
         )
         self.assertEqual(exporter.namespace, "CustomNamespace")
         self.assertEqual(exporter.log_group_name, "custom-log-group")
-        self.assertEqual(exporter.log_stream_name, "custom-stream")
 
     def test_get_unit_mapping(self):
         """Test unit mapping functionality."""
@@ -205,16 +255,6 @@ class TestAwsCloudWatchEmfExporter(unittest.TestCase):
         self.assertEqual(len(result), 2)
         self.assertEqual(result[1], 1234567890)
 
-    def test_generate_log_stream_name(self):
-        """Test log stream name generation."""
-        name1 = self.exporter._generate_log_stream_name()
-        name2 = self.exporter._generate_log_stream_name()
-
-        # Should generate unique names
-        self.assertNotEqual(name1, name2)
-        self.assertTrue(name1.startswith("otel-python-"))
-        self.assertTrue(name2.startswith("otel-python-"))
-
     def test_normalize_timestamp(self):
         """Test timestamp normalization."""
         timestamp_ns = 1609459200000000000  # 2021-01-01 00:00:00 in nanoseconds
@@ -237,12 +277,64 @@ class TestAwsCloudWatchEmfExporter(unittest.TestCase):
         metric = MockMetric("gauge_metric", "Count", "Gauge description")
         dp = MockDataPoint(value=42.5, attributes={"key": "value"})
 
-        record = self.exporter._convert_gauge(metric, dp)
+        record = self.exporter._convert_gauge_and_sum(metric, dp)
 
         self.assertIsNotNone(record)
         self.assertEqual(record.name, "gauge_metric")
         self.assertEqual(record.value, 42.5)
         self.assertEqual(record.attributes, {"key": "value"})
+        self.assertIsInstance(record.timestamp, int)
+
+    def test_convert_sum(self):
+        """Test sum conversion."""
+        metric = MockMetric("sum_metric", "Count", "Sum description")
+        dp = MockDataPoint(value=100.0, attributes={"env": "test"})
+
+        record = self.exporter._convert_gauge_and_sum(metric, dp)
+
+        self.assertIsNotNone(record)
+        self.assertEqual(record.name, "sum_metric")
+        self.assertEqual(record.value, 100.0)
+        self.assertEqual(record.attributes, {"env": "test"})
+        self.assertIsInstance(record.timestamp, int)
+
+    def test_convert_histogram(self):
+        """Test histogram conversion."""
+        metric = MockMetric("histogram_metric", "ms", "Histogram description")
+        dp = MockHistogramDataPoint(
+            count=10, sum_val=150.0, min_val=5.0, max_val=25.0, attributes={"region": "us-east-1"}
+        )
+
+        record = self.exporter._convert_histogram(metric, dp)
+
+        self.assertIsNotNone(record)
+        self.assertEqual(record.name, "histogram_metric")
+        self.assertTrue(hasattr(record, "histogram_data"))
+
+        expected_value = {"Count": 10, "Sum": 150.0, "Min": 5.0, "Max": 25.0}
+        self.assertEqual(record.histogram_data, expected_value)
+        self.assertEqual(record.attributes, {"region": "us-east-1"})
+        self.assertIsInstance(record.timestamp, int)
+
+    def test_convert_exp_histogram(self):
+        """Test exponential histogram conversion."""
+        metric = MockMetric("exp_histogram_metric", "s", "Exponential histogram description")
+        dp = MockExpHistogramDataPoint(count=8, sum_val=64.0, min_val=2.0, max_val=32.0, attributes={"service": "api"})
+
+        record = self.exporter._convert_exp_histogram(metric, dp)
+
+        self.assertIsNotNone(record)
+        self.assertEqual(record.name, "exp_histogram_metric")
+        self.assertTrue(hasattr(record, "exp_histogram_data"))
+
+        exp_data = record.exp_histogram_data
+        self.assertIn("Values", exp_data)
+        self.assertIn("Counts", exp_data)
+        self.assertEqual(exp_data["Count"], 8)
+        self.assertEqual(exp_data["Sum"], 64.0)
+        self.assertEqual(exp_data["Min"], 2.0)
+        self.assertEqual(exp_data["Max"], 32.0)
+        self.assertEqual(record.attributes, {"service": "api"})
         self.assertIsInstance(record.timestamp, int)
 
     def test_create_emf_log(self):
@@ -262,71 +354,6 @@ class TestAwsCloudWatchEmfExporter(unittest.TestCase):
 
         # Check that the result is JSON serializable
         json.dumps(result)  # Should not raise exception
-
-    @patch("botocore.session.Session")
-    def test_export_success(self, mock_session):
-        """Test successful export."""
-        # Mock CloudWatch Logs client
-        mock_client = Mock()
-        mock_session_instance = Mock()
-        mock_session.return_value = mock_session_instance
-        mock_session_instance.create_client.return_value = mock_client
-        mock_client.put_log_events.return_value = {"nextSequenceToken": "12345"}
-
-        # Create empty metrics data to test basic export flow
-        metrics_data = Mock()
-        metrics_data.resource_metrics = []
-
-        result = self.exporter.export(metrics_data)
-
-        self.assertEqual(result, MetricExportResult.SUCCESS)
-
-    def test_export_failure(self):
-        """Test export failure handling."""
-        # Create metrics data that will cause an exception during iteration
-        metrics_data = Mock()
-        # Make resource_metrics raise an exception when iterated over
-        metrics_data.resource_metrics = Mock()
-        metrics_data.resource_metrics.__iter__ = Mock(side_effect=Exception("Test exception"))
-
-        result = self.exporter.export(metrics_data)
-
-        self.assertEqual(result, MetricExportResult.FAILURE)
-
-    def test_force_flush_no_pending_events(self):
-        """Test force flush functionality with no pending events."""
-        result = self.exporter.force_flush()
-
-        self.assertTrue(result)
-
-    @patch.object(AwsCloudWatchEmfExporter, "force_flush")
-    def test_shutdown(self, mock_force_flush):
-        """Test shutdown functionality."""
-        mock_force_flush.return_value = True
-
-        result = self.exporter.shutdown(timeout_millis=5000)
-
-        self.assertTrue(result)
-        mock_force_flush.assert_called_once_with(5000)
-
-    def test_send_log_event_method_exists(self):
-        """Test that _send_log_event method exists and can be called."""
-        # Just test that the method exists and doesn't crash with basic input
-        log_event = {"message": "test message", "timestamp": 1234567890}
-
-        # Mock the AWS client methods to avoid actual AWS calls
-        with patch.object(self.exporter.logs_client, "create_log_group"):
-            with patch.object(self.exporter.logs_client, "create_log_stream"):
-                with patch.object(self.exporter.logs_client, "put_log_events") as mock_put:
-                    mock_put.return_value = {"nextSequenceToken": "12345"}
-
-                    # Should not raise an exception
-                    try:
-                        response = self.exporter._send_log_event(log_event)
-                        # Response may be None or a dict, both are acceptable
-                        self.assertTrue(response is None or isinstance(response, dict))
-                    except ClientError as error:
-                        self.fail(f"_send_log_event raised an exception: {error}")
 
     def test_create_emf_log_with_resource(self):
         """Test EMF log creation with resource attributes."""
@@ -364,58 +391,6 @@ class TestAwsCloudWatchEmfExporter(unittest.TestCase):
         self.assertEqual(set(cw_metrics["Dimensions"][0]), {"env", "service"})
         self.assertEqual(cw_metrics["Metrics"][0]["Name"], "gauge_metric")
 
-    @patch("botocore.session.Session")
-    def test_export_with_gauge_metrics(self, mock_session):
-        """Test exporting actual gauge metrics."""
-        # Mock CloudWatch Logs client
-        mock_client = Mock()
-        mock_session_instance = Mock()
-        mock_session.return_value = mock_session_instance
-        mock_session_instance.create_client.return_value = mock_client
-        mock_client.put_log_events.return_value = {"nextSequenceToken": "12345"}
-        mock_client.create_log_group.side_effect = ClientError(
-            {"Error": {"Code": "ResourceAlreadyExistsException"}}, "CreateLogGroup"
-        )
-        mock_client.create_log_stream.side_effect = ClientError(
-            {"Error": {"Code": "ResourceAlreadyExistsException"}}, "CreateLogStream"
-        )
-
-        # Create mock metrics data
-        resource = Resource.create({"service.name": "test-service"})
-
-        # Create gauge data
-        gauge_data = Gauge(data_points=[MockDataPoint(value=42.0, attributes={"key": "value"})])
-
-        metric = MockMetricWithData(name="test_gauge", data=gauge_data)
-
-        scope_metrics = MockScopeMetrics(metrics=[metric])
-        resource_metrics = MockResourceMetrics(resource=resource, scope_metrics=[scope_metrics])
-
-        metrics_data = Mock()
-        metrics_data.resource_metrics = [resource_metrics]
-
-        result = self.exporter.export(metrics_data)
-
-        self.assertEqual(result, MetricExportResult.SUCCESS)
-        # Test validates that export works with gauge metrics
-
-    def test_get_metric_name_fallback(self):
-        """Test metric name extraction fallback."""
-        # Test with record that has no instrument attribute
-        record = Mock(spec=[])
-
-        result = self.exporter._get_metric_name(record)
-        self.assertIsNone(result)
-
-    def test_get_metric_name_empty_name(self):
-        """Test metric name extraction with empty name."""
-        # Test with record that has empty name
-        record = Mock()
-        record.name = ""
-
-        result = self.exporter._get_metric_name(record)
-        self.assertIsNone(result)
-
     def test_create_emf_log_skips_empty_metric_names(self):
         """Test that EMF log creation skips records with empty metric names."""
         # Create a record with no metric name
@@ -445,63 +420,94 @@ class TestAwsCloudWatchEmfExporter(unittest.TestCase):
         metric_names = [m["Name"] for m in cw_metrics["Metrics"]]
         self.assertIn("valid_metric", metric_names)
 
-    @patch("os.environ.get")
     @patch("botocore.session.Session")
-    def test_initialization_with_env_region(self, mock_session, mock_env_get):
-        """Test initialization with AWS region from environment."""
-        # Mock environment variable
-        mock_env_get.side_effect = lambda key: "us-west-1" if key == "AWS_REGION" else None
-
-        # Mock the botocore session to avoid AWS calls
+    def test_export_success(self, mock_session):
+        """Test successful export."""
+        # Mock CloudWatch Logs client
         mock_client = Mock()
         mock_session_instance = Mock()
         mock_session.return_value = mock_session_instance
         mock_session_instance.create_client.return_value = mock_client
-        mock_client.create_log_group.return_value = {}
-        mock_client.create_log_stream.return_value = {}
+        mock_client.put_log_events.return_value = {"nextSequenceToken": "12345"}
 
-        exporter = AwsCloudWatchEmfExporter(namespace="TestNamespace", log_group_name="test-log-group")
+        # Create empty metrics data to test basic export flow
+        metrics_data = Mock()
+        metrics_data.resource_metrics = []
 
-        # Just verify the exporter was created successfully with region handling
-        self.assertIsNotNone(exporter)
-        self.assertEqual(exporter.namespace, "TestNamespace")
+        result = self.exporter.export(metrics_data)
 
-    @patch("botocore.session.Session")
-    def test_ensure_log_group_exists_create_failure(self, mock_session):
-        """Test log group creation failure."""
-        # Mock the botocore session
-        mock_client = Mock()
-        mock_session_instance = Mock()
-        mock_session.return_value = mock_session_instance
-        mock_session_instance.create_client.return_value = mock_client
+        self.assertEqual(result, MetricExportResult.SUCCESS)
 
-        # Make create fail with access denied error
-        mock_client.create_log_group.side_effect = ClientError({"Error": {"Code": "AccessDenied"}}, "CreateLogGroup")
-        mock_client.create_log_stream.return_value = {}
+    def test_export_failure(self):
+        """Test export failure handling."""
+        # Create metrics data that will cause an exception during iteration
+        metrics_data = Mock()
+        # Make resource_metrics raise an exception when iterated over
+        metrics_data.resource_metrics = Mock()
+        metrics_data.resource_metrics.__iter__ = Mock(side_effect=Exception("Test exception"))
 
-        with self.assertRaises(ClientError):
-            AwsCloudWatchEmfExporter(namespace="TestNamespace", log_group_name="test-log-group")
+        result = self.exporter.export(metrics_data)
 
-    @patch("botocore.session.Session")
-    def test_ensure_log_group_exists_success(self, mock_session):
-        """Test log group existence check when log group already exists."""
-        # Mock the botocore session
-        mock_client = Mock()
-        mock_session_instance = Mock()
-        mock_session.return_value = mock_session_instance
-        mock_session_instance.create_client.return_value = mock_client
+        self.assertEqual(result, MetricExportResult.FAILURE)
 
-        # Make create fail with ResourceAlreadyExistsException (log group exists)
-        mock_client.create_log_group.side_effect = ClientError(
-            {"Error": {"Code": "ResourceAlreadyExistsException"}}, "CreateLogGroup"
-        )
-        mock_client.create_log_stream.return_value = {}
+    def test_export_with_gauge_metrics(self):
+        """Test exporting actual gauge metrics."""
+        # Create mock metrics data
+        resource = Resource.create({"service.name": "test-service"})
 
-        # This should not raise an exception
-        exporter = AwsCloudWatchEmfExporter(namespace="TestNamespace", log_group_name="test-log-group")
-        self.assertIsNotNone(exporter)
-        # Verify create was called once
-        mock_client.create_log_group.assert_called_once_with(logGroupName="test-log-group")
+        # Create gauge data
+        gauge_data = Gauge(data_points=[MockDataPoint(value=42.0, attributes={"key": "value"})])
+
+        metric = MockMetricWithData(name="test_gauge", data=gauge_data)
+
+        scope_metrics = MockScopeMetrics(metrics=[metric])
+        resource_metrics = MockResourceMetrics(resource=resource, scope_metrics=[scope_metrics])
+
+        metrics_data = Mock()
+        metrics_data.resource_metrics = [resource_metrics]
+
+        result = self.exporter.export(metrics_data)
+
+        self.assertEqual(result, MetricExportResult.SUCCESS)
+
+    def test_export_with_sum_metrics(self):
+        """Test export with Sum metrics."""
+        # Create mock metrics data with Sum type
+        resource = Resource.create({"service.name": "test-service"})
+
+        sum_data = MockSumData([MockDataPoint(value=25.0, attributes={"env": "test"})])
+        # Create a mock that will pass the type() check for Sum
+        sum_data.__class__ = Sum
+        metric = MockMetricWithData(name="test_sum", data=sum_data)
+
+        scope_metrics = MockScopeMetrics(metrics=[metric])
+        resource_metrics = MockResourceMetrics(resource=resource, scope_metrics=[scope_metrics])
+
+        metrics_data = Mock()
+        metrics_data.resource_metrics = [resource_metrics]
+
+        result = self.exporter.export(metrics_data)
+        self.assertEqual(result, MetricExportResult.SUCCESS)
+
+    def test_export_with_histogram_metrics(self):
+        """Test export with Histogram metrics."""
+        # Create mock metrics data with Histogram type
+        resource = Resource.create({"service.name": "test-service"})
+
+        hist_dp = MockHistogramDataPoint(count=5, sum_val=25.0, min_val=1.0, max_val=10.0, attributes={"env": "test"})
+        hist_data = MockHistogramData([hist_dp])
+        # Create a mock that will pass the type() check for Histogram
+        hist_data.__class__ = Histogram
+        metric = MockMetricWithData(name="test_histogram", data=hist_data)
+
+        scope_metrics = MockScopeMetrics(metrics=[metric])
+        resource_metrics = MockResourceMetrics(resource=resource, scope_metrics=[scope_metrics])
+
+        metrics_data = Mock()
+        metrics_data.resource_metrics = [resource_metrics]
+
+        result = self.exporter.export(metrics_data)
+        self.assertEqual(result, MetricExportResult.SUCCESS)
 
     def test_export_with_unsupported_metric_type(self):
         """Test export with unsupported metric types."""
@@ -541,6 +547,73 @@ class TestAwsCloudWatchEmfExporter(unittest.TestCase):
         # Should still return success
         result = self.exporter.export(metrics_data)
         self.assertEqual(result, MetricExportResult.SUCCESS)
+
+    def test_get_metric_name_fallback(self):
+        """Test metric name extraction fallback."""
+        # Test with record that has no instrument attribute
+        record = Mock(spec=[])
+
+        result = self.exporter._get_metric_name(record)
+        self.assertIsNone(result)
+
+    def test_get_metric_name_empty_name(self):
+        """Test metric name extraction with empty name."""
+        # Test with record that has empty name
+        record = Mock()
+        record.name = ""
+
+        result = self.exporter._get_metric_name(record)
+        self.assertIsNone(result)
+
+    @patch("os.environ.get")
+    @patch("botocore.session.Session")
+    def test_initialization_with_env_region(self, mock_session, mock_env_get):
+        """Test initialization with AWS region from environment."""
+        # Mock environment variable
+        mock_env_get.side_effect = lambda key: "us-west-1" if key == "AWS_REGION" else None
+
+        # Mock the botocore session to avoid AWS calls
+        mock_client = Mock()
+        mock_session_instance = Mock()
+        mock_session.return_value = mock_session_instance
+        mock_session_instance.create_client.return_value = mock_client
+
+        exporter = AwsCloudWatchEmfExporter(namespace="TestNamespace", log_group_name="test-log-group")
+
+        # Just verify the exporter was created successfully with region handling
+        self.assertIsNotNone(exporter)
+        self.assertEqual(exporter.namespace, "TestNamespace")
+
+    def test_force_flush_no_pending_events(self):
+        """Test force flush functionality with no pending events."""
+        result = self.exporter.force_flush()
+
+        self.assertTrue(result)
+
+    @patch.object(AwsCloudWatchEmfExporter, "force_flush")
+    def test_shutdown(self, mock_force_flush):
+        """Test shutdown functionality."""
+        mock_force_flush.return_value = True
+
+        result = self.exporter.shutdown(timeout_millis=5000)
+
+        self.assertTrue(result)
+        mock_force_flush.assert_called_once_with(5000)
+
+    # pylint: disable=broad-exception-caught
+    def test_send_log_event_method_exists(self):
+        """Test that _send_log_event method exists and can be called."""
+        # Just test that the method exists and doesn't crash with basic input
+        log_event = {"message": "test message", "timestamp": 1234567890}
+
+        # Mock the log client to avoid actual AWS calls
+        with patch.object(self.exporter.log_client, "send_log_event") as mock_send:
+            # Should not raise an exception
+            try:
+                self.exporter._send_log_event(log_event)
+                mock_send.assert_called_once_with(log_event)
+            except Exception as error:
+                self.fail(f"_send_log_event raised an exception: {error}")
 
 
 if __name__ == "__main__":

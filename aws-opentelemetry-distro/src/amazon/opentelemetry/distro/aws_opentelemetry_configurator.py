@@ -288,6 +288,17 @@ def _export_unsampled_span_for_lambda(trace_provider: TracerProvider, resource: 
     )
 
 
+def _export_unsampled_span_for_agent_observability(trace_provider: TracerProvider, resource: Resource = None):
+    if not is_agent_observability_enabled():
+        return
+
+    traces_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
+
+    span_exporter = OTLPAwsSpanExporter(endpoint=traces_endpoint, logger_provider=get_logger_provider())
+
+    trace_provider.add_span_processor(BatchUnsampledSpanProcessor(span_exporter=span_exporter))
+
+
 def _is_defer_to_workers_enabled():
     return os.environ.get(OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED_CONFIG, "false").strip().lower() == "true"
 
@@ -431,9 +442,14 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource) -> 
     if _is_lambda_environment():
         provider.add_span_processor(AwsLambdaSpanProcessor())
 
+    # We always send 100% spans to Genesis platform for agent observability because
+    # AI applications typically have low throughput traffic patterns and require
+    # comprehensive monitoring to catch subtle failure modes like hallucinations
+    # and quality degradation that sampling could miss.
     # Add session.id baggage attribute to span attributes to support AI Agent use cases
     # enabling session ID tracking in spans.
     if is_agent_observability_enabled():
+        _export_unsampled_span_for_agent_observability(provider, resource)
 
         def session_id_predicate(baggage_key: str) -> bool:
             return baggage_key == "session.id"
