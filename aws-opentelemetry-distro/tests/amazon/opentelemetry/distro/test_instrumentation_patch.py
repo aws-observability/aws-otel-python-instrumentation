@@ -7,9 +7,6 @@ from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 import gevent.monkey
-import pkg_resources
-from botocore.client import BaseClient
-from botocore.response import StreamingBody
 
 import opentelemetry.sdk.extension.aws.resource.ec2 as ec2_resource
 import opentelemetry.sdk.extension.aws.resource.eks as eks_resource
