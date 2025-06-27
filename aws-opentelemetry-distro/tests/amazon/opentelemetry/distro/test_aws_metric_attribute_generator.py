@@ -68,8 +68,6 @@ _UNKNOWN_SERVICE: str = "UnknownService"
 _UNKNOWN_OPERATION: str = "UnknownOperation"
 _UNKNOWN_REMOTE_SERVICE: str = "UnknownRemoteService"
 _UNKNOWN_REMOTE_OPERATION: str = "UnknownRemoteOperation"
-_MOCK_ACCOUNT_ID: str = "123456789012"
-_MOCK_REGION: str = "us-east-1"
 
 _INTERNAL_OPERATION: str = "InternalOperation"
 _LOCAL_ROOT: str = "LOCAL_ROOT"
