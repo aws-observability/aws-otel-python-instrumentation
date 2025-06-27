@@ -1527,21 +1527,14 @@ class TestAwsMetricAttributeGenerator(TestCase):
             keys,
             values,
         )
-        self._validate_remote_resource_attributes(
-            "AWS::StepFunctions::StateMachine",
-            "invalid_arn",
-            None,
-            _AWS_REMOTE_RESOURCE_REGION,
-            None,
-            _AWS_REMOTE_RESOURCE_ACCESS_KEY,
-        )
+        self._validate_remote_resource_attributes(None, None, None)
         self._mock_attribute([AWS_STEPFUNCTIONS_STATEMACHINE_ARN], [None])
 
         # Invalid arn and no account access key
         self._mock_attribute(
             [AWS_STEPFUNCTIONS_STATEMACHINE_ARN, SpanAttributes.RPC_SYSTEM], ["invalid_arn", "aws-api"]
         )
-        self._validate_remote_resource_attributes("AWS::StepFunctions::StateMachine", "invalid_arn")
+        self._validate_remote_resource_attributes(None, None, None)
         self._mock_attribute([AWS_STEPFUNCTIONS_STATEMACHINE_ARN], [None])
 
         # Both account access key and account id are not available
@@ -1571,11 +1564,7 @@ class TestAwsMetricAttributeGenerator(TestCase):
             [AWS_STEPFUNCTIONS_STATEMACHINE_ARN, SpanAttributes.RPC_SYSTEM],
             ["arn:aws:states:us-east-1:invalid_account_id:stateMachine:testStateMachine", "aws-api"],
         )
-        self._validate_remote_resource_attributes(
-            "AWS::StepFunctions::StateMachine",
-            "testStateMachine",
-            "arn:aws:states:us-east-1:invalid_account_id:stateMachine:testStateMachine",
-        )
+        self._validate_remote_resource_attributes(None, None, None)
         self._mock_attribute([AWS_STEPFUNCTIONS_STATEMACHINE_ARN], [None])
 
         # Arn with invalid region
