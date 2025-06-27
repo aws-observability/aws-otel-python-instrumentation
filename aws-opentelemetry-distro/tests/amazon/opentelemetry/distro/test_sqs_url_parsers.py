@@ -47,7 +47,7 @@ class TestSqsUrlParser(TestCase):
         self.validateGetQueueName("invalidUrl", None)
         self.validateGetQueueName("https://www.amazon.com", None)
         self.validateGetQueueName("https://sqs.us-east-1.amazonaws.com/123412341234/.", None)
-        self.validateGetQueueName("https://sqs.us-east-1.amazonaws.com/12/Queue", None)
+        self.validateGetQueueName("https://sqs.us-east-1.amazonaws.com/1234123412xx/Queue", None)
         self.validateGetQueueName("https://sqs.us-east-1.amazonaws.com/A/A", None)
         self.validateGetQueueName("https://sqs.us-east-1.amazonaws.com/123412341234/A/ThisShouldNotBeHere", None)
 
@@ -62,7 +62,7 @@ class TestSqsUrlParser(TestCase):
         self.validateGetAccountId("/123412341234/as?df", None)
         self.validateGetAccountId("invalidUrl", None)
         self.validateGetAccountId("https://www.amazon.com", None)
-        self.validateGetAccountId("https://sqs.us-east-1.amazonaws.com/12341234/Queue", None)
+        self.validateGetAccountId("https://sqs.us-east-1.amazonaws.com/12341234/Queue", "12341234")
         self.validateGetAccountId("https://sqs.us-east-1.amazonaws.com/1234123412xx/Queue", None)
         self.validateGetAccountId("https://sqs.us-east-1.amazonaws.com/1234123412xx", None)
         self.validateGetAccountId("https://sqs.us-east-1.amazonaws.com/123412341234/Q_Namez-5", "123412341234")

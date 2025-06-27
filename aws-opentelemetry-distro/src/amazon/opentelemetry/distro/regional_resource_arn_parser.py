@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 from typing import Optional
 
+from amazon.opentelemetry.distro._utils import is_account_id
+
 
 class RegionalResourceArnParser:
     @staticmethod
@@ -16,6 +18,28 @@ class RegionalResourceArnParser:
             return str(arn).split(":")[3]
         return None
 
+    @staticmethod
+    def extract_dynamodb_table_name_from_arn(arn: str) -> Optional[str]:
+        resource_name = RegionalResourceArnParser.extract_resource_name_from_arn(arn)
+        if resource_name:
+            return resource_name.replace("table/", "")
+        return None
+
+    @staticmethod
+    def extract_kinesis_stream_name_from_arn(arn: str) -> Optional[str]:
+        resource_name = RegionalResourceArnParser.extract_resource_name_from_arn(arn)
+        if resource_name:
+            return resource_name.replace("stream/", "")
+        return None
+
+    @staticmethod
+    def extract_resource_name_from_arn(arn: str) -> Optional[str]:
+        # Extracts the name of the resource from an arn
+        if _is_arn(arn):
+            split = arn.split(":")
+            return split[-1]
+        return None
+
 
 def _is_arn(arn: str) -> bool:
     # Check if arn follows the format:
@@ -28,18 +52,4 @@ def _is_arn(arn: str) -> bool:
         return False
 
     arn_parts = str(arn).split(":")
-    return len(arn_parts) >= 6 and _is_account_id(arn_parts[4])
-
-
-def _is_account_id(input: str) -> bool:
-    if input is None or len(input) != 12:
-        return False
-
-    if not _check_digits(input):
-        return False
-
-    return True
-
-
-def _check_digits(string: str) -> bool:
-    return string.isdigit()
+    return len(arn_parts) >= 6 and is_account_id(arn_parts[4])
