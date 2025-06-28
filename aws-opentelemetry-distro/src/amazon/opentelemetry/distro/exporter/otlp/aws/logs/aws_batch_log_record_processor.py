@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
-from typing import List, Mapping, Optional, Sequence, cast
+from typing import Mapping, Optional, Sequence, cast
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY, attach, detach, set_value
@@ -98,11 +98,12 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
                     _logger.exception("Exception while exporting logs: %s", exception)
                 detach(token)
 
-    def _estimate_log_size(self, log: LogData, depth: int = 3) -> int:
+    def _estimate_log_size(self, log: LogData, depth: int = 3) -> int:  # pylint: disable=too-many-branches
         """
         Estimates the size in bytes of a log by calculating the size of its body and its attributes
         and adding a buffer amount to account for other log metadata information.
         Will process complex log structures up to the specified depth limit.
+        Includes cycle detection to prevent processing the log content more than once.
         If the depth limit of the log structure is exceeded, returns the truncated calculation
         to everything up to that point.
 
@@ -114,14 +115,21 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
             int: The estimated size of the log object in bytes
         """
 
-        # Use a queue to prevent excessive recursive calls.
-        # We calculate based on the size of the log record body and attributes for the log.
-        queue: List[tuple[AnyValue, int]] = [(log.log_record.body, 0), (log.log_record.attributes, -1)]
+        # Queue contains tuples of (log_content, depth) where:
+        # - log_content is the current piece of log data being processed
+        # - depth tracks how many levels deep we've traversed to reach this content
+        # - body starts at depth 0 since it's an AnyValue object
+        # - Attributes start at depth -1 since it's a Mapping[str, AnyValue] - when traversed, we will
+        #   start processing its keys at depth 0
+        queue = [(log.log_record.body, 0), (log.log_record.attributes, -1)]
+
+        # Track visited complex log contents to avoid calculating the same one more than once
+        visited = set()
 
         size: int = self._BASE_LOG_BUFFER_BYTE_SIZE
 
         while queue:
-            new_queue: List[tuple[AnyValue, int]] = []
+            new_queue = []
 
             for data in queue:
                 # small optimization, can stop calculating the size once it reaches the 1 MB limit.
@@ -130,19 +138,30 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
 
                 next_val, current_depth = data
 
-                if isinstance(next_val, (str, bytes)):
-                    size += len(next_val)
+                if next_val is None:
                     continue
 
                 if isinstance(next_val, bool):
                     size += 4 if next_val else 5
                     continue
 
+                if isinstance(next_val, (str, bytes)):
+                    size += len(next_val)
+                    continue
+
                 if isinstance(next_val, (float, int)):
                     size += len(str(next_val))
                     continue
 
+                # next_val must be Sequence["AnyValue"] or Mapping[str, "AnyValue"],
                 if current_depth <= depth:
+                    obj_id = id(
+                        next_val
+                    )  # Guaranteed to be unique, see: https://www.w3schools.com/python/ref_func_id.asp
+                    if obj_id in visited:
+                        continue
+                    visited.add(obj_id)
+
                     if isinstance(next_val, Sequence):
                         for content in next_val:
                             new_queue.append((cast(AnyValue, content), current_depth + 1))

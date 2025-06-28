@@ -4,7 +4,7 @@
 import logging
 import os
 import re
-from logging import NOTSET, Logger, getLogger
+from logging import Logger, getLogger
 from typing import ClassVar, Dict, List, NamedTuple, Optional, Type, Union
 
 from importlib_metadata import version
