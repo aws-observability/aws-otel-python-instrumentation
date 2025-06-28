@@ -502,6 +502,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
                 OTLPAwsSpanExporter,
                 AwsAuthSession,
                 Compression.NoCompression,
+                Resource.get_empty(),
             )
 
         for config in bad_configs:
@@ -512,6 +513,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
                 OTLPSpanExporter,
                 Session,
                 Compression.NoCompression,
+                Resource.get_empty(),
             )
 
         self.assertIsInstance(
@@ -615,13 +617,11 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
                 config, _customize_logs_exporter, OTLPLogExporter(), OTLPLogExporter, Session, Compression.NoCompression
             )
 
-        self.assertIsInstance(
-            _customize_logs_exporter(OTLPGrpcLogExporter(), Resource.get_empty()), OTLPGrpcLogExporter
-        )
+        self.assertIsInstance(_customize_logs_exporter(OTLPGrpcLogExporter()), OTLPGrpcLogExporter)
 
     # Need to patch all of these to prevent some weird multi-threading error with the LogProvider
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.LoggingHandler", return_value=MagicMock())
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.getLogger", return_value=MagicMock())
+    @patch("logging.getLogger", return_value=MagicMock())
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._customize_logs_exporter")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.LoggerProvider", return_value=MagicMock())
     @patch(
@@ -900,19 +900,13 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("OTEL_METRIC_EXPORT_INTERVAL", None)
 
     def customize_exporter_test(
-        self,
-        config,
-        executor,
-        default_exporter,
-        expected_exporter_type,
-        expected_session,
-        expected_compression,
+        self, config, executor, default_exporter, expected_exporter_type, expected_session, expected_compression, *args
     ):
         for key, value in config.items():
             os.environ[key] = value
 
         try:
-            result = executor(default_exporter, Resource.get_empty())
+            result = executor(default_exporter, *args)
             self.assertIsInstance(result, expected_exporter_type)
             self.assertIsInstance(result._session, expected_session)
             self.assertEqual(result._compression, expected_compression)
