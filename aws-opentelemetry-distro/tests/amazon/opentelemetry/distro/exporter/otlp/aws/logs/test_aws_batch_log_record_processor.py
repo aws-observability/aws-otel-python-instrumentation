@@ -226,6 +226,50 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
             batch = call[0][0]
             expected_size = expected_sizes[index]
             self.assertEqual(len(batch), expected_size)
+    
+    def test_force_flush_returns_false_when_shutdown(self):
+        """Tests that force_flush returns False when processor is shutdown"""
+        self.processor.shutdown()
+        result = self.processor.force_flush()
+        
+        # Verify force_flush returns False and no export is called
+        self.assertFalse(result)
+        self.mock_exporter.export.assert_not_called()
+    
+    @patch(
+        "amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.attach",
+        return_value=MagicMock(),
+    )
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.detach")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.set_value")
+    def test_force_flush_exports_only_one_batch(self, _, __, ___):
+        """Tests that force_flush should try to atleast export one batch of logs. Rest of the logs will be dropped"""
+        # Set max_export_batch_size to 5 to limit batch size
+        self.processor._max_export_batch_size = 5
+        self.processor._shutdown = False
+        
+        # Add 6 logs to queue, after the export there should be 1 log remaining
+        log_count = 6
+        test_logs = self.generate_test_log_data(
+            log_body="test message", attr_key="key", attr_val="value", count=log_count
+        )
+        
+        for log in test_logs:
+            self.processor._queue.appendleft(log)
+        
+        self.assertEqual(len(self.processor._queue), log_count)
+        
+        result = self.processor.force_flush()
+        
+        self.assertTrue(result)
+        # 45 logs should remain
+        self.assertEqual(len(self.processor._queue), 1)
+        self.mock_exporter.export.assert_called_once()
+        
+        # Verify only one batch of 5 logs was exported
+        args, _ = self.mock_exporter.export.call_args
+        exported_batch = args[0]
+        self.assertEqual(len(exported_batch), 5)
 
     @staticmethod
     def generate_test_log_data(
