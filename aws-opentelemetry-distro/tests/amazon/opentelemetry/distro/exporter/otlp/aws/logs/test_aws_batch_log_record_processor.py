@@ -114,6 +114,23 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
 
             self.assertEqual(actual_size, expected_size)
 
+    def test_process_log_data_with_cycle(self):
+        """Test that processor handles processing logs with circular references only once"""
+        cyclic_dict: dict = {"data": "test"}
+        cyclic_dict["self_ref"] = cyclic_dict
+
+        log = self.generate_test_log_data(
+            log_body=cyclic_dict,
+            attr_key="",
+            attr_val="",
+            log_body_depth=-1,
+            attr_depth=-1,
+            count=1,
+        )
+        expected_size = self.base_log_size + len("data") + len("self_ref") + len("test")
+        actual_size = self.processor._estimate_log_size(log[0])
+        self.assertEqual(actual_size, expected_size)
+
     @patch(
         "amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.attach",
         return_value=MagicMock(),
@@ -236,7 +253,6 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         attr_depth=3,
         count=5,
         create_map=True,
-        instrumentation_scope=InstrumentationScope("test-scope", "1.0.0"),
     ) -> List[LogData]:
 
         def generate_nested_value(depth, value, create_map=True) -> AnyValue:
