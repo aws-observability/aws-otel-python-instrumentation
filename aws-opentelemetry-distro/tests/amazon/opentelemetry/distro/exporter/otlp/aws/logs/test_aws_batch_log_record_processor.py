@@ -251,7 +251,7 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
 
         logs = []
 
-        for index in range(count):
+        for _ in range(count):
             record = LogRecord(
                 timestamp=int(time.time_ns()),
                 trace_id=0x123456789ABCDEF0123456789ABCDEF0,
