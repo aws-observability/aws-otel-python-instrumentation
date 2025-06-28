@@ -103,8 +103,8 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
         Estimates the size in bytes of a log by calculating the size of its body and its attributes
         and adding a buffer amount to account for other log metadata information.
         Will process complex log structures up to the specified depth limit.
-        Includes cycle detection to prevent processing the same complex log content (Maps, Arrays)
-        more than once. If the depth limit of the log structure is exceeded, returns the truncated calculation
+        Includes cycle detection to prevent processing the log content more than once.
+        If the depth limit of the log structure is exceeded, returns the truncated calculation
         to everything up to that point.
 
         Args:
@@ -115,12 +115,15 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
             int: The estimated size of the log object in bytes
         """
 
-        # Queue is a list of (log_content, depth) where:
-        # log_content is the current piece of log data being processed
-        # depth tracks how many levels deep we've traversed to reach this data
+        # Queue contains tuples of (log_content, depth) where:
+        # - log_content is the current piece of log data being processed
+        # - depth tracks how many levels deep we've traversed to reach this content
+        # - body starts at depth 0 since it's an AnyValue object
+        # - Attributes start at depth -1 since it's a Mapping[str, AnyValue] - when traversed, we will
+        #   start processing its keys at depth 0
         queue = [(log.log_record.body, 0), (log.log_record.attributes, -1)]
 
-        # Track visited objects to avoid calculating the same complex log content more than once
+        # Track visited complex log contents to avoid calculating the same one more than once
         visited = set()
 
         size: int = self._BASE_LOG_BUFFER_BYTE_SIZE
@@ -135,15 +138,15 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
 
                 next_val, current_depth = data
 
-                if not next_val:
-                    continue
-
-                if isinstance(next_val, (str, bytes)):
-                    size += len(next_val)
+                if next_val is None:
                     continue
 
                 if isinstance(next_val, bool):
                     size += 4 if next_val else 5
+                    continue
+
+                if isinstance(next_val, (str, bytes)):
+                    size += len(next_val)
                     continue
 
                 if isinstance(next_val, (float, int)):
@@ -152,8 +155,9 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
 
                 # next_val must be Sequence["AnyValue"] or Mapping[str, "AnyValue"],
                 if current_depth <= depth:
-                    # Guaranteed to be unique, see: https://www.w3schools.com/python/ref_func_id.asp
-                    obj_id = id(next_val)
+                    obj_id = id(
+                        next_val
+                    )  # Guaranteed to be unique, see: https://www.w3schools.com/python/ref_func_id.asp
                     if obj_id in visited:
                         continue
                     visited.add(obj_id)
