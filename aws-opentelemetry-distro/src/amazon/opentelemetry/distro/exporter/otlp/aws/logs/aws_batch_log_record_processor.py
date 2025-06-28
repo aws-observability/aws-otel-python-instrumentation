@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
-from typing import List, Mapping, Optional, Sequence, cast
+from typing import Mapping, Optional, Sequence, cast
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY, attach, detach, set_value
@@ -129,7 +129,7 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
         size: int = self._BASE_LOG_BUFFER_BYTE_SIZE
 
         while queue:
-            new_queue: List[tuple[AnyValue, int]] = []
+            new_queue = []
 
             for data in queue:
                 # small optimization, can stop calculating the size once it reaches the 1 MB limit.
