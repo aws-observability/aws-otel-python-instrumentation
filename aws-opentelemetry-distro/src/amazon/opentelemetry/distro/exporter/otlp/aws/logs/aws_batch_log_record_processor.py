@@ -98,7 +98,7 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
                     _logger.exception("Exception while exporting logs: %s", exception)
                 detach(token)
 
-    def _estimate_log_size(self, log: LogData, depth: int = 3) -> int:
+    def _estimate_log_size(self, log: LogData, depth: int = 3) -> int:  # pylint: disable=too-many-branches
         """
         Estimates the size in bytes of a log by calculating the size of its body and its attributes
         and adding a buffer amount to account for other log metadata information.
