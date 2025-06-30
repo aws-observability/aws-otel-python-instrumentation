@@ -46,7 +46,11 @@ def get_aws_session():
         # pylint: disable=import-outside-toplevel
         from botocore.session import Session
 
-        return Session()
+        session = Session()
+        region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+        if region:
+            session.set_config_variable("region", region)
+        return session
     return None
 
 
