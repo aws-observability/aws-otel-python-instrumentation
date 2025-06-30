@@ -17,7 +17,7 @@ class TestOTLPAwsSpanExporter(TestCase):
         mock_logger_provider = MagicMock(spec=LoggerProvider)
         endpoint = "https://xray.us-east-1.amazonaws.com/v1/traces"
 
-        exporter = OTLPAwsSpanExporter(endpoint=endpoint, logger_provider=mock_logger_provider)
+        exporter = OTLPAwsSpanExporter(aws_region="us-east-1", endpoint=endpoint, logger_provider=mock_logger_provider)
 
         self.assertEqual(exporter._logger_provider, mock_logger_provider)
         self.assertEqual(exporter._aws_region, "us-east-1")
@@ -26,7 +26,7 @@ class TestOTLPAwsSpanExporter(TestCase):
         # Test initialization without logger_provider (default behavior)
         endpoint = "https://xray.us-west-2.amazonaws.com/v1/traces"
 
-        exporter = OTLPAwsSpanExporter(endpoint=endpoint)
+        exporter = OTLPAwsSpanExporter(aws_region="us-west-2", endpoint=endpoint)
 
         self.assertIsNone(exporter._logger_provider)
         self.assertEqual(exporter._aws_region, "us-west-2")
@@ -38,7 +38,7 @@ class TestOTLPAwsSpanExporter(TestCase):
         mock_is_enabled.return_value = False
         endpoint = "https://xray.us-east-1.amazonaws.com/v1/traces"
 
-        exporter = OTLPAwsSpanExporter(endpoint=endpoint)
+        exporter = OTLPAwsSpanExporter(aws_region="us-east-1", endpoint=endpoint)
         result = exporter._ensure_llo_handler()
 
         self.assertFalse(result)
@@ -59,7 +59,7 @@ class TestOTLPAwsSpanExporter(TestCase):
         mock_llo_handler_class.return_value = mock_llo_handler
 
         endpoint = "https://xray.us-east-1.amazonaws.com/v1/traces"
-        exporter = OTLPAwsSpanExporter(endpoint=endpoint)
+        exporter = OTLPAwsSpanExporter(aws_region="us-east-1", endpoint=endpoint)
 
         # First call should initialize
         result = exporter._ensure_llo_handler()
@@ -87,7 +87,7 @@ class TestOTLPAwsSpanExporter(TestCase):
         mock_logger_provider = MagicMock(spec=LoggerProvider)
 
         endpoint = "https://xray.us-east-1.amazonaws.com/v1/traces"
-        exporter = OTLPAwsSpanExporter(endpoint=endpoint, logger_provider=mock_logger_provider)
+        exporter = OTLPAwsSpanExporter(aws_region="us-east-1", endpoint=endpoint, logger_provider=mock_logger_provider)
 
         with patch(
             "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.LLOHandler"
@@ -110,7 +110,7 @@ class TestOTLPAwsSpanExporter(TestCase):
         mock_get_logger_provider.side_effect = Exception("Failed to get logger provider")
 
         endpoint = "https://xray.us-east-1.amazonaws.com/v1/traces"
-        exporter = OTLPAwsSpanExporter(endpoint=endpoint)
+        exporter = OTLPAwsSpanExporter(aws_region="us-east-1", endpoint=endpoint)
 
         result = exporter._ensure_llo_handler()
 
@@ -123,7 +123,7 @@ class TestOTLPAwsSpanExporter(TestCase):
         mock_is_enabled.return_value = False
         endpoint = "https://xray.us-east-1.amazonaws.com/v1/traces"
 
-        exporter = OTLPAwsSpanExporter(endpoint=endpoint)
+        exporter = OTLPAwsSpanExporter(aws_region="us-east-1", endpoint=endpoint)
 
         # Mock the parent class export method
         with patch.object(OTLPSpanExporter, "export") as mock_parent_export:
@@ -149,7 +149,7 @@ class TestOTLPAwsSpanExporter(TestCase):
         mock_llo_handler_class.return_value = mock_llo_handler
 
         endpoint = "https://xray.us-east-1.amazonaws.com/v1/traces"
-        exporter = OTLPAwsSpanExporter(endpoint=endpoint)
+        exporter = OTLPAwsSpanExporter(aws_region="us-east-1", endpoint=endpoint)
 
         # Mock spans and processed spans
         original_spans = [MagicMock(spec=ReadableSpan), MagicMock(spec=ReadableSpan)]
@@ -182,7 +182,7 @@ class TestOTLPAwsSpanExporter(TestCase):
         mock_llo_handler.process_spans.side_effect = Exception("LLO processing failed")
 
         endpoint = "https://xray.us-east-1.amazonaws.com/v1/traces"
-        exporter = OTLPAwsSpanExporter(endpoint=endpoint)
+        exporter = OTLPAwsSpanExporter(aws_region="us-east-1", endpoint=endpoint)
 
         spans = [MagicMock(spec=ReadableSpan), MagicMock(spec=ReadableSpan)]
 

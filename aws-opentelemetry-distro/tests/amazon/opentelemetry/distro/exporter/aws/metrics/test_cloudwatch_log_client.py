@@ -24,7 +24,7 @@ class TestCloudWatchLogClient(unittest.TestCase):
             mock_session.return_value = mock_session_instance
             mock_session_instance.create_client.return_value = mock_client
 
-            self.log_client = CloudWatchLogClient(log_group_name="test-log-group")
+            self.log_client = CloudWatchLogClient(session=mock_session, log_group_name="test-log-group")
 
     def test_initialization(self):
         """Test log client initialization."""
@@ -42,6 +42,7 @@ class TestCloudWatchLogClient(unittest.TestCase):
         mock_session_instance.create_client.return_value = mock_client
 
         log_client = CloudWatchLogClient(
+            session=mock_session,
             log_group_name="custom-log-group",
             log_stream_name="custom-stream",
             aws_region="us-west-2",
@@ -479,7 +480,7 @@ class TestCloudWatchLogClient(unittest.TestCase):
         mock_session.return_value.create_client.return_value = mock_client
 
         custom_stream = "my-custom-stream"
-        client = CloudWatchLogClient("test-group", log_stream_name=custom_stream)
+        client = CloudWatchLogClient(session=mock_session, log_group_name="test-group", log_stream_name=custom_stream)
         self.assertEqual(client.log_stream_name, custom_stream)
 
     def test_send_log_batch_empty_batch_no_aws_call(self):

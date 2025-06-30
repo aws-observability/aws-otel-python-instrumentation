@@ -36,7 +36,7 @@ class TestOTLPAwsLogsExporter(TestCase):
 
     def setUp(self):
         self.logs = self.generate_test_log_data()
-        self.exporter = OTLPAwsLogExporter(endpoint=self._ENDPOINT)
+        self.exporter = OTLPAwsLogExporter(aws_region="us-east-1", endpoint=self._ENDPOINT)
 
     @patch("requests.Session.post", return_value=good_response)
     def test_export_success(self, mock_request):

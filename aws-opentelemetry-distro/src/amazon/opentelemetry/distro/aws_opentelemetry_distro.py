@@ -88,8 +88,9 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             # Set GenAI capture content default
             os.environ.setdefault(OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT, "true")
 
-            # Set OTLP endpoints with AWS region if not already set
             region = get_aws_region()
+
+            # Set OTLP endpoints with AWS region if not already set
             if region:
                 os.environ.setdefault(
                     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, f"https://xray.{region}.amazonaws.com/v1/traces"

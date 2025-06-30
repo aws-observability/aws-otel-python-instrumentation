@@ -12,7 +12,7 @@ from typing_extensions import override
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE
 from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
-from amazon.opentelemetry.distro._utils import is_agent_observability_enabled, is_installed
+from amazon.opentelemetry.distro._utils import IS_BOTOCORE_INSTALLED, get_aws_session, is_agent_observability_enabled
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor_builder import (
     AttributePropagatingSpanProcessorBuilder,
@@ -23,11 +23,6 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor import (
-    AwsCloudWatchOtlpBatchLogRecordProcessor,
-)
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
-from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
@@ -214,8 +209,7 @@ def _init_logging(
     for _, exporter_class in exporters.items():
         exporter_args = {}
         log_exporter: LogExporter = _customize_logs_exporter(exporter_class(**exporter_args))
-        log_processor = _customize_log_record_processor(log_exporter)
-        provider.add_log_record_processor(log_processor)
+        _customize_log_record_processor(provider, log_exporter)
 
     event_logger_provider = EventLoggerProvider(logger_provider=provider)
     set_event_logger_provider(event_logger_provider)
@@ -303,7 +297,7 @@ def _export_unsampled_span_for_agent_observability(trace_provider: TracerProvide
 
     traces_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
 
-    span_exporter = OTLPAwsSpanExporter(endpoint=traces_endpoint, logger_provider=get_logger_provider())
+    span_exporter = _create_aws_exporter(endpoint=traces_endpoint)
 
     trace_provider.add_span_processor(BatchUnsampledSpanProcessor(span_exporter=span_exporter))
 
@@ -404,15 +398,7 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
         _logger.info("Detected using AWS OTLP Traces Endpoint.")
 
         if isinstance(span_exporter, OTLPSpanExporter):
-            if is_agent_observability_enabled():
-                # Span exporter needs an instance of logger provider in ai agent
-                # observability case because we need to split input/output prompts
-                # from span attributes and send them to the logs pipeline per
-                # the new Gen AI semantic convention from OTel
-                # ref: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/
-                span_exporter = OTLPAwsSpanExporter(endpoint=traces_endpoint, logger_provider=get_logger_provider())
-            else:
-                span_exporter = OTLPAwsSpanExporter(endpoint=traces_endpoint)
+            return _create_aws_exporter(endpoint=traces_endpoint)
 
         else:
             _logger.warning(
@@ -426,14 +412,20 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
     return AwsMetricAttributesSpanExporterBuilder(span_exporter, resource).build()
 
 
-def _customize_log_record_processor(log_exporter: LogExporter):
-    if isinstance(log_exporter, OTLPAwsLogExporter) and is_agent_observability_enabled():
-        return AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=log_exporter)
+def _customize_log_record_processor(provider: LoggerProvider, log_exporter: Optional[LogExporter]) -> None:
+    if log_exporter is None:
+        return
+    if is_agent_observability_enabled() and IS_BOTOCORE_INSTALLED:
+        from amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor import (
+            AwsCloudWatchOtlpBatchLogRecordProcessor,
+        )
 
-    return BatchLogRecordProcessor(exporter=log_exporter)
+        provider.add_log_record_processor(AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=log_exporter))
+    else:
+        provider.add_log_record_processor(BatchLogRecordProcessor(exporter=log_exporter))
 
 
-def _customize_logs_exporter(log_exporter: LogExporter) -> LogExporter:
+def _customize_logs_exporter(log_exporter: LogExporter) -> Optional[LogExporter]:
     logs_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT)
 
     if _is_aws_otlp_endpoint(logs_endpoint, "logs"):
@@ -443,7 +435,7 @@ def _customize_logs_exporter(log_exporter: LogExporter) -> LogExporter:
             # Setting default compression mode to Gzip as this is the behavior in upstream's
             # collector otlp http exporter:
             # https://github.com/open-telemetry/opentelemetry-collector/tree/main/exporter/otlphttpexporter
-            return OTLPAwsLogExporter(endpoint=logs_endpoint)
+            return _create_aws_exporter(endpoint=logs_endpoint)
 
         _logger.warning(
             "Improper configuration see: please export/set "
@@ -762,8 +754,9 @@ def _check_emf_exporter_enabled() -> bool:
 def create_emf_exporter():
     """Create and configure the CloudWatch EMF exporter."""
     try:
+        session = get_aws_session()
         # Check if botocore is available before importing the EMF exporter
-        if not is_installed("botocore"):
+        if not session:
             _logger.warning("botocore is not installed. EMF exporter requires botocore")
             return None
 
@@ -778,6 +771,7 @@ def create_emf_exporter():
             return None
 
         return AwsCloudWatchEmfExporter(
+            session=session,
             namespace=log_header_setting.namespace,
             log_group_name=log_header_setting.log_group,
             log_stream_name=log_header_setting.log_stream,
@@ -785,4 +779,44 @@ def create_emf_exporter():
     # pylint: disable=broad-exception-caught
     except Exception as errors:
         _logger.error("Failed to create EMF exporter: %s", errors)
+        return None
+
+
+def _create_aws_exporter(endpoint: str):
+    """Create and configure the AWS OTLP exporters."""
+    try:
+        session = get_aws_session()
+        # Check if botocore is available before importing the AWS exporter
+        if not session:
+            _logger.warning("SigV4 Auth requires botocore to be enabled")
+            return None
+
+        # pylint: disable=import-outside-toplevel
+        from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
+        from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
+
+        endpoint = endpoint.lower()
+        split = endpoint.split(".")
+        service = split[0]
+        region = split[1]
+
+        if "xray" in service:
+            if is_agent_observability_enabled():
+                # Span exporter needs an instance of logger provider in ai agent
+                # observability case because we need to split input/output prompts
+                # from span attributes and send them to the logs pipeline per
+                # the new Gen AI semantic convention from OTel
+                # ref: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/
+                return OTLPAwsSpanExporter(
+                    session=session, endpoint=endpoint, aws_region=region, logger_provider=get_logger_provider()
+                )
+
+            return OTLPAwsSpanExporter(session=session, endpoint=endpoint, aws_region=region)
+
+        if "logs" in service:
+            return OTLPAwsLogExporter(session=session, aws_region=region)
+
+    # pylint: disable=broad-exception-caught
+    except Exception as errors:
+        _logger.error("Failed to create AWS OTLP exporter: %s", errors)
         return None

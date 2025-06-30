@@ -821,14 +821,15 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         mock_tracer_provider: TracerProvider = MagicMock()
 
         with patch(
-            "amazon.opentelemetry.distro.aws_opentelemetry_configurator.OTLPAwsSpanExporter"
+            "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.OTLPAwsSpanExporter"
         ) as mock_aws_exporter:
             with patch(
-                "amazon.opentelemetry.distro.aws_opentelemetry_configurator.BatchUnsampledSpanProcessor"
-            ) as mock_processor:
+                "amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_logger_provider"
+            ) as mock_logger_provider:
                 with patch(
-                    "amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_logger_provider"
-                ) as mock_logger_provider:
+                    "amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session"
+                ) as mock_session:
+                    mock_session.return_value = MagicMock()
                     os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
                     os.environ["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] = "https://xray.us-east-1.amazonaws.com/v1/traces"
 
@@ -836,13 +837,13 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
                     # Verify OTLPAwsSpanExporter is created with correct parameters
                     mock_aws_exporter.assert_called_once_with(
+                        session=mock_session.return_value,
                         endpoint="https://xray.us-east-1.amazonaws.com/v1/traces",
+                        aws_region="us-east-1",
                         logger_provider=mock_logger_provider.return_value,
                     )
-                    # Verify BatchUnsampledSpanProcessor wraps the exporter
-                    mock_processor.assert_called_once_with(span_exporter=mock_aws_exporter.return_value)
                     # Verify processor is added to tracer provider
-                    mock_tracer_provider.add_span_processor.assert_called_once_with(mock_processor.return_value)
+                    mock_tracer_provider.add_span_processor.assert_called_once()
 
         # Clean up
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
@@ -1007,17 +1008,16 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop(OTEL_EXPORTER_OTLP_LOGS_HEADERS, None)
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._validate_and_fetch_logs_header")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_installed")
-    def test_create_emf_exporter(self, mock_is_installed, mock_validate):
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
+    def test_create_emf_exporter(self, mock_get_session, mock_validate):
         # Test when botocore is not installed
-        mock_is_installed.return_value = False
+        mock_get_session.return_value = None
         result = create_emf_exporter()
         self.assertIsNone(result)
-        mock_is_installed.assert_called_with("botocore")
 
         # Reset mock for subsequent tests
-        mock_is_installed.reset_mock()
-        mock_is_installed.return_value = True
+        mock_get_session.reset_mock()
+        mock_get_session.return_value = MagicMock()
 
         # Mock the EMF exporter class import by patching the module import
         with patch(
@@ -1040,7 +1040,10 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             self.assertEqual(result, mock_exporter_instance)
             # Verify that the EMF exporter was called with correct parameters
             mock_emf_exporter_class.assert_called_with(
-                namespace=None, log_group_name="test-group", log_stream_name="test-stream"
+                session=mock_get_session.return_value,
+                namespace=None,
+                log_group_name="test-group",
+                log_stream_name="test-stream",
             )
 
             # Test with valid configuration
@@ -1050,7 +1053,10 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             self.assertEqual(result, mock_exporter_instance)
             # Verify that the EMF exporter was called with correct parameters
             mock_emf_exporter_class.assert_called_with(
-                namespace="test-namespace", log_group_name="test-group", log_stream_name="test-stream"
+                session=mock_get_session.return_value,
+                namespace="test-namespace",
+                log_group_name="test-group",
+                log_stream_name="test-stream",
             )
 
             # Test exception handling
