@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from requests import Session
 
+from amazon.opentelemetry.distro._aws_attribute_keys import AWS_AI_AGENT_TYPE, AWS_LOCAL_SERVICE
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor import AttributePropagatingSpanProcessor
 from amazon.opentelemetry.distro.aws_batch_unsampled_span_processor import BatchUnsampledSpanProcessor
@@ -27,6 +28,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _custom_import_sampler,
     _customize_logs_exporter,
     _customize_metric_exporters,
+    _customize_resource,
     _customize_sampler,
     _customize_span_exporter,
     _customize_span_processors,
@@ -67,6 +69,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Span, SpanProcessor, Tracer, TracerProvider
 from opentelemetry.sdk.trace.export import SpanExporter
 from opentelemetry.sdk.trace.sampling import DEFAULT_ON, Sampler
+from opentelemetry.semconv.resource import ResourceAttributes
 from opentelemetry.trace import get_tracer_provider
 
 
@@ -1090,6 +1093,53 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             _customize_metric_exporters(metric_readers, views, is_emf_enabled=True)
             self.assertEqual(len(metric_readers), 1)
             self.assertIsInstance(metric_readers[0], PeriodicExportingMetricReader)
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_service_attribute")
+    def test_customize_resource_without_agent_observability(self, mock_get_service_attribute, mock_is_agent_enabled):
+        """Test _customize_resource when agent observability is disabled"""
+        mock_is_agent_enabled.return_value = False
+        mock_get_service_attribute.return_value = ("test-service", False)
+
+        resource = Resource.create({ResourceAttributes.SERVICE_NAME: "test-service"})
+        result = _customize_resource(resource)
+
+        # Should only have AWS_LOCAL_SERVICE added
+        self.assertEqual(result.attributes[AWS_LOCAL_SERVICE], "test-service")
+        self.assertNotIn(AWS_AI_AGENT_TYPE, result.attributes)
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_service_attribute")
+    def test_customize_resource_with_agent_observability_default(
+        self, mock_get_service_attribute, mock_is_agent_enabled
+    ):
+        """Test _customize_resource when agent observability is enabled with default agent type"""
+        mock_is_agent_enabled.return_value = True
+        mock_get_service_attribute.return_value = ("test-service", False)
+
+        resource = Resource.create({ResourceAttributes.SERVICE_NAME: "test-service"})
+        result = _customize_resource(resource)
+
+        # Should have both AWS_LOCAL_SERVICE and AWS_AI_AGENT_TYPE with default value
+        self.assertEqual(result.attributes[AWS_LOCAL_SERVICE], "test-service")
+        self.assertEqual(result.attributes[AWS_AI_AGENT_TYPE], "default")
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_service_attribute")
+    def test_customize_resource_with_existing_agent_type(self, mock_get_service_attribute, mock_is_agent_enabled):
+        """Test _customize_resource when agent type already exists in resource"""
+        mock_is_agent_enabled.return_value = True
+        mock_get_service_attribute.return_value = ("test-service", False)
+
+        # Create resource with existing agent type
+        resource = Resource.create(
+            {ResourceAttributes.SERVICE_NAME: "test-service", AWS_AI_AGENT_TYPE: "existing-agent"}
+        )
+        result = _customize_resource(resource)
+
+        # Should preserve existing agent type and not override it
+        self.assertEqual(result.attributes[AWS_LOCAL_SERVICE], "test-service")
+        self.assertEqual(result.attributes[AWS_AI_AGENT_TYPE], "existing-agent")
 
 
 def validate_distro_environ():
