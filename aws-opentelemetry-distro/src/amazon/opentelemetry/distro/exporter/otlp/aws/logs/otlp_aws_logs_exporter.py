@@ -61,8 +61,7 @@ class OTLPAwsLogExporter(OTLPLogExporter):
 
         Key behaviors:
         1. Always compresses data with gzip before sending
-        2. Adds truncatable fields header for large Gen AI logs (>1MB)
-        3. Implements Retry-After header support for throttling responses
+        2. Implements Retry-After header support for throttling responses
         """
 
         if self._shutdown:
@@ -77,6 +76,11 @@ class OTLPAwsLogExporter(OTLPLogExporter):
 
         backoff = _create_exp_backoff_generator(max_value=self._MAX_RETRY_TIMEOUT)
 
+        # This loop will eventually terminate because:
+        # 1) The export request will eventually either succeed or fail permanently
+        # 2) The exponential backoff generator has a max value of _MAX_RETRY_TIMEOUT (64s)
+        # 3) After enough retries, delay will equal _MAX_RETRY_TIMEOUT, forcing exit
+        # 4) Non-retryable errors (4xx except 429) immediately exit the loop
         while True:
             resp = self._send(data)
 
