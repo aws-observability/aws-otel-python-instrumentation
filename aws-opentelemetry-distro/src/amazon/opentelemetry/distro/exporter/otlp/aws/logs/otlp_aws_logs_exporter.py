@@ -114,10 +114,6 @@ class OTLPAwsLogExporter(OTLPLogExporter):
                 resp.reason,
                 backoff_seconds,
             )
-
-            # Make sleep interruptible by checking shutdown status
-            if self._shutdown:
-                return LogExportResult.FAILURE
             sleep(backoff_seconds)
             retry_num += 1
 
