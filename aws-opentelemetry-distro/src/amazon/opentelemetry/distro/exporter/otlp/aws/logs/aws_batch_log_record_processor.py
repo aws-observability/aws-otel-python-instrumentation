@@ -175,17 +175,19 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
                 if next_val is None:
                     continue
 
+                if isinstance(next_val, bool):
+                    size += 4 if next_val else 5
+                    continue
+
                 if isinstance(next_val, (str, bytes)):
                     size += len(next_val)
                     continue
 
-                if isinstance(next_val, (float, int, bool)):
+                if isinstance(next_val, (float, int)):
                     size += len(str(next_val))
                     continue
 
-                # next_val must be Sequence["AnyValue"] or Mapping[str, "AnyValue"]
-                # See: https://github.com/open-telemetry/opentelemetry-python/blob/\
-                # 9426d6da834cfb4df7daedd4426bba0aa83165b5/opentelemetry-api/src/opentelemetry/util/types.py#L20
+                # next_val must be Sequence["AnyValue"] or Mapping[str, "AnyValue"],
                 if current_depth <= depth:
                     obj_id = id(
                         next_val
@@ -210,3 +212,12 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
             queue = new_queue
 
         return size
+
+    # Only export the logs once to avoid the race condition of the worker thread and force flush thread
+    # https://github.com/open-telemetry/opentelemetry-python/issues/3193
+    # https://github.com/open-telemetry/opentelemetry-python/blob/main/opentelemetry-sdk/src/opentelemetry/sdk/_shared_internal/__init__.py#L199
+    def force_flush(self, timeout_millis: Optional[int] = None) -> bool:
+        if self._shutdown:
+            return False
+        self._export(BatchLogExportStrategy.EXPORT_AT_LEAST_ONE_BATCH)
+        return True

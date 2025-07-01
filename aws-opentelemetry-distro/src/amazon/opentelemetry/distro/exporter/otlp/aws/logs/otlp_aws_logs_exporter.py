@@ -9,6 +9,7 @@ from io import BytesIO
 from time import sleep, time
 from typing import Dict, Optional, Sequence
 
+from botocore.session import Session
 from requests import Response
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.structures import CaseInsensitiveDict
@@ -37,6 +38,10 @@ class OTLPAwsLogExporter(OTLPLogExporter):
 
     def __init__(
         self,
+        aws_region: str,
+        session: Session = Session(),
+        log_group: Optional[str] = None,
+        log_stream: Optional[str] = None,
         endpoint: Optional[str] = None,
         certificate_file: Optional[str] = None,
         client_key_file: Optional[str] = None,
@@ -44,10 +49,14 @@ class OTLPAwsLogExporter(OTLPLogExporter):
         headers: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None,
     ):
-        self._aws_region = None
+        self._aws_region = aws_region
 
-        if endpoint:
-            self._aws_region = endpoint.split(".")[1]
+        if log_group and log_stream:
+            log_headers = {"x-aws-log-group": log_group, "x-aws-log-stream": log_stream}
+            if headers:
+                headers.update(log_headers)
+            else:
+                headers = log_headers
 
         OTLPLogExporter.__init__(
             self,
@@ -58,7 +67,7 @@ class OTLPAwsLogExporter(OTLPLogExporter):
             headers,
             timeout,
             compression=Compression.Gzip,
-            session=AwsAuthSession(aws_region=self._aws_region, service="logs"),
+            session=AwsAuthSession(session=session, aws_region=self._aws_region, service="logs"),
         )
 
     def export(self, batch: Sequence[LogData]) -> LogExportResult:
