@@ -158,9 +158,8 @@ class OTLPAwsLogExporter(OTLPLogExporter):
         retry_after_delay = self._parse_retryable_header(headers.get(self._RETRY_AFTER_HEADER))
         if retry_after_delay > -1:
             return retry_after_delay
-        else:
-            # multiplying by a random number between .8 and 1.2 introduces a +/-20% jitter to each backoff.
-            return 2**retry_num * random.uniform(0.8, 1.2)
+        # multiplying by a random number between .8 and 1.2 introduces a +/-20% jitter to each backoff.
+        return 2**retry_num * random.uniform(0.8, 1.2)
 
     @staticmethod
     def _parse_retryable_header(retry_header: Optional[str]) -> float:
