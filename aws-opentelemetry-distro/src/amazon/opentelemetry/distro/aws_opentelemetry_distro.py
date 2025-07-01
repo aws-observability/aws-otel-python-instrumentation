@@ -70,8 +70,6 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
 
         os.environ.setdefault(OTEL_EXPORTER_OTLP_PROTOCOL, "http/protobuf")
 
-        super(AwsOpenTelemetryDistro, self)._configure()
-
         os.environ.setdefault(OTEL_PROPAGATORS, "xray,tracecontext,b3,b3multi")
         os.environ.setdefault(OTEL_PYTHON_ID_GENERATOR, "xray")
         os.environ.setdefault(
@@ -116,6 +114,8 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
 
             # Disable AWS Application Signals by default
             os.environ.setdefault(APPLICATION_SIGNALS_ENABLED_CONFIG, "false")
+
+        super(AwsOpenTelemetryDistro, self)._configure()
 
         if kwargs.get("apply_patches", True):
             apply_instrumentation_patches()
