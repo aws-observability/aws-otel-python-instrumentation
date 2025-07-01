@@ -1,10 +1,12 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+# Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 
 import gzip
 import logging
+import random
 from io import BytesIO
-from time import sleep
+from time import sleep, time
 from typing import Dict, Optional, Sequence
 
 from requests import Response
@@ -12,7 +14,6 @@ from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.structures import CaseInsensitiveDict
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
-from opentelemetry.exporter.otlp.proto.common._internal import _create_exp_backoff_generator
 from opentelemetry.exporter.otlp.proto.common._log_encoder import encode_logs
 from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
@@ -20,9 +21,17 @@ from opentelemetry.sdk._logs import LogData
 from opentelemetry.sdk._logs.export import LogExportResult
 
 _logger = logging.getLogger(__name__)
+_MAX_RETRYS = 6
 
 
 class OTLPAwsLogExporter(OTLPLogExporter):
+    """
+    This exporter extends the functionality of the OTLPLogExporter to allow logs to be exported
+    to the CloudWatch Logs OTLP endpoint https://logs.[AWSRegion].amazonaws.com/v1/logs. Utilizes the aws-sdk
+    library to sign and directly inject SigV4 Authentication to the exported request's headers.
+
+    See: https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-OTLPEndpoint.html
+    """
 
     _RETRY_AFTER_HEADER = "Retry-After"  # See: https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
 
@@ -56,13 +65,13 @@ class OTLPAwsLogExporter(OTLPLogExporter):
         """
         Exports log batch with AWS-specific enhancements over the base OTLPLogExporter.
 
-        Based on upstream implementation which does not retry based on Retry-After header:
-        https://github.com/open-telemetry/opentelemetry-python/blob/acae2c232b101d3e447a82a7161355d66aa06fa2/exporter/opentelemetry-exporter-otlp-proto-http/src/opentelemetry/exporter/otlp/proto/http/_log_exporter/__init__.py#L167
+        Key differences from upstream OTLPLogExporter:
+        1. Respects Retry-After header from server responses for proper throttling
+        2. Treats HTTP 429 (Too Many Requests) as a retryable exception
+        3. Always compresses data with gzip before sending
 
-        Key behaviors:
-        1. Always compresses data with gzip before sending
-        2. Adds truncatable fields header for large Gen AI logs (>1MB)
-        3. Implements Retry-After header support for throttling responses
+        Upstream implementation does not support Retry-After header:
+        https://github.com/open-telemetry/opentelemetry-python/blob/acae2c232b101d3e447a82a7161355d66aa06fa2/exporter/opentelemetry-exporter-otlp-proto-http/src/opentelemetry/exporter/otlp/proto/http/_log_exporter/__init__.py#L167
         """
 
         if self._shutdown:
@@ -75,47 +84,50 @@ class OTLPAwsLogExporter(OTLPLogExporter):
             gzip_stream.write(serialized_data)
         data = gzip_data.getvalue()
 
-        backoff = _create_exp_backoff_generator(max_value=self._MAX_RETRY_TIMEOUT)
+        deadline_sec = time() + self._timeout
+        retry_num = 0
 
+        # This loop will eventually terminate because:
+        # 1) The export request will eventually either succeed or fail permanently
+        # 2) Maximum retries (_MAX_RETRYS = 6) will be reached
+        # 3) Deadline timeout will be exceeded
+        # 4) Non-retryable errors (4xx except 429) immediately exit the loop
         while True:
-            resp = self._send(data)
+            resp = self._send(data, deadline_sec - time())
 
             if resp.ok:
                 return LogExportResult.SUCCESS
 
-            delay = self._get_retry_delay_sec(resp.headers, backoff)
+            backoff_seconds = self._get_retry_delay_sec(resp.headers, retry_num)
             is_retryable = self._retryable(resp)
 
-            if not is_retryable or delay == self._MAX_RETRY_TIMEOUT:
-                if is_retryable:
-                    _logger.error(
-                        "Failed to export logs due to retries exhausted "
-                        "after transient error %s encountered while exporting logs batch",
-                        resp.reason,
-                    )
-                else:
-                    _logger.error(
-                        "Failed to export logs batch code: %s, reason: %s",
-                        resp.status_code,
-                        resp.text,
-                    )
+            if not is_retryable or retry_num + 1 == _MAX_RETRYS or backoff_seconds > (deadline_sec - time()):
+                _logger.error(
+                    "Failed to export logs batch code: %s, reason: %s",
+                    resp.status_code,
+                    resp.text,
+                )
                 return LogExportResult.FAILURE
 
             _logger.warning(
-                "Transient error %s encountered while exporting logs batch, retrying in %ss.",
+                "Transient error %s encountered while exporting logs batch, retrying in %.2fs.",
                 resp.reason,
-                delay,
+                backoff_seconds,
             )
 
-            sleep(delay)
+            # Make sleep interruptible by checking shutdown status
+            if self._shutdown:
+                return LogExportResult.FAILURE
+            sleep(backoff_seconds)
+            retry_num += 1
 
-    def _send(self, serialized_data: bytes):
+    def _send(self, serialized_data: bytes, timeout_sec: float):
         try:
             response = self._session.post(
                 url=self._endpoint,
                 data=serialized_data,
                 verify=self._certificate_file,
-                timeout=self._timeout,
+                timeout=timeout_sec,
                 cert=self._client_cert,
             )
             return response
@@ -124,7 +136,7 @@ class OTLPAwsLogExporter(OTLPLogExporter):
                 url=self._endpoint,
                 data=serialized_data,
                 verify=self._certificate_file,
-                timeout=self._timeout,
+                timeout=timeout_sec,
                 cert=self._client_cert,
             )
             return response
@@ -132,29 +144,23 @@ class OTLPAwsLogExporter(OTLPLogExporter):
     @staticmethod
     def _retryable(resp: Response) -> bool:
         """
-        Is it a retryable response?
+        Logic based on https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
         """
         # See: https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
 
         return resp.status_code in (429, 503) or OTLPLogExporter._retryable(resp)
 
-    def _get_retry_delay_sec(self, headers: CaseInsensitiveDict, backoff) -> float:
+    def _get_retry_delay_sec(self, headers: CaseInsensitiveDict, retry_num: int) -> float:
         """
         Get retry delay in seconds from headers or backoff strategy.
         """
-        # See: https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
-        maybe_retry_after = headers.get(self._RETRY_AFTER_HEADER, None)
-
-        # Set the next retry delay to the value of the Retry-After response in the headers.
-        # If Retry-After is not present in the headers, default to the next iteration of the
-        # exponential backoff strategy.
-
-        delay = self._parse_retryable_header(maybe_retry_after)
-
-        if delay == -1:
-            delay = next(backoff, self._MAX_RETRY_TIMEOUT)
-
-        return delay
+        # Check for Retry-After header first, then use exponential backoff with jitter
+        retry_after_delay = self._parse_retryable_header(headers.get(self._RETRY_AFTER_HEADER))
+        if retry_after_delay > -1:
+            return retry_after_delay
+        else:
+            # multiplying by a random number between .8 and 1.2 introduces a +/-20% jitter to each backoff.
+            return 2**retry_num * random.uniform(0.8, 1.2)
 
     @staticmethod
     def _parse_retryable_header(retry_header: Optional[str]) -> float:

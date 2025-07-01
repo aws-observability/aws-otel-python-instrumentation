@@ -10,7 +10,7 @@ from typing import ClassVar, Dict, List, NamedTuple, Optional, Type, Union
 from importlib_metadata import version
 from typing_extensions import override
 
-from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE
+from amazon.opentelemetry.distro._aws_attribute_keys import AWS_AI_AGENT_TYPE, AWS_LOCAL_SERVICE
 from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
 from amazon.opentelemetry.distro._utils import is_agent_observability_enabled, is_installed
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
@@ -181,7 +181,7 @@ def _initialize_components():
             AwsEksResourceDetector(),
             AwsEcsResourceDetector(),
         ]
-        if not _is_lambda_environment()
+        if not (_is_lambda_environment() or is_agent_observability_enabled())
         else []
     )
 
@@ -571,7 +571,15 @@ def _customize_resource(resource: Resource) -> Resource:
     if is_unknown:
         _logger.debug("No valid service name found")
 
-    return resource.merge(Resource.create({AWS_LOCAL_SERVICE: service_name}))
+    custom_attributes = {AWS_LOCAL_SERVICE: service_name}
+
+    if is_agent_observability_enabled():
+        # Add aws.ai.agent.type if it doesn't exist in the resource
+        if resource and resource.attributes.get(AWS_AI_AGENT_TYPE) is None:
+            # Set a default agent type for AI agent observability
+            custom_attributes[AWS_AI_AGENT_TYPE] = "default"
+
+    return resource.merge(Resource.create(custom_attributes))
 
 
 def _is_application_signals_enabled():

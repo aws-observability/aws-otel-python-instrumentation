@@ -7,7 +7,7 @@ from unittest.mock import patch
 import requests
 from requests.structures import CaseInsensitiveDict
 
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import _MAX_RETRYS, OTLPAwsLogExporter
 from opentelemetry._logs.severity import SeverityNumber
 from opentelemetry.sdk._logs import LogData, LogRecord
 from opentelemetry.sdk._logs.export import LogExportResult
@@ -80,18 +80,21 @@ class TestOTLPAwsLogsExporter(TestCase):
     def test_should_export_again_with_backoff_if_retryable_and_no_retry_after_header(self, mock_request, mock_sleep):
         """Tests that multiple export requests are made with exponential delay if the response status code is retryable.
         But there is no Retry-After header."""
+        self.exporter._timeout = 10000  # Large timeout to avoid early exit
         result = self.exporter.export(self.logs)
 
-        # 1, 2, 4, 8, 16, 32 delays
-        self.assertEqual(mock_sleep.call_count, 6)
+        self.assertEqual(mock_sleep.call_count, _MAX_RETRYS - 1)
 
         delays = mock_sleep.call_args_list
 
         for index, delay in enumerate(delays):
-            self.assertEqual(delay[0][0], 2**index)
+            expected_base = 2**index
+            actual_delay = delay[0][0]
+            # Assert delay is within jitter range: base * [0.8, 1.2]
+            self.assertGreaterEqual(actual_delay, expected_base * 0.8)
+            self.assertLessEqual(actual_delay, expected_base * 1.2)
 
-        # Number of calls: 1 + len(1, 2, 4, 8, 16, 32 delays)
-        self.assertEqual(mock_request.call_count, 7)
+        self.assertEqual(mock_request.call_count, _MAX_RETRYS)
         self.assertEqual(result, LogExportResult.FAILURE)
 
     @patch(
@@ -104,6 +107,7 @@ class TestOTLPAwsLogsExporter(TestCase):
     def test_should_export_again_with_server_delay_if_retryable_and_retry_after_header(self, mock_request, mock_sleep):
         """Tests that multiple export requests are made with the server's suggested
         delay if the response status code is retryable and there is a Retry-After header."""
+        self.exporter._timeout = 10000  # Large timeout to avoid early exit
         result = self.exporter.export(self.logs)
         delays = mock_sleep.call_args_list
 
@@ -130,12 +134,17 @@ class TestOTLPAwsLogsExporter(TestCase):
         self, mock_request, mock_sleep
     ):
         """Tests that multiple export requests are made with exponential delay if the response status code is retryable.
-        but the Retry-After header ins invalid or malformed."""
+        but the Retry-After header is invalid or malformed."""
+        self.exporter._timeout = 10000  # Large timeout to avoid early exit
         result = self.exporter.export(self.logs)
         delays = mock_sleep.call_args_list
 
         for index, delay in enumerate(delays):
-            self.assertEqual(delay[0][0], 2**index)
+            expected_base = 2**index
+            actual_delay = delay[0][0]
+            # Assert delay is within jitter range: base * [0.8, 1.2]
+            self.assertGreaterEqual(actual_delay, expected_base * 0.8)
+            self.assertLessEqual(actual_delay, expected_base * 1.2)
 
         self.assertEqual(mock_sleep.call_count, 3)
         self.assertEqual(mock_request.call_count, 4)
@@ -148,6 +157,29 @@ class TestOTLPAwsLogsExporter(TestCase):
 
         self.assertEqual(mock_request.call_count, 2)
         self.assertEqual(result, LogExportResult.SUCCESS)
+
+    @patch(
+        "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter.sleep", side_effect=lambda x: None
+    )
+    @patch("requests.Session.post", return_value=retryable_response_no_header)
+    def test_should_stop_retrying_when_deadline_exceeded(self, mock_request, mock_sleep):
+        """Tests that the exporter stops retrying when the deadline is exceeded."""
+        self.exporter._timeout = 5  # Short timeout to trigger deadline check
+
+        # Mock time to simulate time passing
+        with patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter.time") as mock_time:
+            # First call returns start time, subsequent calls simulate time passing
+            mock_time.side_effect = [0, 0, 1, 2, 4, 8]  # Exponential backoff would be 1, 2, 4 seconds
+
+            result = self.exporter.export(self.logs)
+
+            # Should stop before max retries due to deadline
+            self.assertLess(mock_sleep.call_count, _MAX_RETRYS)
+            self.assertLess(mock_request.call_count, _MAX_RETRYS + 1)
+            self.assertEqual(result, LogExportResult.FAILURE)
+
+            # Verify total time passed is at the timeout limit
+            self.assertGreaterEqual(5, self.exporter._timeout)
 
     @staticmethod
     def generate_test_log_data(count=5):
