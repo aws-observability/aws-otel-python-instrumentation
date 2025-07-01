@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+# Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 
 import logging
 from typing import Mapping, Optional, Sequence, cast
@@ -19,7 +20,7 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
     Custom implementation of BatchLogRecordProcessor that manages log record batching
     with size-based constraints to prevent exceeding AWS CloudWatch Logs OTLP endpoint request size limits.
 
-    This processor still exports all logs up to _max_export_batch_size but rather than doing exactly
+    This processor still exports all logs up to _MAX_LOG_REQUEST_BYTE_SIZE but rather than doing exactly
     one export, we will estimate log sizes and do multiple batch exports
     where each exported batch will have an additional constraint:
 
@@ -29,9 +30,41 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
     A unique case is if the sub-batch is of data size > 1 MB, then the sub-batch will have exactly 1 log in it.
     """
 
-    _BASE_LOG_BUFFER_BYTE_SIZE = (
-        1000  # Buffer size in bytes to account for log metadata not included in the body or attribute size calculation
-    )
+    # OTel log events include fixed metadata attributes so the estimated metadata size
+    # possibly be calculated as this with best efforts:
+    # service.name (255 chars) + cloud.resource_id (max ARN length) + telemetry.xxx (~20 chars) +
+    # common attributes (255 chars) +
+    # scope + flags + traceId + spanId + numeric/timestamp fields + ...
+    # Example log structure:
+    # {
+    #     "resource": {
+    #         "attributes": {
+    #             "aws.local.service": "example-service123",
+    #             "telemetry.sdk.language": "python",
+    #             "service.name": "my-application",
+    #             "cloud.resource_id": "example-resource",
+    #             "aws.log.group.names": "example-log-group",
+    #             "aws.ai.agent.type": "default",
+    #             "telemetry.sdk.version": "1.x.x",
+    #             "telemetry.auto.version": "0.x.x",
+    #             "telemetry.sdk.name": "opentelemetry"
+    #         }
+    #     },
+    #     "scope": {"name": "example.instrumentation.library"},
+    #     "timeUnixNano": 1234567890123456789,
+    #     "observedTimeUnixNano": 1234567890987654321,
+    #     "severityNumber": 9,
+    #     "body": {...},
+    #     "attributes": {...},
+    #     "flags": 1,
+    #     "traceId": "abcd1234efgh5678ijkl9012mnop3456",
+    #     "spanId": "1234abcd5678efgh"
+    # }
+    # 2000 might be a bit of an overestimate but it's better to overestimate the size of the log
+    # and suffer a small performance impact with batching than it is to underestimate and risk
+    # a large log being dropped when sent to the AWS otlp endpoint.
+    _BASE_LOG_BUFFER_BYTE_SIZE = 2000
+
     _MAX_LOG_REQUEST_BYTE_SIZE = (
         1048576  # Maximum uncompressed/unserialized bytes / request -
         # https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-OTLPEndpoint.html
@@ -63,10 +96,11 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
         https://github.com/open-telemetry/opentelemetry-python/blob/bb21ebd46d070c359eee286c97bdf53bfd06759d/opentelemetry-sdk/src/opentelemetry/sdk/_shared_internal/__init__.py#L143
 
         Preserves existing batching behavior but will intermediarly export small log batches if
-        the size of the data in the batch is at or above AWS CloudWatch's maximum request size limit of 1 MB.
+        the size of the data in the batch is estimated to be at or above AWS CloudWatch's
+        maximum request size limit of 1 MB.
 
-        - Data size of exported batches will ALWAYS be <= 1 MB except for the case below:
-        - If the data size of an exported batch is ever > 1 MB then the batch size is guaranteed to be 1
+        - Estimated data size of exported batches will typically be <= 1 MB except for the case below:
+        - If the estimated data size of an exported batch is ever > 1 MB then the batch size is guaranteed to be 1
         """
         with self._export_lock:
             iteration = 0
@@ -141,19 +175,17 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
                 if next_val is None:
                     continue
 
-                if isinstance(next_val, bool):
-                    size += 4 if next_val else 5
-                    continue
-
                 if isinstance(next_val, (str, bytes)):
                     size += len(next_val)
                     continue
 
-                if isinstance(next_val, (float, int)):
+                if isinstance(next_val, (float, int, bool)):
                     size += len(str(next_val))
                     continue
 
-                # next_val must be Sequence["AnyValue"] or Mapping[str, "AnyValue"],
+                # next_val must be Sequence["AnyValue"] or Mapping[str, "AnyValue"]
+                # See: https://github.com/open-telemetry/opentelemetry-python/blob/\
+                # 9426d6da834cfb4df7daedd4426bba0aa83165b5/opentelemetry-api/src/opentelemetry/util/types.py#L20
                 if current_depth <= depth:
                     obj_id = id(
                         next_val
