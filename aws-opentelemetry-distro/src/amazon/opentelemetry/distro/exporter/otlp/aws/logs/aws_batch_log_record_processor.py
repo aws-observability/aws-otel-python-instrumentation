@@ -175,19 +175,17 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
                 if next_val is None:
                     continue
 
-                if isinstance(next_val, bool):
-                    size += 4 if next_val else 5
-                    continue
-
                 if isinstance(next_val, (str, bytes)):
                     size += len(next_val)
                     continue
 
-                if isinstance(next_val, (float, int)):
+                if isinstance(next_val, (float, int, bool)):
                     size += len(str(next_val))
                     continue
 
-                # next_val must be Sequence["AnyValue"] or Mapping[str, "AnyValue"],
+                # next_val must be Sequence["AnyValue"] or Mapping[str, "AnyValue"]
+                # See: https://github.com/open-telemetry/opentelemetry-python/blob/\
+                # 9426d6da834cfb4df7daedd4426bba0aa83165b5/opentelemetry-api/src/opentelemetry/util/types.py#L20
                 if current_depth <= depth:
                     obj_id = id(
                         next_val
