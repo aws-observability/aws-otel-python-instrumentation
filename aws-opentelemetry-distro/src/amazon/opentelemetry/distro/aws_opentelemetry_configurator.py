@@ -23,7 +23,7 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor import (
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor import (
     AwsCloudWatchOtlpBatchLogRecordProcessor,
 )
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter

@@ -1,6 +1,6 @@
-# Copyright The OpenTelemetry Authors
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-# Modifications Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 
 import logging
 from typing import Mapping, Optional, Sequence, cast

@@ -5,7 +5,7 @@ import unittest
 from typing import List
 from unittest.mock import MagicMock, patch
 
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor import (
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor import (
     AwsCloudWatchOtlpBatchLogRecordProcessor,
     BatchLogExportStrategy,
 )
@@ -136,11 +136,11 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         self.assertEqual(actual_size, expected_size)
 
     @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.attach",
+        "amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.attach",
         return_value=MagicMock(),
     )
-    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.detach")
-    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.set_value")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.detach")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.set_value")
     def test_export_single_batch_under_size_limit(self, _, __, ___):
         """Tests that export is only called once if a single batch is under the size limit"""
         log_count = 10
@@ -163,11 +163,11 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         self.mock_exporter.export.assert_called_once()
 
     @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.attach",
+        "amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.attach",
         return_value=MagicMock(),
     )
-    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.detach")
-    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.set_value")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.detach")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.set_value")
     def test_export_single_batch_all_logs_over_size_limit(self, _, __, ___):
         """Should make multiple export calls of batch size 1 to export logs of size > 1 MB."""
 
@@ -188,11 +188,11 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
             self.assertEqual(len(batch[0]), 1)
 
     @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.attach",
+        "amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.attach",
         return_value=MagicMock(),
     )
-    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.detach")
-    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.set_value")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.detach")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.set_value")
     def test_export_single_batch_some_logs_over_size_limit(self, _, __, ___):
         """Should make calls to export smaller sub-batch logs"""
         large_log_body = "X" * (self.processor._MAX_LOG_REQUEST_BYTE_SIZE + 1)

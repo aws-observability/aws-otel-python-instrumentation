@@ -47,7 +47,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetr
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
 from amazon.opentelemetry.distro.exporter.aws.metrics.aws_cloudwatch_emf_exporter import AwsCloudWatchEmfExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor import (
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor import (
     AwsCloudWatchOtlpBatchLogRecordProcessor,
 )
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
