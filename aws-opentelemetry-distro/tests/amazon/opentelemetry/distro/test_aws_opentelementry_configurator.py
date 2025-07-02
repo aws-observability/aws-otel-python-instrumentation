@@ -26,6 +26,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     OtlpLogHeaderSetting,
     _check_emf_exporter_enabled,
     _custom_import_sampler,
+    _customize_log_record_processor,
     _customize_logs_exporter,
     _customize_metric_exporters,
     _customize_resource,
@@ -46,6 +47,11 @@ from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetr
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
 from amazon.opentelemetry.distro.exporter.aws.metrics.aws_cloudwatch_emf_exporter import AwsCloudWatchEmfExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
+
+# pylint: disable=line-too-long
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor import (
+    AwsCloudWatchOtlpBatchLogRecordProcessor,
+)
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
@@ -505,6 +511,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
                 OTLPAwsSpanExporter,
                 AwsAuthSession,
                 Compression.NoCompression,
+                Resource.get_empty(),
             )
 
         for config in bad_configs:
@@ -515,6 +522,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
                 OTLPSpanExporter,
                 Session,
                 Compression.NoCompression,
+                Resource.get_empty(),
             )
 
         self.assertIsInstance(
@@ -618,13 +626,11 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
                 config, _customize_logs_exporter, OTLPLogExporter(), OTLPLogExporter, Session, Compression.NoCompression
             )
 
-        self.assertIsInstance(
-            _customize_logs_exporter(OTLPGrpcLogExporter(), Resource.get_empty()), OTLPGrpcLogExporter
-        )
+        self.assertIsInstance(_customize_logs_exporter(OTLPGrpcLogExporter()), OTLPGrpcLogExporter)
 
     # Need to patch all of these to prevent some weird multi-threading error with the LogProvider
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.LoggingHandler", return_value=MagicMock())
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.getLogger", return_value=MagicMock())
+    @patch("logging.getLogger", return_value=MagicMock())
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._customize_logs_exporter")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.LoggerProvider", return_value=MagicMock())
     @patch(
@@ -903,19 +909,13 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("OTEL_METRIC_EXPORT_INTERVAL", None)
 
     def customize_exporter_test(
-        self,
-        config,
-        executor,
-        default_exporter,
-        expected_exporter_type,
-        expected_session,
-        expected_compression,
+        self, config, executor, default_exporter, expected_exporter_type, expected_session, expected_compression, *args
     ):
         for key, value in config.items():
             os.environ[key] = value
 
         try:
-            result = executor(default_exporter, Resource.get_empty())
+            result = executor(default_exporter, *args)
             self.assertIsInstance(result, expected_exporter_type)
             self.assertIsInstance(result._session, expected_session)
             self.assertEqual(result._compression, expected_compression)
@@ -1014,6 +1014,18 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         # Clean up
         os.environ.pop(OTEL_EXPORTER_OTLP_LOGS_HEADERS, None)
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_aws_otlp_endpoint")
+    def test_customize_log_record_processor_with_agent_observability(self, mock_is_aws_endpoint, mock_is_agent_enabled):
+        """Test that AwsCloudWatchOtlpBatchLogRecordProcessor is used when agent observability is enabled"""
+        mock_exporter = MagicMock(spec=OTLPAwsLogExporter)
+        mock_is_agent_enabled.return_value = True
+        mock_is_aws_endpoint.return_value = True
+
+        processor = _customize_log_record_processor(mock_exporter)
+
+        self.assertIsInstance(processor, AwsCloudWatchOtlpBatchLogRecordProcessor)
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._validate_and_fetch_logs_header")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_installed")

@@ -18,6 +18,14 @@ logger = logging.getLogger(__name__)
 
 
 class OTLPAwsSpanExporter(OTLPSpanExporter):
+    """
+    This exporter extends the functionality of the OTLPSpanExporter to allow spans to be exported
+    to the XRay OTLP endpoint https://xray.[AWSRegion].amazonaws.com/v1/traces. Utilizes the
+    AwsAuthSession to sign and directly inject SigV4 Authentication to the exported request's headers.
+
+    See: https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-OTLPEndpoint.html
+    """
+
     def __init__(
         self,
         endpoint: Optional[str] = None,
