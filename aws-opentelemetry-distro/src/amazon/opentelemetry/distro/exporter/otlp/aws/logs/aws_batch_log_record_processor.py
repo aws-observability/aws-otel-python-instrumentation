@@ -175,12 +175,12 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
                 if next_val is None:
                     continue
 
-                if isinstance(next_val, (str, bytes)):
+                if isinstance(next_val, bytes):
                     size += len(next_val)
                     continue
 
-                if isinstance(next_val, (float, int, bool)):
-                    size += len(str(next_val))
+                if isinstance(next_val, (str, float, int, bool)):
+                    size += AwsCloudWatchOtlpBatchLogRecordProcessor._estimate_utf8_size(str(next_val))
                     continue
 
                 # next_val must be Sequence["AnyValue"] or Mapping[str, "AnyValue"]
@@ -210,3 +210,17 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
             queue = new_queue
 
         return size
+
+    @staticmethod
+    def _estimate_utf8_size(s: str):
+        ascii_count = 0
+        non_ascii_count = 0
+
+        for char in s:
+            if ord(char) < 128:
+                ascii_count += 1
+            else:
+                non_ascii_count += 1
+
+        # Estimate: ASCII chars (1 byte) + upper bound of non-ASCII chars 4 bytes
+        return ascii_count + (non_ascii_count * 4)
