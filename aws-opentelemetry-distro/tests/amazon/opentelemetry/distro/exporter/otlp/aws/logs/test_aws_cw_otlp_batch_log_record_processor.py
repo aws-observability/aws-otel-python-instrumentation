@@ -116,8 +116,8 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
 
     def test_process_log_data_primitive(self):
 
-        primitives: List[AnyValue] = ["test", b"test", 1, 1.2, True, False, None, "深入 Python", "café"]
-        expected_sizes = [4, 4, 1, 3, 4, 5, 0, 2 * 4 + len(" Python"), 1 * 4 + len("caf")]
+        primitives: List[AnyValue] = ["test", b"test", 1, 1.2, True, False, None, "深入 Python", "calfé"]
+        expected_sizes = [4, 4, 1, 3, 4, 5, 0, 2 * 4 + len(" Python"), 1 * 4 + len("calf")]
 
         for index, primitive in enumerate(primitives):
             log = self.generate_test_log_data(log_body=primitive, count=1)
