@@ -47,6 +47,8 @@ from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetr
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
 from amazon.opentelemetry.distro.exporter.aws.metrics.aws_cloudwatch_emf_exporter import AwsCloudWatchEmfExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
+
+# pylint: disable=line-too-long
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor import (
     AwsCloudWatchOtlpBatchLogRecordProcessor,
 )
@@ -1016,7 +1018,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agent_observability_enabled")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_aws_otlp_endpoint")
     def test_customize_log_record_processor_with_agent_observability(self, mock_is_aws_endpoint, mock_is_agent_enabled):
-        """Test that AwsCloudWatchOtlpBatchLogRecordProcessor is used when agent observability is enabled and endpoint is logs endpoint"""
+        """Test that AwsCloudWatchOtlpBatchLogRecordProcessor is used when agent observability is enabled"""
         # Mock the OTLPAwsLogExporter
         mock_exporter = MagicMock(spec=OTLPAwsLogExporter)
 
