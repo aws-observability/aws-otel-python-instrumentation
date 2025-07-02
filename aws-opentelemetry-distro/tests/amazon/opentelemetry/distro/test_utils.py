@@ -4,22 +4,31 @@
 import os
 from importlib.metadata import PackageNotFoundError
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from amazon.opentelemetry.distro._utils import AGENT_OBSERVABILITY_ENABLED, is_agent_observability_enabled, is_installed
+from amazon.opentelemetry.distro._utils import (
+    AGENT_OBSERVABILITY_ENABLED,
+    get_aws_region,
+    is_agent_observability_enabled,
+    is_installed,
+)
 
 
 class TestUtils(TestCase):
     def setUp(self):
         # Store original env var if it exists
         self.original_env = os.environ.get(AGENT_OBSERVABILITY_ENABLED)
+        # Clear it to ensure clean state
+        if AGENT_OBSERVABILITY_ENABLED in os.environ:
+            del os.environ[AGENT_OBSERVABILITY_ENABLED]
 
     def tearDown(self):
-        # Restore original env var
+        # First clear the env var
+        if AGENT_OBSERVABILITY_ENABLED in os.environ:
+            del os.environ[AGENT_OBSERVABILITY_ENABLED]
+        # Then restore original if it existed
         if self.original_env is not None:
             os.environ[AGENT_OBSERVABILITY_ENABLED] = self.original_env
-        elif AGENT_OBSERVABILITY_ENABLED in os.environ:
-            del os.environ[AGENT_OBSERVABILITY_ENABLED]
 
     def test_is_installed_package_not_found(self):
         """Test is_installed returns False when package is not found"""
@@ -94,3 +103,68 @@ class TestUtils(TestCase):
         if AGENT_OBSERVABILITY_ENABLED in os.environ:
             del os.environ[AGENT_OBSERVABILITY_ENABLED]
         self.assertFalse(is_agent_observability_enabled())
+
+    def test_get_aws_region_with_botocore(self):
+        """Test get_aws_region when botocore is available and returns a region"""
+        with patch("amazon.opentelemetry.distro._utils.is_installed") as mock_is_installed:
+            mock_is_installed.return_value = True
+
+            # Create a mock botocore session
+            mock_session_class = MagicMock()
+            mock_session_instance = MagicMock()
+            mock_session_instance.region_name = "us-east-1"
+            mock_session_class.Session.return_value = mock_session_instance
+
+            # Patch the import statement directly in the function
+            with patch.dict("sys.modules", {"botocore": MagicMock(session=mock_session_class)}):
+                region = get_aws_region()
+                self.assertEqual(region, "us-east-1")
+
+    def test_get_aws_region_without_botocore(self):
+        """Test get_aws_region when botocore is not installed"""
+        with patch("amazon.opentelemetry.distro._utils.is_installed") as mock_is_installed:
+            mock_is_installed.return_value = False
+
+            region = get_aws_region()
+            self.assertIsNone(region)
+
+    def test_get_aws_region_botocore_no_region(self):
+        """Test get_aws_region when botocore is available but returns no region"""
+        with patch("amazon.opentelemetry.distro._utils.is_installed") as mock_is_installed:
+            mock_is_installed.return_value = True
+
+            # Create a mock botocore session with no region
+            mock_session_class = MagicMock()
+            mock_session_instance = MagicMock()
+            mock_session_instance.region_name = None
+            mock_session_class.Session.return_value = mock_session_instance
+
+            # Patch the import statement directly in the function
+            with patch.dict("sys.modules", {"botocore": MagicMock(session=mock_session_class)}):
+                region = get_aws_region()
+                self.assertIsNone(region)
+
+    def test_get_aws_region_botocore_import_error(self):
+        """Test get_aws_region when botocore import fails"""
+        with patch("amazon.opentelemetry.distro._utils.is_installed") as mock_is_installed:
+            mock_is_installed.return_value = True
+
+            # Mock ImportError when trying to import botocore
+            with patch.dict("sys.modules", {"botocore": None}):
+                with patch("builtins.__import__", side_effect=ImportError("Botocore not found")):
+                    region = get_aws_region()
+                    self.assertIsNone(region)
+
+    def test_get_aws_region_botocore_attribute_error(self):
+        """Test get_aws_region when botocore has attribute errors"""
+        with patch("amazon.opentelemetry.distro._utils.is_installed") as mock_is_installed:
+            mock_is_installed.return_value = True
+
+            # Mock the botocore import with AttributeError on Session
+            mock_session_module = MagicMock()
+            mock_session_module.Session.side_effect = AttributeError("Session class not found")
+
+            # Patch the import statement directly in the function
+            with patch.dict("sys.modules", {"botocore": MagicMock(session=mock_session_module)}):
+                region = get_aws_region()
+                self.assertIsNone(region)

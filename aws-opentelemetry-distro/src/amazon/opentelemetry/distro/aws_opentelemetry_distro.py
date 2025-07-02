@@ -4,6 +4,19 @@ import os
 import sys
 from logging import Logger, getLogger
 
+from amazon.opentelemetry.distro._utils import get_aws_region, is_agent_observability_enabled
+from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
+    APPLICATION_SIGNALS_ENABLED_CONFIG,
+    OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
+    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
+    OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT,
+    OTEL_LOGS_EXPORTER,
+    OTEL_METRICS_EXPORTER,
+    OTEL_PYTHON_DISABLED_INSTRUMENTATIONS,
+    OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED,
+    OTEL_TRACES_EXPORTER,
+    OTEL_TRACES_SAMPLER,
+)
 from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_instrumentation_patches
 from opentelemetry.distro import OpenTelemetryDistro
 from opentelemetry.environment_variables import OTEL_PROPAGATORS, OTEL_PYTHON_ID_GENERATOR
@@ -57,13 +70,52 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
 
         os.environ.setdefault(OTEL_EXPORTER_OTLP_PROTOCOL, "http/protobuf")
 
-        super(AwsOpenTelemetryDistro, self)._configure()
-
         os.environ.setdefault(OTEL_PROPAGATORS, "xray,tracecontext,b3,b3multi")
         os.environ.setdefault(OTEL_PYTHON_ID_GENERATOR, "xray")
         os.environ.setdefault(
             OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION, "base2_exponential_bucket_histogram"
         )
+
+        if is_agent_observability_enabled():
+            # "otlp" is already native OTel default, but we set them here to be explicit
+            # about intended configuration for agent observability
+            os.environ.setdefault(OTEL_TRACES_EXPORTER, "otlp")
+            os.environ.setdefault(OTEL_LOGS_EXPORTER, "otlp")
+            os.environ.setdefault(OTEL_METRICS_EXPORTER, "awsemf")
+
+            # Set GenAI capture content default
+            os.environ.setdefault(OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT, "true")
+
+            # Set OTLP endpoints with AWS region if not already set
+            region = get_aws_region()
+            if region:
+                os.environ.setdefault(
+                    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, f"https://xray.{region}.amazonaws.com/v1/traces"
+                )
+                os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, f"https://logs.{region}.amazonaws.com/v1/logs")
+            else:
+                _logger.warning(
+                    "AWS region could not be determined. OTLP endpoints will not be automatically configured. "
+                    "Please set AWS_REGION environment variable or configure OTLP endpoints manually."
+                )
+
+            # Set sampler default
+            os.environ.setdefault(OTEL_TRACES_SAMPLER, "parentbased_always_on")
+
+            # Set disabled instrumentations default
+            os.environ.setdefault(
+                OTEL_PYTHON_DISABLED_INSTRUMENTATIONS,
+                "http,sqlalchemy,psycopg2,pymysql,sqlite3,aiopg,asyncpg,mysql_connector,"
+                "botocore,boto3,urllib3,requests,starlette",
+            )
+
+            # Set logging auto instrumentation default
+            os.environ.setdefault(OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED, "true")
+
+            # Disable AWS Application Signals by default
+            os.environ.setdefault(APPLICATION_SIGNALS_ENABLED_CONFIG, "false")
+
+        super(AwsOpenTelemetryDistro, self)._configure()
 
         if kwargs.get("apply_patches", True):
             apply_instrumentation_patches()

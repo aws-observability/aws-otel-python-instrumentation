@@ -5,33 +5,31 @@
 
 import json
 import logging
+import math
 import time
-import uuid
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
-import botocore.session
-from botocore.exceptions import ClientError
-
-from opentelemetry.sdk.metrics import (
-    Counter,
-    Histogram,
-    ObservableCounter,
-    ObservableGauge,
-    ObservableUpDownCounter,
-    UpDownCounter,
-)
+from opentelemetry.sdk.metrics import Counter
+from opentelemetry.sdk.metrics import Histogram as HistogramInstr
+from opentelemetry.sdk.metrics import ObservableCounter, ObservableGauge, ObservableUpDownCounter, UpDownCounter
 from opentelemetry.sdk.metrics._internal.point import Metric
 from opentelemetry.sdk.metrics.export import (
     AggregationTemporality,
+    ExponentialHistogram,
     Gauge,
+    Histogram,
     MetricExporter,
     MetricExportResult,
     MetricsData,
     NumberDataPoint,
+    Sum,
 )
+from opentelemetry.sdk.metrics.view import ExponentialBucketHistogramAggregation
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.util.types import Attributes
+
+from ._cloudwatch_log_client import CloudWatchLogClient
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +125,7 @@ class AwsCloudWatchEmfExporter(MetricExporter):
         log_stream_name: Optional[str] = None,
         aws_region: Optional[str] = None,
         preferred_temporality: Optional[Dict[type, AggregationTemporality]] = None,
+        preferred_aggregation: Optional[Dict[type, Any]] = None,
         **kwargs,
     ):
         """
@@ -138,64 +137,35 @@ class AwsCloudWatchEmfExporter(MetricExporter):
             log_stream_name: CloudWatch log stream name (auto-generated if None)
             aws_region: AWS region (auto-detected if None)
             preferred_temporality: Optional dictionary mapping instrument types to aggregation temporality
+            preferred_aggregation: Optional dictionary mapping instrument types to preferred aggregation
             **kwargs: Additional arguments passed to botocore client
         """
         # Set up temporality preference default to DELTA if customers not set
         if preferred_temporality is None:
             preferred_temporality = {
                 Counter: AggregationTemporality.DELTA,
-                Histogram: AggregationTemporality.DELTA,
+                HistogramInstr: AggregationTemporality.DELTA,
                 ObservableCounter: AggregationTemporality.DELTA,
                 ObservableGauge: AggregationTemporality.DELTA,
                 ObservableUpDownCounter: AggregationTemporality.DELTA,
                 UpDownCounter: AggregationTemporality.DELTA,
             }
 
-        super().__init__(preferred_temporality)
+        # Set up aggregation preference default to exponential histogram for histogram metrics
+        if preferred_aggregation is None:
+            preferred_aggregation = {
+                HistogramInstr: ExponentialBucketHistogramAggregation(),
+            }
+
+        super().__init__(preferred_temporality, preferred_aggregation)
 
         self.namespace = namespace
         self.log_group_name = log_group_name
-        self.log_stream_name = log_stream_name or self._generate_log_stream_name()
 
-        session = botocore.session.Session()
-        self.logs_client = session.create_client("logs", region_name=aws_region, **kwargs)
-
-        # Ensure log group exists
-        self._ensure_log_group_exists()
-
-        # Ensure log stream exists
-        self._ensure_log_stream_exists()
-
-    # Default to unique log stream name matching OTel Collector
-    # EMF Exporter behavior with language for source identification
-    def _generate_log_stream_name(self) -> str:
-        """Generate a unique log stream name."""
-
-        unique_id = str(uuid.uuid4())[:8]
-        return f"otel-python-{unique_id}"
-
-    def _ensure_log_group_exists(self):
-        """Ensure the log group exists, create if it doesn't."""
-        try:
-            self.logs_client.create_log_group(logGroupName=self.log_group_name)
-            logger.info("Created log group: %s", self.log_group_name)
-        except ClientError as error:
-            if error.response.get("Error", {}).get("Code") == "ResourceAlreadyExistsException":
-                logger.debug("Log group %s already exists", self.log_group_name)
-            else:
-                logger.error("Failed to create log group %s : %s", self.log_group_name, error)
-                raise
-
-    def _ensure_log_stream_exists(self):
-        try:
-            self.logs_client.create_log_stream(logGroupName=self.log_group_name, logStreamName=self.log_stream_name)
-            logger.info("Created log stream: %s", self.log_stream_name)
-        except ClientError as error:
-            if error.response.get("Error", {}).get("Code") == "ResourceAlreadyExistsException":
-                logger.debug("Log stream %s already exists", self.log_stream_name)
-            else:
-                logger.error("Failed to create log stream %s : %s", self.log_group_name, error)
-                raise
+        # Initialize CloudWatch Logs client
+        self.log_client = CloudWatchLogClient(
+            log_group_name=log_group_name, log_stream_name=log_stream_name, aws_region=aws_region, **kwargs
+        )
 
     def _get_metric_name(self, record: MetricRecord) -> Optional[str]:
         """Get the metric name from the metric record or data point."""
@@ -275,8 +245,8 @@ class AwsCloudWatchEmfExporter(MetricExporter):
         """
         return MetricRecord(metric_name, metric_unit, metric_description)
 
-    def _convert_gauge(self, metric: Metric, data_point: NumberDataPoint) -> MetricRecord:
-        """Convert a Gauge metric datapoint to a metric record.
+    def _convert_gauge_and_sum(self, metric: Metric, data_point: NumberDataPoint) -> MetricRecord:
+        """Convert a Gauge or Sum metric datapoint to a metric record.
 
         Args:
             metric: The metric object
@@ -289,30 +259,165 @@ class AwsCloudWatchEmfExporter(MetricExporter):
         record = self._create_metric_record(metric.name, metric.unit, metric.description)
 
         # Set timestamp
-        try:
-            timestamp_ms = (
-                self._normalize_timestamp(data_point.time_unix_nano)
-                if data_point.time_unix_nano is not None
-                else int(time.time() * 1000)
-            )
-        except AttributeError:
-            # data_point doesn't have time_unix_nano attribute
-            timestamp_ms = int(time.time() * 1000)
+        timestamp_ms = (
+            self._normalize_timestamp(data_point.time_unix_nano)
+            if data_point.time_unix_nano is not None
+            else int(time.time() * 1000)
+        )
         record.timestamp = timestamp_ms
 
         # Set attributes
-        try:
-            record.attributes = data_point.attributes
-        except AttributeError:
-            # data_point doesn't have attributes
-            record.attributes = {}
+        record.attributes = data_point.attributes
 
-        # For Gauge, set the value directly
-        try:
-            record.value = data_point.value
-        except AttributeError:
-            # data_point doesn't have value
-            record.value = None
+        # Set the value directly for both Gauge and Sum
+        record.value = data_point.value
+
+        return record
+
+    def _convert_histogram(self, metric: Metric, data_point: Any) -> MetricRecord:
+        """Convert a Histogram metric datapoint to a metric record.
+
+        https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/exporter/awsemfexporter/datapoint.go#L87
+
+        Args:
+            metric: The metric object
+            data_point: The datapoint to convert
+
+        Returns:
+            MetricRecord with populated timestamp, attributes, and histogram_data
+        """
+        # Create base record
+        record = self._create_metric_record(metric.name, metric.unit, metric.description)
+
+        # Set timestamp
+        timestamp_ms = (
+            self._normalize_timestamp(data_point.time_unix_nano)
+            if data_point.time_unix_nano is not None
+            else int(time.time() * 1000)
+        )
+        record.timestamp = timestamp_ms
+
+        # Set attributes
+        record.attributes = data_point.attributes
+
+        # For Histogram, set the histogram_data
+        record.histogram_data = {
+            "Count": data_point.count,
+            "Sum": data_point.sum,
+            "Min": data_point.min,
+            "Max": data_point.max,
+        }
+        return record
+
+    # pylint: disable=too-many-locals
+    def _convert_exp_histogram(self, metric: Metric, data_point: Any) -> MetricRecord:
+        """
+        Convert an ExponentialHistogram metric datapoint to a metric record.
+
+        This function follows the logic of CalculateDeltaDatapoints in the Go implementation,
+        converting exponential buckets to their midpoint values.
+
+        Ref:
+            https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/22626
+
+        Args:
+            metric: The metric object
+            data_point: The datapoint to convert
+
+        Returns:
+            MetricRecord with populated timestamp, attributes, and exp_histogram_data
+        """
+
+        # Create base record
+        record = self._create_metric_record(metric.name, metric.unit, metric.description)
+
+        # Set timestamp
+        timestamp_ms = (
+            self._normalize_timestamp(data_point.time_unix_nano)
+            if data_point.time_unix_nano is not None
+            else int(time.time() * 1000)
+        )
+        record.timestamp = timestamp_ms
+
+        # Set attributes
+        record.attributes = data_point.attributes
+
+        # Initialize arrays for values and counts
+        array_values = []
+        array_counts = []
+
+        # Get scale
+        scale = data_point.scale
+        # Calculate base using the formula: 2^(2^(-scale))
+        base = math.pow(2, math.pow(2, float(-scale)))
+
+        # Process positive buckets
+        if data_point.positive and data_point.positive.bucket_counts:
+            positive_offset = getattr(data_point.positive, "offset", 0)
+            positive_bucket_counts = data_point.positive.bucket_counts
+
+            bucket_begin = 0
+            bucket_end = 0
+
+            for bucket_index, count in enumerate(positive_bucket_counts):
+                index = bucket_index + positive_offset
+
+                if bucket_begin == 0:
+                    bucket_begin = math.pow(base, float(index))
+                else:
+                    bucket_begin = bucket_end
+
+                bucket_end = math.pow(base, float(index + 1))
+
+                # Calculate midpoint value of the bucket
+                metric_val = (bucket_begin + bucket_end) / 2
+
+                # Only include buckets with positive counts
+                if count > 0:
+                    array_values.append(metric_val)
+                    array_counts.append(float(count))
+
+        # Process zero bucket
+        zero_count = getattr(data_point, "zero_count", 0)
+        if zero_count > 0:
+            array_values.append(0)
+            array_counts.append(float(zero_count))
+
+        # Process negative buckets
+        if data_point.negative and data_point.negative.bucket_counts:
+            negative_offset = getattr(data_point.negative, "offset", 0)
+            negative_bucket_counts = data_point.negative.bucket_counts
+
+            bucket_begin = 0
+            bucket_end = 0
+
+            for bucket_index, count in enumerate(negative_bucket_counts):
+                index = bucket_index + negative_offset
+
+                if bucket_end == 0:
+                    bucket_end = -math.pow(base, float(index))
+                else:
+                    bucket_end = bucket_begin
+
+                bucket_begin = -math.pow(base, float(index + 1))
+
+                # Calculate midpoint value of the bucket
+                metric_val = (bucket_begin + bucket_end) / 2
+
+                # Only include buckets with positive counts
+                if count > 0:
+                    array_values.append(metric_val)
+                    array_counts.append(float(count))
+
+        # Set the histogram data in the format expected by CloudWatch EMF
+        record.exp_histogram_data = {
+            "Values": array_values,
+            "Counts": array_counts,
+            "Count": data_point.count,
+            "Sum": data_point.sum,
+            "Max": data_point.max,
+            "Min": data_point.min,
+        }
 
         return record
 
@@ -358,7 +463,11 @@ class AwsCloudWatchEmfExporter(MetricExporter):
         metric_definitions = []
         # Collect attributes from all records (they should be the same for all records in the group)
         # Only collect once from the first record and apply to all records
-        all_attributes = metric_records[0].attributes if metric_records and metric_records[0].attributes else {}
+        all_attributes = (
+            metric_records[0].attributes
+            if metric_records and len(metric_records) > 0 and metric_records[0].attributes
+            else {}
+        )
 
         # Process each metric record
         for record in metric_records:
@@ -369,11 +478,6 @@ class AwsCloudWatchEmfExporter(MetricExporter):
             if not metric_name:
                 continue
 
-            # Skip processing if metric value is None or empty
-            if record.value is None:
-                logger.debug("Skipping metric %s as it does not have valid metric value", metric_name)
-                continue
-
             # Create metric data dict
             metric_data = {"Name": metric_name}
 
@@ -381,10 +485,22 @@ class AwsCloudWatchEmfExporter(MetricExporter):
             if unit:
                 metric_data["Unit"] = unit
 
+            # Process different types of aggregations
+            if record.exp_histogram_data:
+                # Base2 Exponential Histogram
+                emf_log[metric_name] = record.exp_histogram_data
+            elif record.histogram_data:
+                # Regular Histogram metrics
+                emf_log[metric_name] = record.histogram_data
+            elif record.value is not None:
+                # Gauge, Sum, and other aggregations
+                emf_log[metric_name] = record.value
+            else:
+                logger.debug("Skipping metric %s as it does not have valid metric value", metric_name)
+                continue
+
             # Add to metric definitions list
             metric_definitions.append(metric_data)
-
-            emf_log[metric_name] = record.value
 
         # Get dimension names from collected attributes
         dimension_names = self._get_dimension_names(all_attributes)
@@ -401,31 +517,18 @@ class AwsCloudWatchEmfExporter(MetricExporter):
 
         return emf_log
 
-    # pylint: disable=no-member
     def _send_log_event(self, log_event: Dict[str, Any]):
         """
-        Send a log event to CloudWatch Logs.
+        Send a log event to CloudWatch Logs using the log client.
 
-        Basic implementation for PR 1 - sends individual events directly.
-
-        TODO: Batching event and follow CloudWatch Logs quato constraints - number of events & size limit per payload
+        Args:
+            log_event: The log event to send
         """
-        try:
-            # Send the log event
-            response = self.logs_client.put_log_events(
-                logGroupName=self.log_group_name, logStreamName=self.log_stream_name, logEvents=[log_event]
-            )
+        self.log_client.send_log_event(log_event)
 
-            logger.debug("Successfully sent log event")
-            return response
-
-        except ClientError as error:
-            logger.debug("Failed to send log event: %s", error)
-            raise
-
-    # pylint: disable=too-many-nested-blocks
+    # pylint: disable=too-many-nested-blocks,unused-argument,too-many-branches
     def export(
-        self, metrics_data: MetricsData, timeout_millis: Optional[int] = None, **kwargs: Any
+        self, metrics_data: MetricsData, timeout_millis: Optional[int] = None, **_kwargs: Any
     ) -> MetricExportResult:
         """
         Export metrics as EMF logs to CloudWatch.
@@ -462,9 +565,17 @@ class AwsCloudWatchEmfExporter(MetricExporter):
 
                         # Process metrics based on type
                         metric_type = type(metric.data)
-                        if metric_type == Gauge:
+                        if metric_type in (Gauge, Sum):
                             for dp in metric.data.data_points:
-                                record = self._convert_gauge(metric, dp)
+                                record = self._convert_gauge_and_sum(metric, dp)
+                                grouped_metrics[self._group_by_attributes_and_timestamp(record)].append(record)
+                        elif metric_type == Histogram:
+                            for dp in metric.data.data_points:
+                                record = self._convert_histogram(metric, dp)
+                                grouped_metrics[self._group_by_attributes_and_timestamp(record)].append(record)
+                        elif metric_type == ExponentialHistogram:
+                            for dp in metric.data.data_points:
+                                record = self._convert_exp_histogram(metric, dp)
                                 grouped_metrics[self._group_by_attributes_and_timestamp(record)].append(record)
                         else:
                             logger.debug("Unsupported Metric Type: %s", metric_type)
@@ -491,11 +602,9 @@ class AwsCloudWatchEmfExporter(MetricExporter):
             logger.error("Failed to export metrics: %s", error)
             return MetricExportResult.FAILURE
 
-    def force_flush(self, timeout_millis: int = 10000) -> bool:
+    def force_flush(self, timeout_millis: int = 10000) -> bool:  # pylint: disable=unused-argument
         """
         Force flush any pending metrics.
-
-        TODO: will add logic to handle gracefule shutdown
 
         Args:
             timeout_millis: Timeout in milliseconds
@@ -503,21 +612,20 @@ class AwsCloudWatchEmfExporter(MetricExporter):
         Returns:
             True if successful, False otherwise
         """
+        self.log_client.flush_pending_events()
         logger.debug("AwsCloudWatchEmfExporter force flushes the buffered metrics")
         return True
 
-    def shutdown(self, timeout_millis: Optional[int] = None, **kwargs: Any) -> bool:
+    def shutdown(self, timeout_millis: Optional[int] = None, **_kwargs: Any) -> bool:
         """
         Shutdown the exporter.
         Override to handle timeout and other keyword arguments, but do nothing.
-
-        TODO: will add logic to handle gracefule shutdown
 
         Args:
             timeout_millis: Ignored timeout in milliseconds
             **kwargs: Ignored additional keyword arguments
         """
-        # Intentionally do nothing
+        # Force flush any remaining batched events
         self.force_flush(timeout_millis)
         logger.debug("AwsCloudWatchEmfExporter shutdown called with timeout_millis=%s", timeout_millis)
         return True

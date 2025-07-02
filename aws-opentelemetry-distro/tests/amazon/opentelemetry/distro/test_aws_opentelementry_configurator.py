@@ -1,5 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+
+# pylint: disable=too-many-lines
+
 import os
 import time
 from unittest import TestCase
@@ -7,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from requests import Session
 
+from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE, AWS_SERVICE_TYPE
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor import AttributePropagatingSpanProcessor
 from amazon.opentelemetry.distro.aws_batch_unsampled_span_processor import BatchUnsampledSpanProcessor
@@ -19,21 +23,28 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
     ApplicationSignalsExporterProvider,
     AwsOpenTelemetryConfigurator,
+    OtlpLogHeaderSetting,
+    _check_emf_exporter_enabled,
     _custom_import_sampler,
     _customize_logs_exporter,
     _customize_metric_exporters,
+    _customize_resource,
     _customize_sampler,
     _customize_span_exporter,
     _customize_span_processors,
+    _export_unsampled_span_for_agent_observability,
     _export_unsampled_span_for_lambda,
     _init_logging,
     _is_application_signals_enabled,
     _is_application_signals_runtime_enabled,
     _is_defer_to_workers_enabled,
     _is_wsgi_master_process,
+    _validate_and_fetch_logs_header,
+    create_emf_exporter,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
+from amazon.opentelemetry.distro.exporter.aws.metrics.aws_cloudwatch_emf_exporter import AwsCloudWatchEmfExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
@@ -58,6 +69,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Span, SpanProcessor, Tracer, TracerProvider
 from opentelemetry.sdk.trace.export import SpanExporter
 from opentelemetry.sdk.trace.sampling import DEFAULT_ON, Sampler
+from opentelemetry.semconv.resource import ResourceAttributes
 from opentelemetry.trace import get_tracer_provider
 
 
@@ -361,24 +373,21 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
     def test_customize_span_processors_with_agent_observability(self):
         mock_tracer_provider: TracerProvider = MagicMock()
 
-        # Test that BaggageSpanProcessor is not added when agent observability is disabled
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
         _customize_span_processors(mock_tracer_provider, Resource.get_empty())
         self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 0)
 
-        # Reset mock for next test
         mock_tracer_provider.reset_mock()
 
-        # Test that BaggageSpanProcessor is added when agent observability is enabled
         os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
         _customize_span_processors(mock_tracer_provider, Resource.get_empty())
-        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 1)
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 2)
 
-        # Verify the added processor is BaggageSpanProcessor
-        added_processor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
-        self.assertIsInstance(added_processor, BaggageSpanProcessor)
+        first_processor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
+        self.assertIsInstance(first_processor, BatchUnsampledSpanProcessor)
+        second_processor = mock_tracer_provider.add_span_processor.call_args_list[1].args[0]
+        self.assertIsInstance(second_processor, BaggageSpanProcessor)
 
-        # Clean up
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
 
     def test_baggage_span_processor_session_id_filtering(self):
@@ -659,7 +668,6 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
     def test_customize_span_processors(self):
         mock_tracer_provider: TracerProvider = MagicMock()
-        # Clean up environment to ensure consistent test state
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", None)
@@ -667,10 +675,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         _customize_span_processors(mock_tracer_provider, Resource.get_empty())
         self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 0)
 
-        # Reset mock for next test
         mock_tracer_provider.reset_mock()
 
-        # Test application signals only
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", "False")
         _customize_span_processors(mock_tracer_provider, Resource.get_empty())
@@ -680,19 +686,17 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         second_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[1].args[0]
         self.assertIsInstance(second_processor, AwsSpanMetricsProcessor)
 
-        # Reset mock for next test
         mock_tracer_provider.reset_mock()
 
-        # Test both agent observability and application signals enabled
         os.environ.setdefault("AGENT_OBSERVABILITY_ENABLED", "true")
         _customize_span_processors(mock_tracer_provider, Resource.get_empty())
-        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 3)
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 4)
 
-        # Verify processors are added in the expected order
         processors = [call.args[0] for call in mock_tracer_provider.add_span_processor.call_args_list]
-        self.assertIsInstance(processors[0], BaggageSpanProcessor)  # Agent observability processor added first
-        self.assertIsInstance(processors[1], AttributePropagatingSpanProcessor)  # Application signals processors
-        self.assertIsInstance(processors[2], AwsSpanMetricsProcessor)
+        self.assertIsInstance(processors[0], BatchUnsampledSpanProcessor)
+        self.assertIsInstance(processors[1], BaggageSpanProcessor)
+        self.assertIsInstance(processors[2], AttributePropagatingSpanProcessor)
+        self.assertIsInstance(processors[3], AwsSpanMetricsProcessor)
 
     def test_customize_span_processors_lambda(self):
         mock_tracer_provider: TracerProvider = MagicMock()
@@ -795,6 +799,80 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
         os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
 
+    # pylint: disable=no-self-use
+    def test_export_unsampled_span_for_agent_observability(self):
+        mock_tracer_provider: TracerProvider = MagicMock()
+
+        _export_unsampled_span_for_agent_observability(mock_tracer_provider, Resource.get_empty())
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 0)
+
+        mock_tracer_provider.reset_mock()
+
+        os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
+        os.environ["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] = "https://xray.us-east-1.amazonaws.com/v1/traces"
+        _export_unsampled_span_for_agent_observability(mock_tracer_provider, Resource.get_empty())
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 1)
+        processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
+        self.assertIsInstance(processor, BatchUnsampledSpanProcessor)
+
+        os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+        os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", None)
+
+    # pylint: disable=no-self-use
+    def test_export_unsampled_span_for_agent_observability_uses_aws_exporter(self):
+        """Test that OTLPAwsSpanExporter is used for AWS endpoints"""
+        mock_tracer_provider: TracerProvider = MagicMock()
+
+        with patch(
+            "amazon.opentelemetry.distro.aws_opentelemetry_configurator.OTLPAwsSpanExporter"
+        ) as mock_aws_exporter:
+            with patch(
+                "amazon.opentelemetry.distro.aws_opentelemetry_configurator.BatchUnsampledSpanProcessor"
+            ) as mock_processor:
+                with patch(
+                    "amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_logger_provider"
+                ) as mock_logger_provider:
+                    os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
+                    os.environ["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] = "https://xray.us-east-1.amazonaws.com/v1/traces"
+
+                    _export_unsampled_span_for_agent_observability(mock_tracer_provider, Resource.get_empty())
+
+                    # Verify OTLPAwsSpanExporter is created with correct parameters
+                    mock_aws_exporter.assert_called_once_with(
+                        endpoint="https://xray.us-east-1.amazonaws.com/v1/traces",
+                        logger_provider=mock_logger_provider.return_value,
+                    )
+                    # Verify BatchUnsampledSpanProcessor wraps the exporter
+                    mock_processor.assert_called_once_with(span_exporter=mock_aws_exporter.return_value)
+                    # Verify processor is added to tracer provider
+                    mock_tracer_provider.add_span_processor.assert_called_once_with(mock_processor.return_value)
+
+        # Clean up
+        os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+        os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", None)
+
+    # pylint: disable=no-self-use
+    def test_customize_span_processors_calls_export_unsampled_span(self):
+        """Test that _customize_span_processors calls _export_unsampled_span_for_agent_observability"""
+        mock_tracer_provider: TracerProvider = MagicMock()
+
+        with patch(
+            "amazon.opentelemetry.distro.aws_opentelemetry_configurator._export_unsampled_span_for_agent_observability"
+        ) as mock_agent_observability:
+            # Test that agent observability function is NOT called when disabled
+            os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+            _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+            mock_agent_observability.assert_not_called()
+
+            # Test that agent observability function is called when enabled
+            mock_agent_observability.reset_mock()
+            os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
+            _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+            mock_agent_observability.assert_called_once_with(mock_tracer_provider, Resource.get_empty())
+
+            # Clean up
+            os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+
     def test_customize_metric_exporter(self):
         metric_readers = []
         views = []
@@ -844,6 +922,224 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         finally:
             for key in config.keys():
                 os.environ.pop(key, None)
+
+    def test_check_emf_exporter_enabled(self):
+        # Test when OTEL_METRICS_EXPORTER is not set
+        os.environ.pop("OTEL_METRICS_EXPORTER", None)
+        self.assertFalse(_check_emf_exporter_enabled())
+
+        # Test when OTEL_METRICS_EXPORTER is empty
+        os.environ["OTEL_METRICS_EXPORTER"] = ""
+        self.assertFalse(_check_emf_exporter_enabled())
+
+        # Test when awsemf is not in the list
+        os.environ["OTEL_METRICS_EXPORTER"] = "console,otlp"
+        self.assertFalse(_check_emf_exporter_enabled())
+
+        # Test when awsemf is in the list
+        os.environ["OTEL_METRICS_EXPORTER"] = "console,awsemf,otlp"
+        self.assertTrue(_check_emf_exporter_enabled())
+        # Should remove awsemf from the list
+        self.assertEqual(os.environ["OTEL_METRICS_EXPORTER"], "console,otlp")
+
+        # Test when awsemf is the only exporter
+        os.environ["OTEL_METRICS_EXPORTER"] = "awsemf"
+        self.assertTrue(_check_emf_exporter_enabled())
+        # Should remove the environment variable entirely
+        self.assertNotIn("OTEL_METRICS_EXPORTER", os.environ)
+
+        # Test with spaces in the list
+        os.environ["OTEL_METRICS_EXPORTER"] = " console , awsemf , otlp "
+        self.assertTrue(_check_emf_exporter_enabled())
+        self.assertEqual(os.environ["OTEL_METRICS_EXPORTER"], "console,otlp")
+
+        # Clean up
+        os.environ.pop("OTEL_METRICS_EXPORTER", None)
+
+    def test_validate_and_fetch_logs_header(self):
+        # Test when headers are not set
+        os.environ.pop(OTEL_EXPORTER_OTLP_LOGS_HEADERS, None)
+        result = _validate_and_fetch_logs_header()
+        self.assertIsInstance(result, OtlpLogHeaderSetting)
+        self.assertIsNone(result.log_group)
+        self.assertIsNone(result.log_stream)
+        self.assertIsNone(result.namespace)
+        self.assertFalse(result.is_valid)
+
+        # Test with valid headers
+        os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=test-group,x-aws-log-stream=test-stream"
+        result = _validate_and_fetch_logs_header()
+        self.assertEqual(result.log_group, "test-group")
+        self.assertEqual(result.log_stream, "test-stream")
+        self.assertIsNone(result.namespace)
+        self.assertTrue(result.is_valid)
+
+        # Test with valid headers including namespace
+        os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = (
+            "x-aws-log-group=test-group,x-aws-log-stream=test-stream,x-aws-metric-namespace=test-namespace"
+        )
+        result = _validate_and_fetch_logs_header()
+        self.assertEqual(result.log_group, "test-group")
+        self.assertEqual(result.log_stream, "test-stream")
+        self.assertEqual(result.namespace, "test-namespace")
+        self.assertTrue(result.is_valid)
+
+        # Test with missing log group
+        os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-stream=test-stream"
+        result = _validate_and_fetch_logs_header()
+        self.assertIsNone(result.log_group)
+        self.assertEqual(result.log_stream, "test-stream")
+        self.assertFalse(result.is_valid)
+
+        # Test with missing log stream
+        os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=test-group"
+        result = _validate_and_fetch_logs_header()
+        self.assertEqual(result.log_group, "test-group")
+        self.assertIsNone(result.log_stream)
+        self.assertFalse(result.is_valid)
+
+        # Test with empty value in log group
+        os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=,x-aws-log-stream=test-stream"
+        result = _validate_and_fetch_logs_header()
+        self.assertIsNone(result.log_group)
+        self.assertEqual(result.log_stream, "test-stream")
+        self.assertFalse(result.is_valid)
+
+        # Test with empty value in log stream
+        os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=test-group,x-aws-log-stream="
+        result = _validate_and_fetch_logs_header()
+        self.assertEqual(result.log_group, "test-group")
+        self.assertIsNone(result.log_stream)
+        self.assertFalse(result.is_valid)
+
+        # Clean up
+        os.environ.pop(OTEL_EXPORTER_OTLP_LOGS_HEADERS, None)
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._validate_and_fetch_logs_header")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_installed")
+    def test_create_emf_exporter(self, mock_is_installed, mock_validate):
+        # Test when botocore is not installed
+        mock_is_installed.return_value = False
+        result = create_emf_exporter()
+        self.assertIsNone(result)
+        mock_is_installed.assert_called_with("botocore")
+
+        # Reset mock for subsequent tests
+        mock_is_installed.reset_mock()
+        mock_is_installed.return_value = True
+
+        # Mock the EMF exporter class import by patching the module import
+        with patch(
+            "amazon.opentelemetry.distro.exporter.aws.metrics.aws_cloudwatch_emf_exporter.AwsCloudWatchEmfExporter"
+        ) as mock_emf_exporter_class:
+            mock_exporter_instance = MagicMock()
+            mock_exporter_instance.namespace = "default"
+            mock_exporter_instance.log_group_name = "test-group"
+            mock_emf_exporter_class.return_value = mock_exporter_instance
+
+            # Test when headers are invalid
+            mock_validate.return_value = OtlpLogHeaderSetting(None, None, None, False)
+            result = create_emf_exporter()
+            self.assertIsNone(result)
+
+            # Test when namespace is missing (should still create exporter with default namespace)
+            mock_validate.return_value = OtlpLogHeaderSetting("test-group", "test-stream", None, True)
+            result = create_emf_exporter()
+            self.assertIsNotNone(result)
+            self.assertEqual(result, mock_exporter_instance)
+            # Verify that the EMF exporter was called with correct parameters
+            mock_emf_exporter_class.assert_called_with(
+                namespace=None, log_group_name="test-group", log_stream_name="test-stream"
+            )
+
+            # Test with valid configuration
+            mock_validate.return_value = OtlpLogHeaderSetting("test-group", "test-stream", "test-namespace", True)
+            result = create_emf_exporter()
+            self.assertIsNotNone(result)
+            self.assertEqual(result, mock_exporter_instance)
+            # Verify that the EMF exporter was called with correct parameters
+            mock_emf_exporter_class.assert_called_with(
+                namespace="test-namespace", log_group_name="test-group", log_stream_name="test-stream"
+            )
+
+            # Test exception handling
+            mock_validate.side_effect = Exception("Test exception")
+            result = create_emf_exporter()
+            self.assertIsNone(result)
+
+    def test_customize_metric_exporters_with_emf(self):
+        metric_readers = []
+        views = []
+
+        # Test with EMF disabled
+        _customize_metric_exporters(metric_readers, views, is_emf_enabled=False)
+        self.assertEqual(len(metric_readers), 0)
+
+        # Test with EMF enabled but create_emf_exporter returns None
+        with patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.create_emf_exporter", return_value=None):
+            _customize_metric_exporters(metric_readers, views, is_emf_enabled=True)
+            self.assertEqual(len(metric_readers), 0)
+
+        # Test with EMF enabled and valid exporter
+        mock_emf_exporter = MagicMock(spec=AwsCloudWatchEmfExporter)
+        # Add the required attributes that PeriodicExportingMetricReader expects
+        mock_emf_exporter._preferred_temporality = {}
+        mock_emf_exporter._preferred_aggregation = {}
+
+        with patch(
+            "amazon.opentelemetry.distro.aws_opentelemetry_configurator.create_emf_exporter",
+            return_value=mock_emf_exporter,
+        ):
+            _customize_metric_exporters(metric_readers, views, is_emf_enabled=True)
+            self.assertEqual(len(metric_readers), 1)
+            self.assertIsInstance(metric_readers[0], PeriodicExportingMetricReader)
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_service_attribute")
+    def test_customize_resource_without_agent_observability(self, mock_get_service_attribute, mock_is_agent_enabled):
+        """Test _customize_resource when agent observability is disabled"""
+        mock_is_agent_enabled.return_value = False
+        mock_get_service_attribute.return_value = ("test-service", False)
+
+        resource = Resource.create({ResourceAttributes.SERVICE_NAME: "test-service"})
+        result = _customize_resource(resource)
+
+        # Should only have AWS_LOCAL_SERVICE added
+        self.assertEqual(result.attributes[AWS_LOCAL_SERVICE], "test-service")
+        self.assertNotIn(AWS_SERVICE_TYPE, result.attributes)
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_service_attribute")
+    def test_customize_resource_with_agent_observability_default(
+        self, mock_get_service_attribute, mock_is_agent_enabled
+    ):
+        """Test _customize_resource when agent observability is enabled with default agent type"""
+        mock_is_agent_enabled.return_value = True
+        mock_get_service_attribute.return_value = ("test-service", False)
+
+        resource = Resource.create({ResourceAttributes.SERVICE_NAME: "test-service"})
+        result = _customize_resource(resource)
+
+        # Should have both AWS_LOCAL_SERVICE and AWS_SERVICE_TYPE with default value
+        self.assertEqual(result.attributes[AWS_LOCAL_SERVICE], "test-service")
+        self.assertEqual(result.attributes[AWS_SERVICE_TYPE], "gen_ai_agent")
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_service_attribute")
+    def test_customize_resource_with_existing_agent_type(self, mock_get_service_attribute, mock_is_agent_enabled):
+        """Test _customize_resource when agent type already exists in resource"""
+        mock_is_agent_enabled.return_value = True
+        mock_get_service_attribute.return_value = ("test-service", False)
+
+        # Create resource with existing agent type
+        resource = Resource.create(
+            {ResourceAttributes.SERVICE_NAME: "test-service", AWS_SERVICE_TYPE: "existing-agent"}
+        )
+        result = _customize_resource(resource)
+
+        # Should preserve existing agent type and not override it
+        self.assertEqual(result.attributes[AWS_LOCAL_SERVICE], "test-service")
+        self.assertEqual(result.attributes[AWS_SERVICE_TYPE], "existing-agent")
 
 
 def validate_distro_environ():
