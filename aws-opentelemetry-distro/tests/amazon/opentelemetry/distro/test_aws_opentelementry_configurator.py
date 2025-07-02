@@ -26,6 +26,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     OtlpLogHeaderSetting,
     _check_emf_exporter_enabled,
     _custom_import_sampler,
+    _customize_log_record_processor,
     _customize_logs_exporter,
     _customize_metric_exporters,
     _customize_resource,
@@ -1008,6 +1009,26 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         # Clean up
         os.environ.pop(OTEL_EXPORTER_OTLP_LOGS_HEADERS, None)
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_aws_otlp_endpoint")
+    def test_customize_log_record_processor_with_agent_observability(self, mock_is_aws_endpoint, mock_is_agent_enabled):
+        """Test that AwsCloudWatchOtlpBatchLogRecordProcessor is used when agent observability is enabled and endpoint is logs endpoint"""
+        from amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor import (
+            AwsCloudWatchOtlpBatchLogRecordProcessor,
+        )
+        from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
+        from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+
+        # Mock the OTLPAwsLogExporter
+        mock_exporter = MagicMock(spec=OTLPAwsLogExporter)
+
+        # Test case 1: Agent observability enabled and AWS logs endpoint
+        mock_is_agent_enabled.return_value = True
+        mock_is_aws_endpoint.return_value = True
+
+        processor = _customize_log_record_processor(mock_exporter)
+        self.assertIsInstance(processor, AwsCloudWatchOtlpBatchLogRecordProcessor)
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._validate_and_fetch_logs_header")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_installed")

@@ -1,6 +1,6 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright The OpenTelemetry Authors
 # SPDX-License-Identifier: Apache-2.0
-# Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
+# Modifications Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 import logging
 from typing import Mapping, Optional, Sequence, cast
@@ -136,10 +136,33 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
         """
         Estimates the size in bytes of a log by calculating the size of its body and its attributes
         and adding a buffer amount to account for other log metadata information.
-        Will process complex log structures up to the specified depth limit.
-        Includes cycle detection to prevent processing the log content more than once.
-        If the depth limit of the log structure is exceeded, returns the truncated calculation
-        to everything up to that point.
+
+        Features:
+        - Processes complex log structures up to the specified depth limit
+        - Includes cycle detection to prevent processing the same content more than once
+        - Returns truncated calculation if depth limit is exceeded
+
+        We set depth to 3 as this is the minimum required depth to estimate our consolidated Gen AI log events:
+
+        Example structure:
+        {
+            "output": {
+                "messages": [
+                    {
+                        "content": "Hello, World!",
+                        "role": "assistant"
+                    }
+                ]
+            },
+            "input": {
+                "messages": [
+                    {
+                        "content": "Say Hello, World!",
+                        "role": "user"
+                    }
+                ]
+            }
+        }
 
         Args:
             log: The Log object to calculate size for

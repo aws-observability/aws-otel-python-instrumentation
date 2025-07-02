@@ -1,6 +1,6 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright The OpenTelemetry Authors
 # SPDX-License-Identifier: Apache-2.0
-# Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
+# Modifications Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 import gzip
 import logging
