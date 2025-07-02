@@ -26,6 +26,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     OtlpLogHeaderSetting,
     _check_emf_exporter_enabled,
     _custom_import_sampler,
+    _customize_log_record_processor,
     _customize_logs_exporter,
     _customize_metric_exporters,
     _customize_resource,
@@ -46,6 +47,11 @@ from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetr
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
 from amazon.opentelemetry.distro.exporter.aws.metrics.aws_cloudwatch_emf_exporter import AwsCloudWatchEmfExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
+
+# pylint: disable=line-too-long
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor import (
+    AwsCloudWatchOtlpBatchLogRecordProcessor,
+)
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
@@ -1009,6 +1015,18 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         # Clean up
         os.environ.pop(OTEL_EXPORTER_OTLP_LOGS_HEADERS, None)
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_aws_otlp_endpoint")
+    def test_customize_log_record_processor_with_agent_observability(self, mock_is_aws_endpoint, mock_is_agent_enabled):
+        """Test that AwsCloudWatchOtlpBatchLogRecordProcessor is used when agent observability is enabled"""
+        mock_exporter = MagicMock(spec=OTLPAwsLogExporter)
+        mock_is_agent_enabled.return_value = True
+        mock_is_aws_endpoint.return_value = True
+
+        processor = _customize_log_record_processor(mock_exporter)
+
+        self.assertIsInstance(processor, AwsCloudWatchOtlpBatchLogRecordProcessor)
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._validate_and_fetch_logs_header")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")

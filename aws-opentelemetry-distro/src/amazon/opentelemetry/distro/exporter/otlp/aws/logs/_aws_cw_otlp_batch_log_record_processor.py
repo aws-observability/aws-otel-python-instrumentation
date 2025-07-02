@@ -136,10 +136,33 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
         """
         Estimates the size in bytes of a log by calculating the size of its body and its attributes
         and adding a buffer amount to account for other log metadata information.
-        Will process complex log structures up to the specified depth limit.
-        Includes cycle detection to prevent processing the log content more than once.
-        If the depth limit of the log structure is exceeded, returns the truncated calculation
-        to everything up to that point.
+
+        Features:
+        - Processes complex log structures up to the specified depth limit
+        - Includes cycle detection to prevent processing the same content more than once
+        - Returns truncated calculation if depth limit is exceeded
+
+        We set depth to 3 as this is the minimum required depth to estimate our consolidated Gen AI log events:
+
+        Example structure:
+        {
+            "output": {
+                "messages": [
+                    {
+                        "content": "Hello, World!",
+                        "role": "assistant"
+                    }
+                ]
+            },
+            "input": {
+                "messages": [
+                    {
+                        "content": "Say Hello, World!",
+                        "role": "user"
+                    }
+                ]
+            }
+        }
 
         Args:
             log: The Log object to calculate size for
@@ -175,12 +198,12 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
                 if next_val is None:
                     continue
 
-                if isinstance(next_val, (str, bytes)):
+                if isinstance(next_val, bytes):
                     size += len(next_val)
                     continue
 
-                if isinstance(next_val, (float, int, bool)):
-                    size += len(str(next_val))
+                if isinstance(next_val, (str, float, int, bool)):
+                    size += AwsCloudWatchOtlpBatchLogRecordProcessor._estimate_utf8_size(str(next_val))
                     continue
 
                 # next_val must be Sequence["AnyValue"] or Mapping[str, "AnyValue"]
@@ -210,6 +233,20 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
             queue = new_queue
 
         return size
+
+    @staticmethod
+    def _estimate_utf8_size(s: str):
+        ascii_count = 0
+        non_ascii_count = 0
+
+        for char in s:
+            if ord(char) < 128:
+                ascii_count += 1
+            else:
+                non_ascii_count += 1
+
+        # Estimate: ASCII chars (1 byte) + upper bound of non-ASCII chars 4 bytes
+        return ascii_count + (non_ascii_count * 4)
 
     # Only export the logs once to avoid the race condition of the worker thread and force flush thread
     # https://github.com/open-telemetry/opentelemetry-python/issues/3193

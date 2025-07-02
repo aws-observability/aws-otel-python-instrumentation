@@ -6,7 +6,8 @@ import gzip
 import logging
 import random
 from io import BytesIO
-from time import sleep, time
+from threading import Event
+from time import time
 from typing import Dict, Optional, Sequence
 
 from botocore.session import Session
@@ -69,6 +70,7 @@ class OTLPAwsLogExporter(OTLPLogExporter):
             compression=Compression.Gzip,
             session=AwsAuthSession(session=session, aws_region=self._aws_region, service="logs"),
         )
+        self._shutdown_event = Event()
 
     def export(self, batch: Sequence[LogData]) -> LogExportResult:
         """
@@ -123,8 +125,17 @@ class OTLPAwsLogExporter(OTLPLogExporter):
                 resp.reason,
                 backoff_seconds,
             )
-            sleep(backoff_seconds)
+            # Use interruptible sleep that can be interrupted by shutdown
+            if self._shutdown_event.wait(backoff_seconds):
+                _logger.info("Export interrupted by shutdown")
+                return LogExportResult.FAILURE
+
             retry_num += 1
+
+    def shutdown(self) -> None:
+        """Shutdown the exporter and interrupt any ongoing waits."""
+        self._shutdown_event.set()
+        return super().shutdown()
 
     def _send(self, serialized_data: bytes, timeout_sec: float):
         try:

@@ -5,7 +5,7 @@ import unittest
 from typing import List
 from unittest.mock import MagicMock, patch
 
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor import (
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor import (
     AwsCloudWatchOtlpBatchLogRecordProcessor,
     BatchLogExportStrategy,
 )
@@ -116,8 +116,8 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
 
     def test_process_log_data_primitive(self):
 
-        primitives: List[AnyValue] = ["test", b"test", 1, 1.2, True, False, None]
-        expected_sizes = [4, 4, 1, 3, 4, 5, 0]
+        primitives: List[AnyValue] = ["test", b"test", 1, 1.2, True, False, None, "深入 Python", "calfé"]
+        expected_sizes = [4, 4, 1, 3, 4, 5, 0, 2 * 4 + len(" Python"), 1 * 4 + len("calf")]
 
         for index, primitive in enumerate(primitives):
             log = self.generate_test_log_data(log_body=primitive, count=1)
@@ -136,11 +136,11 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         self.assertEqual(actual_size, expected_size)
 
     @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.attach",
+        "amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.attach",
         return_value=MagicMock(),
     )
-    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.detach")
-    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.set_value")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.detach")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.set_value")
     def test_export_single_batch_under_size_limit(self, _, __, ___):
         """Tests that export is only called once if a single batch is under the size limit"""
         log_count = 10
@@ -163,11 +163,11 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         self.mock_exporter.export.assert_called_once()
 
     @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.attach",
+        "amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.attach",
         return_value=MagicMock(),
     )
-    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.detach")
-    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.set_value")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.detach")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.set_value")
     def test_export_single_batch_all_logs_over_size_limit(self, _, __, ___):
         """Should make multiple export calls of batch size 1 to export logs of size > 1 MB."""
 
@@ -188,11 +188,11 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
             self.assertEqual(len(batch[0]), 1)
 
     @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.attach",
+        "amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.attach",
         return_value=MagicMock(),
     )
-    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.detach")
-    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.set_value")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.detach")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.set_value")
     def test_export_single_batch_some_logs_over_size_limit(self, _, __, ___):
         """Should make calls to export smaller sub-batch logs"""
         large_log_body = "X" * (self.processor._MAX_LOG_REQUEST_BYTE_SIZE + 1)
@@ -241,11 +241,11 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         self.mock_exporter.export.assert_not_called()
 
     @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.attach",
+        "amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.attach",
         return_value=MagicMock(),
     )
-    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.detach")
-    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor.set_value")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.detach")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.set_value")
     def test_force_flush_exports_only_one_batch(self, _, __, ___):
         """Tests that force_flush should try to at least export one batch of logs. Rest of the logs will be dropped"""
         # Set max_export_batch_size to 5 to limit batch size
