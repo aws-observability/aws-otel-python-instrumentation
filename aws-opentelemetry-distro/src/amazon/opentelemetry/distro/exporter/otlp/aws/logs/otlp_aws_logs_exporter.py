@@ -10,7 +10,6 @@ from threading import Event
 from time import time
 from typing import Dict, Optional, Sequence
 
-from botocore.session import Session
 from requests import Response
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.structures import CaseInsensitiveDict

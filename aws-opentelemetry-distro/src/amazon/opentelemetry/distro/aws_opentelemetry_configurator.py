@@ -23,6 +23,8 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
+from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
@@ -209,7 +211,8 @@ def _init_logging(
     for _, exporter_class in exporters.items():
         exporter_args = {}
         log_exporter: LogExporter = _customize_logs_exporter(exporter_class(**exporter_args))
-        _customize_log_record_processor(provider, log_exporter)
+        log_processor = _customize_log_record_processor(log_exporter)
+        provider.add_log_record_processor(log_processor)
 
     event_logger_provider = EventLoggerProvider(logger_provider=provider)
     set_event_logger_provider(event_logger_provider)
@@ -412,20 +415,14 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
     return AwsMetricAttributesSpanExporterBuilder(span_exporter, resource).build()
 
 
-def _customize_log_record_processor(provider: LoggerProvider, log_exporter: Optional[LogExporter]) -> None:
-    if log_exporter is None:
-        return
-    if is_agent_observability_enabled() and IS_BOTOCORE_INSTALLED:
-        from amazon.opentelemetry.distro.exporter.otlp.aws.logs.aws_batch_log_record_processor import (
-            AwsCloudWatchOtlpBatchLogRecordProcessor,
-        )
+def _customize_log_record_processor(log_exporter: LogExporter):
+    if isinstance(log_exporter, OTLPAwsLogExporter) and is_agent_observability_enabled():
+        return AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=log_exporter)
 
-        provider.add_log_record_processor(AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=log_exporter))
-    else:
-        provider.add_log_record_processor(BatchLogRecordProcessor(exporter=log_exporter))
+    return BatchLogRecordProcessor(exporter=log_exporter)
 
 
-def _customize_logs_exporter(log_exporter: LogExporter) -> Optional[LogExporter]:
+def _customize_logs_exporter(log_exporter: LogExporter) -> LogExporter:
     logs_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT)
 
     if _is_aws_otlp_endpoint(logs_endpoint, "logs"):
