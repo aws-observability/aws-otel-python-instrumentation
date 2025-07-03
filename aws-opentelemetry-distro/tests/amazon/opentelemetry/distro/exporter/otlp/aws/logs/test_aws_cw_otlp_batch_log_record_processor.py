@@ -264,7 +264,6 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         result = self.processor.force_flush()
 
         self.assertTrue(result)
-        # 45 logs should remain
         self.assertEqual(len(self.processor._queue), 1)
         self.mock_exporter.export.assert_called_once()
 
