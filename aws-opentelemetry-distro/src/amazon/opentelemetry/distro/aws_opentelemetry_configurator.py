@@ -421,6 +421,7 @@ def _customize_log_record_processor(logger_provider: LoggerProvider, log_exporte
         return
 
     if is_agent_observability_enabled():
+        # pylint: disable=import-outside-toplevel
         from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor import (
             AwsCloudWatchOtlpBatchLogRecordProcessor,
         )
