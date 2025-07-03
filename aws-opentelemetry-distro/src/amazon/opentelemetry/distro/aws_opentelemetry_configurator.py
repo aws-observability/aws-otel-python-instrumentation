@@ -405,11 +405,10 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
             region = endpoint.split(".")[1]
             return _create_aws_otlp_exporter(endpoint=traces_endpoint, service="xray", region=region)
 
-        else:
-            _logger.warning(
-                "Improper configuration see: please export/set "
-                "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf and OTEL_TRACES_EXPORTER=otlp"
-            )
+        _logger.warning(
+            "Improper configuration see: please export/set "
+            "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf and OTEL_TRACES_EXPORTER=otlp"
+        )
 
     if not _is_application_signals_enabled():
         return span_exporter
@@ -828,6 +827,7 @@ def _create_aws_otlp_exporter(endpoint: str, service: str, region: str):
         if service == "logs":
             return OTLPAwsLogExporter(session=session, aws_region=region)
 
+        return None
     # pylint: disable=broad-exception-caught
     except Exception as errors:
         _logger.error("Failed to create AWS OTLP exporter: %s", errors)
