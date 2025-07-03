@@ -4,8 +4,9 @@
 import logging
 
 import requests
-
-from amazon.opentelemetry.distro._utils import is_installed
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
+from botocore.session import Session
 
 _logger = logging.getLogger(__name__)
 
@@ -33,57 +34,36 @@ class AwsAuthSession(requests.Session):
         service (str): The AWS service name for signing (e.g., "logs" or "xray")
     """
 
-    def __init__(self, aws_region, service):
-
-        self._has_required_dependencies = False
-
-        # Requires botocore to be installed to sign the headers. However,
-        # some users might not need to use this authenticator. In order not conflict
-        # with existing behavior, we check for botocore before initializing this exporter.
-
-        if aws_region and service and is_installed("botocore"):
-            # pylint: disable=import-outside-toplevel
-            from botocore import auth, awsrequest, session
-
-            self._boto_auth = auth
-            self._boto_aws_request = awsrequest
-            self._boto_session = session.Session()
-
-            self._aws_region = aws_region
-            self._service = service
-            self._has_required_dependencies = True
-
-        else:
-            _logger.error(
-                "botocore is required to enable SigV4 Authentication. Please install it using `pip install botocore`",
-            )
+    def __init__(self, aws_region: str, service: str, session: Session):
+        self._aws_region: str = aws_region
+        self._service: str = service
+        self._session: Session = session
 
         super().__init__()
 
     def request(self, method, url, *args, data=None, headers=None, **kwargs):
-        if self._has_required_dependencies:
+        credentials = self._session.get_credentials()
 
-            credentials = self._boto_session.get_credentials()
+        if credentials:
+            signer = SigV4Auth(credentials, self._service, self._aws_region)
+            request = AWSRequest(
+                method="POST",
+                url=url,
+                data=data,
+                headers={"Content-Type": "application/x-protobuf"},
+            )
 
-            if credentials is not None:
-                signer = self._boto_auth.SigV4Auth(credentials, self._service, self._aws_region)
+            try:
+                signer.add_auth(request)
 
-                request = self._boto_aws_request.AWSRequest(
-                    method="POST",
-                    url=url,
-                    data=data,
-                    headers={"Content-Type": "application/x-protobuf"},
-                )
+                if headers is None:
+                    headers = {}
 
-                try:
-                    signer.add_auth(request)
+                headers.update(dict(request.headers))
 
-                    if headers is None:
-                        headers = {}
-
-                    headers.update(dict(request.headers))
-
-                except Exception as signing_error:  # pylint: disable=broad-except
-                    _logger.error("Failed to sign request: %s", signing_error)
+            except Exception as signing_error:  # pylint: disable=broad-except
+                _logger.error("Failed to sign request: %s", signing_error)
+        else:
+            _logger.error("Failed to load AWS Credentials: %s")
 
         return super().request(method=method, url=url, *args, data=data, headers=headers, **kwargs)
