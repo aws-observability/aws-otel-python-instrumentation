@@ -26,6 +26,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     OtlpLogHeaderSetting,
     _check_emf_exporter_enabled,
     _create_aws_otlp_exporter,
+    _create_emf_exporter,
     _custom_import_sampler,
     _customize_log_record_processor,
     _customize_logs_exporter,
@@ -42,7 +43,6 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _is_defer_to_workers_enabled,
     _is_wsgi_master_process,
     _validate_and_fetch_logs_header,
-    create_emf_exporter,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
@@ -1056,7 +1056,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
     def test_create_emf_exporter(self, mock_get_session, mock_validate):
         # Test when botocore is not installed
         mock_get_session.return_value = None
-        result = create_emf_exporter()
+        result = _create_emf_exporter()
         self.assertIsNone(result)
 
         # Reset mock for subsequent tests
@@ -1074,12 +1074,12 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
             # Test when headers are invalid
             mock_validate.return_value = OtlpLogHeaderSetting(None, None, None, False)
-            result = create_emf_exporter()
+            result = _create_emf_exporter()
             self.assertIsNone(result)
 
             # Test when namespace is missing (should still create exporter with default namespace)
             mock_validate.return_value = OtlpLogHeaderSetting("test-group", "test-stream", None, True)
-            result = create_emf_exporter()
+            result = _create_emf_exporter()
             self.assertIsNotNone(result)
             self.assertEqual(result, mock_exporter_instance)
             # Verify that the EMF exporter was called with correct parameters
@@ -1092,7 +1092,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
             # Test with valid configuration
             mock_validate.return_value = OtlpLogHeaderSetting("test-group", "test-stream", "test-namespace", True)
-            result = create_emf_exporter()
+            result = _create_emf_exporter()
             self.assertIsNotNone(result)
             self.assertEqual(result, mock_exporter_instance)
             # Verify that the EMF exporter was called with correct parameters
@@ -1105,7 +1105,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
             # Test exception handling
             mock_validate.side_effect = Exception("Test exception")
-            result = create_emf_exporter()
+            result = _create_emf_exporter()
             self.assertIsNone(result)
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_logger_provider")
@@ -1183,7 +1183,9 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(len(metric_readers), 0)
 
         # Test with EMF enabled but create_emf_exporter returns None
-        with patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.create_emf_exporter", return_value=None):
+        with patch(
+            "amazon.opentelemetry.distro.aws_opentelemetry_configurator._create_emf_exporter", return_value=None
+        ):
             _customize_metric_exporters(metric_readers, views, is_emf_enabled=True)
             self.assertEqual(len(metric_readers), 0)
 
@@ -1194,7 +1196,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         mock_emf_exporter._preferred_aggregation = {}
 
         with patch(
-            "amazon.opentelemetry.distro.aws_opentelemetry_configurator.create_emf_exporter",
+            "amazon.opentelemetry.distro.aws_opentelemetry_configurator._create_emf_exporter",
             return_value=mock_emf_exporter,
         ):
             _customize_metric_exporters(metric_readers, views, is_emf_enabled=True)

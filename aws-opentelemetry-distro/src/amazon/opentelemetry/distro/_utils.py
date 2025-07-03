@@ -42,7 +42,10 @@ IS_BOTOCORE_INSTALLED: bool = is_installed("botocore")
 
 
 def get_aws_session():
-    """Returns a botocore session only if botocore is installed, otherwise None.
+    """
+    Returns a botocore session only if botocore is installed, otherwise None.
+    If AWS Region is defined in `AWS_REGION` or `AWS_DEFAULT_REGION` environment variables,
+    then the region is set in the botocore session before returning.
 
     We do this to prevent runtime errors for ADOT customers that do not need
     any features that require botocore.
