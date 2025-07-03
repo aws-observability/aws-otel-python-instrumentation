@@ -530,7 +530,7 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
 
 
 def _set_remote_account_id_and_region(span: ReadableSpan, attributes: BoundedAttributes) -> bool:
-    ARN_ATTRIBUTES = [
+    arn_attributes = [
         AWS_DYNAMODB_TABLE_ARN,
         AWS_KINESIS_STREAM_ARN,
         AWS_SNS_TOPIC_ARN,
@@ -548,7 +548,7 @@ def _set_remote_account_id_and_region(span: ReadableSpan, attributes: BoundedAtt
         remote_account_id = SqsUrlParser.get_account_id(queue_url)
         remote_region = SqsUrlParser.get_region(queue_url)
     else:
-        for arn_attribute in ARN_ATTRIBUTES:
+        for arn_attribute in arn_attributes:
             if is_key_present(span, arn_attribute):
                 arn = span.attributes.get(arn_attribute)
                 remote_account_id = RegionalResourceArnParser.get_account_id(arn)

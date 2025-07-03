@@ -44,10 +44,7 @@ from opentelemetry.instrumentation.botocore.extensions.types import (
     _BotoResultT,
 )
 from opentelemetry.instrumentation.botocore.utils import get_server_attributes
-from opentelemetry.instrumentation.utils import (
-    is_instrumentation_enabled,
-    suppress_http_instrumentation,
-)
+from opentelemetry.instrumentation.utils import is_instrumentation_enabled, suppress_http_instrumentation
 from opentelemetry.semconv.trace import SpanAttributes
 from opentelemetry.trace.span import Span
 
@@ -250,6 +247,7 @@ def _apply_botocore_dynamodb_patch() -> None:
 
 
 def _apply_botocore_api_call_patch() -> None:
+    # pylint: disable=too-many-locals
     def patched_api_call(self, original_func, instance, args, kwargs):
         """Botocore instrumentation patch to capture AWS authentication details
 
@@ -262,7 +260,9 @@ def _apply_botocore_api_call_patch() -> None:
         1. Propose refactoring upstream _patched_api_call into smaller components
         2. Apply targeted patches to these components to reduce code duplication
 
-        Reference: https://github.com/open-telemetry/opentelemetry-python-contrib/blob/release/v1.33.x-0.54bx/instrumentation/opentelemetry-instrumentation-botocore/src/opentelemetry/instrumentation/botocore/__init__.py#L263
+        Reference: https://github.com/open-telemetry/opentelemetry-python-contrib/blob/
+        release/v1.33.x-0.54bx/instrumentation/opentelemetry-instrumentation-botocore/src/
+        opentelemetry/instrumentation/botocore/__init__.py#L263
         """
         if not is_instrumentation_enabled():
             return original_func(*args, **kwargs)
@@ -284,8 +284,8 @@ def _apply_botocore_api_call_patch() -> None:
             **get_server_attributes(call_context.endpoint_url),
             AWS_AUTH_REGION: call_context.region,
         }
-        credentials = instance._get_credentials()
 
+        credentials = instance._get_credentials()
         if credentials is not None:
             access_key = credentials.access_key
             if access_key is not None:

@@ -275,8 +275,8 @@ class TestInstrumentationPatch(TestCase):
         args = ("operation_name",)
         kwargs = {}
         initial_attributes = {}
-        mock_extension = self._get_mock_extension()
-        mock_call_context = self._get_mock_call_context()
+        mock_extension = _get_mock_extension()
+        mock_call_context = _get_mock_call_context()
 
         def mock_start_span(*args, **kwargs):
             attributes = kwargs.get("attributes", {})
@@ -326,8 +326,8 @@ class TestInstrumentationPatch(TestCase):
         args = ("operation_name",)
         kwargs = {}
         initial_attributes = {}
-        mock_extension = self._get_mock_extension()
-        mock_call_context = self._get_mock_call_context()
+        mock_extension = _get_mock_extension()
+        mock_call_context = _get_mock_call_context()
 
         def mock_start_span(*args, **kwargs):
             attributes = kwargs.get("attributes", {})
@@ -372,8 +372,8 @@ class TestInstrumentationPatch(TestCase):
         args = ("operation_name",)
         kwargs = {}
         initial_attributes = {}
-        mock_extension = self._get_mock_extension()
-        mock_call_context = self._get_mock_call_context()
+        mock_extension = _get_mock_extension()
+        mock_call_context = _get_mock_call_context()
 
         def mock_start_span(*args, **kwargs):
             attributes = kwargs.get("attributes", {})
@@ -410,34 +410,6 @@ class TestInstrumentationPatch(TestCase):
             self.assertFalse("aws.auth.account.access_key" in initial_attributes)
             self.assertTrue("aws.region" in initial_attributes)
             instrumentor.uninstrument()
-
-    def _get_mock_extension(self):
-        # Mock extension
-        mock_extension = MagicMock()
-        mock_extension.should_trace_service_call.return_value = True
-        mock_extension.tracer_schema_version.return_value = "1.0.0"
-        mock_extension.event_logger_schema_version.return_value = "1.0.0"
-        mock_extension.meter_schema_version.return_value = "1.0.0"
-        mock_extension.should_end_span_on_exit.return_value = True
-        mock_extension.extract_attributes = lambda x: None
-        mock_extension.before_service_call = lambda *args, **kwargs: None
-        mock_extension.after_service_call = lambda *args, **kwargs: None
-        mock_extension.on_success = lambda *args, **kwargs: None
-        mock_extension.on_error = lambda *args, **kwargs: None
-        mock_extension.setup_metrics = lambda meter, metrics: None
-        return mock_extension
-
-    def _get_mock_call_context(self):
-        # Mock call context
-        mock_call_context = MagicMock()
-        mock_call_context.service = "test-service"
-        mock_call_context.service_id = "test-service"
-        mock_call_context.operation = "test-operation"
-        mock_call_context.region = "us-west-2"
-        mock_call_context.span_name = "test-span"
-        mock_call_context.span_kind = "CLIENT"
-        mock_call_context.endpoint_url = "https://www.awsmocktest.com"
-        return mock_call_context
 
     def _test_patched_gevent_os_ssl_instrumentation(self):
         # Only ssl and os module should have been patched since the environment variable was set to 'os, ssl'
@@ -711,3 +683,33 @@ def _do_on_success(
     extension.on_success(span_mock, result, mock_instrumentor_context)
 
     return span_attributes
+
+
+def _get_mock_extension():
+    # Mock extension
+    mock_extension = MagicMock()
+    mock_extension.should_trace_service_call.return_value = True
+    mock_extension.tracer_schema_version.return_value = "1.0.0"
+    mock_extension.event_logger_schema_version.return_value = "1.0.0"
+    mock_extension.meter_schema_version.return_value = "1.0.0"
+    mock_extension.should_end_span_on_exit.return_value = True
+    mock_extension.extract_attributes = lambda x: None
+    mock_extension.before_service_call = lambda *args, **kwargs: None
+    mock_extension.after_service_call = lambda *args, **kwargs: None
+    mock_extension.on_success = lambda *args, **kwargs: None
+    mock_extension.on_error = lambda *args, **kwargs: None
+    mock_extension.setup_metrics = lambda meter, metrics: None
+    return mock_extension
+
+
+def _get_mock_call_context():
+    # Mock call context
+    mock_call_context = MagicMock()
+    mock_call_context.service = "test-service"
+    mock_call_context.service_id = "test-service"
+    mock_call_context.operation = "test-operation"
+    mock_call_context.region = "us-west-2"
+    mock_call_context.span_name = "test-span"
+    mock_call_context.span_kind = "CLIENT"
+    mock_call_context.endpoint_url = "https://www.awsmocktest.com"
+    return mock_call_context

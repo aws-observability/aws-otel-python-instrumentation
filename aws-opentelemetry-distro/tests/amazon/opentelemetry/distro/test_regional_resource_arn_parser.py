@@ -1,3 +1,6 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 from unittest import TestCase
 
 from amazon.opentelemetry.distro.regional_resource_arn_parser import RegionalResourceArnParser
@@ -6,35 +9,35 @@ from amazon.opentelemetry.distro.regional_resource_arn_parser import RegionalRes
 class TestRegionalResourceArnParser(TestCase):
     def test_get_account_id(self):
         # Test invalid ARN formats
-        self.validateGetAccountId(None, None)
-        self.validateGetAccountId("", None)
-        self.validateGetAccountId(" ", None)
-        self.validateGetAccountId(":", None)
-        self.validateGetAccountId("::::::", None)
-        self.validateGetAccountId("not:an:arn:string", None)
-        self.validateGetAccountId("arn:aws:ec2:us-west-2:123456", None)
-        self.validateGetAccountId("arn:aws:ec2:us-west-2:1234567xxxxx", None)
-        self.validateGetAccountId("arn:aws:ec2:us-west-2:123456789012", None)
+        self.validate_get_account_id(None, None)
+        self.validate_get_account_id("", None)
+        self.validate_get_account_id(" ", None)
+        self.validate_get_account_id(":", None)
+        self.validate_get_account_id("::::::", None)
+        self.validate_get_account_id("not:an:arn:string", None)
+        self.validate_get_account_id("arn:aws:ec2:us-west-2:123456", None)
+        self.validate_get_account_id("arn:aws:ec2:us-west-2:1234567xxxxx", None)
+        self.validate_get_account_id("arn:aws:ec2:us-west-2:123456789012", None)
 
         # Test valid ARN formats
-        self.validateGetAccountId("arn:aws:dynamodb:us-west-2:123456789012:table/test_table", "123456789012")
-        self.validateGetAccountId("arn:aws:acm:us-east-1:123456789012:certificate:abc-123", "123456789012")
+        self.validate_get_account_id("arn:aws:dynamodb:us-west-2:123456789012:table/test_table", "123456789012")
+        self.validate_get_account_id("arn:aws:acm:us-east-1:123456789012:certificate:abc-123", "123456789012")
 
     def test_get_region(self):
         # Test invalid ARN formats
-        self.validateGetRegion(None, None)
-        self.validateGetRegion("", None)
-        self.validateGetRegion(" ", None)
-        self.validateGetRegion(":", None)
-        self.validateGetRegion("::::::", None)
-        self.validateGetRegion("not:an:arn:string", None)
-        self.validateGetRegion("arn:aws:ec2:us-west-2:123456", None)
-        self.validateGetRegion("arn:aws:ec2:us-west-2:1234567xxxxx", None)
-        self.validateGetRegion("arn:aws:ec2:us-west-2:123456789012", None)
+        self.validate_get_region(None, None)
+        self.validate_get_region("", None)
+        self.validate_get_region(" ", None)
+        self.validate_get_region(":", None)
+        self.validate_get_region("::::::", None)
+        self.validate_get_region("not:an:arn:string", None)
+        self.validate_get_region("arn:aws:ec2:us-west-2:123456", None)
+        self.validate_get_region("arn:aws:ec2:us-west-2:1234567xxxxx", None)
+        self.validate_get_region("arn:aws:ec2:us-west-2:123456789012", None)
 
         # Test valid ARN formats
-        self.validateGetRegion("arn:aws:dynamodb:us-west-2:123456789012:table/test_table", "us-west-2")
-        self.validateGetRegion("arn:aws:acm:us-east-1:123456789012:certificate:abc-123", "us-east-1")
+        self.validate_get_region("arn:aws:dynamodb:us-west-2:123456789012:table/test_table", "us-west-2")
+        self.validate_get_region("arn:aws:acm:us-east-1:123456789012:certificate:abc-123", "us-east-1")
 
     def test_extract_dynamodb_table_name_from_arn(self):
         # Test invalid ARN formats
@@ -89,8 +92,8 @@ class TestRegionalResourceArnParser(TestCase):
     def validate_resource_name(self, arn, expected_name):
         self.assertEqual(RegionalResourceArnParser.extract_resource_name_from_arn(arn), expected_name)
 
-    def validateGetRegion(self, arn, expected_region):
+    def validate_get_region(self, arn, expected_region):
         self.assertEqual(RegionalResourceArnParser.get_region(arn), expected_region)
 
-    def validateGetAccountId(self, arn, expected_account_id):
+    def validate_get_account_id(self, arn, expected_account_id):
         self.assertEqual(RegionalResourceArnParser.get_account_id(arn), expected_account_id)

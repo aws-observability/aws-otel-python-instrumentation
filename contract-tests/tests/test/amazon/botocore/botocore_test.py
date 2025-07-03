@@ -1081,6 +1081,7 @@ class BotocoreTest(ContractTestBase):
         expected_sum: int,
         **kwargs,
     ) -> None:
+        # pylint: disable=too-many-locals
         target_metrics: List[Metric] = []
         for resource_scope_metric in resource_scope_metrics:
             if resource_scope_metric.metric.name.lower() == metric_name.lower():

@@ -19,8 +19,8 @@ class SqsUrlParser:
         """
         if url is None:
             return None
-        urlWithoutProtocol = url.replace(_HTTP_SCHEMA, "").replace(_HTTPS_SCHEMA, "")
-        split_url: List[Optional[str]] = urlWithoutProtocol.split("/")
+        url_without_protocol = url.replace(_HTTP_SCHEMA, "").replace(_HTTPS_SCHEMA, "")
+        split_url: List[Optional[str]] = url_without_protocol.split("/")
         if len(split_url) == 3 and is_account_id(split_url[1]) and _is_valid_queue_name(split_url[2]):
             return split_url[2]
         return None
@@ -48,8 +48,8 @@ class SqsUrlParser:
         if url is None:
             return None, None, None
 
-        urlWithoutProtocol = url.replace(_HTTP_SCHEMA, "").replace(_HTTPS_SCHEMA, "")
-        split_url: List[Optional[str]] = urlWithoutProtocol.split("/")
+        url_without_protocol = url.replace(_HTTP_SCHEMA, "").replace(_HTTPS_SCHEMA, "")
+        split_url: List[Optional[str]] = url_without_protocol.split("/")
         if (
             len(split_url) != 3
             or not is_account_id(split_url[1])
