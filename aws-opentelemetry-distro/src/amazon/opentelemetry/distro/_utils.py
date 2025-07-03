@@ -42,11 +42,18 @@ IS_BOTOCORE_INSTALLED: bool = is_installed("botocore")
 
 
 def get_aws_session():
+    """Returns a botocore session only if botocore is installed, otherwise None.
+
+    We do this to prevent runtime errors for ADOT customers that do not need
+    any features that require botocore.
+    """
     if IS_BOTOCORE_INSTALLED:
         # pylint: disable=import-outside-toplevel
         from botocore.session import Session
 
         session = Session()
+        # Botocore only looks up AWS_DEFAULT_REGION when creating a session/client
+        # See: https://docs.aws.amazon.com/sdkref/latest/guide/feature-region.html#feature-region-sdk-compat
         region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
         if region:
             session.set_config_variable("region", region)
@@ -55,5 +62,13 @@ def get_aws_session():
 
 
 def get_aws_region() -> Optional[str]:
+    """Get AWS region from environment or botocore session.
+
+    Returns the AWS region in the following priority order:
+    1. AWS_REGION environment variable
+    2. AWS_DEFAULT_REGION environment variable
+    3. botocore session's region (if botocore is available)
+    4. None if no region can be determined
+    """
     botocore_session = get_aws_session()
     return botocore_session.get_config_variable("region") if botocore_session else None
