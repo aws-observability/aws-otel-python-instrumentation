@@ -78,12 +78,4 @@ def get_aws_region() -> Optional[str]:
 
 
 def is_account_id(input_str: str) -> bool:
-    if input_str is None:
-        return False
-
-    try:
-        int(input_str)
-    except ValueError:
-        return False
-
-    return True
+    return input_str is not None and input_str.isdigit()
