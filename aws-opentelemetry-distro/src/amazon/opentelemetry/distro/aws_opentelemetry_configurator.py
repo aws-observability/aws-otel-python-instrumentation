@@ -434,7 +434,7 @@ def _customize_log_record_processor(logger_provider: LoggerProvider, log_exporte
 def _customize_logs_exporter(log_exporter: LogExporter) -> LogExporter:
     logs_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT)
 
-    if logs_endpoint and _is_aws_otlp_endpoint(logs_endpoint, "logs"):
+    if logs_endpoint and _is_aws_otlp_endpoint(logs_endpoint, LOGS_SERIVCE):
 
         _logger.info("Detected using AWS OTLP Logs Endpoint.")
 
@@ -443,7 +443,7 @@ def _customize_logs_exporter(log_exporter: LogExporter) -> LogExporter:
             # Setting default compression mode to Gzip as this is the behavior in upstream's
             # collector otlp http exporter:
             # https://github.com/open-telemetry/opentelemetry-collector/tree/main/exporter/otlphttpexporter
-            return _create_aws_otlp_exporter(endpoint=endpoint, service="logs", region=region)
+            return _create_aws_otlp_exporter(endpoint=endpoint, service=LOGS_SERIVCE, region=region)
 
         _logger.warning(
             "Improper configuration see: please export/set "
