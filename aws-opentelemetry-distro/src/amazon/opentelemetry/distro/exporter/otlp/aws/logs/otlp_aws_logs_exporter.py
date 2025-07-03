@@ -10,6 +10,7 @@ from threading import Event
 from time import time
 from typing import Dict, Optional, Sequence
 
+from botocore.session import Session
 from requests import Response
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.structures import CaseInsensitiveDict
@@ -39,7 +40,7 @@ class OTLPAwsLogExporter(OTLPLogExporter):
     def __init__(
         self,
         aws_region: str,
-        session: Session = Session(),
+        session: Session,
         log_group: Optional[str] = None,
         log_stream: Optional[str] = None,
         endpoint: Optional[str] = None,

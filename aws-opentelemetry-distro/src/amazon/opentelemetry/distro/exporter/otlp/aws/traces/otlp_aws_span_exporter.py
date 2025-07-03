@@ -31,7 +31,7 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
     def __init__(
         self,
         aws_region: str,
-        session: Session = Session(),
+        session: Session,
         endpoint: Optional[str] = None,
         certificate_file: Optional[str] = None,
         client_key_file: Optional[str] = None,

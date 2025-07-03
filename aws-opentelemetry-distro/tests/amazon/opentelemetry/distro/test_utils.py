@@ -151,3 +151,25 @@ class TestUtils(TestCase):
             region = get_aws_region()
             self.assertIsNone(region)
             mock_session.get_config_variable.assert_called_once_with("region")
+
+    def test_get_aws_region_with_aws_region_env(self):
+        """Test get_aws_region when AWS_REGION environment variable is set"""
+        os.environ.pop("AWS_REGION", None)
+        os.environ.pop("AWS_DEFAULT_REGION", None)
+        os.environ["AWS_REGION"] = "us-west-2"
+
+        region = get_aws_region()
+        self.assertEqual(region, "us-west-2")
+
+        os.environ.pop("AWS_REGION", None)
+
+    def test_get_aws_region_with_aws_default_region_env(self):
+        """Test get_aws_region when AWS_DEFAULT_REGION environment variable is set"""
+        os.environ.pop("AWS_REGION", None)
+        os.environ.pop("AWS_DEFAULT_REGION", None)
+        os.environ["AWS_DEFAULT_REGION"] = "eu-west-1"
+
+        region = get_aws_region()
+        self.assertEqual(region, "eu-west-1")
+
+        os.environ.pop("AWS_DEFAULT_REGION", None)

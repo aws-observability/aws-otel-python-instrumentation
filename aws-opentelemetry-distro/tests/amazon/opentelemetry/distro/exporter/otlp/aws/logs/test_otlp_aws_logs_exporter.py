@@ -7,6 +7,7 @@ from unittest.mock import patch
 import requests
 from requests.structures import CaseInsensitiveDict
 
+from amazon.opentelemetry.distro._utils import get_aws_session
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import _MAX_RETRYS, OTLPAwsLogExporter
 from opentelemetry._logs.severity import SeverityNumber
 from opentelemetry.sdk._logs import LogData, LogRecord
@@ -36,7 +37,7 @@ class TestOTLPAwsLogsExporter(TestCase):
 
     def setUp(self):
         self.logs = self.generate_test_log_data()
-        self.exporter = OTLPAwsLogExporter(aws_region="us-east-1", endpoint=self._ENDPOINT)
+        self.exporter = OTLPAwsLogExporter(session=get_aws_session(), aws_region="us-east-1", endpoint=self._ENDPOINT)
 
     @patch("requests.Session.post", return_value=good_response)
     def test_export_success(self, mock_request):

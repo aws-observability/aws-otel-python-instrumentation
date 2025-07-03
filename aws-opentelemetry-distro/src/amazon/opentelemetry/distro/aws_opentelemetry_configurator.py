@@ -12,7 +12,7 @@ from typing_extensions import override
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE, AWS_SERVICE_TYPE
 from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
-from amazon.opentelemetry.distro._utils import IS_BOTOCORE_INSTALLED, get_aws_session, is_agent_observability_enabled
+from amazon.opentelemetry.distro._utils import get_aws_session, is_agent_observability_enabled
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor_builder import (
     AttributePropagatingSpanProcessorBuilder,
@@ -23,8 +23,6 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
-from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
@@ -210,9 +208,9 @@ def _init_logging(
 
     for _, exporter_class in exporters.items():
         exporter_args = {}
-        log_exporter: LogExporter = _customize_logs_exporter(exporter_class(**exporter_args))
-        log_processor = _customize_log_record_processor(log_exporter)
-        provider.add_log_record_processor(log_processor)
+        _customize_log_record_processor(
+            logger_provider=provider, log_exporter=_customize_logs_exporter(exporter_class(**exporter_args))
+        )
 
     event_logger_provider = EventLoggerProvider(logger_provider=provider)
     set_event_logger_provider(event_logger_provider)
@@ -299,10 +297,12 @@ def _export_unsampled_span_for_agent_observability(trace_provider: TracerProvide
         return
 
     traces_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
+    if traces_endpoint and _is_aws_otlp_endpoint(traces_endpoint):
+        endpoint = traces_endpoint.lower()
+        region = endpoint.split(".")[1]
 
-    span_exporter = _create_aws_exporter(endpoint=traces_endpoint)
-
-    trace_provider.add_span_processor(BatchUnsampledSpanProcessor(span_exporter=span_exporter))
+        span_exporter = _create_aws_otlp_exporter(endpoint=endpoint, service="xray", region=region)
+        trace_provider.add_span_processor(BatchUnsampledSpanProcessor(span_exporter=span_exporter))
 
 
 def _is_defer_to_workers_enabled():
@@ -397,11 +397,13 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
             traces_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
             span_exporter = OTLPUdpSpanExporter(endpoint=traces_endpoint)
 
-    if _is_aws_otlp_endpoint(traces_endpoint, "xray"):
+    if traces_endpoint and _is_aws_otlp_endpoint(traces_endpoint, "xray"):
         _logger.info("Detected using AWS OTLP Traces Endpoint.")
 
         if isinstance(span_exporter, OTLPSpanExporter):
-            return _create_aws_exporter(endpoint=traces_endpoint)
+            endpoint = traces_endpoint.lower()
+            region = endpoint.split(".")[1]
+            return _create_aws_otlp_exporter(endpoint=traces_endpoint, service="xray", region=region)
 
         else:
             _logger.warning(
@@ -415,24 +417,34 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
     return AwsMetricAttributesSpanExporterBuilder(span_exporter, resource).build()
 
 
-def _customize_log_record_processor(log_exporter: LogExporter):
-    if isinstance(log_exporter, OTLPAwsLogExporter) and is_agent_observability_enabled():
-        return AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=log_exporter)
+def _customize_log_record_processor(logger_provider: LoggerProvider, log_exporter: Optional[LogExporter]) -> None:
+    if not log_exporter:
+        return
 
-    return BatchLogRecordProcessor(exporter=log_exporter)
+    if is_agent_observability_enabled():
+        from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor import (
+            AwsCloudWatchOtlpBatchLogRecordProcessor,
+        )
+
+        logger_provider.add_log_record_processor(AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=log_exporter))
+    else:
+        logger_provider.add_log_record_processor(BatchLogRecordProcessor(exporter=log_exporter))
 
 
 def _customize_logs_exporter(log_exporter: LogExporter) -> LogExporter:
     logs_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT)
 
-    if _is_aws_otlp_endpoint(logs_endpoint, "logs"):
+    if logs_endpoint and _is_aws_otlp_endpoint(logs_endpoint, "logs"):
+
         _logger.info("Detected using AWS OTLP Logs Endpoint.")
 
         if isinstance(log_exporter, OTLPLogExporter) and _validate_and_fetch_logs_header().is_valid:
+            endpoint = logs_endpoint.lower()
+            region = endpoint.split(".")[1]
             # Setting default compression mode to Gzip as this is the behavior in upstream's
             # collector otlp http exporter:
             # https://github.com/open-telemetry/opentelemetry-collector/tree/main/exporter/otlphttpexporter
-            return _create_aws_exporter(endpoint=logs_endpoint)
+            return _create_aws_otlp_exporter(endpoint=logs_endpoint, service="logs", region=region)
 
         _logger.warning(
             "Improper configuration see: please export/set "
@@ -594,10 +606,10 @@ def _is_lambda_environment():
 def _is_aws_otlp_endpoint(otlp_endpoint: Optional[str] = None, service: str = "xray") -> bool:
     """Is the given endpoint an AWS OTLP endpoint?"""
 
-    pattern = AWS_TRACES_OTLP_ENDPOINT_PATTERN if service == "xray" else AWS_LOGS_OTLP_ENDPOINT_PATTERN
-
     if not otlp_endpoint:
         return False
+
+    pattern = AWS_TRACES_OTLP_ENDPOINT_PATTERN if service == "xray" else AWS_LOGS_OTLP_ENDPOINT_PATTERN
 
     return bool(re.match(pattern, otlp_endpoint.lower()))
 
@@ -787,7 +799,7 @@ def create_emf_exporter():
         return None
 
 
-def _create_aws_exporter(endpoint: str):
+def _create_aws_otlp_exporter(endpoint: str, service: str, region: str):
     """Create and configure the AWS OTLP exporters."""
     try:
         session = get_aws_session()
@@ -800,12 +812,7 @@ def _create_aws_exporter(endpoint: str):
         from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
         from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 
-        endpoint = endpoint.lower()
-        split = endpoint.split(".")
-        service = split[0]
-        region = split[1]
-
-        if "xray" in service:
+        if service == "xray":
             if is_agent_observability_enabled():
                 # Span exporter needs an instance of logger provider in ai agent
                 # observability case because we need to split input/output prompts
@@ -818,7 +825,7 @@ def _create_aws_exporter(endpoint: str):
 
             return OTLPAwsSpanExporter(session=session, endpoint=endpoint, aws_region=region)
 
-        if "logs" in service:
+        if service == "logs":
             return OTLPAwsLogExporter(session=session, aws_region=region)
 
     # pylint: disable=broad-exception-caught

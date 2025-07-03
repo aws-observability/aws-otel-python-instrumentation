@@ -90,7 +90,7 @@ class CloudWatchLogClient:
     def __init__(
         self,
         log_group_name: str,
-        session: Session = Session(),
+        session: Session,
         log_stream_name: Optional[str] = None,
         aws_region: Optional[str] = None,
         **kwargs,
