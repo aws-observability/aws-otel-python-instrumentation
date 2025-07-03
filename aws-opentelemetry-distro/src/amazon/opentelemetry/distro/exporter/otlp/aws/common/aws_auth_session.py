@@ -34,7 +34,7 @@ class AwsAuthSession(requests.Session):
         service (str): The AWS service name for signing (e.g., "logs" or "xray")
     """
 
-    def __init__(self, aws_region: str, service: str, session: Session = Session()):
+    def __init__(self, aws_region: str, service: str, session: Session):
         self._aws_region: str = aws_region
         self._service: str = service
         self._session: Session = session
