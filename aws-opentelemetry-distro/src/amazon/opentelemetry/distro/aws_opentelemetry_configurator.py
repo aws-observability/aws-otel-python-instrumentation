@@ -406,7 +406,7 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
             return _create_aws_otlp_exporter(endpoint=endpoint, service=XRAY_SERVICE, region=region)
 
         _logger.warning(
-            "Improper configuration set: please export/set "
+            "Improper configuration: please export/set "
             "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf and OTEL_TRACES_EXPORTER=otlp"
         )
 
@@ -453,7 +453,7 @@ def _customize_logs_exporter(log_exporter: LogExporter) -> LogExporter:
             )
 
         _logger.warning(
-            "Improper configuration set: please export/set "
+            "Improper configuration: please export/set "
             "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/protobuf and OTEL_LOGS_EXPORTER=otlp"
         )
 
