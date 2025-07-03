@@ -6,6 +6,7 @@ from unittest.mock import patch
 import requests
 from botocore.credentials import Credentials
 
+from amazon.opentelemetry.distro._utils import get_aws_session
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 
 AWS_OTLP_TRACES_ENDPOINT = "https://xray.us-east-1.amazonaws.com/v1/traces"
@@ -19,27 +20,12 @@ mock_credentials = Credentials(access_key="test_access_key", secret_key="test_se
 
 
 class TestAwsAuthSession(TestCase):
-    @patch("pkg_resources.get_distribution", side_effect=ImportError("test error"))
-    @patch.dict("sys.modules", {"botocore": None}, clear=False)
-    @patch("requests.Session.request", return_value=requests.Response())
-    def test_aws_auth_session_no_botocore(self, _, __):
-        """Tests that aws_auth_session will not inject SigV4 Headers if botocore is not installed."""
-
-        session = AwsAuthSession("us-east-1", "xray")
-        actual_headers = {"test": "test"}
-
-        session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers=actual_headers)
-
-        self.assertNotIn(AUTHORIZATION_HEADER, actual_headers)
-        self.assertNotIn(X_AMZ_DATE_HEADER, actual_headers)
-        self.assertNotIn(X_AMZ_SECURITY_TOKEN_HEADER, actual_headers)
-
     @patch("requests.Session.request", return_value=requests.Response())
     @patch("botocore.session.Session.get_credentials", return_value=None)
     def test_aws_auth_session_no_credentials(self, _, __):
         """Tests that aws_auth_session will not inject SigV4 Headers if retrieving credentials returns None."""
 
-        session = AwsAuthSession("us-east-1", "xray")
+        session = AwsAuthSession("us-east-1", "xray", get_aws_session())
         actual_headers = {"test": "test"}
 
         session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers=actual_headers)
@@ -53,7 +39,7 @@ class TestAwsAuthSession(TestCase):
     def test_aws_auth_session(self, _, __):
         """Tests that aws_auth_session will inject SigV4 Headers if botocore is installed."""
 
-        session = AwsAuthSession("us-east-1", "xray")
+        session = AwsAuthSession("us-east-1", "xray", get_aws_session())
         actual_headers = {"test": "test"}
 
         session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers=actual_headers)

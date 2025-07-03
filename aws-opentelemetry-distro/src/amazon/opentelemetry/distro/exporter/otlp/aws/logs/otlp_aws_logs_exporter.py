@@ -1,43 +1,48 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+# Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 
 import gzip
 import logging
+import random
 from io import BytesIO
-from time import sleep
+from threading import Event
+from time import time
 from typing import Dict, Optional, Sequence
 
-import requests
+from botocore.session import Session
+from requests import Response
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.structures import CaseInsensitiveDict
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
-from opentelemetry.exporter.otlp.proto.common._internal import (
-    _create_exp_backoff_generator,
-)
 from opentelemetry.exporter.otlp.proto.common._log_encoder import encode_logs
 from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
-from opentelemetry.sdk._logs import (
-    LogData,
-)
-from opentelemetry.sdk._logs.export import (
-    LogExportResult,
-)
+from opentelemetry.sdk._logs import LogData
+from opentelemetry.sdk._logs.export import LogExportResult
 
 _logger = logging.getLogger(__name__)
+_MAX_RETRYS = 6
 
 
 class OTLPAwsLogExporter(OTLPLogExporter):
-    _LARGE_LOG_HEADER = "x-aws-truncatable-fields"
-    _LARGE_GEN_AI_LOG_PATH_HEADER = (
-        "\\$['resourceLogs'][0]['scopeLogs'][0]['logRecords'][0]['body']"
-        "['kvlistValue']['values'][*]['value']['kvlistValue']['values'][*]"
-        "['value']['arrayValue']['values'][*]['kvlistValue']['values'][*]"
-        "['value']['stringValue']"
-    )
-    _RETRY_AFTER_HEADER = "Retry-After"  # https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
+    """
+    This exporter extends the functionality of the OTLPLogExporter to allow logs to be exported
+    to the CloudWatch Logs OTLP endpoint https://logs.[AWSRegion].amazonaws.com/v1/logs. Utilizes the aws-sdk
+    library to sign and directly inject SigV4 Authentication to the exported request's headers.
+
+    See: https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-OTLPEndpoint.html
+    """
+
+    _RETRY_AFTER_HEADER = "Retry-After"  # See: https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
 
     def __init__(
         self,
+        aws_region: str,
+        session: Session,
+        log_group: Optional[str] = None,
+        log_stream: Optional[str] = None,
         endpoint: Optional[str] = None,
         certificate_file: Optional[str] = None,
         client_key_file: Optional[str] = None,
@@ -45,11 +50,14 @@ class OTLPAwsLogExporter(OTLPLogExporter):
         headers: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None,
     ):
-        self._gen_ai_log_flag = False
-        self._aws_region = None
+        self._aws_region = aws_region
 
-        if endpoint:
-            self._aws_region = endpoint.split(".")[1]
+        if log_group and log_stream:
+            log_headers = {"x-aws-log-group": log_group, "x-aws-log-stream": log_stream}
+            if headers:
+                headers.update(log_headers)
+            else:
+                headers = log_headers
 
         OTLPLogExporter.__init__(
             self,
@@ -60,27 +68,21 @@ class OTLPAwsLogExporter(OTLPLogExporter):
             headers,
             timeout,
             compression=Compression.Gzip,
-            session=AwsAuthSession(aws_region=self._aws_region, service="logs"),
+            session=AwsAuthSession(session=session, aws_region=self._aws_region, service="logs"),
         )
+        self._shutdown_event = Event()
 
-    # https://github.com/open-telemetry/opentelemetry-python/blob/main/exporter/opentelemetry-exporter-otlp-proto-http/src/opentelemetry/exporter/otlp/proto/http/_log_exporter/__init__.py#L167
     def export(self, batch: Sequence[LogData]) -> LogExportResult:
         """
-        Exports the given batch of OTLP log data.
-        Behaviors of how this export will work -
+        Exports log batch with AWS-specific enhancements over the base OTLPLogExporter.
 
-        1. Always compresses the serialized data into gzip before sending.
+        Key differences from upstream OTLPLogExporter:
+        1. Respects Retry-After header from server responses for proper throttling
+        2. Treats HTTP 429 (Too Many Requests) as a retryable exception
+        3. Always compresses data with gzip before sending
 
-        2. If self._gen_ai_log_flag is enabled, the log data is > 1 MB a
-           and the assumption is that the log is a normalized gen.ai LogEvent.
-            - inject the {LARGE_LOG_HEADER} into the header.
-
-        3. Retry behavior is now the following:
-            - if the response contains a status code that is retryable and the response contains Retry-After in its
-              headers, the serialized data will be exported after that set delay
-
-            - if the response does not contain that Retry-After header, default back to the current iteration of the
-              exponential backoff delay
+        Upstream implementation does not support Retry-After header:
+        https://github.com/open-telemetry/opentelemetry-python/blob/acae2c232b101d3e447a82a7161355d66aa06fa2/exporter/opentelemetry-exporter-otlp-proto-http/src/opentelemetry/exporter/otlp/proto/http/_log_exporter/__init__.py#L167
         """
 
         if self._shutdown:
@@ -88,96 +90,92 @@ class OTLPAwsLogExporter(OTLPLogExporter):
             return LogExportResult.FAILURE
 
         serialized_data = encode_logs(batch).SerializeToString()
-
         gzip_data = BytesIO()
         with gzip.GzipFile(fileobj=gzip_data, mode="w") as gzip_stream:
             gzip_stream.write(serialized_data)
-
         data = gzip_data.getvalue()
 
-        backoff = _create_exp_backoff_generator(max_value=self._MAX_RETRY_TIMEOUT)
+        deadline_sec = time() + self._timeout
+        retry_num = 0
 
+        # This loop will eventually terminate because:
+        # 1) The export request will eventually either succeed or fail permanently
+        # 2) Maximum retries (_MAX_RETRYS = 6) will be reached
+        # 3) Deadline timeout will be exceeded
+        # 4) Non-retryable errors (4xx except 429) immediately exit the loop
         while True:
-            resp = self._send(data)
+            resp = self._send(data, deadline_sec - time())
 
             if resp.ok:
                 return LogExportResult.SUCCESS
 
-            if not self._retryable(resp):
+            backoff_seconds = self._get_retry_delay_sec(resp.headers, retry_num)
+            is_retryable = self._retryable(resp)
+
+            if not is_retryable or retry_num + 1 == _MAX_RETRYS or backoff_seconds > (deadline_sec - time()):
                 _logger.error(
                     "Failed to export logs batch code: %s, reason: %s",
                     resp.status_code,
                     resp.text,
                 )
-                self._gen_ai_log_flag = False
-                return LogExportResult.FAILURE
-
-            # https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
-            maybe_retry_after = resp.headers.get(self._RETRY_AFTER_HEADER, None)
-
-            # Set the next retry delay to the value of the Retry-After response in the headers.
-            # If Retry-After is not present in the headers, default to the next iteration of the
-            # exponential backoff strategy.
-
-            delay = self._parse_retryable_header(maybe_retry_after)
-
-            if delay == -1:
-                delay = next(backoff, self._MAX_RETRY_TIMEOUT)
-
-            if delay == self._MAX_RETRY_TIMEOUT:
-                _logger.error(
-                    "Transient error %s encountered while exporting logs batch. "
-                    "No Retry-After header found and all backoff retries exhausted. "
-                    "Logs will not be exported.",
-                    resp.reason,
-                )
-                self._gen_ai_log_flag = False
                 return LogExportResult.FAILURE
 
             _logger.warning(
-                "Transient error %s encountered while exporting logs batch, retrying in %ss.",
+                "Transient error %s encountered while exporting logs batch, retrying in %.2fs.",
                 resp.reason,
-                delay,
+                backoff_seconds,
             )
+            # Use interruptible sleep that can be interrupted by shutdown
+            if self._shutdown_event.wait(backoff_seconds):
+                _logger.info("Export interrupted by shutdown")
+                return LogExportResult.FAILURE
 
-            sleep(delay)
+            retry_num += 1
 
-    def set_gen_ai_log_flag(self):
-        """
-        Sets a flag that indicates the current log batch contains
-        a generative AI log record that exceeds the CloudWatch Logs size limit (1MB).
-        """
-        self._gen_ai_log_flag = True
+    def shutdown(self) -> None:
+        """Shutdown the exporter and interrupt any ongoing waits."""
+        self._shutdown_event.set()
+        return super().shutdown()
 
-    def _send(self, serialized_data: bytes):
+    def _send(self, serialized_data: bytes, timeout_sec: float):
         try:
             response = self._session.post(
                 url=self._endpoint,
-                headers={self._LARGE_LOG_HEADER: self._LARGE_GEN_AI_LOG_PATH_HEADER} if self._gen_ai_log_flag else None,
                 data=serialized_data,
                 verify=self._certificate_file,
-                timeout=self._timeout,
+                timeout=timeout_sec,
                 cert=self._client_cert,
             )
             return response
-        except ConnectionError:
+        except RequestsConnectionError:
             response = self._session.post(
                 url=self._endpoint,
-                headers={self._LARGE_LOG_HEADER: self._LARGE_GEN_AI_LOG_PATH_HEADER} if self._gen_ai_log_flag else None,
                 data=serialized_data,
                 verify=self._certificate_file,
-                timeout=self._timeout,
+                timeout=timeout_sec,
                 cert=self._client_cert,
             )
             return response
 
     @staticmethod
-    def _retryable(resp: requests.Response) -> bool:
+    def _retryable(resp: Response) -> bool:
         """
-        Is it a retryable response?
+        Logic based on https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
         """
+        # See: https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
 
         return resp.status_code in (429, 503) or OTLPLogExporter._retryable(resp)
+
+    def _get_retry_delay_sec(self, headers: CaseInsensitiveDict, retry_num: int) -> float:
+        """
+        Get retry delay in seconds from headers or backoff strategy.
+        """
+        # Check for Retry-After header first, then use exponential backoff with jitter
+        retry_after_delay = self._parse_retryable_header(headers.get(self._RETRY_AFTER_HEADER))
+        if retry_after_delay > -1:
+            return retry_after_delay
+        # multiplying by a random number between .8 and 1.2 introduces a +/-20% jitter to each backoff.
+        return 2**retry_num * random.uniform(0.8, 1.2)
 
     @staticmethod
     def _parse_retryable_header(retry_header: Optional[str]) -> float:
