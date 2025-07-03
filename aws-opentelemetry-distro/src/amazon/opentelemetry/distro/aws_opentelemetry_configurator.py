@@ -406,7 +406,7 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
             return _create_aws_otlp_exporter(endpoint=endpoint, service=XRAY_SERVICE, region=region)
 
         _logger.warning(
-            "Improper configuration see: please export/set "
+            "Improper configuration: please export/set "
             "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf and OTEL_TRACES_EXPORTER=otlp"
         )
 
@@ -438,15 +438,22 @@ def _customize_logs_exporter(log_exporter: LogExporter) -> LogExporter:
 
         _logger.info("Detected using AWS OTLP Logs Endpoint.")
 
-        if isinstance(log_exporter, OTLPLogExporter) and _validate_and_fetch_logs_header().is_valid:
-            endpoint, region = _extract_endpoint_and_region_from_otlp_endpoint(logs_endpoint)
-            # Setting default compression mode to Gzip as this is the behavior in upstream's
-            # collector otlp http exporter:
-            # https://github.com/open-telemetry/opentelemetry-collector/tree/main/exporter/otlphttpexporter
-            return _create_aws_otlp_exporter(endpoint=endpoint, service=LOGS_SERIVCE, region=region)
+        if isinstance(log_exporter, OTLPLogExporter):
+
+            if _validate_and_fetch_logs_header().is_valid:
+                endpoint, region = _extract_endpoint_and_region_from_otlp_endpoint(logs_endpoint)
+                # Setting default compression mode to Gzip as this is the behavior in upstream's
+                # collector otlp http exporter:
+                # https://github.com/open-telemetry/opentelemetry-collector/tree/main/exporter/otlphttpexporter
+                return _create_aws_otlp_exporter(endpoint=endpoint, service=LOGS_SERIVCE, region=region)
+
+            _logger.warning(
+                "Improper configuration: Please configure the environment variable OTEL_EXPORTER_OTLP_LOGS_HEADERS "
+                "to have values for x-aws-log-group and x-aws-log-stream"
+            )
 
         _logger.warning(
-            "Improper configuration see: please export/set "
+            "Improper configuration: please export/set "
             "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/protobuf and OTEL_LOGS_EXPORTER=otlp"
         )
 
@@ -650,12 +657,6 @@ def _validate_and_fetch_logs_header() -> OtlpLogHeaderSetting:
                 namespace = value
 
     is_valid = log_group is not None and log_stream is not None
-
-    if not is_valid:
-        _logger.warning(
-            "Improper configuration: Please configure the environment variable OTEL_EXPORTER_OTLP_LOGS_HEADERS "
-            "to have values for x-aws-log-group and x-aws-log-stream"
-        )
 
     return OtlpLogHeaderSetting(log_group, log_stream, namespace, is_valid)
 
