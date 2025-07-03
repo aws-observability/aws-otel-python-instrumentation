@@ -407,7 +407,7 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
 
         _logger.warning(
             "Improper configuration see: please export/set "
-            "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf ƒnd OTEL_TRACES_EXPORTER=otlp"
+            "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf and OTEL_TRACES_EXPORTER=otlp"
         )
 
     if not _is_application_signals_enabled():
