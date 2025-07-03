@@ -1,9 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
+import logging
 import os
 import re
-from logging import NOTSET, Logger, getLogger
+from logging import Logger, getLogger
 from typing import ClassVar, Dict, List, NamedTuple, Optional, Type, Union
 
 from importlib_metadata import version
@@ -22,12 +23,18 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
+
+# pylint: disable=line-too-long
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor import (
+    AwsCloudWatchOtlpBatchLogRecordProcessor,
+)
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
 from amazon.opentelemetry.distro.scope_based_filtering_view import ScopeBasedRetainingView
+from opentelemetry._events import set_event_logger_provider
 from opentelemetry._logs import get_logger_provider, set_logger_provider
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
@@ -42,7 +49,9 @@ from opentelemetry.sdk._configuration import (
     _import_id_generator,
     _import_sampler,
     _OTelSDKConfigurator,
+    _patch_basic_config,
 )
+from opentelemetry.sdk._events import EventLoggerProvider
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, LogExporter
 from opentelemetry.sdk.environment_variables import (
@@ -197,26 +206,28 @@ def _initialize_components():
 
 
 def _init_logging(
-    exporters: Dict[str, Type[LogExporter]],
-    resource: Resource = None,
+    exporters: dict[str, Type[LogExporter]],
+    resource: Optional[Resource] = None,
+    setup_logging_handler: bool = True,
 ):
-
-    # Provides a default OTLP log exporter when none is specified.
-    # This is the behavior for the logs exporters for other languages.
-    if not exporters:
-        exporters = {"otlp": OTLPLogExporter}
-
     provider = LoggerProvider(resource=resource)
     set_logger_provider(provider)
 
     for _, exporter_class in exporters.items():
-        exporter_args: Dict[str, any] = {}
-        log_exporter = _customize_logs_exporter(exporter_class(**exporter_args), resource)
-        provider.add_log_record_processor(BatchLogRecordProcessor(exporter=log_exporter))
+        exporter_args = {}
+        log_exporter: LogExporter = _customize_logs_exporter(exporter_class(**exporter_args))
+        log_processor = _customize_log_record_processor(log_exporter)
+        provider.add_log_record_processor(log_processor)
 
-    handler = LoggingHandler(level=NOTSET, logger_provider=provider)
+    event_logger_provider = EventLoggerProvider(logger_provider=provider)
+    set_event_logger_provider(event_logger_provider)
 
-    getLogger().addHandler(handler)
+    if setup_logging_handler:
+        _patch_basic_config()
+
+        # Add OTel handler
+        handler = LoggingHandler(level=logging.NOTSET, logger_provider=provider)
+        logging.getLogger().addHandler(handler)
 
 
 def _init_tracing(
@@ -417,7 +428,14 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
     return AwsMetricAttributesSpanExporterBuilder(span_exporter, resource).build()
 
 
-def _customize_logs_exporter(log_exporter: LogExporter, resource: Resource) -> LogExporter:
+def _customize_log_record_processor(log_exporter: LogExporter):
+    if isinstance(log_exporter, OTLPAwsLogExporter) and is_agent_observability_enabled():
+        return AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=log_exporter)
+
+    return BatchLogRecordProcessor(exporter=log_exporter)
+
+
+def _customize_logs_exporter(log_exporter: LogExporter) -> LogExporter:
     logs_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT)
 
     if _is_aws_otlp_endpoint(logs_endpoint, "logs"):
@@ -586,7 +604,7 @@ def _is_lambda_environment():
     return AWS_LAMBDA_FUNCTION_NAME_CONFIG in os.environ
 
 
-def _is_aws_otlp_endpoint(otlp_endpoint: str = None, service: str = "xray") -> bool:
+def _is_aws_otlp_endpoint(otlp_endpoint: Optional[str] = None, service: str = "xray") -> bool:
     """Is the given endpoint an AWS OTLP endpoint?"""
 
     pattern = AWS_TRACES_OTLP_ENDPOINT_PATTERN if service == "xray" else AWS_LOGS_OTLP_ENDPOINT_PATTERN
