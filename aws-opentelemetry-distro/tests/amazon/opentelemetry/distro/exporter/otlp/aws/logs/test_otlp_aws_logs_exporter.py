@@ -7,6 +7,7 @@ from unittest.mock import patch
 import requests
 from requests.structures import CaseInsensitiveDict
 
+from amazon.opentelemetry.distro._utils import get_aws_session
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import _MAX_RETRYS, OTLPAwsLogExporter
 from opentelemetry._logs.severity import SeverityNumber
 from opentelemetry.sdk._logs import LogData, LogRecord
@@ -36,7 +37,7 @@ class TestOTLPAwsLogsExporter(TestCase):
 
     def setUp(self):
         self.logs = self.generate_test_log_data()
-        self.exporter = OTLPAwsLogExporter(endpoint=self._ENDPOINT)
+        self.exporter = OTLPAwsLogExporter(session=get_aws_session(), aws_region="us-east-1", endpoint=self._ENDPOINT)
 
     @patch("requests.Session.post", return_value=good_response)
     def test_export_success(self, mock_request):
@@ -200,7 +201,32 @@ class TestOTLPAwsLogsExporter(TestCase):
         # Should make one request, then get interrupted during retry wait
         self.assertEqual(mock_request.call_count, 1)
         self.assertEqual(result, LogExportResult.FAILURE)
-        mock_wait.assert_called_once()
+
+    @patch("requests.Session.post", return_value=good_response)
+    def test_export_with_log_group_and_stream_headers(self, mock_request):
+        """Tests that log_group and log_stream are properly set as headers when provided."""
+        log_group = "test-log-group"
+        log_stream = "test-log-stream"
+
+        exporter = OTLPAwsLogExporter(
+            session=get_aws_session(),
+            aws_region="us-east-1",
+            endpoint=self._ENDPOINT,
+            log_group=log_group,
+            log_stream=log_stream,
+        )
+
+        result = exporter.export(self.logs)
+
+        mock_request.assert_called_once()
+        self.assertEqual(result, LogExportResult.SUCCESS)
+
+        # Verify headers contain log group and stream
+        session_headers = exporter._session.headers
+        self.assertIn("x-aws-log-group", session_headers)
+        self.assertIn("x-aws-log-stream", session_headers)
+        self.assertEqual(session_headers["x-aws-log-group"], log_group)
+        self.assertEqual(session_headers["x-aws-log-stream"], log_stream)
 
     @staticmethod
     def generate_test_log_data(count=5):

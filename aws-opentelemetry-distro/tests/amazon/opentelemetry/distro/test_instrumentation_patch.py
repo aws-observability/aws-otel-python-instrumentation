@@ -14,10 +14,12 @@ from amazon.opentelemetry.distro.patches._instrumentation_patch import (
     AWS_GEVENT_PATCH_MODULES,
     apply_instrumentation_patches,
 )
+from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
 from opentelemetry.semconv.trace import SpanAttributes
 from opentelemetry.trace.span import Span
 
+_STREAM_ARN: str = "arn:aws:kinesis:us-west-2:000000000000:stream/streamName"
 _STREAM_NAME: str = "streamName"
 _BUCKET_NAME: str = "bucketName"
 _QUEUE_NAME: str = "queueName"
@@ -34,6 +36,7 @@ _STATE_MACHINE_ARN: str = "arn:aws:states:us-west-2:000000000000:stateMachine:te
 _ACTIVITY_ARN: str = "arn:aws:states:us-east-1:007003123456789012:activity:testActivity"
 _LAMBDA_FUNCTION_NAME: str = "lambdaFunctionName"
 _LAMBDA_SOURCE_MAPPING_ID: str = "lambdaEventSourceMappingID"
+_TABLE_ARN: str = "arn:aws:dynamodb:us-west-2:123456789012:table/testTable"
 
 # Patch names
 IMPORTLIB_METADATA_VERSION_PATCH: str = "amazon.opentelemetry.distro._utils.version"
@@ -161,6 +164,9 @@ class TestInstrumentationPatch(TestCase):
         # Lambda
         self.assertTrue("lambda" in _KNOWN_EXTENSIONS, "Upstream has removed the Lambda extension")
 
+        # DynamoDB
+        self.assertTrue("dynamodb" in _KNOWN_EXTENSIONS, "Upstream has removed a DynamoDB extension")
+
     def _test_unpatched_gevent_instrumentation(self):
         self.assertFalse(gevent.monkey.is_module_patched("os"), "gevent os module has been patched")
         self.assertFalse(gevent.monkey.is_module_patched("thread"), "gevent thread module has been patched")
@@ -182,6 +188,8 @@ class TestInstrumentationPatch(TestCase):
         kinesis_attributes: Dict[str, str] = _do_extract_kinesis_attributes()
         self.assertTrue("aws.kinesis.stream.name" in kinesis_attributes)
         self.assertEqual(kinesis_attributes["aws.kinesis.stream.name"], _STREAM_NAME)
+        self.assertTrue("aws.kinesis.stream.arn" in kinesis_attributes)
+        self.assertEqual(kinesis_attributes["aws.kinesis.stream.arn"], _STREAM_ARN)
 
         # S3
         self.assertTrue("s3" in _KNOWN_EXTENSIONS)
@@ -246,6 +254,162 @@ class TestInstrumentationPatch(TestCase):
         self.assertEqual(lambda_attributes["aws.lambda.function.name"], _LAMBDA_FUNCTION_NAME)
         self.assertTrue("aws.lambda.resource_mapping.id" in lambda_attributes)
         self.assertEqual(lambda_attributes["aws.lambda.resource_mapping.id"], _LAMBDA_SOURCE_MAPPING_ID)
+
+        # DynamoDB
+        self.assertTrue("dynamodb" in _KNOWN_EXTENSIONS)
+        dynamodb_success_attributes: Dict[str, str] = _do_on_success_dynamodb()
+        self.assertTrue("aws.dynamodb.table.arn" in dynamodb_success_attributes)
+        self.assertEqual(dynamodb_success_attributes["aws.dynamodb.table.arn"], _TABLE_ARN)
+
+        # Access key
+        self._test_patched_api_call_with_credentials()
+        self._test_patched_api_call_with_no_credentials()
+        self._test_patched_api_call_with_no_access_key()
+
+    def _test_patched_api_call_with_credentials(self):
+        # Create mocks
+        mock_tracer = MagicMock()
+        original_func: MagicMock = MagicMock(return_value={"ResponseMetadata": {"RequestId": "12345"}})
+        instance: MagicMock = MagicMock()
+        span: MagicMock = MagicMock()
+        args = ("operation_name",)
+        kwargs = {}
+        initial_attributes = {}
+        mock_extension = _get_mock_extension()
+        mock_call_context = _get_mock_call_context()
+
+        def mock_start_span(*args, **kwargs):
+            attributes = kwargs.get("attributes", {})
+            initial_attributes.update(attributes)
+            cm = MagicMock()
+            cm.__enter__ = MagicMock(return_value=span)
+            cm.__exit__ = MagicMock(return_value=None)
+            return cm
+
+        mock_tracer.start_as_current_span.side_effect = mock_start_span
+
+        # Mock credentials
+        mock_credentials = MagicMock()
+        mock_credentials.access_key = "test-access-key"
+        instance._get_credentials.return_value = mock_credentials
+        instance.meta.region_name = "us-west-2"
+
+        with patch(
+            "opentelemetry.instrumentation.botocore._determine_call_context", return_value=mock_call_context
+        ), patch("opentelemetry.instrumentation.botocore._find_extension", return_value=mock_extension), patch(
+            "opentelemetry.instrumentation.botocore.is_instrumentation_enabled", return_value=True
+        ), patch(
+            "amazon.opentelemetry.distro.patches._botocore_patches.get_server_attributes", return_value={}
+        ), patch(
+            "opentelemetry.instrumentation.botocore.get_tracer", return_value=mock_tracer
+        ), patch(
+            "opentelemetry.instrumentation.botocore.get_event_logger", return_value=MagicMock()
+        ), patch(
+            "opentelemetry.instrumentation.botocore.get_meter", return_value=MagicMock()
+        ):
+            instrumentor = BotocoreInstrumentor()
+            instrumentor.instrument()
+            instrumentor._patched_api_call(original_func, instance, args, kwargs)
+
+            self.assertIn("aws.auth.account.access_key", initial_attributes)
+            self.assertEqual(initial_attributes["aws.auth.account.access_key"], "test-access-key")
+            self.assertIn("aws.auth.region", initial_attributes)
+            self.assertEqual(initial_attributes["aws.auth.region"], "us-west-2")
+            instrumentor.uninstrument()
+
+    def _test_patched_api_call_with_no_credentials(self):
+        # Create mocks
+        mock_tracer = MagicMock()
+        original_func: MagicMock = MagicMock(return_value={"ResponseMetadata": {"RequestId": "12345"}})
+        instance: MagicMock = MagicMock()
+        span: MagicMock = MagicMock()
+        args = ("operation_name",)
+        kwargs = {}
+        initial_attributes = {}
+        mock_extension = _get_mock_extension()
+        mock_call_context = _get_mock_call_context()
+
+        def mock_start_span(*args, **kwargs):
+            attributes = kwargs.get("attributes", {})
+            initial_attributes.update(attributes)
+            cm = MagicMock()
+            cm.__enter__ = MagicMock(return_value=span)
+            cm.__exit__ = MagicMock(return_value=None)
+            return cm
+
+        mock_tracer.start_as_current_span.side_effect = mock_start_span
+
+        # Mock credentials
+        instance._get_credentials.return_value = None
+
+        with patch(
+            "opentelemetry.instrumentation.botocore._determine_call_context", return_value=mock_call_context
+        ), patch("opentelemetry.instrumentation.botocore._find_extension", return_value=mock_extension), patch(
+            "opentelemetry.instrumentation.botocore.is_instrumentation_enabled", return_value=True
+        ), patch(
+            "amazon.opentelemetry.distro.patches._botocore_patches.get_server_attributes", return_value={}
+        ), patch(
+            "opentelemetry.instrumentation.botocore.get_tracer", return_value=mock_tracer
+        ), patch(
+            "opentelemetry.instrumentation.botocore.get_event_logger", return_value=MagicMock()
+        ), patch(
+            "opentelemetry.instrumentation.botocore.get_meter", return_value=MagicMock()
+        ):
+            instrumentor = BotocoreInstrumentor()
+            instrumentor.instrument()
+            instrumentor._patched_api_call(original_func, instance, args, kwargs)
+
+            self.assertFalse("aws.auth.account.access_key" in initial_attributes)
+            self.assertTrue("aws.region" in initial_attributes)
+            instrumentor.uninstrument()
+
+    def _test_patched_api_call_with_no_access_key(self):
+        # Create mocks
+        mock_tracer = MagicMock()
+        original_func: MagicMock = MagicMock(return_value={"ResponseMetadata": {"RequestId": "12345"}})
+        instance: MagicMock = MagicMock()
+        span: MagicMock = MagicMock()
+        args = ("operation_name",)
+        kwargs = {}
+        initial_attributes = {}
+        mock_extension = _get_mock_extension()
+        mock_call_context = _get_mock_call_context()
+
+        def mock_start_span(*args, **kwargs):
+            attributes = kwargs.get("attributes", {})
+            initial_attributes.update(attributes)
+            cm = MagicMock()
+            cm.__enter__ = MagicMock(return_value=span)
+            cm.__exit__ = MagicMock(return_value=None)
+            return cm
+
+        mock_tracer.start_as_current_span.side_effect = mock_start_span
+
+        # Mock credentials
+        mock_credentials = MagicMock()
+        mock_credentials.access_key = None
+        instance._get_credentials.return_value = mock_credentials
+
+        with patch(
+            "opentelemetry.instrumentation.botocore._determine_call_context", return_value=mock_call_context
+        ), patch("opentelemetry.instrumentation.botocore._find_extension", return_value=mock_extension), patch(
+            "opentelemetry.instrumentation.botocore.is_instrumentation_enabled", return_value=True
+        ), patch(
+            "amazon.opentelemetry.distro.patches._botocore_patches.get_server_attributes", return_value={}
+        ), patch(
+            "opentelemetry.instrumentation.botocore.get_tracer", return_value=mock_tracer
+        ), patch(
+            "opentelemetry.instrumentation.botocore.get_event_logger", return_value=MagicMock()
+        ), patch(
+            "opentelemetry.instrumentation.botocore.get_meter", return_value=MagicMock()
+        ):
+            instrumentor = BotocoreInstrumentor()
+            instrumentor.instrument()
+            instrumentor._patched_api_call(original_func, instance, args, kwargs)
+
+            self.assertFalse("aws.auth.account.access_key" in initial_attributes)
+            self.assertTrue("aws.region" in initial_attributes)
+            instrumentor.uninstrument()
 
     def _test_patched_gevent_os_ssl_instrumentation(self):
         # Only ssl and os module should have been patched since the environment variable was set to 'os, ssl'
@@ -410,7 +574,7 @@ class TestInstrumentationPatch(TestCase):
 
 def _do_extract_kinesis_attributes() -> Dict[str, str]:
     service_name: str = "kinesis"
-    params: Dict[str, str] = {"StreamName": _STREAM_NAME}
+    params: Dict[str, str] = {"StreamName": _STREAM_NAME, "StreamARN": _STREAM_ARN}
     return _do_extract_attributes(service_name, params)
 
 
@@ -490,6 +654,12 @@ def _do_extract_attributes(service_name: str, params: Dict[str, Any], operation:
     return attributes
 
 
+def _do_on_success_dynamodb() -> Dict[str, str]:
+    service_name: str = "dynamodb"
+    result: Dict[str, Any] = {"Table": {"TableArn": _TABLE_ARN}}
+    return _do_on_success(service_name, result)
+
+
 def _do_on_success(
     service_name: str, result: Dict[str, Any], operation: str = None, params: Dict[str, Any] = None
 ) -> Dict[str, str]:
@@ -513,3 +683,33 @@ def _do_on_success(
     extension.on_success(span_mock, result, mock_instrumentor_context)
 
     return span_attributes
+
+
+def _get_mock_extension():
+    # Mock extension
+    mock_extension = MagicMock()
+    mock_extension.should_trace_service_call.return_value = True
+    mock_extension.tracer_schema_version.return_value = "1.0.0"
+    mock_extension.event_logger_schema_version.return_value = "1.0.0"
+    mock_extension.meter_schema_version.return_value = "1.0.0"
+    mock_extension.should_end_span_on_exit.return_value = True
+    mock_extension.extract_attributes = lambda x: None
+    mock_extension.before_service_call = lambda *args, **kwargs: None
+    mock_extension.after_service_call = lambda *args, **kwargs: None
+    mock_extension.on_success = lambda *args, **kwargs: None
+    mock_extension.on_error = lambda *args, **kwargs: None
+    mock_extension.setup_metrics = lambda meter, metrics: None
+    return mock_extension
+
+
+def _get_mock_call_context():
+    # Mock call context
+    mock_call_context = MagicMock()
+    mock_call_context.service = "test-service"
+    mock_call_context.service_id = "test-service"
+    mock_call_context.operation = "test-operation"
+    mock_call_context.region = "us-west-2"
+    mock_call_context.span_name = "test-span"
+    mock_call_context.span_kind = "CLIENT"
+    mock_call_context.endpoint_url = "https://www.awsmocktest.com"
+    return mock_call_context

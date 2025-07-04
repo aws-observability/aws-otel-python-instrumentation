@@ -247,3 +247,12 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
 
         # Estimate: ASCII chars (1 byte) + upper bound of non-ASCII chars 4 bytes
         return ascii_count + (non_ascii_count * 4)
+
+    # Only export the logs once to avoid the race condition of the worker thread and force flush thread
+    # https://github.com/open-telemetry/opentelemetry-python/issues/3193
+    # https://github.com/open-telemetry/opentelemetry-python/blob/main/opentelemetry-sdk/src/opentelemetry/sdk/_shared_internal/__init__.py#L199
+    def force_flush(self, timeout_millis: Optional[int] = None) -> bool:
+        if self._shutdown:
+            return False
+        self._export(BatchLogExportStrategy.EXPORT_AT_LEAST_ONE_BATCH)
+        return True

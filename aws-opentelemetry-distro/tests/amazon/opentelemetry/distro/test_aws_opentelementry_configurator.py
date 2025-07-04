@@ -25,6 +25,8 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     AwsOpenTelemetryConfigurator,
     OtlpLogHeaderSetting,
     _check_emf_exporter_enabled,
+    _create_aws_otlp_exporter,
+    _create_emf_exporter,
     _custom_import_sampler,
     _customize_log_record_processor,
     _customize_logs_exporter,
@@ -41,7 +43,6 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _is_defer_to_workers_enabled,
     _is_wsgi_master_process,
     _validate_and_fetch_logs_header,
-    create_emf_exporter,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
@@ -69,6 +70,7 @@ from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExp
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.metrics import get_meter_provider
 from opentelemetry.processor.baggage import BaggageSpanProcessor
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.environment_variables import OTEL_TRACES_SAMPLER, OTEL_TRACES_SAMPLER_ARG
 from opentelemetry.sdk.metrics._internal.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
@@ -386,6 +388,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         mock_tracer_provider.reset_mock()
 
         os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
+        os.environ["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] = "https://xray.us-east-1.amazonaws.com/v1/traces"
         _customize_span_processors(mock_tracer_provider, Resource.get_empty())
         self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 2)
 
@@ -395,6 +398,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertIsInstance(second_processor, BaggageSpanProcessor)
 
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+        os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", None)
 
     def test_baggage_span_processor_session_id_filtering(self):
         """Test that BaggageSpanProcessor only set session.id filter by default"""
@@ -695,6 +699,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         mock_tracer_provider.reset_mock()
 
         os.environ.setdefault("AGENT_OBSERVABILITY_ENABLED", "true")
+        os.environ.setdefault("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "https://xray.us-east-1.amazonaws.com/v1/traces")
         _customize_span_processors(mock_tracer_provider, Resource.get_empty())
         self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 4)
 
@@ -703,6 +708,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertIsInstance(processors[1], BaggageSpanProcessor)
         self.assertIsInstance(processors[2], AttributePropagatingSpanProcessor)
         self.assertIsInstance(processors[3], AwsSpanMetricsProcessor)
+
+        os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
 
     def test_customize_span_processors_lambda(self):
         mock_tracer_provider: TracerProvider = MagicMock()
@@ -830,14 +837,15 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         mock_tracer_provider: TracerProvider = MagicMock()
 
         with patch(
-            "amazon.opentelemetry.distro.aws_opentelemetry_configurator.OTLPAwsSpanExporter"
+            "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.OTLPAwsSpanExporter"
         ) as mock_aws_exporter:
             with patch(
-                "amazon.opentelemetry.distro.aws_opentelemetry_configurator.BatchUnsampledSpanProcessor"
-            ) as mock_processor:
+                "amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_logger_provider"
+            ) as mock_logger_provider:
                 with patch(
-                    "amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_logger_provider"
-                ) as mock_logger_provider:
+                    "amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session"
+                ) as mock_session:
+                    mock_session.return_value = MagicMock()
                     os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
                     os.environ["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] = "https://xray.us-east-1.amazonaws.com/v1/traces"
 
@@ -845,13 +853,13 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
                     # Verify OTLPAwsSpanExporter is created with correct parameters
                     mock_aws_exporter.assert_called_once_with(
+                        session=mock_session.return_value,
                         endpoint="https://xray.us-east-1.amazonaws.com/v1/traces",
+                        aws_region="us-east-1",
                         logger_provider=mock_logger_provider.return_value,
                     )
-                    # Verify BatchUnsampledSpanProcessor wraps the exporter
-                    mock_processor.assert_called_once_with(span_exporter=mock_aws_exporter.return_value)
                     # Verify processor is added to tracer provider
-                    mock_tracer_provider.add_span_processor.assert_called_once_with(mock_processor.return_value)
+                    mock_tracer_provider.add_span_processor.assert_called_once()
 
         # Clean up
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
@@ -1015,30 +1023,45 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         # Clean up
         os.environ.pop(OTEL_EXPORTER_OTLP_LOGS_HEADERS, None)
 
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agent_observability_enabled")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_aws_otlp_endpoint")
-    def test_customize_log_record_processor_with_agent_observability(self, mock_is_aws_endpoint, mock_is_agent_enabled):
-        """Test that AwsCloudWatchOtlpBatchLogRecordProcessor is used when agent observability is enabled"""
+    @patch(
+        "amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agent_observability_enabled", return_value=False
+    )
+    def test_customize_log_record_processor_without_agent_observability(self, _):
+        """Test that BatchLogRecordProcessor is used when agent observability is not enabled"""
+        mock_logger_provider = MagicMock()
         mock_exporter = MagicMock(spec=OTLPAwsLogExporter)
-        mock_is_agent_enabled.return_value = True
-        mock_is_aws_endpoint.return_value = True
 
-        processor = _customize_log_record_processor(mock_exporter)
+        _customize_log_record_processor(mock_logger_provider, mock_exporter)
 
-        self.assertIsInstance(processor, AwsCloudWatchOtlpBatchLogRecordProcessor)
+        mock_logger_provider.add_log_record_processor.assert_called_once()
+        added_processor = mock_logger_provider.add_log_record_processor.call_args[0][0]
+        self.assertIsInstance(added_processor, BatchLogRecordProcessor)
+
+    @patch(
+        "amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agent_observability_enabled", return_value=True
+    )
+    def test_customize_log_record_processor_with_agent_observability(self, _):
+        """Test that AwsCloudWatchOtlpBatchLogRecordProcessor is used when agent observability is enabled"""
+        mock_logger_provider = MagicMock()
+        mock_exporter = MagicMock(spec=OTLPAwsLogExporter)
+
+        _customize_log_record_processor(mock_logger_provider, mock_exporter)
+
+        mock_logger_provider.add_log_record_processor.assert_called_once()
+        added_processor = mock_logger_provider.add_log_record_processor.call_args[0][0]
+        self.assertIsInstance(added_processor, AwsCloudWatchOtlpBatchLogRecordProcessor)
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._validate_and_fetch_logs_header")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_installed")
-    def test_create_emf_exporter(self, mock_is_installed, mock_validate):
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
+    def test_create_emf_exporter(self, mock_get_session, mock_validate):
         # Test when botocore is not installed
-        mock_is_installed.return_value = False
-        result = create_emf_exporter()
+        mock_get_session.return_value = None
+        result = _create_emf_exporter()
         self.assertIsNone(result)
-        mock_is_installed.assert_called_with("botocore")
 
         # Reset mock for subsequent tests
-        mock_is_installed.reset_mock()
-        mock_is_installed.return_value = True
+        mock_get_session.reset_mock()
+        mock_get_session.return_value = MagicMock()
 
         # Mock the EMF exporter class import by patching the module import
         with patch(
@@ -1051,33 +1074,105 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
             # Test when headers are invalid
             mock_validate.return_value = OtlpLogHeaderSetting(None, None, None, False)
-            result = create_emf_exporter()
+            result = _create_emf_exporter()
             self.assertIsNone(result)
 
             # Test when namespace is missing (should still create exporter with default namespace)
             mock_validate.return_value = OtlpLogHeaderSetting("test-group", "test-stream", None, True)
-            result = create_emf_exporter()
+            result = _create_emf_exporter()
             self.assertIsNotNone(result)
             self.assertEqual(result, mock_exporter_instance)
             # Verify that the EMF exporter was called with correct parameters
             mock_emf_exporter_class.assert_called_with(
-                namespace=None, log_group_name="test-group", log_stream_name="test-stream"
+                session=mock_get_session.return_value,
+                namespace=None,
+                log_group_name="test-group",
+                log_stream_name="test-stream",
             )
 
             # Test with valid configuration
             mock_validate.return_value = OtlpLogHeaderSetting("test-group", "test-stream", "test-namespace", True)
-            result = create_emf_exporter()
+            result = _create_emf_exporter()
             self.assertIsNotNone(result)
             self.assertEqual(result, mock_exporter_instance)
             # Verify that the EMF exporter was called with correct parameters
             mock_emf_exporter_class.assert_called_with(
-                namespace="test-namespace", log_group_name="test-group", log_stream_name="test-stream"
+                session=mock_get_session.return_value,
+                namespace="test-namespace",
+                log_group_name="test-group",
+                log_stream_name="test-stream",
             )
 
             # Test exception handling
             mock_validate.side_effect = Exception("Test exception")
-            result = create_emf_exporter()
+            result = _create_emf_exporter()
             self.assertIsNone(result)
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_logger_provider")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
+    def test_create_aws_otlp_exporter(self, mock_get_session, mock_is_agent_enabled, mock_get_logger_provider):
+        # Test when botocore is not installed
+        mock_get_session.return_value = None
+        result = _create_aws_otlp_exporter("https://xray.us-east-1.amazonaws.com/v1/traces", "xray", "us-east-1")
+        self.assertIsNone(result)
+
+        # Reset mock for subsequent tests
+        mock_get_session.reset_mock()
+        mock_get_session.return_value = MagicMock()
+        mock_get_logger_provider.return_value = MagicMock()
+
+        # Test xray service without agent observability
+        mock_is_agent_enabled.return_value = False
+        with patch(
+            "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.OTLPAwsSpanExporter"
+        ) as mock_span_exporter_class:
+            mock_exporter_instance = MagicMock()
+            mock_span_exporter_class.return_value = mock_exporter_instance
+
+            result = _create_aws_otlp_exporter("https://xray.us-east-1.amazonaws.com/v1/traces", "xray", "us-east-1")
+            self.assertIsNotNone(result)
+            self.assertEqual(result, mock_exporter_instance)
+            mock_span_exporter_class.assert_called_with(
+                session=mock_get_session.return_value,
+                endpoint="https://xray.us-east-1.amazonaws.com/v1/traces",
+                aws_region="us-east-1",
+            )
+
+        # Test xray service with agent observability
+        mock_is_agent_enabled.return_value = True
+        with patch(
+            "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.OTLPAwsSpanExporter"
+        ) as mock_span_exporter_class:
+            mock_exporter_instance = MagicMock()
+            mock_span_exporter_class.return_value = mock_exporter_instance
+
+            result = _create_aws_otlp_exporter("https://xray.us-east-1.amazonaws.com/v1/traces", "xray", "us-east-1")
+            self.assertIsNotNone(result)
+            self.assertEqual(result, mock_exporter_instance)
+            mock_span_exporter_class.assert_called_with(
+                session=mock_get_session.return_value,
+                endpoint="https://xray.us-east-1.amazonaws.com/v1/traces",
+                aws_region="us-east-1",
+                logger_provider=mock_get_logger_provider.return_value,
+            )
+
+        # Test logs service
+        with patch(
+            "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter.OTLPAwsLogExporter"
+        ) as mock_log_exporter_class:
+            mock_exporter_instance = MagicMock()
+            mock_log_exporter_class.return_value = mock_exporter_instance
+
+            result = _create_aws_otlp_exporter("https://logs.us-east-1.amazonaws.com/v1/logs", "logs", "us-east-1")
+            self.assertIsNotNone(result)
+            self.assertEqual(result, mock_exporter_instance)
+            mock_log_exporter_class.assert_called_with(session=mock_get_session.return_value, aws_region="us-east-1")
+
+        # Test exception handling
+        mock_get_session.side_effect = Exception("Test exception")
+        result = _create_aws_otlp_exporter("https://xray.us-east-1.amazonaws.com/v1/traces", "xray", "us-east-1")
+        self.assertIsNone(result)
 
     def test_customize_metric_exporters_with_emf(self):
         metric_readers = []
@@ -1088,7 +1183,9 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(len(metric_readers), 0)
 
         # Test with EMF enabled but create_emf_exporter returns None
-        with patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.create_emf_exporter", return_value=None):
+        with patch(
+            "amazon.opentelemetry.distro.aws_opentelemetry_configurator._create_emf_exporter", return_value=None
+        ):
             _customize_metric_exporters(metric_readers, views, is_emf_enabled=True)
             self.assertEqual(len(metric_readers), 0)
 
@@ -1099,7 +1196,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         mock_emf_exporter._preferred_aggregation = {}
 
         with patch(
-            "amazon.opentelemetry.distro.aws_opentelemetry_configurator.create_emf_exporter",
+            "amazon.opentelemetry.distro.aws_opentelemetry_configurator._create_emf_exporter",
             return_value=mock_emf_exporter,
         ):
             _customize_metric_exporters(metric_readers, views, is_emf_enabled=True)
