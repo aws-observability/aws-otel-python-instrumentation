@@ -132,7 +132,9 @@ class TestAwsCloudWatchEmfExporter(unittest.TestCase):
             mock_session.return_value = mock_session_instance
             mock_session_instance.create_client.return_value = mock_client
 
-            self.exporter = AwsCloudWatchEmfExporter(namespace="TestNamespace", log_group_name="test-log-group")
+            self.exporter = AwsCloudWatchEmfExporter(
+                session=mock_session, namespace="TestNamespace", log_group_name="test-log-group"
+            )
 
     def test_initialization(self):
         """Test exporter initialization."""
@@ -150,6 +152,7 @@ class TestAwsCloudWatchEmfExporter(unittest.TestCase):
         mock_session_instance.create_client.return_value = mock_client
 
         exporter = AwsCloudWatchEmfExporter(
+            session=mock_session_instance,
             namespace="CustomNamespace",
             log_group_name="custom-log-group",
             log_stream_name="custom-stream",
@@ -578,7 +581,9 @@ class TestAwsCloudWatchEmfExporter(unittest.TestCase):
         mock_session.return_value = mock_session_instance
         mock_session_instance.create_client.return_value = mock_client
 
-        exporter = AwsCloudWatchEmfExporter(namespace="TestNamespace", log_group_name="test-log-group")
+        exporter = AwsCloudWatchEmfExporter(
+            session=mock_session, namespace="TestNamespace", log_group_name="test-log-group"
+        )
 
         # Just verify the exporter was created successfully with region handling
         self.assertIsNotNone(exporter)

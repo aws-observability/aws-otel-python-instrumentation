@@ -8,8 +8,8 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-import botocore.session
 from botocore.exceptions import ClientError
+from botocore.session import Session
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +90,7 @@ class CloudWatchLogClient:
     def __init__(
         self,
         log_group_name: str,
+        session: Session,
         log_stream_name: Optional[str] = None,
         aws_region: Optional[str] = None,
         **kwargs,
@@ -105,8 +106,6 @@ class CloudWatchLogClient:
         """
         self.log_group_name = log_group_name
         self.log_stream_name = log_stream_name or self._generate_log_stream_name()
-
-        session = botocore.session.Session()
         self.logs_client = session.create_client("logs", region_name=aws_region, **kwargs)
 
         # Event batch to store logs before sending to CloudWatch
