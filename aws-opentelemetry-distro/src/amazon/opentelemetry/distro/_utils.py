@@ -75,3 +75,7 @@ def get_aws_region() -> Optional[str]:
     """
     botocore_session = get_aws_session()
     return botocore_session.get_config_variable("region") if botocore_session else None
+
+
+def is_account_id(input_str: str) -> bool:
+    return input_str is not None and input_str.isdigit()
