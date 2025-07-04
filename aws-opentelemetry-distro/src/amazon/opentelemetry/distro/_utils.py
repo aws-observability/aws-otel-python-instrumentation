@@ -4,6 +4,7 @@
 import os
 from importlib.metadata import PackageNotFoundError, version
 from logging import Logger, getLogger
+from typing import Optional
 
 from packaging.requirements import Requirement
 
@@ -37,30 +38,44 @@ def is_agent_observability_enabled() -> bool:
     return os.environ.get(AGENT_OBSERVABILITY_ENABLED, "false").lower() == "true"
 
 
-def get_aws_region() -> str:
-    """Get AWS region using botocore session.
+IS_BOTOCORE_INSTALLED: bool = is_installed("botocore")
 
-    botocore automatically checks in the following priority order:
+
+def get_aws_session():
+    """
+    Returns a botocore session only if botocore is installed, otherwise None.
+    If AWS Region is defined in `AWS_REGION` or `AWS_DEFAULT_REGION` environment variables,
+    then the region is set in the botocore session before returning.
+
+    We do this to prevent runtime errors for ADOT customers that do not need
+    any features that require botocore.
+    """
+    if IS_BOTOCORE_INSTALLED:
+        # pylint: disable=import-outside-toplevel
+        from botocore.session import Session
+
+        session = Session()
+        # Botocore only looks up AWS_DEFAULT_REGION when creating a session/client
+        # See: https://docs.aws.amazon.com/sdkref/latest/guide/feature-region.html#feature-region-sdk-compat
+        region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+        if region:
+            session.set_config_variable("region", region)
+        return session
+    return None
+
+
+def get_aws_region() -> Optional[str]:
+    """Get AWS region from environment or botocore session.
+
+    Returns the AWS region in the following priority order:
     1. AWS_REGION environment variable
     2. AWS_DEFAULT_REGION environment variable
-    3. AWS CLI config file (~/.aws/config)
-    4. EC2 instance metadata service
-
-    Returns:
-        The AWS region if found, None otherwise.
+    3. botocore session's region (if botocore is available)
+    4. None if no region can be determined
     """
-    if is_installed("botocore"):
-        try:
-            from botocore import session  # pylint: disable=import-outside-toplevel
+    botocore_session = get_aws_session()
+    return botocore_session.get_config_variable("region") if botocore_session else None
 
-            botocore_session = session.Session()
-            if botocore_session.region_name:
-                return botocore_session.region_name
-        except (ImportError, AttributeError):
-            # botocore failed to determine region
-            pass
 
-    _logger.warning(
-        "AWS region not found. Please set AWS_REGION environment variable or configure AWS CLI with 'aws configure'."
-    )
-    return None
+def is_account_id(input_str: str) -> bool:
+    return input_str is not None and input_str.isdigit()

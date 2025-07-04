@@ -4,6 +4,8 @@
 import logging
 from typing import Dict, Optional, Sequence
 
+from botocore.session import Session
+
 from amazon.opentelemetry.distro._utils import is_agent_observability_enabled
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 from amazon.opentelemetry.distro.llo_handler import LLOHandler
@@ -14,12 +16,22 @@ from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExportResult
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
 
 
 class OTLPAwsSpanExporter(OTLPSpanExporter):
+    """
+    This exporter extends the functionality of the OTLPSpanExporter to allow spans to be exported
+    to the XRay OTLP endpoint https://xray.[AWSRegion].amazonaws.com/v1/traces. Utilizes the
+    AwsAuthSession to sign and directly inject SigV4 Authentication to the exported request's headers.
+
+    See: https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-OTLPEndpoint.html
+    """
+
     def __init__(
         self,
+        aws_region: str,
+        session: Session,
         endpoint: Optional[str] = None,
         certificate_file: Optional[str] = None,
         client_key_file: Optional[str] = None,
@@ -29,12 +41,9 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
         compression: Optional[Compression] = None,
         logger_provider: Optional[LoggerProvider] = None,
     ):
-        self._aws_region = None
+        self._aws_region = aws_region
         self._logger_provider = logger_provider
         self._llo_handler = None
-
-        if endpoint:
-            self._aws_region = endpoint.split(".")[1]
 
         OTLPSpanExporter.__init__(
             self,
@@ -45,7 +54,7 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
             headers,
             timeout,
             compression,
-            session=AwsAuthSession(aws_region=self._aws_region, service="xray"),
+            session=AwsAuthSession(session=session, aws_region=self._aws_region, service="xray"),
         )
 
     def _ensure_llo_handler(self):
@@ -55,7 +64,7 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
                 try:
                     self._logger_provider = get_logger_provider()
                 except Exception as exc:  # pylint: disable=broad-exception-caught
-                    logger.debug("Failed to get logger provider: %s", exc)
+                    _logger.debug("Failed to get logger provider: %s", exc)
                     return False
 
             if self._logger_provider:
