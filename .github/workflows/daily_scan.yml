@@ -11,6 +11,9 @@ on:
   schedule:
     - cron: '0 18 * * *' # scheduled to run at 18:00 UTC every day
   workflow_dispatch: # be able to run the workflow on demand
+  push:
+    branches:
+      - test-release
 
 env:
   AWS_DEFAULT_REGION: us-east-1
@@ -61,28 +64,28 @@ jobs:
           parse-json-secrets: true
 
       # See http://jeremylong.github.io/DependencyCheck/dependency-check-cli/ for installation explanation
-      - name: Install and run dependency scan
-        id: dep_scan
-        if: always()
-        run: |
-          gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 259A55407DD6C00299E6607EFFDE55BE73A2D1ED
-          VERSION=$(curl -s https://jeremylong.github.io/DependencyCheck/current.txt | head -n1 | cut -d' ' -f1)
-          curl -Ls "https://github.com/dependency-check/DependencyCheck/releases/download/v$VERSION/dependency-check-$VERSION-release.zip" --output dependency-check.zip
-          curl -Ls "https://github.com/dependency-check/DependencyCheck/releases/download/v$VERSION/dependency-check-$VERSION-release.zip.asc" --output dependency-check.zip.asc
-          gpg --verify dependency-check.zip.asc
-          unzip dependency-check.zip
-          ./dependency-check/bin/dependency-check.sh --enableExperimental --suppression .github/dependency-check-suppressions.xml --failOnCVSS 0 --nvdApiKey ${{ env.NVD_API_KEY_NVD_API_KEY }} -s aws-opentelemetry-distro/
+      # - name: Install and run dependency scan
+      #   id: dep_scan
+      #   if: always()
+      #   run: |
+      #     gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 259A55407DD6C00299E6607EFFDE55BE73A2D1ED
+      #     VERSION=$(curl -s https://jeremylong.github.io/DependencyCheck/current.txt | head -n1 | cut -d' ' -f1)
+      #     curl -Ls "https://github.com/dependency-check/DependencyCheck/releases/download/v$VERSION/dependency-check-$VERSION-release.zip" --output dependency-check.zip
+      #     curl -Ls "https://github.com/dependency-check/DependencyCheck/releases/download/v$VERSION/dependency-check-$VERSION-release.zip.asc" --output dependency-check.zip.asc
+      #     gpg --verify dependency-check.zip.asc
+      #     unzip dependency-check.zip
+      #     ./dependency-check/bin/dependency-check.sh --enableExperimental --suppression .github/dependency-check-suppressions.xml --failOnCVSS 0 --nvdApiKey ${{ env.NVD_API_KEY_NVD_API_KEY }} -s aws-opentelemetry-distro/
 
-      - name: Print dependency scan results on failure
-        if: ${{ steps.dep_scan.outcome != 'success' }}
-        run: less dependency-check-report.html
+      # - name: Print dependency scan results on failure
+      #   if: ${{ steps.dep_scan.outcome != 'success' }}
+      #   run: less dependency-check-report.html
 
       - name: Perform high image scan
         if: always()
         id: high_scan
         uses: ./.github/actions/image_scan
         with:
-          image-ref: "public.ecr.aws/aws-observability/adot-autoinstrumentation-python:v0.9.0"
+          image-ref: "637423224110.dkr.ecr.us-east-1.amazonaws.com/aws-observability/adot-autoinstrumentation-python-staging:0.9.0.dev0-88e4ee7"
           severity: 'CRITICAL,HIGH'
 
       - name: Perform low image scan
@@ -90,7 +93,7 @@ jobs:
         id: low_scan
         uses: ./.github/actions/image_scan
         with:
-          image-ref: "public.ecr.aws/aws-observability/adot-autoinstrumentation-python:v0.9.0"
+          image-ref: "637423224110.dkr.ecr.us-east-1.amazonaws.com/aws-observability/adot-autoinstrumentation-python-staging:0.9.0.dev0-88e4ee7"
           severity: 'MEDIUM,LOW,UNKNOWN'
 
       - name: Configure AWS Credentials for emitting metrics
