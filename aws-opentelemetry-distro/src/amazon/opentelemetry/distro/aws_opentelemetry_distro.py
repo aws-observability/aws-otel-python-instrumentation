@@ -74,6 +74,11 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
 
         if os.environ.get(OTEL_PROPAGATORS, None) is None:
             os.environ.setdefault(OTEL_PROPAGATORS, "tracecontext,baggage,xray")
+            # We need to explicitly reload the opentelemetry.propagate module here
+            # because this module initializes the default propagators when it loads very early in the chain.
+            # Without reloading the OTEL_PROPAGATOR config from this distro won't take any effect.
+            # It's a hack from our end until OpenTelemetry fixes this behavior for distros to
+            # override the default propagators.
             importlib.reload(propagate)
 
         os.environ.setdefault(OTEL_PYTHON_ID_GENERATOR, "xray")
