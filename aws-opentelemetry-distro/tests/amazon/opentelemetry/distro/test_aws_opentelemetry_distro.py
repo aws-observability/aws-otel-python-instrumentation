@@ -45,7 +45,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
                 del os.environ[var]
 
         # Preserve the original sys.path
-        self.original_sys_path = sys.path.copy()
+        # self.original_sys_path = sys.path.copy()
 
     def tearDown(self):
         # Clear all env vars first
@@ -58,7 +58,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
             os.environ[var] = value
 
         # Restore the original sys.path
-        sys.path[:] = self.original_sys_path
+        # sys.path[:] = self.original_sys_path
 
     def test_package_available(self):
         try:
