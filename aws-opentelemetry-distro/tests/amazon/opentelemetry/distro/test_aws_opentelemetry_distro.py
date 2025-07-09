@@ -45,7 +45,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
                 del os.environ[var]
 
         # Preserve the original sys.path
-        # self.original_sys_path = sys.path.copy()
+        self.original_sys_path = sys.path.copy()
 
     def tearDown(self):
         # Clear all env vars first
@@ -58,7 +58,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
             os.environ[var] = value
 
         # Restore the original sys.path
-        # sys.path[:] = self.original_sys_path
+        sys.path[:] = self.original_sys_path
 
     def test_package_available(self):
         try:
@@ -234,30 +234,34 @@ class TestAwsOpenTelemetryDistro(TestCase):
         self.assertEqual(os.environ.get("OTEL_TRACES_EXPORTER"), "otlp")
         self.assertEqual(os.environ.get("OTEL_LOGS_EXPORTER"), "otlp")
 
-    # def test_user_defined_propagators(self):
-    #     """Test that user-defined propagators are respected"""
-    #     # Set user-defined propagators
-    #     os.environ["OTEL_PROPAGATORS"] = "xray"
-    #
-    #     # Force the reload of the propagate module otherwise the above environment
-    #     # variable doesn't taker effect.
-    #     importlib.reload(propagate)
-    #
-    #     distro = AwsOpenTelemetryDistro()
-    #     distro._configure()
-    #
-    #     # Verify that user-defined propagators are preserved
-    #     propagators = propagate.get_global_textmap()
-    #     self.assertTrue(isinstance(propagators, CompositePropagator))
-    #     expected_propagators = ["AwsXRayPropagator"]
-    #     individual_propagators = propagators._propagators
-    #     self.assertEqual(1, len(individual_propagators))
-    #     actual_propagators = []
-    #     for prop in individual_propagators:
-    #         actual_propagators.append(type(prop).__name__)
-    #     self.assertEqual(expected_propagators, actual_propagators)
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
+    def test_user_defined_propagators(self, mock_super_configure, mock_apply_patches):
+        """Test that user-defined propagators are respected"""
+        # Set user-defined propagators
+        os.environ["OTEL_PROPAGATORS"] = "xray"
 
-    def test_otel_propagators_added_when_not_user_defined(self):
+        # Force the reload of the propagate module otherwise the above environment
+        # variable doesn't taker effect.
+        importlib.reload(propagate)
+
+        distro = AwsOpenTelemetryDistro()
+        distro._configure()
+
+        # Verify that user-defined propagators are preserved
+        propagators = propagate.get_global_textmap()
+        self.assertTrue(isinstance(propagators, CompositePropagator))
+        expected_propagators = ["AwsXRayPropagator"]
+        individual_propagators = propagators._propagators
+        self.assertEqual(1, len(individual_propagators))
+        actual_propagators = []
+        for prop in individual_propagators:
+            actual_propagators.append(type(prop).__name__)
+        self.assertEqual(expected_propagators, actual_propagators)
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
+    def test_otel_propagators_added_when_not_user_defined(self, mock_super_configure, mock_apply_patches):
         distro = AwsOpenTelemetryDistro()
         distro._configure()
 
