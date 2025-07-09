@@ -75,7 +75,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
 
         # Check that default values are set
         self.assertEqual(os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL"), "http/protobuf")
-        self.assertEqual(os.environ.get("OTEL_PROPAGATORS"), "tracecontext,baggage,xray")
+        self.assertEqual(os.environ.get("OTEL_PROPAGATORS"), "baggage,xray,tracecontext")
         self.assertEqual(os.environ.get("OTEL_PYTHON_ID_GENERATOR"), "xray")
         self.assertEqual(
             os.environ.get("OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION"),
@@ -270,7 +270,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
 
         self.assertTrue(isinstance(propagators, CompositePropagator))
 
-        expected_propagators = ["TraceContextTextMapPropagator", "W3CBaggagePropagator", "AwsXRayPropagator"]
+        expected_propagators = ["W3CBaggagePropagator", "AwsXRayPropagator", "TraceContextTextMapPropagator"]
         individual_propagators = propagators._propagators
         self.assertEqual(3, len(individual_propagators))
         actual_propagators = []

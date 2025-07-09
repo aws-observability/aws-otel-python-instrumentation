@@ -73,7 +73,8 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
         os.environ.setdefault(OTEL_EXPORTER_OTLP_PROTOCOL, "http/protobuf")
 
         if os.environ.get(OTEL_PROPAGATORS, None) is None:
-            os.environ.setdefault(OTEL_PROPAGATORS, "tracecontext,baggage,xray")
+            # xray is set after baggage in case xray propagator depends on the result of the baggage header extraction.
+            os.environ.setdefault(OTEL_PROPAGATORS, "baggage,xray,tracecontext")
             # We need to explicitly reload the opentelemetry.propagate module here
             # because this module initializes the default propagators when it loads very early in the chain.
             # Without reloading the OTEL_PROPAGATOR config from this distro won't take any effect.
