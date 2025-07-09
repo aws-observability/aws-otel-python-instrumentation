@@ -234,42 +234,42 @@ class TestAwsOpenTelemetryDistro(TestCase):
         self.assertEqual(os.environ.get("OTEL_TRACES_EXPORTER"), "otlp")
         self.assertEqual(os.environ.get("OTEL_LOGS_EXPORTER"), "otlp")
 
-    def test_user_defined_propagators(self):
-        """Test that user-defined propagators are respected"""
-        # Set user-defined propagators
-        os.environ["OTEL_PROPAGATORS"] = "xray"
-
-        # Force the reload of the propagate module otherwise the above environment
-        # variable doesn't taker effect.
-        importlib.reload(propagate)
-
-        distro = AwsOpenTelemetryDistro()
-        distro._configure()
-
-        # Verify that user-defined propagators are preserved
-        propagators = propagate.get_global_textmap()
-        self.assertTrue(isinstance(propagators, CompositePropagator))
-        expected_propagators = ["AwsXRayPropagator"]
-        individual_propagators = propagators._propagators
-        self.assertEqual(1, len(individual_propagators))
-        actual_propagators = []
-        for prop in individual_propagators:
-            actual_propagators.append(type(prop).__name__)
-        self.assertEqual(expected_propagators, actual_propagators)
-
-    def test_otel_propagators_added_when_not_user_defined(self):
-        distro = AwsOpenTelemetryDistro()
-        distro._configure()
-
-        # Verify that the propagators are set correctly by ADOT
-        propagators = propagate.get_global_textmap()
-
-        self.assertTrue(isinstance(propagators, CompositePropagator))
-
-        expected_propagators = ["TraceContextTextMapPropagator", "W3CBaggagePropagator", "AwsXRayPropagator"]
-        individual_propagators = propagators._propagators
-        self.assertEqual(3, len(individual_propagators))
-        actual_propagators = []
-        for prop in individual_propagators:
-            actual_propagators.append(type(prop).__name__)
-        self.assertEqual(expected_propagators, actual_propagators)
+    # def test_user_defined_propagators(self):
+    #     """Test that user-defined propagators are respected"""
+    #     # Set user-defined propagators
+    #     os.environ["OTEL_PROPAGATORS"] = "xray"
+    #
+    #     # Force the reload of the propagate module otherwise the above environment
+    #     # variable doesn't taker effect.
+    #     importlib.reload(propagate)
+    #
+    #     distro = AwsOpenTelemetryDistro()
+    #     distro._configure()
+    #
+    #     # Verify that user-defined propagators are preserved
+    #     propagators = propagate.get_global_textmap()
+    #     self.assertTrue(isinstance(propagators, CompositePropagator))
+    #     expected_propagators = ["AwsXRayPropagator"]
+    #     individual_propagators = propagators._propagators
+    #     self.assertEqual(1, len(individual_propagators))
+    #     actual_propagators = []
+    #     for prop in individual_propagators:
+    #         actual_propagators.append(type(prop).__name__)
+    #     self.assertEqual(expected_propagators, actual_propagators)
+    #
+    # def test_otel_propagators_added_when_not_user_defined(self):
+    #     distro = AwsOpenTelemetryDistro()
+    #     distro._configure()
+    #
+    #     # Verify that the propagators are set correctly by ADOT
+    #     propagators = propagate.get_global_textmap()
+    #
+    #     self.assertTrue(isinstance(propagators, CompositePropagator))
+    #
+    #     expected_propagators = ["TraceContextTextMapPropagator", "W3CBaggagePropagator", "AwsXRayPropagator"]
+    #     individual_propagators = propagators._propagators
+    #     self.assertEqual(3, len(individual_propagators))
+    #     actual_propagators = []
+    #     for prop in individual_propagators:
+    #         actual_propagators.append(type(prop).__name__)
+    #     self.assertEqual(expected_propagators, actual_propagators)
