@@ -1,11 +1,14 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import os
+import importlib
+import sys
 from importlib.metadata import PackageNotFoundError, version
 from unittest import TestCase
 from unittest.mock import patch
 
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
+from opentelemetry.propagators.composite import CompositePropagator
 
 
 class TestAwsOpenTelemetryDistro(TestCase):
@@ -40,6 +43,9 @@ class TestAwsOpenTelemetryDistro(TestCase):
             if var in os.environ:
                 del os.environ[var]
 
+        # Preserve the original sys.path
+        self.original_sys_path = sys.path.copy()
+
     def tearDown(self):
         # Clear all env vars first
         for var in self.env_vars_to_check:
@@ -49,6 +55,9 @@ class TestAwsOpenTelemetryDistro(TestCase):
         # Then restore original values
         for var, value in self.env_vars_to_restore.items():
             os.environ[var] = value
+
+        # Restore the original sys.path
+        sys.path[:] = self.original_sys_path
 
     def test_package_available(self):
         try:
@@ -65,7 +74,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
 
         # Check that default values are set
         self.assertEqual(os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL"), "http/protobuf")
-        self.assertEqual(os.environ.get("OTEL_PROPAGATORS"), "xray,tracecontext,b3,b3multi")
+        self.assertEqual(os.environ.get("OTEL_PROPAGATORS"), "tracecontext,baggage,xray")
         self.assertEqual(os.environ.get("OTEL_PYTHON_ID_GENERATOR"), "xray")
         self.assertEqual(
             os.environ.get("OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION"),
@@ -93,7 +102,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
     def test_configure_with_agent_observability_enabled(
-        self, mock_super_configure, mock_apply_patches, mock_is_agent_observability, mock_get_aws_region
+            self, mock_super_configure, mock_apply_patches, mock_is_agent_observability, mock_get_aws_region
     ):
         """Test that _configure sets agent observability defaults when enabled"""
         mock_is_agent_observability.return_value = True
@@ -188,8 +197,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
     @patch("os.getcwd")
-    @patch("sys.path", new_callable=list)
-    def test_configure_adds_cwd_to_sys_path(self, mock_sys_path, mock_getcwd, mock_super_configure, mock_apply_patches):
+    def test_configure_adds_cwd_to_sys_path(self, mock_getcwd, mock_super_configure, mock_apply_patches):
         """Test that _configure adds current working directory to sys.path"""
         mock_getcwd.return_value = "/test/working/directory"
 
@@ -197,7 +205,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
         distro._configure()
 
         # Check that cwd was added to sys.path
-        self.assertIn("/test/working/directory", mock_sys_path)
+        self.assertIn("/test/working/directory", sys.path)
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.get_aws_region")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_agent_observability_enabled")
@@ -224,3 +232,45 @@ class TestAwsOpenTelemetryDistro(TestCase):
         # And exporters are still set to otlp
         self.assertEqual(os.environ.get("OTEL_TRACES_EXPORTER"), "otlp")
         self.assertEqual(os.environ.get("OTEL_LOGS_EXPORTER"), "otlp")
+
+    def test_user_defined_propagators(self):
+        """Test that user-defined propagators are respected"""
+        # Set user-defined propagators
+        os.environ["OTEL_PROPAGATORS"] = "xray"
+
+        # Force the reload of the propagate module otherwise the above environment
+        # variable doesn't taker effect.
+        from opentelemetry import propagate
+        importlib.reload(propagate)
+
+        distro = AwsOpenTelemetryDistro()
+        distro._configure()
+
+        # Verify that user-defined propagators are preserved
+        propagators = propagate.get_global_textmap()
+        self.assertTrue(isinstance(propagators, CompositePropagator))
+        expected_propagators = ["AwsXRayPropagator"]
+        individual_propagators = propagators._propagators
+        self.assertEqual(1, len(individual_propagators))
+        actual_propagators = []
+        for i, prop in enumerate(individual_propagators):
+            actual_propagators.append(type(prop).__name__)
+        self.assertEqual(expected_propagators, actual_propagators)
+
+    def test_otel_propagators_added_when_not_user_defined(self):
+        distro = AwsOpenTelemetryDistro()
+        distro._configure()
+
+        # Verify that the propagators are set correctly by ADOT
+        from opentelemetry import propagate
+        propagators = propagate.get_global_textmap()
+
+        self.assertTrue(isinstance(propagators, CompositePropagator))
+
+        expected_propagators = ["TraceContextTextMapPropagator", "W3CBaggagePropagator", "AwsXRayPropagator"]
+        individual_propagators = propagators._propagators
+        self.assertEqual(3, len(individual_propagators))
+        actual_propagators = []
+        for i, prop in enumerate(individual_propagators):
+            actual_propagators.append(type(prop).__name__)
+        self.assertEqual(expected_propagators, actual_propagators)

@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import importlib
 import os
 import sys
 from logging import Logger, getLogger
@@ -24,6 +25,7 @@ from opentelemetry.sdk.environment_variables import (
     OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION,
     OTEL_EXPORTER_OTLP_PROTOCOL,
 )
+from opentelemetry import propagate
 
 _logger: Logger = getLogger(__name__)
 
@@ -70,7 +72,10 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
 
         os.environ.setdefault(OTEL_EXPORTER_OTLP_PROTOCOL, "http/protobuf")
 
-        os.environ.setdefault(OTEL_PROPAGATORS, "xray,tracecontext,b3,b3multi")
+        if os.environ.get(OTEL_PROPAGATORS, None) is None:
+            os.environ.setdefault(OTEL_PROPAGATORS, "tracecontext,baggage,xray")
+            importlib.reload(propagate)
+
         os.environ.setdefault(OTEL_PYTHON_ID_GENERATOR, "xray")
         os.environ.setdefault(
             OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION, "base2_exponential_bucket_histogram"
