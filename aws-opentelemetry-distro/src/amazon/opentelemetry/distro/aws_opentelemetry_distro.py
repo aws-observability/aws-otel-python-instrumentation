@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import importlib
 import os
 import sys
 from logging import Logger, getLogger
@@ -18,6 +19,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     OTEL_TRACES_SAMPLER,
 )
 from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_instrumentation_patches
+from opentelemetry import propagate
 from opentelemetry.distro import OpenTelemetryDistro
 from opentelemetry.environment_variables import OTEL_PROPAGATORS, OTEL_PYTHON_ID_GENERATOR
 from opentelemetry.sdk.environment_variables import (
@@ -70,7 +72,16 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
 
         os.environ.setdefault(OTEL_EXPORTER_OTLP_PROTOCOL, "http/protobuf")
 
-        os.environ.setdefault(OTEL_PROPAGATORS, "xray,tracecontext,b3,b3multi")
+        if os.environ.get(OTEL_PROPAGATORS, None) is None:
+            # xray is set after baggage in case xray propagator depends on the result of the baggage header extraction.
+            os.environ.setdefault(OTEL_PROPAGATORS, "baggage,xray,tracecontext")
+            # We need to explicitly reload the opentelemetry.propagate module here
+            # because this module initializes the default propagators when it loads very early in the chain.
+            # Without reloading the OTEL_PROPAGATOR config from this distro won't take any effect.
+            # It's a hack from our end until OpenTelemetry fixes this behavior for distros to
+            # override the default propagators.
+            importlib.reload(propagate)
+
         os.environ.setdefault(OTEL_PYTHON_ID_GENERATOR, "xray")
         os.environ.setdefault(
             OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION, "base2_exponential_bucket_histogram"

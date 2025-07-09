@@ -1262,7 +1262,7 @@ def validate_distro_environ():
     tc.assertEqual(
         "base2_exponential_bucket_histogram", os.environ.get("OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION")
     )
-    tc.assertEqual("xray,tracecontext,b3,b3multi", os.environ.get("OTEL_PROPAGATORS"))
+    tc.assertEqual("baggage,xray,tracecontext", os.environ.get("OTEL_PROPAGATORS"))
     tc.assertEqual("xray", os.environ.get("OTEL_PYTHON_ID_GENERATOR"))
 
     # Not set
