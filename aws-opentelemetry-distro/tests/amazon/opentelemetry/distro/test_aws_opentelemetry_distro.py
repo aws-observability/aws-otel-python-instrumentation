@@ -256,20 +256,20 @@ class TestAwsOpenTelemetryDistro(TestCase):
     #     for prop in individual_propagators:
     #         actual_propagators.append(type(prop).__name__)
     #     self.assertEqual(expected_propagators, actual_propagators)
-    #
-    # def test_otel_propagators_added_when_not_user_defined(self):
-    #     distro = AwsOpenTelemetryDistro()
-    #     distro._configure()
-    #
-    #     # Verify that the propagators are set correctly by ADOT
-    #     propagators = propagate.get_global_textmap()
-    #
-    #     self.assertTrue(isinstance(propagators, CompositePropagator))
-    #
-    #     expected_propagators = ["TraceContextTextMapPropagator", "W3CBaggagePropagator", "AwsXRayPropagator"]
-    #     individual_propagators = propagators._propagators
-    #     self.assertEqual(3, len(individual_propagators))
-    #     actual_propagators = []
-    #     for prop in individual_propagators:
-    #         actual_propagators.append(type(prop).__name__)
-    #     self.assertEqual(expected_propagators, actual_propagators)
+
+    def test_otel_propagators_added_when_not_user_defined(self):
+        distro = AwsOpenTelemetryDistro()
+        distro._configure()
+
+        # Verify that the propagators are set correctly by ADOT
+        propagators = propagate.get_global_textmap()
+
+        self.assertTrue(isinstance(propagators, CompositePropagator))
+
+        expected_propagators = ["TraceContextTextMapPropagator", "W3CBaggagePropagator", "AwsXRayPropagator"]
+        individual_propagators = propagators._propagators
+        self.assertEqual(3, len(individual_propagators))
+        actual_propagators = []
+        for prop in individual_propagators:
+            actual_propagators.append(type(prop).__name__)
+        self.assertEqual(expected_propagators, actual_propagators)
