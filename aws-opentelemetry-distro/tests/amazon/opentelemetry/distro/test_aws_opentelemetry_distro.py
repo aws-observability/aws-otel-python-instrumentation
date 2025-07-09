@@ -1,13 +1,14 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-import os
 import importlib
+import os
 import sys
 from importlib.metadata import PackageNotFoundError, version
 from unittest import TestCase
 from unittest.mock import patch
 
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
+from opentelemetry import propagate
 from opentelemetry.propagators.composite import CompositePropagator
 
 
@@ -102,7 +103,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
     def test_configure_with_agent_observability_enabled(
-            self, mock_super_configure, mock_apply_patches, mock_is_agent_observability, mock_get_aws_region
+        self, mock_super_configure, mock_apply_patches, mock_is_agent_observability, mock_get_aws_region
     ):
         """Test that _configure sets agent observability defaults when enabled"""
         mock_is_agent_observability.return_value = True
@@ -240,7 +241,6 @@ class TestAwsOpenTelemetryDistro(TestCase):
 
         # Force the reload of the propagate module otherwise the above environment
         # variable doesn't taker effect.
-        from opentelemetry import propagate
         importlib.reload(propagate)
 
         distro = AwsOpenTelemetryDistro()
@@ -253,7 +253,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
         individual_propagators = propagators._propagators
         self.assertEqual(1, len(individual_propagators))
         actual_propagators = []
-        for i, prop in enumerate(individual_propagators):
+        for prop in individual_propagators:
             actual_propagators.append(type(prop).__name__)
         self.assertEqual(expected_propagators, actual_propagators)
 
@@ -262,7 +262,6 @@ class TestAwsOpenTelemetryDistro(TestCase):
         distro._configure()
 
         # Verify that the propagators are set correctly by ADOT
-        from opentelemetry import propagate
         propagators = propagate.get_global_textmap()
 
         self.assertTrue(isinstance(propagators, CompositePropagator))
@@ -271,6 +270,6 @@ class TestAwsOpenTelemetryDistro(TestCase):
         individual_propagators = propagators._propagators
         self.assertEqual(3, len(individual_propagators))
         actual_propagators = []
-        for i, prop in enumerate(individual_propagators):
+        for prop in individual_propagators:
             actual_propagators.append(type(prop).__name__)
         self.assertEqual(expected_propagators, actual_propagators)

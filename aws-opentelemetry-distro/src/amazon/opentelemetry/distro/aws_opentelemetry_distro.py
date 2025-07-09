@@ -19,13 +19,13 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     OTEL_TRACES_SAMPLER,
 )
 from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_instrumentation_patches
+from opentelemetry import propagate
 from opentelemetry.distro import OpenTelemetryDistro
 from opentelemetry.environment_variables import OTEL_PROPAGATORS, OTEL_PYTHON_ID_GENERATOR
 from opentelemetry.sdk.environment_variables import (
     OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION,
     OTEL_EXPORTER_OTLP_PROTOCOL,
 )
-from opentelemetry import propagate
 
 _logger: Logger = getLogger(__name__)
 
