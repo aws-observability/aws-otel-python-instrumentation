@@ -5,6 +5,7 @@ from typing import Optional
 from unittest import TestCase
 from unittest.mock import MagicMock, call
 
+from amazon.opentelemetry.distro._aws_attribute_keys import AWS_REMOTE_SERVICE
 from amazon.opentelemetry.distro._aws_span_processing_util import (
     should_generate_dependency_metric_attributes,
     should_generate_service_metric_attributes,
@@ -238,6 +239,15 @@ class TestAwsSpanMetricsProcessor(TestCase):
         self._validate_metrics_generated_for_status_data_ok(599, self.ExpectedStatusMetric.FAULT)
         self._validate_metrics_generated_for_status_data_ok(600, self.ExpectedStatusMetric.NEITHER)
 
+    def test_on_end_metrics_generation_from_ec2_metadata_api(self):
+        span_attributes: Attributes = {AWS_REMOTE_SERVICE: "169.254.169.254"}
+        span: ReadableSpan = _build_readable_span_mock(span_attributes)
+        metric_attributes_dict = _build_ec2_metadata_api_metric_attributes()
+        self._configure_mock_for_on_end(span, metric_attributes_dict)
+
+        self.aws_span_metrics_processor.on_end(span)
+        self._verify_histogram_record(metric_attributes_dict, 0, 0)
+
     def _configure_mock_for_on_end(self, span: Span, attribute_map: {str: Attributes}):
         def generate_m_a_from_span_side_effect(input_span, resource):
             if input_span == span and resource == self.test_resource:
@@ -372,4 +382,11 @@ def _build_metric_attributes(contain_attributes: bool, span: Span) -> Attributes
         if should_generate_dependency_metric_attributes(span):
             attributes = {"new dependency key": "new dependency value"}
             attribute_map[DEPENDENCY_METRIC] = attributes
+    return attribute_map
+
+
+def _build_ec2_metadata_api_metric_attributes() -> Attributes:
+    attribute_map: Attributes = {}
+    attributes = {AWS_REMOTE_SERVICE: "169.254.169.254"}
+    attribute_map[DEPENDENCY_METRIC] = attributes
     return attribute_map

@@ -1,24 +1,35 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import os
 import re
 from logging import DEBUG, Logger, getLogger
 from typing import Match, Optional
 from urllib.parse import ParseResult, urlparse
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
+    AWS_AUTH_ACCESS_KEY,
+    AWS_AUTH_REGION,
     AWS_BEDROCK_AGENT_ID,
     AWS_BEDROCK_DATA_SOURCE_ID,
     AWS_BEDROCK_GUARDRAIL_ARN,
     AWS_BEDROCK_GUARDRAIL_ID,
     AWS_BEDROCK_KNOWLEDGE_BASE_ID,
     AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER,
+    AWS_DYNAMODB_TABLE_ARN,
+    AWS_KINESIS_STREAM_ARN,
     AWS_KINESIS_STREAM_NAME,
+    AWS_LAMBDA_FUNCTION_ARN,
+    AWS_LAMBDA_FUNCTION_NAME,
     AWS_LAMBDA_RESOURCEMAPPING_ID,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_REMOTE_DB_USER,
+    AWS_REMOTE_ENVIRONMENT,
     AWS_REMOTE_OPERATION,
+    AWS_REMOTE_RESOURCE_ACCESS_KEY,
+    AWS_REMOTE_RESOURCE_ACCOUNT_ID,
     AWS_REMOTE_RESOURCE_IDENTIFIER,
+    AWS_REMOTE_RESOURCE_REGION,
     AWS_REMOTE_RESOURCE_TYPE,
     AWS_REMOTE_SERVICE,
     AWS_SECRETSMANAGER_SECRET_ARN,
@@ -31,7 +42,6 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
 )
 from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
 from amazon.opentelemetry.distro._aws_span_processing_util import (
-    GEN_AI_REQUEST_MODEL,
     LOCAL_ROOT,
     MAX_KEYWORD_LENGTH,
     SQL_KEYWORD_PATTERN,
@@ -53,9 +63,11 @@ from amazon.opentelemetry.distro.metric_attribute_generator import (
     SERVICE_METRIC,
     MetricAttributeGenerator,
 )
+from amazon.opentelemetry.distro.regional_resource_arn_parser import RegionalResourceArnParser
 from amazon.opentelemetry.distro.sqs_url_parser import SqsUrlParser
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import BoundedAttributes, ReadableSpan
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import GEN_AI_REQUEST_MODEL
 from opentelemetry.semconv.trace import SpanAttributes
 
 # Pertinent OTEL attribute keys
@@ -99,6 +111,10 @@ _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME: str = "AWS::StepFunctions"
 _NORMALIZED_LAMBDA_SERVICE_NAME: str = "AWS::Lambda"
 _DB_CONNECTION_STRING_TYPE: str = "DB::Connection"
 
+# Constants for Lambda operations
+_LAMBDA_APPLICATION_SIGNALS_REMOTE_ENVIRONMENT: str = "LAMBDA_APPLICATION_SIGNALS_REMOTE_ENVIRONMENT"
+_LAMBDA_INVOKE_OPERATION: str = "Invoke"
+
 # Special DEPENDENCY attribute value if GRAPHQL_OPERATION_TYPE attribute key is present.
 _GRAPHQL: str = "graphql"
 
@@ -140,7 +156,12 @@ def _generate_dependency_metric_attributes(span: ReadableSpan, resource: Resourc
     _set_service(resource, span, attributes)
     _set_egress_operation(span, attributes)
     _set_remote_service_and_operation(span, attributes)
-    _set_remote_type_and_identifier(span, attributes)
+    is_remote_identifier_present = _set_remote_type_and_identifier(span, attributes)
+    if is_remote_identifier_present:
+        is_remote_account_id_present = _set_remote_account_id_and_region(span, attributes)
+        if not is_remote_account_id_present:
+            _set_remote_access_key_and_region(span, attributes)
+    _set_remote_environment(span, attributes)
     _set_remote_db_user(span, attributes)
     _set_span_kind_for_dependency(span, attributes)
     return attributes
@@ -313,7 +334,17 @@ def _normalize_remote_service_name(span: ReadableSpan, service_name: str) -> str
             "Secrets Manager": _NORMALIZED_SECRETSMANAGER_SERVICE_NAME,
             "SNS": _NORMALIZED_SNS_SERVICE_NAME,
             "SFN": _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME,
+            "Lambda": _NORMALIZED_LAMBDA_SERVICE_NAME,
         }
+
+        # Special handling for Lambda invoke operations
+        if _is_lambda_invoke_operation(span):
+            lambda_function_name = span.attributes.get(AWS_LAMBDA_FUNCTION_NAME)
+            # If Lambda name is not present, use UnknownRemoteService
+            # This is intentional - we want to clearly indicate when the Lambda function name
+            # is missing rather than falling back to a generic service name
+            return lambda_function_name if lambda_function_name else UNKNOWN_REMOTE_SERVICE
+
         return aws_sdk_service_mapping.get(service_name, "AWS::" + service_name)
     return service_name
 
@@ -364,7 +395,7 @@ def _generate_remote_operation(span: ReadableSpan) -> str:
 
 
 # pylint: disable=too-many-branches,too-many-statements
-def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttributes) -> None:
+def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttributes) -> bool:
     """
     Remote resource attributes {@link AwsAttributeKeys#AWS_REMOTE_RESOURCE_TYPE} and {@link
     AwsAttributeKeys#AWS_REMOTE_RESOURCE_IDENTIFIER} are used to store information about the resource associated with
@@ -384,9 +415,23 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         if is_key_present(span, _AWS_TABLE_NAMES) and len(span.attributes.get(_AWS_TABLE_NAMES)) == 1:
             remote_resource_type = _NORMALIZED_DYNAMO_DB_SERVICE_NAME + "::Table"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(_AWS_TABLE_NAMES)[0])
+        elif is_key_present(span, AWS_DYNAMODB_TABLE_ARN):
+            remote_resource_type = _NORMALIZED_DYNAMO_DB_SERVICE_NAME + "::Table"
+            remote_resource_identifier = _escape_delimiters(
+                RegionalResourceArnParser.extract_dynamodb_table_name_from_arn(
+                    span.attributes.get(AWS_DYNAMODB_TABLE_ARN)
+                )
+            )
         elif is_key_present(span, AWS_KINESIS_STREAM_NAME):
             remote_resource_type = _NORMALIZED_KINESIS_SERVICE_NAME + "::Stream"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_KINESIS_STREAM_NAME))
+        elif is_key_present(span, AWS_KINESIS_STREAM_ARN):
+            remote_resource_type = _NORMALIZED_KINESIS_SERVICE_NAME + "::Stream"
+            remote_resource_identifier = _escape_delimiters(
+                RegionalResourceArnParser.extract_kinesis_stream_name_from_arn(
+                    span.attributes.get(AWS_KINESIS_STREAM_ARN)
+                )
+            )
         elif is_key_present(span, _AWS_BUCKET_NAME):
             remote_resource_type = _NORMALIZED_S3_SERVICE_NAME + "::Bucket"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(_AWS_BUCKET_NAME))
@@ -423,28 +468,43 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
             remote_resource_identifier = _escape_delimiters(span.attributes.get(GEN_AI_REQUEST_MODEL))
         elif is_key_present(span, AWS_SECRETSMANAGER_SECRET_ARN):
             remote_resource_type = _NORMALIZED_SECRETSMANAGER_SERVICE_NAME + "::Secret"
-            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_SECRETSMANAGER_SECRET_ARN)).split(
-                ":"
-            )[-1]
+            remote_resource_identifier = _escape_delimiters(
+                RegionalResourceArnParser.extract_resource_name_from_arn(
+                    span.attributes.get(AWS_SECRETSMANAGER_SECRET_ARN)
+                )
+            )
             cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_SECRETSMANAGER_SECRET_ARN))
         elif is_key_present(span, AWS_SNS_TOPIC_ARN):
             remote_resource_type = _NORMALIZED_SNS_SERVICE_NAME + "::Topic"
-            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_SNS_TOPIC_ARN)).split(":")[-1]
+            remote_resource_identifier = _escape_delimiters(
+                RegionalResourceArnParser.extract_resource_name_from_arn(span.attributes.get(AWS_SNS_TOPIC_ARN))
+            )
             cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_SNS_TOPIC_ARN))
         elif is_key_present(span, AWS_STEPFUNCTIONS_STATEMACHINE_ARN):
             remote_resource_type = _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME + "::StateMachine"
             remote_resource_identifier = _escape_delimiters(
-                span.attributes.get(AWS_STEPFUNCTIONS_STATEMACHINE_ARN)
-            ).split(":")[-1]
+                RegionalResourceArnParser.extract_resource_name_from_arn(
+                    span.attributes.get(AWS_STEPFUNCTIONS_STATEMACHINE_ARN)
+                )
+            )
             cloudformation_primary_identifier = _escape_delimiters(
                 span.attributes.get(AWS_STEPFUNCTIONS_STATEMACHINE_ARN)
             )
         elif is_key_present(span, AWS_STEPFUNCTIONS_ACTIVITY_ARN):
             remote_resource_type = _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME + "::Activity"
-            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_STEPFUNCTIONS_ACTIVITY_ARN)).split(
-                ":"
-            )[-1]
+            remote_resource_identifier = _escape_delimiters(
+                RegionalResourceArnParser.extract_resource_name_from_arn(
+                    span.attributes.get(AWS_STEPFUNCTIONS_ACTIVITY_ARN)
+                )
+            )
             cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_STEPFUNCTIONS_ACTIVITY_ARN))
+        elif is_key_present(span, AWS_LAMBDA_FUNCTION_NAME):
+            # For non-Invoke Lambda operations, treat Lambda as a resource,
+            # see normalize_remote_service_name for more information.
+            if not _is_lambda_invoke_operation(span):
+                remote_resource_type = _NORMALIZED_LAMBDA_SERVICE_NAME + "::Function"
+                remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_FUNCTION_NAME))
+                cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_FUNCTION_ARN))
         elif is_key_present(span, AWS_LAMBDA_RESOURCEMAPPING_ID):
             remote_resource_type = _NORMALIZED_LAMBDA_SERVICE_NAME + "::EventSourceMapping"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_RESOURCEMAPPING_ID))
@@ -465,6 +525,74 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         attributes[AWS_REMOTE_RESOURCE_TYPE] = remote_resource_type
         attributes[AWS_REMOTE_RESOURCE_IDENTIFIER] = remote_resource_identifier
         attributes[AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER] = cloudformation_primary_identifier
+        return True
+    return False
+
+
+def _set_remote_account_id_and_region(span: ReadableSpan, attributes: BoundedAttributes) -> bool:
+    arn_attributes = [
+        AWS_DYNAMODB_TABLE_ARN,
+        AWS_KINESIS_STREAM_ARN,
+        AWS_SNS_TOPIC_ARN,
+        AWS_SECRETSMANAGER_SECRET_ARN,
+        AWS_STEPFUNCTIONS_STATEMACHINE_ARN,
+        AWS_STEPFUNCTIONS_ACTIVITY_ARN,
+        AWS_BEDROCK_GUARDRAIL_ARN,
+        AWS_LAMBDA_FUNCTION_ARN,
+    ]
+    remote_account_id: Optional[str] = None
+    remote_region: Optional[str] = None
+
+    if is_key_present(span, AWS_SQS_QUEUE_URL):
+        queue_url = _escape_delimiters(span.attributes.get(AWS_SQS_QUEUE_URL))
+        remote_account_id = SqsUrlParser.get_account_id(queue_url)
+        remote_region = SqsUrlParser.get_region(queue_url)
+    else:
+        for arn_attribute in arn_attributes:
+            if is_key_present(span, arn_attribute):
+                arn = span.attributes.get(arn_attribute)
+                remote_account_id = RegionalResourceArnParser.get_account_id(arn)
+                remote_region = RegionalResourceArnParser.get_region(arn)
+                break
+
+    if remote_account_id is not None and remote_region is not None:
+        attributes[AWS_REMOTE_RESOURCE_ACCOUNT_ID] = remote_account_id
+        attributes[AWS_REMOTE_RESOURCE_REGION] = remote_region
+        return True
+    return False
+
+
+def _set_remote_access_key_and_region(span: ReadableSpan, attributes: BoundedAttributes) -> None:
+    if is_key_present(span, AWS_AUTH_ACCESS_KEY):
+        attributes[AWS_REMOTE_RESOURCE_ACCESS_KEY] = span.attributes.get(AWS_AUTH_ACCESS_KEY)
+    if is_key_present(span, AWS_AUTH_REGION):
+        attributes[AWS_REMOTE_RESOURCE_REGION] = span.attributes.get(AWS_AUTH_REGION)
+
+
+def _set_remote_environment(span: ReadableSpan, attributes: BoundedAttributes) -> None:
+    """
+    Remote environment is used to identify the environment of downstream services. Currently only
+    set to "lambda:default" for Lambda Invoke operations when aws-api system is detected.
+    """
+    # We want to treat downstream Lambdas as a service rather than a resource because
+    # Application Signals topology map gets disconnected due to conflicting Lambda Entity
+    # definitions
+    # Additional context can be found in
+    # https://github.com/aws-observability/aws-otel-python-instrumentation/pull/319
+    if _is_lambda_invoke_operation(span):
+        remote_environment = os.environ.get(_LAMBDA_APPLICATION_SIGNALS_REMOTE_ENVIRONMENT, "").strip()
+        if not remote_environment:
+            remote_environment = "default"
+        attributes[AWS_REMOTE_ENVIRONMENT] = f"lambda:{remote_environment}"
+
+
+def _is_lambda_invoke_operation(span: ReadableSpan) -> bool:
+    """Check if the span represents a Lambda Invoke operation."""
+    if not is_aws_sdk_span(span):
+        return False
+
+    rpc_service = _get_remote_service(span, _RPC_SERVICE)
+    return rpc_service == "Lambda" and span.attributes.get(_RPC_METHOD) == _LAMBDA_INVOKE_OPERATION
 
 
 def _get_db_connection(span: ReadableSpan) -> None:

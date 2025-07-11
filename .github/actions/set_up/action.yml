@@ -31,7 +31,7 @@ runs:
 
     - name: Cache tox environment
       # Preserves .tox directory between runs for faster installs
-      uses: actions/cache@v1
+      uses: actions/cache@v3
       with:
         path: |
           .tox

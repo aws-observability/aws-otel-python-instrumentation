@@ -7,16 +7,16 @@ name = "contract-tests"
 description = "Contract tests for AWS OTEL Python Instrumentation"
 version = "1.0.0"
 license = "Apache-2.0"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 
 dependencies = [
-    "opentelemetry-proto==1.25.0",
-    "opentelemetry-sdk==1.25.0",
+    "opentelemetry-proto==1.33.1",
+    "opentelemetry-sdk==1.33.1",
     "testcontainers==3.7.1",
-    "grpcio==1.60.0",
+    "grpcio==1.66.2",
     "docker==7.1.0",
     "mock-collector==1.0.0",
-    "requests==2.32.2"
+    "requests==2.32.4"
 ]
 
 [project.optional-dependencies]

@@ -26,16 +26,6 @@ _BOTO3SQS_INSTRUMENTATION_SCOPE: str = "opentelemetry.instrumentation.boto3sqs"
 # Max keyword length supported by parsing into remote_operation from DB_STATEMENT
 MAX_KEYWORD_LENGTH = 27
 
-# TODO: Use Semantic Conventions once upgrade to 0.47b0
-GEN_AI_REQUEST_MODEL: str = "gen_ai.request.model"
-GEN_AI_SYSTEM: str = "gen_ai.system"
-GEN_AI_REQUEST_MAX_TOKENS: str = "gen_ai.request.max_tokens"
-GEN_AI_REQUEST_TEMPERATURE: str = "gen_ai.request.temperature"
-GEN_AI_REQUEST_TOP_P: str = "gen_ai.request.top_p"
-GEN_AI_RESPONSE_FINISH_REASONS: str = "gen_ai.response.finish_reasons"
-GEN_AI_USAGE_INPUT_TOKENS: str = "gen_ai.usage.input_tokens"
-GEN_AI_USAGE_OUTPUT_TOKENS: str = "gen_ai.usage.output_tokens"
-
 
 # Get dialect keywords retrieved from dialect_keywords.json file.
 # Only meant to be invoked by SQL_KEYWORD_PATTERN and unit tests
@@ -57,7 +47,8 @@ def get_ingress_operation(__, span: ReadableSpan) -> str:
     with the first API path parameter" if the default span name is None, UnknownOperation or http.method value.
     """
     operation: str = span.name
-    if _AWS_LAMBDA_FUNCTION_NAME in os.environ:
+    scope = getattr(span, "instrumentation_scope", None)
+    if _AWS_LAMBDA_FUNCTION_NAME in os.environ and scope.name != "opentelemetry.instrumentation.flask":
         operation = os.environ.get(_AWS_LAMBDA_FUNCTION_NAME) + "/FunctionHandler"
     elif should_use_internal_operation(span):
         operation = INTERNAL_OPERATION
