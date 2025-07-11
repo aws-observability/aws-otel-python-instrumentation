@@ -242,7 +242,7 @@ jobs:
   # Stand-Alone ADOT/ADOT Gen AI test on EC2
   adot-genai:
     needs: [ upload-main-build ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-genai-test.yml@main
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-genesis-test.yml@main
     secrets: inherit
     with:
       caller-workflow-name: 'main-build'
