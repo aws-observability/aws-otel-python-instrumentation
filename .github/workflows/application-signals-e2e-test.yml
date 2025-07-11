@@ -240,7 +240,7 @@ jobs:
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
   
   # Stand-Alone ADOT/ADOT Genesis test on EC2
-  adot-genai:
+  adot-genesis:
     needs: [ upload-main-build ]
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-genesis-test.yml@main
     secrets: inherit
