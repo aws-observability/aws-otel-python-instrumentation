@@ -5,7 +5,7 @@
 
 import time
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from botocore.exceptions import ClientError
 
@@ -578,6 +578,134 @@ class TestCloudWatchLogClient(unittest.TestCase):
         batch2.created_timestamp_ms = current_time - self.log_client.BATCH_FLUSH_INTERVAL
         result = self.log_client._is_batch_active(batch2, current_time)
         self.assertFalse(result)
+
+    @patch("amazon.opentelemetry.distro.exporter.aws.metrics._cloudwatch_log_client.suppress_instrumentation")
+    def test_create_log_group_uses_suppress_instrumentation(self, mock_suppress):
+        """Test that _create_log_group_if_needed uses suppress_instrumentation."""
+        # Configure the mock context manager
+        mock_context = MagicMock()
+        mock_suppress.return_value = mock_context
+        mock_context.__enter__.return_value = mock_context
+        mock_context.__exit__.return_value = None
+
+        # Call the method
+        self.log_client._create_log_group_if_needed()
+
+        # Verify suppress_instrumentation was called
+        mock_suppress.assert_called_once()
+        mock_context.__enter__.assert_called_once()
+        mock_context.__exit__.assert_called_once()
+
+        # Verify the AWS call happened within the context
+        self.log_client.logs_client.create_log_group.assert_called_once_with(logGroupName="test-log-group")
+
+    @patch("amazon.opentelemetry.distro.exporter.aws.metrics._cloudwatch_log_client.suppress_instrumentation")
+    def test_create_log_stream_uses_suppress_instrumentation(self, mock_suppress):
+        """Test that _create_log_stream_if_needed uses suppress_instrumentation."""
+        # Configure the mock context manager
+        mock_context = MagicMock()
+        mock_suppress.return_value = mock_context
+        mock_context.__enter__.return_value = mock_context
+        mock_context.__exit__.return_value = None
+
+        # Call the method
+        self.log_client._create_log_stream_if_needed()
+
+        # Verify suppress_instrumentation was called
+        mock_suppress.assert_called_once()
+        mock_context.__enter__.assert_called_once()
+        mock_context.__exit__.assert_called_once()
+
+        # Verify the AWS call happened within the context
+        self.log_client.logs_client.create_log_stream.assert_called_once()
+
+    @patch("amazon.opentelemetry.distro.exporter.aws.metrics._cloudwatch_log_client.suppress_instrumentation")
+    def test_send_log_batch_uses_suppress_instrumentation(self, mock_suppress):
+        """Test that _send_log_batch uses suppress_instrumentation."""
+        # Configure the mock context manager
+        mock_context = MagicMock()
+        mock_suppress.return_value = mock_context
+        mock_context.__enter__.return_value = mock_context
+        mock_context.__exit__.return_value = None
+
+        # Create a batch with events
+        batch = self.log_client._create_event_batch()
+        batch.add_event({"message": "test", "timestamp": int(time.time() * 1000)}, 10)
+
+        # Mock successful put_log_events
+        self.log_client.logs_client.put_log_events.return_value = {"nextSequenceToken": "12345"}
+
+        # Call the method
+        self.log_client._send_log_batch(batch)
+
+        # Verify suppress_instrumentation was called
+        mock_suppress.assert_called_once()
+        mock_context.__enter__.assert_called_once()
+        mock_context.__exit__.assert_called_once()
+
+        # Verify the AWS call happened within the context
+        self.log_client.logs_client.put_log_events.assert_called_once()
+
+    @patch("amazon.opentelemetry.distro.exporter.aws.metrics._cloudwatch_log_client.suppress_instrumentation")
+    def test_send_log_batch_retry_uses_suppress_instrumentation(self, mock_suppress):
+        """Test that _send_log_batch retry logic also uses suppress_instrumentation."""
+        # Configure the mock context manager
+        mock_context = MagicMock()
+        mock_suppress.return_value = mock_context
+        mock_context.__enter__.return_value = mock_context
+        mock_context.__exit__.return_value = None
+
+        # Create a batch with events
+        batch = self.log_client._create_event_batch()
+        batch.add_event({"message": "test", "timestamp": int(time.time() * 1000)}, 10)
+
+        # Mock put_log_events to fail first with ResourceNotFoundException, then succeed
+        self.log_client.logs_client.put_log_events.side_effect = [
+            ClientError({"Error": {"Code": "ResourceNotFoundException"}}, "PutLogEvents"),
+            {"nextSequenceToken": "12345"},
+        ]
+
+        # Call the method
+        self.log_client._send_log_batch(batch)
+
+        # Verify suppress_instrumentation was called:
+        # 1. Initial _send_log_batch context
+        # 2. Nested context in the retry block
+        # 3. _create_log_group_if_needed context
+        # 4. _create_log_stream_if_needed context
+        self.assertEqual(mock_suppress.call_count, 4)
+        # Each context should have been properly entered and exited
+        self.assertEqual(mock_context.__enter__.call_count, 4)
+        self.assertEqual(mock_context.__exit__.call_count, 4)
+
+        # Verify AWS calls happened
+        self.assertEqual(self.log_client.logs_client.put_log_events.call_count, 2)
+        self.log_client.logs_client.create_log_group.assert_called_once()
+        self.log_client.logs_client.create_log_stream.assert_called_once()
+
+    @patch("amazon.opentelemetry.distro.exporter.aws.metrics._cloudwatch_log_client.suppress_instrumentation")
+    def test_create_log_group_exception_still_uses_suppress_instrumentation(self, mock_suppress):
+        """Test that suppress_instrumentation is properly used even when exceptions occur."""
+        # Configure the mock context manager
+        mock_context = MagicMock()
+        mock_suppress.return_value = mock_context
+        mock_context.__enter__.return_value = mock_context
+        mock_context.__exit__.return_value = None
+
+        # Make create_log_group raise an exception
+        self.log_client.logs_client.create_log_group.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied"}}, "CreateLogGroup"
+        )
+
+        # Call should raise the exception
+        with self.assertRaises(ClientError):
+            self.log_client._create_log_group_if_needed()
+
+        # Verify suppress_instrumentation was still properly used
+        mock_suppress.assert_called_once()
+        mock_context.__enter__.assert_called_once()
+        # __exit__ should be called even though an exception was raised
+        mock_context.__exit__.assert_called_once()
 
 
 if __name__ == "__main__":

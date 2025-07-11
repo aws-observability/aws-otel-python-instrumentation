@@ -11,6 +11,8 @@ from typing import Any, Dict, List, Optional
 from botocore.exceptions import ClientError
 from botocore.session import Session
 
+from opentelemetry.instrumentation.utils import suppress_instrumentation
+
 logger = logging.getLogger(__name__)
 
 
@@ -118,27 +120,29 @@ class CloudWatchLogClient:
 
     def _create_log_group_if_needed(self):
         """Create log group if it doesn't exist."""
-        try:
-            self.logs_client.create_log_group(logGroupName=self.log_group_name)
-            logger.info("Created log group: %s", self.log_group_name)
-        except ClientError as error:
-            if error.response.get("Error", {}).get("Code") == "ResourceAlreadyExistsException":
-                logger.debug("Log group %s already exists", self.log_group_name)
-            else:
-                logger.error("Failed to create log group %s : %s", self.log_group_name, error)
-                raise
+        with suppress_instrumentation():
+            try:
+                self.logs_client.create_log_group(logGroupName=self.log_group_name)
+                logger.info("Created log group: %s", self.log_group_name)
+            except ClientError as error:
+                if error.response.get("Error", {}).get("Code") == "ResourceAlreadyExistsException":
+                    logger.debug("Log group %s already exists", self.log_group_name)
+                else:
+                    logger.error("Failed to create log group %s : %s", self.log_group_name, error)
+                    raise
 
     def _create_log_stream_if_needed(self):
         """Create log stream if it doesn't exist."""
-        try:
-            self.logs_client.create_log_stream(logGroupName=self.log_group_name, logStreamName=self.log_stream_name)
-            logger.info("Created log stream: %s", self.log_stream_name)
-        except ClientError as error:
-            if error.response.get("Error", {}).get("Code") == "ResourceAlreadyExistsException":
-                logger.debug("Log stream %s already exists", self.log_stream_name)
-            else:
-                logger.error("Failed to create log stream %s : %s", self.log_stream_name, error)
-                raise
+        with suppress_instrumentation():
+            try:
+                self.logs_client.create_log_stream(logGroupName=self.log_group_name, logStreamName=self.log_stream_name)
+                logger.info("Created log stream: %s", self.log_stream_name)
+            except ClientError as error:
+                if error.response.get("Error", {}).get("Code") == "ResourceAlreadyExistsException":
+                    logger.debug("Log stream %s already exists", self.log_stream_name)
+                else:
+                    logger.error("Failed to create log stream %s : %s", self.log_stream_name, error)
+                    raise
 
     def _validate_log_event(self, log_event: Dict) -> bool:
         """
@@ -277,52 +281,52 @@ class CloudWatchLogClient:
         }
 
         start_time = time.time()
+        with suppress_instrumentation():
+            try:
+                # Make the PutLogEvents call
+                response = self.logs_client.put_log_events(**put_log_events_input)
 
-        try:
-            # Make the PutLogEvents call
-            response = self.logs_client.put_log_events(**put_log_events_input)
+                elapsed_ms = int((time.time() - start_time) * 1000)
+                logger.debug(
+                    "Successfully sent %s log events (%s KB) in %s ms",
+                    batch.size(),
+                    batch.byte_total / 1024,
+                    elapsed_ms,
+                )
 
-            elapsed_ms = int((time.time() - start_time) * 1000)
-            logger.debug(
-                "Successfully sent %s log events (%s KB) in %s ms",
-                batch.size(),
-                batch.byte_total / 1024,
-                elapsed_ms,
-            )
+                return response
 
-            return response
+            except ClientError as error:
+                # Handle resource not found errors by creating log group/stream
+                error_code = error.response.get("Error", {}).get("Code")
+                if error_code == "ResourceNotFoundException":
+                    logger.info("Log group or stream not found, creating resources and retrying")
+                    with suppress_instrumentation():
+                        try:
+                            # Create log group first
+                            self._create_log_group_if_needed()
+                            # Then create log stream
+                            self._create_log_stream_if_needed()
 
-        except ClientError as error:
-            # Handle resource not found errors by creating log group/stream
-            error_code = error.response.get("Error", {}).get("Code")
-            if error_code == "ResourceNotFoundException":
-                logger.info("Log group or stream not found, creating resources and retrying")
+                            # Retry the PutLogEvents call
+                            response = self.logs_client.put_log_events(**put_log_events_input)
 
-                try:
-                    # Create log group first
-                    self._create_log_group_if_needed()
-                    # Then create log stream
-                    self._create_log_stream_if_needed()
+                            elapsed_ms = int((time.time() - start_time) * 1000)
+                            logger.debug(
+                                "Successfully sent %s log events (%s KB) in %s ms after creating resources",
+                                batch.size(),
+                                batch.byte_total / 1024,
+                                elapsed_ms,
+                            )
 
-                    # Retry the PutLogEvents call
-                    response = self.logs_client.put_log_events(**put_log_events_input)
+                            return response
 
-                    elapsed_ms = int((time.time() - start_time) * 1000)
-                    logger.debug(
-                        "Successfully sent %s log events (%s KB) in %s ms after creating resources",
-                        batch.size(),
-                        batch.byte_total / 1024,
-                        elapsed_ms,
-                    )
-
-                    return response
-
-                except ClientError as retry_error:
-                    logger.error("Failed to send log events after creating resources: %s", retry_error)
+                        except ClientError as retry_error:
+                            logger.error("Failed to send log events after creating resources: %s", retry_error)
+                            raise
+                else:
+                    logger.error("Failed to send log events: %s", error)
                     raise
-            else:
-                logger.error("Failed to send log events: %s", error)
-                raise
 
     def send_log_event(self, log_event: Dict[str, Any]):
         """
