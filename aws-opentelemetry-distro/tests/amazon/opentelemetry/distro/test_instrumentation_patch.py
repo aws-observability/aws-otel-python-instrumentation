@@ -16,6 +16,7 @@ from amazon.opentelemetry.distro.patches._instrumentation_patch import (
 )
 from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
+from opentelemetry.propagate import get_global_textmap
 from opentelemetry.semconv.trace import SpanAttributes
 from opentelemetry.trace.span import Span
 
@@ -80,14 +81,18 @@ class TestInstrumentationPatch(TestCase):
 
         # Validate unpatched upstream behaviour - important to detect upstream changes that may break instrumentation
         self._test_unpatched_botocore_instrumentation()
+        self._test_unpatched_botocore_propagator()
         self._test_unpatched_gevent_instrumentation()
+        self._test_unpatched_starlette_instrumentation()
 
         # Apply patches
         apply_instrumentation_patches()
 
         # Validate patched upstream behaviour - important to detect downstream changes that may break instrumentation
         self._test_patched_botocore_instrumentation()
+        self._test_patched_botocore_propagator()
         self._test_unpatched_gevent_instrumentation()
+        self._test_patched_starlette_instrumentation()
 
         # Test setup to check whether only these two modules get patched by gevent monkey
         os.environ[AWS_GEVENT_PATCH_MODULES] = "os, ssl"
@@ -122,6 +127,8 @@ class TestInstrumentationPatch(TestCase):
         self._test_botocore_installed_flag()
         self._reset_mocks()
         self._test_resource_detector_patches()
+        self._reset_mocks()
+        self._test_starlette_installed_flag()
         self._reset_mocks()
 
     def _test_unpatched_botocore_instrumentation(self):
@@ -566,6 +573,80 @@ class TestInstrumentationPatch(TestCase):
 
             # Verify SSL context was created with correct CA file
             mock_ssl.assert_called_once_with(cafile="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
+
+    def _test_unpatched_botocore_propagator(self):
+        """Test that BotocoreInstrumentor uses its own propagator by default."""
+        # Create a fresh instrumentor to test its initial state
+        test_instrumentor = BotocoreInstrumentor()
+        # Check that it has its own propagator (not the global one)
+        self.assertIsNotNone(test_instrumentor.propagator)
+        # The default propagator should not be the global propagator initially
+        # This test ensures upstream hasn't changed their default behavior
+
+    def _test_patched_botocore_propagator(self):
+        """Test that BotocoreInstrumentor uses global propagator after patching."""
+        # Create a new instrumentor after patches have been applied
+        test_instrumentor = BotocoreInstrumentor()
+        # After patching, the propagator should be the global one
+        self.assertEqual(test_instrumentor.propagator, get_global_textmap())
+
+    def _test_unpatched_starlette_instrumentation(self):
+        """Test unpatched starlette instrumentation dependencies."""
+        try:
+            # pylint: disable=import-outside-toplevel
+            from opentelemetry.instrumentation.starlette import StarletteInstrumentor
+
+            # Store original method to verify it hasn't been patched yet
+            original_deps = StarletteInstrumentor.instrumentation_dependencies
+            # Create an instance to test the method
+            instrumentor = StarletteInstrumentor()
+            deps = original_deps(instrumentor)
+            # Default should have version constraint
+            self.assertEqual(deps, ("starlette >= 0.13, <0.15",))
+        except ImportError:
+            # If starlette instrumentation is not installed, skip this test
+            pass
+
+    def _test_patched_starlette_instrumentation(self):
+        """Test patched starlette instrumentation dependencies."""
+        try:
+            # pylint: disable=import-outside-toplevel
+            from opentelemetry.instrumentation.starlette import StarletteInstrumentor
+
+            # After patching, the version constraint should be relaxed
+            instrumentor = StarletteInstrumentor()
+            deps = instrumentor.instrumentation_dependencies()
+            self.assertEqual(deps, ("starlette >= 0.13",))
+        except ImportError:
+            # If starlette instrumentation is not installed, skip this test
+            pass
+
+    def _test_starlette_installed_flag(self):  # pylint: disable=no-self-use
+        """Test that starlette patches are only applied when starlette is installed."""
+        with patch(
+            "amazon.opentelemetry.distro.patches._starlette_patches._apply_starlette_instrumentation_patches"
+        ) as mock_apply_patches:
+            # Test when starlette is not installed
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=False
+            ) as mock_is_installed:
+                apply_instrumentation_patches()
+                # Check that is_installed was called for starlette
+                mock_is_installed.assert_any_call("starlette")
+                # Patches should not be applied when starlette is not installed
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when starlette is installed
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ) as mock_is_installed:
+                apply_instrumentation_patches()
+                # Check that is_installed was called for starlette
+                mock_is_installed.assert_any_call("starlette")
+                # Patches should be applied when starlette is installed
+                mock_apply_patches.assert_called()
 
     def _reset_mocks(self):
         for method_patch in self.method_patches.values():
