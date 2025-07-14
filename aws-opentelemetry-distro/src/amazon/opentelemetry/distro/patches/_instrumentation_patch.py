@@ -61,6 +61,16 @@ def apply_instrumentation_patches() -> None:
 
         _apply_botocore_instrumentation_patches()
 
+    if is_installed("starlette"):
+        # pylint: disable=import-outside-toplevel
+        # Delay import to only occur if patches is safe to apply (e.g. the instrumented library is installed).
+        from amazon.opentelemetry.distro.patches._starlette_patches import _apply_starlette_instrumentation_patches
+
+        # Starlette auto-instrumentation v0.54b includes a strict dependency version check
+        # This restriction was removed in v1.34.0/0.55b0. Applying temporary patch for Genesis launch
+        # TODO: Remove patch after syncing with upstream v1.34.0 or later
+        _apply_starlette_instrumentation_patches()
+
     # No need to check if library is installed as this patches opentelemetry.sdk,
     # which must be installed for the distro to work at all.
     _apply_resource_detector_patches()

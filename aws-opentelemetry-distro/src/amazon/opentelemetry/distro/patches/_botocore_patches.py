@@ -45,6 +45,7 @@ from opentelemetry.instrumentation.botocore.extensions.types import (
 )
 from opentelemetry.instrumentation.botocore.utils import get_server_attributes
 from opentelemetry.instrumentation.utils import is_instrumentation_enabled, suppress_http_instrumentation
+from opentelemetry.propagate import get_global_textmap
 from opentelemetry.semconv.trace import SpanAttributes
 from opentelemetry.trace.span import Span
 
@@ -54,6 +55,7 @@ def _apply_botocore_instrumentation_patches() -> None:
 
     Adds patches to provide additional support and Java parity for Kinesis, S3, and SQS.
     """
+    _apply_botocore_propagator_patch()
     _apply_botocore_api_call_patch()
     _apply_botocore_kinesis_patch()
     _apply_botocore_s3_patch()
@@ -64,6 +66,27 @@ def _apply_botocore_instrumentation_patches() -> None:
     _apply_botocore_stepfunctions_patch()
     _apply_botocore_lambda_patch()
     _apply_botocore_dynamodb_patch()
+
+
+# Known issue in OpenTelemetry upstream botocore auto-instrumentation
+# TODO: Contribute fix upstream and remove from ADOT patch after the contribution
+def _apply_botocore_propagator_patch() -> None:
+    """Botocore instrumentation patch for propagator
+
+    Changes the default propagator from AwsXRayPropagator to the global propagator.
+    This allows the propagator to be configured via OTEL_PROPAGATORS environment variable.
+    """
+    # Store the original __init__ method
+    original_init = BotocoreInstrumentor.__init__
+
+    def patched_init(self):
+        # Call the original __init__
+        original_init(self)
+        # Replace the propagator with the global one
+        self.propagator = get_global_textmap()
+
+    # Apply the patch
+    BotocoreInstrumentor.__init__ = patched_init
 
 
 def _apply_botocore_lambda_patch() -> None:
