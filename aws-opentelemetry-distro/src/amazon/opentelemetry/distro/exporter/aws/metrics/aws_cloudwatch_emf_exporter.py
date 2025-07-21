@@ -509,11 +509,13 @@ class AwsCloudWatchEmfExporter(MetricExporter):
         for name, value in all_attributes.items():
             emf_log[name] = str(value)
 
-        # Add the single dimension set to CloudWatch Metrics if we have dimensions and metrics
-        if dimension_names and metric_definitions:
-            emf_log["_aws"]["CloudWatchMetrics"].append(
-                {"Namespace": self.namespace, "Dimensions": [dimension_names], "Metrics": metric_definitions}
-            )
+        # Add CloudWatch Metrics if we have metrics, include dimensions only if they exist
+        if metric_definitions:
+            cloudwatch_metric = {"Namespace": self.namespace, "Metrics": metric_definitions}
+            if dimension_names:
+                cloudwatch_metric["Dimensions"] = [dimension_names]
+
+            emf_log["_aws"]["CloudWatchMetrics"].append(cloudwatch_metric)
 
         return emf_log
 
