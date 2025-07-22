@@ -391,7 +391,36 @@ class TestAwsCloudWatchEmfExporter(unittest.TestCase):
         # Check CloudWatch metrics structure
         cw_metrics = result["_aws"]["CloudWatchMetrics"][0]
         self.assertEqual(cw_metrics["Namespace"], "TestNamespace")
+        self.assertIn("Dimensions", cw_metrics)
         self.assertEqual(set(cw_metrics["Dimensions"][0]), {"env", "service"})
+        self.assertEqual(cw_metrics["Metrics"][0]["Name"], "gauge_metric")
+
+    def test_create_emf_log_without_dimensions(self):
+        """Test EMF log creation with metrics but no dimensions."""
+        # Create test record without attributes (no dimensions)
+        gauge_record = self.exporter._create_metric_record("gauge_metric", "Count", "Gauge")
+        gauge_record.value = 75.0
+        gauge_record.timestamp = int(time.time() * 1000)
+        gauge_record.attributes = {}  # No attributes = no dimensions
+
+        records = [gauge_record]
+        resource = Resource.create({"service.name": "test-service"})
+
+        result = self.exporter._create_emf_log(records, resource, 1234567890)
+
+        # Verify EMF log structure
+        self.assertIn("_aws", result)
+        self.assertIn("CloudWatchMetrics", result["_aws"])
+        self.assertEqual(result["_aws"]["Timestamp"], 1234567890)
+        self.assertEqual(result["Version"], "1")
+
+        # Check metric value
+        self.assertEqual(result["gauge_metric"], 75.0)
+
+        # Check CloudWatch metrics structure - should have metrics but no dimensions
+        cw_metrics = result["_aws"]["CloudWatchMetrics"][0]
+        self.assertEqual(cw_metrics["Namespace"], "TestNamespace")
+        self.assertNotIn("Dimensions", cw_metrics)  # No dimensions should be present
         self.assertEqual(cw_metrics["Metrics"][0]["Name"], "gauge_metric")
 
     def test_create_emf_log_skips_empty_metric_names(self):
