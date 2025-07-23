@@ -1,13 +1,12 @@
 import logging
-from typing import Any, AsyncGenerator, Callable, Collection, Tuple, cast
+from typing import Any, Collection
 
 from openinference.instrumentation.mcp.package import _instruments
-from wrapt import ObjectProxy, register_post_import_hook, wrap_function_wrapper
+from wrapt import register_post_import_hook, wrap_function_wrapper
 
-from opentelemetry import context, propagate, trace
+from opentelemetry import trace
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.instrumentation.utils import unwrap
-from opentelemetry.sdk.resources import Resource
 
 
 def setup_loggertwo():
@@ -69,15 +68,13 @@ class MCPInstrumentor(BaseInstrumentor):
             span.set_attribute("mcp.list_tools", True)
         elif isinstance(request, types.CallToolRequest):
             if hasattr(request, "params") and hasattr(request.params, "name"):
-                operation = request.params.name 
+                operation = request.params.name
             span.set_attribute("mcp.call_tool", True)
         if is_client:
             self._add_client_attributes(span, operation, request)
         else:
             self._add_server_attributes(span, operation, request)
 
-    
-    
     def _add_client_attributes(self, span, operation, request):
         span.set_attribute("span.kind", "CLIENT")
         span.set_attribute("aws.remote.service", "Appsignals MCP Server")
@@ -103,8 +100,9 @@ class MCPInstrumentor(BaseInstrumentor):
         """
         Changes made:
             The wrapper intercepts the request before sending, injects distributed tracing context into the
-            request's params._meta field and creates OpenTelemetry spans. The wrapper does not change anything else from the original function's
-            behavior because it reconstructs the request object with the same type and calling the original function with identical parameters.
+            request's params._meta field and creates OpenTelemetry spans. The wrapper does not change anything
+            else from the original function's behavior because it reconstructs the request object with the same
+            type and calling the original function with identical parameters.
         """
 
         async def async_wrapper():
@@ -112,14 +110,12 @@ class MCPInstrumentor(BaseInstrumentor):
                 tracer = trace.get_tracer("mcp.client")
             else:
                 tracer = self.tracer_provider.get_tracer("mcp.client")
-            with tracer.start_as_current_span(
-                "client.send_request", kind=trace.SpanKind.CLIENT
-            ) as span:
+            with tracer.start_as_current_span("client.send_request", kind=trace.SpanKind.CLIENT) as span:
                 span_ctx = span.get_span_context()
                 request = args[0] if len(args) > 0 else kwargs.get("request")
                 if request:
                     req_root = request.root if hasattr(request, "root") else request
-                    
+
                     self.handle_attributes(span, req_root, True)
                     request_data = request.model_dump(by_alias=True, mode="json", exclude_none=True)
                     self._inject_trace_context(request_data, span_ctx)
@@ -155,24 +151,30 @@ class MCPInstrumentor(BaseInstrumentor):
         """
         Changes made:
         This wrapper intercepts requests before processing, extracts distributed tracing context from
-        the request's params._meta field, and creates server-side OpenTelemetry spans linked to the client spans. The wrapper
-        also does not change the original function's behavior by calling it with identical parameters
+        the request's params._meta field, and creates server-side OpenTelemetry spans linked to the client spans.
+        The wrapper also does not change the original function's behavior by calling it with identical parameters
         ensuring no breaking changes to the MCP server functionality.
         """
         req = args[1] if len(args) > 1 else None
         trace_context = None
-        
+
         if req and hasattr(req, "params") and req.params and hasattr(req.params, "meta") and req.params.meta:
             trace_context = req.params.meta.trace_context
         if trace_context:
-            
+
             if self.tracer_provider is None:
                 tracer = trace.get_tracer("mcp.server")
             else:
                 tracer = self.tracer_provider.get_tracer("mcp.server")
             trace_id = trace_context.get("trace_id")
             span_id = trace_context.get("span_id")
-            span_context = trace.SpanContext(trace_id=trace_id, span_id=span_id, is_remote=True,trace_flags=trace.TraceFlags(trace.TraceFlags.SAMPLED),trace_state=trace.TraceState())
+            span_context = trace.SpanContext(
+                trace_id=trace_id,
+                span_id=span_id,
+                is_remote=True,
+                trace_flags=trace.TraceFlags(trace.TraceFlags.SAMPLED),
+                trace_state=trace.TraceState(),
+            )
             span_name = self.getname(req)
             with tracer.start_as_current_span(
                 span_name,
@@ -183,5 +185,7 @@ class MCPInstrumentor(BaseInstrumentor):
                 result = await wrapped(*args, **kwargs)
                 return result
         else:
-            return await wrapped(*args, **kwargs,)
-       
+            return await wrapped(
+                *args,
+                **kwargs,
+            )

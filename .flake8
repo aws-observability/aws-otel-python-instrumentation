@@ -19,6 +19,9 @@ exclude =
   CVS
   .venv*/
   venv*/
+  **/venv*/
+  **/.venv*/
+  aws-opentelemetry-distro/src/amazon/opentelemetry/distro/mcpinstrumentor/venv
   target
   __pycache__
   mock_collector_service_pb2.py
