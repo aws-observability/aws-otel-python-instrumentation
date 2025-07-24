@@ -26,6 +26,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     OtlpLogHeaderSetting,
     _check_emf_exporter_enabled,
     _create_aws_otlp_exporter,
+    _create_cloudwatch_emf_exporter,
     _create_emf_exporter,
     _custom_import_sampler,
     _customize_log_record_processor,
@@ -1053,10 +1054,10 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._validate_and_fetch_logs_header")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
-    def test_create_emf_exporter(self, mock_get_session, mock_validate):
+    def test_create_cloudwatch_emf_exporter(self, mock_get_session, mock_validate):
         # Test when botocore is not installed
         mock_get_session.return_value = None
-        result = _create_emf_exporter()
+        result = _create_cloudwatch_emf_exporter()
         self.assertIsNone(result)
 
         # Reset mock for subsequent tests
@@ -1074,12 +1075,12 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
             # Test when headers are invalid
             mock_validate.return_value = OtlpLogHeaderSetting(None, None, None, False)
-            result = _create_emf_exporter()
+            result = _create_cloudwatch_emf_exporter()
             self.assertIsNone(result)
 
             # Test when namespace is missing (should still create exporter with default namespace)
             mock_validate.return_value = OtlpLogHeaderSetting("test-group", "test-stream", None, True)
-            result = _create_emf_exporter()
+            result = _create_cloudwatch_emf_exporter()
             self.assertIsNotNone(result)
             self.assertEqual(result, mock_exporter_instance)
             # Verify that the EMF exporter was called with correct parameters
@@ -1092,7 +1093,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
             # Test with valid configuration
             mock_validate.return_value = OtlpLogHeaderSetting("test-group", "test-stream", "test-namespace", True)
-            result = _create_emf_exporter()
+            result = _create_cloudwatch_emf_exporter()
             self.assertIsNotNone(result)
             self.assertEqual(result, mock_exporter_instance)
             # Verify that the EMF exporter was called with correct parameters
@@ -1105,7 +1106,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
             # Test exception handling
             mock_validate.side_effect = Exception("Test exception")
-            result = _create_emf_exporter()
+            result = _create_cloudwatch_emf_exporter()
             self.assertIsNone(result)
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_logger_provider")
@@ -1184,7 +1185,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         # Test with EMF enabled but create_emf_exporter returns None
         with patch(
-            "amazon.opentelemetry.distro.aws_opentelemetry_configurator._create_emf_exporter", return_value=None
+            "amazon.opentelemetry.distro.aws_opentelemetry_configurator._create_cloudwatch_emf_exporter", return_value=None
         ):
             _customize_metric_exporters(metric_readers, views, is_emf_enabled=True)
             self.assertEqual(len(metric_readers), 0)
@@ -1196,7 +1197,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         mock_emf_exporter._preferred_aggregation = {}
 
         with patch(
-            "amazon.opentelemetry.distro.aws_opentelemetry_configurator._create_emf_exporter",
+            "amazon.opentelemetry.distro.aws_opentelemetry_configurator._create_cloudwatch_emf_exporter",
             return_value=mock_emf_exporter,
         ):
             _customize_metric_exporters(metric_readers, views, is_emf_enabled=True)
@@ -1249,6 +1250,100 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         # Should preserve existing agent type and not override it
         self.assertEqual(result.attributes[AWS_LOCAL_SERVICE], "test-service")
         self.assertEqual(result.attributes[AWS_SERVICE_TYPE], "existing-agent")
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._validate_and_fetch_logs_header")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._create_cloudwatch_emf_exporter")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
+    def test_create_emf_exporter_lambda_with_valid_headers(
+        self, mock_is_lambda, mock_create_cloudwatch, mock_validate_headers
+    ):
+        """Test _create_emf_exporter in Lambda environment with valid log headers - should use CloudWatch EMF exporter"""
+        mock_is_lambda.return_value = True
+        mock_validate_headers.return_value = OtlpLogHeaderSetting("test-group", "test-stream", "test-namespace", True)
+        mock_cloudwatch_exporter = MagicMock(spec=AwsCloudWatchEmfExporter)
+        mock_create_cloudwatch.return_value = mock_cloudwatch_exporter
+
+        result = _create_emf_exporter()
+
+        self.assertEqual(result, mock_cloudwatch_exporter)
+        mock_create_cloudwatch.assert_called_once()
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._validate_and_fetch_logs_header")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
+    def test_create_emf_exporter_lambda_with_invalid_headers(self, mock_is_lambda, mock_validate_headers):
+        """Test _create_emf_exporter in Lambda environment with invalid log headers - should use Console EMF exporter"""
+        mock_is_lambda.return_value = True
+        mock_validate_headers.return_value = OtlpLogHeaderSetting(None, None, "test-namespace", False)
+
+        with patch(
+            "amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter.ConsoleEmfExporter"
+        ) as mock_console_exporter_class:
+            mock_console_exporter = MagicMock()
+            mock_console_exporter_class.return_value = mock_console_exporter
+
+            result = _create_emf_exporter()
+
+            self.assertEqual(result, mock_console_exporter)
+            mock_console_exporter_class.assert_called_once_with(namespace="test-namespace")
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._validate_and_fetch_logs_header")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
+    def test_create_emf_exporter_lambda_with_invalid_headers_no_namespace(self, mock_is_lambda, mock_validate_headers):
+        """Test _create_emf_exporter in Lambda environment with invalid log headers and no namespace"""
+        mock_is_lambda.return_value = True
+        mock_validate_headers.return_value = OtlpLogHeaderSetting(None, None, None, False)
+
+        with patch(
+            "amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter.ConsoleEmfExporter"
+        ) as mock_console_exporter_class:
+            mock_console_exporter = MagicMock()
+            mock_console_exporter_class.return_value = mock_console_exporter
+
+            result = _create_emf_exporter()
+
+            self.assertEqual(result, mock_console_exporter)
+            mock_console_exporter_class.assert_called_once_with(namespace=None)
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._create_cloudwatch_emf_exporter")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
+    def test_create_emf_exporter_non_lambda_environment(self, mock_is_lambda, mock_create_cloudwatch):
+        """Test _create_emf_exporter in non-Lambda environment - should use CloudWatch EMF exporter"""
+        mock_is_lambda.return_value = False
+        mock_cloudwatch_exporter = MagicMock(spec=AwsCloudWatchEmfExporter)
+        mock_create_cloudwatch.return_value = mock_cloudwatch_exporter
+
+        result = _create_emf_exporter()
+
+        self.assertEqual(result, mock_cloudwatch_exporter)
+        mock_create_cloudwatch.assert_called_once()
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._create_cloudwatch_emf_exporter")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
+    def test_create_emf_exporter_non_lambda_returns_none(self, mock_is_lambda, mock_create_cloudwatch):
+        """Test _create_emf_exporter in non-Lambda environment when CloudWatch exporter creation fails"""
+        mock_is_lambda.return_value = False
+        mock_create_cloudwatch.return_value = None
+
+        result = _create_emf_exporter()
+
+        self.assertIsNone(result)
+        mock_create_cloudwatch.assert_called_once()
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._validate_and_fetch_logs_header")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._create_cloudwatch_emf_exporter")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
+    def test_create_emf_exporter_lambda_cloudwatch_returns_none(
+        self, mock_is_lambda, mock_create_cloudwatch, mock_validate_headers
+    ):
+        """Test _create_emf_exporter in Lambda with valid headers but CloudWatch exporter creation fails"""
+        mock_is_lambda.return_value = True
+        mock_validate_headers.return_value = OtlpLogHeaderSetting("test-group", "test-stream", "test-namespace", True)
+        mock_create_cloudwatch.return_value = None
+
+        result = _create_emf_exporter()
+
+        self.assertIsNone(result)
+        mock_create_cloudwatch.assert_called_once()
 
 
 def validate_distro_environ():

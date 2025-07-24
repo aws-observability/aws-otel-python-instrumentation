@@ -634,10 +634,11 @@ def _validate_and_fetch_logs_header() -> OtlpLogHeaderSetting:
     logs_headers = os.environ.get(OTEL_EXPORTER_OTLP_LOGS_HEADERS)
 
     if not logs_headers:
-        _logger.warning(
-            "Improper configuration: Please configure the environment variable OTEL_EXPORTER_OTLP_LOGS_HEADERS "
-            "to include x-aws-log-group and x-aws-log-stream"
-        )
+        if not _is_lambda_environment():
+            _logger.warning(
+                "Improper configuration: Please configure the environment variable OTEL_EXPORTER_OTLP_LOGS_HEADERS "
+                "to include x-aws-log-group and x-aws-log-stream"
+            )
         return OtlpLogHeaderSetting(None, None, None, False)
 
     log_group = None
@@ -771,8 +772,24 @@ def _check_emf_exporter_enabled() -> bool:
 
     return True
 
-
 def _create_emf_exporter():
+    """
+    Create the appropriate EMF exporter based on the environment and configuration.
+
+    """
+    log_header_setting = _validate_and_fetch_logs_header()
+    
+    if _is_lambda_environment() and not log_header_setting.is_valid:
+        # Lambda without valid logs http headers - use Console EMF exporter
+        from amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter import (
+            ConsoleEmfExporter,
+        )
+        return ConsoleEmfExporter(namespace=log_header_setting.namespace)
+    else:
+        # Non-Lambda environment - use CloudWatch EMF exporter
+        return _create_cloudwatch_emf_exporter()
+
+def _create_cloudwatch_emf_exporter():
     """Create and configure the CloudWatch EMF exporter."""
     try:
         session = get_aws_session()
