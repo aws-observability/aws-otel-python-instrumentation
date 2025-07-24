@@ -15,7 +15,7 @@ from amazon.opentelemetry.distro.patches._instrumentation_patch import (
     apply_instrumentation_patches,
 )
 from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
-from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS
+from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS, bedrock_utils
 from opentelemetry.propagate import get_global_textmap
 from opentelemetry.semconv.trace import SpanAttributes
 from opentelemetry.trace.span import Span
@@ -84,6 +84,7 @@ class TestInstrumentationPatch(TestCase):
         self._test_unpatched_botocore_propagator()
         self._test_unpatched_gevent_instrumentation()
         self._test_unpatched_starlette_instrumentation()
+        self._test_unpatched_bedrock_runtime_instrumentation()
 
         # Apply patches
         apply_instrumentation_patches()
@@ -218,6 +219,9 @@ class TestInstrumentationPatch(TestCase):
 
         # Bedrock Agent Operation
         self._test_patched_bedrock_agent_instrumentation()
+
+        # Bedrock Runtime
+        self._test_patched_bedrock_runtime_instrumentation()
 
         # Bedrock Agent Runtime
         self.assertTrue("bedrock-agent-runtime" in _KNOWN_EXTENSIONS)
@@ -469,6 +473,113 @@ class TestInstrumentationPatch(TestCase):
         bedrock_sucess_attributes: Dict[str, str] = _do_on_success_bedrock("bedrock")
         self.assertEqual(len(bedrock_sucess_attributes), 1)
         self.assertEqual(bedrock_sucess_attributes["aws.bedrock.guardrail.id"], _BEDROCK_GUARDRAIL_ID)
+
+    def _test_unpatched_bedrock_runtime_instrumentation(self):
+        """Test unpatched bedrock-runtime where input values remain as numbers"""
+
+        mock_stream = MagicMock()
+        mock_span = MagicMock()
+        mock_stream_error_callback = MagicMock()
+
+        wrapper = bedrock_utils.ConverseStreamWrapper(mock_stream, mock_span, mock_stream_error_callback)
+        wrapper._record_message = True
+        wrapper._message = {"role": "assistant", "content": []}
+
+        start_event = {
+            "contentBlockStart": {
+                "start": {
+                    "toolUse": {
+                        "toolUseId": "random_id",
+                        "name": "example",
+                        "input": '{"input": 999999999999999999}',
+                    }
+                },
+                "contentBlockIndex": 0,
+            }
+        }
+        wrapper._process_event(start_event)
+
+        # Validate that _content_block contains toolUse input that has been JSON decoded
+        self.assertIn("toolUse", wrapper._content_block)
+        self.assertIn("input", wrapper._content_block["toolUse"])
+        self.assertIn("input", wrapper._content_block["toolUse"]["input"])
+        # Validate that input values are numbers (unpatched behavior)
+        self.assertIsInstance(wrapper._content_block["toolUse"]["input"]["input"], int)
+        self.assertEqual(wrapper._content_block["toolUse"]["input"]["input"], 999999999999999999)
+
+        stop_event = {"contentBlockStop": {"contentBlockIndex": 0}}
+        wrapper._process_event(stop_event)
+
+        expected_tool_use = {
+            "toolUseId": "random_id",
+            "name": "example",
+            "input": {"input": 999999999999999999},
+        }
+        self.assertEqual(len(wrapper._message["content"]), 1)
+        self.assertEqual(wrapper._message["content"][0]["toolUse"], expected_tool_use)
+
+    def _test_patched_bedrock_runtime_instrumentation(self):
+        """Test patched bedrock-runtime"""
+
+        # Create mock arguments for ConverseStreamWrapper
+        mock_stream = MagicMock()
+        mock_span = MagicMock()
+        mock_stream_error_callback = MagicMock()
+
+        # Create real ConverseStreamWrapper with mocked arguments
+        wrapper = bedrock_utils.ConverseStreamWrapper(mock_stream, mock_span, mock_stream_error_callback)
+        wrapper._record_message = True
+        wrapper._message = {"role": "assistant", "content": []}
+
+        # Test contentBlockStart
+        start_event = {
+            "contentBlockStart": {
+                "start": {
+                    "toolUse": {
+                        "toolUseId": "random_id",
+                        "name": "example",
+                        "input": '{"input": 999999999999999999}',
+                    }
+                },
+                "contentBlockIndex": 0,
+            }
+        }
+
+        wrapper._process_event(start_event)
+
+        # Validate that _content_block contains toolUse input as literal string (patched behavior)
+        self.assertIn("toolUse", wrapper._content_block)
+        self.assertIn("input", wrapper._content_block["toolUse"])
+        # Validate that input is a string containing the literal JSON (not decoded)
+        self.assertIsInstance(wrapper._content_block["toolUse"]["input"], str)
+        self.assertEqual(wrapper._content_block["toolUse"]["input"], '{"input": 999999999999999999}')
+
+        # Test contentBlockDelta events
+        delta_events = [
+            {"contentBlockDelta": {"delta": {"toolUse": {"input": '{"in'}}, "contentBlockIndex": 0}},
+            {"contentBlockDelta": {"delta": {"toolUse": {"input": 'put": 9'}}, "contentBlockIndex": 0}},
+            {"contentBlockDelta": {"delta": {"toolUse": {"input": "99"}}, "contentBlockIndex": 0}},
+            {"contentBlockDelta": {"delta": {"toolUse": {"input": "99"}}, "contentBlockIndex": 0}},
+        ]
+
+        for delta_event in delta_events:
+            wrapper._process_event(delta_event)
+
+        # Verify accumulated input buffer
+        self.assertEqual(wrapper._tool_json_input_buf, '{"input": 99999')
+
+        # Test contentBlockStop
+        stop_event = {"contentBlockStop": {"contentBlockIndex": 0}}
+        wrapper._process_event(stop_event)
+
+        # Verify final content_block toolUse value (input becomes the accumulated JSON string)
+        expected_tool_use = {
+            "toolUseId": "random_id",
+            "name": "example",
+            "input": '{"input": 99999',
+        }
+        self.assertEqual(len(wrapper._message["content"]), 1)
+        self.assertEqual(wrapper._message["content"][0]["toolUse"], expected_tool_use)
 
     def _test_patched_bedrock_agent_instrumentation(self):
         """For bedrock-agent service, both extract_attributes and on_success provides attributes,

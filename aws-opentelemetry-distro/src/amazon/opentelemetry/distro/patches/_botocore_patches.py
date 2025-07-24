@@ -328,8 +328,6 @@ def _apply_botocore_bedrock_patch() -> None:
     bedrock_utils.ConverseStreamWrapper._process_event = patched_process_event
     bedrock_utils.extract_tool_calls = patched_extract_tool_calls
 
-    # bedrock-runtime is handled by upstream
-
 
 def _apply_botocore_dynamodb_patch() -> None:
     """Botocore instrumentation patch for DynamoDB
