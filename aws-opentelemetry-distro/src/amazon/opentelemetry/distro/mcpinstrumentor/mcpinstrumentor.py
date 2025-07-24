@@ -24,10 +24,14 @@ def setup_logger_two():
     return logger
 
 
-class MCPInstrumentor(BaseInstrumentor):  # pylint: disable=attribute-defined-outside-init
+class MCPInstrumentor(BaseInstrumentor):
     """
     An instrumenter for MCP.
     """
+
+    def __init__(self):
+        super().__init__()
+        self.tracer = None
 
     # Send Request Wrapper
     def _wrap_send_request(self, wrapped, instance, args, kwargs):
@@ -125,7 +129,7 @@ class MCPInstrumentor(BaseInstrumentor):  # pylint: disable=attribute-defined-ou
 
     def _get_span_name(self, req):  # pylint: disable=no-self-use
         span_name = "unknown"
-        import mcp.types as types  # pylint: disable=import-outside-toplevel
+        import mcp.types as types  # pylint: disable=import-outside-toplevel,consider-using-from-import
 
         if isinstance(req, types.ListToolsRequest):
             span_name = "tools/list"
@@ -137,7 +141,7 @@ class MCPInstrumentor(BaseInstrumentor):  # pylint: disable=attribute-defined-ou
         return span_name
 
     def handle_attributes(self, span, request, is_client=True):
-        import mcp.types as types  # pylint: disable=import-outside-toplevel
+        import mcp.types as types  # pylint: disable=import-outside-toplevel,consider-using-from-import
 
         operation = self._get_span_name(request)
         if isinstance(request, types.ListToolsRequest):
