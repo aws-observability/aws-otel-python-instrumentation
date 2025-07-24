@@ -9,7 +9,7 @@ from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.instrumentation.utils import unwrap
 
 
-def setup_loggertwo():
+def setup_logger_two():
     logger = logging.getLogger("loggertwo")
     logger.setLevel(logging.DEBUG)
     handler = logging.FileHandler("loggertwo.log", mode="w")
@@ -21,7 +21,7 @@ def setup_loggertwo():
     return logger
 
 
-loggertwo = setup_loggertwo()
+logger_two = setup_logger_two()
 
 
 class MCPInstrumentor(BaseInstrumentor):
@@ -33,7 +33,7 @@ class MCPInstrumentor(BaseInstrumentor):
         return _instruments
 
     def _instrument(self, **kwargs: Any) -> None:
-        tracer_provider = kwargs.get("tracer_provider")  # Move this line up
+        tracer_provider = kwargs.get("tracer_provider")
         if tracer_provider:
             self.tracer_provider = tracer_provider
         else:
@@ -42,7 +42,7 @@ class MCPInstrumentor(BaseInstrumentor):
             lambda _: wrap_function_wrapper(
                 "mcp.shared.session",
                 "BaseSession.send_request",
-                self._send_request_wrapper,
+                self._wrap_send_request,
             ),
             "mcp.shared.session",
         )
@@ -50,7 +50,7 @@ class MCPInstrumentor(BaseInstrumentor):
             lambda _: wrap_function_wrapper(
                 "mcp.server.lowlevel.server",
                 "Server._handle_request",
-                self._server_handle_request_wrapper,
+                self._wrap_handle_request,
             ),
             "mcp.server.lowlevel.server",
         )
@@ -96,7 +96,7 @@ class MCPInstrumentor(BaseInstrumentor):
         request_data["params"]["_meta"]["trace_context"] = {"trace_id": span_ctx.trace_id, "span_id": span_ctx.span_id}
 
     # Send Request Wrapper
-    def _send_request_wrapper(self, wrapped, instance, args, kwargs):
+    def _wrap_send_request(self, wrapped, instance, args, kwargs):
         """
         Changes made:
             The wrapper intercepts the request before sending, injects distributed tracing context into the
@@ -133,7 +133,7 @@ class MCPInstrumentor(BaseInstrumentor):
 
         return async_wrapper()
 
-    def getname(self, req):
+    def _get_span_name(self, req):
         span_name = "unknown"
         import mcp.types as types
 
@@ -147,7 +147,7 @@ class MCPInstrumentor(BaseInstrumentor):
         return span_name
 
     # Handle Request Wrapper
-    async def _server_handle_request_wrapper(self, wrapped, instance, args, kwargs):
+    async def _wrap_handle_request(self, wrapped, instance, args, kwargs):
         """
         Changes made:
         This wrapper intercepts requests before processing, extracts distributed tracing context from
@@ -175,7 +175,7 @@ class MCPInstrumentor(BaseInstrumentor):
                 trace_flags=trace.TraceFlags(trace.TraceFlags.SAMPLED),
                 trace_state=trace.TraceState(),
             )
-            span_name = self.getname(req)
+            span_name = self._get_span_name(req)
             with tracer.start_as_current_span(
                 span_name,
                 kind=trace.SpanKind.SERVER,
@@ -185,7 +185,4 @@ class MCPInstrumentor(BaseInstrumentor):
                 result = await wrapped(*args, **kwargs)
                 return result
         else:
-            return await wrapped(
-                *args,
-                **kwargs,
-            )
+            return await wrapped(*args, **kwargs)

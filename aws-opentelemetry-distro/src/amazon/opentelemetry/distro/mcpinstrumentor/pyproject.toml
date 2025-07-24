@@ -25,11 +25,11 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
+  "openinference-instrumentation-mcp",
   "opentelemetry-api",
   "opentelemetry-instrumentation",
-  "opentelemetry-semantic-conventions",
-  "wrapt",
   "opentelemetry-sdk",
+  "wrapt"
 ]
 
 [project.optional-dependencies]

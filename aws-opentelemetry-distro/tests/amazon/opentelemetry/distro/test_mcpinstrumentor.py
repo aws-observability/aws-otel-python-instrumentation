@@ -1,13 +1,16 @@
 """
-Super simple unit test for MCPInstrumentor - no mocking, just one functionality
-Testing the _inject_trace_context method
+Unit tests for MCPInstrumentor - testing actual mcpinstrumentor methods
 """
 
+import asyncio
 import os
 import sys
 import unittest
+from unittest.mock import MagicMock
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../../../../src"))
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
+src_path = os.path.join(project_root, "src")
+sys.path.insert(0, src_path)
 from amazon.opentelemetry.distro.mcpinstrumentor.mcpinstrumentor import MCPInstrumentor  # noqa: E402
 
 
@@ -33,7 +36,7 @@ class SimpleTracerProvider:
 
 
 class TestInjectTraceContext(unittest.TestCase):
-    """Test the _inject_trace_context method - simple functionality"""
+    """Test the _inject_trace_context method"""
 
     def setUp(self):
         self.instrumentor = MCPInstrumentor()
@@ -44,7 +47,7 @@ class TestInjectTraceContext(unittest.TestCase):
         request_data = {}
         span_ctx = SimpleSpanContext(trace_id=12345, span_id=67890)
 
-        # Execute
+        # Execute - Actually test the mcpinstrumentor method
         self.instrumentor._inject_trace_context(request_data, span_ctx)
 
         # Verify
@@ -57,7 +60,7 @@ class TestInjectTraceContext(unittest.TestCase):
         request_data = {"params": {"existing_field": "test_value"}}
         span_ctx = SimpleSpanContext(trace_id=99999, span_id=11111)
 
-        # Execute
+        # Execute - Actually test the mcpinstrumentor method
         self.instrumentor._inject_trace_context(request_data, span_ctx)
 
         # Verify the existing field is preserved and trace context is added
@@ -77,7 +80,7 @@ class TestTracerProvider(unittest.TestCase):
 
     def test_instrument_without_tracer_provider_kwargs(self):
         """Test _instrument method when no tracer_provider in kwargs - should set to None"""
-        # Execute - call _instrument without tracer_provider in kwargs
+        # Execute - Actually test the mcpinstrumentor method
         self.instrumentor._instrument()
 
         # Verify - tracer_provider should be None
@@ -89,7 +92,7 @@ class TestTracerProvider(unittest.TestCase):
         # Setup
         provider = SimpleTracerProvider()
 
-        # Execute - call _instrument with tracer_provider in kwargs
+        # Execute - Actually test the mcpinstrumentor method
         self.instrumentor._instrument(tracer_provider=provider)
 
         # Verify - tracer_provider should be set to the provided value
@@ -97,269 +100,33 @@ class TestTracerProvider(unittest.TestCase):
         self.assertEqual(self.instrumentor.tracer_provider, provider)
 
 
-class TestAppSignalToolCallRequest(unittest.TestCase):
-    """Test with realistic AppSignal MCP server tool call requests"""
+class TestInstrumentationDependencies(unittest.TestCase):
+    """Test the instrumentation_dependencies method"""
 
     def setUp(self):
         self.instrumentor = MCPInstrumentor()
-        self.instrumentor.tracer_provider = None
 
-    def test_appsignal_call_tool_request(self):
-        """Test with a realistic AppSignal MCP server CallToolRequest"""
+    def test_instrumentation_dependencies(self):
+        """Test that instrumentation_dependencies method returns the expected dependencies"""
+        # Execute - Actually test the mcpinstrumentor method
+        dependencies = self.instrumentor.instrumentation_dependencies()
 
-        # Create a realistic CallToolRequest for AppSignal MCP server
-        class CallToolRequest:
-            def __init__(self, tool_name, arguments):
-                self.root = self
-                self.params = CallToolParams(tool_name, arguments)
+        # Verify - should return the _instruments collection
+        self.assertIsNotNone(dependencies)
+        # The dependencies come from openinference.instrumentation.mcp.package._instruments
+        # which should be a collection
 
-            def model_dump(self, **kwargs):
-                return {"method": "call_tool", "params": {"name": self.params.name, "arguments": self.params.arguments}}
 
-        class CallToolParams:
-            def __init__(self, name, arguments):
-                self.name = name
-                self.arguments = arguments
+class TestTraceContextInjection(unittest.TestCase):
+    """Test trace context injection using actual mcpinstrumentor methods"""
 
-        # Create an AppSignal tool call request
-        appsignal_request = CallToolRequest(
-            tool_name="create_metric",
-            arguments={
-                "metric_name": "response_time",
-                "value": 250,
-                "tags": {"endpoint": "/api/users", "method": "GET"},
-            },
-        )
+    def setUp(self):
+        self.instrumentor = MCPInstrumentor()
 
-        # Verify the tool call request structure matches AppSignal expectations
-        request_data = appsignal_request.model_dump()
-        self.assertEqual(request_data["method"], "call_tool")
-        self.assertEqual(request_data["params"]["name"], "create_metric")
-        self.assertEqual(request_data["params"]["arguments"]["metric_name"], "response_time")
-        self.assertEqual(request_data["params"]["arguments"]["value"], 250)
-        self.assertIn("endpoint", request_data["params"]["arguments"]["tags"])
-        self.assertEqual(request_data["params"]["arguments"]["tags"]["endpoint"], "/api/users")
+    def test_trace_context_injection_with_realistic_request(self):
+        """Test actual trace context injection using mcpinstrumentor._inject_trace_context with realistic MCP request"""
 
-        # Test expected AppSignal response structure
-        expected_appsignal_result = {
-            "success": True,
-            "metric_id": "metric_12345",
-            "message": "Metric 'response_time' created successfully",
-            "metadata": {
-                "timestamp": "2025-01-22T21:19:00Z",
-                "tags_applied": ["endpoint:/api/users", "method:GET"],
-                "value_recorded": 250,
-            },
-        }
-
-        self.assertTrue(expected_appsignal_result["success"])
-        self.assertIn("metric_id", expected_appsignal_result)
-        self.assertEqual(expected_appsignal_result["metadata"]["value_recorded"], 250)
-
-    def test_appsignal_tool_without_arguments(self):
-        """Test AppSignal tool call that doesn't require arguments"""
-
-        # Create a realistic CallToolRequest for tools without arguments
-        class CallToolRequestNoArgs:
-            def __init__(self, tool_name):
-                self.root = self
-                self.params = CallToolParamsNoArgs(tool_name)
-
-            def model_dump(self, **kwargs):
-                return {
-                    "method": "call_tool",
-                    "params": {
-                        "name": self.params.name
-                        # No arguments field for this tool
-                    },
-                }
-
-            @classmethod
-            def model_validate(cls, data):
-                return cls(data["params"]["name"])
-
-        class CallToolParamsNoArgs:
-            def __init__(self, name):
-                self.name = name
-                # No arguments attribute for this tool
-
-        # Create an AppSignal tool call without arguments
-        list_apps_request = CallToolRequestNoArgs(tool_name="list_applications")
-
-        # Test argument detection
-        args_with_request = (list_apps_request,)
-        kwargs_empty = {}
-        extracted_request = args_with_request[0] if len(args_with_request) > 0 else kwargs_empty.get("request")
-
-        self.assertEqual(extracted_request, list_apps_request)
-        self.assertEqual(extracted_request.params.name, "list_applications")
-
-        # Verify the request structure for tools without arguments
-        request_data = list_apps_request.model_dump()
-        self.assertEqual(request_data["method"], "call_tool")
-        self.assertEqual(request_data["params"]["name"], "list_applications")
-        self.assertNotIn("arguments", request_data["params"])  # No arguments field
-
-        # Test expected result for list_applications tool
-        expected_list_apps_result = {
-            "success": True,
-            "applications": [
-                {"id": "app_001", "name": "web-frontend", "environment": "production"},
-                {"id": "app_002", "name": "api-backend", "environment": "staging"},
-            ],
-            "total_count": 2,
-        }
-
-        # Verify expected response structure
-        self.assertTrue(expected_list_apps_result["success"])
-        self.assertIn("applications", expected_list_apps_result)
-        self.assertEqual(expected_list_apps_result["total_count"], 2)
-        self.assertEqual(len(expected_list_apps_result["applications"]), 2)
-        self.assertEqual(expected_list_apps_result["applications"][0]["name"], "web-frontend")
-
-    def test_send_request_wrapper_argument_reconstruction(self):
-        """Test the argument  logic: if len(args) > 0 vs else path"""
-
-        # Create a realistic AppSignal request
-        class CallToolRequest:
-            def __init__(self, tool_name, arguments=None):
-                self.root = self
-                self.params = CallToolParams(tool_name, arguments)
-
-            def model_dump(self, by_alias=True, mode="json", exclude_none=True):
-                result = {"method": "call_tool", "params": {"name": self.params.name}}
-                if self.params.arguments:
-                    result["params"]["arguments"] = self.params.arguments
-                return result
-
-            @classmethod
-            def model_validate(cls, data):
-                return cls(data["params"]["name"], data["params"].get("arguments"))
-
-        class CallToolParams:
-            def __init__(self, name, arguments=None):
-                self.name = name
-                self.arguments = arguments
-
-        request = CallToolRequest("create_metric", {"metric_name": "test", "value": 100})
-
-        # Test 1: len(args) > 0 path - should trigger new_args = (modified_request,) + args[1:]
-        args_with_request = (request, "extra_arg1", "extra_arg2")
-        kwargs_test = {"extra_kwarg": "test"}
-
-        # Simulate what the wrapper logic does
-        if len(args_with_request) > 0:
-            # This tests: new_args = (modified_request,) + args[1:]
-            new_args = ("modified_request_placeholder",) + args_with_request[1:]
-            result_args = new_args
-            result_kwargs = kwargs_test
-        else:
-            # This shouldn't happen in this test
-            result_args = args_with_request
-            result_kwargs = kwargs_test.copy()
-            result_kwargs["request"] = "modified_request_placeholder"
-
-        # Verify args path reconstruction
-        self.assertEqual(len(result_args), 3)  # modified_request + 2 extra args
-        self.assertEqual(result_args[0], "modified_request_placeholder")
-        self.assertEqual(result_args[1], "extra_arg1")  # args[1:] preserved
-        self.assertEqual(result_args[2], "extra_arg2")  # args[1:] preserved
-        self.assertEqual(result_kwargs["extra_kwarg"], "test")
-        self.assertNotIn("request", result_kwargs)  # Should NOT modify kwargs in args path
-
-        # Test 2: len(args) == 0 path - should trigger kwargs["request"] = modified_request
-        args_empty = ()
-        kwargs_with_request = {"request": request, "other_param": "value"}
-
-        # Simulate what the wrapper logic does
-        if len(args_empty) > 0:
-            # This shouldn't happen in this test
-            new_args = ("modified_request_placeholder",) + args_empty[1:]
-            result_args = new_args
-            result_kwargs = kwargs_with_request
-        else:
-            # This tests: kwargs["request"] = modified_request
-            result_args = args_empty
-            result_kwargs = kwargs_with_request.copy()
-            result_kwargs["request"] = "modified_request_placeholder"
-
-        # Verify kwargs path reconstruction
-        self.assertEqual(len(result_args), 0)  # No positional args
-        self.assertEqual(result_kwargs["request"], "modified_request_placeholder")
-        self.assertEqual(result_kwargs["other_param"], "value")  # Other kwargs preserved
-
-    def test_server_handle_request_wrapper_logic(self):
-        """Test the _server_handle_request_wrapper"""
-
-        # Create realistic server request structures
-        class ServerRequest:
-            def __init__(self, has_trace_context=False):
-                if has_trace_context:
-                    self.params = ServerRequestParams(has_meta=True)
-                else:
-                    self.params = ServerRequestParams(has_meta=False)
-
-        class ServerRequestParams:
-            def __init__(self, has_meta=False):
-                if has_meta:
-                    self.meta = ServerRequestMeta()
-                else:
-                    self.meta = None
-
-        class ServerRequestMeta:
-            def __init__(self):
-                self.trace_context = {"trace_id": 12345, "span_id": 67890}
-
-        # Test 1: Request WITHOUT trace context - should take else path
-        request_no_trace = ServerRequest(has_trace_context=False)
-
-        # wrapper's request extraction logic
-        args_with_request = (None, request_no_trace)  # args[1] is the request
-        req = args_with_request[1] if len(args_with_request) > 1 else None
-
-        # Check trace context extraction logic
-        trace_context = None
-        if req and hasattr(req, "params") and req.params and hasattr(req.params, "meta") and req.params.meta:
-            trace_context = req.params.meta.trace_context
-
-        # Verify - should NOT find trace context
-        self.assertIsNotNone(req)
-        self.assertIsNotNone(req.params)
-        self.assertIsNone(req.params.meta)  # No meta field
-        self.assertIsNone(trace_context)
-
-        # Test 2: Request WITH trace context - should take if path
-        request_with_trace = ServerRequest(has_trace_context=True)
-
-        # Simulate the wrapper's request extraction logic
-        args_with_trace = (None, request_with_trace)  # args[1] is the request
-        req2 = args_with_trace[1] if len(args_with_trace) > 1 else None
-
-        # Check trace context extraction logic
-        trace_context2 = None
-        if req2 and hasattr(req2, "params") and req2.params and hasattr(req2.params, "meta") and req2.params.meta:
-            trace_context2 = req2.params.meta.trace_context
-
-        # Verify - should find trace context
-        self.assertIsNotNone(req2)
-        self.assertIsNotNone(req2.params)
-        self.assertIsNotNone(req2.params.meta)  # Has meta field
-        self.assertIsNotNone(trace_context2)
-        self.assertEqual(trace_context2["trace_id"], 12345)
-        self.assertEqual(trace_context2["span_id"], 67890)
-
-        # Test 3: No request at all (args[1] doesn't exist)
-        args_no_request = (None,)  # Only one arg, no request
-        req3 = args_no_request[1] if len(args_no_request) > 1 else None
-
-        # Verify - should handle missing request gracefully
-        self.assertIsNone(req3)
-
-    def test_end_to_end_trace_context_propagation(self):
-        """Test client sending trace context and server receiving the same trace context"""
-        # STEP 1: CLIENT SIDE - Create and prepare request with trace context
-
-        # Create a realistic AppSignal request (what client would send)
+        # Create a realistic MCP request structure
         class CallToolRequest:
             def __init__(self, tool_name, arguments=None):
                 self.root = self
@@ -391,69 +158,256 @@ class TestAppSignalToolCallRequest(unittest.TestCase):
         # Client creates original request
         client_request = CallToolRequest("create_metric", {"metric_name": "response_time", "value": 250})
 
-        # Client injects trace context (what _send_request_wrapper does)
+        # Client injects trace context using ACTUAL mcpinstrumentor method
         original_trace_context = SimpleSpanContext(trace_id=98765, span_id=43210)
-
-        # Get request data and inject trace context
         request_data = client_request.model_dump()
+
+        # This is the actual mcpinstrumentor method we're testing
         self.instrumentor._inject_trace_context(request_data, original_trace_context)
 
-        # Create modified request with trace context (what client sends over network)
+        # Create modified request with trace context
         modified_request = CallToolRequest.model_validate(request_data)
 
-        # Verify client successfully injected trace context
+        # Verify the actual mcpinstrumentor method worked correctly
         client_data = modified_request.model_dump()
         self.assertIn("_meta", client_data["params"])
         self.assertIn("trace_context", client_data["params"]["_meta"])
         self.assertEqual(client_data["params"]["_meta"]["trace_context"]["trace_id"], 98765)
         self.assertEqual(client_data["params"]["_meta"]["trace_context"]["span_id"], 43210)
 
-        # STEP 2: SERVER SIDE - Receive and extract trace context
+        # Verify the tool call data is also preserved
+        self.assertEqual(client_data["params"]["name"], "create_metric")
+        self.assertEqual(client_data["params"]["arguments"]["metric_name"], "response_time")
 
-        # Create server request structure (what server receives)
-        class ServerRequest:
+
+class TestInstrumentedMCPServer(unittest.TestCase):
+    """Test mcpinstrumentor with a mock MCP server to verify end-to-end functionality"""
+
+    def setUp(self):
+        self.instrumentor = MCPInstrumentor()
+        self.instrumentor.tracer_provider = None
+
+    def test_no_trace_context_fallback(self):
+        """Test graceful handling when no trace context is present on server side"""
+
+        class MockServerNoTrace:
+            async def _handle_request(self, session, request):
+                return {"success": True, "handled_without_trace": True}
+
+        class MockServerRequestNoTrace:
+            def __init__(self, tool_name):
+                self.params = MockServerRequestParamsNoTrace(tool_name)
+
+        class MockServerRequestParamsNoTrace:
+            def __init__(self, name):
+                self.name = name
+                self.meta = None  # No trace context
+
+        mock_server = MockServerNoTrace()
+        server_request = MockServerRequestNoTrace("create_metric")
+
+        # Setup mocks
+        mock_tracer = MagicMock()
+        mock_span = MagicMock()
+        mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+        mock_tracer.start_as_current_span.return_value.__exit__.return_value = None
+
+        # Test server handling without trace context (fallback scenario)
+        with unittest.mock.patch("opentelemetry.trace.get_tracer", return_value=mock_tracer), unittest.mock.patch.dict(
+            "sys.modules", {"mcp.types": MagicMock()}
+        ), unittest.mock.patch.object(self.instrumentor, "handle_attributes"), unittest.mock.patch.object(
+            self.instrumentor, "_get_span_name", return_value="tools/create_metric"
+        ):
+
+            result = asyncio.run(
+                self.instrumentor._wrap_handle_request(mock_server._handle_request, None, (None, server_request), {})
+            )
+
+        # Verify graceful fallback - no tracing spans should be created when no trace context
+        # The wrapper should call the original function without creating distributed trace spans
+        self.assertEqual(result["success"], True)
+        self.assertEqual(result["handled_without_trace"], True)
+
+        # Should not create traced spans when no trace context is present
+        mock_tracer.start_as_current_span.assert_not_called()
+
+    def test_end_to_end_client_server_communication(self):
+        """Test where server actually receives what client sends (including injected trace context)"""
+
+        # Create realistic request/response classes
+        class MCPRequest:
+            def __init__(self, tool_name, arguments=None, method="call_tool"):
+                self.root = self
+                self.params = MCPRequestParams(tool_name, arguments)
+                self.method = method
+
+            def model_dump(self, by_alias=True, mode="json", exclude_none=True):
+                result = {"method": self.method, "params": {"name": self.params.name}}
+                if self.params.arguments:
+                    result["params"]["arguments"] = self.params.arguments
+                # Include _meta if it exists (for trace context)
+                if hasattr(self.params, "_meta") and self.params._meta:
+                    result["params"]["_meta"] = self.params._meta
+                return result
+
+            @classmethod
+            def model_validate(cls, data):
+                method = data.get("method", "call_tool")
+                instance = cls(data["params"]["name"], data["params"].get("arguments"), method)
+                # Restore _meta field if present
+                if "_meta" in data["params"]:
+                    instance.params._meta = data["params"]["_meta"]
+                return instance
+
+        class MCPRequestParams:
+            def __init__(self, name, arguments=None):
+                self.name = name
+                self.arguments = arguments
+                self._meta = None
+
+        class MCPServerRequest:
             def __init__(self, client_request_data):
-                self.params = ServerRequestParams(client_request_data["params"])
+                """Server request created from client's serialized data"""
+                self.method = client_request_data.get("method", "call_tool")
+                self.params = MCPServerRequestParams(client_request_data["params"])
 
-        class ServerRequestParams:
+        class MCPServerRequestParams:
             def __init__(self, params_data):
                 self.name = params_data["name"]
-                if "arguments" in params_data:
-                    self.arguments = params_data["arguments"]
-                # Extract meta field (trace context)
-                if "_meta" in params_data:
-                    self.meta = ServerRequestMeta(params_data["_meta"])
+                self.arguments = params_data.get("arguments")
+                # Extract trace context from _meta if present
+                if "_meta" in params_data and "trace_context" in params_data["_meta"]:
+                    self.meta = MCPServerRequestMeta(params_data["_meta"]["trace_context"])
                 else:
                     self.meta = None
 
-        class ServerRequestMeta:
-            def __init__(self, meta_data):
-                self.trace_context = meta_data["trace_context"]
+        class MCPServerRequestMeta:
+            def __init__(self, trace_context):
+                self.trace_context = trace_context
 
-        # Server receives the request (simulating network transmission)
-        server_request = ServerRequest(client_data)
+        # Mock client and server that actually communicate
+        class EndToEndMCPSystem:
+            def __init__(self):
+                self.communication_log = []
+                self.last_sent_request = None
 
-        # Server extracts trace context (what _server_handle_request_wrapper does)
-        args_with_request = (None, server_request)  # args[1] is the request
-        req = args_with_request[1] if len(args_with_request) > 1 else None
+            async def client_send_request(self, request):
+                """Client sends request - captures what gets sent"""
+                self.communication_log.append("CLIENT: Preparing to send request")
+                self.last_sent_request = request  # Capture the modified request
 
-        # Extract trace context using server logic
-        extracted_trace_context = None
-        if req and hasattr(req, "params") and req.params and hasattr(req.params, "meta") and req.params.meta:
-            extracted_trace_context = req.params.meta.trace_context
+                # Simulate sending over network - serialize the request
+                serialized_request = request.model_dump()
+                self.communication_log.append(f"CLIENT: Sent {serialized_request}")
 
-        # Verify server successfully received the trace context
-        self.assertIsNotNone(extracted_trace_context)
-        self.assertEqual(extracted_trace_context["trace_id"], 98765)
-        self.assertEqual(extracted_trace_context["span_id"], 43210)
+                # Return client response
+                return {"success": True, "client_response": "Request sent successfully"}
 
-        # Verify it's the SAME trace context that client sent
-        self.assertEqual(extracted_trace_context["trace_id"], original_trace_context.trace_id)
-        self.assertEqual(extracted_trace_context["span_id"], original_trace_context.span_id)
+            async def server_handle_request(self, session, server_request):
+                """Server handles the request it received"""
+                self.communication_log.append(f"SERVER: Received request for {server_request.params.name}")
 
-        # Verify the tool call data is also preserved
+                # Check if trace context was received
+                if server_request.params.meta and server_request.params.meta.trace_context:
+                    trace_info = server_request.params.meta.trace_context
+                    self.communication_log.append(
+                        f"SERVER: Found trace context - trace_id: {trace_info['trace_id']}, "
+                        f"span_id: {trace_info['span_id']}"
+                    )
+                else:
+                    self.communication_log.append("SERVER: No trace context found")
+
+                return {"success": True, "server_response": f"Handled {server_request.params.name}"}
+
+        # Create the end-to-end system
+        e2e_system = EndToEndMCPSystem()
+
+        # Create original client request
+        original_request = MCPRequest("create_metric", {"name": "cpu_usage", "value": 85})
+
+        # Setup OpenTelemetry mocks
+        mock_tracer = MagicMock()
+        mock_span = MagicMock()
+        mock_span_context = MagicMock()
+        mock_span_context.trace_id = 12345
+        mock_span_context.span_id = 67890
+        mock_span.get_span_context.return_value = mock_span_context
+        mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+        mock_tracer.start_as_current_span.return_value.__exit__.return_value = None
+
+        # STEP 1: Client sends request through instrumentation
+        with unittest.mock.patch("opentelemetry.trace.get_tracer", return_value=mock_tracer), unittest.mock.patch.dict(
+            "sys.modules", {"mcp.types": MagicMock()}
+        ), unittest.mock.patch.object(self.instrumentor, "handle_attributes"):
+
+            client_result = asyncio.run(
+                self.instrumentor._wrap_send_request(e2e_system.client_send_request, None, (original_request,), {})
+            )
+
+        # Verify client side worked
+        self.assertEqual(client_result["success"], True)
+        self.assertIn("CLIENT: Preparing to send request", e2e_system.communication_log)
+
+        # Get the request that was actually sent (with trace context injected)
+        sent_request = e2e_system.last_sent_request
+        sent_request_data = sent_request.model_dump()
+
+        # Verify trace context was injected by client instrumentation
+        self.assertIn("_meta", sent_request_data["params"])
+        self.assertIn("trace_context", sent_request_data["params"]["_meta"])
+        self.assertEqual(sent_request_data["params"]["_meta"]["trace_context"]["trace_id"], 12345)
+        self.assertEqual(sent_request_data["params"]["_meta"]["trace_context"]["span_id"], 67890)
+
+        # STEP 2: Server receives the EXACT request that client sent
+        # Create server request from the client's serialized data
+        server_request = MCPServerRequest(sent_request_data)
+
+        # Reset tracer mock for server side
+        mock_tracer.reset_mock()
+
+        # Server processes the request it received
+        with unittest.mock.patch("opentelemetry.trace.get_tracer", return_value=mock_tracer), unittest.mock.patch.dict(
+            "sys.modules", {"mcp.types": MagicMock()}
+        ), unittest.mock.patch.object(self.instrumentor, "handle_attributes"), unittest.mock.patch.object(
+            self.instrumentor, "_get_span_name", return_value="tools/create_metric"
+        ):
+
+            server_result = asyncio.run(
+                self.instrumentor._wrap_handle_request(
+                    e2e_system.server_handle_request, None, (None, server_request), {}
+                )
+            )
+
+        # Verify server side worked
+        self.assertEqual(server_result["success"], True)
+
+        # Verify end-to-end trace context propagation
+        self.assertIn("SERVER: Found trace context - trace_id: 12345, span_id: 67890", e2e_system.communication_log)
+
+        # Verify the server received the exact same data the client sent
         self.assertEqual(server_request.params.name, "create_metric")
-        self.assertEqual(server_request.params.arguments["metric_name"], "response_time")
+        self.assertEqual(server_request.params.arguments["name"], "cpu_usage")
+        self.assertEqual(server_request.params.arguments["value"], 85)
+
+        # Verify the trace context made it through end-to-end
+        self.assertIsNotNone(server_request.params.meta)
+        self.assertIsNotNone(server_request.params.meta.trace_context)
+        self.assertEqual(server_request.params.meta.trace_context["trace_id"], 12345)
+        self.assertEqual(server_request.params.meta.trace_context["span_id"], 67890)
+
+        # Verify complete communication flow
+        expected_log_entries = [
+            "CLIENT: Preparing to send request",
+            "CLIENT: Sent",  # Part of the serialized request log
+            "SERVER: Received request for create_metric",
+            "SERVER: Found trace context - trace_id: 12345, span_id: 67890",
+        ]
+
+        for expected_entry in expected_log_entries:
+            self.assertTrue(
+                any(expected_entry in log_entry for log_entry in e2e_system.communication_log),
+                f"Expected log entry '{expected_entry}' not found in: {e2e_system.communication_log}",
+            )
 
 
 if __name__ == "__main__":
