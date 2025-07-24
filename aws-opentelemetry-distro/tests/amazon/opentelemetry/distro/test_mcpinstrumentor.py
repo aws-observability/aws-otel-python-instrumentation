@@ -50,9 +50,19 @@ class TestInjectTraceContext(unittest.TestCase):
         # Execute - Actually test the mcpinstrumentor method
         self.instrumentor._inject_trace_context(request_data, span_ctx)
 
-        # Verify
-        expected = {"params": {"_meta": {"trace_context": {"trace_id": 12345, "span_id": 67890}}}}
-        self.assertEqual(request_data, expected)
+        # Verify - now uses traceparent W3C format
+        self.assertIn("params", request_data)
+        self.assertIn("_meta", request_data["params"])
+        self.assertIn("traceparent", request_data["params"]["_meta"])
+
+        # Verify traceparent format: "00-{trace_id:032x}-{span_id:016x}-01"
+        traceparent = request_data["params"]["_meta"]["traceparent"]
+        self.assertTrue(traceparent.startswith("00-"))
+        self.assertTrue(traceparent.endswith("-01"))
+        parts = traceparent.split("-")
+        self.assertEqual(len(parts), 4)
+        self.assertEqual(int(parts[1], 16), 12345)  # trace_id
+        self.assertEqual(int(parts[2], 16), 67890)  # span_id
 
     def test_inject_trace_context_existing_params(self):
         """Test injecting trace context when params already exist"""
@@ -63,10 +73,16 @@ class TestInjectTraceContext(unittest.TestCase):
         # Execute - Actually test the mcpinstrumentor method
         self.instrumentor._inject_trace_context(request_data, span_ctx)
 
-        # Verify the existing field is preserved and trace context is added
+        # Verify the existing field is preserved and traceparent is added
         self.assertEqual(request_data["params"]["existing_field"], "test_value")
-        self.assertEqual(request_data["params"]["_meta"]["trace_context"]["trace_id"], 99999)
-        self.assertEqual(request_data["params"]["_meta"]["trace_context"]["span_id"], 11111)
+        self.assertIn("_meta", request_data["params"])
+        self.assertIn("traceparent", request_data["params"]["_meta"])
+
+        # Verify traceparent format contains correct trace/span IDs
+        traceparent = request_data["params"]["_meta"]["traceparent"]
+        parts = traceparent.split("-")
+        self.assertEqual(int(parts[1], 16), 99999)  # trace_id
+        self.assertEqual(int(parts[2], 16), 11111)  # span_id
 
 
 class TestTracerProvider(unittest.TestCase):
@@ -74,30 +90,35 @@ class TestTracerProvider(unittest.TestCase):
 
     def setUp(self):
         self.instrumentor = MCPInstrumentor()
-        # Reset tracer_provider to ensure test isolation
-        if hasattr(self.instrumentor, "tracer_provider"):
-            delattr(self.instrumentor, "tracer_provider")
+        # Reset tracer to ensure test isolation
+        if hasattr(self.instrumentor, "tracer"):
+            delattr(self.instrumentor, "tracer")
 
     def test_instrument_without_tracer_provider_kwargs(self):
-        """Test _instrument method when no tracer_provider in kwargs - should set to None"""
+        """Test _instrument method when no tracer_provider in kwargs - should use default tracer"""
         # Execute - Actually test the mcpinstrumentor method
-        self.instrumentor._instrument()
+        with unittest.mock.patch("opentelemetry.trace.get_tracer") as mock_get_tracer:
+            mock_get_tracer.return_value = "default_tracer"
+            self.instrumentor._instrument()
 
-        # Verify - tracer_provider should be None
-        self.assertTrue(hasattr(self.instrumentor, "tracer_provider"))
-        self.assertIsNone(self.instrumentor.tracer_provider)
+        # Verify - tracer should be set from trace.get_tracer
+        self.assertTrue(hasattr(self.instrumentor, "tracer"))
+        self.assertEqual(self.instrumentor.tracer, "default_tracer")
+        mock_get_tracer.assert_called_with("mcp")
 
     def test_instrument_with_tracer_provider_kwargs(self):
-        """Test _instrument method when tracer_provider is in kwargs - should set to that value"""
+        """Test _instrument method when tracer_provider is in kwargs - should use provider's tracer"""
         # Setup
         provider = SimpleTracerProvider()
 
         # Execute - Actually test the mcpinstrumentor method
         self.instrumentor._instrument(tracer_provider=provider)
 
-        # Verify - tracer_provider should be set to the provided value
-        self.assertTrue(hasattr(self.instrumentor, "tracer_provider"))
-        self.assertEqual(self.instrumentor.tracer_provider, provider)
+        # Verify - tracer should be set from the provided tracer_provider
+        self.assertTrue(hasattr(self.instrumentor, "tracer"))
+        self.assertEqual(self.instrumentor.tracer, "mock_tracer_from_provider")
+        self.assertTrue(provider.get_tracer_called)
+        self.assertEqual(provider.tracer_name, "mcp")
 
 
 class TestInstrumentationDependencies(unittest.TestCase):
@@ -171,9 +192,13 @@ class TestTraceContextInjection(unittest.TestCase):
         # Verify the actual mcpinstrumentor method worked correctly
         client_data = modified_request.model_dump()
         self.assertIn("_meta", client_data["params"])
-        self.assertIn("trace_context", client_data["params"]["_meta"])
-        self.assertEqual(client_data["params"]["_meta"]["trace_context"]["trace_id"], 98765)
-        self.assertEqual(client_data["params"]["_meta"]["trace_context"]["span_id"], 43210)
+        self.assertIn("traceparent", client_data["params"]["_meta"])
+
+        # Verify traceparent format contains correct trace/span IDs
+        traceparent = client_data["params"]["_meta"]["traceparent"]
+        parts = traceparent.split("-")
+        self.assertEqual(int(parts[1], 16), 98765)  # trace_id
+        self.assertEqual(int(parts[2], 16), 43210)  # span_id
 
         # Verify the tool call data is also preserved
         self.assertEqual(client_data["params"]["name"], "create_metric")
@@ -185,7 +210,9 @@ class TestInstrumentedMCPServer(unittest.TestCase):
 
     def setUp(self):
         self.instrumentor = MCPInstrumentor()
-        self.instrumentor.tracer_provider = None
+        # Initialize tracer so the instrumentor can work
+        mock_tracer = MagicMock()
+        self.instrumentor.tracer = mock_tracer
 
     def test_no_trace_context_fallback(self):
         """Test graceful handling when no trace context is present on server side"""
@@ -275,15 +302,15 @@ class TestInstrumentedMCPServer(unittest.TestCase):
             def __init__(self, params_data):
                 self.name = params_data["name"]
                 self.arguments = params_data.get("arguments")
-                # Extract trace context from _meta if present
-                if "_meta" in params_data and "trace_context" in params_data["_meta"]:
-                    self.meta = MCPServerRequestMeta(params_data["_meta"]["trace_context"])
+                # Extract traceparent from _meta if present
+                if "_meta" in params_data and "traceparent" in params_data["_meta"]:
+                    self.meta = MCPServerRequestMeta(params_data["_meta"]["traceparent"])
                 else:
                     self.meta = None
 
         class MCPServerRequestMeta:
-            def __init__(self, trace_context):
-                self.trace_context = trace_context
+            def __init__(self, traceparent):
+                self.traceparent = traceparent
 
         # Mock client and server that actually communicate
         class EndToEndMCPSystem:
@@ -307,13 +334,19 @@ class TestInstrumentedMCPServer(unittest.TestCase):
                 """Server handles the request it received"""
                 self.communication_log.append(f"SERVER: Received request for {server_request.params.name}")
 
-                # Check if trace context was received
-                if server_request.params.meta and server_request.params.meta.trace_context:
-                    trace_info = server_request.params.meta.trace_context
-                    self.communication_log.append(
-                        f"SERVER: Found trace context - trace_id: {trace_info['trace_id']}, "
-                        f"span_id: {trace_info['span_id']}"
-                    )
+                # Check if traceparent was received
+                if server_request.params.meta and server_request.params.meta.traceparent:
+                    traceparent = server_request.params.meta.traceparent
+                    # Parse traceparent to extract trace_id and span_id
+                    parts = traceparent.split("-")
+                    if len(parts) == 4:
+                        trace_id = int(parts[1], 16)
+                        span_id = int(parts[2], 16)
+                        self.communication_log.append(
+                            f"SERVER: Found trace context - trace_id: {trace_id}, " f"span_id: {span_id}"
+                        )
+                    else:
+                        self.communication_log.append("SERVER: Invalid traceparent format")
                 else:
                     self.communication_log.append("SERVER: No trace context found")
 
@@ -339,6 +372,8 @@ class TestInstrumentedMCPServer(unittest.TestCase):
         with unittest.mock.patch("opentelemetry.trace.get_tracer", return_value=mock_tracer), unittest.mock.patch.dict(
             "sys.modules", {"mcp.types": MagicMock()}
         ), unittest.mock.patch.object(self.instrumentor, "handle_attributes"):
+            # Override the setup tracer with the properly mocked one
+            self.instrumentor.tracer = mock_tracer
 
             client_result = asyncio.run(
                 self.instrumentor._wrap_send_request(e2e_system.client_send_request, None, (original_request,), {})
@@ -352,11 +387,15 @@ class TestInstrumentedMCPServer(unittest.TestCase):
         sent_request = e2e_system.last_sent_request
         sent_request_data = sent_request.model_dump()
 
-        # Verify trace context was injected by client instrumentation
+        # Verify traceparent was injected by client instrumentation
         self.assertIn("_meta", sent_request_data["params"])
-        self.assertIn("trace_context", sent_request_data["params"]["_meta"])
-        self.assertEqual(sent_request_data["params"]["_meta"]["trace_context"]["trace_id"], 12345)
-        self.assertEqual(sent_request_data["params"]["_meta"]["trace_context"]["span_id"], 67890)
+        self.assertIn("traceparent", sent_request_data["params"]["_meta"])
+
+        # Parse and verify traceparent contains correct trace/span IDs
+        traceparent = sent_request_data["params"]["_meta"]["traceparent"]
+        parts = traceparent.split("-")
+        self.assertEqual(int(parts[1], 16), 12345)  # trace_id
+        self.assertEqual(int(parts[2], 16), 67890)  # span_id
 
         # STEP 2: Server receives the EXACT request that client sent
         # Create server request from the client's serialized data
@@ -389,11 +428,15 @@ class TestInstrumentedMCPServer(unittest.TestCase):
         self.assertEqual(server_request.params.arguments["name"], "cpu_usage")
         self.assertEqual(server_request.params.arguments["value"], 85)
 
-        # Verify the trace context made it through end-to-end
+        # Verify the traceparent made it through end-to-end
         self.assertIsNotNone(server_request.params.meta)
-        self.assertIsNotNone(server_request.params.meta.trace_context)
-        self.assertEqual(server_request.params.meta.trace_context["trace_id"], 12345)
-        self.assertEqual(server_request.params.meta.trace_context["span_id"], 67890)
+        self.assertIsNotNone(server_request.params.meta.traceparent)
+
+        # Parse traceparent and verify trace/span IDs
+        traceparent = server_request.params.meta.traceparent
+        parts = traceparent.split("-")
+        self.assertEqual(int(parts[1], 16), 12345)  # trace_id
+        self.assertEqual(int(parts[2], 16), 67890)  # span_id
 
         # Verify complete communication flow
         expected_log_entries = [
