@@ -3,7 +3,7 @@
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import importlib
 import json
-from typing import Any, Dict, Sequence
+from typing import Any, Dict, Optional, Sequence
 
 from botocore.exceptions import ClientError
 
@@ -294,7 +294,9 @@ def _apply_botocore_bedrock_patch() -> None:
 
         old_process_event(self, event)
 
-    def patched_extract_tool_calls(message: dict[str, Any], capture_content: bool) -> Sequence[Dict[str, Any]] | None:
+    def patched_extract_tool_calls(
+        message: dict[str, Any], capture_content: bool
+    ) -> Optional[Sequence[Dict[str, Any]]]:
         content = message.get("content")
         if not content:
             return None

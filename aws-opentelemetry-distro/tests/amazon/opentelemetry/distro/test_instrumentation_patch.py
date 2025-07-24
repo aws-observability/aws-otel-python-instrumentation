@@ -482,7 +482,7 @@ class TestInstrumentationPatch(TestCase):
     def _test_unpatched_extract_tool_calls(self):
         """Test unpatched extract_tool_calls with string content throws AttributeError"""
         message_with_string_content = {"role": "assistant", "content": "{"}
-        with self.assertRaises(AttributeError) as context:
+        with self.assertRaises(AttributeError):
             bedrock_utils.extract_tool_calls(message_with_string_content, True)
 
     def _test_unpatched_converse_stream_wrapper(self):
