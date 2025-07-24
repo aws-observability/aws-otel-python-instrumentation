@@ -84,7 +84,10 @@ class TestInstrumentationPatch(TestCase):
         self._test_unpatched_botocore_propagator()
         self._test_unpatched_gevent_instrumentation()
         self._test_unpatched_starlette_instrumentation()
-        self._test_unpatched_bedrock_runtime_instrumentation()
+        # TODO: remove these tests once we bump botocore instrumentation version to 0.56b0
+        # Bedrock Runtime tests
+        self._test_unpatched_converse_stream_wrapper()
+        self._test_unpatched_extract_tool_calls()
 
         # Apply patches
         apply_instrumentation_patches()
@@ -220,8 +223,10 @@ class TestInstrumentationPatch(TestCase):
         # Bedrock Agent Operation
         self._test_patched_bedrock_agent_instrumentation()
 
+        # TODO: remove these tests once we bump botocore instrumentation version to 0.56b0
         # Bedrock Runtime
-        self._test_patched_bedrock_runtime_instrumentation()
+        self._test_patched_converse_stream_wrapper()
+        self._test_patched_extract_tool_calls()
 
         # Bedrock Agent Runtime
         self.assertTrue("bedrock-agent-runtime" in _KNOWN_EXTENSIONS)
@@ -474,7 +479,13 @@ class TestInstrumentationPatch(TestCase):
         self.assertEqual(len(bedrock_sucess_attributes), 1)
         self.assertEqual(bedrock_sucess_attributes["aws.bedrock.guardrail.id"], _BEDROCK_GUARDRAIL_ID)
 
-    def _test_unpatched_bedrock_runtime_instrumentation(self):
+    def _test_unpatched_extract_tool_calls(self):
+        """Test unpatched extract_tool_calls with string content throws AttributeError"""
+        message_with_string_content = {"role": "assistant", "content": "{"}
+        with self.assertRaises(AttributeError) as context:
+            bedrock_utils.extract_tool_calls(message_with_string_content, True)
+
+    def _test_unpatched_converse_stream_wrapper(self):
         """Test unpatched bedrock-runtime where input values remain as numbers"""
 
         mock_stream = MagicMock()
@@ -518,7 +529,7 @@ class TestInstrumentationPatch(TestCase):
         self.assertEqual(len(wrapper._message["content"]), 1)
         self.assertEqual(wrapper._message["content"][0]["toolUse"], expected_tool_use)
 
-    def _test_patched_bedrock_runtime_instrumentation(self):
+    def _test_patched_converse_stream_wrapper(self):
         """Test patched bedrock-runtime"""
 
         # Create mock arguments for ConverseStreamWrapper
@@ -580,6 +591,14 @@ class TestInstrumentationPatch(TestCase):
         }
         self.assertEqual(len(wrapper._message["content"]), 1)
         self.assertEqual(wrapper._message["content"][0]["toolUse"], expected_tool_use)
+
+    def _test_patched_extract_tool_calls(self):
+        """Test patched extract_tool_calls with string content"""
+
+        # Test extract_tool_calls with string content (should return None)
+        message_with_string_content = {"role": "assistant", "content": "{"}
+        result = bedrock_utils.extract_tool_calls(message_with_string_content, True)
+        self.assertIsNone(result)
 
     def _test_patched_bedrock_agent_instrumentation(self):
         """For bedrock-agent service, both extract_attributes and on_success provides attributes,
