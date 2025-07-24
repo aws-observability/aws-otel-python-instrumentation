@@ -354,7 +354,7 @@ def _apply_botocore_dynamodb_patch() -> None:
 
 
 def _apply_botocore_api_call_patch() -> None:
-    # pylint: disable=too-many-locals
+    # pylint: disable=too-many-locals,too-many-statements
     def patched_api_call(self, original_func, instance, args, kwargs):
         """Botocore instrumentation patch to capture AWS authentication details
 
