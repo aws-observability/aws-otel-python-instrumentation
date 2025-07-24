@@ -1,3 +1,6 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Unit tests for MCPInstrumentor - testing actual mcpinstrumentor methods
 """
@@ -8,9 +11,12 @@ import sys
 import unittest
 from unittest.mock import MagicMock
 
+# Add src path for imports
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
 src_path = os.path.join(project_root, "src")
 sys.path.insert(0, src_path)
+
+# pylint: disable=wrong-import-position
 from amazon.opentelemetry.distro.mcpinstrumentor.mcpinstrumentor import MCPInstrumentor  # noqa: E402
 
 
@@ -214,7 +220,7 @@ class TestInstrumentedMCPServer(unittest.TestCase):
         mock_tracer = MagicMock()
         self.instrumentor.tracer = mock_tracer
 
-    def test_no_trace_context_fallback(self):
+    def test_no_trace_context_fallback(self):  # pylint: disable=no-self-use
         """Test graceful handling when no trace context is present on server side"""
 
         class MockServerNoTrace:
@@ -258,7 +264,7 @@ class TestInstrumentedMCPServer(unittest.TestCase):
         # Should not create traced spans when no trace context is present
         mock_tracer.start_as_current_span.assert_not_called()
 
-    def test_end_to_end_client_server_communication(self):
+    def test_end_to_end_client_server_communication(self):  # pylint: disable=too-many-locals,too-many-statements
         """Test where server actually receives what client sends (including injected trace context)"""
 
         # Create realistic request/response classes

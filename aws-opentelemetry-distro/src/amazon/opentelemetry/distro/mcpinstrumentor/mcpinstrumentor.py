@@ -24,7 +24,7 @@ def setup_logger_two():
     return logger
 
 
-class MCPInstrumentor(BaseInstrumentor):
+class MCPInstrumentor(BaseInstrumentor):  # pylint: disable=attribute-defined-outside-init
     """
     An instrumenter for MCP.
     """
@@ -95,7 +95,7 @@ class MCPInstrumentor(BaseInstrumentor):
         else:
             return await wrapped(*args, **kwargs)
 
-    def _inject_trace_context(self, request_data, span_ctx):
+    def _inject_trace_context(self, request_data, span_ctx):  # pylint: disable=no-self-use
         if "params" not in request_data:
             request_data["params"] = {}
         if "_meta" not in request_data["params"]:
@@ -106,7 +106,7 @@ class MCPInstrumentor(BaseInstrumentor):
         traceparent = f"00-{trace_id_hex}-{span_id_hex}-{trace_flags}"
         request_data["params"]["_meta"]["traceparent"] = traceparent
 
-    def _extract_span_context_from_traceparent(self, traceparent):
+    def _extract_span_context_from_traceparent(self, traceparent):  # pylint: disable=no-self-use
         parts = traceparent.split("-")
         if len(parts) == 4:
             try:
@@ -123,9 +123,9 @@ class MCPInstrumentor(BaseInstrumentor):
                 return None
         return None
 
-    def _get_span_name(self, req):
+    def _get_span_name(self, req):  # pylint: disable=no-self-use
         span_name = "unknown"
-        import mcp.types as types
+        import mcp.types as types  # pylint: disable=import-outside-toplevel
 
         if isinstance(req, types.ListToolsRequest):
             span_name = "tools/list"
@@ -137,7 +137,7 @@ class MCPInstrumentor(BaseInstrumentor):
         return span_name
 
     def handle_attributes(self, span, request, is_client=True):
-        import mcp.types as types
+        import mcp.types as types  # pylint: disable=import-outside-toplevel
 
         operation = self._get_span_name(request)
         if isinstance(request, types.ListToolsRequest):
@@ -152,13 +152,13 @@ class MCPInstrumentor(BaseInstrumentor):
         else:
             self._add_server_attributes(span, operation, request)
 
-    def _add_client_attributes(self, span, operation, request):
+    def _add_client_attributes(self, span, operation, request):  # pylint: disable=no-self-use
         span.set_attribute("aws.remote.service", "Appsignals MCP Server")
         span.set_attribute("aws.remote.operation", operation)
         if hasattr(request, "params") and hasattr(request.params, "name"):
             span.set_attribute("tool.name", request.params.name)
 
-    def _add_server_attributes(self, span, operation, request):
+    def _add_server_attributes(self, span, operation, request):  # pylint: disable=no-self-use
         span.set_attribute("server_side", True)
         if hasattr(request, "params") and hasattr(request.params, "name"):
             span.set_attribute("tool.name", request.params.name)
