@@ -257,6 +257,7 @@ def _apply_botocore_bedrock_patch() -> None:
     old_init = bedrock_utils.ConverseStreamWrapper.__init__
     old_process_event = bedrock_utils.ConverseStreamWrapper._process_event
 
+    # The OpenTelemetry Authors code
     def patched_init(self, *args, **kwargs):
         old_init(self, *args, **kwargs)
         self._tool_json_input_buf = ""
@@ -327,6 +328,8 @@ def _apply_botocore_bedrock_patch() -> None:
     bedrock_utils.ConverseStreamWrapper.__init__ = patched_init
     bedrock_utils.ConverseStreamWrapper._process_event = patched_process_event
     bedrock_utils.extract_tool_calls = patched_extract_tool_calls
+
+    # END The OpenTelemetry Authors code
 
 
 def _apply_botocore_dynamodb_patch() -> None:
