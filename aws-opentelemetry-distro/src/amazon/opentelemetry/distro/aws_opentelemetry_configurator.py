@@ -805,6 +805,7 @@ def _create_emf_exporter():
         if _is_lambda_environment() and not log_header_setting.is_valid():
             # pylint: disable=import-outside-toplevel
             from amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter import ConsoleEmfExporter
+
             return ConsoleEmfExporter(namespace=log_header_setting.namespace)
 
         # For non-Lambda environment or Lambda with valid headers - use CloudWatch EMF exporter

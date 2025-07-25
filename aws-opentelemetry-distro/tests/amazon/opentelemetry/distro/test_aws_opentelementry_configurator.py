@@ -508,6 +508,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             bad_configs.append(config)
 
         for config in good_configs:
+            _clear_logs_header_cache()
             self.customize_exporter_test(
                 config,
                 _customize_span_exporter,
@@ -519,6 +520,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             )
 
         for config in bad_configs:
+            _clear_logs_header_cache()
             self.customize_exporter_test(
                 config,
                 _customize_span_exporter,
@@ -616,6 +618,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             bad_configs.append(config)
 
         for config in good_configs:
+            _clear_logs_header_cache()
             self.customize_exporter_test(
                 config,
                 _customize_logs_exporter,
@@ -626,6 +629,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             )
 
         for config in bad_configs:
+            _clear_logs_header_cache()
             self.customize_exporter_test(
                 config, _customize_logs_exporter, OTLPLogExporter(), OTLPLogExporter, Session, Compression.NoCompression
             )

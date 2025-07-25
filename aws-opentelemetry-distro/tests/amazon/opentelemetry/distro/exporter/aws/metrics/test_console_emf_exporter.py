@@ -35,13 +35,10 @@ class TestConsoleEmfExporter(unittest.TestCase):
             '"Dimensions":[["Service"]],"Metrics":[{"Name":"TestMetric","Unit":"Count"}]}]},'
             '"Service":"test-service","TestMetric":42}'
         )
-        log_event = {
-            "message": test_message,
-            "timestamp": 1640995200000
-        }
+        log_event = {"message": test_message, "timestamp": 1640995200000}
 
         # Capture stdout to verify the output
-        with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+        with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
             exporter._export(log_event)
 
         # Verify the message was printed to stdout
