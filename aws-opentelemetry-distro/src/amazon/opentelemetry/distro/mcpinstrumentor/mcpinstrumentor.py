@@ -29,7 +29,7 @@ class MCPInstrumentor(BaseInstrumentor):
     An instrumenter for MCP.
     """
 
-    def __init__(self): # pylint: disable=no-self-use
+    def __init__(self):  # pylint: disable=no-self-use
         super().__init__()
         self.tracer = None
 
@@ -140,7 +140,7 @@ class MCPInstrumentor(BaseInstrumentor):
                 span_name = "unknown"
         return span_name
 
-    def handle_attributes(self, span, request, is_client=True): # pylint: disable=no-self-use
+    def handle_attributes(self, span, request, is_client=True):  # pylint: disable=no-self-use
         import mcp.types as types  # pylint: disable=import-outside-toplevel,consider-using-from-import
 
         operation = self._get_span_name(request)
@@ -170,7 +170,7 @@ class MCPInstrumentor(BaseInstrumentor):
     def instrumentation_dependencies(self) -> Collection[str]:  # pylint: disable=no-self-use
         return _instruments
 
-    def _instrument(self, **kwargs: Any) -> None:   # pylint: disable=no-self-use
+    def _instrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
         tracer_provider = kwargs.get("tracer_provider")
         if tracer_provider:
             self.tracer = tracer_provider.get_tracer("mcp")
@@ -193,6 +193,6 @@ class MCPInstrumentor(BaseInstrumentor):
             "mcp.server.lowlevel.server",
         )
 
-    def _uninstrument(self, **kwargs: Any) -> None: # pylint: disable=no-self-use
+    def _uninstrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
         unwrap("mcp.shared.session", "BaseSession.send_request")
         unwrap("mcp.server.lowlevel.server", "Server._handle_request")

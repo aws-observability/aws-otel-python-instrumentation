@@ -31,11 +31,11 @@ class SimpleSpanContext:
 class SimpleTracerProvider:
     """Simple mock tracer provider without using MagicMock"""
 
-    def __init__(self): # pylint: disable=no-self-use
+    def __init__(self):  # pylint: disable=no-self-use
         self.get_tracer_called = False
         self.tracer_name = None
 
-    def get_tracer(self, name): # pylint: disable=no-self-use
+    def get_tracer(self, name):  # pylint: disable=no-self-use
         self.get_tracer_called = True
         self.tracer_name = name
         return "mock_tracer_from_provider"
@@ -44,10 +44,10 @@ class SimpleTracerProvider:
 class TestInjectTraceContext(unittest.TestCase):
     """Test the _inject_trace_context method"""
 
-    def setUp(self):    # pylint: disable=no-self-use
+    def setUp(self):  # pylint: disable=no-self-use
         self.instrumentor = MCPInstrumentor()
 
-    def test_inject_trace_context_empty_dict(self): # pylint: disable=no-self-use
+    def test_inject_trace_context_empty_dict(self):  # pylint: disable=no-self-use
         """Test injecting trace context into empty dictionary"""
         # Setup
         request_data = {}
@@ -70,7 +70,7 @@ class TestInjectTraceContext(unittest.TestCase):
         self.assertEqual(int(parts[1], 16), 12345)  # trace_id
         self.assertEqual(int(parts[2], 16), 67890)  # span_id
 
-    def test_inject_trace_context_existing_params(self):    # pylint: disable=no-self-use
+    def test_inject_trace_context_existing_params(self):  # pylint: disable=no-self-use
         """Test injecting trace context when params already exist"""
         # Setup
         request_data = {"params": {"existing_field": "test_value"}}
@@ -94,13 +94,13 @@ class TestInjectTraceContext(unittest.TestCase):
 class TestTracerProvider(unittest.TestCase):
     """Test the tracer provider kwargs logic in _instrument method"""
 
-    def setUp(self):    # pylint: disable=no-self-use
+    def setUp(self):  # pylint: disable=no-self-use
         self.instrumentor = MCPInstrumentor()
         # Reset tracer to ensure test isolation
         if hasattr(self.instrumentor, "tracer"):
             delattr(self.instrumentor, "tracer")
 
-    def test_instrument_without_tracer_provider_kwargs(self):   # pylint: disable=no-self-use
+    def test_instrument_without_tracer_provider_kwargs(self):  # pylint: disable=no-self-use
         """Test _instrument method when no tracer_provider in kwargs - should use default tracer"""
         # Execute - Actually test the mcpinstrumentor method
         with unittest.mock.patch("opentelemetry.trace.get_tracer") as mock_get_tracer:
@@ -130,10 +130,10 @@ class TestTracerProvider(unittest.TestCase):
 class TestInstrumentationDependencies(unittest.TestCase):
     """Test the instrumentation_dependencies method"""
 
-    def setUp(self):    # pylint: disable=no-self-use
+    def setUp(self):  # pylint: disable=no-self-use
         self.instrumentor = MCPInstrumentor()
 
-    def test_instrumentation_dependencies(self):    # pylint: disable=no-self-use
+    def test_instrumentation_dependencies(self):  # pylint: disable=no-self-use
         """Test that instrumentation_dependencies method returns the expected dependencies"""
         # Execute - Actually test the mcpinstrumentor method
         dependencies = self.instrumentor.instrumentation_dependencies()
@@ -147,7 +147,7 @@ class TestInstrumentationDependencies(unittest.TestCase):
 class TestTraceContextInjection(unittest.TestCase):
     """Test trace context injection using actual mcpinstrumentor methods"""
 
-    def setUp(self):    # pylint: disable=no-self-use
+    def setUp(self):  # pylint: disable=no-self-use
         self.instrumentor = MCPInstrumentor()
 
     def test_trace_context_injection_with_realistic_request(self):  # pylint: disable=no-self-use
@@ -159,7 +159,7 @@ class TestTraceContextInjection(unittest.TestCase):
                 self.root = self
                 self.params = CallToolParams(tool_name, arguments)
 
-            def model_dump(self, by_alias=True, mode="json", exclude_none=True):    # pylint: disable=no-self-use
+            def model_dump(self, by_alias=True, mode="json", exclude_none=True):  # pylint: disable=no-self-use
                 result = {"method": "call_tool", "params": {"name": self.params.name}}
                 if self.params.arguments:
                     result["params"]["arguments"] = self.params.arguments
@@ -177,7 +177,7 @@ class TestTraceContextInjection(unittest.TestCase):
                 return instance
 
         class CallToolParams:
-            def __init__(self, name, arguments=None):   # pylint: disable=no-self-use
+            def __init__(self, name, arguments=None):  # pylint: disable=no-self-use
                 self.name = name
                 self.arguments = arguments
                 self._meta = None  # Will hold trace context
@@ -214,7 +214,7 @@ class TestTraceContextInjection(unittest.TestCase):
 class TestInstrumentedMCPServer(unittest.TestCase):
     """Test mcpinstrumentor with a mock MCP server to verify end-to-end functionality"""
 
-    def setUp(self):    # pylint: disable=no-self-use
+    def setUp(self):  # pylint: disable=no-self-use
         self.instrumentor = MCPInstrumentor()
         # Initialize tracer so the instrumentor can work
         mock_tracer = MagicMock()
@@ -224,15 +224,15 @@ class TestInstrumentedMCPServer(unittest.TestCase):
         """Test graceful handling when no trace context is present on server side"""
 
         class MockServerNoTrace:
-            async def _handle_request(self, session, request): # pylint: disable=no-self-use
+            async def _handle_request(self, session, request):  # pylint: disable=no-self-use
                 return {"success": True, "handled_without_trace": True}
 
         class MockServerRequestNoTrace:
-            def __init__(self, tool_name): # pylint: disable=no-self-use
+            def __init__(self, tool_name):  # pylint: disable=no-self-use
                 self.params = MockServerRequestParamsNoTrace(tool_name)
 
         class MockServerRequestParamsNoTrace:
-            def __init__(self, name): # pylint: disable=no-self-use
+            def __init__(self, name):  # pylint: disable=no-self-use
                 self.name = name
                 self.meta = None  # No trace context
 
@@ -274,7 +274,7 @@ class TestInstrumentedMCPServer(unittest.TestCase):
                 self.params = MCPRequestParams(tool_name, arguments)
                 self.method = method
 
-            def model_dump(self, by_alias=True, mode="json", exclude_none=True):    # pylint: disable=no-self-use
+            def model_dump(self, by_alias=True, mode="json", exclude_none=True):  # pylint: disable=no-self-use
                 result = {"method": self.method, "params": {"name": self.params.name}}
                 if self.params.arguments:
                     result["params"]["arguments"] = self.params.arguments
@@ -293,19 +293,19 @@ class TestInstrumentedMCPServer(unittest.TestCase):
                 return instance
 
         class MCPRequestParams:
-            def __init__(self, name, arguments=None):   # pylint: disable=no-self-use
+            def __init__(self, name, arguments=None):  # pylint: disable=no-self-use
                 self.name = name
                 self.arguments = arguments
                 self._meta = None
 
         class MCPServerRequest:
-            def __init__(self, client_request_data):    # pylint: disable=no-self-use
+            def __init__(self, client_request_data):  # pylint: disable=no-self-use
                 """Server request created from client's serialized data"""
                 self.method = client_request_data.get("method", "call_tool")
                 self.params = MCPServerRequestParams(client_request_data["params"])
 
         class MCPServerRequestParams:
-            def __init__(self, params_data):    # pylint: disable=no-self-use
+            def __init__(self, params_data):  # pylint: disable=no-self-use
                 self.name = params_data["name"]
                 self.arguments = params_data.get("arguments")
                 # Extract traceparent from _meta if present
@@ -315,16 +315,16 @@ class TestInstrumentedMCPServer(unittest.TestCase):
                     self.meta = None
 
         class MCPServerRequestMeta:
-            def __init__(self, traceparent):    # pylint: disable=no-self-use
+            def __init__(self, traceparent):  # pylint: disable=no-self-use
                 self.traceparent = traceparent
 
         # Mock client and server that actually communicate
         class EndToEndMCPSystem:
-            def __init__(self): # pylint: disable=no-self-use
+            def __init__(self):  # pylint: disable=no-self-use
                 self.communication_log = []
                 self.last_sent_request = None
 
-            async def client_send_request(self, request):   # pylint: disable=no-self-use
+            async def client_send_request(self, request):  # pylint: disable=no-self-use
                 """Client sends request - captures what gets sent"""
                 self.communication_log.append("CLIENT: Preparing to send request")
                 self.last_sent_request = request  # Capture the modified request
@@ -336,7 +336,7 @@ class TestInstrumentedMCPServer(unittest.TestCase):
                 # Return client response
                 return {"success": True, "client_response": "Request sent successfully"}
 
-            async def server_handle_request(self, session, server_request): # pylint: disable=no-self-use
+            async def server_handle_request(self, session, server_request):  # pylint: disable=no-self-use
                 """Server handles the request it received"""
                 self.communication_log.append(f"SERVER: Received request for {server_request.params.name}")
 
