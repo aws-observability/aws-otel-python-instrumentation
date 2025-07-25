@@ -4,7 +4,6 @@
 # pylint: disable=no-self-use
 
 import logging
-import sys
 from typing import Any, Dict, Optional
 
 from opentelemetry.sdk.metrics.export import AggregationTemporality
@@ -47,9 +46,9 @@ class ConsoleEmfExporter(BaseEmfExporter):
             namespace = "default"
         super().__init__(namespace, preferred_temporality, preferred_aggregation)
 
-    def _send_log_event(self, log_event: Dict[str, Any]) -> None:
+    def _export(self, log_event: Dict[str, Any]) -> None:
         """
-        Send a log event to stdout for console output.
+        Send a log event message to stdout for console output.
 
         This method writes the EMF log message to stdout, making it easy to
         capture and redirect the output for processing or debugging purposes.
@@ -57,7 +56,7 @@ class ConsoleEmfExporter(BaseEmfExporter):
         Args:
             log_event: The log event dictionary containing 'message' and 'timestamp'
                       keys, where 'message' is the JSON-serialized EMF log
-        
+
         Raises:
             No exceptions are raised - errors are logged and handled gracefully
         """
@@ -68,10 +67,8 @@ class ConsoleEmfExporter(BaseEmfExporter):
                 print(message, flush=True)
             else:
                 logger.warning("Empty message in log event: %s", log_event)
-        except (KeyError, TypeError) as e:
-            logger.error("Invalid log event format: %s. Error: %s", log_event, e)
-        except Exception as e:
-            logger.error("Failed to write EMF log to console: %s", e)
+        except Exception as error:  # pylint: disable=broad-exception-caught
+            logger.error("Failed to write EMF log to console. Log event: %s. Error: %s", log_event, error)
 
     def force_flush(self, timeout_millis: int = 10000) -> bool:
         """

@@ -66,7 +66,7 @@ class BaseEmfExporter(MetricExporter, ABC):
     Base class for OpenTelemetry metrics exporters that convert to CloudWatch EMF format.
 
     This class contains all the common logic for converting OTel metrics into CloudWatch EMF logs.
-    Subclasses need to implement the _send_log_event method to define where the EMF logs are sent.
+    Subclasses need to implement the _export method to define where the EMF logs are sent.
 
     https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Embedded_Metric_Format_Specification.html
 
@@ -504,7 +504,7 @@ class BaseEmfExporter(MetricExporter, ABC):
         return emf_log
 
     @abstractmethod
-    def _send_log_event(self, log_event: Dict[str, Any]):
+    def _export(self, log_event: Dict[str, Any]):
         """
         Send a log event to the destination (CloudWatch Logs, console, etc.).
 
@@ -513,7 +513,6 @@ class BaseEmfExporter(MetricExporter, ABC):
         Args:
             log_event: The log event to send
         """
-        pass
 
     # pylint: disable=too-many-nested-blocks,unused-argument,too-many-branches
     def export(
@@ -580,7 +579,7 @@ class BaseEmfExporter(MetricExporter, ABC):
                             len(metric_records),
                             timestamp_ms,
                         )
-                        self._send_log_event(
+                        self._export(
                             {
                                 "message": json.dumps(
                                     self._create_emf_log(metric_records, resource_metrics.resource, timestamp_ms)

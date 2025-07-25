@@ -57,7 +57,7 @@ class AwsCloudWatchEmfExporter(BaseEmfExporter):
             log_group_name=log_group_name, log_stream_name=log_stream_name, aws_region=aws_region, **kwargs
         )
 
-    def _send_log_event(self, log_event: Dict[str, Any]):
+    def _export(self, log_event: Dict[str, Any]):
         """
         Send a log event to CloudWatch Logs using the log client.
 
