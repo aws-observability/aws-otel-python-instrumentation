@@ -43,25 +43,17 @@ class TestConsoleEmfExporter(unittest.TestCase):
         """Test exporter initialization with optional parameters."""
         # Test with preferred_temporality
         preferred_temporality = {Counter: AggregationTemporality.CUMULATIVE}
-        exporter = ConsoleEmfExporter(
-            namespace="TestNamespace",
-            preferred_temporality=preferred_temporality
-        )
+        exporter = ConsoleEmfExporter(namespace="TestNamespace", preferred_temporality=preferred_temporality)
         self.assertEqual(exporter.namespace, "TestNamespace")
         self.assertEqual(exporter._preferred_temporality[Counter], AggregationTemporality.CUMULATIVE)
 
         # Test with preferred_aggregation
         preferred_aggregation = {Counter: "TestAggregation"}
-        exporter = ConsoleEmfExporter(
-            preferred_aggregation=preferred_aggregation
-        )
+        exporter = ConsoleEmfExporter(preferred_aggregation=preferred_aggregation)
         self.assertEqual(exporter._preferred_aggregation[Counter], "TestAggregation")
 
         # Test with additional kwargs
-        exporter = ConsoleEmfExporter(
-            namespace="TestNamespace",
-            extra_param="ignored"  # Should be ignored
-        )
+        exporter = ConsoleEmfExporter(namespace="TestNamespace", extra_param="ignored")  # Should be ignored
         self.assertEqual(exporter.namespace, "TestNamespace")
 
     def test_export_log_event_success(self):
@@ -93,7 +85,7 @@ class TestConsoleEmfExporter(unittest.TestCase):
         # Should not print anything for empty message
         captured_output = mock_stdout.getvalue().strip()
         self.assertEqual(captured_output, "")
-        
+
         # Should log a warning
         mock_logger.warning.assert_called_once()
 
@@ -108,7 +100,7 @@ class TestConsoleEmfExporter(unittest.TestCase):
         # Should not print anything when message is missing
         captured_output = mock_stdout.getvalue().strip()
         self.assertEqual(captured_output, "")
-        
+
         # Should log a warning
         mock_logger.warning.assert_called_once()
 
@@ -123,7 +115,7 @@ class TestConsoleEmfExporter(unittest.TestCase):
         # Should not print anything when message is None
         captured_output = mock_stdout.getvalue().strip()
         self.assertEqual(captured_output, "")
-        
+
         # Should log a warning
         mock_logger.warning.assert_called_once()
 
@@ -147,20 +139,20 @@ class TestConsoleEmfExporter(unittest.TestCase):
         # Test with JSON string
         json_message = '{"key": "value"}'
         log_event = {"message": json_message, "timestamp": 1640995200000}
-        
+
         with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
             self.exporter._export(log_event)
-        
+
         captured_output = mock_stdout.getvalue().strip()
         self.assertEqual(captured_output, json_message)
 
         # Test with plain string
         plain_message = "Simple log message"
         log_event = {"message": plain_message, "timestamp": 1640995200000}
-        
+
         with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
             self.exporter._export(log_event)
-        
+
         captured_output = mock_stdout.getvalue().strip()
         self.assertEqual(captured_output, plain_message)
 
@@ -171,10 +163,10 @@ class TestConsoleEmfExporter(unittest.TestCase):
             result = self.exporter.force_flush()
             self.assertTrue(result)
             mock_logger.debug.assert_called_once()
-            
+
             # Reset mock for next call
             mock_logger.reset_mock()
-            
+
             # Test with custom timeout
             result = self.exporter.force_flush(timeout_millis=5000)
             self.assertTrue(result)
@@ -186,23 +178,19 @@ class TestConsoleEmfExporter(unittest.TestCase):
             # Test with no timeout
             result = self.exporter.shutdown()
             self.assertTrue(result)
-            mock_logger.debug.assert_called_once_with(
-                "ConsoleEmfExporter shutdown called with timeout_millis=%s", None
-            )
-            
+            mock_logger.debug.assert_called_once_with("ConsoleEmfExporter shutdown called with timeout_millis=%s", None)
+
             # Reset mock for next call
             mock_logger.reset_mock()
-            
+
             # Test with timeout
             result = self.exporter.shutdown(timeout_millis=3000)
             self.assertTrue(result)
-            mock_logger.debug.assert_called_once_with(
-                "ConsoleEmfExporter shutdown called with timeout_millis=%s", 3000
-            )
-            
+            mock_logger.debug.assert_called_once_with("ConsoleEmfExporter shutdown called with timeout_millis=%s", 3000)
+
             # Reset mock for next call
             mock_logger.reset_mock()
-            
+
             # Test with additional kwargs
             result = self.exporter.shutdown(timeout_millis=3000, extra_arg="ignored")
             self.assertTrue(result)
@@ -215,20 +203,21 @@ class TestConsoleEmfExporter(unittest.TestCase):
         mock_resource_metrics = MagicMock()
         mock_scope_metrics = MagicMock()
         mock_metric = MagicMock()
-        
+
         # Set up the mock hierarchy
         mock_metrics_data.resource_metrics = [mock_resource_metrics]
         mock_resource_metrics.scope_metrics = [mock_scope_metrics]
         mock_scope_metrics.metrics = [mock_metric]
-        
+
         # Mock the metric to have no data_points to avoid complex setup
         mock_metric.data = None
-        
+
         with patch("sys.stdout", new_callable=StringIO):
             result = self.exporter.export(mock_metrics_data)
-        
+
         # Should succeed even with no actual metrics
         from opentelemetry.sdk.metrics.export import MetricExportResult
+
         self.assertEqual(result, MetricExportResult.SUCCESS)
 
     def test_integration_export_success(self):
@@ -236,8 +225,9 @@ class TestConsoleEmfExporter(unittest.TestCase):
         # Create empty MetricsData
         mock_metrics_data = MagicMock(spec=MetricsData)
         mock_metrics_data.resource_metrics = []
-        
+
         from opentelemetry.sdk.metrics.export import MetricExportResult
+
         result = self.exporter.export(mock_metrics_data)
         self.assertEqual(result, MetricExportResult.SUCCESS)
 
@@ -245,8 +235,9 @@ class TestConsoleEmfExporter(unittest.TestCase):
         """Test export method with timeout parameter."""
         mock_metrics_data = MagicMock(spec=MetricsData)
         mock_metrics_data.resource_metrics = []
-        
+
         from opentelemetry.sdk.metrics.export import MetricExportResult
+
         result = self.exporter.export(mock_metrics_data, timeout_millis=5000)
         self.assertEqual(result, MetricExportResult.SUCCESS)
 
@@ -255,17 +246,18 @@ class TestConsoleEmfExporter(unittest.TestCase):
         # Create a mock that raises an exception
         mock_metrics_data = MagicMock(spec=MetricsData)
         mock_metrics_data.resource_metrics = [MagicMock()]
-        
+
         # Make the resource_metrics access raise an exception
         type(mock_metrics_data).resource_metrics = property(
             lambda self: (_ for _ in ()).throw(Exception("Test exception"))
         )
-        
+
         # Patch the logger in the base_emf_exporter since that's where the error logging happens
         with patch("amazon.opentelemetry.distro.exporter.aws.metrics.base_emf_exporter.logger") as mock_logger:
             from opentelemetry.sdk.metrics.export import MetricExportResult
+
             result = self.exporter.export(mock_metrics_data)
-            
+
             self.assertEqual(result, MetricExportResult.FAILURE)
             mock_logger.error.assert_called_once()
             self.assertIn("Failed to export metrics", mock_logger.error.call_args[0][0])
@@ -273,10 +265,10 @@ class TestConsoleEmfExporter(unittest.TestCase):
     def test_flush_output_verification(self):
         """Test that print is called with flush=True."""
         log_event = {"message": "test message", "timestamp": 1640995200000}
-        
+
         with patch("builtins.print") as mock_print:
             self.exporter._export(log_event)
-        
+
         # Verify print was called with flush=True
         mock_print.assert_called_once_with("test message", flush=True)
 
@@ -286,17 +278,17 @@ class TestConsoleEmfExporter(unittest.TestCase):
         with patch("amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter.logger") as mock_logger:
             self.exporter.force_flush()
             mock_logger.debug.assert_called_once()
-            
-        # Test debug logging in shutdown  
+
+        # Test debug logging in shutdown
         with patch("amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter.logger") as mock_logger:
             self.exporter.shutdown()
             mock_logger.debug.assert_called_once()
-            
+
         # Test warning logging for empty message
         with patch("amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter.logger") as mock_logger:
             self.exporter._export({"message": "", "timestamp": 123})
             mock_logger.warning.assert_called_once()
-            
+
         # Test error logging for exception
         with patch("builtins.print", side_effect=Exception("Test")):
             with patch("amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter.logger") as mock_logger:

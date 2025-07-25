@@ -1188,39 +1188,199 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
-    def test_create_emf_exporter_lambda_with_invalid_headers(self, mock_is_lambda, mock_validate_headers):
-        """Test _create_emf_exporter in Lambda environment with invalid log headers - should use Console EMF exporter"""
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
+    def test_create_emf_exporter_lambda_without_valid_headers(
+        self, mock_get_session, mock_is_lambda, mock_fetch_headers
+    ):
+        """Test _create_emf_exporter returns ConsoleEmfExporter for Lambda without valid log headers"""
+        # Setup mocks
         mock_is_lambda.return_value = True
-        mock_validate_headers.return_value = OtlpLogHeaderSetting(None, None, "test-namespace")
+        mock_header_setting = MagicMock()
+        mock_header_setting.is_valid.return_value = False
+        mock_header_setting.namespace = "test-namespace"
+        mock_fetch_headers.return_value = mock_header_setting
 
         with patch(
             "amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter.ConsoleEmfExporter"
-        ) as mock_console_exporter_class:
-            mock_console_exporter = MagicMock()
-            mock_console_exporter_class.return_value = mock_console_exporter
+        ) as mock_console_exporter:
+            mock_exporter_instance = MagicMock()
+            mock_console_exporter.return_value = mock_exporter_instance
 
             result = _create_emf_exporter()
 
-            self.assertEqual(result, mock_console_exporter)
-            mock_console_exporter_class.assert_called_once_with(namespace="test-namespace")
+            self.assertEqual(result, mock_exporter_instance)
+            mock_console_exporter.assert_called_once_with(namespace="test-namespace")
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
-    def test_create_emf_exporter_lambda_with_invalid_headers_no_namespace(self, mock_is_lambda, mock_validate_headers):
-        """Test _create_emf_exporter in Lambda environment with invalid log headers and no namespace"""
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
+    def test_create_emf_exporter_lambda_with_valid_headers(self, mock_get_session, mock_is_lambda, mock_fetch_headers):
+        """Test _create_emf_exporter returns AwsCloudWatchEmfExporter for Lambda with valid headers"""
+        # Setup mocks
         mock_is_lambda.return_value = True
-        mock_validate_headers.return_value = OtlpLogHeaderSetting(None, None, None)
+        mock_session = MagicMock()
+        mock_get_session.return_value = mock_session
+
+        mock_header_setting = MagicMock()
+        mock_header_setting.is_valid.return_value = True
+        mock_header_setting.namespace = "test-namespace"
+        mock_header_setting.log_group = "test-group"
+        mock_header_setting.log_stream = "test-stream"
+        mock_fetch_headers.return_value = mock_header_setting
 
         with patch(
-            "amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter.ConsoleEmfExporter"
-        ) as mock_console_exporter_class:
-            mock_console_exporter = MagicMock()
-            mock_console_exporter_class.return_value = mock_console_exporter
+            "amazon.opentelemetry.distro.exporter.aws.metrics.aws_cloudwatch_emf_exporter.AwsCloudWatchEmfExporter"
+        ) as mock_cloudwatch_exporter:
+            mock_exporter_instance = MagicMock()
+            mock_cloudwatch_exporter.return_value = mock_exporter_instance
 
             result = _create_emf_exporter()
 
-            self.assertEqual(result, mock_console_exporter)
-            mock_console_exporter_class.assert_called_once_with(namespace=None)
+            self.assertEqual(result, mock_exporter_instance)
+            mock_cloudwatch_exporter.assert_called_once_with(
+                session=mock_session,
+                namespace="test-namespace",
+                log_group_name="test-group",
+                log_stream_name="test-stream",
+            )
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
+    def test_create_emf_exporter_non_lambda_with_valid_headers(
+        self, mock_get_session, mock_is_lambda, mock_fetch_headers
+    ):
+        """Test _create_emf_exporter returns AwsCloudWatchEmfExporter for non-Lambda with valid headers"""
+        # Setup mocks
+        mock_is_lambda.return_value = False
+        mock_session = MagicMock()
+        mock_get_session.return_value = mock_session
+
+        mock_header_setting = MagicMock()
+        mock_header_setting.is_valid.return_value = True
+        mock_header_setting.namespace = "test-namespace"
+        mock_header_setting.log_group = "test-group"
+        mock_header_setting.log_stream = "test-stream"
+        mock_fetch_headers.return_value = mock_header_setting
+
+        with patch(
+            "amazon.opentelemetry.distro.exporter.aws.metrics.aws_cloudwatch_emf_exporter.AwsCloudWatchEmfExporter"
+        ) as mock_cloudwatch_exporter:
+            mock_exporter_instance = MagicMock()
+            mock_cloudwatch_exporter.return_value = mock_exporter_instance
+
+            result = _create_emf_exporter()
+
+            self.assertEqual(result, mock_exporter_instance)
+            mock_cloudwatch_exporter.assert_called_once_with(
+                session=mock_session,
+                namespace="test-namespace",
+                log_group_name="test-group",
+                log_stream_name="test-stream",
+            )
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
+    def test_create_emf_exporter_non_lambda_without_valid_headers(
+        self, mock_get_session, mock_is_lambda, mock_fetch_headers
+    ):
+        """Test _create_emf_exporter returns None for non-Lambda without valid headers"""
+        # Setup mocks
+        mock_is_lambda.return_value = False
+        mock_session = MagicMock()
+        mock_get_session.return_value = mock_session
+
+        mock_header_setting = MagicMock()
+        mock_header_setting.is_valid.return_value = False
+        mock_fetch_headers.return_value = mock_header_setting
+
+        result = _create_emf_exporter()
+
+        self.assertIsNone(result)
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._logger")
+    def test_create_emf_exporter_no_botocore_session(
+        self, mock_logger, mock_get_session, mock_is_lambda, mock_fetch_headers
+    ):
+        """Test _create_emf_exporter returns None when botocore session is not available"""
+        # Setup mocks
+        mock_is_lambda.return_value = False
+        mock_get_session.return_value = None  # Simulate missing botocore
+
+        mock_header_setting = MagicMock()
+        mock_header_setting.is_valid.return_value = True
+        mock_fetch_headers.return_value = mock_header_setting
+
+        result = _create_emf_exporter()
+
+        self.assertIsNone(result)
+        mock_logger.warning.assert_called_once_with("botocore is not installed. EMF exporter requires botocore")
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._logger")
+    def test_create_emf_exporter_exception_handling(self, mock_logger, mock_fetch_headers):
+        """Test _create_emf_exporter handles exceptions gracefully"""
+        # Setup mocks to raise exception
+        test_exception = Exception("Test exception")
+        mock_fetch_headers.side_effect = test_exception
+
+        result = _create_emf_exporter()
+
+        self.assertIsNone(result)
+        mock_logger.error.assert_called_once_with("Failed to create EMF exporter: %s", test_exception)
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
+    def test_create_emf_exporter_lambda_without_valid_headers_none_namespace(
+        self, mock_get_session, mock_is_lambda, mock_fetch_headers
+    ):
+        """Test _create_emf_exporter with Lambda environment and None namespace"""
+        # Setup mocks
+        mock_is_lambda.return_value = True
+        mock_header_setting = MagicMock()
+        mock_header_setting.is_valid.return_value = False
+        mock_header_setting.namespace = None
+        mock_fetch_headers.return_value = mock_header_setting
+
+        with patch(
+            "amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter.ConsoleEmfExporter"
+        ) as mock_console_exporter:
+            mock_exporter_instance = MagicMock()
+            mock_console_exporter.return_value = mock_exporter_instance
+
+            result = _create_emf_exporter()
+
+            self.assertEqual(result, mock_exporter_instance)
+            mock_console_exporter.assert_called_once_with(namespace=None)
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
+    def test_create_emf_exporter_cloudwatch_exporter_import_error(
+        self, mock_get_session, mock_is_lambda, mock_fetch_headers
+    ):
+        """Test _create_emf_exporter handles import errors for CloudWatch exporter"""
+        # Setup mocks
+        mock_is_lambda.return_value = False
+        mock_session = MagicMock()
+        mock_get_session.return_value = mock_session
+
+        mock_header_setting = MagicMock()
+        mock_header_setting.is_valid.return_value = True
+        mock_fetch_headers.return_value = mock_header_setting
+
+        # Mock import to raise ImportError
+        with patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._logger") as mock_logger:
+            with patch("builtins.__import__", side_effect=ImportError("Cannot import CloudWatch exporter")):
+                result = _create_emf_exporter()
+
+                self.assertIsNone(result)
+                mock_logger.error.assert_called_once()
 
 
 def validate_distro_environ():
