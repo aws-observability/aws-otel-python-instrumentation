@@ -29,12 +29,12 @@ class MCPInstrumentor(BaseInstrumentor):
     An instrumenter for MCP.
     """
 
-    def __init__(self):
+    def __init__(self): # pylint: disable=no-self-use
         super().__init__()
         self.tracer = None
 
     # Send Request Wrapper
-    def _wrap_send_request(self, wrapped, instance, args, kwargs):
+    def _wrap_send_request(self, wrapped, instance, args, kwargs):  # pylint: disable=no-self-use
         """
         Changes made:
             The wrapper intercepts the request before sending, injects distributed tracing context into the
@@ -43,7 +43,7 @@ class MCPInstrumentor(BaseInstrumentor):
             type and calling the original function with identical parameters.
         """
 
-        async def async_wrapper():
+        async def async_wrapper():  # pylint: disable=no-self-use
             with self.tracer.start_as_current_span("client.send_request", kind=trace.SpanKind.CLIENT) as span:
                 span_ctx = span.get_span_context()
                 request = args[0] if len(args) > 0 else kwargs.get("request")
@@ -68,7 +68,7 @@ class MCPInstrumentor(BaseInstrumentor):
         return async_wrapper()
 
     # Handle Request Wrapper
-    async def _wrap_handle_request(self, wrapped, instance, args, kwargs):
+    async def _wrap_handle_request(self, wrapped, instance, args, kwargs):  # pylint: disable=no-self-use
         """
         Changes made:
         This wrapper intercepts requests before processing, extracts distributed tracing context from
@@ -140,7 +140,7 @@ class MCPInstrumentor(BaseInstrumentor):
                 span_name = "unknown"
         return span_name
 
-    def handle_attributes(self, span, request, is_client=True):
+    def handle_attributes(self, span, request, is_client=True): # pylint: disable=no-self-use
         import mcp.types as types  # pylint: disable=import-outside-toplevel,consider-using-from-import
 
         operation = self._get_span_name(request)
@@ -167,10 +167,10 @@ class MCPInstrumentor(BaseInstrumentor):
         if hasattr(request, "params") and hasattr(request.params, "name"):
             span.set_attribute("tool.name", request.params.name)
 
-    def instrumentation_dependencies(self) -> Collection[str]:
+    def instrumentation_dependencies(self) -> Collection[str]:  # pylint: disable=no-self-use
         return _instruments
 
-    def _instrument(self, **kwargs: Any) -> None:
+    def _instrument(self, **kwargs: Any) -> None:   # pylint: disable=no-self-use
         tracer_provider = kwargs.get("tracer_provider")
         if tracer_provider:
             self.tracer = tracer_provider.get_tracer("mcp")
@@ -193,6 +193,6 @@ class MCPInstrumentor(BaseInstrumentor):
             "mcp.server.lowlevel.server",
         )
 
-    def _uninstrument(self, **kwargs: Any) -> None:
+    def _uninstrument(self, **kwargs: Any) -> None: # pylint: disable=no-self-use
         unwrap("mcp.shared.session", "BaseSession.send_request")
         unwrap("mcp.server.lowlevel.server", "Server._handle_request")
