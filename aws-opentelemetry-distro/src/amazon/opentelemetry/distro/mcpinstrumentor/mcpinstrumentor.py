@@ -10,13 +10,13 @@ from opentelemetry import trace
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.instrumentation.utils import unwrap
 
-from .package import _instruments
+_instruments = ("mcp >= 1.6.0",)
 
 
-def setup_logger_two():
-    logger = logging.getLogger("loggertwo")
+def setup_logger():
+    logger = logging.getLogger("logger")
     logger.setLevel(logging.DEBUG)
-    handler = logging.FileHandler("loggertwo.log", mode="w")
+    handler = logging.FileHandler("logger.log", mode="w")
     handler.setLevel(logging.DEBUG)
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     handler.setFormatter(formatter)
@@ -146,6 +146,9 @@ class MCPInstrumentor(BaseInstrumentor):
         elif isinstance(request, types.CallToolRequest):
             operation = request.params.name
             span.set_attribute("mcp.call_tool", True)
+        elif isinstance(request, types.InitializeRequest):
+            operation = "Initialize"
+            span.set_attribute("mcp.initialize", True)
         if is_client:
             self._add_client_attributes(span, operation, request)
         else:
@@ -191,13 +194,15 @@ class MCPInstrumentor(BaseInstrumentor):
             span_name = "tools/list"
         elif isinstance(req, types.CallToolRequest):
             span_name = f"tools/{req.params.name}"
+        elif isinstance(req, types.InitializeRequest):
+            span_name = "tools/initialize"
         return span_name
 
     @staticmethod
     def _add_client_attributes(span: trace.Span, operation: str, request: ClientRequest) -> None:
         import os  # pylint: disable=import-outside-toplevel
 
-        service_name = os.environ.get("MCP_SERVICE_NAME", "Generic MCP Server")
+        service_name = os.environ.get("MCP_INSTRUMENTATION_SERVER_NAME", "mcp server")
         span.set_attribute("aws.remote.service", service_name)
         span.set_attribute("aws.remote.operation", operation)
         if hasattr(request, "params") and request.params and hasattr(request.params, "name"):
