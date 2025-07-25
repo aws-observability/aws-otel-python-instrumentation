@@ -38,12 +38,12 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _customize_span_processors,
     _export_unsampled_span_for_agent_observability,
     _export_unsampled_span_for_lambda,
+    _fetch_logs_header,
     _init_logging,
     _is_application_signals_enabled,
     _is_application_signals_runtime_enabled,
     _is_defer_to_workers_enabled,
     _is_wsgi_master_process,
-    _fetch_logs_header,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
