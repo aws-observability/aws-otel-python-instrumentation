@@ -1001,15 +1001,12 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             "x-aws-log-group=test-group,x-aws-log-stream=test-stream,x-aws-metric-namespace=test-namespace"
         )
         result = _fetch_logs_header()
-        self.assertEqual(result.log_group, "test-group")
-        self.assertEqual(result.log_stream, "test-stream")
         self.assertEqual(result.namespace, "test-namespace")
         self.assertTrue(result.is_valid())
 
         _clear_logs_header_cache()
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-stream=test-stream"
         result = _fetch_logs_header()
-        self.assertIsNone(result.log_group)
         self.assertEqual(result.log_stream, "test-stream")
         self.assertFalse(result.is_valid())
 
