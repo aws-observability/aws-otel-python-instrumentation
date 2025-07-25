@@ -969,7 +969,6 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("OTEL_METRICS_EXPORTER", None)
 
     def test_fetch_logs_header(self):
-        # Clear cache before starting tests
         _clear_logs_header_cache()
 
         # Test when headers are not set
@@ -985,7 +984,6 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         result2 = _fetch_logs_header()
         self.assertIs(result, result2)  # Same object reference
 
-        # Clear cache and test with valid headers
         _clear_logs_header_cache()
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=test-group,x-aws-log-stream=test-stream"
         result = _fetch_logs_header()
@@ -998,7 +996,6 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         result2 = _fetch_logs_header()
         self.assertIs(result, result2)
 
-        # Clear cache and test with valid headers including namespace
         _clear_logs_header_cache()
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = (
             "x-aws-log-group=test-group,x-aws-log-stream=test-stream,x-aws-metric-namespace=test-namespace"
@@ -1009,7 +1006,6 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(result.namespace, "test-namespace")
         self.assertTrue(result.is_valid())
 
-        # Clear cache and test with missing log group
         _clear_logs_header_cache()
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-stream=test-stream"
         result = _fetch_logs_header()
@@ -1017,7 +1013,6 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(result.log_stream, "test-stream")
         self.assertFalse(result.is_valid())
 
-        # Clear cache and test with missing log stream
         _clear_logs_header_cache()
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=test-group"
         result = _fetch_logs_header()
@@ -1025,7 +1020,6 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertIsNone(result.log_stream)
         self.assertFalse(result.is_valid())
 
-        # Clear cache and test with empty value in log group
         _clear_logs_header_cache()
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=,x-aws-log-stream=test-stream"
         result = _fetch_logs_header()
@@ -1033,7 +1027,6 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(result.log_stream, "test-stream")
         self.assertFalse(result.is_valid())
 
-        # Clear cache and test with empty value in log stream
         _clear_logs_header_cache()
         os.environ[OTEL_EXPORTER_OTLP_LOGS_HEADERS] = "x-aws-log-group=test-group,x-aws-log-stream="
         result = _fetch_logs_header()

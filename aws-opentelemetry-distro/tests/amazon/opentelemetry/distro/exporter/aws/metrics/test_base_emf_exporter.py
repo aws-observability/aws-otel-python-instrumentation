@@ -20,11 +20,11 @@ class ConcreteEmfExporter(BaseEmfExporter):
         """Implementation that stores exported logs for testing."""
         self.exported_logs.append(log_event)
 
-    def force_flush(self, timeout_millis=None):
+    def force_flush(self, timeout_millis=None):  # pylint: disable=no-self-use
         """Force flush implementation for testing."""
         return True
 
-    def shutdown(self, timeout_millis=None):
+    def shutdown(self, timeout_millis=None):  # pylint: disable=no-self-use
         """Shutdown implementation for testing."""
         return True
 

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter import ConsoleEmfExporter
 from opentelemetry.sdk.metrics import Counter
-from opentelemetry.sdk.metrics.export import AggregationTemporality, MetricsData
+from opentelemetry.sdk.metrics.export import AggregationTemporality, MetricsData, MetricExportResult
 
 
 class TestConsoleEmfExporter(unittest.TestCase):
@@ -212,8 +212,6 @@ class TestConsoleEmfExporter(unittest.TestCase):
             result = self.exporter.export(mock_metrics_data)
 
         # Should succeed even with no actual metrics
-        from opentelemetry.sdk.metrics.export import MetricExportResult
-
         self.assertEqual(result, MetricExportResult.SUCCESS)
 
     def test_integration_export_success(self):
@@ -222,8 +220,6 @@ class TestConsoleEmfExporter(unittest.TestCase):
         mock_metrics_data = MagicMock(spec=MetricsData)
         mock_metrics_data.resource_metrics = []
 
-        from opentelemetry.sdk.metrics.export import MetricExportResult
-
         result = self.exporter.export(mock_metrics_data)
         self.assertEqual(result, MetricExportResult.SUCCESS)
 
@@ -231,8 +227,6 @@ class TestConsoleEmfExporter(unittest.TestCase):
         """Test export method with timeout parameter."""
         mock_metrics_data = MagicMock(spec=MetricsData)
         mock_metrics_data.resource_metrics = []
-
-        from opentelemetry.sdk.metrics.export import MetricExportResult
 
         result = self.exporter.export(mock_metrics_data, timeout_millis=5000)
         self.assertEqual(result, MetricExportResult.SUCCESS)
@@ -250,8 +244,6 @@ class TestConsoleEmfExporter(unittest.TestCase):
 
         # Patch the logger in the base_emf_exporter since that's where the error logging happens
         with patch("amazon.opentelemetry.distro.exporter.aws.metrics.base_emf_exporter.logger") as mock_logger:
-            from opentelemetry.sdk.metrics.export import MetricExportResult
-
             result = self.exporter.export(mock_metrics_data)
 
             self.assertEqual(result, MetricExportResult.FAILURE)
