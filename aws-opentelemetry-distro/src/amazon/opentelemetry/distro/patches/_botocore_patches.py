@@ -236,7 +236,7 @@ def _apply_botocore_sqs_patch() -> None:
     _SqsExtension.on_success = patch_on_success
 
 
-def _apply_botocore_bedrock_patch() -> None:
+def _apply_botocore_bedrock_patch() -> None:  # pylint: disable=too-many-statements
     """Botocore instrumentation patch for Bedrock, Bedrock Agent, and Bedrock Agent Runtime
 
     This patch adds an extension to the upstream's list of known extension for Bedrock.
