@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 import importlib
+import json
+from typing import Any, Dict, Optional, Sequence
 
 from botocore.exceptions import ClientError
 
@@ -32,7 +34,7 @@ from opentelemetry.instrumentation.botocore import (
     _determine_call_context,
     _safe_invoke,
 )
-from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS, _find_extension
+from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS, _find_extension, bedrock_utils
 from opentelemetry.instrumentation.botocore.extensions.dynamodb import _DynamoDbExtension
 from opentelemetry.instrumentation.botocore.extensions.lmbd import _LambdaExtension
 from opentelemetry.instrumentation.botocore.extensions.sns import _SnsExtension
@@ -234,7 +236,7 @@ def _apply_botocore_sqs_patch() -> None:
     _SqsExtension.on_success = patch_on_success
 
 
-def _apply_botocore_bedrock_patch() -> None:
+def _apply_botocore_bedrock_patch() -> None:  # pylint: disable=too-many-statements
     """Botocore instrumentation patch for Bedrock, Bedrock Agent, and Bedrock Agent Runtime
 
     This patch adds an extension to the upstream's list of known extension for Bedrock.
@@ -245,7 +247,91 @@ def _apply_botocore_bedrock_patch() -> None:
     _KNOWN_EXTENSIONS["bedrock"] = _lazy_load(".", "_BedrockExtension")
     _KNOWN_EXTENSIONS["bedrock-agent"] = _lazy_load(".", "_BedrockAgentExtension")
     _KNOWN_EXTENSIONS["bedrock-agent-runtime"] = _lazy_load(".", "_BedrockAgentRuntimeExtension")
-    # bedrock-runtime is handled by upstream
+
+    # TODO: The following code is to patch bedrock-runtime bugs that are fixed in
+    # opentelemetry-instrumentation-botocore==0.56b0 in these PRs:
+    # https://github.com/open-telemetry/opentelemetry-python-contrib/pull/3548
+    # https://github.com/open-telemetry/opentelemetry-python-contrib/pull/3544
+    # Remove this code once we've bumped opentelemetry-instrumentation-botocore dependency to 0.56b0
+
+    old_init = bedrock_utils.ConverseStreamWrapper.__init__
+    old_process_event = bedrock_utils.ConverseStreamWrapper._process_event
+
+    # The OpenTelemetry Authors code
+    def patched_init(self, *args, **kwargs):
+        old_init(self, *args, **kwargs)
+        self._tool_json_input_buf = ""
+
+    def patched_process_event(self, event):
+        if "contentBlockStart" in event:
+            start = event["contentBlockStart"].get("start", {})
+            if "toolUse" in start:
+                self._content_block = {"toolUse": start["toolUse"]}
+            return
+
+        if "contentBlockDelta" in event:
+            if self._record_message:
+                delta = event["contentBlockDelta"].get("delta", {})
+                if "text" in delta:
+                    self._content_block.setdefault("text", "")
+                    self._content_block["text"] += delta["text"]
+                elif "toolUse" in delta:
+                    if (input_buf := delta["toolUse"].get("input")) is not None:
+                        self._tool_json_input_buf += input_buf
+            return
+
+        if "contentBlockStop" in event:
+            if self._record_message:
+                if self._tool_json_input_buf:
+                    try:
+                        self._content_block["toolUse"]["input"] = json.loads(self._tool_json_input_buf)
+                    except json.JSONDecodeError:
+                        self._content_block["toolUse"]["input"] = self._tool_json_input_buf
+                self._message["content"].append(self._content_block)
+                self._content_block = {}
+                self._tool_json_input_buf = ""
+            return
+
+        old_process_event(self, event)
+
+    def patched_extract_tool_calls(
+        message: dict[str, Any], capture_content: bool
+    ) -> Optional[Sequence[Dict[str, Any]]]:
+        content = message.get("content")
+        if not content:
+            return None
+
+        tool_uses = [item["toolUse"] for item in content if "toolUse" in item]
+        if not tool_uses:
+            tool_uses = [item for item in content if isinstance(item, dict) and item.get("type") == "tool_use"]
+            tool_id_key = "id"
+        else:
+            tool_id_key = "toolUseId"
+
+        if not tool_uses:
+            return None
+
+        tool_calls = []
+        for tool_use in tool_uses:
+            tool_call = {"type": "function"}
+            if call_id := tool_use.get(tool_id_key):
+                tool_call["id"] = call_id
+
+            if function_name := tool_use.get("name"):
+                tool_call["function"] = {"name": function_name}
+
+            if (function_input := tool_use.get("input")) and capture_content:
+                tool_call.setdefault("function", {})
+                tool_call["function"]["arguments"] = function_input
+
+            tool_calls.append(tool_call)
+        return tool_calls
+
+    bedrock_utils.ConverseStreamWrapper.__init__ = patched_init
+    bedrock_utils.ConverseStreamWrapper._process_event = patched_process_event
+    bedrock_utils.extract_tool_calls = patched_extract_tool_calls
+
+    # END The OpenTelemetry Authors code
 
 
 def _apply_botocore_dynamodb_patch() -> None:
@@ -270,7 +356,7 @@ def _apply_botocore_dynamodb_patch() -> None:
 
 
 def _apply_botocore_api_call_patch() -> None:
-    # pylint: disable=too-many-locals
+    # pylint: disable=too-many-locals,too-many-statements
     def patched_api_call(self, original_func, instance, args, kwargs):
         """Botocore instrumentation patch to capture AWS authentication details
 
