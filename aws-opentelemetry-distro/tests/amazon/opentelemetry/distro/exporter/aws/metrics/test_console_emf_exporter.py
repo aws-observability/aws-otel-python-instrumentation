@@ -1,16 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import json
-import logging
 import unittest
 from io import StringIO
 from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter import ConsoleEmfExporter
-from opentelemetry.sdk.metrics import Counter, MeterProvider
+from opentelemetry.sdk.metrics import Counter
 from opentelemetry.sdk.metrics.export import AggregationTemporality, MetricsData
-from opentelemetry.sdk.resources import Resource
 
 
 class TestConsoleEmfExporter(unittest.TestCase):
