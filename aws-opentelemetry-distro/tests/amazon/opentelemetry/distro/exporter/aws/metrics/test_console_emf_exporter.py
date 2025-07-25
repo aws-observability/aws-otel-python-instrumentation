@@ -7,11 +7,10 @@ import unittest
 from io import StringIO
 from unittest.mock import MagicMock, patch
 
+from amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter import ConsoleEmfExporter
 from opentelemetry.sdk.metrics import Counter, MeterProvider
 from opentelemetry.sdk.metrics.export import AggregationTemporality, MetricsData
 from opentelemetry.sdk.resources import Resource
-
-from amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter import ConsoleEmfExporter
 
 
 class TestConsoleEmfExporter(unittest.TestCase):
