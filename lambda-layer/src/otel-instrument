@@ -98,6 +98,19 @@ if [ -z ${OTEL_PROPAGATORS} ]; then
     export OTEL_PROPAGATORS="baggage,xray,tracecontext"
 fi
 
+# disable application signals runtime metrics by default
+export OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED="false";
+
+# enable emf exporter by default
+if [ -z "${OTEL_METRICS_EXPORTER}" ]; then
+        export OTEL_METRICS_EXPORTER="awsemf";
+fi
+
+# disable OTel logs exporter by default
+if [ -z "${OTEL_LOGS_EXPORTER}" ]; then
+        export OTEL_LOGS_EXPORTER="none";
+fi
+
 if [ -z "${OTEL_AWS_APPLICATION_SIGNALS_ENABLED}" ]; then
     export OTEL_AWS_APPLICATION_SIGNALS_ENABLED="true";
 fi
@@ -107,17 +120,6 @@ fi
 if [ "${OTEL_AWS_APPLICATION_SIGNALS_ENABLED}" = "true" ]; then
     export OTEL_PYTHON_DISTRO="aws_distro";
     export OTEL_PYTHON_CONFIGURATOR="aws_configurator";
-    if [ -z "${OTEL_METRICS_EXPORTER}" ]; then
-        export OTEL_METRICS_EXPORTER="none";
-    fi
-fi
-
-# - If Application Signals is disabled
-
-if [ "${OTEL_AWS_APPLICATION_SIGNALS_ENABLED}" = "false" ]; then
-    if [ -z "${OTEL_METRICS_EXPORTER}" ]; then
-        export OTEL_METRICS_EXPORTER="none";
-    fi
 fi
 
 if [ -z "${OTEL_RESOURCE_ATTRIBUTES}" ]; then
