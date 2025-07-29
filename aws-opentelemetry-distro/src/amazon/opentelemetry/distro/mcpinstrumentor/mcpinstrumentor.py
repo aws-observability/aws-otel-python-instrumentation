@@ -11,7 +11,6 @@ from opentelemetry.instrumentation.utils import unwrap
 
 _instruments = ("mcp >= 1.6.0",)
 
-
 class MCPInstrumentor(BaseInstrumentor):
     """
     An instrumenter for MCP.
