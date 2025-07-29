@@ -1,6 +1,5 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-import logging
 from typing import Any, Callable, Collection, Dict, Tuple
 
 from mcp import ClientRequest
@@ -11,6 +10,8 @@ from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.instrumentation.utils import unwrap
 
 _instruments = ("mcp >= 1.6.0",)
+
+
 class MCPInstrumentor(BaseInstrumentor):
     """
     An instrumenter for MCP.
