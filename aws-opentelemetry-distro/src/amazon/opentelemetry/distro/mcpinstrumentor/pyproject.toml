@@ -3,14 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "amazon-opentelemetry-distro-mcpinstrumentor"
-version = "0.1.0"
-description = "OpenTelemetry MCP instrumentation for AWS Distro"
-readme = "README.md"
+name = "aws-opentelemetry-distro"
+dynamic = ["version"]
+description = "AWS OpenTelemetry Python Distro"
+readme = "README.rst"
 license = "Apache-2.0"
-requires-python = ">=3.10"
+requires-python = ">=3.8"
 authors = [
-  { name = "Johnny Lin", email = "jonzilin@amazon.com" },
+  { name = "Amazon Web Services" },
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -18,31 +18,95 @@ classifiers = [
   "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
 ]
+
 dependencies = [
-  "mcp",
-  "opentelemetry-api",
-  "opentelemetry-instrumentation",
-  "opentelemetry-sdk",
-  "opentelemetry-semantic-conventions",
-  "wrapt"
+  "opentelemetry-api == 1.27.0",
+  "opentelemetry-sdk == 1.27.0",
+  "opentelemetry-exporter-otlp-proto-grpc == 1.27.0",
+  "opentelemetry-exporter-otlp-proto-http == 1.27.0",
+  "opentelemetry-propagator-b3 == 1.27.0",
+  "opentelemetry-propagator-jaeger == 1.27.0",
+  "opentelemetry-exporter-otlp-proto-common == 1.27.0",
+  "opentelemetry-sdk-extension-aws == 2.0.2",
+  "opentelemetry-propagator-aws-xray == 1.0.1",
+  "opentelemetry-distro == 0.48b0",
+  "opentelemetry-propagator-ot-trace == 0.48b0",
+  "opentelemetry-instrumentation == 0.48b0",
+  "opentelemetry-instrumentation-aws-lambda == 0.48b0",
+  "opentelemetry-instrumentation-aio-pika == 0.48b0",
+  "opentelemetry-instrumentation-aiohttp-client == 0.48b0",
+  "opentelemetry-instrumentation-aiopg == 0.48b0",
+  "opentelemetry-instrumentation-asgi == 0.48b0",
+  "opentelemetry-instrumentation-asyncpg == 0.48b0",
+  "opentelemetry-instrumentation-boto == 0.48b0",
+  "opentelemetry-instrumentation-boto3sqs == 0.48b0",
+  "opentelemetry-instrumentation-botocore == 0.48b0",
+  "opentelemetry-instrumentation-celery == 0.48b0",
+  "opentelemetry-instrumentation-confluent-kafka == 0.48b0",
+  "opentelemetry-instrumentation-dbapi == 0.48b0",
+  "opentelemetry-instrumentation-django == 0.48b0",
+  "opentelemetry-instrumentation-elasticsearch == 0.48b0",
+  "opentelemetry-instrumentation-falcon == 0.48b0",
+  "opentelemetry-instrumentation-fastapi == 0.48b0",
+  "opentelemetry-instrumentation-flask == 0.48b0",
+  "opentelemetry-instrumentation-grpc == 0.48b0",
+  "opentelemetry-instrumentation-httpx == 0.48b0",
+  "opentelemetry-instrumentation-jinja2 == 0.48b0",
+  "opentelemetry-instrumentation-kafka-python == 0.48b0",
+  "opentelemetry-instrumentation-logging == 0.48b0",
+  "opentelemetry-instrumentation-mysql == 0.48b0",
+  "opentelemetry-instrumentation-mysqlclient == 0.48b0",
+  "opentelemetry-instrumentation-pika == 0.48b0",
+  "opentelemetry-instrumentation-psycopg2 == 0.48b0",
+  "opentelemetry-instrumentation-pymemcache == 0.48b0",
+  "opentelemetry-instrumentation-pymongo == 0.48b0",
+  "opentelemetry-instrumentation-pymysql == 0.48b0",
+  "opentelemetry-instrumentation-pyramid == 0.48b0",
+  "opentelemetry-instrumentation-redis == 0.48b0",
+  "opentelemetry-instrumentation-remoulade == 0.48b0",
+  "opentelemetry-instrumentation-requests == 0.48b0",
+  "opentelemetry-instrumentation-sqlalchemy == 0.48b0",
+  "opentelemetry-instrumentation-sqlite3 == 0.48b0",
+  "opentelemetry-instrumentation-starlette == 0.48b0",
+  "opentelemetry-instrumentation-system-metrics == 0.48b0",
+  "opentelemetry-instrumentation-tornado == 0.48b0",
+  "opentelemetry-instrumentation-tortoiseorm == 0.48b0",
+  "opentelemetry-instrumentation-urllib == 0.48b0",
+  "opentelemetry-instrumentation-urllib3 == 0.48b0",
+  "opentelemetry-instrumentation-wsgi == 0.48b0",
+  "opentelemetry-instrumentation-cassandra == 0.48b0",
 ]
 
 [project.optional-dependencies]
-instruments = ["mcp"]
+# The 'patch' optional dependency is used for applying patches to specific libraries.
+# If a new patch is added into the list, it must also be added into tox.ini, dev-requirements.txt and _instrumentation_patch
+patch = [
+  "botocore ~= 1.0",
+]
+test = []
 
-[project.entry-points.opentelemetry_instrumentor]
-mcp = "mcpinstrumentor:MCPInstrumentor"
+[project.entry-points.opentelemetry_configurator]
+aws_configurator = "amazon.opentelemetry.distro.aws_opentelemetry_configurator:AwsOpenTelemetryConfigurator"
+
+[project.entry-points.opentelemetry_distro]
+aws_distro = "amazon.opentelemetry.distro.aws_opentelemetry_distro:AwsOpenTelemetryDistro"
+
+[project.urls]
+Homepage = "https://github.com/aws-observability/aws-otel-python-instrumentation/tree/main/aws-opentelemetry-distro"
+
+[tool.hatch.version]
+path = "src/amazon/opentelemetry/distro/version.py"
 
 [tool.hatch.build.targets.sdist]
 include = [
-  "mcpinstrumentor.py",
-  "README.md"
+  "/src",
+  "/tests",
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["."]
+packages = ["src/amazon"]

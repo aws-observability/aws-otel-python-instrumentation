@@ -11,20 +11,6 @@ from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.instrumentation.utils import unwrap
 
 _instruments = ("mcp >= 1.6.0",)
-
-
-def setup_logger():
-    logger = logging.getLogger("logger")
-    logger.setLevel(logging.DEBUG)
-    handler = logging.FileHandler("logger.log", mode="w")
-    handler.setLevel(logging.DEBUG)
-    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-    handler.setFormatter(formatter)
-    if not logger.handlers:
-        logger.addHandler(handler)
-    return logger
-
-
 class MCPInstrumentor(BaseInstrumentor):
     """
     An instrumenter for MCP.
