@@ -47,9 +47,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
-from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import (
-    CompactConsoleLogExporter,
-)
+from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import CompactConsoleLogExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 
 # pylint: disable=line-too-long
