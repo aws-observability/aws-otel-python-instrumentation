@@ -635,8 +635,8 @@ class TestAwsCloudWatchEmfExporter(unittest.TestCase):
         mock_force_flush.assert_called_once_with(5000)
 
     # pylint: disable=broad-exception-caught
-    def test_send_log_event_method_exists(self):
-        """Test that _send_log_event method exists and can be called."""
+    def test_export_method_exists(self):
+        """Test that _export method exists and can be called."""
         # Just test that the method exists and doesn't crash with basic input
         log_event = {"message": "test message", "timestamp": 1234567890}
 
@@ -644,10 +644,10 @@ class TestAwsCloudWatchEmfExporter(unittest.TestCase):
         with patch.object(self.exporter.log_client, "send_log_event") as mock_send:
             # Should not raise an exception
             try:
-                self.exporter._send_log_event(log_event)
+                self.exporter._export(log_event)
                 mock_send.assert_called_once_with(log_event)
             except Exception as error:
-                self.fail(f"_send_log_event raised an exception: {error}")
+                self.fail(f"_export raised an exception: {error}")
 
 
 if __name__ == "__main__":
