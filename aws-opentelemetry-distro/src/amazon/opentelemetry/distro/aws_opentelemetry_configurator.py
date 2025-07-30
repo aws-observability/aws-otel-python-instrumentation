@@ -214,7 +214,7 @@ def _init_logging(
     for _, exporter_class in exporters.items():
         if exporter_class is ConsoleLogExporter and _is_lambda_environment():
             exporter_class = CompressedConsoleLogExporter
-            _logger.debug("Lambda environment detected, using CompressedConsoleLogExporter")
+            _logger.debug("Lambda environment detected, using CompressedConsoleLogExporter instead of ConsoleLogExporter")
         exporter_args = {}
         _customize_log_record_processor(
             logger_provider=provider, log_exporter=_customize_logs_exporter(exporter_class(**exporter_args))
