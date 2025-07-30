@@ -47,8 +47,8 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
-from amazon.opentelemetry.distro.exporter.console.logs.compressed_console_log_exporter import (
-    CompressedConsoleLogExporter,
+from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import (
+    CompactConsoleLogExporter,
 )
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 
@@ -696,7 +696,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         mock_get_logger,
         mock_logging_handler,
     ):
-        """Test that ConsoleLogExporter is replaced with CompressedConsoleLogExporter when in Lambda"""
+        """Test that ConsoleLogExporter is replaced with CompactConsoleLogExporter when in Lambda"""
 
         # Mock _is_lambda_environment to return True
         with patch(
@@ -713,8 +713,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             call_args = mock_customize_logs_exporter.call_args
             exporter_instance = call_args[0][0]
 
-            # Verify it's a CompressedConsoleLogExporter instance
-            self.assertIsInstance(exporter_instance, CompressedConsoleLogExporter)
+            # Verify it's a CompactConsoleLogExporter instance
+            self.assertIsInstance(exporter_instance, CompactConsoleLogExporter)
 
         # Reset mocks
         mock_customize_processor.reset_mock()
@@ -733,7 +733,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
             # Verify it's still a regular ConsoleLogExporter
             self.assertIsInstance(exporter_instance, ConsoleLogExporter)
-            self.assertNotIsInstance(exporter_instance, CompressedConsoleLogExporter)
+            self.assertNotIsInstance(exporter_instance, CompactConsoleLogExporter)
 
     def test_customize_span_processors(self):
         mock_tracer_provider: TracerProvider = MagicMock()

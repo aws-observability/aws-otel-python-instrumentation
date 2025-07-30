@@ -3,16 +3,16 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from amazon.opentelemetry.distro.exporter.console.logs.compressed_console_log_exporter import (
-    CompressedConsoleLogExporter,
+from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import (
+    CompactConsoleLogExporter,
 )
 from opentelemetry.sdk._logs.export import LogExportResult
 
 
-class TestCompressedConsoleLogExporter(unittest.TestCase):
+class TestCompactConsoleLogExporter(unittest.TestCase):
 
     def setUp(self):
-        self.exporter = CompressedConsoleLogExporter()
+        self.exporter = CompactConsoleLogExporter()
 
     @patch("builtins.print")
     def test_export_compresses_json(self, mock_print):
@@ -56,7 +56,7 @@ class TestCompressedConsoleLogExporter(unittest.TestCase):
 
         # Verify print calls
         self.assertEqual(mock_print.call_count, 2)  # 2 records
-        # Each record should print compressed JSON
+        # Each record should print compact JSON
         expected_calls = [unittest.mock.call('{"body":"test"}', flush=True)] * 2
         mock_print.assert_has_calls(expected_calls)
 

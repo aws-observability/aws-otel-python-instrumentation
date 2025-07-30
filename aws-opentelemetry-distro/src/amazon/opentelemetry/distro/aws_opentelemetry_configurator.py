@@ -23,8 +23,8 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
-from amazon.opentelemetry.distro.exporter.console.logs.compressed_console_log_exporter import (
-    CompressedConsoleLogExporter,
+from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import (
+    CompactConsoleLogExporter,
 )
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
@@ -220,9 +220,9 @@ def _init_logging(
 
     for _, exporter_class in exporters.items():
         if exporter_class is ConsoleLogExporter and _is_lambda_environment():
-            exporter_class = CompressedConsoleLogExporter
+            exporter_class = CompactConsoleLogExporter
             _logger.debug(
-                "Lambda environment detected, using CompressedConsoleLogExporter instead of ConsoleLogExporter"
+                "Lambda environment detected, using CompactConsoleLogExporter instead of ConsoleLogExporter"
             )
         exporter_args = {}
         _customize_log_record_processor(

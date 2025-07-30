@@ -7,7 +7,7 @@ from opentelemetry.sdk._logs import LogData
 from opentelemetry.sdk._logs.export import ConsoleLogExporter, LogExportResult
 
 
-class CompressedConsoleLogExporter(ConsoleLogExporter):
+class CompactConsoleLogExporter(ConsoleLogExporter):
     def export(self, batch: Sequence[LogData]):
         for data in batch:
             formatted_json = self.formatter(data.log_record)
