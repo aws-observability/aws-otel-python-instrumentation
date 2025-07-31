@@ -24,5 +24,8 @@ opentelemetry-instrument python your_mcp_app.py
 
 ## Spans Created
 
-- **Client**: `client.send_request` 
+- **Client**: 
+  - Initialize: `mcp.initialize`
+  - List Tools: `mcp.list_tools`
+  - Call Tool: `mcp.call_tool.{tool_name}`
 - **Server**: `tools/initialize`, `tools/list`, `tools/{tool_name}`
