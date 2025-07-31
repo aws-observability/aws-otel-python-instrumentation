@@ -29,7 +29,7 @@ class MCPHandler(BaseHTTPRequestHandler):
             "OTEL_LOGS_EXPORTER": "none",
         }
         server_params = StdioServerParameters(
-            command="opentelemetry-instrument", args=["python3", "simple_mcp_server.py"], env=server_env
+            command="opentelemetry-instrument", args=["python3", "mcp_server.py"], env=server_env
         )
         async with stdio_client(server_params) as (read, write):
             async with ClientSession(read, write) as session:

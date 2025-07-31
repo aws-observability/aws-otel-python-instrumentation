@@ -8,7 +8,7 @@ from wrapt import register_post_import_hook, wrap_function_wrapper
 from opentelemetry import trace
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.instrumentation.utils import unwrap
-
+from .semconv import MCPAttributes, MCPSpanNames, MCPOperations, MCPTraceContext, MCPEnvironmentVariables
 _instruments = ("mcp >= 1.6.0",)
 
 class MCPInstrumentor(BaseInstrumentor):
@@ -27,9 +27,9 @@ class MCPInstrumentor(BaseInstrumentor):
     def _instrument(self, **kwargs: Any) -> None:
         tracer_provider = kwargs.get("tracer_provider")
         if tracer_provider:
-            self.tracer = tracer_provider.get_tracer("mcp")
+            self.tracer = tracer_provider.get_tracer("instrumentation.mcp")
         else:
-            self.tracer = trace.get_tracer("mcp")
+            self.tracer = trace.get_tracer("instrumentation.mcp")
         register_post_import_hook(
             lambda _: wrap_function_wrapper(
                 "mcp.shared.session",
@@ -65,7 +65,7 @@ class MCPInstrumentor(BaseInstrumentor):
         """
 
         async def async_wrapper():
-            with self.tracer.start_as_current_span("client.send_request", kind=trace.SpanKind.CLIENT) as span:
+            with self.tracer.start_as_current_span(MCPSpanNames.CLIENT_SEND_REQUEST, kind=trace.SpanKind.CLIENT) as span:
                 span_ctx = span.get_span_context()
                 request = args[0] if len(args) > 0 else kwargs.get("request")
                 if request:
@@ -107,7 +107,7 @@ class MCPInstrumentor(BaseInstrumentor):
         traceparent = None
 
         if req and hasattr(req, "params") and req.params and hasattr(req.params, "meta") and req.params.meta:
-            traceparent = getattr(req.params.meta, "traceparent", None)
+            traceparent = getattr(req.params.meta, MCPTraceContext.TRACEPARENT_HEADER, None)
         span_context = self._extract_span_context_from_traceparent(traceparent) if traceparent else None
         if span_context:
             span_name = self._get_mcp_operation(req)
@@ -125,16 +125,24 @@ class MCPInstrumentor(BaseInstrumentor):
     def _generate_mcp_attributes(self, span: trace.Span, request: ClientRequest, is_client: bool) -> None:
         import mcp.types as types  # pylint: disable=import-outside-toplevel,consider-using-from-import
 
-        operation = "UnknownOperation"
+        operation = MCPOperations.UNKNOWN_OPERATION
+        
         if isinstance(request, types.ListToolsRequest):
-            operation = "ListTool"
-            span.set_attribute("mcp.list_tools", True)
+            operation = MCPOperations.LIST_TOOL
+            span.set_attribute(MCPAttributes.MCP_LIST_TOOLS, True)
+            if is_client:
+                span.update_name(MCPSpanNames.CLIENT_LIST_TOOLS)
         elif isinstance(request, types.CallToolRequest):
             operation = request.params.name
-            span.set_attribute("mcp.call_tool", True)
+            span.set_attribute(MCPAttributes.MCP_CALL_TOOL, True)
+            if is_client:
+                span.update_name(MCPSpanNames.client_call_tool(request.params.name))
         elif isinstance(request, types.InitializeRequest):
-            operation = "Initialize"
-            span.set_attribute("mcp.initialize", True)
+            operation = MCPOperations.INITIALIZE
+            span.set_attribute(MCPAttributes.MCP_INITIALIZE, True)
+            if is_client:
+                span.update_name(MCPSpanNames.CLIENT_INITIALIZE)
+        
         if is_client:
             self._add_client_attributes(span, operation, request)
         else:
@@ -148,9 +156,9 @@ class MCPInstrumentor(BaseInstrumentor):
             request_data["params"]["_meta"] = {}
         trace_id_hex = f"{span_ctx.trace_id:032x}"
         span_id_hex = f"{span_ctx.span_id:016x}"
-        trace_flags = "01"
-        traceparent = f"00-{trace_id_hex}-{span_id_hex}-{trace_flags}"
-        request_data["params"]["_meta"]["traceparent"] = traceparent
+        trace_flags = MCPTraceContext.TRACE_FLAGS_SAMPLED
+        traceparent = f"{MCPTraceContext.TRACEPARENT_VERSION}-{trace_id_hex}-{span_id_hex}-{trace_flags}"
+        request_data["params"]["_meta"][MCPTraceContext.TRACEPARENT_HEADER] = traceparent
 
     @staticmethod
     def _extract_span_context_from_traceparent(traceparent: str):
@@ -177,24 +185,24 @@ class MCPInstrumentor(BaseInstrumentor):
         span_name = "unknown"
 
         if isinstance(req, types.ListToolsRequest):
-            span_name = "tools/list"
+            span_name = MCPSpanNames.TOOLS_LIST
         elif isinstance(req, types.CallToolRequest):
-            span_name = f"tools/{req.params.name}"
+            span_name = MCPSpanNames.tools_call(req.params.name)
         elif isinstance(req, types.InitializeRequest):
-            span_name = "tools/initialize"
+            span_name = MCPSpanNames.TOOLS_INITIALIZE
         return span_name
 
     @staticmethod
     def _add_client_attributes(span: trace.Span, operation: str, request: ClientRequest) -> None:
         import os  # pylint: disable=import-outside-toplevel
 
-        service_name = os.environ.get("MCP_INSTRUMENTATION_SERVER_NAME", "mcp server")
-        span.set_attribute("aws.remote.service", service_name)
-        span.set_attribute("aws.remote.operation", operation)
+        service_name = os.environ.get(MCPEnvironmentVariables.SERVER_NAME, "mcp server")
+        span.set_attribute(MCPAttributes.AWS_REMOTE_SERVICE, service_name)
+        span.set_attribute(MCPAttributes.AWS_REMOTE_OPERATION, operation)
         if hasattr(request, "params") and request.params and hasattr(request.params, "name"):
-            span.set_attribute("tool.name", request.params.name)
+            span.set_attribute(MCPAttributes.MCP_TOOL_NAME, request.params.name)
 
     @staticmethod
     def _add_server_attributes(span: trace.Span, operation: str, request: ClientRequest) -> None:
         if hasattr(request, "params") and request.params and hasattr(request.params, "name"):
-            span.set_attribute("tool.name", request.params.name)
+            span.set_attribute(MCPAttributes.MCP_TOOL_NAME, request.params.name)

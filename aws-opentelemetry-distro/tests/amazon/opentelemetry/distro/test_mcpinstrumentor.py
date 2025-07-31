@@ -6,18 +6,11 @@ Unit tests for MCPInstrumentor - testing actual mcpinstrumentor methods
 """
 
 import asyncio
-import os
-import sys
 import unittest
 from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock
 
-# Add src path for imports
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
-src_path = os.path.join(project_root, "src")
-sys.path.insert(0, src_path)
-
-from amazon.opentelemetry.distro.mcpinstrumentor.mcpinstrumentor import MCPInstrumentor  # noqa: E402
+from amazon.opentelemetry.distro.instrumentation.mcp.mcp_instrumentor import MCPInstrumentor
 
 
 class SimpleSpanContext:
@@ -103,7 +96,9 @@ class TestTracerProvider(unittest.TestCase):
     def test_instrument_without_tracer_provider_kwargs(self) -> None:
         """Test _instrument method when no tracer_provider in kwargs - should use default tracer"""
         # Execute - Actually test the mcpinstrumentor method
-        with unittest.mock.patch("opentelemetry.trace.get_tracer") as mock_get_tracer:
+        with unittest.mock.patch("opentelemetry.trace.get_tracer") as mock_get_tracer, unittest.mock.patch(
+            "amazon.opentelemetry.distro.instrumentation.mcp.mcp_instrumentor.register_post_import_hook"
+        ):
             mock_get_tracer.return_value = "default_tracer"
             self.instrumentor._instrument()
 
@@ -118,7 +113,10 @@ class TestTracerProvider(unittest.TestCase):
         provider = SimpleTracerProvider()
 
         # Execute - Actually test the mcpinstrumentor method
-        self.instrumentor._instrument(tracer_provider=provider)
+        with unittest.mock.patch(
+            "amazon.opentelemetry.distro.instrumentation.mcp.mcp_instrumentor.register_post_import_hook"
+        ):
+            self.instrumentor._instrument(tracer_provider=provider)
 
         # Verify - tracer should be set from the provided tracer_provider
         self.assertTrue(hasattr(self.instrumentor, "tracer"))
@@ -140,8 +138,8 @@ class TestInstrumentationDependencies(unittest.TestCase):
 
         # Verify - should return the _instruments collection
         self.assertIsNotNone(dependencies)
-        # The dependencies come from openinference.instrumentation.mcp.package._instruments
-        # which should be a collection
+        # Should contain mcp dependency
+        self.assertIn("mcp >= 1.6.0", dependencies)
 
 
 class TestTraceContextInjection(unittest.TestCase):
