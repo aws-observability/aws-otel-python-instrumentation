@@ -99,9 +99,9 @@ jobs:
           DEV_VERSION="${{ github.event.inputs.version }}.dev0"
           sed -i 's/__version__ = ".*"/__version__ = "'$DEV_VERSION'"/' aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py
           VERSION="${{ github.event.inputs.version }}"
-          sed -i 's/python:v.*"/python:v'$VERSION'"/' .github/workflows/daily_scan.yml
+          sed -i 's/python:v.*"/python:v'$VERSION'"/' .github/workflows/daily-scan.yml
           git add aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py
-          git add .github/workflows/daily_scan.yml
+          git add .github/workflows/daily-scan.yml
           git commit -m "Prepare main for next development cycle: Update version to $DEV_VERSION"
           git push --set-upstream origin "prepare-main-for-next-dev-cycle-${VERSION}"
 
