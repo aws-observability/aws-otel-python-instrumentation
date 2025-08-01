@@ -105,7 +105,7 @@ class TestTracerProvider(unittest.TestCase):
         # Verify - tracer should be set from trace.get_tracer
         self.assertTrue(hasattr(self.instrumentor, "tracer"))
         self.assertEqual(self.instrumentor.tracer, "default_tracer")
-        mock_get_tracer.assert_called_with("mcp")
+        mock_get_tracer.assert_called_with("instrumentation.mcp")
 
     def test_instrument_with_tracer_provider_kwargs(self) -> None:
         """Test _instrument method when tracer_provider is in kwargs - should use provider's tracer"""
@@ -122,7 +122,7 @@ class TestTracerProvider(unittest.TestCase):
         self.assertTrue(hasattr(self.instrumentor, "tracer"))
         self.assertEqual(self.instrumentor.tracer, "mock_tracer_from_provider")
         self.assertTrue(provider.get_tracer_called)
-        self.assertEqual(provider.tracer_name, "mcp")
+        self.assertEqual(provider.tracer_name, "instrumentation.mcp")
 
 
 class TestInstrumentationDependencies(unittest.TestCase):
@@ -249,7 +249,7 @@ class TestInstrumentedMCPServer(unittest.TestCase):
 
         # Test server handling without trace context (fallback scenario)
         with unittest.mock.patch("opentelemetry.trace.get_tracer", return_value=mock_tracer), unittest.mock.patch.dict(
-            "sys.modules", {"mcp.types": MagicMock()}
+            "sys.modules", {"mcp.types": MagicMock(), "mcp": MagicMock()}
         ), unittest.mock.patch.object(self.instrumentor, "_generate_mcp_attributes"), unittest.mock.patch.object(
             self.instrumentor, "_get_mcp_operation", return_value="tools/create_metric"
         ):
@@ -384,7 +384,7 @@ class TestInstrumentedMCPServer(unittest.TestCase):
 
         # STEP 1: Client sends request through instrumentation
         with unittest.mock.patch("opentelemetry.trace.get_tracer", return_value=mock_tracer), unittest.mock.patch.dict(
-            "sys.modules", {"mcp.types": MagicMock()}
+            "sys.modules", {"mcp.types": MagicMock(), "mcp": MagicMock()}
         ), unittest.mock.patch.object(self.instrumentor, "_generate_mcp_attributes"):
             # Override the setup tracer with the properly mocked one
             self.instrumentor.tracer = mock_tracer
@@ -420,7 +420,7 @@ class TestInstrumentedMCPServer(unittest.TestCase):
 
         # Server processes the request it received
         with unittest.mock.patch("opentelemetry.trace.get_tracer", return_value=mock_tracer), unittest.mock.patch.dict(
-            "sys.modules", {"mcp.types": MagicMock()}
+            "sys.modules", {"mcp.types": MagicMock(), "mcp": MagicMock()}
         ), unittest.mock.patch.object(self.instrumentor, "_generate_mcp_attributes"), unittest.mock.patch.object(
             self.instrumentor, "_get_mcp_operation", return_value="tools/create_metric"
         ):
@@ -465,7 +465,3 @@ class TestInstrumentedMCPServer(unittest.TestCase):
                 any(expected_entry in log_entry for log_entry in e2e_system.communication_log),
                 f"Expected log entry '{expected_entry}' not found in: {e2e_system.communication_log}",
             )
-
-
-if __name__ == "__main__":
-    unittest.main()

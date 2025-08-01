@@ -89,7 +89,7 @@ dependencies = [
 # If a new patch is added into the list, it must also be added into tox.ini, dev-requirements.txt and _instrumentation_patch
 patch = [
   "botocore ~= 1.0",
-  "mcp >= 1.1.0"
+  "mcp >= 1.6.0"
 ]
 test = []
 
