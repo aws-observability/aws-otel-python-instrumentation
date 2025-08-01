@@ -23,7 +23,7 @@ jobs:
       - name: Build Wheel and Image Files
         uses: ./.github/actions/artifacts_build
         with:
-          image_uri_with_tag: pr_build/${{ matrix.python-version }}
+          image_uri_with_tag: pr-build/${{ matrix.python-version }}
           push_image: false
           load_image: true
           python_version: ${{ matrix.python-version }}
