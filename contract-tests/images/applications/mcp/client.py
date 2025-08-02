@@ -9,7 +9,7 @@ from mcp.client.stdio import stdio_client
 
 
 class MCPHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
+    def do_GET(self):  # pylint: disable=invalid-name
         if self.path == "/mcp/echo":
             asyncio.run(self._call_mcp_tool("echo", {"text": "Hello from HTTP request!"}))
             self.send_response(200)
@@ -18,7 +18,8 @@ class MCPHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
-    async def _call_mcp_tool(self, tool_name, arguments):
+    @staticmethod
+    async def _call_mcp_tool(tool_name, arguments):
         server_env = {
             "OTEL_PYTHON_DISTRO": "aws_distro",
             "OTEL_PYTHON_CONFIGURATOR": "aws_configurator",

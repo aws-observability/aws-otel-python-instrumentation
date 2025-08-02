@@ -22,6 +22,7 @@ class MCPTest(ContractTestBase):
         pass
 
     @override
+    # pylint: disable=too-many-locals,too-many-statements
     def _assert_semantic_conventions_span_attributes(
         self, resource_scope_spans, method: str, path: str, status_code: int, **kwargs
     ) -> None:
@@ -36,30 +37,28 @@ class MCPTest(ContractTestBase):
         for resource_scope_span in resource_scope_spans:
             span = resource_scope_span.span
 
-            if span.name == "client.send_request" and span.kind == Span.SPAN_KIND_CLIENT:
-                for attr in span.attributes:
-                    if attr.key == "mcp.initialize" and attr.value.bool_value:
-                        initialize_client_span = span
-                        break
-                    elif attr.key == "mcp.list_tools" and attr.value.bool_value:
-                        list_tools_client_span = span
-                        break
-                    elif attr.key == "mcp.call_tool" and attr.value.bool_value:
-                        call_tool_client_span = span
-                        break
-
+            if span.name == "notifications/initialize" and span.kind == Span.SPAN_KIND_CLIENT:
+                initialize_client_span = span
+            elif span.name == "mcp.list_tools" and span.kind == Span.SPAN_KIND_CLIENT:
+                list_tools_client_span = span
+            elif span.name == f"mcp.call_tool.{tool_name}" and span.kind == Span.SPAN_KIND_CLIENT:
+                call_tool_client_span = span
             elif span.name == "tools/list" and span.kind == Span.SPAN_KIND_SERVER:
                 list_tools_server_span = span
             elif span.name == f"tools/{tool_name}" and span.kind == Span.SPAN_KIND_SERVER:
                 call_tool_server_span = span
+
+        # Validate list tools client span
+        self.assertIsNotNone(list_tools_client_span, "List tools client span not found")
+        self.assertEqual(list_tools_client_span.kind, Span.SPAN_KIND_CLIENT)
 
         # Validate initialize client span (no server span expected)
         self.assertIsNotNone(initialize_client_span, "Initialize client span not found")
         self.assertEqual(initialize_client_span.kind, Span.SPAN_KIND_CLIENT)
 
         init_attributes = {attr.key: attr.value for attr in initialize_client_span.attributes}
-        self.assertIn("mcp.initialize", init_attributes)
-        self.assertTrue(init_attributes["mcp.initialize"].bool_value)
+        self.assertIn("notifications/initialize", init_attributes)
+        self.assertTrue(init_attributes["notifications/initialize"].bool_value)
 
         # Validate list tools client span
         self.assertIsNotNone(list_tools_client_span, "List tools client span not found")

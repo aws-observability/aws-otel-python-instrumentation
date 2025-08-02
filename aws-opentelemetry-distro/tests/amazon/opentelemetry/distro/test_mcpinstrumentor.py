@@ -266,6 +266,7 @@ class TestInstrumentedMCPServer(unittest.TestCase):
         # Should not create traced spans when no trace context is present
         mock_tracer.start_as_current_span.assert_not_called()
 
+    # pylint: disable=too-many-locals,too-many-statements
     def test_end_to_end_client_server_communication(
         self,
     ) -> None:
@@ -465,3 +466,145 @@ class TestInstrumentedMCPServer(unittest.TestCase):
                 any(expected_entry in log_entry for log_entry in e2e_system.communication_log),
                 f"Expected log entry '{expected_entry}' not found in: {e2e_system.communication_log}",
             )
+
+
+class TestMCPInstrumentorEdgeCases(unittest.TestCase):
+    """Test edge cases and error conditions for MCP instrumentor"""
+
+    def setUp(self) -> None:
+        self.instrumentor = MCPInstrumentor()
+
+    def test_invalid_traceparent_format(self) -> None:
+        """Test handling of malformed traceparent headers"""
+        invalid_formats = [
+            "invalid-format",
+            "00-invalid-hex-01",
+            "00-12345-67890",  # Missing part
+            "00-12345-67890-01-extra",  # Too many parts
+            "",  # Empty string
+        ]
+
+        for invalid_format in invalid_formats:
+            with unittest.mock.patch.dict("sys.modules", {"mcp.types": MagicMock()}):
+                result = self.instrumentor._extract_span_context_from_traceparent(invalid_format)
+                self.assertIsNone(result, f"Should return None for invalid format: {invalid_format}")
+
+    def test_version_import(self) -> None:
+        """Test that version can be imported"""
+        from amazon.opentelemetry.distro.instrumentation.mcp import version
+
+        self.assertIsNotNone(version)
+
+    def test_constants_import(self) -> None:
+        """Test that constants can be imported"""
+        from amazon.opentelemetry.distro.instrumentation.mcp.constants import MCPEnvironmentVariables
+
+        self.assertIsNotNone(MCPEnvironmentVariables.SERVER_NAME)
+
+    def test_add_client_attributes_default_server_name(self) -> None:
+        """Test _add_client_attributes uses default server name"""
+        mock_span = MagicMock()
+
+        class MockRequest:
+            def __init__(self) -> None:
+                self.params = MockParams()
+
+        class MockParams:
+            def __init__(self) -> None:
+                self.name = "test_tool"
+
+        request = MockRequest()
+        self.instrumentor._add_client_attributes(mock_span, "test_operation", request)
+
+        # Verify default server name is used
+        mock_span.set_attribute.assert_any_call("rpc.service", "mcp server")
+        mock_span.set_attribute.assert_any_call("rpc.method", "test_operation")
+        mock_span.set_attribute.assert_any_call("mcp.tool.name", "test_tool")
+
+    def test_add_client_attributes_without_tool_name(self) -> None:
+        """Test _add_client_attributes when request has no tool name"""
+        mock_span = MagicMock()
+
+        class MockRequestNoTool:
+            def __init__(self) -> None:
+                self.params = None
+
+        request = MockRequestNoTool()
+        self.instrumentor._add_client_attributes(mock_span, "test_operation", request)
+
+        # Should still set service and method, but not tool name
+        mock_span.set_attribute.assert_any_call("rpc.service", "mcp server")
+        mock_span.set_attribute.assert_any_call("rpc.method", "test_operation")
+
+    def test_add_server_attributes_without_tool_name(self) -> None:
+        """Test _add_server_attributes when request has no tool name"""
+        mock_span = MagicMock()
+
+        class MockRequestNoTool:
+            def __init__(self) -> None:
+                self.params = None
+
+        request = MockRequestNoTool()
+        self.instrumentor._add_server_attributes(mock_span, "test_operation", request)
+
+        # Should not set any attributes for server when no tool name
+        mock_span.set_attribute.assert_not_called()
+
+    def test_inject_trace_context_empty_request(self) -> None:
+        """Test trace context injection with minimal request data"""
+        request_data = {}
+        span_ctx = SimpleSpanContext(trace_id=111, span_id=222)
+
+        self.instrumentor._inject_trace_context(request_data, span_ctx)
+
+        # Should create params and _meta structure
+        self.assertIn("params", request_data)
+        self.assertIn("_meta", request_data["params"])
+        self.assertIn("traceparent", request_data["params"]["_meta"])
+
+        # Verify traceparent format
+        traceparent = request_data["params"]["_meta"]["traceparent"]
+        parts = traceparent.split("-")
+        self.assertEqual(len(parts), 4)
+        self.assertEqual(int(parts[1], 16), 111)  # trace_id
+        self.assertEqual(int(parts[2], 16), 222)  # span_id
+
+    def test_uninstrument(self) -> None:
+        """Test _uninstrument method removes instrumentation"""
+        with unittest.mock.patch(
+            "amazon.opentelemetry.distro.instrumentation.mcp.mcp_instrumentor.unwrap"
+        ) as mock_unwrap:
+            self.instrumentor._uninstrument()
+
+            # Verify both unwrap calls are made
+            self.assertEqual(mock_unwrap.call_count, 2)
+            mock_unwrap.assert_any_call("mcp.shared.session", "BaseSession.send_request")
+            mock_unwrap.assert_any_call("mcp.server.lowlevel.server", "Server._handle_request")
+
+    def test_extract_span_context_valid_traceparent(self) -> None:
+        """Test _extract_span_context_from_traceparent with valid format"""
+        # Use correct hex values: 12345 = 0x3039, 67890 = 0x10932
+        valid_traceparent = "00-0000000000003039-0000000000010932-01"
+        result = self.instrumentor._extract_span_context_from_traceparent(valid_traceparent)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.trace_id, 12345)
+        self.assertEqual(result.span_id, 67890)
+        self.assertTrue(result.is_remote)
+
+    def test_extract_span_context_value_error(self) -> None:
+        """Test _extract_span_context_from_traceparent with invalid hex values"""
+        invalid_hex_traceparent = "00-invalid-hex-values-01"
+        result = self.instrumentor._extract_span_context_from_traceparent(invalid_hex_traceparent)
+
+        self.assertIsNone(result)
+
+    def test_instrument_method_coverage(self) -> None:
+        """Test _instrument method registers hooks"""
+        with unittest.mock.patch(
+            "amazon.opentelemetry.distro.instrumentation.mcp.mcp_instrumentor.register_post_import_hook"
+        ) as mock_register:
+            self.instrumentor._instrument()
+
+            # Should register two hooks
+            self.assertEqual(mock_register.call_count, 2)

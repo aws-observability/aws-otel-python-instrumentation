@@ -9,8 +9,8 @@ COPY ./contract-tests/images/applications/mcp /mcp
 ENV PIP_ROOT_USER_ACTION=ignore
 ARG DISTRO
 
-# Install requirements and the main distro (MCP instrumentor is included)
-RUN pip install --upgrade pip && pip install -r requirements.txt && pip install ${DISTRO} --force-reinstall
+# Install requirements and the main distro with patch dependencies (MCP instrumentor is included)
+RUN pip install --upgrade pip && pip install -r requirements.txt && pip install ${DISTRO}[patch] --force-reinstall
 RUN opentelemetry-bootstrap -a install
 
 # Without `-u`, logs will be buffered and `wait_for_logs` will never return.
