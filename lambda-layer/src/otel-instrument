@@ -101,9 +101,9 @@ fi
 # disable application signals runtime metrics by default
 export OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED="false";
 
-# enable emf exporter by default
+# disable otel metrics export by default
 if [ -z "${OTEL_METRICS_EXPORTER}" ]; then
-        export OTEL_METRICS_EXPORTER="awsemf";
+        export OTEL_METRICS_EXPORTER="none";
 fi
 
 # disable OTel logs exporter by default
