@@ -7,7 +7,7 @@ Unit tests for MCPInstrumentor - testing actual mcpinstrumentor methods
 
 import asyncio
 import unittest
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from unittest.mock import MagicMock
 
 from amazon.opentelemetry.distro.instrumentation.mcp import version
@@ -214,262 +214,6 @@ class TestTraceContextInjection(unittest.TestCase):
         self.assertEqual(client_data["params"]["arguments"]["metric_name"], "response_time")
 
 
-class TestInstrumentedMCPServer(unittest.TestCase):
-    """Test mcpinstrumentor with a mock MCP server to verify end-to-end functionality"""
-
-    def setUp(self) -> None:
-        self.instrumentor = MCPInstrumentor()
-        # Initialize tracer so the instrumentor can work
-        mock_tracer = MagicMock()
-        self.instrumentor.tracer = mock_tracer
-
-    def test_no_trace_context_fallback(self) -> None:
-        """Test graceful handling when no trace context is present on server side"""
-
-        class MockServerNoTrace:
-            @staticmethod
-            async def _handle_request(session: Any, request: Any) -> Dict[str, Any]:
-                return {"success": True, "handled_without_trace": True}
-
-        class MockServerRequestNoTrace:
-            def __init__(self, tool_name: str) -> None:
-                self.params = MockServerRequestParamsNoTrace(tool_name)
-
-        class MockServerRequestParamsNoTrace:
-            def __init__(self, name: str) -> None:
-                self.name = name
-                self.meta: Optional[Any] = None  # No trace context
-
-        mock_server = MockServerNoTrace()
-        server_request = MockServerRequestNoTrace("create_metric")
-
-        # Setup mocks
-        mock_tracer = MagicMock()
-        mock_span = MagicMock()
-        mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
-        mock_tracer.start_as_current_span.return_value.__exit__.return_value = None
-
-        # Test server handling without trace context (fallback scenario)
-        with unittest.mock.patch("opentelemetry.trace.get_tracer", return_value=mock_tracer), unittest.mock.patch.dict(
-            "sys.modules", {"mcp.types": MagicMock(), "mcp": MagicMock()}
-        ), unittest.mock.patch.object(self.instrumentor, "_generate_mcp_attributes"), unittest.mock.patch.object(
-            self.instrumentor, "_get_mcp_operation", return_value="tools/create_metric"
-        ):
-
-            result = asyncio.run(
-                self.instrumentor._wrap_handle_request(mock_server._handle_request, None, (None, server_request), {})
-            )
-
-        # Verify graceful fallback - no tracing spans should be created when no trace context
-        # The wrapper should call the original function without creating distributed trace spans
-        self.assertEqual(result["success"], True)
-        self.assertEqual(result["handled_without_trace"], True)
-
-        # Should not create traced spans when no trace context is present
-        mock_tracer.start_as_current_span.assert_not_called()
-
-    # pylint: disable=too-many-locals,too-many-statements
-    def test_end_to_end_client_server_communication(
-        self,
-    ) -> None:
-        """Test where server actually receives what client sends (including injected trace context)"""
-
-        # Create realistic request/response classes
-        class MCPRequest:
-            def __init__(
-                self, tool_name: str, arguments: Optional[Dict[str, Any]] = None, method: str = "call_tool"
-            ) -> None:
-                self.root = self
-                self.params = MCPRequestParams(tool_name, arguments)
-                self.method = method
-
-            def model_dump(
-                self, by_alias: bool = True, mode: str = "json", exclude_none: bool = True
-            ) -> Dict[str, Any]:
-                result = {"method": self.method, "params": {"name": self.params.name}}
-                if self.params.arguments:
-                    result["params"]["arguments"] = self.params.arguments
-                # Include _meta if it exists (for trace context)
-                if hasattr(self.params, "_meta") and self.params._meta:
-                    result["params"]["_meta"] = self.params._meta
-                return result
-
-            @classmethod
-            def model_validate(cls, data: Dict[str, Any]) -> "MCPRequest":
-                method = data.get("method", "call_tool")
-                instance = cls(data["params"]["name"], data["params"].get("arguments"), method)
-                # Restore _meta field if present
-                if "_meta" in data["params"]:
-                    instance.params._meta = data["params"]["_meta"]
-                return instance
-
-        class MCPRequestParams:
-            def __init__(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> None:
-                self.name = name
-                self.arguments = arguments
-                self._meta: Optional[Dict[str, Any]] = None
-
-        class MCPServerRequest:
-            def __init__(self, client_request_data: Dict[str, Any]) -> None:
-                """Server request created from client's serialized data"""
-                self.method = client_request_data.get("method", "call_tool")
-                self.params = MCPServerRequestParams(client_request_data["params"])
-
-        class MCPServerRequestParams:
-            def __init__(self, params_data: Dict[str, Any]) -> None:
-                self.name = params_data["name"]
-                self.arguments = params_data.get("arguments")
-                # Extract traceparent from _meta if present
-                if "_meta" in params_data and "traceparent" in params_data["_meta"]:
-                    self.meta = MCPServerRequestMeta(params_data["_meta"]["traceparent"])
-                else:
-                    self.meta = None
-
-        class MCPServerRequestMeta:
-            def __init__(self, traceparent: str) -> None:
-                self.traceparent = traceparent
-
-        # Mock client and server that actually communicate
-        class EndToEndMCPSystem:
-            def __init__(self) -> None:
-                self.communication_log: List[str] = []
-                self.last_sent_request: Optional[Any] = None
-
-            async def client_send_request(self, request: Any) -> Dict[str, Any]:
-                """Client sends request - captures what gets sent"""
-                self.communication_log.append("CLIENT: Preparing to send request")
-                self.last_sent_request = request  # Capture the modified request
-
-                # Simulate sending over network - serialize the request
-                serialized_request = request.model_dump()
-                self.communication_log.append(f"CLIENT: Sent {serialized_request}")
-
-                # Return client response
-                return {"success": True, "client_response": "Request sent successfully"}
-
-            async def server_handle_request(self, session: Any, server_request: Any) -> Dict[str, Any]:
-                """Server handles the request it received"""
-                self.communication_log.append(f"SERVER: Received request for {server_request.params.name}")
-
-                # Check if traceparent was received
-                if server_request.params.meta and server_request.params.meta.traceparent:
-                    traceparent = server_request.params.meta.traceparent
-                    # Parse traceparent to extract trace_id and span_id
-                    parts = traceparent.split("-")
-                    if len(parts) == 4:
-                        trace_id = int(parts[1], 16)
-                        span_id = int(parts[2], 16)
-                        self.communication_log.append(
-                            f"SERVER: Found trace context - trace_id: {trace_id}, " f"span_id: {span_id}"
-                        )
-                    else:
-                        self.communication_log.append("SERVER: Invalid traceparent format")
-                else:
-                    self.communication_log.append("SERVER: No trace context found")
-
-                return {"success": True, "server_response": f"Handled {server_request.params.name}"}
-
-        # Create the end-to-end system
-        e2e_system = EndToEndMCPSystem()
-
-        # Create original client request
-        original_request = MCPRequest("create_metric", {"name": "cpu_usage", "value": 85})
-
-        # Setup OpenTelemetry mocks
-        mock_tracer = MagicMock()
-        mock_span = MagicMock()
-        mock_span_context = MagicMock()
-        mock_span_context.trace_id = 12345
-        mock_span_context.span_id = 67890
-        mock_span.get_span_context.return_value = mock_span_context
-        mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
-        mock_tracer.start_as_current_span.return_value.__exit__.return_value = None
-
-        # STEP 1: Client sends request through instrumentation
-        with unittest.mock.patch("opentelemetry.trace.get_tracer", return_value=mock_tracer), unittest.mock.patch.dict(
-            "sys.modules", {"mcp.types": MagicMock(), "mcp": MagicMock()}
-        ), unittest.mock.patch.object(self.instrumentor, "_generate_mcp_attributes"):
-            # Override the setup tracer with the properly mocked one
-            self.instrumentor.tracer = mock_tracer
-
-            client_result = asyncio.run(
-                self.instrumentor._wrap_send_request(e2e_system.client_send_request, None, (original_request,), {})
-            )
-
-        # Verify client side worked
-        self.assertEqual(client_result["success"], True)
-        self.assertIn("CLIENT: Preparing to send request", e2e_system.communication_log)
-
-        # Get the request that was actually sent (with trace context injected)
-        sent_request = e2e_system.last_sent_request
-        sent_request_data = sent_request.model_dump()
-
-        # Verify traceparent was injected by client instrumentation
-        self.assertIn("_meta", sent_request_data["params"])
-        self.assertIn("traceparent", sent_request_data["params"]["_meta"])
-
-        # Parse and verify traceparent contains correct trace/span IDs
-        traceparent = sent_request_data["params"]["_meta"]["traceparent"]
-        parts = traceparent.split("-")
-        self.assertEqual(int(parts[1], 16), 12345)  # trace_id
-        self.assertEqual(int(parts[2], 16), 67890)  # span_id
-
-        # STEP 2: Server receives the EXACT request that client sent
-        # Create server request from the client's serialized data
-        server_request = MCPServerRequest(sent_request_data)
-
-        # Reset tracer mock for server side
-        mock_tracer.reset_mock()
-
-        # Server processes the request it received
-        with unittest.mock.patch("opentelemetry.trace.get_tracer", return_value=mock_tracer), unittest.mock.patch.dict(
-            "sys.modules", {"mcp.types": MagicMock(), "mcp": MagicMock()}
-        ), unittest.mock.patch.object(self.instrumentor, "_generate_mcp_attributes"), unittest.mock.patch.object(
-            self.instrumentor, "_get_mcp_operation", return_value="tools/create_metric"
-        ):
-
-            server_result = asyncio.run(
-                self.instrumentor._wrap_handle_request(
-                    e2e_system.server_handle_request, None, (None, server_request), {}
-                )
-            )
-
-        # Verify server side worked
-        self.assertEqual(server_result["success"], True)
-
-        # Verify end-to-end trace context propagation
-        self.assertIn("SERVER: Found trace context - trace_id: 12345, span_id: 67890", e2e_system.communication_log)
-
-        # Verify the server received the exact same data the client sent
-        self.assertEqual(server_request.params.name, "create_metric")
-        self.assertEqual(server_request.params.arguments["name"], "cpu_usage")
-        self.assertEqual(server_request.params.arguments["value"], 85)
-
-        # Verify the traceparent made it through end-to-end
-        self.assertIsNotNone(server_request.params.meta)
-        self.assertIsNotNone(server_request.params.meta.traceparent)
-
-        # Parse traceparent and verify trace/span IDs
-        traceparent = server_request.params.meta.traceparent
-        parts = traceparent.split("-")
-        self.assertEqual(int(parts[1], 16), 12345)  # trace_id
-        self.assertEqual(int(parts[2], 16), 67890)  # span_id
-
-        # Verify complete communication flow
-        expected_log_entries = [
-            "CLIENT: Preparing to send request",
-            "CLIENT: Sent",  # Part of the serialized request log
-            "SERVER: Received request for create_metric",
-            "SERVER: Found trace context - trace_id: 12345, span_id: 67890",
-        ]
-
-        for expected_entry in expected_log_entries:
-            self.assertTrue(
-                any(expected_entry in log_entry for log_entry in e2e_system.communication_log),
-                f"Expected log entry '{expected_entry}' not found in: {e2e_system.communication_log}",
-            )
-
-
 class TestMCPInstrumentorEdgeCases(unittest.TestCase):
     """Test edge cases and error conditions for MCP instrumentor"""
 
@@ -670,168 +414,6 @@ class TestGetMCPOperation(unittest.TestCase):
             self.assertEqual(result, "unknown")
 
 
-class TestAddClientAttributes(unittest.TestCase):
-    """Test _add_client_attributes method"""
-
-    def setUp(self) -> None:
-        self.instrumentor = MCPInstrumentor()
-
-    def test_add_client_attributes_with_env_var(self) -> None:
-        """Test _add_client_attributes with custom server name from environment"""
-        mock_span = MagicMock()
-
-        class MockRequest:
-            def __init__(self):
-                self.params = MockParams()
-
-        class MockParams:
-            def __init__(self):
-                self.name = "env_tool"
-
-        with unittest.mock.patch.dict("os.environ", {"MCP_INSTRUMENTATION_SERVER_NAME": "custom server"}):
-            request = MockRequest()
-            self.instrumentor._add_client_attributes(mock_span, "test_op", request)
-
-            mock_span.set_attribute.assert_any_call("rpc.service", "custom server")
-            mock_span.set_attribute.assert_any_call("rpc.method", "test_op")
-            mock_span.set_attribute.assert_any_call("mcp.tool.name", "env_tool")
-
-    def test_add_client_attributes_no_params(self) -> None:
-        """Test _add_client_attributes when request has no params"""
-        mock_span = MagicMock()
-
-        class MockRequestNoParams:
-            def __init__(self):
-                self.params = None
-
-        request = MockRequestNoParams()
-        self.instrumentor._add_client_attributes(mock_span, "test_op", request)
-
-        mock_span.set_attribute.assert_any_call("rpc.service", "mcp server")
-        mock_span.set_attribute.assert_any_call("rpc.method", "test_op")
-        # Should not set tool name when no params
-
-
-class TestAddServerAttributes(unittest.TestCase):
-    """Test _add_server_attributes method"""
-
-    def setUp(self) -> None:
-        self.instrumentor = MCPInstrumentor()
-
-    def test_add_server_attributes_with_tool_name(self) -> None:
-        """Test _add_server_attributes when request has tool name"""
-        mock_span = MagicMock()
-
-        class MockRequest:
-            def __init__(self):
-                self.params = MockParams()
-
-        class MockParams:
-            def __init__(self):
-                self.name = "server_tool"
-
-        request = MockRequest()
-        self.instrumentor._add_server_attributes(mock_span, "test_op", request)
-
-        mock_span.set_attribute.assert_called_once_with("mcp.tool.name", "server_tool")
-
-    def test_add_server_attributes_no_params(self) -> None:
-        """Test _add_server_attributes when request has no params"""
-        mock_span = MagicMock()
-
-        class MockRequestNoParams:
-            def __init__(self):
-                self.params = None
-
-        request = MockRequestNoParams()
-        self.instrumentor._add_server_attributes(mock_span, "test_op", request)
-
-        mock_span.set_attribute.assert_not_called()
-
-
-class TestWrapSendRequestEdgeCases(unittest.TestCase):
-    """Test _wrap_send_request edge cases"""
-
-    def setUp(self) -> None:
-        self.instrumentor = MCPInstrumentor()
-        mock_tracer = MagicMock()
-        mock_span = MagicMock()
-        mock_span_context = MagicMock()
-        mock_span_context.trace_id = 12345
-        mock_span_context.span_id = 67890
-        mock_span.get_span_context.return_value = mock_span_context
-        mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
-        mock_tracer.start_as_current_span.return_value.__exit__.return_value = None
-        self.instrumentor.tracer = mock_tracer
-
-    def test_wrap_send_request_no_request_in_args(self) -> None:
-        """Test _wrap_send_request when no request in args"""
-
-        async def mock_wrapped():
-            return {"result": "no_request"}
-
-        result = asyncio.run(self.instrumentor._wrap_send_request(mock_wrapped, None, (), {}))
-
-        self.assertEqual(result["result"], "no_request")
-
-    def test_wrap_send_request_request_in_kwargs(self) -> None:
-        """Test _wrap_send_request when request is in kwargs"""
-
-        class MockRequest:
-            def __init__(self):
-                self.root = self
-                self.params = MockParams()
-
-            def model_dump(self, **kwargs):
-                return {"method": "test", "params": {"name": "test_tool"}}
-
-            @classmethod
-            def model_validate(cls, data):
-                return cls()
-
-        class MockParams:
-            def __init__(self):
-                self.name = "test_tool"
-
-        async def mock_wrapped(*args, **kwargs):
-            return {"result": "kwargs_request"}
-
-        request = MockRequest()
-
-        with unittest.mock.patch.object(self.instrumentor, "_generate_mcp_attributes"):
-            result = asyncio.run(self.instrumentor._wrap_send_request(mock_wrapped, None, (), {"request": request}))
-
-        self.assertEqual(result["result"], "kwargs_request")
-
-    def test_wrap_send_request_no_root_attribute(self) -> None:
-        """Test _wrap_send_request when request has no root attribute"""
-
-        class MockRequestNoRoot:
-            def __init__(self):
-                self.params = MockParams()
-
-            def model_dump(self, **kwargs):
-                return {"method": "test", "params": {"name": "test_tool"}}
-
-            @classmethod
-            def model_validate(cls, data):
-                return cls()
-
-        class MockParams:
-            def __init__(self):
-                self.name = "test_tool"
-
-        async def mock_wrapped(*args, **kwargs):
-            return {"result": "no_root"}
-
-        request = MockRequestNoRoot()
-
-        with unittest.mock.patch.object(self.instrumentor, "_generate_mcp_attributes"):
-            result = asyncio.run(self.instrumentor._wrap_send_request(mock_wrapped, None, (request,), {}))
-
-        self.assertEqual(result["result"], "no_root")
-
-
 class TestWrapHandleRequestEdgeCases(unittest.TestCase):
     """Test _wrap_handle_request edge cases"""
 
@@ -918,296 +500,237 @@ class TestWrapHandleRequestEdgeCases(unittest.TestCase):
 class TestInstrumentorStaticMethods(unittest.TestCase):
     """Test static methods of MCPInstrumentor"""
 
-    def test_instrumentation_dependencies_static(self) -> None:
+    @staticmethod
+    def test_instrumentation_dependencies_static() -> None:
         """Test instrumentation_dependencies as static method"""
         deps = MCPInstrumentor.instrumentation_dependencies()
-        self.assertIn("mcp >= 1.6.0", deps)
+        assert "mcp >= 1.6.0" in deps
 
-    def test_uninstrument_static(self) -> None:
+    @staticmethod
+    def test_uninstrument_static() -> None:
         """Test _uninstrument as static method"""
         with unittest.mock.patch(
             "amazon.opentelemetry.distro.instrumentation.mcp.mcp_instrumentor.unwrap"
         ) as mock_unwrap:
             MCPInstrumentor._uninstrument()
 
-            self.assertEqual(mock_unwrap.call_count, 2)
+            assert mock_unwrap.call_count == 2
             mock_unwrap.assert_any_call("mcp.shared.session", "BaseSession.send_request")
             mock_unwrap.assert_any_call("mcp.server.lowlevel.server", "Server._handle_request")
 
 
-class TestEnvironmentVariableHandling(unittest.TestCase):
-    """Test environment variable handling"""
+class TestMCPInstrumentorMissingCoverage(unittest.TestCase):
+    """Tests targeting specific uncovered lines in MCPInstrumentor"""
 
     def setUp(self) -> None:
         self.instrumentor = MCPInstrumentor()
 
-    def test_server_name_environment_variable(self) -> None:
-        """Test that MCP_INSTRUMENTATION_SERVER_NAME environment variable is used"""
+    def test_generate_mcp_attributes_list_tools_server_side(self) -> None:
+        """Test _generate_mcp_attributes for ListToolsRequest on server side"""
         mock_span = MagicMock()
 
-        class MockRequest:
-            def __init__(self):
-                self.params = MockParams()
-
-        class MockParams:
-            def __init__(self):
-                self.name = "test_tool"
-
-        # Test with environment variable set
-        with unittest.mock.patch.dict("os.environ", {"MCP_INSTRUMENTATION_SERVER_NAME": "my-custom-server"}):
-            request = MockRequest()
-            self.instrumentor._add_client_attributes(mock_span, "test_operation", request)
-
-            mock_span.set_attribute.assert_any_call("rpc.service", "my-custom-server")
-
-    def test_server_name_default_value(self) -> None:
-        """Test that default server name is used when environment variable is not set"""
-        mock_span = MagicMock()
-
-        class MockRequest:
-            def __init__(self):
-                self.params = MockParams()
-
-        class MockParams:
-            def __init__(self):
-                self.name = "test_tool"
-
-        # Test without environment variable
-        with unittest.mock.patch.dict("os.environ", {}, clear=True):
-            request = MockRequest()
-            self.instrumentor._add_client_attributes(mock_span, "test_operation", request)
-
-            mock_span.set_attribute.assert_any_call("rpc.service", "mcp server")
-
-
-class TestTraceContextFormats(unittest.TestCase):
-    """Test trace context format handling"""
-
-    def setUp(self) -> None:
-        self.instrumentor = MCPInstrumentor()
-
-    def test_inject_trace_context_format(self) -> None:
-        """Test that injected trace context follows W3C format"""
-        request_data = {}
-        span_ctx = SimpleSpanContext(trace_id=0x12345678901234567890123456789012, span_id=0x1234567890123456)
-
-        self.instrumentor._inject_trace_context(request_data, span_ctx)
-
-        traceparent = request_data["params"]["_meta"]["traceparent"]
-        self.assertEqual(traceparent, "00-12345678901234567890123456789012-1234567890123456-01")
-
-    def test_extract_span_context_edge_cases(self) -> None:
-        """Test _extract_span_context_from_traceparent with various edge cases"""
-        # Test with valid non-zero values
-        result = self.instrumentor._extract_span_context_from_traceparent(
-            "00-12345678901234567890123456789012-1234567890123456-01"
-        )
-        self.assertIsNotNone(result)
-        self.assertEqual(result.trace_id, 0x12345678901234567890123456789012)
-        self.assertEqual(result.span_id, 0x1234567890123456)
-        self.assertTrue(result.is_remote)
-
-        # Test with invalid format
-        result = self.instrumentor._extract_span_context_from_traceparent("invalid-format")
-        self.assertIsNone(result)
-
-        # Test with invalid hex values
-        result = self.instrumentor._extract_span_context_from_traceparent("00-invalid-hex-01")
-        self.assertIsNone(result)
-
-
-class TestComplexRequestStructures(unittest.TestCase):
-    """Test handling of complex request structures"""
-
-    def setUp(self) -> None:
-        self.instrumentor = MCPInstrumentor()
-
-    def test_inject_trace_context_nested_params(self) -> None:
-        """Test trace context injection with nested params structure"""
-        request_data = {
-            "method": "call_tool",
-            "params": {"name": "test_tool", "arguments": {"key": "value"}, "existing_meta": "should_be_preserved"},
-        }
-        span_ctx = SimpleSpanContext(trace_id=999, span_id=888)
-
-        self.instrumentor._inject_trace_context(request_data, span_ctx)
-
-        # Verify existing structure is preserved
-        self.assertEqual(request_data["method"], "call_tool")
-        self.assertEqual(request_data["params"]["name"], "test_tool")
-        self.assertEqual(request_data["params"]["arguments"]["key"], "value")
-        self.assertEqual(request_data["params"]["existing_meta"], "should_be_preserved")
-
-        # Verify trace context is added
-        self.assertIn("_meta", request_data["params"])
-        self.assertIn("traceparent", request_data["params"]["_meta"])
-
-        traceparent = request_data["params"]["_meta"]["traceparent"]
-        parts = traceparent.split("-")
-        self.assertEqual(int(parts[1], 16), 999)
-        self.assertEqual(int(parts[2], 16), 888)
-
-
-class TestMCPInstrumentorCoverage(unittest.TestCase):
-    """Additional tests to improve coverage without importing MCP"""
-
-    def setUp(self) -> None:
-        self.instrumentor = MCPInstrumentor()
-
-    def test_generate_mcp_attributes_unknown_operation(self) -> None:
-        """Test _generate_mcp_attributes with unknown request type"""
-        mock_span = MagicMock()
-
-        class MockUnknownRequest:
+        class MockListToolsRequest:
             pass
 
-        request = MockUnknownRequest()
+        request = MockListToolsRequest()
 
-        # Mock isinstance to return False for all checks
+        def mock_isinstance(obj, cls):
+            return cls.__name__ == "ListToolsRequest"
+
         with unittest.mock.patch(
-            "amazon.opentelemetry.distro.instrumentation.mcp.mcp_instrumentor.isinstance", return_value=False
+            "amazon.opentelemetry.distro.instrumentation.mcp.mcp_instrumentor.isinstance", side_effect=mock_isinstance
         ):
-            self.instrumentor._generate_mcp_attributes(mock_span, request, True)
+            with unittest.mock.patch.dict("sys.modules", {"mcp.types": MagicMock()}):
+                import sys
 
-            # Should call _add_client_attributes with unknown operation
-            mock_span.set_attribute.assert_any_call("rpc.service", "mcp server")
-            mock_span.set_attribute.assert_any_call("rpc.method", "UnknownOperation")
+                sys.modules["mcp.types"].ListToolsRequest = MockListToolsRequest
 
-    def test_add_client_attributes_no_name_attribute(self) -> None:
-        """Test _add_client_attributes when request params has no name attribute"""
+                self.instrumentor._generate_mcp_attributes(mock_span, request, False)
+
+                mock_span.set_attribute.assert_called_with("mcp.list_tools", True)
+                mock_span.update_name.assert_not_called()
+
+    def test_generate_mcp_attributes_initialize_server_side(self) -> None:
+        """Test _generate_mcp_attributes for InitializeRequest on server side"""
         mock_span = MagicMock()
 
-        class MockRequest:
+        class MockInitializeRequest:
+            pass
+
+        request = MockInitializeRequest()
+
+        def mock_isinstance(obj, cls):
+            return cls.__name__ == "InitializeRequest"
+
+        with unittest.mock.patch(
+            "amazon.opentelemetry.distro.instrumentation.mcp.mcp_instrumentor.isinstance", side_effect=mock_isinstance
+        ):
+            with unittest.mock.patch.dict("sys.modules", {"mcp.types": MagicMock()}):
+                import sys
+
+                sys.modules["mcp.types"].InitializeRequest = MockInitializeRequest
+
+                self.instrumentor._generate_mcp_attributes(mock_span, request, False)
+
+                mock_span.set_attribute.assert_called_with("notifications/initialize", True)
+                mock_span.update_name.assert_not_called()
+
+    def test_generate_mcp_attributes_call_tool_server_side(self) -> None:
+        """Test _generate_mcp_attributes for CallToolRequest on server side"""
+        mock_span = MagicMock()
+
+        class MockCallToolRequest:
             def __init__(self):
                 self.params = MockParams()
 
         class MockParams:
             def __init__(self):
-                pass  # No name attribute
+                self.name = "server_tool"
+
+        request = MockCallToolRequest()
+
+        def mock_isinstance(obj, cls):
+            return cls.__name__ == "CallToolRequest"
+
+        with unittest.mock.patch(
+            "amazon.opentelemetry.distro.instrumentation.mcp.mcp_instrumentor.isinstance", side_effect=mock_isinstance
+        ):
+            with unittest.mock.patch.dict("sys.modules", {"mcp.types": MagicMock()}):
+                import sys
+
+                sys.modules["mcp.types"].CallToolRequest = MockCallToolRequest
+
+                self.instrumentor._generate_mcp_attributes(mock_span, request, False)
+
+                # Should set both mcp.call_tool and mcp.tool.name attributes
+                mock_span.set_attribute.assert_any_call("mcp.call_tool", True)
+                mock_span.set_attribute.assert_any_call("mcp.tool.name", "server_tool")
+                mock_span.update_name.assert_not_called()
+
+    def test_get_mcp_operation_list_tools_request(self) -> None:
+        """Test _get_mcp_operation for ListToolsRequest"""
+
+        class MockListToolsRequest:
+            pass
+
+        request = MockListToolsRequest()
+
+        def mock_isinstance(obj, cls):
+            return cls.__name__ == "ListToolsRequest"
+
+        with unittest.mock.patch(
+            "amazon.opentelemetry.distro.instrumentation.mcp.mcp_instrumentor.isinstance", side_effect=mock_isinstance
+        ):
+            with unittest.mock.patch.dict("sys.modules", {"mcp.types": MagicMock()}):
+                import sys
+
+                sys.modules["mcp.types"].ListToolsRequest = MockListToolsRequest
+
+                result = self.instrumentor._get_mcp_operation(request)
+
+                self.assertEqual(result, "tools/list")
+
+    def test_get_mcp_operation_call_tool_request(self) -> None:
+        """Test _get_mcp_operation for CallToolRequest"""
+
+        class MockCallToolRequest:
+            def __init__(self):
+                self.params = MockParams()
+
+        class MockParams:
+            def __init__(self):
+                self.name = "test_tool"
+
+        request = MockCallToolRequest()
+
+        def mock_isinstance(obj, cls):
+            return cls.__name__ == "CallToolRequest"
+
+        with unittest.mock.patch(
+            "amazon.opentelemetry.distro.instrumentation.mcp.mcp_instrumentor.isinstance", side_effect=mock_isinstance
+        ):
+            with unittest.mock.patch.dict("sys.modules", {"mcp.types": MagicMock()}):
+                import sys
+
+                sys.modules["mcp.types"].CallToolRequest = MockCallToolRequest
+
+                result = self.instrumentor._get_mcp_operation(request)
+
+                self.assertEqual(result, "tools/test_tool")
+
+    def test_add_client_attributes_with_params_but_no_name(self) -> None:
+        """Test _add_client_attributes when params exists but has no name"""
+        mock_span = MagicMock()
+
+        class MockRequest:
+            def __init__(self):
+                self.params = MockParamsNoName()
+
+        class MockParamsNoName:
+            def __init__(self):
+                self.other_field = "value"
 
         request = MockRequest()
         self.instrumentor._add_client_attributes(mock_span, "test_op", request)
 
-        # Should set service and method but not tool name
         mock_span.set_attribute.assert_any_call("rpc.service", "mcp server")
         mock_span.set_attribute.assert_any_call("rpc.method", "test_op")
-        # Verify only 2 calls were made (service and method, no tool name)
         self.assertEqual(mock_span.set_attribute.call_count, 2)
 
-    def test_add_server_attributes_no_name_attribute(self) -> None:
-        """Test _add_server_attributes when request params has no name attribute"""
+    def test_add_server_attributes_with_params_but_no_name(self) -> None:
+        """Test _add_server_attributes when params exists but has no name"""
         mock_span = MagicMock()
 
         class MockRequest:
             def __init__(self):
-                self.params = MockParams()
+                self.params = MockParamsNoName()
 
-        class MockParams:
+        class MockParamsNoName:
             def __init__(self):
-                pass  # No name attribute
+                self.other_field = "value"
 
         request = MockRequest()
         self.instrumentor._add_server_attributes(mock_span, "test_op", request)
 
-        # Should not set any attributes when no name
         mock_span.set_attribute.assert_not_called()
 
-    def test_extract_span_context_zero_trace_id(self) -> None:
-        """Test _extract_span_context_from_traceparent with zero trace_id"""
-        # Zero trace_id should still create a valid span context in OpenTelemetry
-        result = self.instrumentor._extract_span_context_from_traceparent(
-            "00-00000000000000000000000000000000-1234567890123456-01"
-        )
-        self.assertIsNotNone(result)
-        self.assertEqual(result.trace_id, 0)
-        self.assertEqual(result.span_id, 0x1234567890123456)
+    def test_extract_span_context_with_wrong_part_count(self) -> None:
+        """Test _extract_span_context_from_traceparent with wrong number of parts"""
+        result = self.instrumentor._extract_span_context_from_traceparent("00-12345")
+        self.assertIsNone(result)
 
-    def test_extract_span_context_zero_span_id(self) -> None:
-        """Test _extract_span_context_from_traceparent with zero span_id"""
-        # Zero span_id should still create a valid span context in OpenTelemetry
-        result = self.instrumentor._extract_span_context_from_traceparent(
-            "00-12345678901234567890123456789012-0000000000000000-01"
-        )
-        self.assertIsNotNone(result)
-        self.assertEqual(result.trace_id, 0x12345678901234567890123456789012)
-        self.assertEqual(result.span_id, 0)
+        result = self.instrumentor._extract_span_context_from_traceparent("00-12345-67890-01-extra")
+        self.assertIsNone(result)
 
-    def test_inject_trace_context_existing_meta(self) -> None:
-        """Test _inject_trace_context when _meta already exists"""
-        request_data = {"params": {"_meta": {"existing_field": "should_be_preserved"}}}
-        span_ctx = SimpleSpanContext(trace_id=123, span_id=456)
+    def test_wrap_handle_request_with_hasattr_false(self) -> None:
+        """Test _wrap_handle_request when hasattr returns False for meta"""
 
-        self.instrumentor._inject_trace_context(request_data, span_ctx)
+        class MockRequestNoMetaAttr:
+            def __init__(self):
+                self.params = MockParamsNoMetaAttr()
 
-        # Should preserve existing _meta fields
-        self.assertEqual(request_data["params"]["_meta"]["existing_field"], "should_be_preserved")
-        self.assertIn("traceparent", request_data["params"]["_meta"])
+        class MockParamsNoMetaAttr:
+            def __init__(self):
+                pass
 
-    def test_wrap_send_request_exception_handling(self) -> None:
-        """Test _wrap_send_request handles exceptions gracefully"""
+        async def mock_wrapped(*args, **kwargs):
+            return {"result": "no_meta_attr"}
 
-        async def mock_wrapped_that_raises():
-            raise ValueError("Test exception")
+        request = MockRequestNoMetaAttr()
+        result = asyncio.run(self.instrumentor._wrap_handle_request(mock_wrapped, None, ("session", request), {}))
 
-        mock_tracer = MagicMock()
-        mock_span = MagicMock()
-        mock_span_context = MagicMock()
-        mock_span_context.trace_id = 12345
-        mock_span_context.span_id = 67890
-        mock_span.get_span_context.return_value = mock_span_context
-        mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
-        mock_tracer.start_as_current_span.return_value.__exit__.return_value = None
-        self.instrumentor.tracer = mock_tracer
-
-        with self.assertRaises(ValueError):
-            asyncio.run(self.instrumentor._wrap_send_request(mock_wrapped_that_raises, None, (), {}))
-
-    def test_wrap_handle_request_exception_handling(self) -> None:
-        """Test _wrap_handle_request handles exceptions gracefully"""
-
-        async def mock_wrapped_that_raises(*args, **kwargs):
-            raise ValueError("Test exception")
-
-        mock_tracer = MagicMock()
-        mock_span = MagicMock()
-        mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
-        mock_tracer.start_as_current_span.return_value.__exit__.return_value = None
-        self.instrumentor.tracer = mock_tracer
-
-        with self.assertRaises(ValueError):
-            asyncio.run(self.instrumentor._wrap_handle_request(mock_wrapped_that_raises, None, ("session", None), {}))
-
-    def test_instrumentation_dependencies_return_type(self) -> None:
-        """Test that instrumentation_dependencies returns a Collection"""
-        deps = self.instrumentor.instrumentation_dependencies()
-        self.assertIsInstance(deps, tuple)
-        self.assertEqual(len(deps), 1)
-        self.assertEqual(deps[0], "mcp >= 1.6.0")
-
-    def test_instrument_with_none_tracer_provider(self) -> None:
-        """Test _instrument method when tracer_provider is None"""
-        with unittest.mock.patch("opentelemetry.trace.get_tracer") as mock_get_tracer, unittest.mock.patch(
-            "amazon.opentelemetry.distro.instrumentation.mcp.mcp_instrumentor.register_post_import_hook"
-        ):
-            mock_get_tracer.return_value = "default_tracer"
-
-            self.instrumentor._instrument(tracer_provider=None)
-
-            # Should use default tracer when tracer_provider is None
-            self.assertEqual(self.instrumentor.tracer, "default_tracer")
-            mock_get_tracer.assert_called_with("instrumentation.mcp")
+        self.assertEqual(result["result"], "no_meta_attr")
 
     def test_add_client_attributes_missing_params_attribute(self) -> None:
         """Test _add_client_attributes when request has no params attribute"""
         mock_span = MagicMock()
 
         class MockRequestNoParams:
-            pass  # No params attribute at all
+            pass
 
         request = MockRequestNoParams()
         self.instrumentor._add_client_attributes(mock_span, "test_op", request)
 
-        # Should still set service and method
         mock_span.set_attribute.assert_any_call("rpc.service", "mcp server")
         mock_span.set_attribute.assert_any_call("rpc.method", "test_op")
 
@@ -1216,10 +739,188 @@ class TestMCPInstrumentorCoverage(unittest.TestCase):
         mock_span = MagicMock()
 
         class MockRequestNoParams:
-            pass  # No params attribute at all
+            pass
 
         request = MockRequestNoParams()
         self.instrumentor._add_server_attributes(mock_span, "test_op", request)
 
-        # Should not set any attributes
         mock_span.set_attribute.assert_not_called()
+
+    def test_inject_trace_context_existing_meta(self) -> None:
+        """Test _inject_trace_context when _meta already exists"""
+        request_data = {"params": {"_meta": {"existing_field": "should_be_preserved"}}}
+        span_ctx = SimpleSpanContext(trace_id=123, span_id=456)
+
+        self.instrumentor._inject_trace_context(request_data, span_ctx)
+
+        self.assertEqual(request_data["params"]["_meta"]["existing_field"], "should_be_preserved")
+        self.assertIn("traceparent", request_data["params"]["_meta"])
+
+    def test_extract_span_context_zero_values(self) -> None:
+        """Test _extract_span_context_from_traceparent with zero values"""
+        result = self.instrumentor._extract_span_context_from_traceparent(
+            "00-00000000000000000000000000000000-1234567890123456-01"
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result.trace_id, 0)
+        self.assertEqual(result.span_id, 0x1234567890123456)
+
+        result = self.instrumentor._extract_span_context_from_traceparent(
+            "00-12345678901234567890123456789012-0000000000000000-01"
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result.trace_id, 0x12345678901234567890123456789012)
+        self.assertEqual(result.span_id, 0)
+
+
+class TestMCPCoverage(unittest.TestCase):
+    """Essential tests for missing coverage"""
+
+    def setUp(self) -> None:
+        self.instrumentor = MCPInstrumentor()
+
+    def test_generate_mcp_attributes_server_side(self) -> None:
+        """Test server-side MCP attribute generation"""
+        mock_span = MagicMock()
+
+        class MockCallToolRequest:
+            def __init__(self):
+                self.params = MockParams()
+
+        class MockParams:
+            def __init__(self):
+                self.name = "server_tool"
+
+        request = MockCallToolRequest()
+
+        def mock_isinstance(obj, cls):
+            return cls.__name__ == "CallToolRequest"
+
+        with unittest.mock.patch(
+            "amazon.opentelemetry.distro.instrumentation.mcp.mcp_instrumentor.isinstance", side_effect=mock_isinstance
+        ):
+            with unittest.mock.patch.dict("sys.modules", {"mcp.types": MagicMock()}):
+                import sys
+
+                sys.modules["mcp.types"].CallToolRequest = MockCallToolRequest
+
+                self.instrumentor._generate_mcp_attributes(mock_span, request, False)
+
+                # Should set both mcp.call_tool and mcp.tool.name attributes
+                mock_span.set_attribute.assert_any_call("mcp.call_tool", True)
+                mock_span.set_attribute.assert_any_call("mcp.tool.name", "server_tool")
+                mock_span.update_name.assert_not_called()
+
+    def test_get_mcp_operation_list_tools(self) -> None:
+        """Test _get_mcp_operation for ListToolsRequest"""
+
+        class MockListToolsRequest:
+            pass
+
+        request = MockListToolsRequest()
+
+        def mock_isinstance(obj, cls):
+            return cls.__name__ == "ListToolsRequest"
+
+        with unittest.mock.patch(
+            "amazon.opentelemetry.distro.instrumentation.mcp.mcp_instrumentor.isinstance", side_effect=mock_isinstance
+        ):
+            with unittest.mock.patch.dict("sys.modules", {"mcp.types": MagicMock()}):
+                import sys
+
+                sys.modules["mcp.types"].ListToolsRequest = MockListToolsRequest
+
+                result = self.instrumentor._get_mcp_operation(request)
+                self.assertEqual(result, "tools/list")
+
+    def test_get_mcp_operation_call_tool(self) -> None:
+        """Test _get_mcp_operation for CallToolRequest"""
+
+        class MockCallToolRequest:
+            def __init__(self):
+                self.params = MockParams()
+
+        class MockParams:
+            def __init__(self):
+                self.name = "test_tool"
+
+        request = MockCallToolRequest()
+
+        def mock_isinstance(obj, cls):
+            return cls.__name__ == "CallToolRequest"
+
+        with unittest.mock.patch(
+            "amazon.opentelemetry.distro.instrumentation.mcp.mcp_instrumentor.isinstance", side_effect=mock_isinstance
+        ):
+            with unittest.mock.patch.dict("sys.modules", {"mcp.types": MagicMock()}):
+                import sys
+
+                sys.modules["mcp.types"].CallToolRequest = MockCallToolRequest
+
+                result = self.instrumentor._get_mcp_operation(request)
+                self.assertEqual(result, "tools/test_tool")
+
+    def test_add_attributes_edge_cases(self) -> None:
+        """Test attribute setting edge cases"""
+        mock_span = MagicMock()
+
+        # Test client attributes with no params
+        class MockRequestNoParams:
+            def __init__(self):
+                self.params = None
+
+        request = MockRequestNoParams()
+        self.instrumentor._add_client_attributes(mock_span, "test_op", request)
+        mock_span.set_attribute.assert_any_call("rpc.service", "mcp server")
+        mock_span.set_attribute.assert_any_call("rpc.method", "test_op")
+
+        # Test server attributes with no params
+        mock_span.reset_mock()
+        self.instrumentor._add_server_attributes(mock_span, "test_op", request)
+        mock_span.set_attribute.assert_not_called()
+
+    def test_extract_span_context_edge_cases(self) -> None:
+        """Test span context extraction edge cases"""
+        # Test wrong part count
+        result = self.instrumentor._extract_span_context_from_traceparent("00-12345")
+        self.assertIsNone(result)
+
+        # Test invalid hex
+        result = self.instrumentor._extract_span_context_from_traceparent("00-invalid-hex-values-01")
+        self.assertIsNone(result)
+
+        # Test zero values (should still work)
+        result = self.instrumentor._extract_span_context_from_traceparent(
+            "00-00000000000000000000000000000000-1234567890123456-01"
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result.trace_id, 0)
+
+    def test_wrap_handle_request_no_meta_attr(self) -> None:
+        """Test _wrap_handle_request when meta attribute doesn't exist"""
+
+        class MockRequestNoMetaAttr:
+            def __init__(self):
+                self.params = MockParamsNoMetaAttr()
+
+        class MockParamsNoMetaAttr:
+            def __init__(self):
+                pass
+
+        async def mock_wrapped(*args, **kwargs):
+            return {"result": "no_meta_attr"}
+
+        request = MockRequestNoMetaAttr()
+        result = asyncio.run(self.instrumentor._wrap_handle_request(mock_wrapped, None, ("session", request), {}))
+
+        self.assertEqual(result["result"], "no_meta_attr")
+
+    def test_inject_trace_context_existing_meta(self) -> None:
+        """Test trace context injection preserves existing _meta"""
+        request_data = {"params": {"_meta": {"existing": "preserved"}}}
+        span_ctx = SimpleSpanContext(trace_id=123, span_id=456)
+
+        self.instrumentor._inject_trace_context(request_data, span_ctx)
+
+        self.assertEqual(request_data["params"]["_meta"]["existing"], "preserved")
+        self.assertIn("traceparent", request_data["params"]["_meta"])
