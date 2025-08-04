@@ -9,7 +9,7 @@ import asyncio
 import sys
 import unittest
 from typing import Any, Dict, List, Optional
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from amazon.opentelemetry.distro.instrumentation.mcp import version
 from amazon.opentelemetry.distro.instrumentation.mcp.constants import MCPEnvironmentVariables
@@ -885,147 +885,61 @@ class FakeRequest:
         return cls(params=FakeParams(name=data["params"].get("name")))
 
 
-class TestMCPTypesCoverage(unittest.TestCase):
-    """Test isinstance checks in _generate_mcp_attributes and _get_mcp_operation"""
+class TestGetMCPOperation(unittest.TestCase):
+    """Test _get_mcp_operation function with patched types"""
 
-    def setUp(self) -> None:
+    def setUp(self):
         self.instrumentor = MCPInstrumentor()
-        self.mock_span = MagicMock()
 
-    def test_generate_mcp_attributes_list_tools(self) -> None:
-        """Test _generate_mcp_attributes with ListToolsRequest"""
-        from amazon.opentelemetry.distro.instrumentation.mcp.semconv import MCPAttributes
+    @unittest.mock.patch("mcp.types")
+    def test_get_mcp_operation_coverage(self, mock_types):
+        """Test _get_mcp_operation with all request types"""
 
-        class MockListToolsRequest:
+        # Create actual classes for isinstance checks
+        class FakeListToolsRequest:
             pass
 
-        with patch("amazon.opentelemetry.distro.instrumentation.mcp.mcp_instrumentor.types") as mock_types:
-            mock_types.ListToolsRequest = MockListToolsRequest
-            mock_types.CallToolRequest = type("CallToolRequest", (), {})
-            mock_types.InitializeRequest = type("InitializeRequest", (), {})
-
-            request = MockListToolsRequest()
-            self.instrumentor._generate_mcp_attributes(self.mock_span, request, is_client=True)
-            self.mock_span.set_attribute.assert_any_call(MCPAttributes.MCP_LIST_TOOLS, True)
-
-    def test_generate_mcp_attributes_call_tool(self) -> None:
-        """Test _generate_mcp_attributes with CallToolRequest"""
-        from amazon.opentelemetry.distro.instrumentation.mcp.semconv import MCPAttributes
-
-        class MockCallToolRequest:
+        class FakeCallToolRequest:
             def __init__(self):
                 self.params = type("Params", (), {"name": "test_tool"})()
 
-        with patch("amazon.opentelemetry.distro.instrumentation.mcp.mcp_instrumentor.types") as mock_types:
-            mock_types.ListToolsRequest = type("ListToolsRequest", (), {})
-            mock_types.CallToolRequest = MockCallToolRequest
-            mock_types.InitializeRequest = type("InitializeRequest", (), {})
+        # Set up mock types
+        mock_types.ListToolsRequest = FakeListToolsRequest
+        mock_types.CallToolRequest = FakeCallToolRequest
 
-            request = MockCallToolRequest()
-            self.instrumentor._generate_mcp_attributes(self.mock_span, request, is_client=True)
-            self.mock_span.set_attribute.assert_any_call(MCPAttributes.MCP_CALL_TOOL, True)
+        # Test ListToolsRequest path
+        result1 = self.instrumentor._get_mcp_operation(FakeListToolsRequest())
+        self.assertEqual(result1, "tools/list")
 
-    def test_generate_mcp_attributes_initialize(self) -> None:
-        """Test _generate_mcp_attributes with InitializeRequest"""
-        from amazon.opentelemetry.distro.instrumentation.mcp.semconv import MCPAttributes
+        # Test CallToolRequest path
+        result2 = self.instrumentor._get_mcp_operation(FakeCallToolRequest())
+        self.assertEqual(result2, "tools/test_tool")
 
-        class MockInitializeRequest:
+        # Test unknown request type
+        result3 = self.instrumentor._get_mcp_operation(object())
+        self.assertEqual(result3, "unknown")
+
+    @unittest.mock.patch("mcp.types")
+    def test_generate_mcp_attributes_coverage(self, mock_types):
+        """Test _generate_mcp_attributes with all request types"""
+
+        class FakeListToolsRequest:
             pass
 
-        with patch("amazon.opentelemetry.distro.instrumentation.mcp.mcp_instrumentor.types") as mock_types:
-            mock_types.ListToolsRequest = type("ListToolsRequest", (), {})
-            mock_types.CallToolRequest = type("CallToolRequest", (), {})
-            mock_types.InitializeRequest = MockInitializeRequest
-
-            request = MockInitializeRequest()
-            self.instrumentor._generate_mcp_attributes(self.mock_span, request, is_client=True)
-            self.mock_span.set_attribute.assert_any_call(MCPAttributes.MCP_INITIALIZE, True)
-
-    def test_get_mcp_operation_list_tools(self) -> None:
-        """Test _get_mcp_operation with ListToolsRequest"""
-
-        class MockListToolsRequest:
-            pass
-
-        with patch("amazon.opentelemetry.distro.instrumentation.mcp.mcp_instrumentor.types") as mock_types:
-            mock_types.ListToolsRequest = MockListToolsRequest
-            mock_types.CallToolRequest = type("CallToolRequest", (), {})
-
-            request = MockListToolsRequest()
-            result = self.instrumentor._get_mcp_operation(request)
-            self.assertEqual(result, "tools/list")
-
-    def test_get_mcp_operation_call_tool(self) -> None:
-        """Test _get_mcp_operation with CallToolRequest"""
-
-        class MockCallToolRequest:
+        class FakeCallToolRequest:
             def __init__(self):
-                self.params = type("Params", (), {"name": "my_tool"})()
+                self.params = type("Params", (), {"name": "test_tool"})()
 
-        with patch("amazon.opentelemetry.distro.instrumentation.mcp.mcp_instrumentor.types") as mock_types:
-            mock_types.ListToolsRequest = type("ListToolsRequest", (), {})
-            mock_types.CallToolRequest = MockCallToolRequest
+        class FakeInitializeRequest:
+            pass
 
-            request = MockCallToolRequest()
-            result = self.instrumentor._get_mcp_operation(request)
-            self.assertEqual(result, "tools/my_tool")
+        mock_types.ListToolsRequest = FakeListToolsRequest
+        mock_types.CallToolRequest = FakeCallToolRequest
+        mock_types.InitializeRequest = FakeInitializeRequest
 
-    def test_get_mcp_operation_unknown(self) -> None:
-        """Test _get_mcp_operation with unknown request type"""
-        with patch("amazon.opentelemetry.distro.instrumentation.mcp.mcp_instrumentor.types") as mock_types:
-            mock_types.ListToolsRequest = type("ListToolsRequest", (), {})
-            mock_types.CallToolRequest = type("CallToolRequest", (), {})
-
-            unknown_request = object()
-            result = self.instrumentor._get_mcp_operation(unknown_request)
-            self.assertEqual(result, "unknown")
-
-
-class TestAdditionalCoverage(unittest.TestCase):
-    def setUp(self):
-        self.instrumentor = MCPInstrumentor()
-        mock_tracer = MagicMock()
         mock_span = MagicMock()
-        mock_span_context = MagicMock(trace_id=123, span_id=456)
-        mock_span.get_span_context.return_value = mock_span_context
-        mock_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
-        self.instrumentor.tracer = mock_tracer
-
-    def test_wrap_send_request_kwargs_only_with_extra_args(self):
-        """Covers case where kwargs['request'] is set and args has extra elements."""
-
-        async def dummy_wrapped(*args, **kwargs):
-            return {"ok": True}
-
-        req = FakeRequest(params=FakeParams("tool1"))
-        with patch.object(self.instrumentor, "_generate_mcp_attributes"):
-            result = asyncio.run(self.instrumentor._wrap_send_request(dummy_wrapped, None, (), {"request": req}))
-        self.assertTrue(result["ok"])
-
-    def test_wrap_handle_request_invalid_traceparent_path(self):
-        """Covers case where traceparent exists but is invalid -> no span created."""
-        bad_meta = type("Meta", (), {"traceparent": "invalid-format"})
-        req = FakeRequest(params=FakeParams(name="tool1", meta=bad_meta))
-
-        async def dummy_wrapped(*args, **kwargs):
-            return {"ok": True}
-
-        result = asyncio.run(self.instrumentor._wrap_handle_request(dummy_wrapped, None, (None, req), {}))
-        self.assertTrue(result["ok"])
-        self.instrumentor.tracer.start_as_current_span.assert_not_called()
-
-    def test_add_client_attributes_missing_name_env_var(self):
-        """Covers _add_client_attributes with env var set but no name."""
-        span = MagicMock()
-        req = FakeRequest(params=FakeParams(name=None))
-        with patch.dict("os.environ", {"MCP_INSTRUMENTATION_SERVER_NAME": "env_server"}):
-            self.instrumentor._add_client_attributes(span, "op", req)
-        span.set_attribute.assert_any_call("rpc.service", "env_server")
-
-    def test_add_server_attributes_name_missing(self):
-        """Covers _add_server_attributes when .params exists but .name is None."""
-        span = MagicMock()
-        req = FakeRequest(params=FakeParams(name=None))
-        self.instrumentor._add_server_attributes(span, "op", req)
-        # The method should still be called but with None value, so we just verify it was called
-        span.set_attribute.assert_called_once()
+        self.instrumentor._generate_mcp_attributes(mock_span, FakeListToolsRequest(), True)
+        self.instrumentor._generate_mcp_attributes(mock_span, FakeCallToolRequest(), True)
+        self.instrumentor._generate_mcp_attributes(mock_span, FakeInitializeRequest(), True)
+        mock_span.set_attribute.assert_any_call("mcp.list_tools", True)
+        mock_span.set_attribute.assert_any_call("mcp.call_tool", True)

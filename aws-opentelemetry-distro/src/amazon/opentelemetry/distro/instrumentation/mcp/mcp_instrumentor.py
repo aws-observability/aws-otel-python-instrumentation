@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from typing import Any, Callable, Collection, Dict, Tuple
 
-import mcp.types as types
 from wrapt import register_post_import_hook, wrap_function_wrapper
 
 from opentelemetry import trace
@@ -129,6 +128,8 @@ class MCPInstrumentor(BaseInstrumentor):
 
     @staticmethod
     def _generate_mcp_attributes(span: trace.Span, request: Any, is_client: bool) -> None:
+        import mcp.types as types  # pylint: disable=import-outside-toplevel,consider-using-from-import
+
         operation = MCPOperations.UNKNOWN_OPERATION
 
         if isinstance(request, types.ListToolsRequest):
@@ -184,6 +185,9 @@ class MCPInstrumentor(BaseInstrumentor):
 
     @staticmethod
     def _get_mcp_operation(req: Any) -> str:
+
+        import mcp.types as types  # pylint: disable=import-outside-toplevel,consider-using-from-import
+
         span_name = "unknown"
 
         if isinstance(req, types.ListToolsRequest):
