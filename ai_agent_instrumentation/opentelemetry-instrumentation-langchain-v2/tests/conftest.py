@@ -58,24 +58,6 @@ def scrub_aws_credentials(response):
     return response
 
 
-@pytest.fixture(scope="module")
-def vcr_config():
-    return {
-        "filter_headers": [
-            ("authorization", "AWS4-HMAC-SHA256 REDACTED"),
-            ("x-amz-date", "REDACTED_DATE"),
-            ("x-amz-security-token", "REDACTED_TOKEN"),
-            ("x-amz-content-sha256", "REDACTED_CONTENT_HASH"),
-        ],
-        "filter_query_parameters": [
-            ("X-Amz-Security-Token", "REDACTED"),
-            ("X-Amz-Signature", "REDACTED"),
-        ],
-        "decode_compressed_response": True,
-        "before_record_response": scrub_aws_credentials,
-    }
-
-
 @pytest.fixture(scope="session")
 def instrument_langchain(tracer_provider):
     langchain_instrumentor = LangChainInstrumentor()

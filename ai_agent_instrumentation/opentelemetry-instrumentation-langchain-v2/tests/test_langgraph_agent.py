@@ -72,12 +72,12 @@ def test_langgraph_invoke(instrument_langchain, span_exporter):
 
     assert "gen_ai.prompt" in calculate_task_span.attributes
     assert "gen_ai.completion" in calculate_task_span.attributes
-    assert f"What's 5 + 5?" in calculate_task_span.attributes["gen_ai.prompt"]
+    assert "What's 5 + 5?" in calculate_task_span.attributes["gen_ai.prompt"]
 
     langgraph_span = next(span for span in spans if span.name == "chain LangGraph")
     assert "gen_ai.prompt" in langgraph_span.attributes
     assert "gen_ai.completion" in langgraph_span.attributes
-    assert f"What's 5 + 5?" in langgraph_span.attributes["gen_ai.prompt"]
+    assert "What's 5 + 5?" in langgraph_span.attributes["gen_ai.prompt"]
     assert response in langgraph_span.attributes["gen_ai.completion"]
 
 

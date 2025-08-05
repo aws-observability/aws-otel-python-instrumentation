@@ -186,7 +186,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             model_id = kwargs["invocation_params"]["model_id"]
 
         name = self._get_name_from_callback(serialized, kwargs=kwargs)
-        if model_id != None:
+        if model_id is not None:
             name = model_id
 
         span = self._create_span(
@@ -223,7 +223,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             model_id = kwargs["invocation_params"]["model_id"]
 
         name = self._get_name_from_callback(serialized, kwargs=kwargs)
-        if model_id != None:
+        if model_id is not None:
             name = model_id
 
         span = self._create_span(

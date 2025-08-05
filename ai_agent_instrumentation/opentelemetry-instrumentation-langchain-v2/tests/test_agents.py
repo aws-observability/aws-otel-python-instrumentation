@@ -81,7 +81,7 @@ def test_agents_with_events_with_content(instrument_with_content, span_exporter,
     agent_executor = AgentExecutor(agent=agent, tools=tools)
 
     prompt = "What is AWS?"
-    response = agent_executor.invoke({"input": prompt})
+    agent_executor.invoke({"input": prompt})
 
     spans = span_exporter.get_finished_spans()
 
