@@ -1,3 +1,8 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# pylint: disable=no-self-use
+
 """
 Semantic conventions for Gen AI agent spans following OpenTelemetry standards.
 
@@ -6,7 +11,7 @@ https://github.com/open-telemetry/semantic-conventions/blob/main/docs/gen-ai/gen
 """
 
 
-class Span_Attributes:
+class SpanAttributes:
     GEN_AI_OPERATION_NAME = "gen_ai.operation.name"
     GEN_AI_SYSTEM = "gen_ai.system"
     GEN_AI_ERROR_TYPE = "error.type"

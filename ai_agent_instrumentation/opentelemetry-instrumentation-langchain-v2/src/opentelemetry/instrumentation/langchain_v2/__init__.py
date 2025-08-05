@@ -1,3 +1,8 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# pylint: disable=no-self-use
+
 from typing import Collection
 
 from wrapt import wrap_function_wrapper
@@ -15,19 +20,19 @@ _instruments = ("langchain >= 0.1.0",)
 
 class LangChainInstrumentor(BaseInstrumentor):
 
-    def instrumentation_dependencies(cls) -> Collection[str]:
+    def instrumentation_dependencies(self, cls) -> Collection[str]:
         return _instruments
 
     def _instrument(self, **kwargs):
         tracer_provider = kwargs.get("tracer_provider")
         tracer = get_tracer(__name__, __version__, tracer_provider)
 
-        otelCallbackHandler = OpenTelemetryCallbackHandler(tracer)
+        otel_callback_handler = OpenTelemetryCallbackHandler(tracer)
 
         wrap_function_wrapper(
             module="langchain_core.callbacks",
             name="BaseCallbackManager.__init__",
-            wrapper=_BaseCallbackManagerInitWrapper(otelCallbackHandler),
+            wrapper=_BaseCallbackManagerInitWrapper(otel_callback_handler),
         )
 
     def _uninstrument(self, **kwargs):
@@ -53,5 +58,5 @@ class _BaseCallbackManagerInitWrapper:
         for handler in instance.inheritable_handlers:
             if isinstance(handler, OpenTelemetryCallbackHandler):
                 return None
-        else:
-            instance.add_handler(self.callback_handler, True)
+
+        instance.add_handler(self.callback_handler, True)

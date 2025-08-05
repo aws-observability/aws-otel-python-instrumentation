@@ -1,3 +1,8 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# pylint: disable=no-self-use
+
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -9,7 +14,7 @@ from langchain_core.messages import BaseMessage
 from langchain_core.outputs import LLMResult
 
 from opentelemetry import context as context_api
-from opentelemetry.instrumentation.langchain_v2.span_attributes import GenAIOperationValues, Span_Attributes
+from opentelemetry.instrumentation.langchain_v2.span_attributes import GenAIOperationValues, SpanAttributes
 from opentelemetry.instrumentation.utils import _SUPPRESS_INSTRUMENTATION_KEY
 from opentelemetry.trace import SpanKind, set_span_in_context
 from opentelemetry.trace.span import Span
@@ -31,7 +36,7 @@ def _set_request_params(span, kwargs, span_holder: SpanHolder):
         if (model := kwargs.get(model_tag)) is not None:
             span_holder.request_model = model
             break
-        elif (model := (kwargs.get("invocation_params") or {}).get(model_tag)) is not None:
+        if (model := (kwargs.get("invocation_params") or {}).get(model_tag)) is not None:
             span_holder.request_model = model
             break
     else:
@@ -40,8 +45,8 @@ def _set_request_params(span, kwargs, span_holder: SpanHolder):
     if span_holder.request_model is None:
         model = None
 
-    _set_span_attribute(span, Span_Attributes.GEN_AI_REQUEST_MODEL, model)
-    _set_span_attribute(span, Span_Attributes.GEN_AI_RESPONSE_MODEL, model)
+    _set_span_attribute(span, SpanAttributes.GEN_AI_REQUEST_MODEL, model)
+    _set_span_attribute(span, SpanAttributes.GEN_AI_RESPONSE_MODEL, model)
 
     if "invocation_params" in kwargs:
         params = kwargs["invocation_params"].get("params") or kwargs["invocation_params"]
@@ -50,13 +55,13 @@ def _set_request_params(span, kwargs, span_holder: SpanHolder):
 
     _set_span_attribute(
         span,
-        Span_Attributes.GEN_AI_REQUEST_MAX_TOKENS,
+        SpanAttributes.GEN_AI_REQUEST_MAX_TOKENS,
         params.get("max_tokens") or params.get("max_new_tokens"),
     )
 
-    _set_span_attribute(span, Span_Attributes.GEN_AI_REQUEST_TEMPERATURE, params.get("temperature"))
+    _set_span_attribute(span, SpanAttributes.GEN_AI_REQUEST_TEMPERATURE, params.get("temperature"))
 
-    _set_span_attribute(span, Span_Attributes.GEN_AI_REQUEST_TOP_P, params.get("top_p"))
+    _set_span_attribute(span, SpanAttributes.GEN_AI_REQUEST_TOP_P, params.get("top_p"))
 
 
 def _set_span_attribute(span: Span, name: str, value: AttributeValue):
@@ -196,13 +201,13 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             kind=SpanKind.CLIENT,
             metadata=metadata,
         )
-        _set_span_attribute(span, Span_Attributes.GEN_AI_OPERATION_NAME, GenAIOperationValues.CHAT)
+        _set_span_attribute(span, SpanAttributes.GEN_AI_OPERATION_NAME, GenAIOperationValues.CHAT)
 
         if "kwargs" in serialized:
             _set_request_params(span, serialized["kwargs"], self.span_mapping[run_id])
         if "name" in serialized:
-            _set_span_attribute(span, Span_Attributes.GEN_AI_SYSTEM, serialized.get("name"))
-        _set_span_attribute(span, Span_Attributes.GEN_AI_OPERATION_NAME, "chat")
+            _set_span_attribute(span, SpanAttributes.GEN_AI_SYSTEM, serialized.get("name"))
+        _set_span_attribute(span, SpanAttributes.GEN_AI_OPERATION_NAME, "chat")
 
     def on_llm_start(
         self,
@@ -233,13 +238,13 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             kind=SpanKind.CLIENT,
             metadata=metadata,
         )
-        _set_span_attribute(span, Span_Attributes.GEN_AI_OPERATION_NAME, GenAIOperationValues.CHAT)
+        _set_span_attribute(span, SpanAttributes.GEN_AI_OPERATION_NAME, GenAIOperationValues.CHAT)
 
         _set_request_params(span, kwargs, self.span_mapping[run_id])
 
-        _set_span_attribute(span, Span_Attributes.GEN_AI_SYSTEM, serialized.get("name"))
+        _set_span_attribute(span, SpanAttributes.GEN_AI_SYSTEM, serialized.get("name"))
 
-        _set_span_attribute(span, Span_Attributes.GEN_AI_OPERATION_NAME, "text_completion")
+        _set_span_attribute(span, SpanAttributes.GEN_AI_OPERATION_NAME, "text_completion")
 
     def on_llm_end(
         self,
@@ -263,11 +268,11 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         if response.llm_output is not None:
             model_name = response.llm_output.get("model_name") or response.llm_output.get("model_id")
             if model_name is not None:
-                _set_span_attribute(span, Span_Attributes.GEN_AI_RESPONSE_MODEL, model_name)
+                _set_span_attribute(span, SpanAttributes.GEN_AI_RESPONSE_MODEL, model_name)
 
-            id = response.llm_output.get("id")
-            if id is not None and id != "":
-                _set_span_attribute(span, Span_Attributes.GEN_AI_RESPONSE_ID, id)
+            item_id = response.llm_output.get("id")
+            if item_id is not None and item_id != "":
+                _set_span_attribute(span, SpanAttributes.GEN_AI_RESPONSE_ID, item_id)
 
         token_usage = (response.llm_output or {}).get("token_usage") or (response.llm_output or {}).get("usage")
 
@@ -283,9 +288,9 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                 or token_usage.get("output_tokens")
             )
 
-            _set_span_attribute(span, Span_Attributes.GEN_AI_USAGE_INPUT_TOKENS, prompt_tokens)
+            _set_span_attribute(span, SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS, prompt_tokens)
 
-            _set_span_attribute(span, Span_Attributes.GEN_AI_USAGE_OUTPUT_TOKENS, completion_tokens)
+            _set_span_attribute(span, SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS, completion_tokens)
 
         self._end_span(span, run_id)
 
@@ -325,7 +330,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         )
 
         if "agent_name" in metadata:
-            _set_span_attribute(span, Span_Attributes.GEN_AI_AGENT_NAME, metadata["agent_name"])
+            _set_span_attribute(span, SpanAttributes.GEN_AI_AGENT_NAME, metadata["agent_name"])
 
         _set_span_attribute(span, "gen_ai.prompt", str(inputs))
 
@@ -384,18 +389,18 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         _set_span_attribute(span, "gen_ai.tool.input", input_str)
 
         if serialized.get("id"):
-            _set_span_attribute(span, Span_Attributes.GEN_AI_TOOL_CALL_ID, serialized.get("id"))
+            _set_span_attribute(span, SpanAttributes.GEN_AI_TOOL_CALL_ID, serialized.get("id"))
 
         if serialized.get("description"):
             _set_span_attribute(
                 span,
-                Span_Attributes.GEN_AI_TOOL_DESCRIPTION,
+                SpanAttributes.GEN_AI_TOOL_DESCRIPTION,
                 serialized.get("description"),
             )
 
-        _set_span_attribute(span, Span_Attributes.GEN_AI_TOOL_NAME, name)
+        _set_span_attribute(span, SpanAttributes.GEN_AI_TOOL_NAME, name)
 
-        _set_span_attribute(span, Span_Attributes.GEN_AI_OPERATION_NAME, "execute_tool")
+        _set_span_attribute(span, SpanAttributes.GEN_AI_OPERATION_NAME, "execute_tool")
 
     def on_tool_end(
         self,
@@ -433,7 +438,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
 
             _set_span_attribute(span, "gen_ai.agent.tool.input", tool_input)
             _set_span_attribute(span, "gen_ai.agent.tool.name", tool)
-            _set_span_attribute(span, Span_Attributes.GEN_AI_OPERATION_NAME, "invoke_agent")
+            _set_span_attribute(span, SpanAttributes.GEN_AI_OPERATION_NAME, "invoke_agent")
 
     def on_agent_finish(self, finish: AgentFinish, run_id: UUID, parent_run_id: UUID, **kwargs: Any):
 

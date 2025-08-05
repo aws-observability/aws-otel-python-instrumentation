@@ -1,3 +1,8 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# pylint: disable=no-self-use
+
 import os
 from typing import TypedDict
 
@@ -53,7 +58,7 @@ def test_langgraph_invoke(instrument_langchain, span_exporter):
 
     expected_spans = {"chain LangGraph", "chain calculate", "chat anthropic.claude-3-haiku-20240307-v1:0"}
 
-    assert expected_spans == set([span.name for span in spans])
+    assert expected_spans == {span.name for span in spans}
 
     llm_span = next(span for span in spans if span.name == "chat anthropic.claude-3-haiku-20240307-v1:0")
     calculate_task_span = next(span for span in spans if span.name == "chain calculate")
@@ -114,9 +119,9 @@ async def test_langgraph_ainvoke(instrument_langchain, span_exporter):
     await langgraph.ainvoke(input={"request": user_request})
     spans = span_exporter.get_finished_spans()
 
-    assert set(["chain LangGraph", "chain calculate", "chat anthropic.claude-3-haiku-20240307-v1:0"]) == set(
-        [span.name for span in spans]
-    )
+    assert set(["chain LangGraph", "chain calculate", "chat anthropic.claude-3-haiku-20240307-v1:0"]) == {
+        span.name for span in spans
+    }
 
     llm_span = next(span for span in spans if span.name == "chat anthropic.claude-3-haiku-20240307-v1:0")
     calculate_task_span = next(span for span in spans if span.name == "chain calculate")

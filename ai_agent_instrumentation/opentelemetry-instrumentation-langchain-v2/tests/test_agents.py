@@ -1,3 +1,8 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# pylint: disable=no-self-use
+
 import os
 
 import boto3
@@ -45,7 +50,7 @@ def test_agents(instrument_langchain, span_exporter):
 
     spans = span_exporter.get_finished_spans()
 
-    assert set([span.name for span in spans]) == {
+    assert {span.name for span in spans} == {
         "chat anthropic.claude-3-5-sonnet-20240620-v1:0",
         "chain AgentExecutor",
         "chain RunnableSequence",
@@ -85,7 +90,7 @@ def test_agents_with_events_with_content(instrument_with_content, span_exporter,
 
     spans = span_exporter.get_finished_spans()
 
-    assert set([span.name for span in spans]) == {
+    assert {span.name for span in spans} == {
         "chat anthropic.claude-3-5-sonnet-20240620-v1:0",
         "chain AgentExecutor",
         "chain RunnableSequence",
@@ -124,7 +129,7 @@ def test_agents_with_events_with_no_content(instrument_langchain, span_exporter)
 
     spans = span_exporter.get_finished_spans()
 
-    assert set([span.name for span in spans]) == {
+    assert {span.name for span in spans} == {
         "chat anthropic.claude-3-5-sonnet-20240620-v1:0",
         "chain AgentExecutor",
         "chain RunnableSequence",
