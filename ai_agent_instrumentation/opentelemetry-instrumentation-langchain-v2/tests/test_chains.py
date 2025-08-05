@@ -36,7 +36,6 @@ def create_chains(llm):
     Era: {era}
     Playwright: This is a synopsis for the above play:""",  # noqa: E501
     )
-    synopsis_chain = LLMChain(llm=llm, prompt=synopsis_prompt, output_key="synopsis", name="synopsis")
 
     review_prompt = PromptTemplate(
         input_variables=["synopsis"],
@@ -46,10 +45,9 @@ def create_chains(llm):
     {synopsis}
     Review from a New York Times play critic of the above play:""",  # noqa: E501
     )
-    review_chain = LLMChain(llm=llm, prompt=review_prompt, output_key="review")
 
     overall_chain = SequentialChain(
-        chains=[synopsis_chain, review_chain],
+        chains=[LLMChain(llm=llm, prompt=synopsis_prompt, output_key="synopsis", name="synopsis"), LLMChain(llm=llm, prompt=review_prompt, output_key="review")],
         input_variables=["era", "title"],
         output_variables=["synopsis", "review"],
         verbose=True,

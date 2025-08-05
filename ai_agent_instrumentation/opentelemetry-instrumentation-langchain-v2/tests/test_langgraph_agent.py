@@ -47,8 +47,7 @@ def test_langgraph_invoke(instrument_langchain, span_exporter):
 
     langgraph = workflow.compile()
 
-    user_request = "What's 5 + 5?"
-    response = langgraph.invoke(input={"request": user_request})["result"]
+    response = langgraph.invoke(input={"request": "What's 5 + 5?"})["result"]
 
     spans = span_exporter.get_finished_spans()
     for span in spans:
