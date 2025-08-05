@@ -47,7 +47,10 @@ def create_chains(llm):
     )
 
     overall_chain = SequentialChain(
-        chains=[LLMChain(llm=llm, prompt=synopsis_prompt, output_key="synopsis", name="synopsis"), LLMChain(llm=llm, prompt=review_prompt, output_key="review")],
+        chains=[
+            LLMChain(llm=llm, prompt=synopsis_prompt, output_key="synopsis", name="synopsis"),
+            LLMChain(llm=llm, prompt=review_prompt, output_key="review"),
+        ],
         input_variables=["era", "title"],
         output_variables=["synopsis", "review"],
         verbose=True,
