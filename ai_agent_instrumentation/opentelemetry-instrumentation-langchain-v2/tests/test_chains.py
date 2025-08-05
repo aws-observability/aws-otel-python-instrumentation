@@ -26,8 +26,7 @@ def create_bedrock_llm(region="us-west-2"):
 
 
 def create_chains(llm):
-    """Create and return the synopsis chain, review chain, and overall chain."""
-
+    """Create and return the sequential chain."""
     synopsis_prompt = PromptTemplate(
         input_variables=["title", "era"],
         template="""You are a playwright. Given the title of play and the era it is set in, it is your job to write a synopsis for that title.
@@ -46,7 +45,7 @@ def create_chains(llm):
     Review from a New York Times play critic of the above play:""",  # noqa: E501
     )
 
-    overall_chain = SequentialChain(
+    return SequentialChain(
         chains=[
             LLMChain(llm=llm, prompt=synopsis_prompt, output_key="synopsis", name="synopsis"),
             LLMChain(llm=llm, prompt=review_prompt, output_key="review"),
@@ -56,56 +55,45 @@ def create_chains(llm):
         verbose=True,
     )
 
-    return overall_chain
-
-
-def validate_span(span, expected_kind, expected_attrs):
-    """Validate a span against expected values."""
-    assert span.kind == expected_kind
-    for attr in expected_attrs:
-        assert attr in span.attributes
-    return ast.literal_eval(span.attributes["gen_ai.prompt"]), ast.literal_eval(span.attributes["gen_ai.completion"])
-
 
 @pytest.mark.vcr(filter_headers=["Authorization", "X-Amz-Date", "X-Amz-Security-Token"], record_mode="once")
 def test_sequential_chain(instrument_langchain, span_exporter):
     span_exporter.clear()
 
-    llm = create_bedrock_llm()
-    chain = create_chains(llm)
     input_data = {"title": "Tragedy at sunset on the beach", "era": "Victorian England"}
-    chain.invoke(input_data)
+    create_chains(create_bedrock_llm()).invoke(input_data)
 
     spans = span_exporter.get_finished_spans()
-    langchain_spans = [span for span in spans if span.name.startswith("chain ")]
-
-    assert [
-        "chain synopsis",
-        "chain LLMChain",
-        "chain SequentialChain",
-    ] == [span.name for span in langchain_spans]
-
     synopsis_span = next(span for span in spans if span.name == "chain synopsis")
     review_span = next(span for span in spans if span.name == "chain LLMChain")
     overall_span = next(span for span in spans if span.name == "chain SequentialChain")
 
-    synopsis_prompt, synopsis_completion = validate_span(
-        synopsis_span, SpanKind.INTERNAL, ["gen_ai.prompt", "gen_ai.completion"]
-    )
-    assert synopsis_prompt == input_data
-    assert "synopsis" in synopsis_completion
+    assert ["chain synopsis", "chain LLMChain", "chain SequentialChain"] == [
+        span.name for span in spans if span.name.startswith("chain ")
+    ]
 
-    review_prompt, review_completion = validate_span(
-        review_span, SpanKind.INTERNAL, ["gen_ai.prompt", "gen_ai.completion"]
-    )
-    assert "title" in review_prompt
-    assert "era" in review_prompt
-    assert "synopsis" in review_prompt
-    assert "review" in review_completion
+    for span in [synopsis_span, review_span, overall_span]:
+        assert span.kind == SpanKind.INTERNAL
+        assert "gen_ai.prompt" in span.attributes
+        assert "gen_ai.completion" in span.attributes
 
-    overall_prompt, overall_completion = validate_span(
-        overall_span, SpanKind.INTERNAL, ["gen_ai.prompt", "gen_ai.completion"]
+    synopsis_data = (
+        ast.literal_eval(synopsis_span.attributes["gen_ai.prompt"]),
+        ast.literal_eval(synopsis_span.attributes["gen_ai.completion"]),
     )
-    assert overall_prompt == input_data
-    assert "synopsis" in overall_completion
-    assert "review" in overall_completion
+    assert synopsis_data[0] == input_data
+    assert "synopsis" in synopsis_data[1]
+
+    review_data = (
+        ast.literal_eval(review_span.attributes["gen_ai.prompt"]),
+        ast.literal_eval(review_span.attributes["gen_ai.completion"]),
+    )
+    assert all(key in review_data[0] for key in ["title", "era", "synopsis"])
+    assert "review" in review_data[1]
+
+    overall_data = (
+        ast.literal_eval(overall_span.attributes["gen_ai.prompt"]),
+        ast.literal_eval(overall_span.attributes["gen_ai.completion"]),
+    )
+    assert overall_data[0] == input_data
+    assert all(key in overall_data[1] for key in ["synopsis", "review"])
