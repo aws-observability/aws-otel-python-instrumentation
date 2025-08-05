@@ -3,14 +3,27 @@
 
 """
 MCP (Model Context Protocol) Semantic Conventions for OpenTelemetry.
-
-This module defines semantic conventions for MCP instrumentation following
-OpenTelemetry standards for consistent telemetry data.
 """
 
 
+MCP_METHOD_NAME = "mcp.method.name"
+MCP_REQUEST_ID = "mcp.request.id"
+MCP_SESSION_ID = "mcp.session.id"
+MCP_TOOL_NAME = "mcp.tool.name"
+MCP_PROMPT_NAME = "mcp.prompt.name"
+MCP_REQUEST_ARGUMENT = "mcp.request.argument"
+
+
+NOTIFICATIONS_CANCELLED = "notifications/cancelled"
+NOTIFICATIONS_INITIALIZED = "notifications/initialized"
+NOTIFICATIONS_PROGRESS = "notifications/progress"
+RESOURCES_LIST = "resources/list"
+TOOLS_LIST = "tools/list"
+TOOLS_CALL = "tools/call"
+CLIENT_INITIALIZED = "initialize"
+
+
 class MCPAttributes:
-    """MCP-specific span attributes for OpenTelemetry instrumentation."""
 
     # MCP Operation Type Attributes
     MCP_INITIALIZE = "notifications/initialize"
@@ -43,18 +56,13 @@ class MCPSpanNames:
     """Standard span names for MCP operations."""
 
     # Client-side span names
-    CLIENT_SEND_REQUEST = "client.send_request"
+    CLIENT_SEND_REQUEST = "span.mcp.client"
     """
     Span name for client-side MCP request operations.
     Used for all outgoing MCP requests (initialize, list tools, call tool).
     """
 
-    CLIENT_INITIALIZE = "notifications/initialize"
-    """
-    Span name for client-side MCP initialization requests.
-    """
-
-    CLIENT_LIST_TOOLS = "mcp.list_tools"
+    CLIENT_LIST_TOOLS = "span.mcp.server"
     """
     Span name for client-side MCP list tools requests.
     """

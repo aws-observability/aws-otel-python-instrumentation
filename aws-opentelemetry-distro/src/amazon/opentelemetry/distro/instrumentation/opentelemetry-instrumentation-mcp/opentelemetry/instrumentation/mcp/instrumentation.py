@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import Any, Callable, Collection, Dict, Tuple
+from typing import Any, Callable, Collection, Dict, Optional, Tuple
 
 from wrapt import register_post_import_hook, wrap_function_wrapper
 
@@ -8,30 +8,26 @@ from opentelemetry import trace
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.instrumentation.utils import unwrap
 from opentelemetry.semconv.trace import SpanAttributes
+from opentelemetry.instrumentation.mcp.version import __version__
+from opentelemetry.propagate import get_global_textmap
 
-from .constants import MCPEnvironmentVariables, MCPTraceContext
-from .semconv import MCPAttributes, MCPOperations, MCPSpanNames
+from .semconv import CLIENT_INITIALIZED, MCP_METHOD_NAME, TOOLS_CALL, TOOLS_LIST, MCPAttributes, MCPOperations, MCPSpanNames
 
 
-class MCPInstrumentor(BaseInstrumentor):
+class McpInstrumentor(BaseInstrumentor):
     """
     An instrumenter for MCP.
     """
 
-    def __init__(self):
+    def __init__(self, **kwargs):
         super().__init__()
-        self.tracer = None
+        self.propagators = kwargs.get("propagators") or get_global_textmap()
+        self.tracer = trace.get_tracer(__name__, __version__, tracer_provider=kwargs.get("tracer_provider", None))
 
-    @staticmethod
-    def instrumentation_dependencies() -> Collection[str]:
-        return ("mcp >= 1.6.0",)
+    def instrumentation_dependencies(self) -> Collection[str]:
+        return "mcp >= 1.6.0"
 
     def _instrument(self, **kwargs: Any) -> None:
-        tracer_provider = kwargs.get("tracer_provider")
-        if tracer_provider:
-            self.tracer = tracer_provider.get_tracer("instrumentation.mcp")
-        else:
-            self.tracer = trace.get_tracer("instrumentation.mcp")
         register_post_import_hook(
             lambda _: wrap_function_wrapper(
                 "mcp.shared.session",
@@ -49,48 +45,61 @@ class MCPInstrumentor(BaseInstrumentor):
             "mcp.server.lowlevel.server",
         )
 
-    @staticmethod
-    def _uninstrument(**kwargs: Any) -> None:
+    def _uninstrument(self, **kwargs: Any) -> None:
         unwrap("mcp.shared.session", "BaseSession.send_request")
         unwrap("mcp.server.lowlevel.server", "Server._handle_request")
-
-    # Send Request Wrapper
+    
+    
     def _wrap_send_request(
         self, wrapped: Callable, instance: Any, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Callable:
-        """
-        Changes made:
-            The wrapper intercepts the request before sending, injects distributed tracing context into the
-            request's params._meta field and creates OpenTelemetry spans. The wrapper does not change anything
-            else from the original function's behavior because it reconstructs the request object with the same
-            type and calling the original function with identical parameters.
+        import mcp.types as types 
+        """ 
+        Patches BaseSession.send_request which is responsible for sending requests from the client to the MCP server.
+        This patched MCP client intercepts the request to obtain attributes for creating client-side span, extracts
+        the current trace context, and embeds it into the request's params._meta.traceparent field
+        before forwarding the request to the MCP server.
+        
+        Args:
+            wrapped: The original BaseSession.send_request function
+            instance: The BaseSession instance
+            args: Positional arguments, where args[0] is typically the request object
+            kwargs: Keyword arguments, may contain 'request' parameter
+            
+        Returns:
+            Callable: Async wrapper function that handles trace context injection
         """
 
         async def async_wrapper():
+            request: Optional[types.ClientRequest] = args[0] if len(args) > 0 else None
+
+            if not request:
+                return await wrapped(*args, **kwargs)
+
             with self.tracer.start_as_current_span(
                 MCPSpanNames.CLIENT_SEND_REQUEST, kind=trace.SpanKind.CLIENT
             ) as span:
-                span_ctx = span.get_span_context()
-                request = args[0] if len(args) > 0 else kwargs.get("request")
+                
                 if request:
-                    req_root = request.root if hasattr(request, "root") else request
-
-                    self._generate_mcp_attributes(span, req_root, is_client=True)
+                    span_ctx = trace.set_span_in_context(span)
+                    parent_span = {}
+                    self.propagators.inject(carrier=parent_span, context=span_ctx)
+                    
                     request_data = request.model_dump(by_alias=True, mode="json", exclude_none=True)
-                    self._inject_trace_context(request_data, span_ctx)
-                    # Reconstruct request object with injected trace context
-                    modified_request = type(request).model_validate(request_data)
-                    if len(args) > 0:
-                        new_args = (modified_request,) + args[1:]
-                        result = await wrapped(*new_args, **kwargs)
-                    else:
-                        kwargs["request"] = modified_request
-                        result = await wrapped(*args, **kwargs)
-                else:
-                    result = await wrapped(*args, **kwargs)
-                return result
 
-        return async_wrapper()
+                    if "params" not in request_data:
+                        request_data["params"] = {}
+                    if "_meta" not in request_data["params"]:
+                        request_data["params"]["_meta"] = {}
+                    request_data["params"]["_meta"].update(parent_span)
+
+                    # Reconstruct request object with injected trace context
+                    modified_request = request.model_validate(request_data)
+                    new_args = (modified_request,) + args[1:]
+                    
+                    return await wrapped(*new_args, **kwargs)
+
+        return async_wrapper
 
     # Handle Request Wrapper
     async def _wrap_handle_request(
@@ -111,7 +120,7 @@ class MCPInstrumentor(BaseInstrumentor):
         traceparent = None
 
         if req and hasattr(req, "params") and req.params and hasattr(req.params, "meta") and req.params.meta:
-            traceparent = getattr(req.params.meta, MCPTraceContext.TRACEPARENT_HEADER, None)
+            traceparent = None
         span_context = self._extract_span_context_from_traceparent(traceparent) if traceparent else None
         if span_context:
             span_name = self._get_mcp_operation(req)
@@ -130,40 +139,18 @@ class MCPInstrumentor(BaseInstrumentor):
     def _generate_mcp_attributes(span: trace.Span, request: Any, is_client: bool) -> None:
         import mcp.types as types  # pylint: disable=import-outside-toplevel,consider-using-from-import
 
-        operation = MCPOperations.UNKNOWN_OPERATION
-
         if isinstance(request, types.ListToolsRequest):
-            operation = MCPOperations.LIST_TOOL
-            span.set_attribute(MCPAttributes.MCP_LIST_TOOLS, True)
+            span.set_attribute(MCP_METHOD_NAME, TOOLS_LIST)
             if is_client:
                 span.update_name(MCPSpanNames.CLIENT_LIST_TOOLS)
         elif isinstance(request, types.CallToolRequest):
-            operation = request.params.name
-            span.set_attribute(MCPAttributes.MCP_CALL_TOOL, True)
+            span.set_attribute(MCP_METHOD_NAME, TOOLS_CALL)
             if is_client:
                 span.update_name(MCPSpanNames.client_call_tool(request.params.name))
         elif isinstance(request, types.InitializeRequest):
-            operation = MCPOperations.INITIALIZE
-            span.set_attribute(MCPAttributes.MCP_INITIALIZE, True)
-            if is_client:
-                span.update_name(MCPSpanNames.CLIENT_INITIALIZE)
+            span.set_attribute(MCP_METHOD_NAME, CLIENT_INITIALIZED)
 
-        if is_client:
-            MCPInstrumentor._add_client_attributes(span, operation, request)
-        else:
-            MCPInstrumentor._add_server_attributes(span, operation, request)
-
-    @staticmethod
-    def _inject_trace_context(request_data: Dict[str, Any], span_ctx) -> None:
-        if "params" not in request_data:
-            request_data["params"] = {}
-        if "_meta" not in request_data["params"]:
-            request_data["params"]["_meta"] = {}
-        trace_id_hex = f"{span_ctx.trace_id:032x}"
-        span_id_hex = f"{span_ctx.span_id:016x}"
-        trace_flags = MCPTraceContext.TRACE_FLAGS_SAMPLED
-        traceparent = f"{MCPTraceContext.TRACEPARENT_VERSION}-{trace_id_hex}-{span_id_hex}-{trace_flags}"
-        request_data["params"]["_meta"][MCPTraceContext.TRACEPARENT_HEADER] = traceparent
+        # Additional attributes can be added here if needed
 
     @staticmethod
     def _extract_span_context_from_traceparent(traceparent: str):
@@ -195,18 +182,3 @@ class MCPInstrumentor(BaseInstrumentor):
         elif isinstance(req, types.CallToolRequest):
             span_name = MCPSpanNames.tools_call(req.params.name)
         return span_name
-
-    @staticmethod
-    def _add_client_attributes(span: trace.Span, operation: str, request: Any) -> None:
-        import os  # pylint: disable=import-outside-toplevel
-
-        service_name = os.environ.get(MCPEnvironmentVariables.SERVER_NAME, "mcp server")
-        span.set_attribute(SpanAttributes.RPC_SERVICE, service_name)
-        span.set_attribute(SpanAttributes.RPC_METHOD, operation)
-        if hasattr(request, "params") and request.params and hasattr(request.params, "name"):
-            span.set_attribute(MCPAttributes.MCP_TOOL_NAME, request.params.name)
-
-    @staticmethod
-    def _add_server_attributes(span: trace.Span, operation: str, request: Any) -> None:
-        if hasattr(request, "params") and request.params and hasattr(request.params, "name"):
-            span.set_attribute(MCPAttributes.MCP_TOOL_NAME, request.params.name)
