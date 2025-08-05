@@ -9,7 +9,6 @@ from opentelemetry.sdk._logs.export import (
     InMemoryLogExporter,
 )
 
-# from ai_agent_instrumentation.opentelemetry-instrumentation-langchain-v2.src.opentelemetry.instrumentation.langchain_v2 import LangChainInstrumentor
 from src.opentelemetry.instrumentation.langchain_v2 import LangChainInstrumentor
 
 
