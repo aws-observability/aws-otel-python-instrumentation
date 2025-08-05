@@ -56,9 +56,9 @@ def test_langgraph_invoke(instrument_langchain, span_exporter):
         print(f"  Attributes: {span.attributes}")
         print("---")
 
-    expected_spans = {"chain LangGraph", "chain calculate", "chat anthropic.claude-3-haiku-20240307-v1:0"}
-
-    assert expected_spans == {span.name for span in spans}
+    assert {"chain LangGraph", "chain calculate", "chat anthropic.claude-3-haiku-20240307-v1:0"} == {
+        span.name for span in spans
+    }
 
     llm_span = next(span for span in spans if span.name == "chat anthropic.claude-3-haiku-20240307-v1:0")
     calculate_task_span = next(span for span in spans if span.name == "chain calculate")
@@ -115,8 +115,7 @@ async def test_langgraph_ainvoke(instrument_langchain, span_exporter):
 
     langgraph = workflow.compile()
 
-    user_request = "What's 5 + 5?"
-    await langgraph.ainvoke(input={"request": user_request})
+    await langgraph.ainvoke(input={"request": "What's 5 + 5?"})
     spans = span_exporter.get_finished_spans()
 
     assert set(["chain LangGraph", "chain calculate", "chat anthropic.claude-3-haiku-20240307-v1:0"]) == {
@@ -146,8 +145,6 @@ def test_langgraph_double_invoke(instrument_langchain, span_exporter):
         return langgraph
 
     graph = build_graph()
-
-    from opentelemetry import trace
 
     assert trace.get_current_span() == INVALID_SPAN
 

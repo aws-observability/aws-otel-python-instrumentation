@@ -60,3 +60,4 @@ class _BaseCallbackManagerInitWrapper:
                 return None
 
         instance.add_handler(self.callback_handler, True)
+        return None
