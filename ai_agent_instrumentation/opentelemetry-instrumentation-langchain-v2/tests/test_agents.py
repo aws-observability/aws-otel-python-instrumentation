@@ -8,29 +8,24 @@ from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain_community.tools import DuckDuckGoSearchResults
 import boto3
 
-@pytest.mark.vcr(
-    filter_headers=['Authorization', 'X-Amz-Date', 'X-Amz-Security-Token'],
-    record_mode='all'
-)
+
+@pytest.mark.vcr(filter_headers=["Authorization", "X-Amz-Date", "X-Amz-Security-Token"], record_mode="all")
 def test_agents(instrument_langchain, span_exporter):
     search = DuckDuckGoSearchResults()
     tools = [search]
-    
+
     span_exporter.clear()
     session = boto3.Session(
-        aws_access_key_id=os.environ.get('AWS_ACCESS_KEY_ID'),
-        aws_secret_access_key=os.environ.get('AWS_SECRET_ACCESS_KEY'),
-        region_name="us-west-2" 
+        aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+        region_name="us-west-2",
     )
-    
-    bedrock_client = session.client(
-        service_name='bedrock-runtime',
-        region_name="us-west-2"
-    )
-    
+
+    bedrock_client = session.client(service_name="bedrock-runtime", region_name="us-west-2")
+
     model = ChatBedrock(
         model_id="anthropic.claude-3-5-sonnet-20240620-v1:0",
-        region_name="us-west-2",  
+        region_name="us-west-2",
         temperature=0.9,
         max_tokens=2048,
         model_kwargs={
@@ -38,19 +33,19 @@ def test_agents(instrument_langchain, span_exporter):
         },
         client=bedrock_client,
     )
-    
+
     prompt = hub.pull(
         "hwchase17/openai-functions-agent",
         api_key=os.environ["LANGSMITH_API_KEY"],
     )
-    
+
     agent = create_tool_calling_agent(model, tools, prompt)
     agent_executor = AgentExecutor(agent=agent, tools=tools)
 
     agent_executor.invoke({"input": "When was Amazon founded?"})
-    
+
     spans = span_exporter.get_finished_spans()
-        
+
     assert set([span.name for span in spans]) == {
         "chat anthropic.claude-3-5-sonnet-20240620-v1:0",
         "chain AgentExecutor",
@@ -65,22 +60,19 @@ def test_agents(instrument_langchain, span_exporter):
 
 
 @pytest.mark.vcr
-def test_agents_with_events_with_content(
-    instrument_with_content, span_exporter, log_exporter
-):
+def test_agents_with_events_with_content(instrument_with_content, span_exporter, log_exporter):
     search = DuckDuckGoSearchResults()
     tools = [search]
     model = ChatBedrock(
         model_id="anthropic.claude-3-5-sonnet-20240620-v1:0",
-        region_name="us-west-2",  
+        region_name="us-west-2",
         temperature=0.9,
         max_tokens=2048,
         model_kwargs={
             "top_p": 0.9,
         },
     )
-    
-    
+
     prompt = hub.pull(
         "hwchase17/openai-functions-agent",
         api_key=os.environ["LANGSMITH_API_KEY"],
@@ -88,7 +80,6 @@ def test_agents_with_events_with_content(
 
     agent = create_tool_calling_agent(model, tools, prompt)
     agent_executor = AgentExecutor(agent=agent, tools=tools)
-
 
     prompt = "What is AWS?"
     response = agent_executor.invoke({"input": prompt})
@@ -106,17 +97,15 @@ def test_agents_with_events_with_content(
         "chain RunnableLambda",
         "execute_tool duckduckgo_results_json",
     }
-    
+
 
 @pytest.mark.vcr
-def test_agents_with_events_with_no_content(
-    instrument_langchain, span_exporter
-):
+def test_agents_with_events_with_no_content(instrument_langchain, span_exporter):
     search = DuckDuckGoSearchResults()
     tools = [search]
     model = ChatBedrock(
         model_id="anthropic.claude-3-5-sonnet-20240620-v1:0",
-        region_name="us-west-2",  
+        region_name="us-west-2",
         temperature=0.9,
         max_tokens=2048,
         model_kwargs={

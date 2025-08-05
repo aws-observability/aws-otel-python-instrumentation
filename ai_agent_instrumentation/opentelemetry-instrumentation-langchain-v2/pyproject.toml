@@ -34,9 +34,16 @@ instruments = [
   "langchain >= 0.3.21",
 ]
 
-[tool.hatch.build.targets.wheel]
-packages = ["/src/amazon/opentelemetry"]
+
 
 [tool.hatch.version]
-path = "version.py"
+path = "src/opentelemetry/instrumentation/langchain_v2/version.py"
 
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/tests",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

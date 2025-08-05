@@ -12,35 +12,36 @@ __all__ = ["OpenTelemetryCallbackHandler"]
 
 _instruments = ("langchain >= 0.1.0",)
 
+
 class LangChainInstrumentor(BaseInstrumentor):
-    
+
     def instrumentation_dependencies(cls) -> Collection[str]:
         return _instruments
-    
+
     def _instrument(self, **kwargs):
         tracer_provider = kwargs.get("tracer_provider")
         tracer = get_tracer(__name__, __version__, tracer_provider)
 
         otelCallbackHandler = OpenTelemetryCallbackHandler(tracer)
-        
+
         wrap_function_wrapper(
             module="langchain_core.callbacks",
             name="BaseCallbackManager.__init__",
             wrapper=_BaseCallbackManagerInitWrapper(otelCallbackHandler),
         )
-    
+
     def _uninstrument(self, **kwargs):
         unwrap("langchain_core.callbacks", "BaseCallbackManager.__init__")
         if hasattr(self, "_wrapped"):
             for module, name in self._wrapped:
                 unwrap(module, name)
-        
-        
+
+
 class _BaseCallbackManagerInitWrapper:
     def __init__(self, callback_handler: "OpenTelemetryCallbackHandler"):
         self.callback_handler = callback_handler
         self._wrapped = []
-        
+
     def __call__(
         self,
         wrapped,
