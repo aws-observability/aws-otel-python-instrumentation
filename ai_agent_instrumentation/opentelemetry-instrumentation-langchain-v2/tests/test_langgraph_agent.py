@@ -1,9 +1,11 @@
-import pytest
 import os
-from langchain_aws import ChatBedrock
-import boto3
 from typing import TypedDict
+
+import boto3
+import pytest
+from langchain_aws import ChatBedrock
 from langgraph.graph import StateGraph
+
 from opentelemetry import trace
 from opentelemetry.trace import INVALID_SPAN
 

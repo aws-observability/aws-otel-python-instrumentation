@@ -1,10 +1,12 @@
-import os
 import ast
-import pytest
-from langchain.prompts import PromptTemplate
+import os
+
 import boto3
-from langchain_aws import BedrockLLM
+import pytest
 from langchain.chains import LLMChain, SequentialChain
+from langchain.prompts import PromptTemplate
+from langchain_aws import BedrockLLM
+
 from opentelemetry.trace import SpanKind
 
 

@@ -1,12 +1,12 @@
 from typing import Collection
-from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
+
 from wrapt import wrap_function_wrapper
 
-from opentelemetry.trace import get_tracer
-from opentelemetry.instrumentation.utils import unwrap
-
-from opentelemetry.instrumentation.langchain_v2.version import __version__
+from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.instrumentation.langchain_v2.callback_handler import OpenTelemetryCallbackHandler
+from opentelemetry.instrumentation.langchain_v2.version import __version__
+from opentelemetry.instrumentation.utils import unwrap
+from opentelemetry.trace import get_tracer
 
 __all__ = ["OpenTelemetryCallbackHandler"]
 

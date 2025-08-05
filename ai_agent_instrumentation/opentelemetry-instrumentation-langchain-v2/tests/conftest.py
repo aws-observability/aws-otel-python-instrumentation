@@ -1,16 +1,12 @@
+import os
+
+import pytest
+from src.opentelemetry.instrumentation.langchain_v2 import LangChainInstrumentor
+
+from opentelemetry.sdk._logs.export import InMemoryLogExporter
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-
-import os
-import pytest
-
-from opentelemetry.sdk._logs.export import (
-    InMemoryLogExporter,
-)
-
-from src.opentelemetry.instrumentation.langchain_v2 import LangChainInstrumentor
-
 
 OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT = "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"
 

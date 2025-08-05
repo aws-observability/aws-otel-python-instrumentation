@@ -1,25 +1,20 @@
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
-from langchain_core.callbacks import (
-    BaseCallbackHandler,
-)
-
-from langchain_core.messages import BaseMessage
-from langchain_core.outputs import LLMResult
-from opentelemetry.context.context import Context
-from opentelemetry.trace import SpanKind, set_span_in_context
-from opentelemetry.trace.span import Span
-from opentelemetry.util.types import AttributeValue
 from uuid import UUID
 
-from opentelemetry import context as context_api
-from opentelemetry.instrumentation.utils import _SUPPRESS_INSTRUMENTATION_KEY
-
 from langchain_core.agents import AgentAction, AgentFinish
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.messages import BaseMessage
+from langchain_core.outputs import LLMResult
 
-from opentelemetry.instrumentation.langchain_v2.span_attributes import Span_Attributes, GenAIOperationValues
+from opentelemetry import context as context_api
+from opentelemetry.instrumentation.langchain_v2.span_attributes import GenAIOperationValues, Span_Attributes
+from opentelemetry.instrumentation.utils import _SUPPRESS_INSTRUMENTATION_KEY
+from opentelemetry.trace import SpanKind, set_span_in_context
+from opentelemetry.trace.span import Span
 from opentelemetry.trace.status import Status, StatusCode
+from opentelemetry.util.types import AttributeValue
 
 
 @dataclass

@@ -1,12 +1,11 @@
 import os
-from typing import Tuple
 
+import boto3
 import pytest
 from langchain import hub
-from langchain_aws import ChatBedrock
 from langchain.agents import AgentExecutor, create_tool_calling_agent
+from langchain_aws import ChatBedrock
 from langchain_community.tools import DuckDuckGoSearchResults
-import boto3
 
 
 @pytest.mark.vcr(filter_headers=["Authorization", "X-Amz-Date", "X-Amz-Security-Token"], record_mode="all")
