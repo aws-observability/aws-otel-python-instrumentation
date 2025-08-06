@@ -1,10 +1,12 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+from dataclasses import dataclass
+import json
 from typing import Any, AsyncGenerator, Callable, Collection, Dict, Optional, Tuple, cast
 
-from wrapt import register_post_import_hook, wrap_function_wrapper
+from wrapt import ObjectProxy, register_post_import_hook, wrap_function_wrapper
 
-from opentelemetry import trace
+from opentelemetry import context, trace
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.instrumentation.utils import unwrap
 from opentelemetry.semconv.trace import SpanAttributes
@@ -15,6 +17,7 @@ from .version import __version__
 from .semconv import (
     CLIENT_INITIALIZED,
     MCP_METHOD_NAME,
+    MCP_REQUEST_ARGUMENT,
     TOOLS_CALL,
     TOOLS_LIST,
     MCPAttributes,
@@ -34,7 +37,7 @@ class McpInstrumentor(BaseInstrumentor):
         self.tracer = trace.get_tracer(__name__, __version__, tracer_provider=kwargs.get("tracer_provider", None))
 
     def instrumentation_dependencies(self) -> Collection[str]:
-        return ("mcp >= 1.6.0",)
+        return ("mcp >= 1.8.1",)
 
     def _instrument(self, **kwargs: Any) -> None:
     
@@ -88,14 +91,14 @@ class McpInstrumentor(BaseInstrumentor):
 
             with self.tracer.start_as_current_span(
                 MCPSpanNames.SPAN_MCP_CLIENT, kind=trace.SpanKind.CLIENT
-            ) as mcp_client_span:
+            ) as client_span:
 
                 if request:
-                    span_ctx = trace.set_span_in_context(mcp_client_span)
+                    span_ctx = trace.set_span_in_context(client_span)
                     parent_span = {}
                     self.propagators.inject(carrier=parent_span, context=span_ctx)
 
-                    McpInstrumentor._set_mcp_client_attributes(mcp_client_span, request)
+                    McpInstrumentor._set_mcp_client_attributes(client_span, request)
 
                     request_as_json["params"]["_meta"].update(parent_span)
 
@@ -132,6 +135,10 @@ class McpInstrumentor(BaseInstrumentor):
             span.set_attribute(MCP_METHOD_NAME, TOOLS_LIST)
         if isinstance(request, types.CallToolRequest):
             tool_name = request.params.name
+            tool_arguments = request.params.arguments
+            if tool_arguments:
+                for arg_name, arg_val in tool_arguments.items():
+                    span.set_attribute(f"{MCP_REQUEST_ARGUMENT}.{arg_name}", McpInstrumentor.serialize(arg_val))
             span.update_name(f"{TOOLS_CALL} {tool_name}")
             span.set_attribute(MCP_METHOD_NAME, TOOLS_CALL)
             span.set_attribute(MCPAttributes.MCP_TOOL_NAME, tool_name)
@@ -149,3 +156,13 @@ class McpInstrumentor(BaseInstrumentor):
             span.update_name(f"{TOOLS_CALL} {tool_name}")
             span.set_attribute(MCP_METHOD_NAME, TOOLS_CALL)
             span.set_attribute(MCPAttributes.MCP_TOOL_NAME, tool_name)
+
+
+    @staticmethod 
+    def serialize(args):
+        try:
+            return json.dumps(args)
+        except Exception:
+            return str(args)
+
+
