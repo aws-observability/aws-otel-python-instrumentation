@@ -89,11 +89,9 @@ dependencies = [
 # If a new patch is added into the list, it must also be added into tox.ini, dev-requirements.txt and _instrumentation_patch
 patch = [
   "botocore ~= 1.0",
-  "mcp >= 0.1.6",
+  "mcp >= 1.6.0",
 ]
-instruments = [
-  "mcp >= 0.1.6",
-]
+
 test = []
 
 [project.entry-points.opentelemetry_configurator]

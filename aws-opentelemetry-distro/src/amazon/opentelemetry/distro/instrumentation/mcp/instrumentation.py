@@ -34,10 +34,10 @@ class McpInstrumentor(BaseInstrumentor):
         self.tracer = trace.get_tracer(__name__, __version__, tracer_provider=kwargs.get("tracer_provider", None))
 
     def instrumentation_dependencies(self) -> Collection[str]:
-        return "mcp >= 1.6.0"
+        return ("mcp >= 1.6.0",)
 
     def _instrument(self, **kwargs: Any) -> None:
-
+    
         register_post_import_hook(
             lambda _: wrap_function_wrapper(
                 "mcp.shared.session",
@@ -63,6 +63,7 @@ class McpInstrumentor(BaseInstrumentor):
         self, wrapped: Callable, instance: Any, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Callable:
         import mcp.types as types
+        
 
         """ 
         Patches BaseSession.send_request which is responsible for sending requests from the client to the MCP server.
@@ -103,23 +104,16 @@ class McpInstrumentor(BaseInstrumentor):
                     new_args = (modified_request,) + args[1:]
 
                     return await wrapped(*new_args, **kwargs)
+        return async_wrapper()
 
-        return async_wrapper
-
-    # Handle Request Wrapper
     async def _wrap_handle_request(
         self, wrapped: Callable, instance: Any, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Any:
-        """
-        Patches Server._handle_request which is responsible for processing requests on the MCP server.
-        This patched MCP server intercepts incoming requests to extract tracing context from
-        the request's params._meta field and creates server-side spans linked to the client spans.
-        """
         req = args[1] if len(args) > 1 else None
         carrier = {}
 
         if req and hasattr(req, "params") and req.params and hasattr(req.params, "meta") and req.params.meta:
-            carrier = req.params.meta.__dict__
+            carrier = req.params.meta.model_dump()
 
         parent_ctx = self.propagators.extract(carrier=carrier)
 
@@ -128,8 +122,7 @@ class McpInstrumentor(BaseInstrumentor):
                 MCPSpanNames.SPAN_MCP_SERVER, kind=trace.SpanKind.SERVER, context=parent_ctx
             ) as mcp_server_span:
                 self._set_mcp_server_attributes(mcp_server_span, req)
-
-            return await wrapped(*args, **kwargs)
+                return await wrapped(*args, **kwargs)
 
     @staticmethod
     def _set_mcp_client_attributes(span: trace.Span, request: Any) -> None:
@@ -149,9 +142,9 @@ class McpInstrumentor(BaseInstrumentor):
     def _set_mcp_server_attributes(span: trace.Span, request: Any) -> None:
         import mcp.types as types  # pylint: disable=import-outside-toplevel,consider-using-from-import
 
-        if isinstance(span, types.ListToolsRequest):
+        if isinstance(request, types.ListToolsRequest):
             span.set_attribute(MCP_METHOD_NAME, TOOLS_LIST)
-        if isinstance(span, types.CallToolRequest):
+        if isinstance(request, types.CallToolRequest):
             tool_name = request.params.name
             span.update_name(f"{TOOLS_CALL} {tool_name}")
             span.set_attribute(MCP_METHOD_NAME, TOOLS_CALL)
