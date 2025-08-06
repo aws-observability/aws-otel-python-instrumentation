@@ -37,7 +37,8 @@ instruments = [
 
 
 [tool.hatch.version]
-path = "src/opentelemetry/instrumentation/langchain_v2/version.py"
+path = "version.py"
+
 
 [tool.hatch.build.targets.sdist]
 include = [

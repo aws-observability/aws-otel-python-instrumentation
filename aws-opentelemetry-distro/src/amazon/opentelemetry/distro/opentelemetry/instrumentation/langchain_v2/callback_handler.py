@@ -13,8 +13,11 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import LLMResult
 
+from amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.span_attributes import (
+    GenAIOperationValues,
+    SpanAttributes,
+)
 from opentelemetry import context as context_api
-from opentelemetry.instrumentation.langchain_v2.span_attributes import GenAIOperationValues, SpanAttributes
 from opentelemetry.instrumentation.utils import _SUPPRESS_INSTRUMENTATION_KEY
 from opentelemetry.trace import SpanKind, set_span_in_context
 from opentelemetry.trace.span import Span

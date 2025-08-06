@@ -6,8 +6,8 @@
 import os
 
 import pytest
-from src.opentelemetry.instrumentation.langchain_v2 import LangChainInstrumentor
 
+from amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2 import LangChainInstrumentor
 from opentelemetry.sdk._logs.export import InMemoryLogExporter
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -97,15 +97,19 @@ def instrument_with_content(tracer_provider):
     instrumentor.uninstrument()
 
 
+# Define these variables once at the module level
+current_dir = os.path.dirname(os.path.abspath(__file__))
+cassette_dir = os.path.join(current_dir, "fixtures", "vcr_cassettes")
+# Create the directory for cassettes if it doesn't exist
+os.makedirs(cassette_dir, exist_ok=True)
+
+
 @pytest.fixture(scope="module")
 def vcr_config():
+    # Reuse the module-level variables instead of redefining them
     return {
         "filter_headers": ["Authorization", "X-Amz-Date", "X-Amz-Security-Token"],
         "filter_query_parameters": ["X-Amz-Signature", "X-Amz-Credential", "X-Amz-SignedHeaders"],
         "record_mode": "once",
-        "cassette_library_dir": "tests/fixtures/vcr_cassettes",
+        "cassette_library_dir": cassette_dir,
     }
-
-
-# Create the directory for cassettes if it doesn't exist
-os.makedirs("tests/fixtures/vcr_cassettes", exist_ok=True)

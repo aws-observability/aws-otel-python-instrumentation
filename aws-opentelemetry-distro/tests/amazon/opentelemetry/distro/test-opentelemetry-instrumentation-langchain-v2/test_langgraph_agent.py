@@ -17,6 +17,7 @@ from opentelemetry.trace import INVALID_SPAN
 
 @pytest.mark.vcr(filter_headers=["Authorization", "X-Amz-Date", "X-Amz-Security-Token"], record_mode="once")
 def test_langgraph_invoke(instrument_langchain, span_exporter):
+    span_exporter.clear()
     session = boto3.Session(
         aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
