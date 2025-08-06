@@ -1,0 +1,51 @@
+interactions:
+- request:
+    body: '{"anthropic_version": "bedrock-2023-05-31", "messages": [{"role": "user",
+      "content": "What''s 5 + 5?"}], "system": "You are a mathematician.", "max_tokens":
+      1000, "temperature": 0}'
+    headers:
+      Accept:
+      - !!binary |
+        YXBwbGljYXRpb24vanNvbg==
+      Content-Length:
+      - '179'
+      Content-Type:
+      - !!binary |
+        YXBwbGljYXRpb24vanNvbg==
+      User-Agent:
+      - !!binary |
+        Qm90bzMvMS40MC4zIG1kL0JvdG9jb3JlIzEuNDAuMyB1YS8yLjEgb3MvbWFjb3MjMjQuNS4wIG1k
+        L2FyY2gjYXJtNjQgbGFuZy9weXRob24jMy4xMS4xMyBtZC9weWltcGwjQ1B5dGhvbiBtL2IsWixE
+        IGNmZy9yZXRyeS1tb2RlI2xlZ2FjeSBCb3RvY29yZS8xLjQwLjM=
+      amz-sdk-invocation-id:
+      - !!binary |
+        ZTgzYzY1MDItM2M0Zi00NmIxLTg0MmEtMWUyOWFiN2NlNGM5
+      amz-sdk-request:
+      - !!binary |
+        YXR0ZW1wdD0x
+    method: POST
+    uri: https://bedrock-runtime.us-west-2.amazonaws.com/model/anthropic.claude-3-haiku-20240307-v1%3A0/invoke
+  response:
+    body:
+      string: '{"id":"msg_bdrk_01AJS6KmqXvybCZpFmvbDJKV","type":"message","role":"assistant","model":"claude-3-haiku-20240307","content":[{"type":"text","text":"10."}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":21,"output_tokens":6}}'
+    headers:
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '245'
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 06 Aug 2025 20:23:52 GMT
+      X-Amzn-Bedrock-Input-Token-Count:
+      - '21'
+      X-Amzn-Bedrock-Invocation-Latency:
+      - '270'
+      X-Amzn-Bedrock-Output-Token-Count:
+      - '6'
+      x-amzn-RequestId:
+      - 0bfc2606-772e-4e8a-853f-3e26393c6a41
+    status:
+      code: 200
+      message: OK
+version: 1
