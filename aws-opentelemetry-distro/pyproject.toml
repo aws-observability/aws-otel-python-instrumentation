@@ -87,6 +87,7 @@ dependencies = [
   "langchain-aws == 0.2.15",
   "langchain-community == 0.3.27",
   "langgraph == 0.6.3",
+  "duckduckgo-search == 8.1.1",
 ]
 
 [project.optional-dependencies]

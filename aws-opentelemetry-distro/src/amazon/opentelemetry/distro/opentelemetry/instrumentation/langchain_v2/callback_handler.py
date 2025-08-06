@@ -218,9 +218,9 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         prompts: list[str],
         *,
         run_id: UUID,
-        parent_run_id: UUID | None = None,
-        tags: Optional[list[str]] | None = None,
-        metadata: Optional[dict[str, Any]] | None = None,
+        parent_run_id: Optional[UUID] = None,
+        tags: Optional[list[str]] = None,
+        metadata: Optional[dict[str, Any]] = None,
         **kwargs: Any,
     ):
         if context_api.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
@@ -254,8 +254,8 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         response: LLMResult,
         *,
         run_id: UUID,
-        parent_run_id: UUID | None = None,
-        tags: Optional[list[str]] | None = None,
+        parent_run_id: Optional[UUID] = None,
+        tags: Optional[list[str]] = None,
         **kwargs: Any,
     ):
         if context_api.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
@@ -302,8 +302,8 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         error: BaseException,
         *,
         run_id: UUID,
-        parent_run_id: UUID | None = None,
-        tags: Optional[list[str]] | None = None,
+        parent_run_id: Optional[UUID] = None,
+        tags: Optional[list[str]] = None,
         **kwargs: Any,
     ):
         self._handle_error(error, run_id, parent_run_id, **kwargs)
@@ -314,9 +314,9 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         inputs: dict[str, Any],
         *,
         run_id: UUID,
-        parent_run_id: UUID | None = None,
-        tags: Optional[list[str]] | None = None,
-        metadata: Optional[dict[str, Any]] | None = None,
+        parent_run_id: Optional[UUID] = None,
+        tags: Optional[list[str]] = None,
+        metadata: Optional[dict[str, Any]] = None,
         **kwargs: Any,
     ):
         if context_api.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
@@ -342,8 +342,8 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         outputs: dict[str, Any],
         *,
         run_id: UUID,
-        parent_run_id: UUID | None = None,
-        tags: list[str] | None = None,
+        parent_run_id: Optional[UUID] = None,
+        tags: Optional[list[str]] = None,
         **kwargs: Any,
     ):
 
@@ -359,8 +359,8 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self,
         error: BaseException,
         run_id: UUID,
-        parent_run_id: UUID | None = None,
-        tags: Optional[list[str]] | None = None,
+        parent_run_id: Optional[UUID] = None,
+        tags: Optional[list[str]] = None,
         **kwargs: Any,
     ):
         self._handle_error(error, run_id, parent_run_id, **kwargs)
@@ -371,10 +371,10 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         input_str: str,
         *,
         run_id: UUID,
-        parent_run_id: UUID | None = None,
-        tags: list[str] | None = None,
-        metadata: dict[str, Any] | None = None,
-        inputs: dict[str, Any] | None = None,
+        parent_run_id: Optional[UUID] = None,
+        tags: Optional[list[str]] = None,
+        metadata: Optional[dict[str, Any]] = None,
+        inputs: Optional[dict[str, Any]] = None,
         **kwargs: Any,
     ):
         if context_api.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
@@ -410,8 +410,8 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         output: Any,
         *,
         run_id: UUID,
-        parent_run_id: UUID | None = None,
-        tags: list[str] | None = None,
+        parent_run_id: Optional[UUID] = None,
+        tags: Optional[list[str]] = None,
         **kwargs: Any,
     ):
         if context_api.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
@@ -426,8 +426,8 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self,
         error: BaseException,
         run_id: UUID,
-        parent_run_id: UUID | None = None,
-        tags: list[str] | None = None,
+        parent_run_id: Optional[UUID] = None,
+        tags: Optional[list[str]] = None,
         **kwargs: Any,
     ):
         self._handle_error(error, run_id, parent_run_id, **kwargs)
