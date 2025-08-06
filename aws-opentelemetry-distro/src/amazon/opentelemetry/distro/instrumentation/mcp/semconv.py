@@ -56,13 +56,13 @@ class MCPSpanNames:
     """Standard span names for MCP operations."""
 
     # Client-side span names
-    CLIENT_SEND_REQUEST = "span.mcp.client"
+    SPAN_MCP_CLIENT = "span.mcp.client"
     """
     Span name for client-side MCP request operations.
     Used for all outgoing MCP requests (initialize, list tools, call tool).
     """
 
-    CLIENT_LIST_TOOLS = "span.mcp.server"
+    SPAN_MCP_SERVER = "span.mcp.server"
     """
     Span name for client-side MCP list tools requests.
     """
