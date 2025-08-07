@@ -26,7 +26,6 @@ class MCPSpanAttributes:
     MCP_TOOL_NAME = "mcp.tool.name"
     """
     The name of the tool provided in the request.
-
     Conditionally Required when operation is related to a specific tool.
     """
     MCP_REQUEST_ARGUMENT = "mcp.request.argument"
@@ -34,9 +33,23 @@ class MCPSpanAttributes:
     Full attribute: mcp.request.argument.<key>
     Additional arguments passed to the request within params object. <key> being the normalized argument name (lowercase), the value being the argument value.
     """
+    MCP_PROMPT_NAME = "mcp.prompt.name"
+    """
+    The name of the prompt or prompt template provided in the request or response
+    Conditionally Required when operation is related to a specific prompt.
+    """
+    MCP_RESOURCE_URI = "mcp.resource.uri"
+    """
+    The value of the resource uri.
+    Conditionally Required when the client executes a request type that includes a resource URI parameter.
+    """
+    MCP_TRANSPORT_TYPE = "mcp.transport.type"
+    """
+    The transport type used for MCP communication.
+    Examples: stdio, streamable_http
+    """
 
-
-class MCPMethodNameValue:
+class MCPMethodValue:
 
     NOTIFICATIONS_CANCELLED = "notifications/cancelled"
     """
@@ -66,4 +79,9 @@ class MCPMethodNameValue:
     INITIALIZED = "initialize"
     """
     Request to initialize the MCP client.
+    """
+
+    PROMPTS_GET = "prompts/get"
+    """
+    Request to get a prompt.
     """

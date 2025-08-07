@@ -17,13 +17,13 @@ from .version import __version__
 
 from .semconv import (
     MCPSpanAttributes,
-    MCPMethodNameValue,
+    MCPMethodValue,
 )
 
 
 class McpInstrumentor(BaseInstrumentor):
     """
-    An instrumentation class for MCP: https://modelcontextprotocol.io/overview.
+    An instrumentation class for MCP: https://modelcontextprotocol.io/overview
     """
 
     def __init__(self, **kwargs):
@@ -46,11 +46,13 @@ class McpInstrumentor(BaseInstrumentor):
             ),
             "mcp.shared.session",
         )
+
+
         register_post_import_hook(
             lambda _: wrap_function_wrapper(
                 "mcp.server.lowlevel.server",
                 "Server._handle_request",
-                self._wrap_stdio_handle_request,
+                self._wrap_server_handle_request,
             ),
             "mcp.server.lowlevel.server",
         )
@@ -65,11 +67,14 @@ class McpInstrumentor(BaseInstrumentor):
         import mcp.types as types
 
         """ 
-        Instruments MCP client-side stdio request sending, see: https://modelcontextprotocol.io/specification/2025-06-18/basic/transports
+        Instruments MCP client-side request sending for both stdio and Streamable HTTP transport, 
+        see: https://modelcontextprotocol.io/specification/2025-06-18/basic/transports
 
-        This is the master function responsible for sending requests from the client to the MCP server. See:
-        https://github.com/modelcontextprotocol/python-sdk/blob/e68e513b428243057f9c4693e10162eb3bb52897/src/mcp/shared/session.py#L220
-        
+        This is the master function responsible for sending requests from the client to the MCP server. 
+        See:
+        - https://github.com/modelcontextprotocol/python-sdk/blob/e68e513b428243057f9c4693e10162eb3bb52897/src/mcp/shared/session.py#L220
+        - https://github.com/modelcontextprotocol/python-sdk/blob/e68e513b428243057f9c4693e10162eb3bb52897/src/mcp/client/session_group.py#L233
+
         The instrumented MCP client intercepts the request to obtain attributes for creating client-side span, extracts
         the current trace context, and embeds it into the request's params._meta field
         before forwarding the request to the MCP server.
@@ -105,7 +110,7 @@ class McpInstrumentor(BaseInstrumentor):
                 parent_span = {}
                 self.propagators.inject(carrier=parent_span, context=span_ctx)
 
-                McpInstrumentor._configure_mcp_span(client_span, request, request_id)
+                McpInstrumentor._generate_mcp_span_attrs(client_span, request, request_id)
                 request_as_json["params"]["_meta"].update(parent_span)
 
                 # Reconstruct request object with injected trace context
@@ -123,13 +128,15 @@ class McpInstrumentor(BaseInstrumentor):
 
         return async_wrapper()
 
-    async def _wrap_stdio_handle_request(
+    async def _wrap_server_handle_request(
         self, wrapped: Callable, instance: Any, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Any:
         """
-        Instruments MCP server-side stdio request handling, see: https://modelcontextprotocol.io/specification/2025-06-18/basic/transports
+        Instruments MCP server-side request handling for both stdio and Streamable HTTP transport, 
+        see: https://modelcontextprotocol.io/specification/2025-06-18/basic/transports
 
-        This is the core function responsible for processing incoming requests on the MCP server. See:
+        This is the core function responsible for processing incoming requests on the MCP server. 
+        See:
         https://github.com/modelcontextprotocol/python-sdk/blob/e68e513b428243057f9c4693e10162eb3bb52897/src/mcp/server/lowlevel/server.py#L616
 
         The instrumented MCP server intercepts incoming requests to extract tracing context from
@@ -158,7 +165,7 @@ class McpInstrumentor(BaseInstrumentor):
                 "span.mcp.server", kind=trace.SpanKind.SERVER, context=parent_ctx
             ) as server_span:
 
-                self._configure_mcp_span(server_span, incoming_req, request_id)
+                self._generate_mcp_span_attrs(server_span, incoming_req, request_id)
 
                 try:
                     result = await wrapped(*args, **kwargs)
@@ -170,45 +177,44 @@ class McpInstrumentor(BaseInstrumentor):
                     raise
 
     @staticmethod
-    def _configure_mcp_span(span: trace.Span, request, request_id: Optional[str]) -> None:
+    def _generate_mcp_span_attrs(span: trace.Span, request, request_id: Optional[str]) -> None:
         import mcp.types as types  # pylint: disable=import-outside-toplevel,consider-using-from-import
 
+        # Client-side: request is of type ClientRequest which contains the Union of different RootModel types
+        # Server-side: request is passed the RootModel
+        # See: https://github.com/modelcontextprotocol/python-sdk/blob/e68e513b428243057f9c4693e10162eb3bb52897/src/mcp/types.py#L1220
         if hasattr(request, "root"):
             request = request.root
 
         if request_id:
             span.set_attribute(MCPSpanAttributes.MCP_REQUEST_ID, request_id)
-
-        if isinstance(request, types.ListToolsRequest):
-            span.update_name(MCPMethodNameValue.TOOLS_LIST)
-            span.set_attribute(MCPSpanAttributes.MCP_METHOD_NAME, MCPMethodNameValue.TOOLS_LIST)
-            return
+        
+        span.set_attribute(MCPSpanAttributes.MCP_METHOD_NAME, request.method)
 
         if isinstance(request, types.CallToolRequest):
             tool_name = request.params.name
-
-            span.update_name(f"{MCPMethodNameValue.TOOLS_CALL} {request.params.name}")
-            span.set_attribute(MCPSpanAttributes.MCP_METHOD_NAME, MCPMethodNameValue.TOOLS_CALL)
+            span.update_name(f"{MCPMethodValue.TOOLS_CALL} {tool_name}")
             span.set_attribute(MCPSpanAttributes.MCP_TOOL_NAME, tool_name)
 
-            if hasattr(request.params, "arguments"):
+            if request.params.arguments:
                 for arg_name, arg_val in request.params.arguments.items():
                     span.set_attribute(
                         f"{MCPSpanAttributes.MCP_REQUEST_ARGUMENT}.{arg_name}", McpInstrumentor.serialize(arg_val)
                     )
-
-        if isinstance(request, types.InitializeRequest):
-            span.update_name(MCPMethodNameValue.INITIALIZED)
-            span.set_attribute(MCPSpanAttributes.MCP_METHOD_NAME, MCPMethodNameValue.INITIALIZED)
-
-        if isinstance(request, types.CancelledNotification):
-            span.update_name(MCPMethodNameValue.NOTIFICATIONS_CANCELLED)
-            span.set_attribute(MCPSpanAttributes.MCP_METHOD_NAME, MCPMethodNameValue.NOTIFICATIONS_CANCELLED)
-
-        if isinstance(request, types.ToolListChangedNotification):
-            span.update_name(MCPMethodNameValue.NOTIFICATIONS_CANCELLED)
-            span.set_attribute(MCPSpanAttributes.MCP_METHOD_NAME, MCPMethodNameValue.NOTIFICATIONS_CANCELLED)
-
+            return 
+        if isinstance(request, types.GetPromptRequest):
+            prompt_name = request.params.name
+            span.update_name(f"{MCPMethodValue.PROMPTS_GET} {prompt_name}")
+            span.set_attribute(MCPSpanAttributes.MCP_PROMPT_NAME, prompt_name)
+            return 
+        if isinstance(request, (types.ReadResourceRequest, types.SubscribeRequest, types.UnsubscribeRequest)):
+            resource_uri = str(request.params.uri)
+            span.update_name(f"{MCPSpanAttributes.MCP_RESOURCE_URI} {resource_uri}")
+            span.set_attribute(MCPSpanAttributes.MCP_RESOURCE_URI, resource_uri)
+            return 
+        
+        span.update_name(request.method)
+    
     @staticmethod
     def serialize(args):
         try:
