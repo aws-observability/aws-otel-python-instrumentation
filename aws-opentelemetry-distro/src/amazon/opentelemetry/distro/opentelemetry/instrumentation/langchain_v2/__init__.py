@@ -42,6 +42,7 @@ class LangChainInstrumentor(BaseInstrumentor):
         if hasattr(self, "_wrapped"):
             for module, name in self._wrapped:
                 unwrap(module, name)
+        self.handler = None
 
 
 class _BaseCallbackManagerInitWrapper:

@@ -1,10 +1,20 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+# pylint: disable=no-self-use
+
+import time
 import unittest
 import uuid
-from unittest.mock import MagicMock, patch
+from unittest.mock import Mock, patch
 
+from langchain_core.outputs import Generation, LLMResult
+
+from amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2 import (
+    LangChainInstrumentor,
+    _BaseCallbackManagerInitWrapper,
+    _instruments,
+)
 from amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler import (
     OpenTelemetryCallbackHandler,
     SpanHolder,
@@ -12,130 +22,345 @@ from amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.call
     _set_request_params,
     _set_span_attribute,
 )
-from amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.span_attributes import SpanAttributes
-from opentelemetry.trace import SpanKind
+from amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.span_attributes import (
+    GenAIOperationValues,
+    SpanAttributes,
+)
+from opentelemetry.trace import SpanKind, StatusCode
+
+
+class TestOpenTelemetryHelperFunctions(unittest.TestCase):
+    """Test the helper functions in the callback handler module."""
+
+    def test_set_span_attribute(self):
+        mock_span = Mock()
+
+        _set_span_attribute(mock_span, "test.attribute", "test_value")
+        mock_span.set_attribute.assert_called_once_with("test.attribute", "test_value")
+
+        mock_span.reset_mock()
+
+        _set_span_attribute(mock_span, "test.attribute", None)
+        mock_span.set_attribute.assert_not_called()
+
+        _set_span_attribute(mock_span, "test.attribute", "")
+        mock_span.set_attribute.assert_not_called()
+
+    def test_sanitize_metadata_value(self):
+        self.assertEqual(_sanitize_metadata_value(None), None)
+        self.assertEqual(_sanitize_metadata_value(True), True)
+        self.assertEqual(_sanitize_metadata_value("string"), "string")
+        self.assertEqual(_sanitize_metadata_value(123), 123)
+        self.assertEqual(_sanitize_metadata_value(1.23), 1.23)
+
+        self.assertEqual(_sanitize_metadata_value([1, "two", 3.0]), ["1", "two", "3.0"])
+        self.assertEqual(_sanitize_metadata_value((1, "two", 3.0)), ["1", "two", "3.0"])
+
+        class TestClass:
+            def __str__(self):
+                return "test_class"
+
+        self.assertEqual(_sanitize_metadata_value(TestClass()), "test_class")
+
+    @patch(
+        "amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler._set_span_attribute"
+    )
+    def test_set_request_params(self, mock_set_span_attribute):
+        mock_span = Mock()
+        mock_span_holder = Mock(spec=SpanHolder)
+
+        kwargs = {"model_id": "gpt-4", "temperature": 0.7, "max_tokens": 100, "top_p": 0.9}
+        _set_request_params(mock_span, kwargs, mock_span_holder)
+
+        self.assertEqual(mock_span_holder.request_model, "gpt-4")
+        mock_set_span_attribute.assert_any_call(mock_span, SpanAttributes.GEN_AI_REQUEST_MODEL, "gpt-4")
+        mock_set_span_attribute.assert_any_call(mock_span, SpanAttributes.GEN_AI_RESPONSE_MODEL, "gpt-4")
+        mock_set_span_attribute.assert_any_call(mock_span, SpanAttributes.GEN_AI_REQUEST_TEMPERATURE, 0.7)
+        mock_set_span_attribute.assert_any_call(mock_span, SpanAttributes.GEN_AI_REQUEST_MAX_TOKENS, 100)
+        mock_set_span_attribute.assert_any_call(mock_span, SpanAttributes.GEN_AI_REQUEST_TOP_P, 0.9)
+
+        mock_set_span_attribute.reset_mock()
+        mock_span_holder.reset_mock()
+
+        kwargs = {"invocation_params": {"model_id": "gpt-3.5-turbo", "temperature": 0.5, "max_tokens": 50}}
+        _set_request_params(mock_span, kwargs, mock_span_holder)
+
+        self.assertEqual(mock_span_holder.request_model, "gpt-3.5-turbo")
+        mock_set_span_attribute.assert_any_call(mock_span, SpanAttributes.GEN_AI_REQUEST_MODEL, "gpt-3.5-turbo")
 
 
 class TestOpenTelemetryCallbackHandler(unittest.TestCase):
+    """Test the OpenTelemetryCallbackHandler class."""
+
     def setUp(self):
-        self.mock_tracer = MagicMock()
-        self.mock_span = MagicMock()
+        self.mock_tracer = Mock()
+        self.mock_span = Mock()
         self.mock_tracer.start_span.return_value = self.mock_span
         self.handler = OpenTelemetryCallbackHandler(self.mock_tracer)
         self.run_id = uuid.uuid4()
         self.parent_run_id = uuid.uuid4()
 
-    def test_set_span_attribute(self):
-        """Test the _set_span_attribute function with various inputs."""
-        # Value is not None
-        _set_span_attribute(self.mock_span, "test.attribute", "test_value")
-        self.mock_span.set_attribute.assert_called_with("test.attribute", "test_value")
+    def test_init(self):
+        """Test the initialization of the handler."""
+        handler = OpenTelemetryCallbackHandler(self.mock_tracer)
+        self.assertEqual(handler.tracer, self.mock_tracer)
+        self.assertEqual(handler.span_mapping, {})
 
-        # Value is None
-        self.mock_span.reset_mock()
-        _set_span_attribute(self.mock_span, "test.attribute", None)
-        self.mock_span.set_attribute.assert_not_called()
+    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler.context_api")
+    def test_create_span(self, mock_context_api):
+        """Test the _create_span method."""
+        mock_context_api.get_value.return_value = {}
+        mock_context_api.set_value.return_value = {}
+        mock_context_api.attach.return_value = None
 
-        # Value is empty string
-        self.mock_span.reset_mock()
-        _set_span_attribute(self.mock_span, "test.attribute", "")
-        self.mock_span.set_attribute.assert_not_called()
+        span = self.handler._create_span(
+            run_id=self.run_id,
+            parent_run_id=None,
+            span_name="test_span",
+            kind=SpanKind.INTERNAL,
+            metadata={"key": "value"},
+        )
 
-        # Value is number
-        self.mock_span.reset_mock()
-        _set_span_attribute(self.mock_span, "test.attribute", 123)
-        self.mock_span.set_attribute.assert_called_with("test.attribute", 123)
-
-    def test_sanitize_metadata_value(self):
-        """Test _sanitize_metadata_value function with various inputs."""
-        # Basic types
-        self.assertEqual(_sanitize_metadata_value(None), None)
-        self.assertEqual(_sanitize_metadata_value("string"), "string")
-        self.assertEqual(_sanitize_metadata_value(123), 123)
-        self.assertEqual(_sanitize_metadata_value(123.45), 123.45)
-        self.assertEqual(_sanitize_metadata_value(True), True)
-
-        # List type
-        self.assertEqual(_sanitize_metadata_value([1, 2, 3]), ["1", "2", "3"])
-        self.assertEqual(_sanitize_metadata_value(["a", "b", "c"]), ["a", "b", "c"])
-
-        # Complex object
-        class TestClass:
-            def __str__(self):
-                return "TestClass"
-
-        self.assertEqual(_sanitize_metadata_value(TestClass()), "TestClass")
-
-        # Nested list
-        self.assertEqual(_sanitize_metadata_value([1, [2, 3], 4]), ["1", "['2', '3']", "4"])
-
-    @patch("time.time", return_value=12345.0)
-    def test_set_request_params(self, mock_time):
-        """Test _set_request_params function."""
-        span = MagicMock()
-
-        # Create SpanHolder manually with fields to avoid factory issue
-        span_holder = SpanHolder(span=span, children=[], start_time=12345.0, request_model=None)
-
-        # Test with model_id in kwargs
-        kwargs = {"model_id": "gpt-4", "temperature": 0.7, "max_tokens": 100, "top_p": 0.9}
-        _set_request_params(span, kwargs, span_holder)
-
-        self.assertEqual(span_holder.request_model, "gpt-4")
-
-        # Verify the appropriate attributes were set
-        span.set_attribute.assert_any_call(SpanAttributes.GEN_AI_REQUEST_MODEL, "gpt-4")
-        span.set_attribute.assert_any_call(SpanAttributes.GEN_AI_RESPONSE_MODEL, "gpt-4")
-        span.set_attribute.assert_any_call(SpanAttributes.GEN_AI_REQUEST_TEMPERATURE, 0.7)
-        span.set_attribute.assert_any_call(SpanAttributes.GEN_AI_REQUEST_MAX_TOKENS, 100)
-        span.set_attribute.assert_any_call(SpanAttributes.GEN_AI_REQUEST_TOP_P, 0.9)
-
-        # Test with invocation_params
-        span.reset_mock()
-        span_holder = SpanHolder(span=span, children=[], start_time=12345.0, request_model=None)
-
-        kwargs = {"invocation_params": {"model_id": "claude-3", "temperature": 0.5, "max_tokens": 200, "top_p": 0.8}}
-        _set_request_params(span, kwargs, span_holder)
-
-        self.assertEqual(span_holder.request_model, "claude-3")
-        span.set_attribute.assert_any_call(SpanAttributes.GEN_AI_REQUEST_MODEL, "claude-3")
-
-    def test_create_span(self):
-        """Test _create_span method."""
-        # Test creating span without parent
-        with patch("time.time", return_value=12345.0):
-            span = self.handler._create_span(self.run_id, None, "test_span", metadata={"key": "value"})
-
+        self.mock_tracer.start_span.assert_called_once_with("test_span", kind=SpanKind.INTERNAL)
         self.assertEqual(span, self.mock_span)
-        # Fix: Use SpanKind.INTERNAL instead of the integer value
-        self.mock_tracer.start_span.assert_called_with("test_span", kind=SpanKind.INTERNAL)
         self.assertIn(self.run_id, self.handler.span_mapping)
-        self.assertEqual(self.handler.span_mapping[self.run_id].span, self.mock_span)
-        self.assertEqual(self.handler.span_mapping[self.run_id].children, [])
 
-        # Test creating span with parent
-        with patch("time.time", return_value=12345.0):
-            parent_run_id = uuid.uuid4()
-            parent_span = MagicMock()
-            self.handler.span_mapping[parent_run_id] = SpanHolder(
-                span=parent_span, children=[], start_time=12345.0, request_model=None
+        self.mock_tracer.reset_mock()
+
+        parent_span = Mock()
+        self.handler.span_mapping[self.parent_run_id] = SpanHolder(parent_span, [], time.time(), "model-id")
+
+    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler.context_api")
+    def test_on_llm_start_and_end(self, mock_context_api):
+        mock_context_api.get_value.return_value = False
+        serialized = {"name": "test_llm"}
+        prompts = ["Hello, world!"]
+        kwargs = {"invocation_params": {"model_id": "gpt-4", "temperature": 0.7, "max_tokens": 100}}
+
+        class MockSpanHolder:
+            def __init__(self, span, name, start_timestamp):
+                self.span = span
+                self.name = name
+                self.start_timestamp = start_timestamp
+                self.request_model = None
+
+        def mock_create_span(run_id, parent_run_id, name, kind, metadata):
+            span_holder = MockSpanHolder(span=self.mock_span, name=name, start_timestamp=time.time_ns())
+            self.handler.span_mapping[run_id] = span_holder
+            return self.mock_span
+
+        original_create_span = self.handler._create_span
+        self.handler._create_span = Mock(side_effect=mock_create_span)
+
+        self.handler.on_llm_start(
+            serialized=serialized,
+            prompts=prompts,
+            run_id=self.run_id,
+            parent_run_id=self.parent_run_id,
+            metadata={},
+            **kwargs,
+        )
+
+        self.handler._create_span.assert_called_once_with(
+            self.run_id,
+            self.parent_run_id,
+            f"{GenAIOperationValues.CHAT} gpt-4",
+            kind=SpanKind.CLIENT,
+            metadata={},
+        )
+
+        self.handler.span_mapping[self.run_id] = SpanHolder(self.mock_span, [], time.time(), "gpt-4")
+
+        llm_output = {
+            "token_usage": {"prompt_tokens": 10, "completion_tokens": 20},
+            "model_name": "gpt-4",
+            "id": "response-123",
+        }
+        generations = [[Generation(text="This is a test response")]]
+        response = LLMResult(generations=generations, llm_output=llm_output)
+
+        with patch(
+            "amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler._set_span_attribute"
+        ) as mock_set_attribute:
+            with patch.object(self.handler, "_end_span") as mock_end_span:
+                self.handler.on_llm_end(response=response, run_id=self.run_id, parent_run_id=self.parent_run_id)
+
+                print("\nAll calls to mock_set_attribute:")
+                for i, call in enumerate(mock_set_attribute.call_args_list):
+                    args, kwargs = call
+                    print(f"Call {i+1}:", args, kwargs)
+
+                mock_set_attribute.assert_any_call(self.mock_span, SpanAttributes.GEN_AI_RESPONSE_MODEL, "gpt-4")
+                mock_set_attribute.assert_any_call(self.mock_span, SpanAttributes.GEN_AI_RESPONSE_ID, "response-123")
+                mock_set_attribute.assert_any_call(self.mock_span, SpanAttributes.GEN_AI_USAGE_INPUT_TOKENS, 10)
+                mock_set_attribute.assert_any_call(self.mock_span, SpanAttributes.GEN_AI_USAGE_OUTPUT_TOKENS, 20)
+
+        self.handler._create_span = original_create_span
+
+    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler.context_api")
+    def test_on_llm_error(self, mock_context_api):
+        """Test the on_llm_error method."""
+        mock_context_api.get_value.return_value = False
+        self.handler.span_mapping[self.run_id] = SpanHolder(self.mock_span, [], time.time(), "gpt-4")
+        error = ValueError("Test error")
+
+        self.handler._handle_error(error=error, run_id=self.run_id, parent_run_id=self.parent_run_id)
+
+        self.mock_span.set_status.assert_called_once()
+        args, _ = self.mock_span.set_status.call_args
+        self.assertEqual(args[0].status_code, StatusCode.ERROR)
+
+        self.mock_span.record_exception.assert_called_once_with(error)
+        self.mock_span.end.assert_called_once()
+
+    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler.context_api")
+    def test_on_chain_start_end(self, mock_context_api):
+        """Test the on_chain_start and on_chain_end methods."""
+        mock_context_api.get_value.return_value = False
+        serialized = {"name": "test_chain"}
+        inputs = {"query": "What is the capital of France?"}
+
+        with patch.object(self.handler, "_create_span", return_value=self.mock_span) as mock_create_span:
+            self.handler.on_chain_start(
+                serialized=serialized,
+                inputs=inputs,
+                run_id=self.run_id,
+                parent_run_id=self.parent_run_id,
+                metadata={},
             )
 
-            span = self.handler._create_span(self.run_id, parent_run_id, "child_span")
+            mock_create_span.assert_called_once()
+            self.mock_span.set_attribute.assert_called_once_with("gen_ai.prompt", str(inputs))
 
-            self.assertEqual(len(self.handler.span_mapping[parent_run_id].children), 1)
-            self.assertEqual(self.handler.span_mapping[parent_run_id].children[0], self.run_id)
+        outputs = {"result": "Paris"}
+        self.handler.span_mapping[self.run_id] = SpanHolder(self.mock_span, [], time.time(), "gpt-4")
 
-    def test_get_name_from_callback(self):
-        """Test _get_name_from_callback method."""
-        # Test with name in kwargs
-        serialized = {"kwargs": {"name": "test_name"}}
-        name = self.handler._get_name_from_callback(serialized)
-        self.assertEqual(name, "test_name")
+        with patch.object(self.handler, "_end_span") as mock_end_span:
+            self.handler.on_chain_end(outputs=outputs, run_id=self.run_id, parent_run_id=self.parent_run_id)
 
-        # Test with name in direct kwargs
-        name = self.handler._get_name_from_callback({}, kwargs={"name": "direct_name"})
-        self.assertEqual(name, "unknown")
+            self.mock_span.set_attribute.assert_called_with("gen_ai.completion", str(outputs))
+            mock_end_span.assert_called_once_with(self.mock_span, self.run_id)
 
-        # Test with name in serialized
-        name = self.handler
+    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler.context_api")
+    def test_on_tool_start_end(self, mock_context_api):
+        """Test the on_tool_start and on_tool_end methods."""
+        mock_context_api.get_value.return_value = False
+        serialized = {"name": "test_tool", "id": "tool-123", "description": "A test tool"}
+        input_str = "What is 2 + 2?"
+
+        with patch.object(self.handler, "_create_span", return_value=self.mock_span) as mock_create_span:
+            with patch.object(self.handler, "_get_name_from_callback", return_value="test_tool") as mock_get_name:
+                self.handler.on_tool_start(
+                    serialized=serialized, input_str=input_str, run_id=self.run_id, parent_run_id=self.parent_run_id
+                )
+
+                mock_create_span.assert_called_once()
+                mock_get_name.assert_called_once()
+
+                self.mock_span.set_attribute.assert_any_call("gen_ai.tool.input", input_str)
+                self.mock_span.set_attribute.assert_any_call("gen_ai.tool.call.id", "tool-123")
+                self.mock_span.set_attribute.assert_any_call("gen_ai.tool.description", "A test tool")
+                self.mock_span.set_attribute.assert_any_call("gen_ai.tool.name", "test_tool")
+                self.mock_span.set_attribute.assert_any_call("gen_ai.operation.name", "execute_tool")
+
+        output = "The answer is 4"
+
+        self.handler.span_mapping[self.run_id] = SpanHolder(self.mock_span, [], time.time(), "gpt-4")
+
+        with patch.object(self.handler, "_end_span") as mock_end_span:
+            self.handler.on_tool_end(output=output, run_id=self.run_id)
+
+            mock_end_span.assert_called_once()
+
+            self.mock_span.set_attribute.assert_any_call("gen_ai.tool.output", output)
+
+
+class TestLangChainInstrumentor(unittest.TestCase):
+    """Test the LangChainInstrumentor class."""
+
+    def setUp(self):
+        self.instrumentor = LangChainInstrumentor()
+
+    def test_instrumentation_dependencies(self):
+        """Test that instrumentation_dependencies returns the correct dependencies."""
+        result = self.instrumentor.instrumentation_dependencies()
+        self.assertEqual(result, _instruments)
+        self.assertEqual(result, ("langchain >= 0.1.0",))
+
+    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.get_tracer")
+    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.wrap_function_wrapper")
+    def test_instrument(self, mock_wrap, mock_get_tracer):
+        """Test the _instrument method."""
+        mock_tracer = Mock()
+        mock_get_tracer.return_value = mock_tracer
+        tracer_provider = Mock()
+
+        self.instrumentor._instrument(tracer_provider=tracer_provider)
+
+        mock_get_tracer.assert_called_once()
+        mock_wrap.assert_called_once()
+
+        module = mock_wrap.call_args[1]["module"]
+        name = mock_wrap.call_args[1]["name"]
+        wrapper = mock_wrap.call_args[1]["wrapper"]
+
+        self.assertEqual(module, "langchain_core.callbacks")
+        self.assertEqual(name, "BaseCallbackManager.__init__")
+        self.assertIsInstance(wrapper, _BaseCallbackManagerInitWrapper)
+        self.assertIsInstance(wrapper.callback_handler, OpenTelemetryCallbackHandler)
+
+    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.unwrap")
+    def test_uninstrument(self, mock_unwrap):
+        """Test the _uninstrument method."""
+        self.instrumentor._wrapped = [("module1", "function1"), ("module2", "function2")]
+        self.instrumentor.handler = Mock()
+
+        self.instrumentor._uninstrument()
+
+        mock_unwrap.assert_any_call("langchain_core.callbacks", "BaseCallbackManager.__init__")
+        mock_unwrap.assert_any_call("module1", "function1")
+        mock_unwrap.assert_any_call("module2", "function2")
+        self.assertIsNone(self.instrumentor.handler)
+
+
+class TestBaseCallbackManagerInitWrapper(unittest.TestCase):
+    """Test the _BaseCallbackManagerInitWrapper class."""
+
+    def test_init_wrapper_add_handler(self):
+        """Test that the wrapper adds the handler to the callback manager."""
+        mock_handler = Mock(spec=OpenTelemetryCallbackHandler)
+
+        wrapper_instance = _BaseCallbackManagerInitWrapper(mock_handler)
+
+        original_func = Mock()
+        instance = Mock()
+        instance.inheritable_handlers = []
+
+        wrapper_instance(original_func, instance, [], {})
+
+        original_func.assert_called_once_with()
+        instance.add_handler.assert_called_once_with(mock_handler, True)
+
+    def test_init_wrapper_handler_already_exists(self):
+        """Test that the wrapper doesn't add a duplicate handler."""
+        mock_handler = Mock(spec=OpenTelemetryCallbackHandler)
+
+        wrapper_instance = _BaseCallbackManagerInitWrapper(mock_handler)
+
+        original_func = Mock()
+        instance = Mock()
+
+        mock_tracer = Mock()
+        existing_handler = OpenTelemetryCallbackHandler(mock_tracer)
+        instance.inheritable_handlers = [existing_handler]
+
+        wrapper_instance(original_func, instance, [], {})
+
+        original_func.assert_called_once_with()
+        instance.add_handler.assert_not_called()
+
+
+if __name__ == "__main__":
+    import time
+
+    unittest.main()
