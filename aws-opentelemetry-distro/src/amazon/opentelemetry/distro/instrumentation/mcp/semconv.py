@@ -2,112 +2,68 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-MCP (Model Context Protocol) Semantic Conventions for OpenTelemetry.
+MCP (Model Context Protocol) Semantic Conventions.
+
+Based off of: https://github.com/open-telemetry/semantic-conventions/pull/2083
+
+WARNING: These semantic conventions are currently in development and are considered unstable.
+They may change at any time without notice. Use with caution in production environments.
 """
 
 
-MCP_METHOD_NAME = "mcp.method.name"
-MCP_REQUEST_ID = "mcp.request.id"
-MCP_SESSION_ID = "mcp.session.id"
-MCP_TOOL_NAME = "mcp.tool.name"
-MCP_PROMPT_NAME = "mcp.prompt.name"
-MCP_REQUEST_ARGUMENT = "mcp.request.argument"
+class MCPSpanAttributes:
 
-
-NOTIFICATIONS_CANCELLED = "notifications/cancelled"
-NOTIFICATIONS_INITIALIZED = "notifications/initialized"
-NOTIFICATIONS_PROGRESS = "notifications/progress"
-RESOURCES_LIST = "resources/list"
-TOOLS_LIST = "tools/list"
-TOOLS_CALL = "tools/call"
-CLIENT_INITIALIZED = "initialize"
-
-
-class MCPAttributes:
-
-    # MCP Operation Type Attributes
-    MCP_INITIALIZE = "notifications/initialize"
+    MCP_METHOD_NAME = "mcp.method.name"
     """
-    Boolean attribute indicating this span represents an MCP initialize operation.
-    Set to True when the span tracks session initialization between client and server.
+    The name of the request or notification method.
+    Examples: notifications/cancelled; initialize; notifications/initialized
     """
-
-    MCP_LIST_TOOLS = "mcp.list_tools"
+    MCP_REQUEST_ID = "mcp.request.id"
     """
-    Boolean attribute indicating this span represents an MCP list tools operation.
-    Set to True when the span tracks discovery of available tools on the server.
+    This is a unique identifier for the request. 
+    Conditionally Required when the client executes a request.
     """
-
-    MCP_CALL_TOOL = "mcp.call_tool"
-    """
-    Boolean attribute indicating this span represents an MCP call tool operation.
-    Set to True when the span tracks execution of a specific tool.
-    """
-
-    # MCP Tool Information
     MCP_TOOL_NAME = "mcp.tool.name"
     """
-    The name of the MCP tool being called.
-    Example: "echo", "search", "calculator"
+    The name of the tool provided in the request.
+
+    Conditionally Required when operation is related to a specific tool.
+    """
+    MCP_REQUEST_ARGUMENT = "mcp.request.argument"
+    """
+    Full attribute: mcp.request.argument.<key>
+    Additional arguments passed to the request within params object. <key> being the normalized argument name (lowercase), the value being the argument value.
     """
 
 
-class MCPSpanNames:
-    """Standard span names for MCP operations."""
+class MCPMethodNameValue:
 
-    # Client-side span names
-    SPAN_MCP_CLIENT = "span.mcp.client"
+    NOTIFICATIONS_CANCELLED = "notifications/cancelled"
     """
-    Span name for client-side MCP request operations.
-    Used for all outgoing MCP requests (initialize, list tools, call tool).
+    Notification cancelling a previously-issued request.
     """
 
-    SPAN_MCP_SERVER = "span.mcp.server"
+    NOTIFICATIONS_INITIALIZED = "notifications/initialized"
     """
-    Span name for client-side MCP list tools requests.
+    Notification indicating that the MCP client has been initialized.
     """
-
-    @staticmethod
-    def client_call_tool(tool_name: str) -> str:
-        """
-        Generate span name for client-side MCP tool call requests.
-
-        Args:
-            tool_name: Name of the tool being called
-
-        Returns:
-            Formatted span name like "mcp.call_tool.echo", "mcp.call_tool.search"
-        """
-        return f"mcp.call_tool.{tool_name}"
-
+    NOTIFICATIONS_PROGRESS = "notifications/progress"
+    """
+    Notification indicating the progress for a long-running operation.
+    """
+    RESOURCES_LIST = "resources/list"
+    """
+    Request to list resources available on server.
+    """
     TOOLS_LIST = "tools/list"
     """
-    Span name for server-side MCP list tools handling.
-    Tracks server processing of tool discovery requests.
+    Request to list tools available on server.
     """
-
-    @staticmethod
-    def tools_call(tool_name: str) -> str:
-        """
-        Generate span name for server-side MCP tool call handling.
-
-        Args:
-            tool_name: Name of the tool being called
-
-        Returns:
-            Formatted span name like "tools/echo", "tools/search"
-        """
-        return f"tools/{tool_name}"
-
-
-class MCPOperations:
-    """Standard operation names for MCP semantic conventions."""
-
-    INITIALIZE = "Notifications/Initialize"
-    """Operation name for MCP session initialization."""
-
-    LIST_TOOL = "ListTool"
-    """Operation name for MCP tool discovery."""
-
-    UNKNOWN_OPERATION = "UnknownOperation"
-    """Fallback operation name for unrecognized MCP operations."""
+    TOOLS_CALL = "tools/call"
+    """
+    Request to call a tool.
+    """
+    INITIALIZED = "initialize"
+    """
+    Request to initialize the MCP client.
+    """

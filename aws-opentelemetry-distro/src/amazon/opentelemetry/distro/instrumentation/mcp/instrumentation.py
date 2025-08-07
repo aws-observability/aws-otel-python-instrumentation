@@ -7,6 +7,7 @@ from typing import Any, AsyncGenerator, Callable, Collection, Dict, Optional, Tu
 from wrapt import ObjectProxy, register_post_import_hook, wrap_function_wrapper
 
 from opentelemetry import context, trace
+from opentelemetry.trace.status import Status, StatusCode
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.instrumentation.utils import unwrap
 from opentelemetry.semconv.trace import SpanAttributes
@@ -15,20 +16,14 @@ from opentelemetry.propagate import get_global_textmap
 from .version import __version__
 
 from .semconv import (
-    CLIENT_INITIALIZED,
-    MCP_METHOD_NAME,
-    MCP_REQUEST_ARGUMENT,
-    TOOLS_CALL,
-    TOOLS_LIST,
-    MCPAttributes,
-    MCPOperations,
-    MCPSpanNames,
+    MCPSpanAttributes,
+    MCPMethodNameValue,
 )
 
 
 class McpInstrumentor(BaseInstrumentor):
     """
-    An instrumentor class for MCP.
+    An instrumentation class for MCP: https://modelcontextprotocol.io/overview.
     """
 
     def __init__(self, **kwargs):
@@ -40,12 +35,14 @@ class McpInstrumentor(BaseInstrumentor):
         return ("mcp >= 1.8.1",)
 
     def _instrument(self, **kwargs: Any) -> None:
-    
+        # TODO: add instrumentation for Streamable Http transport
+        # See: https://modelcontextprotocol.io/specification/2025-06-18/basic/transports
+
         register_post_import_hook(
             lambda _: wrap_function_wrapper(
                 "mcp.shared.session",
                 "BaseSession.send_request",
-                self._wrap_send_request,
+                self._wrap_session_send_request,
             ),
             "mcp.shared.session",
         )
@@ -53,7 +50,7 @@ class McpInstrumentor(BaseInstrumentor):
             lambda _: wrap_function_wrapper(
                 "mcp.server.lowlevel.server",
                 "Server._handle_request",
-                self._wrap_handle_request,
+                self._wrap_stdio_handle_request,
             ),
             "mcp.server.lowlevel.server",
         )
@@ -62,17 +59,26 @@ class McpInstrumentor(BaseInstrumentor):
         unwrap("mcp.shared.session", "BaseSession.send_request")
         unwrap("mcp.server.lowlevel.server", "Server._handle_request")
 
-    def _wrap_send_request(
+    def _wrap_session_send_request(
         self, wrapped: Callable, instance: Any, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Callable:
         import mcp.types as types
-        
 
         """ 
-        Patches BaseSession.send_request which is responsible for sending requests from the client to the MCP server.
-        This patched MCP client intercepts the request to obtain attributes for creating client-side span, extracts
-        the current trace context, and embeds it into the request's params._meta.traceparent field
+        Instruments MCP client-side stdio request sending, see: https://modelcontextprotocol.io/specification/2025-06-18/basic/transports
+
+        This is the master function responsible for sending requests from the client to the MCP server. See:
+        https://github.com/modelcontextprotocol/python-sdk/blob/e68e513b428243057f9c4693e10162eb3bb52897/src/mcp/shared/session.py#L220
+        
+        The instrumented MCP client intercepts the request to obtain attributes for creating client-side span, extracts
+        the current trace context, and embeds it into the request's params._meta field
         before forwarding the request to the MCP server.
+
+       Args:
+            wrapped: The original BaseSession.send_request method being instrumented
+            instance: The BaseSession instance handling the stdio communication
+            args: Positional arguments passed to the original send_request method, containing the ClientRequest
+            kwargs: Keyword arguments passed to the original send_request method
         """
 
         async def async_wrapper():
@@ -81,88 +87,131 @@ class McpInstrumentor(BaseInstrumentor):
             if not request:
                 return await wrapped(*args, **kwargs)
 
+            request_id = None
+
+            if hasattr(instance, "_request_id"):
+                request_id = instance._request_id
+
             request_as_json = request.model_dump(by_alias=True, mode="json", exclude_none=True)
 
             if "params" not in request_as_json:
                 request_as_json["params"] = {}
-
             if "_meta" not in request_as_json["params"]:
                 request_as_json["params"]["_meta"] = {}
 
-            with self.tracer.start_as_current_span(
-                MCPSpanNames.SPAN_MCP_CLIENT, kind=trace.SpanKind.CLIENT
-            ) as client_span:
+            with self.tracer.start_as_current_span("span.mcp.client", kind=trace.SpanKind.CLIENT) as client_span:
 
-                if request:
-                    span_ctx = trace.set_span_in_context(client_span)
-                    parent_span = {}
-                    self.propagators.inject(carrier=parent_span, context=span_ctx)
+                span_ctx = trace.set_span_in_context(client_span)
+                parent_span = {}
+                self.propagators.inject(carrier=parent_span, context=span_ctx)
 
-                    McpInstrumentor._set_mcp_client_attributes(client_span, request)
+                McpInstrumentor._configure_mcp_span(client_span, request, request_id)
+                request_as_json["params"]["_meta"].update(parent_span)
 
-                    request_as_json["params"]["_meta"].update(parent_span)
+                # Reconstruct request object with injected trace context
+                modified_request = request.model_validate(request_as_json)
+                new_args = (modified_request,) + args[1:]
 
-                    # Reconstruct request object with injected trace context
-                    modified_request = request.model_validate(request_as_json)
-                    new_args = (modified_request,) + args[1:]
+                try:
+                    result = await wrapped(*new_args, **kwargs)
+                    client_span.set_status(Status(StatusCode.OK))
+                    return result
+                except Exception as e:
+                    client_span.set_status(Status(StatusCode.ERROR, str(e)))
+                    client_span.record_exception(e)
+                    raise
 
-                    return await wrapped(*new_args, **kwargs)
         return async_wrapper()
 
-    async def _wrap_handle_request(
+    async def _wrap_stdio_handle_request(
         self, wrapped: Callable, instance: Any, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Any:
-        req = args[1] if len(args) > 1 else None
+        """
+        Instruments MCP server-side stdio request handling, see: https://modelcontextprotocol.io/specification/2025-06-18/basic/transports
+
+        This is the core function responsible for processing incoming requests on the MCP server. See:
+        https://github.com/modelcontextprotocol/python-sdk/blob/e68e513b428243057f9c4693e10162eb3bb52897/src/mcp/server/lowlevel/server.py#L616
+
+        The instrumented MCP server intercepts incoming requests to extract tracing context from
+        the request's params._meta field, creates server-side spans linked to the originating client spans,
+        and processes the request while maintaining trace continuity.
+
+        Args:
+            wrapped: The original Server._handle_request method being instrumented
+            instance: The MCP Server instance processing the stdio communication
+            args: Positional arguments passed to the original _handle_request method, containing the incoming request
+            kwargs: Keyword arguments passed to the original _handle_request method
+        """
+        incoming_req = args[1] if len(args) > 1 else None
+        request_id = None
         carrier = {}
 
-        if req and hasattr(req, "params") and req.params and hasattr(req.params, "meta") and req.params.meta:
-            carrier = req.params.meta.model_dump()
+        if incoming_req and hasattr(incoming_req, "id"):
+            request_id = incoming_req.id
+        if incoming_req and hasattr(incoming_req, "params") and hasattr(incoming_req.params, "meta"):
+            carrier = incoming_req.params.meta.model_dump()
 
         parent_ctx = self.propagators.extract(carrier=carrier)
 
         if parent_ctx:
             with self.tracer.start_as_current_span(
-                MCPSpanNames.SPAN_MCP_SERVER, kind=trace.SpanKind.SERVER, context=parent_ctx
-            ) as mcp_server_span:
-                self._set_mcp_server_attributes(mcp_server_span, req)
-                return await wrapped(*args, **kwargs)
+                "span.mcp.server", kind=trace.SpanKind.SERVER, context=parent_ctx
+            ) as server_span:
+
+                self._configure_mcp_span(server_span, incoming_req, request_id)
+
+                try:
+                    result = await wrapped(*args, **kwargs)
+                    server_span.set_status(Status(StatusCode.OK))
+                    return result
+                except Exception as e:
+                    server_span.set_status(Status(StatusCode.ERROR, str(e)))
+                    server_span.record_exception(e)
+                    raise
 
     @staticmethod
-    def _set_mcp_client_attributes(span: trace.Span, request: Any) -> None:
+    def _configure_mcp_span(span: trace.Span, request, request_id: Optional[str]) -> None:
         import mcp.types as types  # pylint: disable=import-outside-toplevel,consider-using-from-import
 
+        if hasattr(request, "root"):
+            request = request.root
+
+        if request_id:
+            span.set_attribute(MCPSpanAttributes.MCP_REQUEST_ID, request_id)
+
         if isinstance(request, types.ListToolsRequest):
-            span.set_attribute(MCP_METHOD_NAME, TOOLS_LIST)
+            span.update_name(MCPMethodNameValue.TOOLS_LIST)
+            span.set_attribute(MCPSpanAttributes.MCP_METHOD_NAME, MCPMethodNameValue.TOOLS_LIST)
+            return
+
         if isinstance(request, types.CallToolRequest):
             tool_name = request.params.name
-            tool_arguments = request.params.arguments
-            if tool_arguments:
-                for arg_name, arg_val in tool_arguments.items():
-                    span.set_attribute(f"{MCP_REQUEST_ARGUMENT}.{arg_name}", McpInstrumentor.serialize(arg_val))
-            span.update_name(f"{TOOLS_CALL} {tool_name}")
-            span.set_attribute(MCP_METHOD_NAME, TOOLS_CALL)
-            span.set_attribute(MCPAttributes.MCP_TOOL_NAME, tool_name)
+
+            span.update_name(f"{MCPMethodNameValue.TOOLS_CALL} {request.params.name}")
+            span.set_attribute(MCPSpanAttributes.MCP_METHOD_NAME, MCPMethodNameValue.TOOLS_CALL)
+            span.set_attribute(MCPSpanAttributes.MCP_TOOL_NAME, tool_name)
+
+            if hasattr(request.params, "arguments"):
+                for arg_name, arg_val in request.params.arguments.items():
+                    span.set_attribute(
+                        f"{MCPSpanAttributes.MCP_REQUEST_ARGUMENT}.{arg_name}", McpInstrumentor.serialize(arg_val)
+                    )
+
         if isinstance(request, types.InitializeRequest):
-            span.set_attribute(MCP_METHOD_NAME, CLIENT_INITIALIZED)
+            span.update_name(MCPMethodNameValue.INITIALIZED)
+            span.set_attribute(MCPSpanAttributes.MCP_METHOD_NAME, MCPMethodNameValue.INITIALIZED)
+
+        if isinstance(request, types.CancelledNotification):
+            span.update_name(MCPMethodNameValue.NOTIFICATIONS_CANCELLED)
+            span.set_attribute(MCPSpanAttributes.MCP_METHOD_NAME, MCPMethodNameValue.NOTIFICATIONS_CANCELLED)
+
+        if isinstance(request, types.ToolListChangedNotification):
+            span.update_name(MCPMethodNameValue.NOTIFICATIONS_CANCELLED)
+            span.set_attribute(MCPSpanAttributes.MCP_METHOD_NAME, MCPMethodNameValue.NOTIFICATIONS_CANCELLED)
 
     @staticmethod
-    def _set_mcp_server_attributes(span: trace.Span, request: Any) -> None:
-        import mcp.types as types  # pylint: disable=import-outside-toplevel,consider-using-from-import
-
-        if isinstance(request, types.ListToolsRequest):
-            span.set_attribute(MCP_METHOD_NAME, TOOLS_LIST)
-        if isinstance(request, types.CallToolRequest):
-            tool_name = request.params.name
-            span.update_name(f"{TOOLS_CALL} {tool_name}")
-            span.set_attribute(MCP_METHOD_NAME, TOOLS_CALL)
-            span.set_attribute(MCPAttributes.MCP_TOOL_NAME, tool_name)
-
-
-    @staticmethod 
     def serialize(args):
         try:
             return json.dumps(args)
         except Exception:
             return str(args)
-
-
