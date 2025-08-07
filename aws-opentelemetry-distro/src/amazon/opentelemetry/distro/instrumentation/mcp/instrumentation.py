@@ -108,10 +108,12 @@ class McpInstrumentor(BaseInstrumentor):
                 return await wrapped(*args, **kwargs)
 
             request_id: Optional[int] = getattr(instance, "_request_id", None)
-            span_name, span_kind = self._DEFAULT_SERVER_SPAN_NAME, SpanKind.SERVER
+            span_name = self._DEFAULT_SERVER_SPAN_NAME
+            span_kind = SpanKind.SERVER
 
             if isinstance(message, (ClientRequest, ClientNotification)):
-                span_name, span_kind = self._DEFAULT_CLIENT_SPAN_NAME, SpanKind.CLIENT
+                span_name = self._DEFAULT_CLIENT_SPAN_NAME
+                span_kind = SpanKind.CLIENT
 
             message_json = message.model_dump(by_alias=True, mode="json", exclude_none=True)
 
@@ -225,6 +227,7 @@ class McpInstrumentor(BaseInstrumentor):
             self._DEFAULT_SERVER_SPAN_NAME, kind=SpanKind.SERVER, context=parent_ctx
         ) as server_span:
 
+            server_span.set_attribute(SpanAttributes.RPC_SERVICE, instance.name)
             self._generate_mcp_message_attrs(server_span, incoming_msg, request_id)
 
             try:

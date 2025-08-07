@@ -41,6 +41,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_STEPFUNCTIONS_STATEMACHINE_ARN,
 )
 from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
+from amazon.opentelemetry.distro.instrumentation.mcp.semconv import MCPSpanAttributes
 from amazon.opentelemetry.distro._aws_span_processing_util import (
     LOCAL_ROOT,
     MAX_KEYWORD_LENGTH,
@@ -97,6 +98,7 @@ _SERVER_SOCKET_ADDRESS: str = SpanAttributes.SERVER_SOCKET_ADDRESS
 _SERVER_SOCKET_PORT: str = SpanAttributes.SERVER_SOCKET_PORT
 _AWS_TABLE_NAMES: str = SpanAttributes.AWS_DYNAMODB_TABLE_NAMES
 _AWS_BUCKET_NAME: str = SpanAttributes.AWS_S3_BUCKET
+_MCP_METHOD_NAME: str = MCPSpanAttributes.MCP_METHOD_NAME
 
 # Normalized remote service names for supported AWS services
 _NORMALIZED_DYNAMO_DB_SERVICE_NAME: str = "AWS::DynamoDB"
@@ -263,6 +265,9 @@ def _set_remote_service_and_operation(span: ReadableSpan, attributes: BoundedAtt
     elif is_key_present(span, _GRAPHQL_OPERATION_TYPE):
         remote_service = _GRAPHQL
         remote_operation = _get_remote_operation(span, _GRAPHQL_OPERATION_TYPE)
+    elif is_key_present(span, _MCP_METHOD_NAME) and is_key_present(span, _RPC_SERVICE):
+        remote_service = _normalize_remote_service_name(span, _get_remote_service(span, _RPC_SERVICE))
+        remote_operation = _get_remote_operation(span, _MCP_METHOD_NAME)
 
     # Peer service takes priority as RemoteService over everything but AWS Remote.
     if is_key_present(span, _PEER_SERVICE) and not is_key_present(span, AWS_REMOTE_SERVICE):
