@@ -7,11 +7,33 @@ import ast
 
 import boto3
 import pytest
+from botocore.exceptions import ClientError, NoCredentialsError
 from langchain.chains import LLMChain, SequentialChain
 from langchain.prompts import PromptTemplate
 from langchain_aws import BedrockLLM
 
 from opentelemetry.trace import SpanKind
+
+
+def has_aws_credentials():
+    """Check if AWS credentials are available."""
+    # Check for environment variables first
+    if os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_SECRET_ACCESS_KEY"):
+        return True
+
+    # Try to create a boto3 client and make a simple call
+    try:
+        # Using STS for a lightweight validation
+        sts = boto3.client("sts")
+        sts.get_caller_identity()
+        return True
+    except (NoCredentialsError, ClientError):
+        return False
+
+
+aws_credentials_required = pytest.mark.skipif(
+    not has_aws_credentials(), reason="AWS credentials not available for testing"
+)
 
 
 def create_bedrock_llm(region="us-west-2"):
@@ -56,6 +78,7 @@ def create_chains(llm):
     )
 
 
+@aws_credentials_required
 @pytest.mark.vcr(filter_headers=["Authorization", "X-Amz-Date", "X-Amz-Security-Token"], record_mode="once")
 def test_sequential_chain(instrument_langchain, span_exporter):
     span_exporter.clear()
