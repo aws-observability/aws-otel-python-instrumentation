@@ -188,9 +188,9 @@ class TestOpenTelemetryCallbackHandler(unittest.TestCase):
                 self.handler.on_llm_end(response=response, run_id=self.run_id, parent_run_id=self.parent_run_id)
 
                 print("\nAll calls to mock_set_attribute:")
-                for i, call in enumerate(mock_set_attribute.call_args_list):
+                for idx, call in enumerate(mock_set_attribute.call_args_list):
                     args, kwargs = call
-                    print(f"Call {i+1}:", args, kwargs)
+                    print(f"Call {idx+1}:", args, kwargs)
 
                 mock_set_attribute.assert_any_call(self.mock_span, SpanAttributes.GEN_AI_RESPONSE_MODEL, "gpt-4")
                 mock_set_attribute.assert_any_call(self.mock_span, SpanAttributes.GEN_AI_RESPONSE_ID, "response-123")

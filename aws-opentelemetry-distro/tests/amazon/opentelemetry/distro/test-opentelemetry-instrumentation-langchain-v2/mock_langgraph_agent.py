@@ -44,10 +44,10 @@ async def test_langgraph_ainvoke(instrument_langchain, span_exporter):
                 return {"result": response.content}
 
             # Patch StateGraph to avoid actual execution
-            with patch("langgraph.graph.StateGraph", autospec=True) as MockStateGraph:
+            with patch("langgraph.graph.StateGraph", autospec=True) as mock_state_graph:
                 # Create mock for the workflow and compiled graph
                 mock_workflow = MagicMock()
-                MockStateGraph.return_value = mock_workflow
+                mock_state_graph.return_value = mock_workflow
                 mock_compiled_graph = MagicMock()
                 mock_workflow.compile.return_value = mock_compiled_graph
 
@@ -57,7 +57,7 @@ async def test_langgraph_ainvoke(instrument_langchain, span_exporter):
 
                 mock_compiled_graph.ainvoke = mock_ainvoke
 
-                workflow = MockStateGraph(State)
+                workflow = mock_state_graph(State)
                 workflow.add_node("calculate", calculate)
                 workflow.set_entry_point("calculate")
 
@@ -106,10 +106,10 @@ def test_langgraph_double_invoke(instrument_langchain, span_exporter):
         return state
 
     # Patch StateGraph to avoid actual execution
-    with patch("langgraph.graph.StateGraph", autospec=True) as MockStateGraph:
+    with patch("langgraph.graph.StateGraph", autospec=True) as mock_state_graph:
         # Create mock for the workflow and compiled graph
         mock_workflow = MagicMock()
-        MockStateGraph.return_value = mock_workflow
+        mock_state_graph.return_value = mock_workflow
         mock_compiled_graph = MagicMock()
         mock_workflow.compile.return_value = mock_compiled_graph
 
@@ -117,7 +117,7 @@ def test_langgraph_double_invoke(instrument_langchain, span_exporter):
         mock_compiled_graph.invoke.return_value = {"result": "init"}
 
         def build_graph():
-            workflow = MockStateGraph(DummyGraphState)
+            workflow = mock_state_graph(DummyGraphState)
             workflow.add_node("mynode", mynode_func)
             workflow.set_entry_point("mynode")
             langgraph = workflow.compile()
@@ -184,10 +184,10 @@ async def test_langgraph_double_ainvoke(instrument_langchain, span_exporter):
         return state
 
     # Patch StateGraph to avoid actual execution
-    with patch("langgraph.graph.StateGraph", autospec=True) as MockStateGraph:
+    with patch("langgraph.graph.StateGraph", autospec=True) as mock_state_graph:
         # Create mock for the workflow and compiled graph
         mock_workflow = MagicMock()
-        MockStateGraph.return_value = mock_workflow
+        mock_state_graph.return_value = mock_workflow
         mock_compiled_graph = MagicMock()
         mock_workflow.compile.return_value = mock_compiled_graph
 
@@ -198,7 +198,7 @@ async def test_langgraph_double_ainvoke(instrument_langchain, span_exporter):
         mock_compiled_graph.ainvoke = mock_ainvoke
 
         def build_graph():
-            workflow = MockStateGraph(DummyGraphState)
+            workflow = mock_state_graph(DummyGraphState)
             workflow.add_node("mynode", mynode_func)
             workflow.set_entry_point("mynode")
             langgraph = workflow.compile()
