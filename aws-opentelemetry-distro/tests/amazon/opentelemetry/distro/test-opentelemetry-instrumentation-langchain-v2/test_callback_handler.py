@@ -182,7 +182,7 @@ class TestOpenTelemetryCallbackHandler(unittest.TestCase):
 
         with patch(
             # pylint: disable=no-self-use
-            "amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler._set_span_attribute" # noqa: E501
+            "amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler._set_span_attribute"  # noqa: E501
         ) as mock_set_attribute:
             with patch.object(self.handler, "_end_span"):
                 self.handler.on_llm_end(response=response, run_id=self.run_id, parent_run_id=self.parent_run_id)
