@@ -21,10 +21,10 @@ async def test_langgraph_ainvoke(instrument_langchain, span_exporter):
     # Mock the boto3 client
     with patch("boto3.client", autospec=True):
         # Mock the ChatBedrock client
-        with patch("langchain_aws.chat_models.ChatBedrock", autospec=True) as MockChatBedrock:
+        with patch("langchain_aws.chat_models.ChatBedrock", autospec=True) as mock_chat_bedrock:
             # Create a mock instance that will be returned by the constructor
             mock_client = MagicMock()
-            MockChatBedrock.return_value = mock_client
+            mock_chat_bedrock.return_value = mock_client
 
             # Set up the response for the invoke method
             mock_response = AIMessage(content="The answer is 10.")

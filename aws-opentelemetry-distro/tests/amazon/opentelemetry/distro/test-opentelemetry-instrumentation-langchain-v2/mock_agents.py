@@ -60,10 +60,13 @@ def mock_prompt():
     )
 
 
-def test_agents(instrument_langchain, span_exporter, mock_model, mock_search_tool, mock_prompt):
-    tools = [mock_search_tool]
+def test_agents(
+    instrument_langchain, span_exporter, model_fixture, search_tool_fixture, prompt_fixture
+):  # Changed parameter names
+    # pylint: disable=redefined-outer-name
+    tools = [search_tool_fixture]  # Use renamed parameter
 
-    agent = create_tool_calling_agent(mock_model, tools, mock_prompt)
+    agent = create_tool_calling_agent(model_fixture, tools, prompt_fixture)  # Use renamed parameters
     agent_executor = AgentExecutor(agent=agent, tools=tools)
 
     # Mock the agent's intermediate steps
@@ -90,11 +93,12 @@ def test_agents(instrument_langchain, span_exporter, mock_model, mock_search_too
 
 
 def test_agents_with_events_with_content(
-    instrument_with_content, span_exporter, mock_model, mock_search_tool, mock_prompt
+    instrument_with_content, span_exporter, model_param, search_tool_param, prompt_param  # Changed parameter names
 ):
-    tools = [mock_search_tool]
+    # pylint: disable=redefined-outer-name
+    tools = [search_tool_param]  # Use renamed parameter
 
-    agent = create_tool_calling_agent(mock_model, tools, mock_prompt)
+    agent = create_tool_calling_agent(model_param, tools, prompt_param)  # Use renamed parameters
     agent_executor = AgentExecutor(agent=agent, tools=tools)
 
     with patch("langchain.agents.AgentExecutor._iter_next_step") as mock_iter:
@@ -120,11 +124,12 @@ def test_agents_with_events_with_content(
 
 
 def test_agents_with_events_with_no_content(
-    instrument_langchain, span_exporter, mock_model, mock_search_tool, mock_prompt
+    instrument_langchain, span_exporter, model_input, search_tool_input, prompt_input  # Changed parameter names
 ):
-    tools = [mock_search_tool]
+    # pylint: disable=redefined-outer-name
+    tools = [search_tool_input]  # Use renamed parameter
 
-    agent = create_tool_calling_agent(mock_model, tools, mock_prompt)
+    agent = create_tool_calling_agent(model_input, tools, prompt_input)  # Use renamed parameters
     agent_executor = AgentExecutor(agent=agent, tools=tools)
 
     with patch("langchain.agents.AgentExecutor._iter_next_step") as mock_iter:

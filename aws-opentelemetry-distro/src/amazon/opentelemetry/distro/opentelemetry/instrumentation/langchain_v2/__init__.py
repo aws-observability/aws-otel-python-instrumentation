@@ -21,6 +21,10 @@ _instruments = ("langchain >= 0.1.0",)
 
 
 class LangChainInstrumentor(BaseInstrumentor):
+    def __init__(self):
+        super().__init__()
+        self.handler = None  # Initialize the handler attribute
+        self._wrapped = []
 
     def instrumentation_dependencies(self) -> Collection[str]:
         return _instruments

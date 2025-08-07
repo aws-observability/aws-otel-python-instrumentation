@@ -355,12 +355,13 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         _set_span_attribute(span, "gen_ai.completion", str(outputs))
         self._end_span(span, run_id)
 
+    # pylint: disable=arguments-differ
     def on_chain_error(
         self,
         error: BaseException,
+        *,
         run_id: UUID,
         parent_run_id: Optional[UUID] = None,
-        tags: Optional[list[str]] = None,
         **kwargs: Any,
     ):
         self._handle_error(error, run_id, parent_run_id, **kwargs)
@@ -425,14 +426,14 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
     def on_tool_error(
         self,
         error: BaseException,
+        *,
         run_id: UUID,
         parent_run_id: Optional[UUID] = None,
-        tags: Optional[list[str]] = None,
         **kwargs: Any,
     ):
         self._handle_error(error, run_id, parent_run_id, **kwargs)
 
-    def on_agent_action(self, action: AgentAction, run_id: UUID, parent_run_id: UUID, **kwargs: Any):
+    def on_agent_action(self, action: AgentAction, *, run_id: UUID, parent_run_id: UUID, **kwargs: Any):
         tool = getattr(action, "tool", None)
         tool_input = getattr(action, "tool_input", None)
 
@@ -443,7 +444,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             _set_span_attribute(span, "gen_ai.agent.tool.name", tool)
             _set_span_attribute(span, SpanAttributes.GEN_AI_OPERATION_NAME, "invoke_agent")
 
-    def on_agent_finish(self, finish: AgentFinish, run_id: UUID, parent_run_id: UUID, **kwargs: Any):
+    def on_agent_finish(self, finish: AgentFinish, *, run_id: UUID, parent_run_id: UUID, **kwargs: Any):
 
         span = self.span_mapping[run_id].span
 
