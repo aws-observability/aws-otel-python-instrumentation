@@ -274,6 +274,53 @@ class TestOpenTelemetryCallbackHandler(unittest.TestCase):
 
             self.mock_span.set_attribute.assert_any_call("gen_ai.tool.output", output)
 
+    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler.context_api")
+    def test_on_agent_action_and_finish(self, mock_context_api):
+        """Test the on_agent_action and on_agent_finish methods."""
+        mock_context_api.get_value.return_value = False
+
+        # Create a mock AgentAction
+        mock_action = Mock()
+        mock_action.tool = "calculator"
+        mock_action.tool_input = "2 + 2"
+
+        # Create a mock AgentFinish
+        mock_finish = Mock()
+        mock_finish.return_values = {"output": "The answer is 4"}
+
+        # Set up the handler with a mocked span
+        self.handler.span_mapping[self.run_id] = SpanHolder(self.mock_span, [], time.time(), "gpt-4")
+
+        # Test on_agent_action
+        self.handler.on_agent_action(action=mock_action, run_id=self.run_id, parent_run_id=self.parent_run_id)
+
+        # Verify the expected attributes were set
+        self.mock_span.set_attribute.assert_any_call("gen_ai.agent.tool.input", "2 + 2")
+        self.mock_span.set_attribute.assert_any_call("gen_ai.agent.tool.name", "calculator")
+        self.mock_span.set_attribute.assert_any_call(SpanAttributes.GEN_AI_OPERATION_NAME, "invoke_agent")
+
+        # Test on_agent_finish
+        self.handler.on_agent_finish(finish=mock_finish, run_id=self.run_id, parent_run_id=self.parent_run_id)
+
+        # Verify the output attribute was set
+        self.mock_span.set_attribute.assert_any_call("gen_ai.agent.tool.output", "The answer is 4")
+
+    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler.context_api")
+    def test_on_agent_error(self, mock_context_api):
+        """Test the on_agent_error method."""
+        mock_context_api.get_value.return_value = False
+
+        # Create a test error
+        test_error = ValueError("Something went wrong")
+
+        # Patch the _handle_error method
+        with patch.object(self.handler, "_handle_error") as mock_handle_error:
+            # Call on_agent_error
+            self.handler.on_agent_error(error=test_error, run_id=self.run_id, parent_run_id=self.parent_run_id)
+
+            # Verify _handle_error was called with the right parameters
+            mock_handle_error.assert_called_once_with(test_error, self.run_id, self.parent_run_id)
+
 
 class TestLangChainInstrumentor(unittest.TestCase):
     """Test the LangChainInstrumentor class."""
@@ -358,6 +405,49 @@ class TestBaseCallbackManagerInitWrapper(unittest.TestCase):
 
         original_func.assert_called_once_with()
         instance.add_handler.assert_not_called()
+
+
+class TestSanitizeMetadataValue(unittest.TestCase):
+    """Tests for the _sanitize_metadata_value function."""
+
+    def test_sanitize_none(self):
+        """Test that None values remain None."""
+        self.assertIsNone(_sanitize_metadata_value(None))
+
+    def test_sanitize_primitive_types(self):
+        """Test that primitive types (bool, str, bytes, int, float) remain unchanged."""
+        self.assertEqual(_sanitize_metadata_value(True), True)
+        self.assertEqual(_sanitize_metadata_value(False), False)
+        self.assertEqual(_sanitize_metadata_value("test_string"), "test_string")
+        self.assertEqual(_sanitize_metadata_value(b"test_bytes"), b"test_bytes")
+        self.assertEqual(_sanitize_metadata_value(123), 123)
+        self.assertEqual(_sanitize_metadata_value(123.45), 123.45)
+
+    def test_sanitize_lists_and_tuples(self):
+        """Test that lists and tuples are properly sanitized."""
+        self.assertEqual(_sanitize_metadata_value([1, 2, 3]), ["1", "2", "3"])
+
+        self.assertEqual(_sanitize_metadata_value([1, "test", True, None]), ["1", "test", "True", "None"])
+
+        self.assertEqual(_sanitize_metadata_value((1, 2, 3)), ["1", "2", "3"])
+
+        self.assertEqual(_sanitize_metadata_value([1, [2, 3], 4]), ["1", "['2', '3']", "4"])
+
+    def test_sanitize_complex_objects(self):
+        """Test that complex objects are converted to strings."""
+        self.assertEqual(_sanitize_metadata_value({"key": "value"}), "{'key': 'value'}")
+
+        class TestObject:
+            def __str__(self):
+                return "TestObject"
+
+        self.assertEqual(_sanitize_metadata_value(TestObject()), "TestObject")
+
+        self.assertTrue(_sanitize_metadata_value({1, 2, 3}).startswith("{"))
+        self.assertTrue(_sanitize_metadata_value({1, 2, 3}).endswith("}"))
+
+        complex_struct = {"key1": [1, 2, 3], "key2": {"nested": "value"}, "key3": TestObject()}
+        self.assertTrue(isinstance(_sanitize_metadata_value(complex_struct), str))
 
 
 if __name__ == "__main__":
