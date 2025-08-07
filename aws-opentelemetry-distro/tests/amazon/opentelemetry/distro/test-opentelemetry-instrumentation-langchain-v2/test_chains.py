@@ -4,6 +4,7 @@
 # pylint: disable=no-self-use
 
 import ast
+import os
 
 import boto3
 import pytest
