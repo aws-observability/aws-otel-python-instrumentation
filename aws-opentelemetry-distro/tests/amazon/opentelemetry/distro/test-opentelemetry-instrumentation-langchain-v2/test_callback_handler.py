@@ -180,8 +180,8 @@ class TestOpenTelemetryCallbackHandler(unittest.TestCase):
         generations = [[Generation(text="This is a test response")]]
         response = LLMResult(generations=generations, llm_output=llm_output)
 
-        # pylint: disable=no-self-use
         with patch(
+            # pylint: disable=no-self-use
             "amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler._set_span_attribute"
         ) as mock_set_attribute:
             with patch.object(self.handler, "_end_span"):
