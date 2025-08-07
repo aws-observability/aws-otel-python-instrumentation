@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# pylint: disable=no-self-use,protected-access,too-many-locals
+# pylint: skip-file
 
 from typing import TypedDict
 from unittest.mock import MagicMock, patch
