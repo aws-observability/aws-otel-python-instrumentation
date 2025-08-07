@@ -87,7 +87,6 @@ dependencies = [
   "langchain-aws == 0.2.15",
   "langchain-community == 0.3.27",
   "langgraph == 0.6.3",
-  "duckduckgo-search == 8.1.1",
   "pytest-asyncio == 0.21.0",
   "pytest-vcr == 1.0.2",
 ]
@@ -104,7 +103,7 @@ test = []
 aws_configurator = "amazon.opentelemetry.distro.aws_opentelemetry_configurator:AwsOpenTelemetryConfigurator"
 
 [project.entry-points.opentelemetry_instrumentor]
-langchain = "amazon.opentelemetry.distro.instrumentation.mcp.instrumentation:McpInstrumentor"
+langchain = "amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2:LangChainInstrumentor"
 
 [project.entry-points.opentelemetry_distro]
 aws_distro = "amazon.opentelemetry.distro.aws_opentelemetry_distro:AwsOpenTelemetryDistro"

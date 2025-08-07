@@ -19,7 +19,7 @@ async def test_langgraph_ainvoke(instrument_langchain, span_exporter):
     span_exporter.clear()
 
     # Mock the boto3 client
-    with patch("boto3.client", autospec=True) as mock_boto_client:
+    with patch("boto3.client", autospec=True):
         # Mock the ChatBedrock client
         with patch("langchain_aws.chat_models.ChatBedrock", autospec=True) as MockChatBedrock:
             # Create a mock instance that will be returned by the constructor
