@@ -269,7 +269,6 @@ class McpInstrumentor(BaseInstrumentor):
             tool_name = message.params.name
             span.update_name(f"{MCPMethodValue.TOOLS_CALL} {tool_name}")
             span.set_attribute(MCPSpanAttributes.MCP_TOOL_NAME, tool_name)
-            message.params.arguments
             if message.params.arguments:
                 for arg_name, arg_val in message.params.arguments.items():
                     span.set_attribute(
