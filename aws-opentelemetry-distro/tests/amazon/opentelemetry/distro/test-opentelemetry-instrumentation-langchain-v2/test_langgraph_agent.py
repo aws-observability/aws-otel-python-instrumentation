@@ -8,6 +8,7 @@ from typing import TypedDict
 
 import boto3
 import pytest
+from botocore.exceptions import ClientError, NoCredentialsError
 from langchain_aws import ChatBedrock
 from langgraph.graph import StateGraph
 
@@ -15,6 +16,28 @@ from opentelemetry import trace
 from opentelemetry.trace import INVALID_SPAN
 
 
+def has_aws_credentials():
+    """Check if AWS credentials are available."""
+    # Check for environment variables first
+    if os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_SECRET_ACCESS_KEY"):
+        return True
+
+    # Try to create a boto3 client and make a simple call
+    try:
+        # Using STS for a lightweight validation
+        sts = boto3.client("sts")
+        sts.get_caller_identity()
+        return True
+    except (NoCredentialsError, ClientError):
+        return False
+
+
+aws_credentials_required = pytest.mark.skipif(
+    not has_aws_credentials(), reason="AWS credentials not available for testing"
+)
+
+
+@aws_credentials_required
 @pytest.mark.vcr(filter_headers=["Authorization", "X-Amz-Date", "X-Amz-Security-Token"], record_mode="once")
 def test_langgraph_invoke(instrument_langchain, span_exporter):
     span_exporter.clear()
@@ -86,6 +109,7 @@ def test_langgraph_invoke(instrument_langchain, span_exporter):
     assert response in langgraph_span.attributes["gen_ai.completion"]
 
 
+@aws_credentials_required
 @pytest.mark.vcr
 @pytest.mark.asyncio
 # @pytest.mark.xfail(reason="Context propagation is not yet supported for async LangChain callbacks", strict=True)
@@ -127,6 +151,7 @@ async def test_langgraph_ainvoke(instrument_langchain, span_exporter):
     assert llm_span.parent.span_id == calculate_task_span.context.span_id
 
 
+@aws_credentials_required
 @pytest.mark.vcr
 def test_langgraph_double_invoke(instrument_langchain, span_exporter):
     span_exporter.clear()
@@ -169,6 +194,7 @@ def test_langgraph_double_invoke(instrument_langchain, span_exporter):
     ] == [span.name for span in spans]
 
 
+@aws_credentials_required
 @pytest.mark.vcr
 @pytest.mark.asyncio
 async def test_langgraph_double_ainvoke(instrument_langchain, span_exporter):

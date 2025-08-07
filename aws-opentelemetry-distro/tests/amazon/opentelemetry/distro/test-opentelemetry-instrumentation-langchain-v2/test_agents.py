@@ -7,12 +7,35 @@ import os
 
 import boto3
 import pytest
+from botocore.exceptions import ClientError, NoCredentialsError
 from langchain import hub
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain_aws import ChatBedrock
 from langchain_community.tools import DuckDuckGoSearchResults
 
 
+def has_aws_credentials():
+    """Check if AWS credentials are available."""
+    # Check for environment variables first
+    if os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_SECRET_ACCESS_KEY"):
+        return True
+
+    # Try to create a boto3 client and make a simple call
+    try:
+        # Using STS for a lightweight validation
+        sts = boto3.client("sts")
+        sts.get_caller_identity()
+        return True
+    except (NoCredentialsError, ClientError):
+        return False
+
+
+aws_credentials_required = pytest.mark.skipif(
+    not has_aws_credentials(), reason="AWS credentials not available for testing"
+)
+
+
+@aws_credentials_required
 @pytest.mark.vcr(filter_headers=["Authorization", "X-Amz-Date", "X-Amz-Security-Token"], record_mode="all")
 def test_agents(instrument_langchain, span_exporter):
     search = DuckDuckGoSearchResults()
@@ -63,6 +86,7 @@ def test_agents(instrument_langchain, span_exporter):
     }
 
 
+@aws_credentials_required
 @pytest.mark.vcr
 def test_agents_with_events_with_content(instrument_with_content, span_exporter, log_exporter):
     search = DuckDuckGoSearchResults()
@@ -103,6 +127,7 @@ def test_agents_with_events_with_content(instrument_with_content, span_exporter,
     }
 
 
+@aws_credentials_required
 @pytest.mark.vcr
 def test_agents_with_events_with_no_content(instrument_langchain, span_exporter):
     search = DuckDuckGoSearchResults()
