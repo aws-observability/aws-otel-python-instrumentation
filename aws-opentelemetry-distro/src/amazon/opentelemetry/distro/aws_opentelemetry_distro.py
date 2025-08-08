@@ -93,8 +93,6 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
         )
 
         if is_agent_observability_enabled():
-            # Disable unnecessary
-            _load._logger.setLevel(logging.ERROR)
             # "otlp" is already native OTel default, but we set them here to be explicit
             # about intended configuration for agent observability
             os.environ.setdefault(OTEL_TRACES_EXPORTER, "otlp")
