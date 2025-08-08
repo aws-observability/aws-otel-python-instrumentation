@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import importlib
+import logging
 import os
 import sys
 from logging import Logger, getLogger
@@ -22,12 +23,15 @@ from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_ins
 from opentelemetry import propagate
 from opentelemetry.distro import OpenTelemetryDistro
 from opentelemetry.environment_variables import OTEL_PROPAGATORS, OTEL_PYTHON_ID_GENERATOR
+from opentelemetry.instrumentation.auto_instrumentation import _load
 from opentelemetry.sdk.environment_variables import (
     OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION,
     OTEL_EXPORTER_OTLP_PROTOCOL,
 )
 
 _logger: Logger = getLogger(__name__)
+# Suppress configurator warnings from OpenTelemetry auto-instrumentation
+_load._logger.setLevel(logging.ERROR)
 
 
 class AwsOpenTelemetryDistro(OpenTelemetryDistro):
@@ -89,6 +93,8 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
         )
 
         if is_agent_observability_enabled():
+            # Disable unnecessary
+            _load._logger.setLevel(logging.ERROR)
             # "otlp" is already native OTel default, but we set them here to be explicit
             # about intended configuration for agent observability
             os.environ.setdefault(OTEL_TRACES_EXPORTER, "otlp")
