@@ -12,5 +12,16 @@ def echo(text: str) -> str:
     return f"Echo: {text}"
 
 
+@mcp.resource(uri="file://sample.txt", name="Sample Resource")
+def sample_resource() -> str:
+    """Sample MCP resource"""
+    return "This is a sample resource content"
+
+
+@mcp.prompt(name="greeting", description="Generate a greeting message")
+def greeting_prompt(name: str = "World") -> str:
+    """Generate a personalized greeting"""
+    return f"Hello, {name}! Welcome to our MCP server."
+
 if __name__ == "__main__":
     mcp.run()
