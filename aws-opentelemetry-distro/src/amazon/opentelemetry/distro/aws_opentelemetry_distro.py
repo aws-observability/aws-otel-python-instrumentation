@@ -1,10 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import importlib
-import logging
 import os
 import sys
-from logging import Logger, getLogger
+from logging import ERROR, Logger, getLogger
 
 from amazon.opentelemetry.distro._utils import get_aws_region, is_agent_observability_enabled
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
@@ -32,7 +31,7 @@ from opentelemetry.sdk.environment_variables import (
 
 _logger: Logger = getLogger(__name__)
 # Suppress configurator warnings from OpenTelemetry auto-instrumentation
-_load._logger.setLevel(os.environ.get(OTEL_PYTHON_LOG_LEVEL, logging.ERROR))
+_load._logger.setLevel(os.environ.get(OTEL_PYTHON_LOG_LEVEL, ERROR))
 
 
 class AwsOpenTelemetryDistro(OpenTelemetryDistro):
