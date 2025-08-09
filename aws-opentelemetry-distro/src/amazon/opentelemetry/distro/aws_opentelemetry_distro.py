@@ -24,6 +24,7 @@ from opentelemetry import propagate
 from opentelemetry.distro import OpenTelemetryDistro
 from opentelemetry.environment_variables import OTEL_PROPAGATORS, OTEL_PYTHON_ID_GENERATOR
 from opentelemetry.instrumentation.auto_instrumentation import _load
+from opentelemetry.instrumentation.logging.environment_variables import OTEL_PYTHON_LOG_LEVEL
 from opentelemetry.sdk.environment_variables import (
     OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION,
     OTEL_EXPORTER_OTLP_PROTOCOL,
@@ -31,7 +32,7 @@ from opentelemetry.sdk.environment_variables import (
 
 _logger: Logger = getLogger(__name__)
 # Suppress configurator warnings from OpenTelemetry auto-instrumentation
-_load._logger.setLevel(logging.ERROR)
+_load._logger.setLevel(os.environ.get(OTEL_PYTHON_LOG_LEVEL, logging.ERROR))
 
 
 class AwsOpenTelemetryDistro(OpenTelemetryDistro):
