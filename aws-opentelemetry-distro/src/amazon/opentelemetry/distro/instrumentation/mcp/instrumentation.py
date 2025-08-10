@@ -28,6 +28,7 @@ class McpInstrumentor(BaseInstrumentor):
 
     _DEFAULT_CLIENT_SPAN_NAME = "span.mcp.client"
     _DEFAULT_SERVER_SPAN_NAME = "span.mcp.server"
+    _MCP_SESSION_ID_HEADER = "mcp-session-id"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -226,8 +227,12 @@ class McpInstrumentor(BaseInstrumentor):
         with self.tracer.start_as_current_span(
             self._DEFAULT_SERVER_SPAN_NAME, kind=SpanKind.SERVER, context=parent_ctx
         ) as server_span:
+            
+            # Extract session ID if available
+            session_id = self._extract_session_id(args)
+            if session_id:
+                server_span.set_attribute(MCPSpanAttributes.MCP_SESSION_ID, session_id)
 
-            server_span.set_attribute(SpanAttributes.RPC_SERVICE, instance.name)
             self._generate_mcp_message_attrs(server_span, incoming_msg, request_id)
 
             try:
@@ -238,7 +243,27 @@ class McpInstrumentor(BaseInstrumentor):
                 server_span.set_status(Status(StatusCode.ERROR, str(e)))
                 server_span.record_exception(e)
                 raise
-
+    
+    def _extract_session_id(self, args: Tuple[Any, ...]) -> Optional[str]:
+        """
+        Extract session ID from server method arguments.
+        """
+        try:
+            from mcp.shared.session import RequestResponder  # pylint: disable=import-outside-toplevel
+            from mcp.shared.message import ServerMessageMetadata  # pylint: disable=import-outside-toplevel
+            
+            message = args[0]
+            if isinstance(message, RequestResponder):
+                if message.message_metadata and isinstance(message.message_metadata, ServerMessageMetadata):
+                    request_context = message.message_metadata.request_context
+                    if request_context:
+                        headers = getattr(request_context, 'headers', None)
+                        if headers:
+                            return headers.get(self._MCP_SESSION_ID_HEADER)
+            return None
+        except Exception:
+            return None
+        
     @staticmethod
     def _generate_mcp_message_attrs(span: trace.Span, message, request_id: Optional[int]) -> None:
         import mcp.types as types  # pylint: disable=import-outside-toplevel,consider-using-from-import

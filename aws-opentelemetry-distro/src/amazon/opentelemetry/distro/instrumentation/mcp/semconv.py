@@ -48,6 +48,12 @@ class MCPSpanAttributes:
     The transport type used for MCP communication.
     Examples: stdio, streamable_http
     """
+    MCP_SESSION_ID = "mcp.session.id"
+    """
+    The session identifier for HTTP transport connections.
+    Only present for streamable_http transport, not available for stdio.
+    """
+
 
 class MCPMethodValue:
 
