@@ -1,23 +1,24 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+from dataclasses import dataclass
 import json
-from typing import Any, Callable, Collection, Dict, Optional, Tuple, Union
+from typing import Any, AsyncGenerator, Callable, Collection, Dict, Optional, Tuple, Union, cast
 
 from wrapt import register_post_import_hook, wrap_function_wrapper
 
 from opentelemetry import trace
+from opentelemetry.trace import SpanKind, Status, StatusCode
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.instrumentation.utils import unwrap
-from opentelemetry.propagate import get_global_textmap
-from opentelemetry.semconv.attributes.network_attributes import NetworkTransportValues
 from opentelemetry.semconv.trace import SpanAttributes
-from opentelemetry.trace import INVALID_SPAN, SpanKind, Status, StatusCode
+from opentelemetry.propagate import get_global_textmap
+
+from .version import __version__
 
 from .semconv import (
-    MCPMethodValue,
     MCPSpanAttributes,
+    MCPMethodValue,
 )
-from .version import __version__
 
 
 class McpInstrumentor(BaseInstrumentor):
@@ -28,7 +29,6 @@ class McpInstrumentor(BaseInstrumentor):
     _DEFAULT_CLIENT_SPAN_NAME = "span.mcp.client"
     _DEFAULT_SERVER_SPAN_NAME = "span.mcp.server"
     _MCP_SESSION_ID_HEADER = "mcp-session-id"
-    _MCP_META_FIELD = "_meta"
 
     def __init__(self, **kwargs):
         super().__init__()
@@ -57,14 +57,6 @@ class McpInstrumentor(BaseInstrumentor):
         )
         register_post_import_hook(
             lambda _: wrap_function_wrapper(
-                "mcp.shared.session",
-                "BaseSession._send_response",
-                self._wrap_send_response,
-            ),
-            "mcp.shared.session",
-        )
-        register_post_import_hook(
-            lambda _: wrap_function_wrapper(
                 "mcp.server.lowlevel.server",
                 "Server._handle_request",
                 self._wrap_server_handle_request,
@@ -83,7 +75,6 @@ class McpInstrumentor(BaseInstrumentor):
     def _uninstrument(self, **kwargs: Any) -> None:
         unwrap("mcp.shared.session", "BaseSession.send_request")
         unwrap("mcp.shared.session", "BaseSession.send_notification")
-        unwrap("mcp.shared.session", "BaseSession._send_response")
         unwrap("mcp.server.lowlevel.server", "Server._handle_request")
         unwrap("mcp.server.lowlevel.server", "Server._handle_notification")
 
@@ -107,7 +98,7 @@ class McpInstrumentor(BaseInstrumentor):
              args: Positional arguments passed to the original send_request/send_notification method
              kwargs: Keyword arguments passed to the original send_request/send_notification method
         """
-        from mcp.types import ClientNotification, ClientRequest, ServerNotification, ServerRequest
+        from mcp.types import ClientRequest, ClientNotification, ServerRequest, ServerNotification
 
         async def async_wrapper():
             message: Optional[Union[ClientRequest, ClientNotification, ServerRequest, ServerNotification]] = (
@@ -129,18 +120,14 @@ class McpInstrumentor(BaseInstrumentor):
 
             if "params" not in message_json:
                 message_json["params"] = {}
-            if self._MCP_META_FIELD not in message_json["params"]:
-                message_json["params"][self._MCP_META_FIELD] = {}
+            if "_meta" not in message_json["params"]:
+                message_json["params"]["_meta"] = {}
 
-            parent_ctx = None
-            if message_json["params"][self._MCP_META_FIELD]:
-                parent_ctx = self.propagators.extract(message_json["params"][self._MCP_META_FIELD])
-
-            with self.tracer.start_as_current_span(name=span_name, kind=span_kind, context=parent_ctx) as span:
+            with self.tracer.start_as_current_span(name=span_name, kind=span_kind) as span:
                 ctx = trace.set_span_in_context(span)
                 carrier = {}
                 self.propagators.inject(carrier=carrier, context=ctx)
-                message_json["params"][self._MCP_META_FIELD].update(carrier)
+                message_json["params"]["_meta"].update(carrier)
 
                 McpInstrumentor._generate_mcp_message_attrs(span, message, request_id)
 
@@ -240,14 +227,11 @@ class McpInstrumentor(BaseInstrumentor):
         with self.tracer.start_as_current_span(
             self._DEFAULT_SERVER_SPAN_NAME, kind=SpanKind.SERVER, context=parent_ctx
         ) as server_span:
-
-            # session_id only exits if the transport protocol is Streamable HTTP
+            
+            # Extract session ID if available
             session_id = self._extract_session_id(args)
             if session_id:
                 server_span.set_attribute(MCPSpanAttributes.MCP_SESSION_ID, session_id)
-                server_span.set_attribute(SpanAttributes.NETWORK_TRANSPORT, NetworkTransportValues.PIPE.value)
-            else:
-                server_span.set_attribute(SpanAttributes.NETWORK_TRANSPORT, NetworkTransportValues.TCP.value)
 
             self._generate_mcp_message_attrs(server_span, incoming_msg, request_id)
 
@@ -259,60 +243,27 @@ class McpInstrumentor(BaseInstrumentor):
                 server_span.set_status(Status(StatusCode.ERROR, str(e)))
                 server_span.record_exception(e)
                 raise
-
-    async def _wrap_send_response(
-        self, wrapped: Callable, instance: Any, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> Any:
-        """
-        Instruments BaseSession._send_response to propagate trace context into response.
-
-        Note: we do not need to generate another span for the reponse as it falls under
-              the _wrap_server_message_handler
-        """
-        response = args[1] if len(args) > 1 else kwargs.get("response", None)
-
-        if not response:
-            return await wrapped(*args, **kwargs)
-
-        current_span = trace.get_current_span()
-        if current_span is not INVALID_SPAN:
-            # Inject trace context into response
-            carrier = {}
-            self.propagators.inject(carrier=carrier, context=trace.set_span_in_context(current_span))
-
-            response_json = response.model_dump(by_alias=True, mode="json", exclude_none=True)
-
-            if self._MCP_META_FIELD not in response_json:
-                response_json[self._MCP_META_FIELD] = {}
-            response_json[self._MCP_META_FIELD].update(carrier)
-
-            modified_response = response.model_validate(response_json)
-
-            if len(args) > 1:
-                args = args[:1] + (modified_response,) + args[2:]
-            else:
-                kwargs["response"] = modified_response
-
-        return await wrapped(*args, **kwargs)
-
+    
     def _extract_session_id(self, args: Tuple[Any, ...]) -> Optional[str]:
         """
         Extract session ID from server method arguments.
         """
         try:
+            from mcp.shared.session import RequestResponder  # pylint: disable=import-outside-toplevel
+            from mcp.shared.message import ServerMessageMetadata  # pylint: disable=import-outside-toplevel
+            
             message = args[0]
-            if hasattr(message, "message_metadata"):
-                message_metadata = message.message_metadata
-                if message.message_metadata and hasattr(message_metadata, "request_context"):
-                    request_context = message_metadata.request_context
-                    if request_context and hasattr(request_context, "headers"):
-                        headers = request_context.headers
+            if isinstance(message, RequestResponder):
+                if message.message_metadata and isinstance(message.message_metadata, ServerMessageMetadata):
+                    request_context = message.message_metadata.request_context
+                    if request_context:
+                        headers = getattr(request_context, 'headers', None)
                         if headers:
                             return headers.get(self._MCP_SESSION_ID_HEADER)
             return None
         except Exception:
             return None
-
+        
     @staticmethod
     def _generate_mcp_message_attrs(span: trace.Span, message, request_id: Optional[int]) -> None:
         import mcp.types as types  # pylint: disable=import-outside-toplevel,consider-using-from-import
@@ -375,4 +326,4 @@ class McpInstrumentor(BaseInstrumentor):
         try:
             return json.dumps(args)
         except Exception:
-            return "unknown_args"
+            return ""
