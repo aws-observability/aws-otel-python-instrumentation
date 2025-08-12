@@ -1,0 +1,10 @@
+[project]
+name = "mcp-client-app"
+description = "Simple MCP client that calls echo tool for testing MCP instrumentation"
+version = "1.0.0"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.1.0",
+    "fastmcp>=0.1.0"
+]
