@@ -84,6 +84,7 @@ jobs:
         with:
           image-ref: "public.ecr.aws/aws-observability/adot-autoinstrumentation-python:v0.10.1"
           severity: 'CRITICAL,HIGH'
+          logout: 'false'
 
       - name: Perform low image scan
         if: always()
@@ -92,6 +93,7 @@ jobs:
         with:
           image-ref: "public.ecr.aws/aws-observability/adot-autoinstrumentation-python:v0.10.1"
           severity: 'MEDIUM,LOW,UNKNOWN'
+          logout: 'false'
 
       - name: Configure AWS Credentials for emitting metrics
         if: always()
