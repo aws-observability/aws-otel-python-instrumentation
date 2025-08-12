@@ -11,23 +11,40 @@ from unittest.mock import Mock, patch
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.outputs import Generation, LLMResult
 
-from amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2 import (
+from amazon.opentelemetry.distro.langchain_v2 import (
     LangChainInstrumentor,
     _BaseCallbackManagerInitWrapper,
     _instruments,
 )
-from amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler import (
+from amazon.opentelemetry.distro.langchain_v2.callback_handler import (
     OpenTelemetryCallbackHandler,
     SpanHolder,
     _sanitize_metadata_value,
     _set_request_params,
     _set_span_attribute,
 )
-from amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.span_attributes import (
+from amazon.opentelemetry.distro.langchain_v2.span_attributes import (
     GenAIOperationValues,
     SpanAttributes,
 )
 from opentelemetry.trace import SpanKind, StatusCode
+
+# from opentelemetry.distro import (
+#     OpenTelemetryCallbackHandler,
+#     SpanHolder,
+#     _sanitize_metadata_value,
+#     _set_request_params,
+#     _set_span_attribute,
+# )
+# from opentelemetry.distro import (
+#     GenAIOperationValues,
+#     SpanAttributes,
+# )
+# from opentelemetry.distro import (
+#     LangChainInstrumentor,
+#     _BaseCallbackManagerInitWrapper,
+#     _instruments,
+# )
 
 
 class TestOpenTelemetryHelperFunctions(unittest.TestCase):
@@ -63,9 +80,7 @@ class TestOpenTelemetryHelperFunctions(unittest.TestCase):
 
         self.assertEqual(_sanitize_metadata_value(TestClass()), "test_class")
 
-    @patch(
-        "amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler._set_span_attribute"
-    )
+    @patch("amazon.opentelemetry.distro.langchain_v2.callback_handler._set_span_attribute")
     def test_set_request_params(self, mock_set_span_attribute):
         mock_span = Mock()
         mock_span_holder = Mock(spec=SpanHolder)
@@ -107,7 +122,7 @@ class TestOpenTelemetryCallbackHandler(unittest.TestCase):
         self.assertEqual(handler.tracer, self.mock_tracer)
         self.assertEqual(handler.span_mapping, {})
 
-    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler.context_api")
+    @patch("amazon.opentelemetry.distro.langchain_v2.callback_handler.context_api")
     def test_create_span(self, mock_context_api):
         """Test the _create_span method."""
         mock_context_api.get_value.return_value = {}
@@ -131,7 +146,7 @@ class TestOpenTelemetryCallbackHandler(unittest.TestCase):
         parent_span = Mock()
         self.handler.span_mapping[self.parent_run_id] = SpanHolder(parent_span, [], time.time(), "model-id")
 
-    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler.context_api")
+    @patch("amazon.opentelemetry.distro.langchain_v2.callback_handler.context_api")
     def test_on_llm_start_and_end(self, mock_context_api):
         mock_context_api.get_value.return_value = False
         serialized = {"name": "test_llm"}
@@ -182,7 +197,7 @@ class TestOpenTelemetryCallbackHandler(unittest.TestCase):
 
         with patch(
             # pylint: disable=no-self-use
-            "amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler._set_span_attribute"  # noqa: E501
+            "amazon.opentelemetry.distro.langchain_v2.callback_handler._set_span_attribute"  # noqa: E501
         ) as mock_set_attribute:
             with patch.object(self.handler, "_end_span"):
                 self.handler.on_llm_end(response=response, run_id=self.run_id, parent_run_id=self.parent_run_id)
@@ -199,7 +214,7 @@ class TestOpenTelemetryCallbackHandler(unittest.TestCase):
 
         self.handler._create_span = original_create_span
 
-    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler.context_api")
+    @patch("amazon.opentelemetry.distro.langchain_v2.callback_handler.context_api")
     def test_on_llm_error(self, mock_context_api):
         """Test the on_llm_error method."""
         mock_context_api.get_value.return_value = False
@@ -215,7 +230,7 @@ class TestOpenTelemetryCallbackHandler(unittest.TestCase):
         self.mock_span.record_exception.assert_called_once_with(error)
         self.mock_span.end.assert_called_once()
 
-    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler.context_api")
+    @patch("amazon.opentelemetry.distro.langchain_v2.callback_handler.context_api")
     def test_on_chain_start_end(self, mock_context_api):
         """Test the on_chain_start and on_chain_end methods."""
         mock_context_api.get_value.return_value = False
@@ -243,7 +258,7 @@ class TestOpenTelemetryCallbackHandler(unittest.TestCase):
             self.mock_span.set_attribute.assert_called_with("gen_ai.completion", str(outputs))
             mock_end_span.assert_called_once_with(self.mock_span, self.run_id)
 
-    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler.context_api")
+    @patch("amazon.opentelemetry.distro.langchain_v2.callback_handler.context_api")
     def test_on_tool_start_end(self, mock_context_api):
         """Test the on_tool_start and on_tool_end methods."""
         mock_context_api.get_value.return_value = False
@@ -276,7 +291,7 @@ class TestOpenTelemetryCallbackHandler(unittest.TestCase):
 
             self.mock_span.set_attribute.assert_any_call("gen_ai.tool.output", output)
 
-    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler.context_api")
+    @patch("amazon.opentelemetry.distro.langchain_v2.callback_handler.context_api")
     def test_on_agent_action_and_finish(self, mock_context_api):
         """Test the on_agent_action and on_agent_finish methods."""
         mock_context_api.get_value.return_value = False
@@ -307,7 +322,7 @@ class TestOpenTelemetryCallbackHandler(unittest.TestCase):
         # Verify the output attribute was set
         self.mock_span.set_attribute.assert_any_call("gen_ai.agent.tool.output", "The answer is 4")
 
-    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler.context_api")
+    @patch("amazon.opentelemetry.distro.langchain_v2.callback_handler.context_api")
     def test_on_agent_error(self, mock_context_api):
         """Test the on_agent_error method."""
         mock_context_api.get_value.return_value = False
@@ -336,8 +351,8 @@ class TestLangChainInstrumentor(unittest.TestCase):
         self.assertEqual(result, _instruments)
         self.assertEqual(result, ("langchain >= 0.1.0",))
 
-    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.get_tracer")
-    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.wrap_function_wrapper")
+    @patch("amazon.opentelemetry.distro.langchain_v2.get_tracer")
+    @patch("amazon.opentelemetry.distro.langchain_v2.wrap_function_wrapper")
     def test_instrument(self, mock_wrap, mock_get_tracer):
         """Test the _instrument method."""
         mock_tracer = Mock()
@@ -358,7 +373,7 @@ class TestLangChainInstrumentor(unittest.TestCase):
         self.assertIsInstance(wrapper, _BaseCallbackManagerInitWrapper)
         self.assertIsInstance(wrapper.callback_handler, OpenTelemetryCallbackHandler)
 
-    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.unwrap")
+    @patch("amazon.opentelemetry.distro.langchain_v2.unwrap")
     def test_uninstrument(self, mock_unwrap):
         """Test the _uninstrument method."""
         self.instrumentor._wrapped = [("module1", "function1"), ("module2", "function2")]
@@ -463,7 +478,7 @@ class TestOpenTelemetryCallbackHandlerExtended(unittest.TestCase):
         self.run_id = uuid.uuid4()
         self.parent_run_id = uuid.uuid4()
 
-    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler.context_api")
+    @patch("amazon.opentelemetry.distro.langchain_v2.callback_handler.context_api")
     def test_on_chat_model_start(self, mock_context_api):
         """Test the on_chat_model_start method."""
         mock_context_api.get_value.return_value = False
@@ -509,7 +524,7 @@ class TestOpenTelemetryCallbackHandlerExtended(unittest.TestCase):
                 SpanAttributes.GEN_AI_OPERATION_NAME, GenAIOperationValues.CHAT
             )
 
-    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler.context_api")
+    @patch("amazon.opentelemetry.distro.langchain_v2.callback_handler.context_api")
     def test_on_chain_error(self, mock_context_api):
         """Test the on_chain_error method."""
         mock_context_api.get_value.return_value = False
@@ -528,7 +543,7 @@ class TestOpenTelemetryCallbackHandlerExtended(unittest.TestCase):
             # Verify _handle_error was called with the right parameters
             mock_handle_error.assert_called_once_with(test_error, self.run_id, self.parent_run_id)
 
-    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler.context_api")
+    @patch("amazon.opentelemetry.distro.langchain_v2.callback_handler.context_api")
     def test_on_tool_error(self, mock_context_api):
         """Test the on_tool_error method."""
         mock_context_api.get_value.return_value = False
@@ -547,7 +562,7 @@ class TestOpenTelemetryCallbackHandlerExtended(unittest.TestCase):
             # Verify _handle_error was called with the right parameters
             mock_handle_error.assert_called_once_with(test_error, self.run_id, self.parent_run_id)
 
-    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler.context_api")
+    @patch("amazon.opentelemetry.distro.langchain_v2.callback_handler.context_api")
     def test_get_name_from_callback(self, mock_context_api):
         """Test the _get_name_from_callback method."""
         mock_context_api.get_value.return_value = False
@@ -588,9 +603,7 @@ class TestOpenTelemetryCallbackHandlerExtended(unittest.TestCase):
         test_error = ValueError("Test error")
 
         # Mock the context_api.get_value to return False (don't suppress)
-        with patch(
-            "amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler.context_api"
-        ) as mock_context_api:
+        with patch("amazon.opentelemetry.distro.langchain_v2.callback_handler.context_api") as mock_context_api:
             mock_context_api.get_value.return_value = False
 
             # Patch the _end_span method
@@ -603,7 +616,7 @@ class TestOpenTelemetryCallbackHandlerExtended(unittest.TestCase):
                 self.mock_span.record_exception.assert_called_once_with(test_error)
                 mock_end_span.assert_called_once_with(self.mock_span, self.run_id)
 
-    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler.context_api")
+    @patch("amazon.opentelemetry.distro.langchain_v2.callback_handler.context_api")
     def test_on_llm_start_with_suppressed_instrumentation(self, mock_context_api):
         """Test that methods don't proceed when instrumentation is suppressed."""
         # Set suppression key to True
@@ -615,7 +628,7 @@ class TestOpenTelemetryCallbackHandlerExtended(unittest.TestCase):
             # Verify _create_span was not called
             mock_create_span.assert_not_called()
 
-    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler.context_api")
+    @patch("amazon.opentelemetry.distro.langchain_v2.callback_handler.context_api")
     def test_on_llm_end_without_span(self, mock_context_api):
         """Test on_llm_end when the run_id doesn't have a span."""
         mock_context_api.get_value.return_value = False
@@ -628,7 +641,7 @@ class TestOpenTelemetryCallbackHandlerExtended(unittest.TestCase):
             response=response, run_id=uuid.uuid4()  # Using a different run_id that's not in span_mapping
         )
 
-    @patch("amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler.context_api")
+    @patch("amazon.opentelemetry.distro.langchain_v2.callback_handler.context_api")
     def test_on_llm_end_with_different_token_usage_keys(self, mock_context_api):
         """Test on_llm_end with different token usage dictionary structures."""
         mock_context_api.get_value.return_value = False

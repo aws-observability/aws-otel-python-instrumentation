@@ -13,7 +13,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import LLMResult
 
-from amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.span_attributes import (
+from amazon.opentelemetry.distro.langchain_v2.span_attributes import (
     GenAIOperationValues,
     SpanAttributes,
 )

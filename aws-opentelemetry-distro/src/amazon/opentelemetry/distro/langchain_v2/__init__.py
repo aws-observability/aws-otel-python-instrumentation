@@ -7,15 +7,15 @@ from typing import Collection
 
 from wrapt import wrap_function_wrapper
 
-from amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.callback_handler import (
+from amazon.opentelemetry.distro.langchain_v2.callback_handler import (
     OpenTelemetryCallbackHandler,
 )
-from amazon.opentelemetry.distro.opentelemetry.instrumentation.langchain_v2.version import __version__
+from amazon.opentelemetry.distro.langchain_v2.version import __version__
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.instrumentation.utils import unwrap
 from opentelemetry.trace import get_tracer
 
-__all__ = ["OpenTelemetryCallbackHandler"]
+__all__ = ["OpenTelemetryCallbackHandler", "LangChainInstrumentor", "_BaseCallbackManagerInitWrapper", "_instruments"]
 
 _instruments = ("langchain >= 0.1.0",)
 
