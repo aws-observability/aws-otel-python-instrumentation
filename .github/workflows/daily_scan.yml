@@ -77,6 +77,17 @@ jobs:
         if: ${{ steps.dep_scan.outcome != 'success' }}
         run: less dependency-check-report.html
 
+      - name: Configure AWS credentials for image scan
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+
+      - name: Login to Public ECR
+        uses: docker/login-action@v3
+        with:
+          registry: public.ecr.aws
+          
       - name: Perform high image scan
         if: always()
         id: high_scan
