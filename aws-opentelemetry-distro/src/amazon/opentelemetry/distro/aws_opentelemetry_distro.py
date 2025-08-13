@@ -3,7 +3,7 @@
 import importlib
 import os
 import sys
-from logging import ERROR, Logger, getLogger
+from logging import Logger, getLogger
 
 from amazon.opentelemetry.distro._utils import get_aws_region, is_agent_observability_enabled
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
@@ -22,17 +22,12 @@ from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_ins
 from opentelemetry import propagate
 from opentelemetry.distro import OpenTelemetryDistro
 from opentelemetry.environment_variables import OTEL_PROPAGATORS, OTEL_PYTHON_ID_GENERATOR
-from opentelemetry.instrumentation.auto_instrumentation import _load
-from opentelemetry.instrumentation.logging import LEVELS
-from opentelemetry.instrumentation.logging.environment_variables import OTEL_PYTHON_LOG_LEVEL
 from opentelemetry.sdk.environment_variables import (
     OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION,
     OTEL_EXPORTER_OTLP_PROTOCOL,
 )
 
 _logger: Logger = getLogger(__name__)
-# Suppress configurator warnings from auto-instrumentation
-_load._logger.setLevel(LEVELS.get(os.environ.get(OTEL_PYTHON_LOG_LEVEL, "error").lower(), ERROR))
 
 
 class AwsOpenTelemetryDistro(OpenTelemetryDistro):
