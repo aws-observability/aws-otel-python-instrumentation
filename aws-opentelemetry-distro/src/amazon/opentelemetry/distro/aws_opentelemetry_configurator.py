@@ -23,7 +23,6 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
-from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import CompactConsoleLogExporter
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
@@ -47,7 +46,7 @@ from opentelemetry.sdk._configuration import (
 )
 from opentelemetry.sdk._events import EventLoggerProvider
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
-from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogExporter, LogExporter
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, LogExporter
 from opentelemetry.sdk.environment_variables import (
     _OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED,
     OTEL_EXPORTER_OTLP_METRICS_PROTOCOL,
@@ -123,14 +122,7 @@ class OtlpLogHeaderSetting(NamedTuple):
     log_group: Optional[str]
     log_stream: Optional[str]
     namespace: Optional[str]
-
-    def is_valid(self) -> bool:
-        """Check if the log header setting is valid by ensuring both log_group and log_stream are present."""
-        return self.log_group is not None and self.log_stream is not None
-
-
-# Singleton cache for OtlpLogHeaderSetting
-_otlp_log_header_setting_cache: Optional[OtlpLogHeaderSetting] = None
+    is_valid: bool
 
 
 class AwsOpenTelemetryConfigurator(_OTelSDKConfigurator):
@@ -217,9 +209,6 @@ def _init_logging(
     set_logger_provider(provider)
 
     for _, exporter_class in exporters.items():
-        if exporter_class is ConsoleLogExporter and _is_lambda_environment():
-            exporter_class = CompactConsoleLogExporter
-            _logger.debug("Lambda environment detected, using CompactConsoleLogExporter instead of ConsoleLogExporter")
         exporter_args = {}
         _customize_log_record_processor(
             logger_provider=provider, log_exporter=_customize_logs_exporter(exporter_class(**exporter_args))
@@ -451,7 +440,7 @@ def _customize_logs_exporter(log_exporter: LogExporter) -> LogExporter:
 
         if isinstance(log_exporter, OTLPLogExporter):
 
-            if _fetch_logs_header().is_valid():
+            if _validate_and_fetch_logs_header().is_valid:
                 endpoint, region = _extract_endpoint_and_region_from_otlp_endpoint(logs_endpoint)
                 # Setting default compression mode to Gzip as this is the behavior in upstream's
                 # collector otlp http exporter:
@@ -638,23 +627,18 @@ def _extract_endpoint_and_region_from_otlp_endpoint(endpoint: str):
     return endpoint, region
 
 
-def _fetch_logs_header() -> OtlpLogHeaderSetting:
-    """Returns the OTLP log header setting as a singleton instance."""
-    global _otlp_log_header_setting_cache  # pylint: disable=global-statement
-
-    if _otlp_log_header_setting_cache is not None:
-        return _otlp_log_header_setting_cache
+def _validate_and_fetch_logs_header() -> OtlpLogHeaderSetting:
+    """Checks if x-aws-log-group and x-aws-log-stream are present in the headers in order to send logs to
+    AWS OTLP Logs endpoint."""
 
     logs_headers = os.environ.get(OTEL_EXPORTER_OTLP_LOGS_HEADERS)
 
     if not logs_headers:
-        if not _is_lambda_environment():
-            _logger.warning(
-                "Improper configuration: Please configure the environment variable OTEL_EXPORTER_OTLP_LOGS_HEADERS "
-                "to include x-aws-log-group and x-aws-log-stream"
-            )
-        _otlp_log_header_setting_cache = OtlpLogHeaderSetting(None, None, None)
-        return _otlp_log_header_setting_cache
+        _logger.warning(
+            "Improper configuration: Please configure the environment variable OTEL_EXPORTER_OTLP_LOGS_HEADERS "
+            "to include x-aws-log-group and x-aws-log-stream"
+        )
+        return OtlpLogHeaderSetting(None, None, None, False)
 
     log_group = None
     log_stream = None
@@ -672,14 +656,9 @@ def _fetch_logs_header() -> OtlpLogHeaderSetting:
             elif key == AWS_EMF_METRICS_NAMESPACE and value:
                 namespace = value
 
-    _otlp_log_header_setting_cache = OtlpLogHeaderSetting(log_group, log_stream, namespace)
-    return _otlp_log_header_setting_cache
+    is_valid = log_group is not None and log_stream is not None
 
-
-def _clear_logs_header_cache():
-    """Clear the singleton cache for OtlpLogHeaderSetting. Used primarily for testing."""
-    global _otlp_log_header_setting_cache  # pylint: disable=global-statement
-    _otlp_log_header_setting_cache = None
+    return OtlpLogHeaderSetting(log_group, log_stream, namespace, is_valid)
 
 
 def _get_metric_export_interval():
@@ -794,25 +773,8 @@ def _check_emf_exporter_enabled() -> bool:
 
 
 def _create_emf_exporter():
-    """
-    Create the appropriate EMF exporter based on the environment and configuration.
-
-    Returns:
-        ConsoleEmfExporter for Lambda without log headers log group and stream
-        AwsCloudWatchEmfExporter for other cases (when conditions are met)
-        None if CloudWatch exporter cannot be created
-    """
+    """Create and configure the CloudWatch EMF exporter."""
     try:
-        log_header_setting = _fetch_logs_header()
-
-        # Lambda without valid logs http headers - use Console EMF exporter
-        if _is_lambda_environment() and not log_header_setting.is_valid():
-            # pylint: disable=import-outside-toplevel
-            from amazon.opentelemetry.distro.exporter.aws.metrics.console_emf_exporter import ConsoleEmfExporter
-
-            return ConsoleEmfExporter(namespace=log_header_setting.namespace)
-
-        # For non-Lambda environment or Lambda with valid headers - use CloudWatch EMF exporter
         session = get_aws_session()
         # Check if botocore is available before importing the EMF exporter
         if not session:
@@ -824,7 +786,9 @@ def _create_emf_exporter():
             AwsCloudWatchEmfExporter,
         )
 
-        if not log_header_setting.is_valid():
+        log_header_setting = _validate_and_fetch_logs_header()
+
+        if not log_header_setting.is_valid:
             return None
 
         return AwsCloudWatchEmfExporter(
