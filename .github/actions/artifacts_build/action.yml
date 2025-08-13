@@ -105,3 +105,4 @@ runs:
       with:
         image-ref: ${{ inputs.image_uri_with_tag }}
         severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'
+        logout: 'true'
