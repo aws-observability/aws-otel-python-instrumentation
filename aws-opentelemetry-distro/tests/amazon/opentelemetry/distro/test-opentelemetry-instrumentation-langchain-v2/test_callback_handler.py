@@ -29,23 +29,6 @@ from amazon.opentelemetry.distro.langchain_v2.span_attributes import (
 )
 from opentelemetry.trace import SpanKind, StatusCode
 
-# from opentelemetry.distro import (
-#     OpenTelemetryCallbackHandler,
-#     SpanHolder,
-#     _sanitize_metadata_value,
-#     _set_request_params,
-#     _set_span_attribute,
-# )
-# from opentelemetry.distro import (
-#     GenAIOperationValues,
-#     SpanAttributes,
-# )
-# from opentelemetry.distro import (
-#     LangChainInstrumentor,
-#     _BaseCallbackManagerInitWrapper,
-#     _instruments,
-# )
-
 
 class TestOpenTelemetryHelperFunctions(unittest.TestCase):
     """Test the helper functions in the callback handler module."""
