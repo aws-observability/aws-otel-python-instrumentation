@@ -132,8 +132,23 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
         run: |
+          # Create release notes template
+          cat > release_notes.md << 'EOF'
+          This release contains updates of the following upstream components:
+
+          OpenTelemetry Python - <opentelemetry-sdk version number - e.g. 1.22.0>
+          OpenTelemetry Python Contrib - <opentelemetry-instrumentation version number - e.g. 0.43b0>
+
+          This release also publishes to public ECR and PyPi.
+          * See ADOT Python auto-instrumentation Docker image v${{ github.event.inputs.version }} in our public ECR repository:
+          https://gallery.ecr.aws/aws-observability/adot-autoinstrumentation-python
+          * See version ${{ github.event.inputs.version }} in our PyPi repository:
+          https://pypi.org/project/aws-opentelemetry-distro/
+          EOF
+
           gh release create --target "$GITHUB_REF_NAME" \
              --title "Release v${{ github.event.inputs.version }}" \
+             --notes-file release_notes.md \
              --draft \
              "v${{ github.event.inputs.version }}" \
              dist/${{ env.ARTIFACT_NAME }} \
