@@ -110,3 +110,25 @@ class TestLLOHandlerPatterns(LLOHandlerTestBase):
             # Restore original patterns
             LLO_PATTERNS.clear()
             LLO_PATTERNS.update(original_patterns)
+
+    def test_is_llo_attribute_otel_genai_patterns_match(self):
+        """
+        Verify _is_llo_attribute recognizes new GenAI patterns from Strands SDK that follow OTel GenAI Semantic
+        Convention.
+        """
+        self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.user.message"))
+        self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.assistant.message"))
+        self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.system.message"))
+        self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.tool.message"))
+        self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.choice"))
+
+    def test_is_llo_attribute_otel_genai_patterns_no_match(self):
+        """
+        Verify _is_llo_attribute correctly rejects similar but invalid GenAI patterns.
+        """
+        self.assertFalse(self.llo_handler._is_llo_attribute("gen_ai.user"))
+        self.assertFalse(self.llo_handler._is_llo_attribute("gen_ai.assistant"))
+        self.assertFalse(self.llo_handler._is_llo_attribute("gen_ai.system"))
+        self.assertFalse(self.llo_handler._is_llo_attribute("gen_ai.tool"))
+        self.assertFalse(self.llo_handler._is_llo_attribute("gen_ai.user.message.content"))
+        self.assertFalse(self.llo_handler._is_llo_attribute("gen_ai.invalid.message"))
