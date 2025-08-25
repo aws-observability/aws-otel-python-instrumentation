@@ -139,12 +139,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
         run: |
-          # Create release notes template
+          # Extract versions from pyproject.toml
+          SDK_VERSION=$(grep "opentelemetry-sdk ==" aws-opentelemetry-distro/pyproject.toml | sed 's/.*== \([^,]*\).*/\1/' | tr -d '"')
+          INSTRUMENTATION_VERSION=$(grep "opentelemetry-instrumentation ==" aws-opentelemetry-distro/pyproject.toml | sed 's/.*== \([^,]*\).*/\1/' | tr -d '"')
+
+          # Create release notes
           cat > release_notes.md << EOF
           This release contains updates of the following upstream components:
 
-          OpenTelemetry Python - <opentelemetry-sdk version number - e.g. 1.22.0>
-          OpenTelemetry Python Contrib - <opentelemetry-instrumentation version number - e.g. 0.43b0>
+          OpenTelemetry Python - $SDK_VERSION
+          OpenTelemetry Python Contrib - $INSTRUMENTATION_VERSION
 
           This release also publishes to public ECR and PyPi.
           * See ADOT Python auto-instrumentation Docker image v${{ github.event.inputs.version }} in our public ECR repository:
