@@ -36,7 +36,8 @@ def _apply_starlette_instrumentation_patches() -> None:
         # this Middleware instrumentation is injected internally by Starlette Instrumentor, see:
         # https://github.com/open-telemetry/opentelemetry-python-contrib/blob/51da0a766e5d3cbc746189e10c9573163198cfcd/instrumentation/opentelemetry-instrumentation-asgi/src/opentelemetry/instrumentation/asgi/__init__.py#L573
         #
-        # Issue for tracking a feature to customize this setting within Starlette: https://github.com/open-telemetry/opentelemetry-python-contrib/issues/3725
+        # Issue for tracking a feature to customize this setting within Starlette:
+        # https://github.com/open-telemetry/opentelemetry-python-contrib/issues/3725
         if is_agent_observability_enabled():
             original_init = OpenTelemetryMiddleware.__init__
 
