@@ -9,6 +9,7 @@ from amazon.opentelemetry.distro.patches._starlette_patches import _apply_starle
 class TestStarlettePatch(TestCase):
     """Test the Starlette instrumentation patches."""
 
+    @patch("amazon.opentelemetry.distro.patches._starlette_patches.AGENT_OBSERVABILITY_ENABLED", True)
     @patch("amazon.opentelemetry.distro.patches._starlette_patches._logger")
     def test_starlette_patch_applied_successfully(self, mock_logger):
         """Test that the Starlette instrumentation patch is applied successfully."""
@@ -16,12 +17,28 @@ class TestStarlettePatch(TestCase):
         mock_instrumentor_class = MagicMock()
         mock_instrumentor_class.__name__ = "StarletteInstrumentor"
 
-        # Create a mock module
+        class MockMiddleware:
+            def __init__(self, app, **kwargs):
+                pass
+
+        mock_middleware_class = MockMiddleware
+        original_init = mock_middleware_class.__init__
+
+        # Create mock modules
         mock_starlette_module = MagicMock()
         mock_starlette_module.StarletteInstrumentor = mock_instrumentor_class
 
-        # Mock the import
-        with patch.dict("sys.modules", {"opentelemetry.instrumentation.starlette": mock_starlette_module}):
+        mock_asgi_module = MagicMock()
+        mock_asgi_module.OpenTelemetryMiddleware = mock_middleware_class
+
+        # Mock the imports
+        with patch.dict(
+            "sys.modules",
+            {
+                "opentelemetry.instrumentation.starlette": mock_starlette_module,
+                "opentelemetry.instrumentation.asgi": mock_asgi_module,
+            },
+        ):
             # Apply the patch
             _apply_starlette_instrumentation_patches()
 
@@ -32,6 +49,18 @@ class TestStarlettePatch(TestCase):
             mock_instance = MagicMock()
             result = mock_instrumentor_class.instrumentation_dependencies(mock_instance)
             self.assertEqual(result, ("starlette >= 0.13",))
+
+            self.assertNotEqual(mock_middleware_class.__init__, original_init)
+
+            # Test middleware patching sets exclude flags
+            mock_middleware_instance = MagicMock()
+            mock_middleware_instance.exclude_receive_span = False
+            mock_middleware_instance.exclude_send_span = False
+
+            mock_middleware_class.__init__(mock_middleware_instance, "app")
+
+            self.assertTrue(mock_middleware_instance.exclude_receive_span)
+            self.assertTrue(mock_middleware_instance.exclude_send_span)
 
             # Verify logging
             mock_logger.debug.assert_called_once_with(
