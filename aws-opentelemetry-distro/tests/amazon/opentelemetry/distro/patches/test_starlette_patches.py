@@ -12,31 +12,63 @@ class TestStarlettePatch(TestCase):
     @patch("amazon.opentelemetry.distro.patches._starlette_patches._logger")
     def test_starlette_patch_applied_successfully(self, mock_logger):
         """Test that the Starlette instrumentation patch is applied successfully."""
-        # Create a mock StarletteInstrumentor class
-        mock_instrumentor_class = MagicMock()
-        mock_instrumentor_class.__name__ = "StarletteInstrumentor"
+        for agent_enabled in [True, False]:
+            with self.subTest(agent_enabled=agent_enabled):
+                with patch.dict("os.environ", {"AGENT_OBSERVABILITY_ENABLED": "true" if agent_enabled else "false"}):
+                    # Create a mock StarletteInstrumentor class
+                    mock_instrumentor_class = MagicMock()
+                    mock_instrumentor_class.__name__ = "StarletteInstrumentor"
 
-        # Create a mock module
-        mock_starlette_module = MagicMock()
-        mock_starlette_module.StarletteInstrumentor = mock_instrumentor_class
+                    def create_middleware_class():
+                        class MockMiddleware:
+                            def __init__(self, app, **kwargs):
+                                pass
 
-        # Mock the import
-        with patch.dict("sys.modules", {"opentelemetry.instrumentation.starlette": mock_starlette_module}):
-            # Apply the patch
-            _apply_starlette_instrumentation_patches()
+                        return MockMiddleware
 
-            # Verify the instrumentation_dependencies method was replaced
-            self.assertTrue(hasattr(mock_instrumentor_class, "instrumentation_dependencies"))
+                    mock_middleware_class = create_middleware_class()
 
-            # Test the patched method returns the expected value
-            mock_instance = MagicMock()
-            result = mock_instrumentor_class.instrumentation_dependencies(mock_instance)
-            self.assertEqual(result, ("starlette >= 0.13",))
+                    mock_starlette_module = MagicMock()
+                    mock_starlette_module.StarletteInstrumentor = mock_instrumentor_class
 
-            # Verify logging
-            mock_logger.debug.assert_called_once_with(
-                "Successfully patched Starlette instrumentation_dependencies method"
-            )
+                    mock_asgi_module = MagicMock()
+                    mock_asgi_module.OpenTelemetryMiddleware = mock_middleware_class
+
+                    with patch.dict(
+                        "sys.modules",
+                        {
+                            "opentelemetry.instrumentation.starlette": mock_starlette_module,
+                            "opentelemetry.instrumentation.asgi": mock_asgi_module,
+                        },
+                    ):
+                        # Apply the patch
+                        _apply_starlette_instrumentation_patches()
+
+                        # Verify the instrumentation_dependencies method was replaced
+                        self.assertTrue(hasattr(mock_instrumentor_class, "instrumentation_dependencies"))
+
+                        # Test the patched method returns the expected value
+                        mock_instance = MagicMock()
+                        result = mock_instrumentor_class.instrumentation_dependencies(mock_instance)
+                        self.assertEqual(result, ("starlette >= 0.13",))
+
+                        mock_middleware_instance = MagicMock()
+                        mock_middleware_instance.exclude_receive_span = False
+                        mock_middleware_instance.exclude_send_span = False
+                        mock_middleware_class.__init__(mock_middleware_instance, "app")
+
+                        # Test middleware patching sets exclude flags
+                        if agent_enabled:
+                            self.assertTrue(mock_middleware_instance.exclude_receive_span)
+                            self.assertTrue(mock_middleware_instance.exclude_send_span)
+                        else:
+                            self.assertFalse(mock_middleware_instance.exclude_receive_span)
+                            self.assertFalse(mock_middleware_instance.exclude_send_span)
+
+                        # Verify logging
+                        mock_logger.debug.assert_called_with(
+                            "Successfully patched Starlette instrumentation_dependencies method"
+                        )
 
     @patch("amazon.opentelemetry.distro.patches._starlette_patches._logger")
     def test_starlette_patch_handles_import_error(self, mock_logger):
