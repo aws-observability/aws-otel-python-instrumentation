@@ -31,6 +31,7 @@ def _apply_starlette_instrumentation_patches() -> None:
         # Apply the patch
         StarletteInstrumentor.instrumentation_dependencies = patched_instrumentation_dependencies
 
+        # pylint: disable=line-too-long
         # Patch to exclude http receive/send ASGI event spans from Bedrock AgentCore,
         # this Middleware instrumentation is injected internally by Starlette Instrumentor, see:
         # https://github.com/open-telemetry/opentelemetry-python-contrib/blob/51da0a766e5d3cbc746189e10c9573163198cfcd/instrumentation/opentelemetry-instrumentation-asgi/src/opentelemetry/instrumentation/asgi/__init__.py#L573
