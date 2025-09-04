@@ -1,0 +1,28 @@
+name: Test Release Workflow
+on:
+  workflow_dispatch:
+
+jobs:
+  check-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check main workflow status
+        run: |
+          WORKFLOW_ID=$(gh api repos/${{ github.repository }}/actions/workflows --jq '.workflows[] | select(.name=="Test Main Workflow") | .id')
+          LATEST_RUN=$(gh api repos/${{ github.repository }}/actions/workflows/$WORKFLOW_ID/runs --jq '.workflow_runs[] | select(.head_branch=="${{ github.ref_name }}") | {conclusion, status}' | head -1)
+          STATUS=$(echo "$LATEST_RUN" | jq -r '.status')
+          CONCLUSION=$(echo "$LATEST_RUN" | jq -r '.conclusion')
+          
+          if [ "$STATUS" = "in_progress" ] || [ "$STATUS" = "queued" ]; then
+            echo "Main workflow is still running (status: $STATUS). Cannot proceed with release."
+            exit 1
+          elif [ "$CONCLUSION" != "success" ]; then
+            echo "Latest main workflow on branch ${{ github.ref_name }} conclusion: $CONCLUSION"
+            exit 1
+          fi
+          echo "Main workflow succeeded, proceeding with release"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      
+      - name: Mock release step
+        run: echo "Release would happen here"
