@@ -22,7 +22,7 @@ jobs:
           fi
           echo "Main workflow succeeded, proceeding with release"
         env:
-          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Mock release step
         run: echo "Release would happen here"
