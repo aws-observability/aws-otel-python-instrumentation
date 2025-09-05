@@ -8,4 +8,4 @@ All notable changes to this project will be documented in this file.
 
 ## 0.11.0 - 2024-08-20
 
-- Initial CHANGELOG implementation
+- Initial CHANGELOG implementation ([#465](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/465))
