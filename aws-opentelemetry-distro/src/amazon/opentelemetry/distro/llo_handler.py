@@ -16,6 +16,7 @@ from opentelemetry.util import types
 ROLE_SYSTEM = "system"
 ROLE_USER = "user"
 ROLE_ASSISTANT = "assistant"
+ROLE_TOOL = "tool"
 
 _logger = logging.getLogger(__name__)
 
@@ -137,6 +138,35 @@ LLO_PATTERNS: Dict[str, PatternConfig] = {
         "role": ROLE_USER,
         "source": "prompt",
     },
+    # OTel GenAI Semantic Convention used by the latest Strands SDK
+    # References:
+    # - OTel GenAI SemConv: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/
+    # - Strands SDK PR(introduced in v0.1.9): https://github.com/strands-agents/sdk-python/pull/319
+    "gen_ai.user.message": {
+        "type": PatternType.DIRECT,
+        "role": ROLE_USER,
+        "source": "prompt",
+    },
+    "gen_ai.assistant.message": {
+        "type": PatternType.DIRECT,
+        "role": ROLE_ASSISTANT,
+        "source": "output",
+    },
+    "gen_ai.system.message": {
+        "type": PatternType.DIRECT,
+        "role": ROLE_SYSTEM,
+        "source": "prompt",
+    },
+    "gen_ai.tool.message": {
+        "type": PatternType.DIRECT,
+        "role": ROLE_TOOL,
+        "source": "prompt",
+    },
+    "gen_ai.choice": {
+        "type": PatternType.DIRECT,
+        "role": ROLE_ASSISTANT,
+        "source": "output",
+    },
 }
 
 
@@ -214,6 +244,7 @@ class LLOHandler:
         for attr_key, value in attributes.items():
             if attr_key in self._exact_match_patterns:
                 config = self._pattern_configs[attr_key]
+
                 messages.append(
                     {"content": value, "role": config.get("role", "unknown"), "source": config.get("source", "unknown")}
                 )
@@ -279,6 +310,12 @@ class LLOHandler:
         # Collect from span events
         if span.events:
             for event in span.events:
+                # Check if event name itself is an LLO pattern (e.g., "gen_ai.user.message")
+                if self._is_llo_attribute(event.name):
+                    # Put all event attributes as the content as LLO in log event
+                    all_llo_attributes[event.name] = dict(event.attributes) if event.attributes else {}
+
+                # Also check traditional pattern - LLO attributes within event attributes
                 if event.attributes:
                     for key, value in event.attributes.items():
                         if self._is_llo_attribute(key):
@@ -372,6 +409,10 @@ class LLOHandler:
         updated_events = []
 
         for event in span.events:
+            # Skip entire event if event name is an LLO pattern
+            if self._is_llo_attribute(event.name):
+                continue
+
             if not event.attributes:
                 updated_events.append(event)
                 continue
@@ -417,7 +458,7 @@ class LLOHandler:
             elif role == ROLE_ASSISTANT:
                 output_messages.append(formatted_message)
             else:
-                # Route based on source for non-standard roles
+                # Route based on source for non-standard roles including tool
                 if any(key in message.get("source", "") for key in ["completion", "output", "result"]):
                     output_messages.append(formatted_message)
                 else:
