@@ -94,14 +94,6 @@ jobs:
           git commit -am "Update version to ${VERSION}"
           git push origin "v${VERSION}_release"
 
-      - name: Update CHANGELOG for release
-        run: |
-          # Replace "## Unreleased" with "## ${VERSION} - $(date +%Y-%m-%d)"
-          sed -i "s/## Unreleased/## ${VERSION} - $(date +%Y-%m-%d)/" CHANGELOG.md
-          git add CHANGELOG.md
-          git commit -m "Update CHANGELOG for version ${VERSION}"
-          git push origin "v${VERSION}_release"
-
       - name: Create pull request against the release branch
         env:
           GITHUB_TOKEN: ${{ env.BOT_TOKEN_GITHUB_RW_PATOKEN }}
@@ -112,23 +104,3 @@ jobs:
           By submitting this pull request, I confirm that you can use, modify, copy, and redistribute this contribution, under the terms of your choice." \
                        --head v${{ github.event.inputs.version }}_release \
                        --base release/v${MAJOR_MINOR}.x
-
-      - name: Create pull request against main for CHANGELOG
-        env:
-          GITHUB_TOKEN: ${{ env.BOT_TOKEN_GITHUB_RW_PATOKEN }}
-        run: |
-          # Create branch for main PR
-          git checkout -b "v${VERSION}_changelog_main"
-          
-          # Update CHANGELOG for main (keep Unreleased + add release entry)
-          sed -i "s/## Unreleased/## Unreleased\n\n## ${VERSION} - $(date +%Y-%m-%d)/" CHANGELOG.md
-          git add CHANGELOG.md
-          git commit -m "Add ${VERSION} to CHANGELOG"
-          git push origin "v${VERSION}_changelog_main"
-          
-          gh pr create --title "Add ${VERSION} to CHANGELOG" \
-                       --body "This PR adds the ${VERSION} release entry to CHANGELOG.md.
-          
-          By submitting this pull request, I confirm that you can use, modify, copy, and redistribute this contribution, under the terms of your choice." \
-                       --head v${{ github.event.inputs.version }}_changelog_main \
-                       --base main
