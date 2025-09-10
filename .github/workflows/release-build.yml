@@ -28,7 +28,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-sdk:
     environment: Release
     runs-on: ubuntu-latest
     steps:
@@ -66,6 +66,54 @@ jobs:
       # TODO: Add some sort of smoke/integration testing before we go
       # release the artifacts. adot java for reference:
       # https://github.com/aws-observability/aws-otel-java-instrumentation/tree/93870a550ac30988fbdd5d3bf1e8f9f1b37916f5/smoke-tests
+
+      - name: Upload SDK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: dist/${{ env.ARTIFACT_NAME }}
+  
+  build-layer:
+    needs: build-sdk
+    runs-on: ubuntu-latest
+    outputs:
+      aws_regions_json: ${{ steps.set-matrix.outputs.aws_regions_json }}
+    steps:
+      - name: Set up regions matrix
+        id: set-matrix
+        run: |
+          IFS=',' read -ra REGIONS <<< "${{ github.event.inputs.aws_region }}"
+          MATRIX="["
+          for region in "${REGIONS[@]}"; do
+            trimmed_region=$(echo "$region" | xargs)
+            MATRIX+="\"$trimmed_region\","
+          done
+          MATRIX="${MATRIX%,}]"
+          echo ${MATRIX}
+          echo "aws_regions_json=${MATRIX}" >> $GITHUB_OUTPUT
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Build layers
+        working-directory: lambda-layer/src
+        run: |
+          ./build-lambda-layer.sh
+          pip install tox
+          tox
+      - name: upload layer
+        uses: actions/upload-artifact@v4
+        with:
+          name: layer.zip
+          path: lambda-layer/src/build/aws-opentelemetry-python-layer.zip
+
+  publish-sdk:
+    needs: [build-sdk, build-layer]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@v4
 
       - name: Configure AWS credentials for PyPI secrets
         uses: aws-actions/configure-aws-credentials@v4
@@ -109,12 +157,17 @@ jobs:
       - name: Install twine
         run: pip install twine
       
+      - name: Download SDK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+      
       - name: Publish to TestPyPI
         env:
           TWINE_USERNAME: '__token__'
           TWINE_PASSWORD: ${{ env.TEST_PYPI_TOKEN_API_TOKEN }}
         run: |
-          twine upload --repository testpypi --skip-existing --verbose dist/${{ env.ARTIFACT_NAME }}
+          twine upload --repository testpypi --skip-existing --verbose ${{ env.ARTIFACT_NAME }}
 
       # Publish to prod PyPI
       - name: Publish to PyPI
@@ -122,7 +175,7 @@ jobs:
           TWINE_USERNAME: '__token__'
           TWINE_PASSWORD: ${{ env.PROD_PYPI_TOKEN_API_TOKEN }}
         run: |
-          twine upload --skip-existing --verbose dist/${{ env.ARTIFACT_NAME }}
+          twine upload --skip-existing --verbose ${{ env.ARTIFACT_NAME }}
 
       # Publish to public ECR
       - name: Build and push public ECR image
@@ -145,80 +198,10 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: |
             ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ github.event.inputs.version }}
-
-      - name: Get SHA256 checksum of wheel file
-        id: get_sha256
-        run: |
-          shasum -a 256 dist/${{ env.ARTIFACT_NAME }} | sed "s|dist/||" > ${{ env.ARTIFACT_NAME }}.sha256
-
-      # Publish to GitHub releases
-      - name: Create GH release
-        id: create_release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
-        run: |
-          # Extract versions from pyproject.toml
-          SDK_VERSION=$(grep "opentelemetry-sdk ==" aws-opentelemetry-distro/pyproject.toml | sed 's/.*== \([^,]*\).*/\1/' | tr -d '"')
-          INSTRUMENTATION_VERSION=$(grep "opentelemetry-instrumentation ==" aws-opentelemetry-distro/pyproject.toml | sed 's/.*== \([^,]*\).*/\1/' | tr -d '"')
-
-          # Create release notes
-          cat > release_notes.md << EOF
-          This release contains updates of the following upstream components:
-
-          OpenTelemetry Python - $SDK_VERSION
-          OpenTelemetry Python Contrib - $INSTRUMENTATION_VERSION
-
-          This release also publishes to public ECR and PyPi.
-          * See ADOT Python auto-instrumentation Docker image v${{ github.event.inputs.version }} in our public ECR repository:
-          https://gallery.ecr.aws/aws-observability/adot-autoinstrumentation-python
-          * See version ${{ github.event.inputs.version }} in our PyPi repository:
-          https://pypi.org/project/aws-opentelemetry-distro/
-          EOF
-
-          gh release create --target "$GITHUB_REF_NAME" \
-             --title "Release v${{ github.event.inputs.version }}" \
-             --notes-file release_notes.md \
-             --draft \
-             "v${{ github.event.inputs.version }}" \
-             dist/${{ env.ARTIFACT_NAME }} \
-             ${{ env.ARTIFACT_NAME }}.sha256
-  build-layer:
-    runs-on: ubuntu-latest
-    needs: build
-    outputs:
-      aws_regions_json: ${{ steps.set-matrix.outputs.aws_regions_json }}
-    steps:
-      - name: Set up regions matrix
-        id: set-matrix
-        run: |
-          IFS=',' read -ra REGIONS <<< "${{ github.event.inputs.aws_region }}"
-          MATRIX="["
-          for region in "${REGIONS[@]}"; do
-            trimmed_region=$(echo "$region" | xargs)
-            MATRIX+="\"$trimmed_region\","
-          done
-          MATRIX="${MATRIX%,}]"
-          echo ${MATRIX}
-          echo "aws_regions_json=${MATRIX}" >> $GITHUB_OUTPUT
-      - name: Checkout Repo @ SHA - ${{ github.sha }}
-        uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-      - name: Build layers
-        working-directory: lambda-layer/src
-        run: |
-          ./build-lambda-layer.sh
-          pip install tox
-          tox
-      - name: upload layer
-        uses: actions/upload-artifact@v4
-        with:
-          name: layer.zip
-          path: lambda-layer/src/build/aws-opentelemetry-python-layer.zip
+  
   publish-layer-prod:
     runs-on: ubuntu-latest
-    needs: build-layer
+    needs: [build-layer, publish-sdk]
     strategy:
       matrix:
         aws_region: ${{ fromJson(needs.build-layer.outputs.aws_regions_json) }}
@@ -299,9 +282,12 @@ jobs:
         if: always()
         run: |
           aws s3 rb --force s3://${{ env.BUCKET_NAME }}
+
   generate-lambda-release-note:
     runs-on: ubuntu-latest
     needs: publish-layer-prod
+    outputs:
+      layer-note: ${{ steps.layer-note.outputs.layer-note }}
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@v4
@@ -320,6 +306,7 @@ jobs:
           cat $file
           done
       - name: generate layer-note
+        id: layer-note
         working-directory: ${{ env.LAYER_NAME }}
         run: |
           echo "| Region | Layer ARN |" >> ../layer-note
@@ -329,7 +316,13 @@ jobs:
           read arn < $file
           echo "| " $file " | " $arn " |" >> ../layer-note
           done
-          cat ../layer-note
+          cd ..
+          {
+            echo "layer-note<<EOF"
+            cat layer-note
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+          cat layer-note
       - name: generate tf layer
         working-directory: ${{ env.LAYER_NAME }}
         run: |
@@ -355,47 +348,66 @@ jobs:
           done
           echo "}" >> ../layer_cdk
           cat ../layer_cdk
-      - name: download layer.zip
+
+  publish-github:
+    needs: generate-lambda-release-note
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@v4
+      
+      - name: Download SDK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+      
+      - name: Download layer.zip artifact
         uses: actions/download-artifact@v4
         with:
           name: layer.zip
+
       - name: Rename layer file
         run: |
           cp aws-opentelemetry-python-layer.zip layer.zip
-      - name: Get commit hash
-        id: commit
-        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-      - name: Update GH release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="v${{ github.event.inputs.version }}"
-          # Generate SHA-256 checksum for layer.zip
-          shasum -a 256 layer.zip > layer.zip.sha256
-          gh release upload $TAG \
-            layer.zip \
-            layer.zip.sha256 \
-            layer_arns.tf \
-            --clobber
-      - name: Update Release Notes
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="v${{ github.event.inputs.version }}"
-          # Get current release notes
-          current_notes=$(gh release view $TAG --json body -q .body)
-          echo "This release also includes the AWS OpenTelemetry Lambda Layer for Python version ${{ github.event.inputs.version }}-${{ steps.commit.outputs.sha_short }}." >> lambda_notes.md
-          echo "" >> lambda_notes.md
-          echo "Lambda Layer ARNs:" >> lambda_notes.md
-          echo "" >> lambda_notes.md
-          cat layer-note >> lambda_notes.md
-          echo "" >> lambda_notes.md
-          echo "Notes:" >> lambda_notes.md
-          {
-            echo "$current_notes"
-            echo ""
-            cat lambda_notes.md
-          } > updated_notes.md
-          # Update release notes
-          gh release edit $TAG --notes-file updated_notes.md
 
+      # Publish to GitHub releases
+      - name: Create GH release
+        id: create_release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Extract versions from pyproject.toml
+          SDK_VERSION=$(grep "opentelemetry-sdk ==" aws-opentelemetry-distro/pyproject.toml | sed 's/.*== \([^,]*\).*/\1/' | tr -d '"')
+          INSTRUMENTATION_VERSION=$(grep "opentelemetry-instrumentation ==" aws-opentelemetry-distro/pyproject.toml | sed 's/.*== \([^,]*\).*/\1/' | tr -d '"')
+
+          # Create release notes
+          cat > release_notes.md << EOF
+          This release contains updates of the following upstream components:
+
+          OpenTelemetry Python - $SDK_VERSION
+          OpenTelemetry Python Contrib - $INSTRUMENTATION_VERSION
+
+          This release also publishes to public ECR and PyPi.
+          * See ADOT Python auto-instrumentation Docker image v${{ github.event.inputs.version }} in our public ECR repository:
+          https://gallery.ecr.aws/aws-observability/adot-autoinstrumentation-python
+          * See version ${{ github.event.inputs.version }} in our PyPi repository:
+          https://pypi.org/project/aws-opentelemetry-distro/
+
+          This release also includes the AWS OpenTelemetry Lambda Layer for Python version ${{ github.event.inputs.version }}-$(echo $GITHUB_SHA | cut -c1-7).
+
+          Lambda Layer ARNs:
+          ${{ needs.generate-lambda-release-note.outputs.layer-note }}
+          EOF
+
+          shasum -a 256 ${{ env.ARTIFACT_NAME }} > ${{ env.ARTIFACT_NAME }}.sha256
+          shasum -a 256 layer.zip > layer.zip.sha256
+
+          gh release create --target "$GITHUB_REF_NAME" \
+             --title "Release v${{ github.event.inputs.version }}" \
+             --notes-file release_notes.md \
+             --draft \
+             "v${{ github.event.inputs.version }}" \
+             ${{ env.ARTIFACT_NAME }} \
+             ${{ env.ARTIFACT_NAME }}.sha256 \
+             layer.zip \
+             layer.zip.sha256
