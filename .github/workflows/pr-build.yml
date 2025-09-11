@@ -19,9 +19,14 @@ jobs:
           
       - name: Check CHANGELOG
         run: |
-          # Check if PR is from pre-release or post-release workflow
+          # Check if PR is from workflows bot or dependabot
           if [[ "${{ github.event.pull_request.user.login }}" == "aws-application-signals-bot" ]]; then
             echo "Skipping check: PR from aws-application-signals-bot"
+            exit 0
+          fi
+          
+          if [[ "${{ github.event.pull_request.user.login }}" == "dependabot[bot]" ]]; then
+            echo "Skipping check: PR from dependabot"
             exit 0
           fi
           
