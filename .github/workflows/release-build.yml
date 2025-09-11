@@ -376,16 +376,30 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Extract versions from pyproject.toml
-          SDK_VERSION=$(grep "opentelemetry-sdk ==" aws-opentelemetry-distro/pyproject.toml | sed 's/.*== \([^,]*\).*/\1/' | tr -d '"')
-          INSTRUMENTATION_VERSION=$(grep "opentelemetry-instrumentation ==" aws-opentelemetry-distro/pyproject.toml | sed 's/.*== \([^,]*\).*/\1/' | tr -d '"')
+          # Extract all dependencies from pyproject.toml
+          DEPS=$(python3 -c "
+            import re
+            with open('aws-opentelemetry-distro/pyproject.toml', 'r') as f:
+                content = f.read()
+            deps_match = re.search(r'dependencies\s*=\s*\[(.*?)\]', content, re.DOTALL)
+            if deps_match:
+                deps_content = deps_match.group(1)
+                dep_lines = re.findall(r'\"([^\"]+)\"', deps_content)
+                formatted_deps = []
+                for dep_line in dep_lines:
+                    if ' == ' in dep_line:
+                        package, version = dep_line.split(' == ', 1)
+                        formatted_deps.append(f'- \`{package}\` - {version}')
+                    else:
+                        formatted_deps.append(f'- \`{dep_line}\`')
+                print('\n'.join(formatted_deps))
+          ")
 
           # Create release notes
           cat > release_notes.md << EOF
-          This release contains updates of the following upstream components:
+          This release contains the following upstream components:
 
-          OpenTelemetry Python - $SDK_VERSION
-          OpenTelemetry Python Contrib - $INSTRUMENTATION_VERSION
+          $DEPS
 
           This release also publishes to public ECR and PyPi.
           * See ADOT Python auto-instrumentation Docker image v${{ github.event.inputs.version }} in our public ECR repository:
