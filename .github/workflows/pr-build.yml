@@ -31,7 +31,7 @@ jobs:
           fi
           
           # Check for Skip Changelog label
-          if echo '${{ toJSON(github.event.pull_request.labels.*.name) }}' | jq -r '.[]' | grep -q "Skip Changelog"; then
+          if echo '${{ toJSON(github.event.pull_request.labels.*.name) }}' | jq -r '.[]' | grep -q "skip changelog"; then
             echo "Skipping check: Skip Changelog label found"
             exit 0
           fi
