@@ -67,7 +67,7 @@ def apply_instrumentation_patches() -> None:
         from amazon.opentelemetry.distro.patches._starlette_patches import _apply_starlette_instrumentation_patches
 
         # Starlette auto-instrumentation v0.54b includes a strict dependency version check
-        # This restriction was removed in v1.34.0/0.55b0. Applying temporary patch for Genesis launch
+        # This restriction was removed in v1.34.0/0.55b0. Applying temporary patch for Bedrock AgentCore launch
         # TODO: Remove patch after syncing with upstream v1.34.0 or later
         _apply_starlette_instrumentation_patches()
 
