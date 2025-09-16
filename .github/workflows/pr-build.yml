@@ -132,7 +132,7 @@ jobs:
           distribution: temurin
 
       - name: Setup Gradle
-        uses: gradle/gradle-build-action@ed408507eac070d1f99cc633dbcf757c94c7933a #4.4.3
+        uses: gradle/actions/gradle-build@ed408507eac070d1f99cc633dbcf757c94c7933a #4.4.3
 
       - name: Build with Gradle
         run: cd performance-tests; ./gradlew spotlessCheck
