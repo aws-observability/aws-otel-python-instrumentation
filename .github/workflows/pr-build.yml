@@ -1,6 +1,12 @@
 name: Python Instrumentation PR Build
 on:
   pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - labeled
+      - unlabeled
     branches:
       - main
       - "release/v*"
