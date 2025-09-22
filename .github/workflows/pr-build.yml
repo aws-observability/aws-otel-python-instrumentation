@@ -164,7 +164,7 @@ jobs:
 
   all-pr-checks-pass:
     runs-on: ubuntu-latest
-    needs: [static-code-checks, lint, spotless, blotless]
+    needs: [static-code-checks, lint, spotless]
     if: always()
     steps:
       - name: Checkout to get workflow file
