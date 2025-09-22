@@ -60,8 +60,8 @@ jobs:
           CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}..HEAD | grep -E "^\.github/(workflows|actions)/.*\.ya?ml$" || true)
           
           if [ -n "$CHANGED_FILES" ]; then
-            # Check for any versioned actions
-            VIOLATIONS=$(grep -Hn "uses:.*@v" $CHANGED_FILES || true)
+            # Check for any versioned actions, excluding comments and this validation script
+            VIOLATIONS=$(grep -Hn "uses:.*@v" $CHANGED_FILES | grep -v "grep.*uses:.*@v" | grep -v "^\s*#" || true)
             if [ -n "$VIOLATIONS" ]; then
               echo "Found versioned GitHub actions. Use commit SHAs instead:"
               echo "$VIOLATIONS"
