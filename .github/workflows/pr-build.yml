@@ -24,7 +24,7 @@ jobs:
           fetch-depth: 0
           
       - name: Check CHANGELOG
-        continue-on-error: true
+        if: always()
         run: |
           # Check if PR is from workflows bot or dependabot
           if [[ "${{ github.event.pull_request.user.login }}" == "aws-application-signals-bot" ]]; then
@@ -54,7 +54,7 @@ jobs:
           exit 1
 
       - name: Check for versioned GitHub actions
-        continue-on-error: true
+        if: always()
         run: |
           # Get changed GitHub workflow/action files
           CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}..HEAD | grep -E "^\.github/(workflows|actions)/.*\.ya?ml$" || true)
@@ -70,10 +70,6 @@ jobs:
           fi
           
           echo "No versioned actions found in changed files"
-
-      - name: Fail if any of the above checks failed
-        if: failure()
-        run: exit 1
 
   build:
     runs-on: ubuntu-latest
