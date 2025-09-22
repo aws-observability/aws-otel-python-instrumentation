@@ -27,6 +27,7 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - uses: actions/checkout@v4
     - name: Build sample lambda function
       shell: bash
       working-directory: ${{ inputs.layer_directory }}/sample-apps
@@ -38,6 +39,7 @@ runs:
         ./build-lambda-layer.sh
         pip install tox
         tox
+    - uses: actions/checkout@v4 #v4
     - name: Upload Layer to S3
       shell: bash
       run: |
