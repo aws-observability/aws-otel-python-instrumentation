@@ -164,7 +164,7 @@ jobs:
 
   all-pr-checks-pass:
     runs-on: ubuntu-latest
-    needs: [static-code-checks, lint, spotless]
+    needs: [static-code-checks, lint, build, build-lambda, spotless]
     if: always()
     steps:
       - name: Check all jobs succeeded
