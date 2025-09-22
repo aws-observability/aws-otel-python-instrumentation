@@ -61,7 +61,7 @@ jobs:
           
           if [ -n "$CHANGED_FILES" ]; then
             # Check for any versioned actions, excluding comments and this validation script
-            VIOLATIONS=$(grep -Hn "uses:.*@v" $CHANGED_FILES | grep -v "grep.*uses:.*@v" | grep -v "^\s*#" || true)
+            VIOLATIONS=$(grep -Hn "uses:.*@v" $CHANGED_FILES | grep -v "grep.*uses:.*@v" | grep -v "#.*@v" || true)
             if [ -n "$VIOLATIONS" ]; then
               echo "Found versioned GitHub actions. Use commit SHAs instead:"
               echo "$VIOLATIONS"
