@@ -3,6 +3,7 @@
 import sys
 import os
 import re
+import requests
 
 # Dependencies that use the first version number (opentelemetry-python)
 PYTHON_CORE_DEPS = [
@@ -67,6 +68,23 @@ CONTRIB_DEPS = [
     'opentelemetry-instrumentation-cassandra',
 ]
 
+# AWS-specific packages with independent versioning
+AWS_DEPS = [
+    'opentelemetry-sdk-extension-aws',
+    'opentelemetry-propagator-aws-xray',
+]
+
+def get_latest_version(package_name):
+    """Get the latest version of a package from PyPI."""
+    try:
+        response = requests.get(f'https://pypi.org/pypi/{package_name}/json')
+        response.raise_for_status()
+        data = response.json()
+        return data['info']['version']
+    except Exception as e:
+        print(f"Warning: Could not get latest version for {package_name}: {e}")
+        return None
+
 def main():
     otel_python_version = os.environ.get('OTEL_PYTHON_VERSION')
     otel_contrib_version = os.environ.get('OTEL_CONTRIB_VERSION')
@@ -98,6 +116,17 @@ def main():
             if re.search(pattern, content):
                 content = re.sub(pattern, replacement, content)
                 updated = True
+        
+        # Update AWS dependencies with their latest versions
+        for dep in AWS_DEPS:
+            latest_version = get_latest_version(dep)
+            if latest_version:
+                pattern = rf'"{re.escape(dep)} == [^"]*"'
+                replacement = f'"{dep} == {latest_version}"'
+                if re.search(pattern, content):
+                    content = re.sub(pattern, replacement, content)
+                    updated = True
+                    print(f"Updated {dep} to {latest_version}")
         
         if updated:
             with open(pyproject_path, 'w') as f:
