@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
-import requests
 import os
-import sys
 import re
+import sys
+
+import requests
 
 
 def get_latest_otel_versions():

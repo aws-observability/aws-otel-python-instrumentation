@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
-import sys
 import os
 import re
+import sys
+
 import requests
 
 # Dependencies that use the opentelemetry-python version number
