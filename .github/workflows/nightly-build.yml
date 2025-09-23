@@ -8,6 +8,9 @@ on:
     branches:
       - zhaez/nightly-build
 
+env:
+  BRANCH_NAME: nightly-dependency-updates
+
 jobs:
   update-and-create-pr:
     runs-on: ubuntu-latest
@@ -25,13 +28,11 @@ jobs:
     
     - name: Check if nightly branch already exists
       run: |
-        BRANCH_NAME="nightly-dependency-updates"
         if git ls-remote --exit-code --heads origin "$BRANCH_NAME"; then
           echo "Branch $BRANCH_NAME already exists. Skipping run to avoid conflicts."
           echo "Please merge or close the existing PR before the next nightly run."
           exit 0
         fi
-        echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
     
     - name: Configure git and create branch
       run: |
