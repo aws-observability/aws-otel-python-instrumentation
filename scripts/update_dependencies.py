@@ -5,7 +5,7 @@ import os
 import re
 import requests
 
-# Dependencies that use the first version number (opentelemetry-python)
+# Dependencies that use the opentelemetry-python version number
 PYTHON_CORE_DEPS = [
     'opentelemetry-api',
     'opentelemetry-sdk',
@@ -17,7 +17,7 @@ PYTHON_CORE_DEPS = [
     'opentelemetry-exporter-otlp-proto-common',
 ]
 
-# Dependencies that use the second version number (opentelemetry-python-contrib)
+# Dependencies that use the opentelemetry-python-contrib version number
 CONTRIB_DEPS = [
     'opentelemetry-distro',
     'opentelemetry-processor-baggage',
@@ -68,7 +68,7 @@ CONTRIB_DEPS = [
     'opentelemetry-instrumentation-cassandra',
 ]
 
-# AWS-specific packages with independent versioning
+packages with independent versioning
 AWS_DEPS = [
     'opentelemetry-sdk-extension-aws',
     'opentelemetry-propagator-aws-xray',
@@ -101,7 +101,7 @@ def main():
         
         updated = False
         
-        # Update Python core dependencies
+        # Update opentelemetry-python dependencies
         for dep in PYTHON_CORE_DEPS:
             pattern = rf'"{re.escape(dep)} == [^"]*"'
             replacement = f'"{dep} == {otel_python_version}"'
@@ -109,7 +109,7 @@ def main():
                 content = re.sub(pattern, replacement, content)
                 updated = True
         
-        # Update contrib dependencies  
+        # Update opentelemetry-python-contrib dependencies  
         for dep in CONTRIB_DEPS:
             pattern = rf'"{re.escape(dep)} == [^"]*"'
             replacement = f'"{dep} == {otel_contrib_version}"'
@@ -117,7 +117,7 @@ def main():
                 content = re.sub(pattern, replacement, content)
                 updated = True
         
-        # Update AWS dependencies with their latest versions
+        # Update dependencies with independent versioning
         for dep in AWS_DEPS:
             latest_version = get_latest_version(dep)
             if latest_version:

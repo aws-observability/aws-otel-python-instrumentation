@@ -21,8 +21,8 @@ def get_latest_otel_versions():
             print(f"Could not parse release title: {release_title}")
             sys.exit(1)
         
-        otel_python_version = match.group(1)      # e.g., "1.37.0"
-        otel_contrib_version = match.group(2)     # e.g., "0.58b0"
+        otel_python_version = match.group(1)
+        otel_contrib_version = match.group(2)
         
         return otel_python_version, otel_contrib_version
         

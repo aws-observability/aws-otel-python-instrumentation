@@ -70,7 +70,7 @@ jobs:
           echo "Dependencies were updated"
           echo "has_changes=true" >> $GITHUB_OUTPUT
           
-          # Create PR immediately
+          # Create PR
           git add aws-opentelemetry-distro/pyproject.toml
           git commit -m "chore: update OpenTelemetry dependencies to ${{ steps.get_versions.outputs.otel_python_version }}/${{ steps.get_versions.outputs.otel_contrib_version }}"
           git push origin "$BRANCH_NAME"
@@ -81,11 +81,7 @@ jobs:
 
           **Updated versions:**
           - OpenTelemetry Python: ${{ steps.get_versions.outputs.otel_python_version }}
-          - OpenTelemetry Contrib: ${{ steps.get_versions.outputs.otel_contrib_version }}
-
-          **Status:** Tests are running in the nightly workflow. Check the workflow results for compatibility status.
-
-          This PR will trigger additional validation via pr-build workflow including multi-version testing and linting." \
+          - OpenTelemetry Contrib: ${{ steps.get_versions.outputs.otel_contrib_version }}" \
             --base main \
             --head "$BRANCH_NAME"
         fi
