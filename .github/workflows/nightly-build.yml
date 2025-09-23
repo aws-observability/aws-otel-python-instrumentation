@@ -23,13 +23,21 @@ jobs:
         fetch-depth: 0
         token: ${{ secrets.GITHUB_TOKEN }}
     
+    - name: Check if nightly branch already exists
+      run: |
+        BRANCH_NAME="nightly-dependency-updates"
+        if git ls-remote --exit-code --heads origin "$BRANCH_NAME"; then
+          echo "Branch $BRANCH_NAME already exists. Skipping run to avoid conflicts."
+          echo "Please merge or close the existing PR before the next nightly run."
+          exit 0
+        fi
+        echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+    
     - name: Configure git and create branch
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        BRANCH_NAME="nightly-deps-$(date +%Y%m%d)"
         git checkout -b "$BRANCH_NAME"
-        echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
     
     - name: Set up Python
       uses: actions/setup-python@v4
