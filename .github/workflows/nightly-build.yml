@@ -31,7 +31,7 @@ jobs:
         if git ls-remote --exit-code --heads origin "$BRANCH_NAME"; then
           echo "Branch $BRANCH_NAME already exists. Skipping run to avoid conflicts."
           echo "Please merge or close the existing PR before the next nightly run."
-          exit 0
+          exit 1
         fi
     
     - name: Configure git and create branch
