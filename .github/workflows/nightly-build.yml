@@ -101,7 +101,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
-        ref: nightly-deps-$(date +%Y%m%d)
+        ref: nightly-dependency-updates
     
     - name: Set up Python
       uses: actions/setup-python@v4
