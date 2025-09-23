@@ -7,6 +7,12 @@ on:
       - "release/v*"
       - ci-workflow
   workflow_dispatch: # be able to run the workflow on demand
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Git ref to checkout'
+        required: false
+        type: string
 env:
   AWS_DEFAULT_REGION: us-east-1
   STAGING_ECR_REGISTRY: 637423224110.dkr.ecr.us-east-1.amazonaws.com
@@ -34,6 +40,8 @@ jobs:
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - name: Get Python Distro Output
         id: python_output
