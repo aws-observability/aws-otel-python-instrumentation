@@ -78,8 +78,7 @@ jobs:
 
           This PR will trigger additional validation via pr-build workflow including multi-version testing and linting." \
             --base main \
-            --head "$BRANCH_NAME" \
-            --label "dependencies"
+            --head "$BRANCH_NAME"
         fi
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
