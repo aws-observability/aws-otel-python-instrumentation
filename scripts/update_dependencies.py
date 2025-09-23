@@ -68,7 +68,7 @@ CONTRIB_DEPS = [
     'opentelemetry-instrumentation-cassandra',
 ]
 
-packages with independent versioning
+# packages with independent versioning
 AWS_DEPS = [
     'opentelemetry-sdk-extension-aws',
     'opentelemetry-propagator-aws-xray',
