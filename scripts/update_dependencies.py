@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 
-import toml
 import sys
 import os
+import re
 
 # Dependencies that use the first version number (opentelemetry-python)
 PYTHON_CORE_DEPS = [
@@ -79,24 +79,29 @@ def main():
     
     try:
         with open(pyproject_path, 'r') as f:
-            data = toml.load(f)
+            content = f.read()
         
-        deps = data.get('project', {}).get('dependencies', [])
         updated = False
         
-        for i, dep in enumerate(deps):
-            dep_name = dep.split('==')[0].strip()
-            
-            if dep_name in PYTHON_CORE_DEPS:
-                deps[i] = f'{dep_name} == {otel_python_version}'
+        # Update Python core dependencies
+        for dep in PYTHON_CORE_DEPS:
+            pattern = rf'"{re.escape(dep)} == [^"]*"'
+            replacement = f'"{dep} == {otel_python_version}"'
+            if re.search(pattern, content):
+                content = re.sub(pattern, replacement, content)
                 updated = True
-            elif dep_name in CONTRIB_DEPS:
-                deps[i] = f'{dep_name} == {otel_contrib_version}'
+        
+        # Update contrib dependencies  
+        for dep in CONTRIB_DEPS:
+            pattern = rf'"{re.escape(dep)} == [^"]*"'
+            replacement = f'"{dep} == {otel_contrib_version}"'
+            if re.search(pattern, content):
+                content = re.sub(pattern, replacement, content)
                 updated = True
         
         if updated:
             with open(pyproject_path, 'w') as f:
-                toml.dump(data, f)
+                f.write(content)
             print(f'Dependencies updated to Python {otel_python_version} / Contrib {otel_contrib_version}')
         else:
             print('No OpenTelemetry dependencies found to update')
