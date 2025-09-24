@@ -12,7 +12,6 @@ import requests
 PYTHON_CORE_DEPS = [
     "opentelemetry-api",
     "opentelemetry-sdk",
-    "opentelemetry-exporter-otlp",
     "opentelemetry-exporter-otlp-proto-grpc",
     "opentelemetry-exporter-otlp-proto-http",
     "opentelemetry-propagator-b3",
