@@ -6,7 +6,6 @@ on:
       - main
       - "release/v*"
       - ci-workflow
-      - nightly-dependency-updates
   workflow_dispatch: # be able to run the workflow on demand
   workflow_call:
     inputs:
@@ -123,7 +122,7 @@ jobs:
     name: "Publish Main Build Status"
     needs: [ build, application-signals-e2e-test ]
     runs-on: ubuntu-latest
-    if: always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+    if: always()
     steps:
       - name: Configure AWS Credentials for emitting metrics
         uses: aws-actions/configure-aws-credentials@a03048d87541d1d9fcf2ecf528a4a65ba9bd7838 #5.0.0
