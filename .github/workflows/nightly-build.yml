@@ -12,6 +12,9 @@ env:
   AWS_DEFAULT_REGION: us-east-1
   BRANCH_NAME: nightly-dependency-updates
 
+permissions:
+  id-token: write
+
 jobs:
   update-and-create-pr:
     runs-on: ubuntu-latest
