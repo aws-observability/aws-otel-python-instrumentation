@@ -46,7 +46,7 @@ jobs:
     - name: Install build tools
       run: |
         python -m pip install --upgrade pip
-        pip install toml requests
+        pip install toml requests packaging
     
     - name: Get latest upstream versions
       id: get_versions
@@ -57,6 +57,13 @@ jobs:
         OTEL_PYTHON_VERSION: ${{ steps.get_versions.outputs.otel_python_version }}
         OTEL_CONTRIB_VERSION: ${{ steps.get_versions.outputs.otel_contrib_version }}
       run: python scripts/update_dependencies.py
+    
+    - name: Check for breaking changes
+      id: breaking_changes
+      env:
+        OTEL_PYTHON_VERSION: ${{ steps.get_versions.outputs.otel_python_version }}
+        OTEL_CONTRIB_VERSION: ${{ steps.get_versions.outputs.otel_contrib_version }}
+      run: python scripts/find_breaking_changes.py
     
     - name: Check for changes and create PR
       id: check_changes
@@ -79,7 +86,10 @@ jobs:
 
           **Updated versions:**
           - OpenTelemetry Python: ${{ steps.get_versions.outputs.otel_python_version }}
-          - OpenTelemetry Contrib: ${{ steps.get_versions.outputs.otel_contrib_version }}" \
+          - OpenTelemetry Contrib: ${{ steps.get_versions.outputs.otel_contrib_version }}
+
+          **Upstream releases with breaking changes:**
+          ${{ steps.breaking_changes.outputs.breaking_changes_info }}" \
             --base main \
             --head "$BRANCH_NAME"
         fi
