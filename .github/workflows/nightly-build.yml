@@ -55,18 +55,18 @@ jobs:
       id: get_versions
       run: python scripts/get_upstream_versions.py
     
-    - name: Update dependencies
-      env:
-        OTEL_PYTHON_VERSION: ${{ steps.get_versions.outputs.otel_python_version }}
-        OTEL_CONTRIB_VERSION: ${{ steps.get_versions.outputs.otel_contrib_version }}
-      run: python scripts/update_dependencies.py
-    
     - name: Check for breaking changes
       id: breaking_changes
       env:
         OTEL_PYTHON_VERSION: ${{ steps.get_versions.outputs.otel_python_version }}
         OTEL_CONTRIB_VERSION: ${{ steps.get_versions.outputs.otel_contrib_version }}
       run: python scripts/find_breaking_changes.py
+    
+    - name: Update dependencies
+      env:
+        OTEL_PYTHON_VERSION: ${{ steps.get_versions.outputs.otel_python_version }}
+        OTEL_CONTRIB_VERSION: ${{ steps.get_versions.outputs.otel_contrib_version }}
+      run: python scripts/update_dependencies.py
     
     - name: Check for changes and create PR
       id: check_changes
