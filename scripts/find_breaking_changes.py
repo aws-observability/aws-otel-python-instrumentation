@@ -96,7 +96,7 @@ def main():
             breaking_info += f"- [{release['name']}]({release['url']})\n"
     
     if contrib_breaking:
-        breaking_info += "**opentelemetry-python-contrib:**\n"
+        breaking_info += "\n**opentelemetry-python-contrib:**\n"
         for release in contrib_breaking:
             breaking_info += f"- [{release['name']}]({release['url']})\n"
     
