@@ -84,7 +84,6 @@ jobs:
         fi
     
     - name: Create or update PR
-      if: steps.check_changes.outputs.has_changes == 'true'
       run: |
         PR_BODY="Automated update of OpenTelemetry dependencies.
 
@@ -95,8 +94,8 @@ jobs:
         **Upstream releases with breaking changes:**
         ${{ steps.breaking_changes.outputs.breaking_changes_info }}"
         
-        if gh pr view "$BRANCH_NAME" > /dev/null 2>&1; then
-          echo "PR already exists, updating description..."
+        if gh pr view "$BRANCH_NAME" --json state --jq '.state' 2>/dev/null | grep -q "OPEN"; then
+          echo "Open PR already exists, updating description..."
           gh pr edit "$BRANCH_NAME" --body "$PR_BODY"
         else
           echo "Creating new PR..."
