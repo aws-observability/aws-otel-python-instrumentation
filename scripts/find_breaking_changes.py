@@ -91,19 +91,19 @@ def main():
     breaking_info = ""
     
     if core_breaking:
-        breaking_info += "**opentelemetry-python:**\\n"
+        breaking_info += "**opentelemetry-python:**\n"
         for release in core_breaking:
-            breaking_info += f"- [{release['name']}]({release['url']})\\n"
+            breaking_info += f"- [{release['name']}]({release['url']})\n"
     
     if contrib_breaking:
-        breaking_info += "**opentelemetry-python-contrib:**\\n"
+        breaking_info += "**opentelemetry-python-contrib:**\n"
         for release in contrib_breaking:
-            breaking_info += f"- [{release['name']}]({release['url']})\\n"
+            breaking_info += f"- [{release['name']}]({release['url']})\n"
     
     # Set GitHub output
     if os.environ.get('GITHUB_OUTPUT'):
         with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output_file:
-            output_file.write(f'breaking_changes_info={breaking_info}\n')
+            output_file.write(f'breaking_changes_info<<EOF\n{breaking_info}EOF\n')
 
 if __name__ == '__main__':
     main()
