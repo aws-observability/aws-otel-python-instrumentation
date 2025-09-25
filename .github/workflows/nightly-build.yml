@@ -68,7 +68,7 @@ jobs:
         OTEL_CONTRIB_VERSION: ${{ steps.get_versions.outputs.otel_contrib_version }}
       run: python scripts/update_dependencies.py
     
-    - name: Check for changes and create PR
+    - name: Check for changes and commit
       id: check_changes
       run: |
         if git diff --quiet; then
@@ -78,21 +78,30 @@ jobs:
           echo "Dependencies were updated"
           echo "has_changes=true" >> $GITHUB_OUTPUT
           
-          # Create PR
           git add aws-opentelemetry-distro/pyproject.toml
           git commit -m "chore: update OpenTelemetry dependencies to ${{ steps.get_versions.outputs.otel_python_version }}/${{ steps.get_versions.outputs.otel_contrib_version }}"
           git push origin "$BRANCH_NAME"
-          
+        fi
+    
+    - name: Create or update PR
+      run: |
+        PR_BODY="Automated update of OpenTelemetry dependencies.
+
+        **Updated versions:**
+        - OpenTelemetry Python: ${{ steps.get_versions.outputs.otel_python_version }}
+        - OpenTelemetry Contrib: ${{ steps.get_versions.outputs.otel_contrib_version }}
+
+        **Upstream releases with breaking changes:**
+        ${{ steps.breaking_changes.outputs.breaking_changes_info }}"
+        
+        if gh pr view "$BRANCH_NAME" > /dev/null 2>&1; then
+          echo "PR already exists, updating description..."
+          gh pr edit "$BRANCH_NAME" --body "$PR_BODY"
+        else
+          echo "Creating new PR..."
           gh pr create \
             --title "Nightly dependency update: OpenTelemetry ${{ steps.get_versions.outputs.otel_python_version }}/${{ steps.get_versions.outputs.otel_contrib_version }}" \
-            --body "Automated update of OpenTelemetry dependencies.
-
-          **Updated versions:**
-          - OpenTelemetry Python: ${{ steps.get_versions.outputs.otel_python_version }}
-          - OpenTelemetry Contrib: ${{ steps.get_versions.outputs.otel_contrib_version }}
-
-          **Upstream releases with breaking changes:**
-          ${{ steps.breaking_changes.outputs.breaking_changes_info }}" \
+            --body "$PR_BODY" \
             --base main \
             --head "$BRANCH_NAME"
         fi
