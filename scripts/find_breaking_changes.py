@@ -87,7 +87,7 @@ def main():
         print("Could not determine current versions")
         sys.exit(1)
 
-    print(f"Checking for breaking changes:")
+    print("Checking for breaking changes:")
     print(f"Core: {current_core_version} → {new_core_version}")
     print(f"Contrib: {current_contrib_version} → {new_contrib_version}")
 
