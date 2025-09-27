@@ -26,7 +26,7 @@ def get_current_version_from_pyproject():
 
         return current_core_version, current_contrib_version
 
-    except Exception as error:
+    except (OSError, IOError) as error:
         print(f"Error reading current versions: {error}")
         return None, None
 
@@ -62,8 +62,8 @@ def get_releases_with_breaking_changes(repo, current_version, new_version):
                                 "body": release.get("body", ""),
                             }
                         )
-            except Exception:
-                # Skip releases with invalid version formats
+            except (ValueError, KeyError):
+                # Skip releases with invalid version formats or missing data
                 continue
 
         return breaking_releases
