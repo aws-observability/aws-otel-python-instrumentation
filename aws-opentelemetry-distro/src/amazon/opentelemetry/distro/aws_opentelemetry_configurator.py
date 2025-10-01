@@ -619,27 +619,29 @@ def _is_application_signals_runtime_enabled():
 def _get_code_correlation_enabled_status() -> Optional[bool]:
     """
     Get the code correlation enabled status from environment variable.
-    
+
     Returns:
         True if OTEL_AWS_CODE_CORRELATION_ENABLED is set to 'true'
         False if OTEL_AWS_CODE_CORRELATION_ENABLED is set to 'false'
         None if OTEL_AWS_CODE_CORRELATION_ENABLED is not set (default state)
     """
     env_value = os.environ.get(CODE_CORRELATION_ENABLED_CONFIG)
-    
+
     if env_value is None:
         return None  # Default state - environment variable not set
-    
+
     env_value_lower = env_value.strip().lower()
     if env_value_lower == "true":
         return True
-    elif env_value_lower == "false":
+    if env_value_lower == "false":
         return False
-    else:
-        # Invalid value, treat as default and log warning
-        _logger.warning("Invalid value for %s: %s. Expected 'true' or 'false'. Using default.", 
-                       CODE_CORRELATION_ENABLED_CONFIG, env_value)
-        return None
+    # Invalid value, treat as default and log warning
+    _logger.warning(
+        "Invalid value for %s: %s. Expected 'true' or 'false'. Using default.",
+        CODE_CORRELATION_ENABLED_CONFIG,
+        env_value,
+    )
+    return None
 
 
 def _is_lambda_environment():

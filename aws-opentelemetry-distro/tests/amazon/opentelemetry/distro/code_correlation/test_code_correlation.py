@@ -3,11 +3,11 @@
 
 import asyncio
 from unittest import TestCase
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 from amazon.opentelemetry.distro.code_correlation import (
-    CODE_FUNCTION_NAME,
     CODE_FILE_PATH,
+    CODE_FUNCTION_NAME,
     CODE_LINE_NUMBER,
     _add_code_attributes_to_span,
     add_code_attributes_to_span,
@@ -35,6 +35,7 @@ class TestAddCodeAttributesToSpan(TestCase):
 
     def test_add_code_attributes_to_recording_span(self):
         """Test adding code attributes to a recording span."""
+
         def test_function():
             pass
 
@@ -68,7 +69,7 @@ class TestAddCodeAttributesToSpan(TestCase):
         # Create a mock function without __code__ attribute
         mock_func = MagicMock()
         mock_func.__name__ = "mock_function"
-        delattr(mock_func, '__code__')
+        delattr(mock_func, "__code__")
 
         _add_code_attributes_to_span(self.mock_span, mock_func)
 
@@ -87,7 +88,7 @@ class TestAddCodeAttributesToSpan(TestCase):
         """Test handling of functions without __name__ attribute."""
         # Create an object without __name__ attribute
         mock_func = MagicMock()
-        delattr(mock_func, '__name__')
+        delattr(mock_func, "__name__")
         mock_func.__code__ = MagicMock()
         mock_func.__code__.co_filename = "/test/file.py"
         mock_func.__code__.co_firstlineno = 10
@@ -115,7 +116,7 @@ class TestAddCodeAttributesToSpan(TestCase):
         self.mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, "test_func")
         self.mock_span.set_attribute.assert_any_call(CODE_FILE_PATH, "/test/file.py")
 
-    @patch('amazon.opentelemetry.distro.code_correlation.getattr')
+    @patch("amazon.opentelemetry.distro.code_correlation.getattr")
     def test_add_code_attributes_getattr_exception(self, mock_getattr):
         """Test exception handling when getattr fails."""
         mock_getattr.side_effect = Exception("Test exception")
@@ -204,7 +205,7 @@ class TestAddCodeAttributesToSpanDecorator(TestCase):
         self.mock_span = MagicMock(spec=Span)
         self.mock_span.is_recording.return_value = True
 
-    @patch('amazon.opentelemetry.distro.code_correlation.trace.get_current_span')
+    @patch("amazon.opentelemetry.distro.code_correlation.trace.get_current_span")
     def test_decorator_sync_function(self, mock_get_current_span):
         """Test decorator with synchronous function."""
         mock_get_current_span.return_value = self.mock_span
@@ -222,7 +223,7 @@ class TestAddCodeAttributesToSpanDecorator(TestCase):
         # Verify span attributes were set
         self.mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, "test_sync_function")
 
-    @patch('amazon.opentelemetry.distro.code_correlation.trace.get_current_span')
+    @patch("amazon.opentelemetry.distro.code_correlation.trace.get_current_span")
     def test_decorator_async_function(self, mock_get_current_span):
         """Test decorator with asynchronous function."""
         mock_get_current_span.return_value = self.mock_span
@@ -245,7 +246,7 @@ class TestAddCodeAttributesToSpanDecorator(TestCase):
         # Verify span attributes were set
         self.mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, "test_async_function")
 
-    @patch('amazon.opentelemetry.distro.code_correlation.trace.get_current_span')
+    @patch("amazon.opentelemetry.distro.code_correlation.trace.get_current_span")
     def test_decorator_no_current_span(self, mock_get_current_span):
         """Test decorator when there's no current span."""
         mock_get_current_span.return_value = None
@@ -263,7 +264,7 @@ class TestAddCodeAttributesToSpanDecorator(TestCase):
         # Verify no span attributes were set
         self.mock_span.set_attribute.assert_not_called()
 
-    @patch('amazon.opentelemetry.distro.code_correlation.trace.get_current_span')
+    @patch("amazon.opentelemetry.distro.code_correlation.trace.get_current_span")
     def test_decorator_exception_handling(self, mock_get_current_span):
         """Test decorator handles exceptions gracefully."""
         mock_get_current_span.side_effect = Exception("Test exception")
@@ -280,6 +281,7 @@ class TestAddCodeAttributesToSpanDecorator(TestCase):
 
     def test_decorator_preserves_function_metadata(self):
         """Test that decorator preserves original function metadata."""
+
         @add_code_attributes_to_span
         def test_function():
             """Test function docstring."""
@@ -291,6 +293,7 @@ class TestAddCodeAttributesToSpanDecorator(TestCase):
 
     def test_async_function_detection(self):
         """Test that async functions are properly detected."""
+
         # Create a regular function
         def sync_func():
             pass
@@ -309,7 +312,7 @@ class TestAddCodeAttributesToSpanDecorator(TestCase):
         # Check that async function returns a coroutine function
         self.assertTrue(asyncio.iscoroutinefunction(decorated_async))
 
-    @patch('amazon.opentelemetry.distro.code_correlation.trace.get_current_span')
+    @patch("amazon.opentelemetry.distro.code_correlation.trace.get_current_span")
     def test_decorator_with_function_that_raises_exception(self, mock_get_current_span):
         """Test decorator with function that raises exception."""
         mock_get_current_span.return_value = self.mock_span
@@ -325,7 +328,7 @@ class TestAddCodeAttributesToSpanDecorator(TestCase):
         # Verify span attributes were still set before exception
         self.mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, "test_function")
 
-    @patch('amazon.opentelemetry.distro.code_correlation.trace.get_current_span')
+    @patch("amazon.opentelemetry.distro.code_correlation.trace.get_current_span")
     def test_decorator_with_async_function_that_raises_exception(self, mock_get_current_span):
         """Test decorator with async function that raises exception."""
         mock_get_current_span.return_value = self.mock_span
@@ -346,8 +349,8 @@ class TestAddCodeAttributesToSpanDecorator(TestCase):
         # Verify span attributes were still set before exception
         self.mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, "test_async_function")
 
-    @patch('amazon.opentelemetry.distro.code_correlation._add_code_attributes_to_span')
-    @patch('amazon.opentelemetry.distro.code_correlation.trace.get_current_span')
+    @patch("amazon.opentelemetry.distro.code_correlation._add_code_attributes_to_span")
+    @patch("amazon.opentelemetry.distro.code_correlation.trace.get_current_span")
     def test_decorator_internal_exception_handling_sync(self, mock_get_current_span, mock_add_attributes):
         """Test that decorator handles internal exceptions gracefully in sync function."""
         mock_get_current_span.return_value = self.mock_span
@@ -364,8 +367,8 @@ class TestAddCodeAttributesToSpanDecorator(TestCase):
         # Verify the function still works correctly despite internal exception
         self.assertEqual(result, "test result")
 
-    @patch('amazon.opentelemetry.distro.code_correlation._add_code_attributes_to_span')
-    @patch('amazon.opentelemetry.distro.code_correlation.trace.get_current_span')
+    @patch("amazon.opentelemetry.distro.code_correlation._add_code_attributes_to_span")
+    @patch("amazon.opentelemetry.distro.code_correlation.trace.get_current_span")
     def test_decorator_internal_exception_handling_async(self, mock_get_current_span, mock_add_attributes):
         """Test that decorator handles internal exceptions gracefully in async function."""
         mock_get_current_span.return_value = self.mock_span

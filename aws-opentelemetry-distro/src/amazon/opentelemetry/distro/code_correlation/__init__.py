@@ -40,12 +40,12 @@ def _add_code_attributes_to_span(span, func: Callable[..., Any]) -> None:
 
     try:
         # Get function name
-        function_name = getattr(func, '__name__', str(func))
+        function_name = getattr(func, "__name__", str(func))
         span.set_attribute(CODE_FUNCTION_NAME, function_name)
 
         # Get function source file from code object
         try:
-            if hasattr(func, '__code__'):
+            if hasattr(func, "__code__"):
                 source_file = func.__code__.co_filename
                 span.set_attribute(CODE_FILE_PATH, source_file)
         except (AttributeError, TypeError):
@@ -55,14 +55,14 @@ def _add_code_attributes_to_span(span, func: Callable[..., Any]) -> None:
 
         # Get function line number from code object
         try:
-            if hasattr(func, '__code__'):
+            if hasattr(func, "__code__"):
                 line_number = func.__code__.co_firstlineno
                 span.set_attribute(CODE_LINE_NUMBER, line_number)
         except (AttributeError, TypeError):
             # Handle cases where code object is not available
             pass
 
-    except Exception:
+    except Exception:  # pylint: disable=broad-exception-caught
         # Silently handle any unexpected errors to avoid breaking
         # the instrumentation flow
         pass
@@ -99,8 +99,7 @@ def add_code_attributes_to_span(func: Callable[..., Any]) -> Callable[..., Any]:
     """
     # Detect async functions: check function code object flags or special attributes
     # CO_ITERABLE_COROUTINE = 0x80, async functions will have this flag set
-    is_async = (hasattr(func, '__code__') and
-                func.__code__.co_flags & 0x80) or hasattr(func, '_is_coroutine')
+    is_async = (hasattr(func, "__code__") and func.__code__.co_flags & 0x80) or hasattr(func, "_is_coroutine")
 
     if is_async:
         # Async function wrapper
@@ -111,7 +110,7 @@ def add_code_attributes_to_span(func: Callable[..., Any]) -> Callable[..., Any]:
                 current_span = trace.get_current_span()
                 if current_span:
                     _add_code_attributes_to_span(current_span, func)
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 # Silently handle any unexpected errors
                 pass
 
@@ -119,20 +118,20 @@ def add_code_attributes_to_span(func: Callable[..., Any]) -> Callable[..., Any]:
             return await func(*args, **kwargs)
 
         return async_wrapper
-    else:
-        # Sync function wrapper
-        @wraps(func)
-        def sync_wrapper(*args, **kwargs):
-            # Add code attributes to current span
-            try:
-                current_span = trace.get_current_span()
-                if current_span:
-                    _add_code_attributes_to_span(current_span, func)
-            except Exception:
-                # Silently handle any unexpected errors
-                pass
 
-            # Call the original sync function
-            return func(*args, **kwargs)
+    # Sync function wrapper
+    @wraps(func)
+    def sync_wrapper(*args, **kwargs):
+        # Add code attributes to current span
+        try:
+            current_span = trace.get_current_span()
+            if current_span:
+                _add_code_attributes_to_span(current_span, func)
+        except Exception:  # pylint: disable=broad-exception-caught
+            # Silently handle any unexpected errors
+            pass
 
-        return sync_wrapper
+        # Call the original sync function
+        return func(*args, **kwargs)
+
+    return sync_wrapper
