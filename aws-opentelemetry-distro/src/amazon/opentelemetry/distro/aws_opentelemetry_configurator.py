@@ -95,6 +95,7 @@ SYSTEM_METRICS_INSTRUMENTATION_SCOPE_NAME = "opentelemetry.instrumentation.syste
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
 OTEL_EXPORTER_OTLP_LOGS_HEADERS = "OTEL_EXPORTER_OTLP_LOGS_HEADERS"
+CODE_CORRELATION_ENABLED_CONFIG = "OTEL_AWS_CODE_CORRELATION_ENABLED"
 
 XRAY_SERVICE = "xray"
 LOGS_SERIVCE = "logs"
@@ -613,6 +614,32 @@ def _is_application_signals_runtime_enabled():
     return _is_application_signals_enabled() and (
         os.environ.get(APPLICATION_SIGNALS_RUNTIME_ENABLED_CONFIG, "true").lower() == "true"
     )
+
+
+def _get_code_correlation_enabled_status() -> Optional[bool]:
+    """
+    Get the code correlation enabled status from environment variable.
+    
+    Returns:
+        True if OTEL_AWS_CODE_CORRELATION_ENABLED is set to 'true'
+        False if OTEL_AWS_CODE_CORRELATION_ENABLED is set to 'false'
+        None if OTEL_AWS_CODE_CORRELATION_ENABLED is not set (default state)
+    """
+    env_value = os.environ.get(CODE_CORRELATION_ENABLED_CONFIG)
+    
+    if env_value is None:
+        return None  # Default state - environment variable not set
+    
+    env_value_lower = env_value.strip().lower()
+    if env_value_lower == "true":
+        return True
+    elif env_value_lower == "false":
+        return False
+    else:
+        # Invalid value, treat as default and log warning
+        _logger.warning("Invalid value for %s: %s. Expected 'true' or 'false'. Using default.", 
+                       CODE_CORRELATION_ENABLED_CONFIG, env_value)
+        return None
 
 
 def _is_lambda_environment():
