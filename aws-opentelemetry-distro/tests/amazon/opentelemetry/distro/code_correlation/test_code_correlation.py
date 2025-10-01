@@ -42,11 +42,11 @@ class TestAddCodeAttributesToSpan(TestCase):
 
         # Verify function name attribute is set
         self.mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, "test_function")
-        
+
         # Verify file path attribute is set
         expected_file_path = test_function.__code__.co_filename
         self.mock_span.set_attribute.assert_any_call(CODE_FILE_PATH, expected_file_path)
-        
+
         # Verify line number attribute is set
         expected_line_number = test_function.__code__.co_firstlineno
         self.mock_span.set_attribute.assert_any_call(CODE_LINE_NUMBER, expected_line_number)
@@ -136,7 +136,7 @@ class TestAddCodeAttributesToSpan(TestCase):
         mock_func.__name__ = "test_func"
         mock_code = MagicMock()
         mock_code.co_firstlineno = 10
-        
+
         # Make co_filename raise AttributeError
         type(mock_code).co_filename = PropertyMock(side_effect=AttributeError("Test exception"))
         mock_func.__code__ = mock_code
@@ -158,7 +158,7 @@ class TestAddCodeAttributesToSpan(TestCase):
         mock_func.__name__ = "test_func"
         mock_code = MagicMock()
         mock_code.co_filename = "/test/file.py"
-        
+
         # Make co_firstlineno raise TypeError
         type(mock_code).co_firstlineno = PropertyMock(side_effect=TypeError("Test exception"))
         mock_func.__code__ = mock_code
@@ -180,7 +180,7 @@ class TestAddCodeAttributesToSpan(TestCase):
         mock_func.__name__ = "test_func"
         mock_code = MagicMock()
         mock_code.co_firstlineno = 10
-        
+
         # Make co_filename raise TypeError
         type(mock_code).co_filename = PropertyMock(side_effect=TypeError("Test exception"))
         mock_func.__code__ = mock_code
@@ -364,7 +364,7 @@ class TestAddCodeAttributesToSpanDecorator(TestCase):
         # Verify the function still works correctly despite internal exception
         self.assertEqual(result, "test result")
 
-    @patch('amazon.opentelemetry.distro.code_correlation._add_code_attributes_to_span')  
+    @patch('amazon.opentelemetry.distro.code_correlation._add_code_attributes_to_span')
     @patch('amazon.opentelemetry.distro.code_correlation.trace.get_current_span')
     def test_decorator_internal_exception_handling_async(self, mock_get_current_span, mock_add_attributes):
         """Test that decorator handles internal exceptions gracefully in async function."""
