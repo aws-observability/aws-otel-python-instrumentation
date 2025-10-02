@@ -9,8 +9,8 @@ from amazon.opentelemetry.distro.code_correlation import (
     CODE_FILE_PATH,
     CODE_FUNCTION_NAME,
     CODE_LINE_NUMBER,
-    _add_code_attributes_to_span,
     add_code_attributes_to_span,
+    record_code_attributes,
 )
 from opentelemetry.trace import Span
 
@@ -26,7 +26,7 @@ class TestCodeCorrelationConstants(TestCase):
 
 
 class TestAddCodeAttributesToSpan(TestCase):
-    """Test the _add_code_attributes_to_span function."""
+    """Test the add_code_attributes_to_span function."""
 
     def setUp(self):
         """Set up test fixtures."""
@@ -39,7 +39,7 @@ class TestAddCodeAttributesToSpan(TestCase):
         def test_function():
             pass
 
-        _add_code_attributes_to_span(self.mock_span, test_function)
+        add_code_attributes_to_span(self.mock_span, test_function)
 
         # Verify function name attribute is set
         self.mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, "test_function")
@@ -59,7 +59,7 @@ class TestAddCodeAttributesToSpan(TestCase):
         def test_function():
             pass
 
-        _add_code_attributes_to_span(self.mock_span, test_function)
+        add_code_attributes_to_span(self.mock_span, test_function)
 
         # Verify no attributes are set
         self.mock_span.set_attribute.assert_not_called()
@@ -71,7 +71,7 @@ class TestAddCodeAttributesToSpan(TestCase):
         mock_func.__name__ = "mock_function"
         delattr(mock_func, "__code__")
 
-        _add_code_attributes_to_span(self.mock_span, mock_func)
+        add_code_attributes_to_span(self.mock_span, mock_func)
 
         # Verify only function name attribute is set
         self.mock_span.set_attribute.assert_called_once_with(CODE_FUNCTION_NAME, "mock_function")
@@ -79,7 +79,7 @@ class TestAddCodeAttributesToSpan(TestCase):
     def test_add_code_attributes_builtin_function(self):
         """Test handling of built-in functions."""
         # Use a built-in function like len
-        _add_code_attributes_to_span(self.mock_span, len)
+        add_code_attributes_to_span(self.mock_span, len)
 
         # Verify only function name attribute is set
         self.mock_span.set_attribute.assert_called_once_with(CODE_FUNCTION_NAME, "len")
@@ -93,7 +93,7 @@ class TestAddCodeAttributesToSpan(TestCase):
         mock_func.__code__.co_filename = "/test/file.py"
         mock_func.__code__.co_firstlineno = 10
 
-        _add_code_attributes_to_span(self.mock_span, mock_func)
+        add_code_attributes_to_span(self.mock_span, mock_func)
 
         # Verify function name uses str() representation
         self.mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, str(mock_func))
@@ -110,7 +110,7 @@ class TestAddCodeAttributesToSpan(TestCase):
         mock_func.__code__.co_firstlineno = MagicMock(side_effect=Exception("Test exception"))
 
         # This should not raise an exception
-        _add_code_attributes_to_span(self.mock_span, mock_func)
+        add_code_attributes_to_span(self.mock_span, mock_func)
 
         # Verify function name and file path are still set
         self.mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, "test_func")
@@ -125,7 +125,7 @@ class TestAddCodeAttributesToSpan(TestCase):
             pass
 
         # This should not raise an exception
-        _add_code_attributes_to_span(self.mock_span, test_function)
+        add_code_attributes_to_span(self.mock_span, test_function)
 
         # Verify no attributes are set due to exception
         self.mock_span.set_attribute.assert_not_called()
@@ -143,7 +143,7 @@ class TestAddCodeAttributesToSpan(TestCase):
         mock_func.__code__ = mock_code
 
         # This should not raise an exception
-        _add_code_attributes_to_span(self.mock_span, mock_func)
+        add_code_attributes_to_span(self.mock_span, mock_func)
 
         # Verify function name and line number are still set, but not file path
         self.mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, "test_func")
@@ -165,7 +165,7 @@ class TestAddCodeAttributesToSpan(TestCase):
         mock_func.__code__ = mock_code
 
         # This should not raise an exception
-        _add_code_attributes_to_span(self.mock_span, mock_func)
+        add_code_attributes_to_span(self.mock_span, mock_func)
 
         # Verify function name and file path are still set, but not line number
         self.mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, "test_func")
@@ -187,7 +187,7 @@ class TestAddCodeAttributesToSpan(TestCase):
         mock_func.__code__ = mock_code
 
         # This should not raise an exception
-        _add_code_attributes_to_span(self.mock_span, mock_func)
+        add_code_attributes_to_span(self.mock_span, mock_func)
 
         # Verify function name and line number are still set, but not file path
         self.mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, "test_func")
@@ -197,8 +197,8 @@ class TestAddCodeAttributesToSpan(TestCase):
             self.mock_span.set_attribute.assert_any_call(CODE_FILE_PATH, MagicMock())
 
 
-class TestAddCodeAttributesToSpanDecorator(TestCase):
-    """Test the add_code_attributes_to_span decorator."""
+class TestRecordCodeAttributesDecorator(TestCase):
+    """Test the record_code_attributes decorator."""
 
     def setUp(self):
         """Set up test fixtures."""
@@ -210,7 +210,7 @@ class TestAddCodeAttributesToSpanDecorator(TestCase):
         """Test decorator with synchronous function."""
         mock_get_current_span.return_value = self.mock_span
 
-        @add_code_attributes_to_span
+        @record_code_attributes
         def test_sync_function(arg1, arg2=None):
             return f"sync result: {arg1}, {arg2}"
 
@@ -228,7 +228,7 @@ class TestAddCodeAttributesToSpanDecorator(TestCase):
         """Test decorator with asynchronous function."""
         mock_get_current_span.return_value = self.mock_span
 
-        @add_code_attributes_to_span
+        @record_code_attributes
         async def test_async_function(arg1, arg2=None):
             return f"async result: {arg1}, {arg2}"
 
@@ -251,7 +251,7 @@ class TestAddCodeAttributesToSpanDecorator(TestCase):
         """Test decorator when there's no current span."""
         mock_get_current_span.return_value = None
 
-        @add_code_attributes_to_span
+        @record_code_attributes
         def test_function():
             return "test result"
 
@@ -269,7 +269,7 @@ class TestAddCodeAttributesToSpanDecorator(TestCase):
         """Test decorator handles exceptions gracefully."""
         mock_get_current_span.side_effect = Exception("Test exception")
 
-        @add_code_attributes_to_span
+        @record_code_attributes
         def test_function():
             return "test result"
 
@@ -282,7 +282,7 @@ class TestAddCodeAttributesToSpanDecorator(TestCase):
     def test_decorator_preserves_function_metadata(self):
         """Test that decorator preserves original function metadata."""
 
-        @add_code_attributes_to_span
+        @record_code_attributes
         def test_function():
             """Test function docstring."""
             return "test result"
@@ -303,8 +303,8 @@ class TestAddCodeAttributesToSpanDecorator(TestCase):
             pass
 
         # Apply decorator to both
-        decorated_sync = add_code_attributes_to_span(sync_func)
-        decorated_async = add_code_attributes_to_span(async_func)
+        decorated_sync = record_code_attributes(sync_func)
+        decorated_async = record_code_attributes(async_func)
 
         # Check that sync function returns a regular function
         self.assertFalse(asyncio.iscoroutinefunction(decorated_sync))
@@ -317,7 +317,7 @@ class TestAddCodeAttributesToSpanDecorator(TestCase):
         """Test decorator with function that raises exception."""
         mock_get_current_span.return_value = self.mock_span
 
-        @add_code_attributes_to_span
+        @record_code_attributes
         def test_function():
             raise ValueError("Test function exception")
 
@@ -333,7 +333,7 @@ class TestAddCodeAttributesToSpanDecorator(TestCase):
         """Test decorator with async function that raises exception."""
         mock_get_current_span.return_value = self.mock_span
 
-        @add_code_attributes_to_span
+        @record_code_attributes
         async def test_async_function():
             raise ValueError("Test async function exception")
 
@@ -349,15 +349,15 @@ class TestAddCodeAttributesToSpanDecorator(TestCase):
         # Verify span attributes were still set before exception
         self.mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, "test_async_function")
 
-    @patch("amazon.opentelemetry.distro.code_correlation._add_code_attributes_to_span")
+    @patch("amazon.opentelemetry.distro.code_correlation.add_code_attributes_to_span")
     @patch("amazon.opentelemetry.distro.code_correlation.trace.get_current_span")
     def test_decorator_internal_exception_handling_sync(self, mock_get_current_span, mock_add_attributes):
         """Test that decorator handles internal exceptions gracefully in sync function."""
         mock_get_current_span.return_value = self.mock_span
-        # Make _add_code_attributes_to_span raise an exception
+        # Make add_code_attributes_to_span raise an exception
         mock_add_attributes.side_effect = Exception("Internal exception")
 
-        @add_code_attributes_to_span
+        @record_code_attributes
         def test_function():
             return "test result"
 
@@ -367,15 +367,15 @@ class TestAddCodeAttributesToSpanDecorator(TestCase):
         # Verify the function still works correctly despite internal exception
         self.assertEqual(result, "test result")
 
-    @patch("amazon.opentelemetry.distro.code_correlation._add_code_attributes_to_span")
+    @patch("amazon.opentelemetry.distro.code_correlation.add_code_attributes_to_span")
     @patch("amazon.opentelemetry.distro.code_correlation.trace.get_current_span")
     def test_decorator_internal_exception_handling_async(self, mock_get_current_span, mock_add_attributes):
         """Test that decorator handles internal exceptions gracefully in async function."""
         mock_get_current_span.return_value = self.mock_span
-        # Make _add_code_attributes_to_span raise an exception
+        # Make add_code_attributes_to_span raise an exception
         mock_add_attributes.side_effect = Exception("Internal exception")
 
-        @add_code_attributes_to_span
+        @record_code_attributes
         async def test_async_function():
             return "async test result"
 

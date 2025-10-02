@@ -91,6 +91,18 @@ from opentelemetry.semconv.trace import SpanAttributes
 from opentelemetry.trace import Span, SpanKind, TracerProvider, get_tracer, get_tracer_provider
 from opentelemetry.trace.status import Status, StatusCode
 
+# Import code correlation functionality
+try:
+    from amazon.opentelemetry.distro.aws_opentelemetry_configurator import get_code_correlation_enabled_status
+    from amazon.opentelemetry.distro.code_correlation import add_code_attributes_to_span
+except ImportError:
+    # If code correlation module is not available, define no-op functions
+    def add_code_attributes_to_span(span, func):
+        pass
+    
+    def get_code_correlation_enabled_status():
+        return None
+
 logger = logging.getLogger(__name__)
 
 _HANDLER = "_HANDLER"
@@ -302,6 +314,17 @@ def _instrument(
                         ResourceAttributes.CLOUD_ACCOUNT_ID,
                         account_id,
                     )
+
+                    # Add code-level information attributes to the span if enabled
+                    if get_code_correlation_enabled_status() is True:
+                        try:
+                            add_code_attributes_to_span(span, call_wrapped)
+                        except Exception as exc:
+                            # Log but don't fail the instrumentation
+                            logger.debug(
+                                "Failed to add code attributes to lambda span: %s", 
+                                str(exc)
+                            )
 
                 exception = None
                 result = None
