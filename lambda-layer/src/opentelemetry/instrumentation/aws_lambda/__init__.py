@@ -99,7 +99,7 @@ except ImportError:
     # If code correlation module is not available, define no-op functions
     def add_code_attributes_to_span(span, func):
         pass
-    
+
     def get_code_correlation_enabled_status():
         return None
 
@@ -322,7 +322,7 @@ def _instrument(
                         except Exception as exc:
                             # Log but don't fail the instrumentation
                             logger.debug(
-                                "Failed to add code attributes to lambda span: %s", 
+                                "Failed to add code attributes to lambda span: %s",
                                 str(exc)
                             )
 

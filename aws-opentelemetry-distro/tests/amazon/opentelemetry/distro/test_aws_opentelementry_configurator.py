@@ -94,6 +94,13 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
     @classmethod
     def setUpClass(cls):
+        # Store original environment variables to restore later
+        cls._original_env = {}
+        for key in list(os.environ.keys()):
+            if key.startswith("OTEL_"):
+                cls._original_env[key] = os.environ[key]
+                del os.environ[key]
+
         # Run AwsOpenTelemetryDistro to set up environment, then validate expected env values.
         aws_open_telemetry_distro: AwsOpenTelemetryDistro = AwsOpenTelemetryDistro()
         aws_open_telemetry_distro.configure(apply_patches=False)
