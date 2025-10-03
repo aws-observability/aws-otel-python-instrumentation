@@ -395,19 +395,38 @@ jobs:
                 print('\n'.join(formatted_deps))
           ")
 
+          # Extract CHANGELOG entries for this version
+          CHANGELOG_ENTRIES=$(python3 -c "
+            import re
+            with open('CHANGELOG.md', 'r') as f:
+                content = f.read()
+            version_pattern = r'## v${{ github.event.inputs.version }}.*?\n(.*?)(?=\n## |\Z)'
+            version_match = re.search(version_pattern, content, re.DOTALL)
+            if version_match:
+                entries = version_match.group(1).strip()
+                if entries:
+                    print(entries)
+          ")
+
           # Create release notes
           cat > release_notes.md << EOF
-          This release contains the following upstream components:
+          $(if [ -n "$CHANGELOG_ENTRIES" ]; then echo "## What's Changed"; echo "$CHANGELOG_ENTRIES"; echo ""; fi)
+
+          ## Upstream Components
 
           $DEPS
 
-          This release also publishes to public ECR and PyPi.
+          ## Release Artifacts
+
+          This release publishes to public ECR and PyPi.
           * See ADOT Python auto-instrumentation Docker image v${{ github.event.inputs.version }} in our public ECR repository:
           https://gallery.ecr.aws/aws-observability/adot-autoinstrumentation-python
           * See version ${{ github.event.inputs.version }} in our PyPi repository:
           https://pypi.org/project/aws-opentelemetry-distro/
 
-          This release also includes the AWS OpenTelemetry Lambda Layer for Python version ${{ github.event.inputs.version }}-$(echo $GITHUB_SHA | cut -c1-7).
+          ## Lambda Layer
+
+          This release includes the AWS OpenTelemetry Lambda Layer for Python version ${{ github.event.inputs.version }}-$(echo $GITHUB_SHA | cut -c1-7).
 
           Lambda Layer ARNs:
           ${{ needs.generate-lambda-release-note.outputs.layer-note }}
