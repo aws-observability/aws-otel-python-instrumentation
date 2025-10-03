@@ -17,6 +17,7 @@ from amazon.opentelemetry.distro.aws_batch_unsampled_span_processor import Batch
 from amazon.opentelemetry.distro.aws_lambda_span_processor import AwsLambdaSpanProcessor
 from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsMetricAttributesSpanExporter
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
+    CODE_CORRELATION_ENABLED_CONFIG,
     LAMBDA_SPAN_EXPORT_BATCH_SIZE,
     OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
     OTEL_EXPORTER_OTLP_LOGS_HEADERS,
@@ -39,6 +40,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _export_unsampled_span_for_agent_observability,
     _export_unsampled_span_for_lambda,
     _fetch_logs_header,
+    _get_code_correlation_enabled_status,
     _init_logging,
     _is_application_signals_enabled,
     _is_application_signals_runtime_enabled,
@@ -1424,6 +1426,66 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
                 self.assertIsNone(result)
                 mock_logger.error.assert_called_once()
+
+    def test_get_code_correlation_enabled_status(self):
+        """Test _get_code_correlation_enabled_status function with various environment variable values"""
+        # Test when environment variable is not set (default state)
+        os.environ.pop(CODE_CORRELATION_ENABLED_CONFIG, None)
+        result = _get_code_correlation_enabled_status()
+        self.assertIsNone(result)
+
+        # Test when environment variable is set to 'true' (case insensitive)
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "true"
+        result = _get_code_correlation_enabled_status()
+        self.assertTrue(result)
+
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "TRUE"
+        result = _get_code_correlation_enabled_status()
+        self.assertTrue(result)
+
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "True"
+        result = _get_code_correlation_enabled_status()
+        self.assertTrue(result)
+
+        # Test when environment variable is set to 'false' (case insensitive)
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "false"
+        result = _get_code_correlation_enabled_status()
+        self.assertFalse(result)
+
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "FALSE"
+        result = _get_code_correlation_enabled_status()
+        self.assertFalse(result)
+
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "False"
+        result = _get_code_correlation_enabled_status()
+        self.assertFalse(result)
+
+        # Test with leading/trailing whitespace
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "  true  "
+        result = _get_code_correlation_enabled_status()
+        self.assertTrue(result)
+
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "  false  "
+        result = _get_code_correlation_enabled_status()
+        self.assertFalse(result)
+
+        # Test invalid values (should return None and log warning)
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "invalid"
+        result = _get_code_correlation_enabled_status()
+        self.assertIsNone(result)
+
+        # Test another invalid value
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "yes"
+        result = _get_code_correlation_enabled_status()
+        self.assertIsNone(result)
+
+        # Test empty string (invalid)
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = ""
+        result = _get_code_correlation_enabled_status()
+        self.assertIsNone(result)
+
+        # Clean up
+        os.environ.pop(CODE_CORRELATION_ENABLED_CONFIG, None)
 
 
 def validate_distro_environ():
