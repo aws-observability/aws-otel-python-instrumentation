@@ -304,3 +304,143 @@ class TestAwsXRayRemoteSampler(TestCase):
 
         non_parent_based_xray_sampler._rules_timer.cancel()
         non_parent_based_xray_sampler._targets_timer.cancel()
+
+    def test_create_remote_sampler_with_none_resource(self):
+        """Tests creating remote sampler with None resource"""
+        with patch("amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler._logger") as mock_logger:
+            self.rs = AwsXRayRemoteSampler(resource=None)
+
+            # Verify warning was logged for None resource
+            mock_logger.warning.assert_called_once_with(
+                "OTel Resource provided is `None`. Defaulting to empty resource"
+            )
+
+            # Verify empty resource was set
+            self.assertIsNotNone(self.rs._root._root._AwsXRayRemoteSampler__resource)
+            self.assertEqual(len(self.rs._root._root._AwsXRayRemoteSampler__resource.attributes), 0)
+
+    def test_create_remote_sampler_with_small_polling_interval(self):
+        """Tests creating remote sampler with polling interval < 10"""
+        with patch("amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler._logger") as mock_logger:
+            self.rs = AwsXRayRemoteSampler(resource=Resource.get_empty(), polling_interval=5)  # Less than 10
+
+            # Verify info log was called for small polling interval
+            mock_logger.info.assert_any_call("`polling_interval` is `None` or too small. Defaulting to %s", 300)
+
+            # Verify default polling interval was set
+            self.assertEqual(self.rs._root._root._AwsXRayRemoteSampler__polling_interval, 300)
+
+    def test_create_remote_sampler_with_none_endpoint(self):
+        """Tests creating remote sampler with None endpoint"""
+        with patch("amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler._logger") as mock_logger:
+            self.rs = AwsXRayRemoteSampler(resource=Resource.get_empty(), endpoint=None)
+
+            # Verify info log was called for None endpoint
+            mock_logger.info.assert_any_call("`endpoint` is `None`. Defaulting to %s", "http://127.0.0.1:2000")
+
+    @patch("requests.Session.post", side_effect=mocked_requests_get)
+    def test_should_sample_with_expired_rule_cache(self, mock_post=None):
+        """Tests should_sample behavior when rule cache is expired"""
+        self.rs = AwsXRayRemoteSampler(resource=Resource.get_empty())
+
+        # Mock rule cache to be expired
+        with patch.object(self.rs._root._root._AwsXRayRemoteSampler__rule_cache, "expired", return_value=True):
+            with patch("amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler._logger") as mock_logger:
+                # Call should_sample when cache is expired
+                result = self.rs._root._root.should_sample(None, 0, "test_span")
+
+                # Verify debug log was called
+                mock_logger.debug.assert_called_once_with("Rule cache is expired so using fallback sampling strategy")
+
+                # Verify fallback sampler was used (should return some result)
+                self.assertIsNotNone(result)
+
+    @patch("requests.Session.post", side_effect=mocked_requests_get)
+    def test_refresh_rules_when_targets_require_it(self, mock_post=None):
+        """Tests that sampling rules are refreshed when targets polling indicates it"""
+        self.rs = AwsXRayRemoteSampler(resource=Resource.get_empty())
+
+        # Mock the rule cache update_sampling_targets to return refresh_rules=True
+        with patch.object(
+            self.rs._root._root._AwsXRayRemoteSampler__rule_cache,
+            "update_sampling_targets",
+            return_value=(True, None),  # refresh_rules=True, min_polling_interval=None
+        ):
+            # Mock get_and_update_sampling_rules to track if it was called
+            with patch.object(
+                self.rs._root._root, "_AwsXRayRemoteSampler__get_and_update_sampling_rules"
+            ) as mock_update_rules:
+                # Call the method that should trigger rule refresh
+                self.rs._root._root._AwsXRayRemoteSampler__get_and_update_sampling_targets()
+
+                # Verify that rules were refreshed
+                mock_update_rules.assert_called_once()
+
+    @patch("requests.Session.post", side_effect=mocked_requests_get)
+    def test_update_target_polling_interval(self, mock_post=None):
+        """Tests that target polling interval is updated when targets polling returns new interval"""
+        self.rs = AwsXRayRemoteSampler(resource=Resource.get_empty())
+
+        # Mock the rule cache update_sampling_targets to return new polling interval
+        new_interval = 500
+        with patch.object(
+            self.rs._root._root._AwsXRayRemoteSampler__rule_cache,
+            "update_sampling_targets",
+            return_value=(False, new_interval),  # refresh_rules=False, min_polling_interval=500
+        ):
+            # Store original interval
+            original_interval = self.rs._root._root._AwsXRayRemoteSampler__target_polling_interval
+
+            # Call the method that should update polling interval
+            self.rs._root._root._AwsXRayRemoteSampler__get_and_update_sampling_targets()
+
+            # Verify that polling interval was updated
+            self.assertEqual(self.rs._root._root._AwsXRayRemoteSampler__target_polling_interval, new_interval)
+            self.assertNotEqual(original_interval, new_interval)
+
+    def test_generate_client_id_format(self):
+        """Tests that client ID generation produces correctly formatted hex string"""
+        self.rs = AwsXRayRemoteSampler(resource=Resource.get_empty())
+        client_id = self.rs._root._root._AwsXRayRemoteSampler__client_id
+
+        # Verify client ID is 24 characters long
+        self.assertEqual(len(client_id), 24)
+
+        # Verify all characters are valid hex characters
+        valid_hex_chars = set("0123456789abcdef")
+        for char in client_id:
+            self.assertIn(char, valid_hex_chars)
+
+    def test_internal_sampler_get_description(self):
+        """Tests get_description method of internal _AwsXRayRemoteSampler"""
+        internal_sampler = _AwsXRayRemoteSampler(resource=Resource.get_empty())
+
+        try:
+            description = internal_sampler.get_description()
+            self.assertEqual(description, "_AwsXRayRemoteSampler{remote sampling with AWS X-Ray}")
+        finally:
+            # Clean up timers
+            internal_sampler._rules_timer.cancel()
+            internal_sampler._targets_timer.cancel()
+
+    @patch("requests.Session.post", side_effect=mocked_requests_get)
+    def test_rule_and_target_pollers_start_correctly(self, mock_post=None):
+        """Tests that both rule and target pollers are started and configured correctly"""
+        self.rs = AwsXRayRemoteSampler(resource=Resource.get_empty())
+
+        # Verify timers are created and started
+        self.assertIsNotNone(self.rs._root._root._rules_timer)
+        self.assertIsNotNone(self.rs._root._root._targets_timer)
+
+        # Verify timers are daemon threads
+        self.assertTrue(self.rs._root._root._rules_timer.daemon)
+        self.assertTrue(self.rs._root._root._targets_timer.daemon)
+
+        # Verify jitter values are within expected ranges
+        rule_jitter = self.rs._root._root._AwsXRayRemoteSampler__rule_polling_jitter
+        target_jitter = self.rs._root._root._AwsXRayRemoteSampler__target_polling_jitter
+
+        self.assertGreaterEqual(rule_jitter, 0.0)
+        self.assertLessEqual(rule_jitter, 5.0)
+        self.assertGreaterEqual(target_jitter, 0.0)
+        self.assertLessEqual(target_jitter, 0.1)
