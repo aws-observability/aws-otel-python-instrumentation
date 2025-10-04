@@ -20,7 +20,7 @@ def _apply_flask_instrumentation_patches() -> None:
         _apply_flask_code_attributes_patch()
 
 
-def _apply_flask_code_attributes_patch() -> None:
+def _apply_flask_code_attributes_patch() -> None:  # pylint: disable=too-many-statements
     """Flask instrumentation patch for code attributes
 
     This patch modifies the Flask instrumentation to automatically apply
@@ -37,10 +37,12 @@ def _apply_flask_code_attributes_patch() -> None:
     """
     try:
         # Import Flask instrumentation classes and AWS decorator
-        import flask
+        import flask  # pylint: disable=import-outside-toplevel
 
-        from amazon.opentelemetry.distro.code_correlation import record_code_attributes
-        from opentelemetry.instrumentation.flask import FlaskInstrumentor
+        from amazon.opentelemetry.distro.code_correlation import (  # pylint: disable=import-outside-toplevel
+            record_code_attributes,
+        )
+        from opentelemetry.instrumentation.flask import FlaskInstrumentor  # pylint: disable=import-outside-toplevel
 
         # Store the original _instrument and _uninstrument methods
         original_instrument = FlaskInstrumentor._instrument
@@ -79,7 +81,7 @@ def _apply_flask_code_attributes_patch() -> None:
             """Wrapped Flask.dispatch_request method to handle deferred view function binding."""
             try:
                 # Get the current request context
-                from flask import request
+                from flask import request  # pylint: disable=import-outside-toplevel
 
                 # Check if there's an endpoint for this request
                 endpoint = request.endpoint

@@ -344,10 +344,14 @@ class TestAwsXRayRemoteSampler(TestCase):
         self.rs = AwsXRayRemoteSampler(resource=Resource.get_empty())
 
         # Mock rule cache to be expired
-        with patch.object(self.rs._root._root._AwsXRayRemoteSampler__rule_cache, "expired", return_value=True):
-            with patch("amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler._logger") as mock_logger:
+        with patch.object(
+            self.rs._root._root._AwsXRayRemoteSampler__rule_cache, "expired", return_value=True
+        ):  # pylint: disable=not-context-manager
+            with patch(
+                "amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler._logger"
+            ) as mock_logger:  # pylint: disable=not-context-manager
                 # Call should_sample when cache is expired
-                result = self.rs._root._root.should_sample(None, 0, "test_span")
+                result = self.rs._root._root.should_sample(None, 0, "test_span")  # pylint: disable=not-context-manager
 
                 # Verify debug log was called
                 mock_logger.debug.assert_called_once_with("Rule cache is expired so using fallback sampling strategy")

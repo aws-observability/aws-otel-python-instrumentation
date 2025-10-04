@@ -36,10 +36,12 @@ def _apply_fastapi_code_attributes_patch() -> None:
     """
     try:
         # Import FastAPI instrumentation classes and AWS decorator
-        from fastapi import routing
+        from fastapi import routing  # pylint: disable=import-outside-toplevel
 
-        from amazon.opentelemetry.distro.code_correlation import record_code_attributes
-        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        from amazon.opentelemetry.distro.code_correlation import (  # pylint: disable=import-outside-toplevel
+            record_code_attributes,
+        )
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor  # pylint: disable=import-outside-toplevel
 
         # Store the original _instrument and _uninstrument methods
         original_instrument = FastAPIInstrumentor._instrument

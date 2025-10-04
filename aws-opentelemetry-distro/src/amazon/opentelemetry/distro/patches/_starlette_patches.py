@@ -82,10 +82,14 @@ def _apply_starlette_code_attributes_patch() -> None:
     """
     try:
         # Import Starlette routing classes and AWS decorator
-        from starlette.routing import Route
+        from starlette.routing import Route  # pylint: disable=import-outside-toplevel
 
-        from amazon.opentelemetry.distro.code_correlation import record_code_attributes
-        from opentelemetry.instrumentation.starlette import StarletteInstrumentor
+        from amazon.opentelemetry.distro.code_correlation import (  # pylint: disable=import-outside-toplevel
+            record_code_attributes,
+        )
+        from opentelemetry.instrumentation.starlette import (  # pylint: disable=import-outside-toplevel
+            StarletteInstrumentor,
+        )
 
         # Store the original _instrument and _uninstrument methods
         original_instrument = StarletteInstrumentor._instrument

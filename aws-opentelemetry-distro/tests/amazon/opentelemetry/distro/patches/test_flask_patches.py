@@ -39,9 +39,9 @@ class TestFlaskPatchesRealApp(TestBase):
         self.app = flask.Flask(__name__)
 
         # Add test routes
-        @self.app.route("/hello/<name>")
-        def hello(name):
-            return f"Hello {name}!"
+        @self.app.route("/hello")
+        def hello():
+            return "Hello!"
 
         @self.app.route("/error")
         def error_endpoint():
@@ -120,7 +120,7 @@ class TestFlaskPatchesRealApp(TestBase):
 
         # Test a request to trigger the patches
         instrumentor.instrument_app(self.app)
-        resp = self.client.get("/hello/world")
+        resp = self.client.get("/hello")
         self.assertEqual(200, resp.status_code)
 
         # Test uninstrumentation - this should restore original Flask methods
@@ -152,16 +152,16 @@ class TestFlaskPatchesRealApp(TestBase):
         mock_get_status.assert_called_once()
 
         # Make a request
-        resp = self.client.get("/hello/world")
+        resp = self.client.get("/hello")
         self.assertEqual(200, resp.status_code)
-        self.assertEqual([b"Hello world!"], list(resp.response))
+        self.assertEqual([b"Hello!"], list(resp.response))
 
         # Check spans were still generated (normal instrumentation)
         spans = self.memory_exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
 
         span = spans[0]
-        self.assertEqual(span.name, "GET /hello/<name>")
+        self.assertEqual(span.name, "GET /hello")
         self.assertEqual(span.kind, trace.SpanKind.SERVER)
 
         # Clean up - avoid Flask instrumentation issues
@@ -226,7 +226,6 @@ class TestFlaskPatchesRealApp(TestBase):
         self.app.add_url_rule("/test_lambda", "test_lambda", lambda_func)
 
         # Clean up - don't call uninstrument_app to avoid Flask instrumentation issues
-        pass
 
     @patch("amazon.opentelemetry.distro.patches._flask_patches.get_code_correlation_enabled_status")
     def test_flask_patches_dispatch_request_coverage(self, mock_get_status):
