@@ -63,8 +63,8 @@ def _apply_flask_code_attributes_patch() -> None:
                         decorated_view_func._original_view_func = view_func
                         return decorated_view_func
                 return view_func
-            except Exception as e:
-                _logger.warning("Failed to apply code attributes decorator to view function %s: %s", endpoint, e)
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                _logger.warning("Failed to apply code attributes decorator to view function %s: %s", endpoint, exc)
                 return view_func
 
         def _wrapped_add_url_rule(self, rule, endpoint=None, view_func=None, **options):
@@ -98,8 +98,8 @@ def _apply_flask_code_attributes_patch() -> None:
                                     endpoint,
                                 )
 
-            except Exception as e:
-                _logger.warning("Failed to process deferred view function decoration: %s", e)
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                _logger.warning("Failed to process deferred view function decoration: %s", exc)
 
             # Call the original dispatch_request method
             return original_flask_dispatch_request(self)
@@ -130,8 +130,8 @@ def _apply_flask_code_attributes_patch() -> None:
                     flask.Flask.dispatch_request = self._original_flask_dispatch_request
                     delattr(self, "_original_flask_add_url_rule")
                     delattr(self, "_original_flask_dispatch_request")
-                except Exception as e:
-                    _logger.warning("Failed to restore original Flask methods: %s", e)
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    _logger.warning("Failed to restore original Flask methods: %s", exc)
 
         # Apply the patches to FlaskInstrumentor
         FlaskInstrumentor._instrument = patched_instrument
@@ -139,5 +139,5 @@ def _apply_flask_code_attributes_patch() -> None:
 
         _logger.debug("Flask instrumentation code attributes patch applied successfully")
 
-    except Exception as e:
-        _logger.warning("Failed to apply Flask code attributes patch: %s", e)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        _logger.warning("Failed to apply Flask code attributes patch: %s", exc)
