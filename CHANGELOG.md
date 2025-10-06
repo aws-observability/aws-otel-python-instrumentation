@@ -11,3 +11,17 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+
+## v1.2.3 - 10-03-2025
+
+- fake entry #1
+  ([101](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/300))
+
+- fake entry #2
+  ([101](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/300))
+
+- fake entry #3
+  ([101](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/300))
+
+- fake entry #4
+  ([101](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/300))
