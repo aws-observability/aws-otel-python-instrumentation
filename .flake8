@@ -26,4 +26,3 @@ exclude =
   mock_collector_service_pb2_grpc.py
   lambda-layer/terraform/lambda/.terraform
   lambda-layer/sample-apps/build
-  samples
