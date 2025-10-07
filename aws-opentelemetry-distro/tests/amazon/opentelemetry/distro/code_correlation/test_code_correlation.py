@@ -28,90 +28,109 @@ class TestCodeCorrelationConstants(TestCase):
 class TestAddCodeAttributesToSpan(TestCase):
     """Test the add_code_attributes_to_span function."""
 
-    def setUp(self):
-        """Set up test fixtures."""
-        self.mock_span = MagicMock(spec=Span)
-        self.mock_span.is_recording.return_value = True
-
     def test_add_code_attributes_to_recording_span_with_function(self):
         """Test adding code attributes to a recording span with a regular function."""
+        # Create independent mock_span for this test
+        mock_span = MagicMock(spec=Span)
+        mock_span.is_recording.return_value = True
 
         def test_function():
             pass
 
-        add_code_attributes_to_span(self.mock_span, test_function)
+        add_code_attributes_to_span(mock_span, test_function)
 
         # Verify function name attribute is set
-        self.mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, "test_function")
+        mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, "test_function")
 
         # Verify file path attribute is set
         expected_file_path = test_function.__code__.co_filename
-        self.mock_span.set_attribute.assert_any_call(CODE_FILE_PATH, expected_file_path)
+        mock_span.set_attribute.assert_any_call(CODE_FILE_PATH, expected_file_path)
 
         # Verify line number attribute is set
         expected_line_number = test_function.__code__.co_firstlineno
-        self.mock_span.set_attribute.assert_any_call(CODE_LINE_NUMBER, expected_line_number)
+        mock_span.set_attribute.assert_any_call(CODE_LINE_NUMBER, expected_line_number)
 
     def test_add_code_attributes_to_recording_span_with_class(self):
         """Test adding code attributes to a recording span with a class."""
+        # Create independent mock_span for this test
+        mock_span = MagicMock(spec=Span)
+        mock_span.is_recording.return_value = True
 
         class TestClass:
             pass
 
-        add_code_attributes_to_span(self.mock_span, TestClass)
+        add_code_attributes_to_span(mock_span, TestClass)
 
         # Verify class name attribute is set
-        self.mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, "TestClass")
+        mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, "TestClass")
 
         # Verify file path attribute is set (classes have file paths too)
-        self.mock_span.set_attribute.assert_any_call(CODE_FILE_PATH, __file__)
+        mock_span.set_attribute.assert_any_call(CODE_FILE_PATH, __file__)
 
     def test_add_code_attributes_to_non_recording_span(self):
         """Test that no attributes are added to a non-recording span."""
-        self.mock_span.is_recording.return_value = False
+        # Create independent mock_span for this test
+        mock_span = MagicMock(spec=Span)
+        mock_span.is_recording.return_value = False
 
         def test_function():
             pass
 
-        add_code_attributes_to_span(self.mock_span, test_function)
+        add_code_attributes_to_span(mock_span, test_function)
 
         # Verify no attributes are set
-        self.mock_span.set_attribute.assert_not_called()
+        mock_span.set_attribute.assert_not_called()
 
     def test_add_code_attributes_function_without_code(self):
         """Test handling of functions without __code__ attribute."""
+        # Create independent mock_span for this test
+        mock_span = MagicMock(spec=Span)
+        mock_span.is_recording.return_value = True
+
         # Create a mock function without __code__ attribute
         mock_func = MagicMock()
         mock_func.__name__ = "mock_function"
         delattr(mock_func, "__code__")
 
-        add_code_attributes_to_span(self.mock_span, mock_func)
+        add_code_attributes_to_span(mock_span, mock_func)
 
         # Functions without __code__ attribute don't get any attributes set
-        self.mock_span.set_attribute.assert_not_called()
+        mock_span.set_attribute.assert_not_called()
 
     def test_add_code_attributes_builtin_function(self):
         """Test handling of built-in functions."""
+        # Create independent mock_span for this test
+        mock_span = MagicMock(spec=Span)
+        mock_span.is_recording.return_value = True
+
         # Use a built-in function like len
-        add_code_attributes_to_span(self.mock_span, len)
+        add_code_attributes_to_span(mock_span, len)
 
         # Built-in functions don't have __code__ attribute, so no attributes are set
-        self.mock_span.set_attribute.assert_not_called()
+        mock_span.set_attribute.assert_not_called()
 
     def test_add_code_attributes_exception_handling(self):
         """Test that exceptions are handled gracefully."""
+        # Create independent mock_span for this test
+        mock_span = MagicMock(spec=Span)
+        mock_span.is_recording.return_value = True
+
         # Create a function that will cause an exception when accessing __name__
         mock_func = MagicMock()
         mock_func.__name__ = MagicMock(side_effect=Exception("Test exception"))
 
         # This should not raise an exception
-        add_code_attributes_to_span(self.mock_span, mock_func)
+        add_code_attributes_to_span(mock_span, mock_func)
 
         # No attributes should be set due to exception
-        self.mock_span.set_attribute.assert_not_called()
+        mock_span.set_attribute.assert_not_called()
 
     def test_add_code_attributes_inspect_isclass_exception(self):
         """Test exception handling when inspect.isclass raises an exception."""
+        # Create independent mock_span for this test
+        mock_span = MagicMock(spec=Span)
+        mock_span.is_recording.return_value = True
+
         # Create a mock object that will cause inspect.isclass to raise an exception
         with patch("amazon.opentelemetry.distro.code_correlation.inspect.isclass") as mock_isclass:
             mock_isclass.side_effect = Exception("Test exception")
@@ -120,10 +139,10 @@ class TestAddCodeAttributesToSpan(TestCase):
                 pass
 
             # This should not raise an exception
-            add_code_attributes_to_span(self.mock_span, test_function)
+            add_code_attributes_to_span(mock_span, test_function)
 
             # No attributes should be set due to exception
-            self.mock_span.set_attribute.assert_not_called()
+            mock_span.set_attribute.assert_not_called()
 
 
 class TestRecordCodeAttributesDecorator(TestCase):
