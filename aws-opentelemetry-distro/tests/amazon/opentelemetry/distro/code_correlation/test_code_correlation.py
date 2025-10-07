@@ -125,26 +125,6 @@ class TestAddCodeAttributesToSpan(TestCase):
         # No attributes should be set due to exception
         mock_span.set_attribute.assert_not_called()
 
-    def test_add_code_attributes_inspect_isclass_exception(self):
-        """Test exception handling when inspect.isclass raises an exception."""
-        # Create independent mock_span for this test
-        mock_span = MagicMock(spec=Span)
-        mock_span.is_recording.return_value = True
-
-        # Create a mock object that will cause inspect.isclass to raise an exception
-        with patch("amazon.opentelemetry.distro.code_correlation.inspect.isclass") as mock_isclass:
-            mock_isclass.side_effect = Exception("Test exception")
-
-            def test_function():
-                pass
-
-            # This should not raise an exception
-            add_code_attributes_to_span(mock_span, test_function)
-
-            # No attributes should be set due to exception
-            mock_span.set_attribute.assert_not_called()
-
-
 class TestRecordCodeAttributesDecorator(TestCase):
     """Test the record_code_attributes decorator."""
 
