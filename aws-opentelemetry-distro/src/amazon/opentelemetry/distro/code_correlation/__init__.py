@@ -48,12 +48,12 @@ def add_code_attributes_to_span(span, func_or_class: Callable[..., Any]) -> None
             return
 
         if is_class:
-            span.set_attribute(CODE_FUNCTION_NAME, func_or_class.__name__)
+            span.set_attribute(CODE_FUNCTION_NAME, f"{func_or_class.__module__}.{func_or_class.__qualname__}")
             span.set_attribute(CODE_FILE_PATH, inspect.getfile(func_or_class))
         else:
             code = getattr(func_or_class, "__code__", None)
             if code:
-                span.set_attribute(CODE_FUNCTION_NAME, func_or_class.__name__)
+                span.set_attribute(CODE_FUNCTION_NAME, f"{func_or_class.__module__}.{func_or_class.__qualname__}")
                 span.set_attribute(CODE_FILE_PATH, code.co_filename)
                 span.set_attribute(CODE_LINE_NUMBER, code.co_firstlineno)
     except Exception:  # pylint: disable=broad-exception-caught
