@@ -352,34 +352,34 @@ jobs:
         run: |
           # Extract all dependencies from pyproject.toml
           DEPS=$(python3 -c "
-            import re
-            with open('aws-opentelemetry-distro/pyproject.toml', 'r') as f:
-                content = f.read()
-            deps_match = re.search(r'dependencies\s*=\s*\[(.*?)\]', content, re.DOTALL)
-            if deps_match:
-                deps_content = deps_match.group(1)
-                dep_lines = re.findall(r'\"([^\"]+)\"', deps_content)
-                formatted_deps = []
-                for dep_line in dep_lines:
-                    if ' == ' in dep_line:
-                        package, version = dep_line.split(' == ', 1)
-                        formatted_deps.append(f'- \`{package}\` - {version}')
-                    else:
-                        formatted_deps.append(f'- \`{dep_line}\`')
-                print('\n'.join(formatted_deps))
+          import re
+          with open('aws-opentelemetry-distro/pyproject.toml', 'r') as f:
+              content = f.read()
+          deps_match = re.search(r'dependencies\s*=\s*\[(.*?)\]', content, re.DOTALL)
+          if deps_match:
+              deps_content = deps_match.group(1)
+              dep_lines = re.findall(r'\"([^\"]+)\"', deps_content)
+              formatted_deps = []
+              for dep_line in dep_lines:
+                  if ' == ' in dep_line:
+                      package, version = dep_line.split(' == ', 1)
+                      formatted_deps.append(f'- \`{package}\` - {version}')
+                  else:
+                      formatted_deps.append(f'- \`{dep_line}\`')
+              print('\n'.join(formatted_deps))
           ")
 
           # Extract CHANGELOG entries for this version
           CHANGELOG_ENTRIES=$(python3 -c "
-            import re
-            with open('CHANGELOG.md', 'r') as f:
-                content = f.read()
-            version_pattern = r'## v${{ github.event.inputs.version }}.*?\n(.*?)(?=\n## |\Z)'
-            version_match = re.search(version_pattern, content, re.DOTALL)
-            if version_match:
-                entries = version_match.group(1).strip()
-                if entries:
-                    print(entries)
+          import re
+          with open('CHANGELOG.md', 'r') as f:
+              content = f.read()
+          version_pattern = r'## v${{ github.event.inputs.version }}.*?\n(.*?)(?=\n## |\Z)'
+          version_match = re.search(version_pattern, content, re.DOTALL)
+          if version_match:
+              entries = version_match.group(1).strip()
+              if entries:
+                  print(entries)
           ")
 
           # Create release notes
