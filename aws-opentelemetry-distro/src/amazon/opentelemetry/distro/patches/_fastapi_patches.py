@@ -13,7 +13,7 @@ def _apply_fastapi_instrumentation_patches() -> None:
     """FastAPI instrumentation patches
 
     Applies patches to provide code attributes support for FastAPI instrumentation.
-    This patches the Flask instrumentation to automatically add code attributes
+    This patches the FastAPI instrumentation to automatically add code attributes
     to spans by decorating view functions with record_code_attributes.
     """
     if get_code_correlation_enabled_status() is True:
