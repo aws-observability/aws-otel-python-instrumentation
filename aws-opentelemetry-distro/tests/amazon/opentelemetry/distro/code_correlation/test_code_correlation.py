@@ -3,7 +3,7 @@
 
 import asyncio
 from unittest import TestCase
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro.code_correlation import (
     CODE_FILE_PATH,
@@ -33,8 +33,8 @@ class TestAddCodeAttributesToSpan(TestCase):
         self.mock_span = MagicMock(spec=Span)
         self.mock_span.is_recording.return_value = True
 
-    def test_add_code_attributes_to_recording_span(self):
-        """Test adding code attributes to a recording span."""
+    def test_add_code_attributes_to_recording_span_with_function(self):
+        """Test adding code attributes to a recording span with a regular function."""
 
         def test_function():
             pass
@@ -51,6 +51,20 @@ class TestAddCodeAttributesToSpan(TestCase):
         # Verify line number attribute is set
         expected_line_number = test_function.__code__.co_firstlineno
         self.mock_span.set_attribute.assert_any_call(CODE_LINE_NUMBER, expected_line_number)
+
+    def test_add_code_attributes_to_recording_span_with_class(self):
+        """Test adding code attributes to a recording span with a class."""
+
+        class TestClass:
+            pass
+
+        add_code_attributes_to_span(self.mock_span, TestClass)
+
+        # Verify class name attribute is set
+        self.mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, "TestClass")
+
+        # Verify file path attribute is set (classes have file paths too)
+        self.mock_span.set_attribute.assert_any_call(CODE_FILE_PATH, __file__)
 
     def test_add_code_attributes_to_non_recording_span(self):
         """Test that no attributes are added to a non-recording span."""
@@ -73,128 +87,43 @@ class TestAddCodeAttributesToSpan(TestCase):
 
         add_code_attributes_to_span(self.mock_span, mock_func)
 
-        # Verify only function name attribute is set
-        self.mock_span.set_attribute.assert_called_once_with(CODE_FUNCTION_NAME, "mock_function")
+        # Functions without __code__ attribute don't get any attributes set
+        self.mock_span.set_attribute.assert_not_called()
 
     def test_add_code_attributes_builtin_function(self):
         """Test handling of built-in functions."""
         # Use a built-in function like len
         add_code_attributes_to_span(self.mock_span, len)
 
-        # Verify only function name attribute is set
-        self.mock_span.set_attribute.assert_called_once_with(CODE_FUNCTION_NAME, "len")
-
-    def test_add_code_attributes_function_without_name(self):
-        """Test handling of functions without __name__ attribute."""
-        # Create an object without __name__ attribute
-        mock_func = MagicMock()
-        delattr(mock_func, "__name__")
-        mock_func.__code__ = MagicMock()
-        mock_func.__code__.co_filename = "/test/file.py"
-        mock_func.__code__.co_firstlineno = 10
-
-        add_code_attributes_to_span(self.mock_span, mock_func)
-
-        # Verify function name uses str() representation
-        self.mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, str(mock_func))
-        self.mock_span.set_attribute.assert_any_call(CODE_FILE_PATH, "/test/file.py")
-        self.mock_span.set_attribute.assert_any_call(CODE_LINE_NUMBER, 10)
+        # Built-in functions don't have __code__ attribute, so no attributes are set
+        self.mock_span.set_attribute.assert_not_called()
 
     def test_add_code_attributes_exception_handling(self):
         """Test that exceptions are handled gracefully."""
-        # Create a function that will cause an exception when accessing attributes
+        # Create a function that will cause an exception when accessing __name__
         mock_func = MagicMock()
-        mock_func.__name__ = "test_func"
-        mock_func.__code__ = MagicMock()
-        mock_func.__code__.co_filename = "/test/file.py"
-        mock_func.__code__.co_firstlineno = MagicMock(side_effect=Exception("Test exception"))
+        mock_func.__name__ = MagicMock(side_effect=Exception("Test exception"))
 
         # This should not raise an exception
         add_code_attributes_to_span(self.mock_span, mock_func)
 
-        # Verify function name and file path are still set
-        self.mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, "test_func")
-        self.mock_span.set_attribute.assert_any_call(CODE_FILE_PATH, "/test/file.py")
-
-    @patch("amazon.opentelemetry.distro.code_correlation.getattr")
-    def test_add_code_attributes_getattr_exception(self, mock_getattr):
-        """Test exception handling when getattr fails."""
-        mock_getattr.side_effect = Exception("Test exception")
-
-        def test_function():
-            pass
-
-        # This should not raise an exception
-        add_code_attributes_to_span(self.mock_span, test_function)
-
-        # Verify no attributes are set due to exception
+        # No attributes should be set due to exception
         self.mock_span.set_attribute.assert_not_called()
 
-    def test_add_code_attributes_co_filename_exception(self):
-        """Test exception handling when accessing co_filename raises exception."""
-        # Create a mock function with __code__ that raises exception on co_filename access
-        mock_func = MagicMock()
-        mock_func.__name__ = "test_func"
-        mock_code = MagicMock()
-        mock_code.co_firstlineno = 10
+    def test_add_code_attributes_inspect_isclass_exception(self):
+        """Test exception handling when inspect.isclass raises an exception."""
+        # Create a mock object that will cause inspect.isclass to raise an exception
+        with patch("amazon.opentelemetry.distro.code_correlation.inspect.isclass") as mock_isclass:
+            mock_isclass.side_effect = Exception("Test exception")
 
-        # Make co_filename raise AttributeError
-        type(mock_code).co_filename = PropertyMock(side_effect=AttributeError("Test exception"))
-        mock_func.__code__ = mock_code
+            def test_function():
+                pass
 
-        # This should not raise an exception
-        add_code_attributes_to_span(self.mock_span, mock_func)
+            # This should not raise an exception
+            add_code_attributes_to_span(self.mock_span, test_function)
 
-        # Verify function name and line number are still set, but not file path
-        self.mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, "test_func")
-        self.mock_span.set_attribute.assert_any_call(CODE_LINE_NUMBER, 10)
-        # File path should not be called due to exception
-        with self.assertRaises(AssertionError):
-            self.mock_span.set_attribute.assert_any_call(CODE_FILE_PATH, MagicMock())
-
-    def test_add_code_attributes_co_firstlineno_exception(self):
-        """Test exception handling when accessing co_firstlineno raises exception."""
-        # Create a mock function with __code__ that raises exception on co_firstlineno access
-        mock_func = MagicMock()
-        mock_func.__name__ = "test_func"
-        mock_code = MagicMock()
-        mock_code.co_filename = "/test/file.py"
-
-        # Make co_firstlineno raise TypeError
-        type(mock_code).co_firstlineno = PropertyMock(side_effect=TypeError("Test exception"))
-        mock_func.__code__ = mock_code
-
-        # This should not raise an exception
-        add_code_attributes_to_span(self.mock_span, mock_func)
-
-        # Verify function name and file path are still set, but not line number
-        self.mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, "test_func")
-        self.mock_span.set_attribute.assert_any_call(CODE_FILE_PATH, "/test/file.py")
-        # Line number should not be called due to exception
-        with self.assertRaises(AssertionError):
-            self.mock_span.set_attribute.assert_any_call(CODE_LINE_NUMBER, MagicMock())
-
-    def test_add_code_attributes_co_filename_type_error(self):
-        """Test exception handling when accessing co_filename raises TypeError."""
-        # Create a mock function with __code__ that raises TypeError on co_filename access
-        mock_func = MagicMock()
-        mock_func.__name__ = "test_func"
-        mock_code = MagicMock()
-        mock_code.co_firstlineno = 10
-
-        # Make co_filename raise TypeError
-        type(mock_code).co_filename = PropertyMock(side_effect=TypeError("Test exception"))
-        mock_func.__code__ = mock_code
-
-        # This should not raise an exception
-        add_code_attributes_to_span(self.mock_span, mock_func)
-
-        # Verify function name and line number are still set, but not file path
-        self.mock_span.set_attribute.assert_any_call(CODE_FUNCTION_NAME, "test_func")
-        self.mock_span.set_attribute.assert_any_call(CODE_LINE_NUMBER, 10)
-        # File path should not be called due to TypeError
-        with self.assertRaises(AssertionError):
-            self.mock_span.set_attribute.assert_any_call(CODE_FILE_PATH, MagicMock())
+            # No attributes should be set due to exception
+            self.mock_span.set_attribute.assert_not_called()
 
 
 class TestRecordCodeAttributesDecorator(TestCase):
@@ -261,7 +190,7 @@ class TestRecordCodeAttributesDecorator(TestCase):
         # Verify the function still works correctly
         self.assertEqual(result, "test result")
 
-        # Verify no span attributes were set
+        # Verify no span attributes were set since there's no span
         self.mock_span.set_attribute.assert_not_called()
 
     @patch("amazon.opentelemetry.distro.code_correlation.trace.get_current_span")

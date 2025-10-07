@@ -85,6 +85,13 @@ def apply_instrumentation_patches() -> None:
 
         _apply_fastapi_instrumentation_patches()
 
+    if is_installed("django"):
+        # pylint: disable=import-outside-toplevel
+        # Delay import to only occur if patches is safe to apply (e.g. the instrumented library is installed).
+        from amazon.opentelemetry.distro.patches._django_patches import _apply_django_instrumentation_patches
+
+        _apply_django_instrumentation_patches()
+
     # No need to check if library is installed as this patches opentelemetry.sdk,
     # which must be installed for the distro to work at all.
     _apply_resource_detector_patches()

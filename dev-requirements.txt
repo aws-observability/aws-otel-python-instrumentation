@@ -18,3 +18,4 @@ botocore==1.34.67
 flask>=2.0.0
 fastapi>=0.68.0
 starlette>=0.14.2
+django>=3.2
