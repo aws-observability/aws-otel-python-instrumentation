@@ -12,7 +12,7 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
-## v1.2.3 - 10-03-2025
+## v0.12.1.dev0 - 10-03-2025
 
 - fake entry #1
   ([101](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/300))
