@@ -28,17 +28,13 @@ def _apply_django_code_attributes_patch() -> None:  # pylint: disable=too-many-s
     code attributes to the current span when a view function is about to be executed.
 
     The patch includes:
-    1. Caching mechanism to avoid re-processing the same view functions
-    2. Support for class-based views by extracting the actual HTTP method handler
-    3. Automatic addition of code.function.name, code.file.path, and code.line.number
-    4. Graceful error handling and cleanup during uninstrument
+    1. Support for class-based views by extracting the actual HTTP method handler
+    2. Automatic addition of code.function.name, code.file.path, and code.line.number
+    3. Graceful error handling and cleanup during uninstrument
     """
     try:
         # Import Django instrumentation classes and AWS code correlation function
         from amazon.opentelemetry.distro.code_correlation import (  # pylint: disable=import-outside-toplevel
-            CODE_FILE_PATH,
-            CODE_FUNCTION_NAME,
-            CODE_LINE_NUMBER,
             add_code_attributes_to_span,
         )
         from opentelemetry.instrumentation.django import DjangoInstrumentor  # pylint: disable=import-outside-toplevel
@@ -60,10 +56,6 @@ def _apply_django_code_attributes_patch() -> None:  # pylint: disable=too-many-s
                 nonlocal original_process_view
                 if original_process_view is None:
                     original_process_view = _DjangoMiddleware.process_view
-
-                # Add code cache to the middleware class
-                if not hasattr(_DjangoMiddleware, "_code_cache"):
-                    _DjangoMiddleware._code_cache = {}
 
                 def patched_process_view(
                     self, request, view_func, *args, **kwargs
@@ -90,53 +82,12 @@ def _apply_django_code_attributes_patch() -> None:  # pylint: disable=too-many-s
                                     handler = getattr(view_class, method_name, None) or view_class
                                     target = handler
 
-                                # Try to get attributes from cache first
-                                if target in self._code_cache:
-                                    # Directly set attributes from cache
-                                    for key, value in self._code_cache[target].items():
-                                        if value is not None:  # Only set non-None values
-                                            span.set_attribute(key, value)
-                                    _logger.debug(
-                                        "Added cached code attributes to span for Django view: %s",
-                                        getattr(target, "__name__", str(target)),
-                                    )
-                                else:
-                                    # Call the existing add_code_attributes_to_span function
-                                    add_code_attributes_to_span(span, target)
-
-                                    # Read the attributes that were just set and cache them
-                                    # Note: span.attributes might not be available immediately,
-                                    # so we extract the attributes in a safer way
-                                    cached_attrs = {}
-                                    try:
-                                        # Try to get attributes if they exist
-                                        if hasattr(span, "attributes") and span.attributes:
-                                            cached_attrs = {
-                                                CODE_FUNCTION_NAME: span.attributes.get(CODE_FUNCTION_NAME),
-                                                CODE_FILE_PATH: span.attributes.get(CODE_FILE_PATH),
-                                                CODE_LINE_NUMBER: span.attributes.get(CODE_LINE_NUMBER),
-                                            }
-                                        else:
-                                            # Fallback: extract from the target directly
-                                            import inspect  # pylint: disable=import-outside-toplevel
-
-                                            if hasattr(target, "__name__"):
-                                                cached_attrs[CODE_FUNCTION_NAME] = target.__name__
-                                            if hasattr(target, "__code__") and target.__code__:
-                                                cached_attrs[CODE_FILE_PATH] = target.__code__.co_filename
-                                                cached_attrs[CODE_LINE_NUMBER] = target.__code__.co_firstlineno
-                                            elif inspect.isclass(target):
-                                                cached_attrs[CODE_FUNCTION_NAME] = target.__name__
-                                                cached_attrs[CODE_FILE_PATH] = inspect.getfile(target)
-                                    except Exception as cache_exc:  # pylint: disable=broad-exception-caught
-                                        _logger.debug("Failed to cache code attributes: %s", cache_exc)
-
-                                    # Cache the attributes for future use
-                                    self._code_cache[target] = cached_attrs
-                                    _logger.debug(
-                                        "Added and cached code attributes to span for Django view: %s",
-                                        getattr(target, "__name__", str(target)),
-                                    )
+                                # Call the existing add_code_attributes_to_span function
+                                add_code_attributes_to_span(span, target)
+                                _logger.debug(
+                                    "Added code attributes to span for Django view: %s",
+                                    getattr(target, "__name__", str(target)),
+                                )
                     except Exception as exc:  # pylint: disable=broad-exception-caught
                         # Don't let code attributes addition break the request processing
                         _logger.warning("Failed to add code attributes to Django span: %s", exc)
@@ -158,9 +109,6 @@ def _apply_django_code_attributes_patch() -> None:  # pylint: disable=too-many-s
 
                 if original_process_view is not None:
                     _DjangoMiddleware.process_view = original_process_view
-                    # Clean up the code cache
-                    if hasattr(_DjangoMiddleware, "_code_cache"):
-                        delattr(_DjangoMiddleware, "_code_cache")
                     _logger.debug("Django middleware process_view restored successfully")
 
             except Exception as exc:  # pylint: disable=broad-exception-caught
