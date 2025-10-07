@@ -125,6 +125,7 @@ class TestAddCodeAttributesToSpan(TestCase):
         # No attributes should be set due to exception
         mock_span.set_attribute.assert_not_called()
 
+
 class TestRecordCodeAttributesDecorator(TestCase):
     """Test the record_code_attributes decorator."""
 
