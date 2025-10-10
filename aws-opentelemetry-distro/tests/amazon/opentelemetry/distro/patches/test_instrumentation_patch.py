@@ -10,6 +10,24 @@ import gevent.monkey
 
 import opentelemetry.sdk.extension.aws.resource.ec2 as ec2_resource
 import opentelemetry.sdk.extension.aws.resource.eks as eks_resource
+from amazon.opentelemetry.distro._aws_attribute_keys import (
+    AWS_AUTH_CREDENTIAL_PROVIDER_ARN,
+    AWS_BEDROCK_AGENTCORE_BROWSER_ARN,
+    AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN,
+    AWS_BEDROCK_AGENTCORE_GATEWAY_ARN,
+    AWS_BEDROCK_AGENTCORE_MEMORY_ARN,
+    AWS_BEDROCK_AGENTCORE_RUNTIME_ARN,
+    AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN,
+    AWS_BEDROCK_AGENTCORE_WORKLOAD_IDENTITY_ARN,
+    AWS_GATEWAY_TARGET_ID,
+)
+from amazon.opentelemetry.distro.patches._bedrock_agentcore_patches import (
+    GEN_AI_BROWSER_ID,
+    GEN_AI_CODE_INTERPRETER_ID,
+    GEN_AI_GATEWAY_ID,
+    GEN_AI_MEMORY_ID,
+    GEN_AI_RUNTIME_ID,
+)
 from amazon.opentelemetry.distro.patches._instrumentation_patch import (
     AWS_GEVENT_PATCH_MODULES,
     apply_instrumentation_patches,
@@ -38,6 +56,20 @@ _ACTIVITY_ARN: str = "arn:aws:states:us-east-1:007003123456789012:activity:testA
 _LAMBDA_FUNCTION_NAME: str = "lambdaFunctionName"
 _LAMBDA_SOURCE_MAPPING_ID: str = "lambdaEventSourceMappingID"
 _TABLE_ARN: str = "arn:aws:dynamodb:us-west-2:123456789012:table/testTable"
+_AGENTCORE_RUNTIME_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/test-runtime"
+_AGENTCORE_RUNTIME_ENDPOINT_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime-endpoint/test-endpoint"
+_AGENTCORE_RUNTIME_ID: str = "test-runtime-123"
+_AGENTCORE_BROWSER_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:browser/test-browser"
+_AGENTCORE_BROWSER_ID: str = "agentBrowser-123456789"
+_AGENTCORE_CODE_INTERPRETER_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:code-interpreter/test-ci"
+_AGENTCORE_CODE_INTERPRETER_ID: str = "agentCodeInterpreter-123456789"
+_AGENTCORE_GATEWAY_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:gateway/test-gateway"
+_AGENTCORE_GATEWAY_ID: str = "agentGateway-123456789"
+_AGENTCORE_TARGET_ID: str = "target-123456789"
+_AGENTCORE_MEMORY_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/test-memory"
+_AGENTCORE_MEMORY_ID: str = "agentMemory-123456789"
+_AGENTCORE_CREDENTIAL_PROVIDER_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:credential-provider/test-cp"
+_AGENTCORE_WORKLOAD_IDENTITY_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:workload-identity/test-wi"
 
 # Patch names
 IMPORTLIB_METADATA_VERSION_PATCH: str = "amazon.opentelemetry.distro._utils.version"
@@ -160,6 +192,14 @@ class TestInstrumentationPatch(TestCase):
             "bedrock-agent-runtime" in _KNOWN_EXTENSIONS, "Upstream has added a Bedrock Agent Runtime extension"
         )
 
+        # Bedrock AgentCore
+        self.assertFalse("bedrock-agentcore" in _KNOWN_EXTENSIONS, "Upstream has added a Bedrock AgentCore extension")
+
+        # Bedrock AgentCore Control
+        self.assertFalse(
+            "bedrock-agentcore-control" in _KNOWN_EXTENSIONS, "Upstream has added a Bedrock AgentCore Control extension"
+        )
+
         # BedrockRuntime
         self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS, "Upstream has added a bedrock-runtime extension")
 
@@ -236,6 +276,41 @@ class TestInstrumentationPatch(TestCase):
         self.assertEqual(bedrock_agent_runtime_attributes["aws.bedrock.knowledge_base.id"], _BEDROCK_KNOWLEDGEBASE_ID)
         bedrock_agent_runtime_sucess_attributes: Dict[str, str] = _do_on_success_bedrock("bedrock-agent-runtime")
         self.assertEqual(len(bedrock_agent_runtime_sucess_attributes), 0)
+
+        # Bedrock AgentCore
+        self.assertTrue("bedrock-agentcore" in _KNOWN_EXTENSIONS)
+        bedrock_agentcore_attributes: Dict[str, str] = _do_extract_bedrock_agentcore_attributes()
+        # Runtime attributes
+        self.assertEqual(bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_RUNTIME_ARN], _AGENTCORE_RUNTIME_ARN)
+        self.assertEqual(
+            bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN], _AGENTCORE_RUNTIME_ENDPOINT_ARN
+        )
+        self.assertEqual(bedrock_agentcore_attributes[GEN_AI_RUNTIME_ID], _AGENTCORE_RUNTIME_ID)
+        # Browser attributes
+        self.assertEqual(bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_BROWSER_ARN], _AGENTCORE_BROWSER_ARN)
+        self.assertEqual(bedrock_agentcore_attributes[GEN_AI_BROWSER_ID], _AGENTCORE_BROWSER_ID)
+        # Code interpreter attributes
+        self.assertEqual(
+            bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN], _AGENTCORE_CODE_INTERPRETER_ARN
+        )
+        self.assertEqual(bedrock_agentcore_attributes[GEN_AI_CODE_INTERPRETER_ID], _AGENTCORE_CODE_INTERPRETER_ID)
+        # Gateway attributes
+        self.assertEqual(bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_GATEWAY_ARN], _AGENTCORE_GATEWAY_ARN)
+        self.assertEqual(bedrock_agentcore_attributes[GEN_AI_GATEWAY_ID], _AGENTCORE_GATEWAY_ID)
+        self.assertEqual(bedrock_agentcore_attributes[AWS_GATEWAY_TARGET_ID], _AGENTCORE_TARGET_ID)
+        # Memory attributes
+        self.assertEqual(bedrock_agentcore_attributes[GEN_AI_MEMORY_ID], _AGENTCORE_MEMORY_ID)
+        self.assertEqual(bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_MEMORY_ARN], _AGENTCORE_MEMORY_ARN)
+        # Auth and identity attributes
+        self.assertEqual(
+            bedrock_agentcore_attributes[AWS_AUTH_CREDENTIAL_PROVIDER_ARN], _AGENTCORE_CREDENTIAL_PROVIDER_ARN
+        )
+        self.assertEqual(
+            bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_WORKLOAD_IDENTITY_ARN], _AGENTCORE_WORKLOAD_IDENTITY_ARN
+        )
+
+        # Bedrock AgentCore Control
+        self.assertTrue("bedrock-agentcore-control" in _KNOWN_EXTENSIONS)
 
         # BedrockRuntime
         self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
@@ -851,6 +926,31 @@ def _do_extract_stepfunctions_attributes() -> Dict[str, str]:
 def _do_extract_lambda_attributes() -> Dict[str, str]:
     service_name: str = "lambda"
     params: Dict[str, str] = {"FunctionName": _LAMBDA_FUNCTION_NAME, "UUID": _LAMBDA_SOURCE_MAPPING_ID}
+    return _do_extract_attributes(service_name, params)
+
+
+def _do_extract_bedrock_agentcore_attributes() -> Dict[str, str]:
+    service_name: str = "bedrock-agentcore"
+    params: Dict[str, Any] = {
+        "agentRuntimeArn": _AGENTCORE_RUNTIME_ARN,
+        "agentRuntimeEndpointArn": _AGENTCORE_RUNTIME_ENDPOINT_ARN,
+        "agentRuntimeId": _AGENTCORE_RUNTIME_ID,
+        "browserArn": _AGENTCORE_BROWSER_ARN,
+        "browserId": _AGENTCORE_BROWSER_ID,
+        "browserIdentifier": _AGENTCORE_BROWSER_ID,
+        "codeInterpreterArn": _AGENTCORE_CODE_INTERPRETER_ARN,
+        "codeInterpreterId": _AGENTCORE_CODE_INTERPRETER_ID,
+        "codeInterpreterIdentifier": _AGENTCORE_CODE_INTERPRETER_ID,
+        "gatewayArn": _AGENTCORE_GATEWAY_ARN,
+        "gatewayId": _AGENTCORE_GATEWAY_ID,
+        "gatewayIdentifier": _AGENTCORE_GATEWAY_ID,
+        "targetId": _AGENTCORE_TARGET_ID,
+        "memoryId": _AGENTCORE_MEMORY_ID,
+        "credentialProviderArn": _AGENTCORE_CREDENTIAL_PROVIDER_ARN,
+        "workloadIdentityArn": _AGENTCORE_WORKLOAD_IDENTITY_ARN,
+        "memory": {"arn": _AGENTCORE_MEMORY_ARN, "id": _AGENTCORE_MEMORY_ID},
+        "workloadIdentityDetails": {"workloadIdentityArn": _AGENTCORE_WORKLOAD_IDENTITY_ARN},
+    }
     return _do_extract_attributes(service_name, params)
 
 

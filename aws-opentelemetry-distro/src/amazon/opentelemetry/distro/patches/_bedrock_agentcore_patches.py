@@ -1,0 +1,103 @@
+# Copyright The OpenTelemetry Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+from typing import Any, Dict
+
+from amazon.opentelemetry.distro._aws_attribute_keys import (
+    AWS_AUTH_CREDENTIAL_PROVIDER_ARN,
+    AWS_BEDROCK_AGENTCORE_BROWSER_ARN,
+    AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN,
+    AWS_BEDROCK_AGENTCORE_GATEWAY_ARN,
+    AWS_BEDROCK_AGENTCORE_MEMORY_ARN,
+    AWS_BEDROCK_AGENTCORE_RUNTIME_ARN,
+    AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN,
+    AWS_BEDROCK_AGENTCORE_WORKLOAD_IDENTITY_ARN,
+    AWS_GATEWAY_TARGET_ID,
+)
+from opentelemetry.instrumentation.botocore.extensions.types import (
+    _AttributeMapT,
+    _AwsSdkExtension,
+    _BotocoreInstrumentorContext,
+    _BotoResultT,
+)
+from opentelemetry.trace.span import Span
+
+GEN_AI_RUNTIME_ID = "gen_ai.runtime.id"
+GEN_AI_BROWSER_ID = "gen_ai.browser.id"
+GEN_AI_CODE_INTERPRETER_ID = "gen_ai.code_interpreter.id"
+GEN_AI_MEMORY_ID = "gen_ai.memory.id"
+GEN_AI_GATEWAY_ID = "gen_ai.gateway.id"
+
+# Mapping of flattened JSON paths to attribute keys
+_ATTRIBUTE_MAPPING = {
+    "agentRuntimeArn": AWS_BEDROCK_AGENTCORE_RUNTIME_ARN,
+    "agentRuntimeEndpointArn": AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN,
+    "agentRuntimeId": GEN_AI_RUNTIME_ID,
+    "browserArn": AWS_BEDROCK_AGENTCORE_BROWSER_ARN,
+    "browserId": GEN_AI_BROWSER_ID,
+    "browserIdentifier": GEN_AI_BROWSER_ID,
+    "codeInterpreterArn": AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN,
+    "codeInterpreterId": GEN_AI_CODE_INTERPRETER_ID,
+    "codeInterpreterIdentifier": GEN_AI_CODE_INTERPRETER_ID,
+    "gatewayArn": AWS_BEDROCK_AGENTCORE_GATEWAY_ARN,
+    "gatewayId": GEN_AI_GATEWAY_ID,
+    "gatewayIdentifier": GEN_AI_GATEWAY_ID,
+    "targetId": AWS_GATEWAY_TARGET_ID,
+    "memory.arn": AWS_BEDROCK_AGENTCORE_MEMORY_ARN,
+    "memory.id": GEN_AI_MEMORY_ID,
+    "memoryId": GEN_AI_MEMORY_ID,
+    "credentialProviderArn": AWS_AUTH_CREDENTIAL_PROVIDER_ARN,
+    "workloadIdentityArn": AWS_BEDROCK_AGENTCORE_WORKLOAD_IDENTITY_ARN,
+    "workloadIdentityDetails.workloadIdentityArn": AWS_BEDROCK_AGENTCORE_WORKLOAD_IDENTITY_ARN,
+}
+
+
+class _BedrockAgentCoreExtension(_AwsSdkExtension):
+    def extract_attributes(self, attributes: _AttributeMapT):
+        extracted_attrs = self._extract_attributes(self._call_context.params)
+        attributes.update(extracted_attrs)
+
+    def on_success(
+        self,
+        span: Span,
+        result: _BotoResultT,
+        instrumentor_context: _BotocoreInstrumentorContext,
+    ):
+        if span is None or not span.is_recording():
+            return
+
+        extracted_attrs = self._extract_attributes(result)
+        for attr_name, attr_value in extracted_attrs.items():
+            span.set_attribute(attr_name, attr_value)
+
+    @staticmethod
+    def _extract_attributes(params: Dict[str, Any]):
+        """Extracts all Bedrock AgentCore attributes using mapping-based traversal"""
+        attrs = {}
+        for path, attr_key in _ATTRIBUTE_MAPPING.items():
+            value = _BedrockAgentCoreExtension._get_nested_value(params, path)
+            if value:
+                attrs[attr_key] = value
+        return attrs
+
+    @staticmethod
+    def _get_nested_value(data: Dict[str, Any], path: str):
+        """Get value from nested dictionary using dot notation path"""
+        keys = path.split(".")
+        value = data
+        for key in keys:
+            if isinstance(value, dict) and key in value:
+                value = value[key]
+            else:
+                return None
+        return value
