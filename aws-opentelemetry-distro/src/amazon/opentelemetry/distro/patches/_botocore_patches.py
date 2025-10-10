@@ -23,6 +23,9 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_STEPFUNCTIONS_ACTIVITY_ARN,
     AWS_STEPFUNCTIONS_STATEMACHINE_ARN,
 )
+from amazon.opentelemetry.distro.patches._bedrock_agentcore_patches import (  # noqa # pylint: disable=unused-import
+    _BedrockAgentCoreExtension,
+)
 from amazon.opentelemetry.distro.patches._bedrock_patches import (  # noqa # pylint: disable=unused-import
     _BedrockAgentExtension,
     _BedrockAgentRuntimeExtension,
@@ -247,6 +250,10 @@ def _apply_botocore_bedrock_patch() -> None:  # pylint: disable=too-many-stateme
     _KNOWN_EXTENSIONS["bedrock"] = _lazy_load(".", "_BedrockExtension")
     _KNOWN_EXTENSIONS["bedrock-agent"] = _lazy_load(".", "_BedrockAgentExtension")
     _KNOWN_EXTENSIONS["bedrock-agent-runtime"] = _lazy_load(".", "_BedrockAgentRuntimeExtension")
+    _KNOWN_EXTENSIONS["bedrock-agentcore"] = _lazy_load(".._bedrock_agentcore_patches", "_BedrockAgentCoreExtension")
+    _KNOWN_EXTENSIONS["bedrock-agentcore-control"] = _lazy_load(
+        ".._bedrock_agentcore_patches", "_BedrockAgentCoreExtension"
+    )
 
     # TODO: The following code is to patch bedrock-runtime bugs that are fixed in
     # opentelemetry-instrumentation-botocore==0.56b0 in these PRs:
