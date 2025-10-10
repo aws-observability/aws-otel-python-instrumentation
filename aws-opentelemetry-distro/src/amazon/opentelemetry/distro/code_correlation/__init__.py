@@ -7,6 +7,7 @@ Code correlation module for AWS OpenTelemetry Python Instrumentation.
 This module provides functionality for correlating code execution with telemetry data.
 """
 
+import inspect
 from functools import wraps
 from typing import Any, Callable
 
@@ -21,7 +22,7 @@ CODE_FILE_PATH = "code.file.path"
 CODE_LINE_NUMBER = "code.line.number"
 
 
-def _add_code_attributes_to_span(span, func: Callable[..., Any]) -> None:
+def add_code_attributes_to_span(span, func_or_class: Callable[..., Any]) -> None:
     """
     Add code-related attributes to a span based on a Python function.
 
@@ -39,36 +40,27 @@ def _add_code_attributes_to_span(span, func: Callable[..., Any]) -> None:
         return
 
     try:
-        # Get function name
-        function_name = getattr(func, "__name__", str(func))
-        span.set_attribute(CODE_FUNCTION_NAME, function_name)
-
-        # Get function source file from code object
+        # Check if it's a class first, with proper exception handling
         try:
-            if hasattr(func, "__code__"):
-                source_file = func.__code__.co_filename
-                span.set_attribute(CODE_FILE_PATH, source_file)
-        except (AttributeError, TypeError):
-            # Handle cases where code object is not available
-            # (e.g., built-in functions, C extensions)
-            pass
+            is_class = inspect.isclass(func_or_class)
+        except Exception:  # pylint: disable=broad-exception-caught
+            # If inspect.isclass fails, we can't safely determine the type, so return early
+            return
 
-        # Get function line number from code object
-        try:
-            if hasattr(func, "__code__"):
-                line_number = func.__code__.co_firstlineno
-                span.set_attribute(CODE_LINE_NUMBER, line_number)
-        except (AttributeError, TypeError):
-            # Handle cases where code object is not available
-            pass
-
+        if is_class:
+            span.set_attribute(CODE_FUNCTION_NAME, f"{func_or_class.__module__}.{func_or_class.__qualname__}")
+            span.set_attribute(CODE_FILE_PATH, inspect.getfile(func_or_class))
+        else:
+            code = getattr(func_or_class, "__code__", None)
+            if code:
+                span.set_attribute(CODE_FUNCTION_NAME, f"{func_or_class.__module__}.{func_or_class.__qualname__}")
+                span.set_attribute(CODE_FILE_PATH, code.co_filename)
+                span.set_attribute(CODE_LINE_NUMBER, code.co_firstlineno)
     except Exception:  # pylint: disable=broad-exception-caught
-        # Silently handle any unexpected errors to avoid breaking
-        # the instrumentation flow
         pass
 
 
-def add_code_attributes_to_span(func: Callable[..., Any]) -> Callable[..., Any]:
+def record_code_attributes(func: Callable[..., Any]) -> Callable[..., Any]:
     """
     Decorator to automatically add code attributes to the current OpenTelemetry span.
 
@@ -81,12 +73,12 @@ def add_code_attributes_to_span(func: Callable[..., Any]) -> Callable[..., Any]:
     This decorator supports both synchronous and asynchronous functions.
 
     Usage:
-        @add_code_attributes_to_span
+        @record_code_attributes
         def my_sync_function():
             # Sync function implementation
             pass
 
-        @add_code_attributes_to_span
+        @record_code_attributes
         async def my_async_function():
             # Async function implementation
             pass
@@ -97,9 +89,8 @@ def add_code_attributes_to_span(func: Callable[..., Any]) -> Callable[..., Any]:
     Returns:
         The wrapped function with current span code attributes tracing
     """
-    # Detect async functions: check function code object flags or special attributes
-    # CO_ITERABLE_COROUTINE = 0x80, async functions will have this flag set
-    is_async = (hasattr(func, "__code__") and func.__code__.co_flags & 0x80) or hasattr(func, "_is_coroutine")
+    # Detect async functions
+    is_async = inspect.iscoroutinefunction(func)
 
     if is_async:
         # Async function wrapper
@@ -109,7 +100,7 @@ def add_code_attributes_to_span(func: Callable[..., Any]) -> Callable[..., Any]:
             try:
                 current_span = trace.get_current_span()
                 if current_span:
-                    _add_code_attributes_to_span(current_span, func)
+                    add_code_attributes_to_span(current_span, func)
             except Exception:  # pylint: disable=broad-exception-caught
                 # Silently handle any unexpected errors
                 pass
@@ -126,7 +117,7 @@ def add_code_attributes_to_span(func: Callable[..., Any]) -> Callable[..., Any]:
         try:
             current_span = trace.get_current_span()
             if current_span:
-                _add_code_attributes_to_span(current_span, func)
+                add_code_attributes_to_span(current_span, func)
         except Exception:  # pylint: disable=broad-exception-caught
             # Silently handle any unexpected errors
             pass

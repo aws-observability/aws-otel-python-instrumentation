@@ -616,7 +616,7 @@ def _is_application_signals_runtime_enabled():
     )
 
 
-def _get_code_correlation_enabled_status() -> Optional[bool]:
+def get_code_correlation_enabled_status() -> Optional[bool]:
     """
     Get the code correlation enabled status from environment variable.
 

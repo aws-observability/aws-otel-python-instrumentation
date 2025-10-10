@@ -40,12 +40,12 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _export_unsampled_span_for_agent_observability,
     _export_unsampled_span_for_lambda,
     _fetch_logs_header,
-    _get_code_correlation_enabled_status,
     _init_logging,
     _is_application_signals_enabled,
     _is_application_signals_runtime_enabled,
     _is_defer_to_workers_enabled,
     _is_wsgi_master_process,
+    get_code_correlation_enabled_status,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
@@ -94,6 +94,13 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
     @classmethod
     def setUpClass(cls):
+        # Store original environment variables to restore later
+        cls._original_env = {}
+        for key in list(os.environ.keys()):
+            if key.startswith("OTEL_"):
+                cls._original_env[key] = os.environ[key]
+                del os.environ[key]
+
         # Run AwsOpenTelemetryDistro to set up environment, then validate expected env values.
         aws_open_telemetry_distro: AwsOpenTelemetryDistro = AwsOpenTelemetryDistro()
         aws_open_telemetry_distro.configure(apply_patches=False)
@@ -1428,60 +1435,60 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
                 mock_logger.error.assert_called_once()
 
     def test_get_code_correlation_enabled_status(self):
-        """Test _get_code_correlation_enabled_status function with various environment variable values"""
+        """Test get_code_correlation_enabled_status function with various environment variable values"""
         # Test when environment variable is not set (default state)
         os.environ.pop(CODE_CORRELATION_ENABLED_CONFIG, None)
-        result = _get_code_correlation_enabled_status()
+        result = get_code_correlation_enabled_status()
         self.assertIsNone(result)
 
         # Test when environment variable is set to 'true' (case insensitive)
         os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "true"
-        result = _get_code_correlation_enabled_status()
+        result = get_code_correlation_enabled_status()
         self.assertTrue(result)
 
         os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "TRUE"
-        result = _get_code_correlation_enabled_status()
+        result = get_code_correlation_enabled_status()
         self.assertTrue(result)
 
         os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "True"
-        result = _get_code_correlation_enabled_status()
+        result = get_code_correlation_enabled_status()
         self.assertTrue(result)
 
         # Test when environment variable is set to 'false' (case insensitive)
         os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "false"
-        result = _get_code_correlation_enabled_status()
+        result = get_code_correlation_enabled_status()
         self.assertFalse(result)
 
         os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "FALSE"
-        result = _get_code_correlation_enabled_status()
+        result = get_code_correlation_enabled_status()
         self.assertFalse(result)
 
         os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "False"
-        result = _get_code_correlation_enabled_status()
+        result = get_code_correlation_enabled_status()
         self.assertFalse(result)
 
         # Test with leading/trailing whitespace
         os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "  true  "
-        result = _get_code_correlation_enabled_status()
+        result = get_code_correlation_enabled_status()
         self.assertTrue(result)
 
         os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "  false  "
-        result = _get_code_correlation_enabled_status()
+        result = get_code_correlation_enabled_status()
         self.assertFalse(result)
 
         # Test invalid values (should return None and log warning)
         os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "invalid"
-        result = _get_code_correlation_enabled_status()
+        result = get_code_correlation_enabled_status()
         self.assertIsNone(result)
 
         # Test another invalid value
         os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "yes"
-        result = _get_code_correlation_enabled_status()
+        result = get_code_correlation_enabled_status()
         self.assertIsNone(result)
 
         # Test empty string (invalid)
         os.environ[CODE_CORRELATION_ENABLED_CONFIG] = ""
-        result = _get_code_correlation_enabled_status()
+        result = get_code_correlation_enabled_status()
         self.assertIsNone(result)
 
         # Clean up
