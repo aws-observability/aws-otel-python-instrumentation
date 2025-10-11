@@ -31,7 +31,7 @@ class TestAwsCodeCorrelationConfig(TestCase):
     def test_init_with_custom_parameters(self):
         """Test initialization with custom parameters."""
         include = ["myapp", "mylib"]
-        exclude = ["thirdparty", "vendor"]
+        exclude = ["third-party", "vendor"]
         stack_depth = 10
 
         config = AwsCodeCorrelationConfig(include=include, exclude=exclude, stack_depth=stack_depth)
@@ -169,13 +169,13 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):
 
     def test_from_env_complete_configuration(self):
         """Test from_env with complete configuration."""
-        config_data = {"include": ["myapp", "mylib"], "exclude": ["thirdparty", "vendor"], "stack_depth": 15}
+        config_data = {"include": ["myapp", "mylib"], "exclude": ["third-party", "vendor"], "stack_depth": 15}
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
         config = AwsCodeCorrelationConfig.from_env()
 
         self.assertEqual(config.include, ["myapp", "mylib"])
-        self.assertEqual(config.exclude, ["thirdparty", "vendor"])
+        self.assertEqual(config.exclude, ["third-party", "vendor"])
         self.assertEqual(config.stack_depth, 15)
 
     def test_from_env_partial_configuration(self):
@@ -191,13 +191,13 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):
 
     def test_from_env_only_exclude(self):
         """Test from_env with only exclude configuration."""
-        config_data = {"exclude": ["vendor", "thirdparty"]}
+        config_data = {"exclude": ["vendor", "third-party"]}
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
         config = AwsCodeCorrelationConfig.from_env()
 
         self.assertEqual(config.include, [])  # Default value
-        self.assertEqual(config.exclude, ["vendor", "thirdparty"])
+        self.assertEqual(config.exclude, ["vendor", "third-party"])
         self.assertEqual(config.stack_depth, 0)  # Default value
 
     def test_from_env_only_stack_depth(self):
@@ -425,7 +425,7 @@ class TestAwsCodeCorrelationConfigIntegration(TestCase):
 
     def test_roundtrip_to_json_from_env(self):
         """Test roundtrip: config -> to_json -> env -> from_env -> config."""
-        original_config = AwsCodeCorrelationConfig(include=["myapp"], exclude=["thirdparty"], stack_depth=5)
+        original_config = AwsCodeCorrelationConfig(include=["myapp"], exclude=["third-party"], stack_depth=5)
 
         # Convert to JSON for environment
         config_json = original_config.to_json(indent=None)  # Compact JSON

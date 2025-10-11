@@ -34,7 +34,7 @@ class AwsCodeCorrelationConfig:
     Example Configuration:
         export OTEL_AWS_CODE_CORRELATION_CONFIG='{
             "include": ["myapp", "mylib"],
-            "exclude": ["thirdparty", "vendor"],
+            "exclude": ["third-party", "vendor"],
             "stack_depth": 5
         }'
     """
