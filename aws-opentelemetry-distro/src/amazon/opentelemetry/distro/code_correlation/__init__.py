@@ -6,37 +6,39 @@ Code correlation module for AWS OpenTelemetry Python Instrumentation.
 
 This module provides functionality for correlating code execution with telemetry data.
 """
-
-# Version information
-__version__ = "1.0.0"
-
-# Code correlation attribute constants
-CODE_FUNCTION_NAME = "code.function.name"
-CODE_FILE_PATH = "code.file.path"
-CODE_LINE_NUMBER = "code.line.number"
+# Import code attributes span processor
+from .code_attributes_span_processor import CodeAttributesSpanProcessor
 
 # Import main utilities to maintain API compatibility
 from .utils import (
     add_code_attributes_to_span,
+    add_code_attributes_to_span_from_frame,
     get_callable_fullname,
+    get_function_fullname_from_frame,
     record_code_attributes,
 )
 
-# Import stack trace processor
-from .stack_trace_span_processor import StackTraceSpanProcessor
+# Version information
+__version__ = "1.0.0"
+
+# Import constants from separate module to avoid circular imports
+from .constants import CODE_FILE_PATH, CODE_FUNCTION_NAME, CODE_LINE_NUMBER, CODE_STACKTRACE
 
 # Define public API
 __all__ = [
     # Constants
     "CODE_FUNCTION_NAME",
-    "CODE_FILE_PATH", 
+    "CODE_FILE_PATH",
     "CODE_LINE_NUMBER",
+    "CODE_STACKTRACE",
     # Functions
     "add_code_attributes_to_span",
+    "add_code_attributes_to_span_from_frame",
     "get_callable_fullname",
+    "get_function_fullname_from_frame",
     "record_code_attributes",
     # Classes
-    "StackTraceSpanProcessor",
+    "CodeAttributesSpanProcessor",
     # Version
     "__version__",
 ]

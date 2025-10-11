@@ -11,13 +11,13 @@ code metadata with telemetry data.
 import functools
 import inspect
 from functools import wraps
-from types import FunctionType, MethodType
+from types import FrameType, FunctionType, MethodType
 from typing import Any, Callable
 
 from opentelemetry import trace
 
 
-def get_callable_fullname(obj) -> str:
+def get_callable_fullname(obj) -> str:  # pylint: disable=too-many-return-statements
     """
     Return the fully qualified name of any callable (module + qualname),
     safely handling functions, methods, classes, partials, built-ins, etc.
@@ -42,7 +42,7 @@ def get_callable_fullname(obj) -> str:
         if inspect.isclass(obj):
             module = getattr(obj, "__module__", "<unknown_module>")
             name = getattr(obj, "__qualname__", getattr(obj, "__name__", "<unknown_class>"))
-            return f"{module}.{name}"
+            return _construct_qualified_name(module, None, name)
 
         # Bound or unbound methods
         if isinstance(obj, MethodType):
@@ -52,28 +52,110 @@ def get_callable_fullname(obj) -> str:
                 cls_name = cls.__class__.__name__ if not inspect.isclass(cls) else cls.__name__
                 module = getattr(func, "__module__", "<unknown_module>")
                 name = getattr(func, "__name__", "<unknown_func>")
-                return f"{module}.{cls_name}.{name}"
+                return _construct_qualified_name(module, cls_name, name)
 
         # Regular Python functions, lambdas, static/class methods
         if isinstance(obj, (FunctionType, staticmethod, classmethod)):
             func = inspect.unwrap(obj)
             module = getattr(func, "__module__", "<unknown_module>")
             qualname = getattr(func, "__qualname__", getattr(func, "__name__", repr(func)))
-            return f"{module}.{qualname}"
+            return _construct_qualified_name(module, None, qualname)
 
         # Built-in or C extension functions (e.g., len, numpy.add)
         module = getattr(obj, "__module__", None)
         name = getattr(obj, "__qualname__", None) or getattr(obj, "__name__", None)
-        if module and name:
-            return f"{module}.{name}"
-        elif name:
-            return name
+        if name:
+            return _construct_qualified_name(module or "<unknown_module>", None, name)
 
         # Fallback for unknown callables
         return repr(obj)
 
-    except Exception:
+    except Exception:  # pylint: disable=broad-exception-caught
         return "<unknown_callable>"
+
+
+def get_function_fullname_from_frame(frame: FrameType) -> str:
+    """
+    Extract a fully qualified function name from a frame, similar to get_callable_fullname.
+
+    This attempts to construct a full name including module and class information
+    when possible, falling back to just the function name if needed.
+
+    Args:
+        frame: The Python frame object to extract name from
+
+    Returns:
+        The fully qualified function name if possible, otherwise just the function name
+    """
+    code = frame.f_code
+    func_name = code.co_name
+
+    try:
+        # Try to get module name from frame globals
+        module_name = frame.f_globals.get("__name__", "<unknown_module>")
+
+        # Try to determine if this is a method by looking for 'self' or 'cls' in locals
+        locals_dict = frame.f_locals
+
+        # Check for bound method (has 'self')
+        if "self" in locals_dict:
+            try:
+                cls_name = locals_dict["self"].__class__.__name__
+                return _construct_qualified_name(module_name, cls_name, func_name)
+            except (AttributeError, KeyError):
+                pass
+
+        # Check for class method (has 'cls')
+        elif "cls" in locals_dict:
+            try:
+                cls_name = locals_dict["cls"].__name__
+                return _construct_qualified_name(module_name, cls_name, func_name)
+            except (AttributeError, KeyError):
+                pass
+
+        # For regular functions or fallback
+        return _construct_qualified_name(module_name, None, func_name)
+
+    except Exception:  # pylint: disable=broad-exception-caught
+        # If anything goes wrong, fallback to simple function name
+        return func_name
+
+
+def add_code_attributes_to_span_from_frame(frame: FrameType, span) -> None:
+    """
+    Add code-related attributes to a span based on a Python frame object.
+
+    This utility method extracts metadata from a frame and adds the following span attributes:
+    - CODE_FUNCTION_NAME: The fully qualified function name from the frame
+    - CODE_FILE_PATH: The file path where the code is defined
+    - CODE_LINE_NUMBER: The line number where the function is defined
+
+    Args:
+        frame: The Python frame object to extract metadata from
+        span: The OpenTelemetry span to add attributes to
+    """
+    # Import constants here to avoid circular imports
+    from .constants import (  # pylint: disable=import-outside-toplevel
+        CODE_FILE_PATH,
+        CODE_FUNCTION_NAME,
+        CODE_LINE_NUMBER,
+    )
+
+    if not span.is_recording():
+        return
+
+    try:
+        # Set function name using full qualified name (consistent with add_code_attributes_to_span)
+        span.set_attribute(CODE_FUNCTION_NAME, get_function_fullname_from_frame(frame))
+
+        # Set file path from code object
+        span.set_attribute(CODE_FILE_PATH, frame.f_code.co_filename)
+
+        # Set line number from code object
+        span.set_attribute(CODE_LINE_NUMBER, frame.f_lineno)
+
+    except Exception:  # pylint: disable=broad-exception-caught
+        pass
 
 
 def add_code_attributes_to_span(span, func_or_class: Callable[..., Any]) -> None:
@@ -90,15 +172,19 @@ def add_code_attributes_to_span(span, func_or_class: Callable[..., Any]) -> None
         func_or_class: The Python function or class to extract metadata from
     """
     # Import constants here to avoid circular imports
-    from . import CODE_FUNCTION_NAME, CODE_FILE_PATH, CODE_LINE_NUMBER
-    
+    from .constants import (  # pylint: disable=import-outside-toplevel
+        CODE_FILE_PATH,
+        CODE_FUNCTION_NAME,
+        CODE_LINE_NUMBER,
+    )
+
     if not span.is_recording():
         return
 
     try:
         # Always set the function name using our robust helper
         span.set_attribute(CODE_FUNCTION_NAME, get_callable_fullname(func_or_class))
-        
+
         # Try to get file path using inspect.getfile (works for both classes and functions)
         try:
             file_path = inspect.getfile(func_or_class)
@@ -106,12 +192,12 @@ def add_code_attributes_to_span(span, func_or_class: Callable[..., Any]) -> None
         except (OSError, TypeError):
             # Built-ins and some other callables don't have source files
             pass
-        
+
         # Try to get line number from __code__ attribute (only available for functions)
         code = getattr(func_or_class, "__code__", None)
         if code:
             span.set_attribute(CODE_LINE_NUMBER, code.co_firstlineno)
-            
+
     except Exception:  # pylint: disable=broad-exception-caught
         pass
 
@@ -180,3 +266,22 @@ def record_code_attributes(func: Callable[..., Any]) -> Callable[..., Any]:
         return func(*args, **kwargs)
 
     return sync_wrapper
+
+
+def _construct_qualified_name(module_name: str, class_name: str = None, func_name: str = "") -> str:
+    """
+    Construct a fully qualified name from module, class, and function components.
+
+    Args:
+        module_name: The module name
+        class_name: The class name (optional)
+        func_name: The function name
+
+    Returns:
+        The fully qualified name in the format module.Class.function or module.function
+    """
+    if class_name:
+        return f"{module_name}.{class_name}.{func_name}"
+    if module_name and module_name not in ("<unknown_module>", None):
+        return f"{module_name}.{func_name}"
+    return func_name
