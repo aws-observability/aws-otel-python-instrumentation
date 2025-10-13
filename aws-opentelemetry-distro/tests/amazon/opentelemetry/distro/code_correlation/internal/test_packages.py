@@ -399,14 +399,12 @@ class TestBuildPackageMapping(TestCase):
 class TestLoadThirdPartyPackages(TestCase):
     """Test the _load_third_party_packages function."""
 
-    @patch("importlib.resources.read_binary")
-    @patch("gzip.decompress")
+    @patch("importlib.resources.read_text")
     @patch("amazon.opentelemetry.distro.code_correlation.internal.packages._code_attributes_config")
-    def test_load_third_party_packages_success(self, mock_config, mock_decompress, mock_read_binary):
+    def test_load_third_party_packages_success(self, mock_config, mock_read_text):
         """Test successful loading of third-party packages."""
-        # Mock compressed data and decompression
-        mock_read_binary.return_value = b"compressed_data"
-        mock_decompress.return_value = b"package1\npackage2\npackage3"
+        # Mock text file content
+        mock_read_text.return_value = "package1\npackage2\npackage3"
 
         # Mock configuration
         mock_config.include = ["extra_package"]
@@ -417,11 +415,11 @@ class TestLoadThirdPartyPackages(TestCase):
         expected = {"package1", "package3", "extra_package"}  # package2 excluded
         self.assertEqual(result, expected)
 
-    @patch("importlib.resources.read_binary")
+    @patch("importlib.resources.read_text")
     @patch("amazon.opentelemetry.distro.code_correlation.internal.packages._logger")
-    def test_load_third_party_packages_exception(self, mock_logger, mock_read_binary):
+    def test_load_third_party_packages_exception(self, mock_logger, mock_read_text):
         """Test loading third-party packages handles exceptions."""
-        mock_read_binary.side_effect = Exception("Read error")
+        mock_read_text.side_effect = Exception("Read error")
 
         result = _load_third_party_packages.__wrapped__()
 
