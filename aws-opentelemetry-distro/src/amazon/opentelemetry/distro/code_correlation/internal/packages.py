@@ -263,12 +263,11 @@ def _load_third_party_packages() -> Set[str]:
         Set of third-party package names
     """
     try:
-        from gzip import decompress  # pylint: disable=import-outside-toplevel
-        from importlib.resources import read_binary  # pylint: disable=import-outside-toplevel
+        from importlib.resources import read_text  # pylint: disable=import-outside-toplevel
 
-        # Load compressed package list
-        compressed_data = read_binary("amazon.opentelemetry.distro.code_correlation.internal", "3rd.tar.gz")
-        package_names = set(decompress(compressed_data).decode("utf-8").splitlines())
+        # Load package list from text file
+        content = read_text("amazon.opentelemetry.distro.code_correlation.internal", "3rd.txt")
+        package_names = set(content.splitlines())
 
         # Apply configuration overrides
         configured_packages = (package_names | set(_code_attributes_config.include)) - set(
