@@ -59,18 +59,20 @@ _TABLE_ARN: str = "arn:aws:dynamodb:us-west-2:123456789012:table/testTable"
 _AGENTCORE_RUNTIME_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/test-runtime-123"
 _AGENTCORE_RUNTIME_ENDPOINT_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime-endpoint/test-endpoint"
 _AGENTCORE_RUNTIME_ID: str = "test-runtime-123"
-_AGENTCORE_BROWSER_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:browser/agentBrowser-123456789"
-_AGENTCORE_BROWSER_ID: str = "agentBrowser-123456789"
+_AGENTCORE_BROWSER_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:browser/testBrowser-1234567890"
+_AGENTCORE_BROWSER_ID: str = "testBrowser-1234567890"
 _AGENTCORE_CODE_INTERPRETER_ARN: str = (
-    "arn:aws:bedrock-agentcore:us-east-1:123456789012:code-interpreter/agentCodeInterpreter-123456789"
+    "arn:aws:bedrock-agentcore:us-east-1:123456789012:code-interpreter/testCodeInt-1234567890"
 )
-_AGENTCORE_CODE_INTERPRETER_ID: str = "agentCodeInterpreter-123456789"
+_AGENTCORE_CODE_INTERPRETER_ID: str = "testCodeInt-1234567890"
 _AGENTCORE_GATEWAY_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:gateway/agentGateway-123456789"
 _AGENTCORE_GATEWAY_ID: str = "agentGateway-123456789"
 _AGENTCORE_TARGET_ID: str = "target-123456789"
 _AGENTCORE_MEMORY_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/agentMemory-123456789"
 _AGENTCORE_MEMORY_ID: str = "agentMemory-123456789"
-_AGENTCORE_CREDENTIAL_PROVIDER_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:credential-provider/test-cp"
+_AGENTCORE_CREDENTIAL_PROVIDER_ARN: str = (
+    "arn:aws:acps:us-east-1:123456789012:token-vault/test-vault/apikeycredentialprovider/test-provider"
+)
 _AGENTCORE_WORKLOAD_IDENTITY_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:workload-identity/test-wi"
 
 # Patch names
