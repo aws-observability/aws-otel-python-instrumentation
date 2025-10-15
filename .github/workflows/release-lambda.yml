@@ -150,12 +150,12 @@ jobs:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v2
-      - name: download layerARNs
-        uses: actions/download-artifact@v4
-        with:
-          pattern: ${{ env.LAYER_NAME }}-*
-          path: ${{ env.LAYER_NAME }}
-          merge-multiple: true
+      # - name: download layerARNs
+      #   uses: actions/download-artifact@v4
+      #   with:
+      #     pattern: ${{ env.LAYER_NAME }}-*
+      #     path: ${{ env.LAYER_NAME }}
+      #     merge-multiple: true
       # - name: show layerARNs
       #   run: |
       #     for file in ${{ env.LAYER_NAME }}/*
@@ -163,42 +163,42 @@ jobs:
       #     echo $file
       #     cat $file
       #     done
-      - name: generate layer-note
-        working-directory: ${{ env.LAYER_NAME }}
-        run: |
-          echo "| Region | Layer ARN |" >> ../layer-note
-          echo "|  ----  | ----  |" >> ../layer-note
-          for file in *
-          do
-          read arn < $file
-          echo "| " $file " | " $arn " |" >> ../layer-note
-          done
-          cat ../layer-note
-      - name: generate tf layer
-        working-directory: ${{ env.LAYER_NAME }}
-        run: |
-          echo "locals {" >> ../layer_arns.tf
-          echo "  sdk_layer_arns = {" >> ../layer_arns.tf
-          for file in *
-          do
-          read arn < $file
-          echo "    \""$file"\" = \""$arn"\"" >> ../layer_arns.tf
-          done
-          cd ..
-          echo "  }" >> layer_arns.tf
-          echo "}" >> layer_arns.tf
-          terraform fmt layer_arns.tf
-          cat layer_arns.tf
-      - name: generate layer ARN constants for CDK
-        working-directory: ${{ env.LAYER_NAME }}
-        run: |
-          echo "{" > ../layer_cdk
-          for file in *; do
-            read arn < "$file"
-            echo "    \"$file\": \"$arn\"," >> ../layer_cdk
-          done
-          echo "}" >> ../layer_cdk
-          cat ../layer_cdk
+      # - name: generate layer-note
+      #   working-directory: ${{ env.LAYER_NAME }}
+      #   run: |
+      #     echo "| Region | Layer ARN |" >> ../layer-note
+      #     echo "|  ----  | ----  |" >> ../layer-note
+      #     for file in *
+      #     do
+      #     read arn < $file
+      #     echo "| " $file " | " $arn " |" >> ../layer-note
+      #     done
+      #     cat ../layer-note
+      # - name: generate tf layer
+      #   working-directory: ${{ env.LAYER_NAME }}
+      #   run: |
+      #     echo "locals {" >> ../layer_arns.tf
+      #     echo "  sdk_layer_arns = {" >> ../layer_arns.tf
+      #     for file in *
+      #     do
+      #     read arn < $file
+      #     echo "    \""$file"\" = \""$arn"\"" >> ../layer_arns.tf
+      #     done
+      #     cd ..
+      #     echo "  }" >> layer_arns.tf
+      #     echo "}" >> layer_arns.tf
+      #     terraform fmt layer_arns.tf
+      #     cat layer_arns.tf
+      # - name: generate layer ARN constants for CDK
+      #   working-directory: ${{ env.LAYER_NAME }}
+      #   run: |
+      #     echo "{" > ../layer_cdk
+      #     for file in *; do
+      #       read arn < "$file"
+      #       echo "    \"$file\": \"$arn\"," >> ../layer_cdk
+      #     done
+      #     echo "}" >> ../layer_cdk
+      #     cat ../layer_cdk
       - name: download layer.zip
         uses: actions/download-artifact@v4
         with:
@@ -219,7 +219,6 @@ jobs:
           echo "" >> release_notes.md
           echo "See new Lambda Layer ARNs:" >> release_notes.md
           echo "" >> release_notes.md
-          cat layer-note >> release_notes.md
           echo "" >> release_notes.md
           echo "Notes:" >> release_notes.md
       - name: Create GH release
@@ -234,7 +233,7 @@ jobs:
              --notes-file release_notes.md  \
              --draft \
              "lambda-v${VERSION}-${SHA_SHORT}" \
-             layer_arns.tf layer.zip
+             layer.zip
           echo Removing release_notes.md ...
           rm -f release_notes.md
       - name: Upload layer.zip and SHA-256 checksum to SDK Release Notes (tagged with latest)
