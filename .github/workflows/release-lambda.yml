@@ -156,13 +156,13 @@ jobs:
           pattern: ${{ env.LAYER_NAME }}-*
           path: ${{ env.LAYER_NAME }}
           merge-multiple: true
-      - name: show layerARNs
-        run: |
-          for file in ${{ env.LAYER_NAME }}/*
-          do
-          echo $file
-          cat $file
-          done
+      # - name: show layerARNs
+      #   run: |
+      #     for file in ${{ env.LAYER_NAME }}/*
+      #     do
+      #     echo $file
+      #     cat $file
+      #     done
       - name: generate layer-note
         working-directory: ${{ env.LAYER_NAME }}
         run: |
