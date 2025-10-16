@@ -699,7 +699,7 @@ def _set_span_kind_for_dependency(span: ReadableSpan, attributes: BoundedAttribu
     attributes[AWS_SPAN_KIND] = span_kind
 
 
-# pylint: disable=too-many-locals
+# pylint: disable=too-many-locals,too-many-return-statements
 def _get_agentcore_resource_type_and_identifier(span: ReadableSpan) -> tuple[Optional[str], Optional[str]]:
     """Get BedrockAgentCore resource type and identifier based on span attributes."""
 
