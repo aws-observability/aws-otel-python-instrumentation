@@ -109,6 +109,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         else:
             set_main_status(404)
 
+    # pylint: disable=too-many-return-statements,too-many-branches,too-many-statements
     def _handle_bedrock_agentcore_request(self) -> None:
         bedrock_agentcore_client = boto3.client(
             "bedrock-agentcore", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION
