@@ -420,7 +420,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):
         config_data = {
             "include": ["valid_string", 123, True, None, "another_valid_string"],
             "exclude": [],
-            "stack_depth": 5
+            "stack_depth": 5,
         }
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
@@ -435,7 +435,9 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):
         self.assertTrue(mock_logger.warning.call_count >= 3)  # At least 3 non-string items
         warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
         # Check that warnings mention non-string items being skipped
-        non_string_warnings = [call for call in warning_calls if "'include' list item" in call and "must be a string" in call]
+        non_string_warnings = [
+            call for call in warning_calls if "'include' list item" in call and "must be a string" in call
+        ]
         self.assertEqual(len(non_string_warnings), 3)  # 123, True, None
 
     @patch("amazon.opentelemetry.distro.code_correlation.config._logger")
@@ -444,7 +446,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):
         config_data = {
             "include": [],
             "exclude": ["valid_exclude", 42, False, "another_valid_exclude", [1, 2, 3]],
-            "stack_depth": 10
+            "stack_depth": 10,
         }
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
@@ -459,7 +461,9 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):
         self.assertTrue(mock_logger.warning.call_count >= 3)  # At least 3 non-string items
         warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
         # Check that warnings mention non-string items being skipped
-        non_string_warnings = [call for call in warning_calls if "'exclude' list item" in call and "must be a string" in call]
+        non_string_warnings = [
+            call for call in warning_calls if "'exclude' list item" in call and "must be a string" in call
+        ]
         self.assertEqual(len(non_string_warnings), 3)  # 42, False, [1, 2, 3]
 
     @patch("amazon.opentelemetry.distro.code_correlation.config._logger")
@@ -468,7 +472,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):
         config_data = {
             "include": [123, True, None, {"key": "value"}, [1, 2, 3]],
             "exclude": [456, False, 0, 1.5, {"another": "object"}],
-            "stack_depth": 5
+            "stack_depth": 5,
         }
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
@@ -482,19 +486,19 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):
         # Should log warnings for all non-string items
         self.assertTrue(mock_logger.warning.call_count >= 10)  # 5 + 5 non-string items
         warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
-        include_warnings = [call for call in warning_calls if "'include' list item" in call and "must be a string" in call]
-        exclude_warnings = [call for call in warning_calls if "'exclude' list item" in call and "must be a string" in call]
+        include_warnings = [
+            call for call in warning_calls if "'include' list item" in call and "must be a string" in call
+        ]
+        exclude_warnings = [
+            call for call in warning_calls if "'exclude' list item" in call and "must be a string" in call
+        ]
         self.assertEqual(len(include_warnings), 5)
         self.assertEqual(len(exclude_warnings), 5)
 
     @patch("amazon.opentelemetry.distro.code_correlation.config._logger")
     def test_from_env_float_stack_depth(self, mock_logger):
         """Test from_env with float stack_depth."""
-        config_data = {
-            "include": ["myapp"],
-            "exclude": ["vendor"],
-            "stack_depth": 5.7
-        }
+        config_data = {"include": ["myapp"], "exclude": ["vendor"], "stack_depth": 5.7}
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
         config = AwsCodeCorrelationConfig.from_env()
@@ -518,7 +522,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):
         config_data = {
             "include": ["valid", "", "also_valid", ""],
             "exclude": ["", "valid_exclude", ""],
-            "stack_depth": 5
+            "stack_depth": 5,
         }
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
