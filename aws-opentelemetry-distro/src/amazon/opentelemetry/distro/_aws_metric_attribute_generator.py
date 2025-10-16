@@ -8,14 +8,22 @@ from urllib.parse import ParseResult, urlparse
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_AUTH_ACCESS_KEY,
+    AWS_AUTH_CREDENTIAL_PROVIDER_ARN,
     AWS_AUTH_REGION,
     AWS_BEDROCK_AGENT_ID,
+    AWS_BEDROCK_AGENTCORE_BROWSER_ARN,
+    AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN,
+    AWS_BEDROCK_AGENTCORE_GATEWAY_ARN,
+    AWS_BEDROCK_AGENTCORE_MEMORY_ARN,
+    AWS_BEDROCK_AGENTCORE_RUNTIME_ARN,
+    AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN,
     AWS_BEDROCK_DATA_SOURCE_ID,
     AWS_BEDROCK_GUARDRAIL_ARN,
     AWS_BEDROCK_GUARDRAIL_ID,
     AWS_BEDROCK_KNOWLEDGE_BASE_ID,
     AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER,
     AWS_DYNAMODB_TABLE_ARN,
+    AWS_GATEWAY_TARGET_ID,
     AWS_KINESIS_STREAM_ARN,
     AWS_KINESIS_STREAM_NAME,
     AWS_LAMBDA_FUNCTION_ARN,
@@ -63,6 +71,13 @@ from amazon.opentelemetry.distro.metric_attribute_generator import (
     SERVICE_METRIC,
     MetricAttributeGenerator,
 )
+from amazon.opentelemetry.distro.patches._bedrock_agentcore_patches import (
+    GEN_AI_BROWSER_ID,
+    GEN_AI_CODE_INTERPRETER_ID,
+    GEN_AI_GATEWAY_ID,
+    GEN_AI_MEMORY_ID,
+    GEN_AI_RUNTIME_ID,
+)
 from amazon.opentelemetry.distro.regional_resource_arn_parser import RegionalResourceArnParser
 from amazon.opentelemetry.distro.sqs_url_parser import SqsUrlParser
 from opentelemetry.sdk.resources import Resource
@@ -105,6 +120,7 @@ _NORMALIZED_S3_SERVICE_NAME: str = "AWS::S3"
 _NORMALIZED_SQS_SERVICE_NAME: str = "AWS::SQS"
 _NORMALIZED_BEDROCK_SERVICE_NAME: str = "AWS::Bedrock"
 _NORMALIZED_BEDROCK_RUNTIME_SERVICE_NAME: str = "AWS::BedrockRuntime"
+_NORMALIZED_BEDROCK_AGENTCORE_SERVICE_NAME: str = "AWS::BedrockAgentCore"
 _NORMALIZED_SECRETSMANAGER_SERVICE_NAME: str = "AWS::SecretsManager"
 _NORMALIZED_SNS_SERVICE_NAME: str = "AWS::SNS"
 _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME: str = "AWS::StepFunctions"
@@ -117,6 +133,19 @@ _LAMBDA_INVOKE_OPERATION: str = "Invoke"
 
 # Special DEPENDENCY attribute value if GRAPHQL_OPERATION_TYPE attribute key is present.
 _GRAPHQL: str = "graphql"
+
+# AWS SDK service mapping for normalization
+_AWS_SDK_SERVICE_MAPPING = {
+    "Bedrock Agent": _NORMALIZED_BEDROCK_SERVICE_NAME,
+    "Bedrock Agent Runtime": _NORMALIZED_BEDROCK_SERVICE_NAME,
+    "Bedrock Runtime": _NORMALIZED_BEDROCK_RUNTIME_SERVICE_NAME,
+    "Bedrock AgentCore Control": _NORMALIZED_BEDROCK_AGENTCORE_SERVICE_NAME,
+    "Bedrock AgentCore": _NORMALIZED_BEDROCK_AGENTCORE_SERVICE_NAME,
+    "Secrets Manager": _NORMALIZED_SECRETSMANAGER_SERVICE_NAME,
+    "SNS": _NORMALIZED_SNS_SERVICE_NAME,
+    "SFN": _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME,
+    "Lambda": _NORMALIZED_LAMBDA_SERVICE_NAME,
+}
 
 _logger: Logger = getLogger(__name__)
 
@@ -327,16 +356,6 @@ def _normalize_remote_service_name(span: ReadableSpan, service_name: str) -> str
     as the associated remote resource (Model) is not listed in Cloud Control.
     """
     if is_aws_sdk_span(span):
-        aws_sdk_service_mapping = {
-            "Bedrock Agent": _NORMALIZED_BEDROCK_SERVICE_NAME,
-            "Bedrock Agent Runtime": _NORMALIZED_BEDROCK_SERVICE_NAME,
-            "Bedrock Runtime": _NORMALIZED_BEDROCK_RUNTIME_SERVICE_NAME,
-            "Secrets Manager": _NORMALIZED_SECRETSMANAGER_SERVICE_NAME,
-            "SNS": _NORMALIZED_SNS_SERVICE_NAME,
-            "SFN": _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME,
-            "Lambda": _NORMALIZED_LAMBDA_SERVICE_NAME,
-        }
-
         # Special handling for Lambda invoke operations
         if _is_lambda_invoke_operation(span):
             lambda_function_name = span.attributes.get(AWS_LAMBDA_FUNCTION_NAME)
@@ -345,7 +364,7 @@ def _normalize_remote_service_name(span: ReadableSpan, service_name: str) -> str
             # is missing rather than falling back to a generic service name
             return lambda_function_name if lambda_function_name else UNKNOWN_REMOTE_SERVICE
 
-        return aws_sdk_service_mapping.get(service_name, "AWS::" + service_name)
+        return _AWS_SDK_SERVICE_MAPPING.get(service_name, "AWS::" + service_name)
     return service_name
 
 
@@ -466,6 +485,13 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         elif is_key_present(span, GEN_AI_REQUEST_MODEL):
             remote_resource_type = _NORMALIZED_BEDROCK_SERVICE_NAME + "::Model"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(GEN_AI_REQUEST_MODEL))
+        elif (
+            _AWS_SDK_SERVICE_MAPPING.get(str(span.attributes.get(_RPC_SERVICE)))
+            == _NORMALIZED_BEDROCK_AGENTCORE_SERVICE_NAME
+        ):
+            agentcore_type, agentcore_identifier = _get_agentcore_resource_type_and_identifier(span)
+            remote_resource_type = agentcore_type
+            remote_resource_identifier = _escape_delimiters(agentcore_identifier) if agentcore_identifier else None
         elif is_key_present(span, AWS_SECRETSMANAGER_SECRET_ARN):
             remote_resource_type = _NORMALIZED_SECRETSMANAGER_SERVICE_NAME + "::Secret"
             remote_resource_identifier = _escape_delimiters(
@@ -672,6 +698,89 @@ def _set_remote_db_user(span: ReadableSpan, attributes: BoundedAttributes) -> No
 def _set_span_kind_for_dependency(span: ReadableSpan, attributes: BoundedAttributes) -> None:
     span_kind: str = span.kind.name
     attributes[AWS_SPAN_KIND] = span_kind
+
+
+def _get_agentcore_resource_type_and_identifier(span: ReadableSpan) -> tuple[Optional[str], Optional[str]]:
+    """Get BedrockAgentCore resource type and identifier based on span attributes."""
+
+    attrs = span.attributes
+
+    # This check is not necessary but added to satisfy the linter.
+    if not attrs:
+        return None, None
+
+    def extract_id_from_arn(arn: str) -> Optional[str]:
+        if not arn:
+            return None
+        parts = arn.split("/")
+        return parts[-1] if parts else None
+
+    resource_type = None
+    resource_identifier = None
+
+    # Browser
+    browser_id = attrs.get(GEN_AI_BROWSER_ID)
+    browser_arn = attrs.get(AWS_BEDROCK_AGENTCORE_BROWSER_ARN)
+    if browser_id or browser_arn:
+        id_value = browser_id or extract_id_from_arn(str(browser_arn) if browser_arn else "")
+        resource_type = "Browser" if id_value == "aws.browser.v1" else "BrowserCustom"
+        resource_identifier = str(id_value) if id_value else None
+
+    # Gateway
+    gateway_id = attrs.get(GEN_AI_GATEWAY_ID)
+    gateway_arn = attrs.get(AWS_BEDROCK_AGENTCORE_GATEWAY_ARN)
+    if gateway_id or gateway_arn:
+        gateway_target_id = attrs.get(AWS_GATEWAY_TARGET_ID)
+        if gateway_target_id:
+            resource_type = "GatewayTarget"
+            resource_identifier = str(gateway_target_id)
+        else:
+            resource_type = "Gateway"
+            resource_identifier = (
+                str(gateway_id) if gateway_id else extract_id_from_arn(str(gateway_arn) if gateway_arn else "")
+            )
+
+    # Runtime
+    runtime_id = attrs.get(GEN_AI_RUNTIME_ID)
+    runtime_arn = attrs.get(AWS_BEDROCK_AGENTCORE_RUNTIME_ARN)
+    runtime_endpoint_arn = attrs.get(AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN)
+    if runtime_id or runtime_arn:
+        if runtime_endpoint_arn:
+            resource_type = "RuntimeEndpoint"
+            resource_identifier = str(runtime_endpoint_arn)
+        else:
+            resource_type = "Runtime"
+            resource_identifier = (
+                str(runtime_id) if runtime_id else extract_id_from_arn(str(runtime_arn) if runtime_arn else "")
+            )
+
+    # Code interpreter
+    code_interpreter_id = attrs.get(GEN_AI_CODE_INTERPRETER_ID)
+    code_interpreter_arn = attrs.get(AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN)
+    if code_interpreter_id or code_interpreter_arn:
+        id_value = code_interpreter_id or extract_id_from_arn(str(code_interpreter_arn) if code_interpreter_arn else "")
+        resource_type = "CodeInterpreter" if id_value == "aws.codeinterpreter.v1" else "CodeInterpreterCustom"
+        resource_identifier = str(id_value) if id_value else None
+
+    # Identity
+    credential_arn = attrs.get(AWS_AUTH_CREDENTIAL_PROVIDER_ARN)
+    if credential_arn:
+        credential_arn_str = str(credential_arn)
+        if "apikeycredentialprovider" in credential_arn_str:
+            resource_type = "APIKeyCredentialProvider"
+        if "oauth2credentialprovider" in credential_arn_str:
+            resource_type = "OAuth2CredentialProvider"
+        resource_identifier = extract_id_from_arn(credential_arn_str)
+
+    # Memory
+    memory_id = attrs.get(GEN_AI_MEMORY_ID)
+    memory_arn = attrs.get(AWS_BEDROCK_AGENTCORE_MEMORY_ARN)
+    if memory_id or memory_arn:
+        resource_type = "Memory"
+        resource_identifier = str(memory_arn) if memory_arn else None
+
+    full_resource_type = f"{_NORMALIZED_BEDROCK_AGENTCORE_SERVICE_NAME}::{resource_type}" if resource_type else None
+    return full_resource_type, resource_identifier
 
 
 def _log_unknown_attribute(attribute_key: str, span: ReadableSpan) -> None:

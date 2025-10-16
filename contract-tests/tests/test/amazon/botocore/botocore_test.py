@@ -750,6 +750,72 @@ class BotocoreTest(ContractTestBase):
             span_name="Bedrock Agent.GetDataSource",
         )
 
+    def test_bedrock_agentcore_invoke_agent_runtime(self):
+        self.do_test_requests(
+            "bedrock-agentcore/runtime/invokeagentruntime/myAgent-w8slyU6q5M",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock AgentCore",
+            remote_service="AWS::BedrockAgentCore",
+            remote_operation="InvokeAgentRuntime",
+            remote_resource_type="AWS::BedrockAgentCore::Runtime",
+            remote_resource_identifier="myAgent-w8slyU6q5M",
+            cloudformation_primary_identifier="myAgent-w8slyU6q5M",
+            span_name="Bedrock AgentCore.InvokeAgentRuntime",
+        )
+
+    def test_bedrock_agentcore_create_agent_runtime_endpoint(self):
+        self.do_test_requests(
+            "bedrock-agentcore/runtime/createendpoint",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock AgentCore Control",
+            remote_service="AWS::BedrockAgentCore",
+            remote_operation="CreateAgentRuntimeEndpoint",
+            remote_resource_type="AWS::BedrockAgentCore::RuntimeEndpoint",
+            remote_resource_identifier=("arn:aws:bedrock-agentcore:us-west-2:123456789012:endpoint/invokeEndpoint"),
+            cloudformation_primary_identifier=(
+                "arn:aws:bedrock-agentcore:us-west-2:123456789012:endpoint/invokeEndpoint"
+            ),
+            span_name="Bedrock AgentCore Control.CreateAgentRuntimeEndpoint",
+        )
+
+    def test_bedrock_agentcore_start_browser_session(self):
+        self.do_test_requests(
+            "bedrock-agentcore/runtime/startbrowsersession/agentBrowser-qYkrpgjS2M",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock AgentCore",
+            remote_service="AWS::BedrockAgentCore",
+            remote_operation="StartBrowserSession",
+            remote_resource_type="AWS::BedrockAgentCore::BrowserCustom",
+            remote_resource_identifier="agentBrowser-qYkrpgjS2M",
+            cloudformation_primary_identifier="agentBrowser-qYkrpgjS2M",
+            span_name="Bedrock AgentCore.StartBrowserSession",
+        )
+
+    def test_bedrock_agentcore_start_browser_session_v1(self):
+        self.do_test_requests(
+            "bedrock-agentcore/runtime/startbrowsersession/aws.browser.v1",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock AgentCore",
+            remote_service="AWS::BedrockAgentCore",
+            remote_operation="StartBrowserSession",
+            remote_resource_type="AWS::BedrockAgentCore::Browser",
+            remote_resource_identifier="aws.browser.v1",
+            cloudformation_primary_identifier="aws.browser.v1",
+            span_name="Bedrock AgentCore.StartBrowserSession",
+        )
+
     def test_secretsmanager_describe_secret(self):
         self.do_test_requests(
             "secretsmanager/describesecret/my-secret",

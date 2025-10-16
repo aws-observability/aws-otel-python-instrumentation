@@ -24,6 +24,7 @@ _FAULT: str = "fault"
 _AWS_SDK_S3_ENDPOINT: str = os.environ.get("AWS_SDK_S3_ENDPOINT")
 _AWS_SDK_ENDPOINT: str = os.environ.get("AWS_SDK_ENDPOINT")
 _AWS_REGION: str = os.environ.get("AWS_REGION")
+_AWS_ACCOUNT_ID: str = "123456789012"
 _ERROR_ENDPOINT: str = "http://error.test:8080"
 _FAULT_ENDPOINT: str = "http://fault.test:8080"
 os.environ.setdefault("AWS_ACCESS_KEY_ID", "testcontainers-localstack")
@@ -47,7 +48,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         if self.in_path("kinesis"):
             self._handle_kinesis_request()
         if self.in_path("bedrock"):
-            self._handle_bedrock_request()
+            if self.in_path("bedrock-agentcore"):
+                self._handle_bedrock_agentcore_request()
+            else:
+                self._handle_bedrock_request()
         if self.in_path("secretsmanager"):
             self._handle_secretsmanager_request()
         if self.in_path("stepfunctions"):
@@ -103,6 +107,84 @@ class RequestHandler(BaseHTTPRequestHandler):
             )
         else:
             set_main_status(404)
+
+    def _handle_bedrock_agentcore_request(self) -> None:
+        bedrock_agentcore_client = boto3.client(
+            "bedrock-agentcore", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION
+        )
+        bedrock_agentcore_control_client = boto3.client(
+            "bedrock-agentcore-control", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION
+        )
+
+        if self.in_path("runtime"):
+            path_parts = self.path.split("/")
+            operation = path_parts[3]
+
+            if operation == "invokeagentruntime":
+                agent_id = path_parts[4]
+                set_main_status(200)
+                bedrock_agentcore_client.meta.events.register(
+                    "before-call.bedrock-agentcore.InvokeAgentRuntime",
+                    inject_200_success,
+                )
+                bedrock_agentcore_client.invoke_agent_runtime(
+                    agentRuntimeArn=f"arn:aws:bedrock-agentcore:{_AWS_REGION}:{_AWS_ACCOUNT_ID}:runtime/{agent_id}",
+                    payload=b'{"message": "Hello, test message"}',
+                )
+                return
+            elif operation == "createendpoint":
+                set_main_status(200)
+                bedrock_agentcore_control_client.meta.events.register(
+                    "before-call.bedrock-agentcore-control.CreateAgentRuntimeEndpoint",
+                    lambda **kwargs: inject_200_success(
+                        agentRuntimeArn=(
+                            f"arn:aws:bedrock-agentcore:{_AWS_REGION}:{_AWS_ACCOUNT_ID}:"
+                            "runtime/completeAgent-w8slyU6q5M"
+                        ),
+                        agentRuntimeEndpointArn=(
+                            f"arn:aws:bedrock-agentcore:{_AWS_REGION}:{_AWS_ACCOUNT_ID}:endpoint/invokeEndpoint"
+                        ),
+                        agentRuntimeId="completeAgent-w8slyU6q5M",
+                        createdAt="2024-01-01T00:00:00Z",
+                        endpointName="invokeEndpoint",
+                        status="ACTIVE",
+                        targetVersion="1.0",
+                        **kwargs,
+                    ),
+                )
+                bedrock_agentcore_control_client.create_agent_runtime_endpoint(
+                    agentRuntimeId="completeAgent-w8slyU6q5M",
+                    name="invokeEndpoint",
+                    description="Endpoint for invoking agent runtime",
+                )
+                return
+            elif operation == "startbrowsersession":
+                browser_id = path_parts[4]
+                set_main_status(200)
+                bedrock_agentcore_client.meta.events.register(
+                    "before-call.bedrock-agentcore.StartBrowserSession",
+                    lambda **kwargs: inject_200_success(
+                        browserIdentifier=browser_id,
+                        createdAt="2024-01-01T00:00:00Z",
+                        sessionId="testBrowserSession",
+                        streams={
+                            "automationStream": {
+                                "streamEndpoint": "wss://example.com/automation",
+                                "streamStatus": "ENABLED",
+                            },
+                            "liveViewStream": {"streamEndpoint": "wss://example.com/liveview"},
+                        },
+                        **kwargs,
+                    ),
+                )
+                bedrock_agentcore_client.start_browser_session(
+                    browserIdentifier=browser_id,
+                    name="testBrowserSession",
+                    viewPort={"width": 1920, "height": 1080},
+                )
+                return
+
+        set_main_status(404)
 
     def _handle_s3_request(self) -> None:
         s3_client: BaseClient = boto3.client("s3", endpoint_url=_AWS_SDK_S3_ENDPOINT, region_name=_AWS_REGION)
@@ -650,6 +732,7 @@ def prepare_aws_server() -> None:
 
 
 def inject_200_success(**kwargs):
+    print(f"inject_200_success kwargs: {kwargs}")
     response_metadata = {
         "HTTPStatusCode": 200,
         "RequestId": "mock-request-id",
@@ -660,20 +743,15 @@ def inject_200_success(**kwargs):
         "ResponseMetadata": response_metadata,
     }
 
-    guardrail_id = kwargs.get("guardrailId")
-    if guardrail_id is not None:
-        response_body["guardrailId"] = guardrail_id
-    guardrail_arn = kwargs.get("guardrailArn")
-    if guardrail_arn is not None:
-        response_body["guardrailArn"] = guardrail_arn
-    model_id = kwargs.get("modelId")
-    if model_id is not None:
-        response_body["modelId"] = model_id
+    for key, value in kwargs.items():
+        if key not in ["headers", "body"]:
+            response_body[key] = value
 
     HTTPResponse = namedtuple("HTTPResponse", ["status_code", "headers", "body"])
     headers = kwargs.get("headers", {})
     body = kwargs.get("body", "")
-    response_body["body"] = body
+    if body:
+        response_body["body"] = body
     http_response = HTTPResponse(200, headers=headers, body=body)
 
     return http_response, response_body
