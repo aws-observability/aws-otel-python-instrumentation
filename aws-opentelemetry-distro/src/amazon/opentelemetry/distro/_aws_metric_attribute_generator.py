@@ -706,15 +706,18 @@ def _get_agentcore_resource_type_and_identifier(span: ReadableSpan) -> tuple[Opt
 
     attrs = span.attributes
 
-    # This check is not necessary but added to satisfy the linter.
+    # This check is not necessary but added to fix linter.
     if not attrs:
         return None, None
 
-    def extract_id_from_arn(arn: str) -> Optional[str]:
+    def extract_id_from_arn(arn: Optional[str]) -> Optional[str]:
         if not arn:
             return None
         parts = arn.split("/")
         return parts[-1] if parts else None
+
+    def format_resource_type(resource_type: Optional[str]) -> Optional[str]:
+        return f"{_NORMALIZED_BEDROCK_AGENTCORE_SERVICE_NAME}::{resource_type}" if resource_type else None
 
     resource_type = None
     resource_identifier = None
@@ -723,45 +726,57 @@ def _get_agentcore_resource_type_and_identifier(span: ReadableSpan) -> tuple[Opt
     browser_id = attrs.get(GEN_AI_BROWSER_ID)
     browser_arn = attrs.get(AWS_BEDROCK_AGENTCORE_BROWSER_ARN)
     if browser_id or browser_arn:
-        id_value = browser_id or extract_id_from_arn(str(browser_arn) if browser_arn else "")
-        resource_type = "Browser" if id_value == "aws.browser.v1" else "BrowserCustom"
-        resource_identifier = str(id_value) if id_value else None
+        if browser_arn:
+            resource_identifier = extract_id_from_arn(str(browser_arn)) if browser_arn else None
+        if browser_id:
+            resource_identifier = str(browser_id)
+        resource_type = "Browser" if resource_identifier == "aws.browser.v1" else "BrowserCustom"
+        return format_resource_type(resource_type), resource_identifier
 
     # Gateway
     gateway_id = attrs.get(GEN_AI_GATEWAY_ID)
     gateway_arn = attrs.get(AWS_BEDROCK_AGENTCORE_GATEWAY_ARN)
-    if gateway_id or gateway_arn:
-        gateway_target_id = attrs.get(AWS_GATEWAY_TARGET_ID)
-        if gateway_target_id:
-            resource_type = "GatewayTarget"
-            resource_identifier = str(gateway_target_id)
-        else:
-            resource_type = "Gateway"
-            resource_identifier = (
-                str(gateway_id) if gateway_id else extract_id_from_arn(str(gateway_arn) if gateway_arn else "")
-            )
+    gateway_target_id = attrs.get(AWS_GATEWAY_TARGET_ID)
+    if gateway_target_id:
+        resource_type = "GatewayTarget"
+        resource_identifier = str(gateway_target_id)
+        return format_resource_type(resource_type), resource_identifier
+    if gateway_arn or gateway_id:
+        if gateway_arn:
+            resource_identifier = extract_id_from_arn(str(gateway_arn)) if gateway_arn else None
+        if gateway_id:
+            resource_identifier = str(gateway_id)
+        resource_type = "Gateway"
+        return format_resource_type(resource_type), resource_identifier
 
     # Runtime
     runtime_id = attrs.get(GEN_AI_RUNTIME_ID)
     runtime_arn = attrs.get(AWS_BEDROCK_AGENTCORE_RUNTIME_ARN)
     runtime_endpoint_arn = attrs.get(AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN)
-    if runtime_id or runtime_arn:
-        if runtime_endpoint_arn:
-            resource_type = "RuntimeEndpoint"
-            resource_identifier = str(runtime_endpoint_arn)
-        else:
-            resource_type = "Runtime"
-            resource_identifier = (
-                str(runtime_id) if runtime_id else extract_id_from_arn(str(runtime_arn) if runtime_arn else "")
-            )
+    if runtime_endpoint_arn:
+        resource_type = "RuntimeEndpoint"
+        resource_identifier = str(runtime_endpoint_arn)
+        return format_resource_type(resource_type), resource_identifier
+    if runtime_arn or runtime_id:
+        if runtime_arn:
+            resource_identifier = extract_id_from_arn(str(runtime_arn)) if runtime_arn else None
+        if runtime_id:
+            resource_identifier = str(runtime_id)
+        resource_type = "Runtime"
+        return format_resource_type(resource_type), resource_identifier
 
     # Code interpreter
     code_interpreter_id = attrs.get(GEN_AI_CODE_INTERPRETER_ID)
     code_interpreter_arn = attrs.get(AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN)
     if code_interpreter_id or code_interpreter_arn:
-        id_value = code_interpreter_id or extract_id_from_arn(str(code_interpreter_arn) if code_interpreter_arn else "")
-        resource_type = "CodeInterpreter" if id_value == "aws.codeinterpreter.v1" else "CodeInterpreterCustom"
-        resource_identifier = str(id_value) if id_value else None
+        if code_interpreter_arn:
+            resource_identifier = extract_id_from_arn(str(code_interpreter_arn)) if code_interpreter_arn else None
+        if code_interpreter_id:
+            resource_identifier = str(code_interpreter_id)
+        resource_type = (
+            "CodeInterpreter" if resource_identifier == "aws.codeinterpreter.v1" else "CodeInterpreterCustom"
+        )
+        return format_resource_type(resource_type), resource_identifier
 
     # Identity
     credential_arn = attrs.get(AWS_AUTH_CREDENTIAL_PROVIDER_ARN)
@@ -772,16 +787,20 @@ def _get_agentcore_resource_type_and_identifier(span: ReadableSpan) -> tuple[Opt
         if "oauth2credentialprovider" in credential_arn_str:
             resource_type = "OAuth2CredentialProvider"
         resource_identifier = extract_id_from_arn(credential_arn_str)
+        return format_resource_type(resource_type), resource_identifier
 
     # Memory
     memory_id = attrs.get(GEN_AI_MEMORY_ID)
     memory_arn = attrs.get(AWS_BEDROCK_AGENTCORE_MEMORY_ARN)
     if memory_id or memory_arn:
         resource_type = "Memory"
-        resource_identifier = str(memory_arn) if memory_arn else None
+        if memory_arn:
+            resource_identifier = extract_id_from_arn(str(memory_arn)) if memory_arn else None
+        if memory_id:
+            resource_identifier = str(memory_id)
+        return format_resource_type(resource_type), resource_identifier
 
-    full_resource_type = f"{_NORMALIZED_BEDROCK_AGENTCORE_SERVICE_NAME}::{resource_type}" if resource_type else None
-    return full_resource_type, resource_identifier
+    return None, None
 
 
 def _log_unknown_attribute(attribute_key: str, span: ReadableSpan) -> None:

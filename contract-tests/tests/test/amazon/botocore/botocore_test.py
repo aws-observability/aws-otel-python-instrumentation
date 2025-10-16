@@ -750,7 +750,42 @@ class BotocoreTest(ContractTestBase):
             span_name="Bedrock Agent.GetDataSource",
         )
 
+    def test_bedrock_agentcore_create_agent_runtime(self):
+        expected_identifier = "myAgent-w8slyU6q5M"
+        self.do_test_requests(
+            "bedrock-agentcore/runtime/createagentruntime/myAgent-w8slyU6q5M",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock AgentCore Control",
+            remote_service="AWS::BedrockAgentCore",
+            remote_operation="CreateAgentRuntime",
+            remote_resource_type="AWS::BedrockAgentCore::Runtime",
+            remote_resource_identifier=expected_identifier,
+            cloudformation_primary_identifier=expected_identifier,
+            span_name="Bedrock AgentCore Control.CreateAgentRuntime",
+        )
+
+    def test_bedrock_agentcore_create_agent_runtime_endpoint(self):
+        expected_identifier = "arn:aws:bedrock-agentcore:us-west-2:123456789012:endpoint/invokeEndpoint"
+        self.do_test_requests(
+            "bedrock-agentcore/runtime/createendpoint/myAgent-w8slyU6q5M",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock AgentCore Control",
+            remote_service="AWS::BedrockAgentCore",
+            remote_operation="CreateAgentRuntimeEndpoint",
+            remote_resource_type="AWS::BedrockAgentCore::RuntimeEndpoint",
+            remote_resource_identifier=expected_identifier,
+            cloudformation_primary_identifier=expected_identifier,
+            span_name="Bedrock AgentCore Control.CreateAgentRuntimeEndpoint",
+        )
+
     def test_bedrock_agentcore_invoke_agent_runtime(self):
+        expected_identifier = "myAgent-w8slyU6q5M"
         self.do_test_requests(
             "bedrock-agentcore/runtime/invokeagentruntime/myAgent-w8slyU6q5M",
             "GET",
@@ -761,30 +796,13 @@ class BotocoreTest(ContractTestBase):
             remote_service="AWS::BedrockAgentCore",
             remote_operation="InvokeAgentRuntime",
             remote_resource_type="AWS::BedrockAgentCore::Runtime",
-            remote_resource_identifier="myAgent-w8slyU6q5M",
-            cloudformation_primary_identifier="myAgent-w8slyU6q5M",
+            remote_resource_identifier=expected_identifier,
+            cloudformation_primary_identifier=expected_identifier,
             span_name="Bedrock AgentCore.InvokeAgentRuntime",
         )
 
-    def test_bedrock_agentcore_create_agent_runtime_endpoint(self):
-        self.do_test_requests(
-            "bedrock-agentcore/runtime/createendpoint",
-            "GET",
-            200,
-            0,
-            0,
-            rpc_service="Bedrock AgentCore Control",
-            remote_service="AWS::BedrockAgentCore",
-            remote_operation="CreateAgentRuntimeEndpoint",
-            remote_resource_type="AWS::BedrockAgentCore::RuntimeEndpoint",
-            remote_resource_identifier=("arn:aws:bedrock-agentcore:us-west-2:123456789012:endpoint/invokeEndpoint"),
-            cloudformation_primary_identifier=(
-                "arn:aws:bedrock-agentcore:us-west-2:123456789012:endpoint/invokeEndpoint"
-            ),
-            span_name="Bedrock AgentCore Control.CreateAgentRuntimeEndpoint",
-        )
-
     def test_bedrock_agentcore_start_browser_session(self):
+        expected_identifier = "agentBrowser-qYkrpgjS2M"
         self.do_test_requests(
             "bedrock-agentcore/browser/startbrowsersession/agentBrowser-qYkrpgjS2M",
             "GET",
@@ -795,12 +813,13 @@ class BotocoreTest(ContractTestBase):
             remote_service="AWS::BedrockAgentCore",
             remote_operation="StartBrowserSession",
             remote_resource_type="AWS::BedrockAgentCore::BrowserCustom",
-            remote_resource_identifier="agentBrowser-qYkrpgjS2M",
-            cloudformation_primary_identifier="agentBrowser-qYkrpgjS2M",
+            remote_resource_identifier=expected_identifier,
+            cloudformation_primary_identifier=expected_identifier,
             span_name="Bedrock AgentCore.StartBrowserSession",
         )
 
     def test_bedrock_agentcore_start_browser_session_v1(self):
+        expected_identifier = "aws.browser.v1"
         self.do_test_requests(
             "bedrock-agentcore/browser/startbrowsersession/aws.browser.v1",
             "GET",
@@ -811,9 +830,128 @@ class BotocoreTest(ContractTestBase):
             remote_service="AWS::BedrockAgentCore",
             remote_operation="StartBrowserSession",
             remote_resource_type="AWS::BedrockAgentCore::Browser",
-            remote_resource_identifier="aws.browser.v1",
-            cloudformation_primary_identifier="aws.browser.v1",
+            remote_resource_identifier=expected_identifier,
+            cloudformation_primary_identifier=expected_identifier,
             span_name="Bedrock AgentCore.StartBrowserSession",
+        )
+
+    def test_bedrock_agentcore_start_code_interpreter_session(self):
+        expected_identifier = "agentCodeInterpreter-m9Mvuwkg6j"
+        self.do_test_requests(
+            "bedrock-agentcore/codeinterpreter/startcodeinterpretersession/agentCodeInterpreter-m9Mvuwkg6j",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock AgentCore",
+            remote_service="AWS::BedrockAgentCore",
+            remote_operation="StartCodeInterpreterSession",
+            remote_resource_type="AWS::BedrockAgentCore::CodeInterpreterCustom",
+            remote_resource_identifier=expected_identifier,
+            cloudformation_primary_identifier=expected_identifier,
+            span_name="Bedrock AgentCore.StartCodeInterpreterSession",
+        )
+
+    def test_bedrock_agentcore_start_code_interpreter_session_v1(self):
+        expected_identifier = "aws.codeinterpreter.v1"
+        self.do_test_requests(
+            "bedrock-agentcore/codeinterpreter/startcodeinterpretersession/aws.codeinterpreter.v1",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock AgentCore",
+            remote_service="AWS::BedrockAgentCore",
+            remote_operation="StartCodeInterpreterSession",
+            remote_resource_type="AWS::BedrockAgentCore::CodeInterpreter",
+            remote_resource_identifier=expected_identifier,
+            cloudformation_primary_identifier=expected_identifier,
+            span_name="Bedrock AgentCore.StartCodeInterpreterSession",
+        )
+
+    def test_bedrock_agentcore_create_event(self):
+        expected_identifier = "agentMemory-1mtr9C5pGt"
+        self.do_test_requests(
+            "bedrock-agentcore/memory/createevent/agentMemory-1mtr9C5pGt",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock AgentCore",
+            remote_service="AWS::BedrockAgentCore",
+            remote_operation="CreateEvent",
+            remote_resource_type="AWS::BedrockAgentCore::Memory",
+            remote_resource_identifier=expected_identifier,
+            cloudformation_primary_identifier=expected_identifier,
+            span_name="Bedrock AgentCore.CreateEvent",
+        )
+
+    def test_bedrock_agentcore_create_gateway(self):
+        expected_identifier = "agentGateway-k8Nt2pLm9Q"
+        self.do_test_requests(
+            "bedrock-agentcore/gateway/creategateway/agentGateway-k8Nt2pLm9Q",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock AgentCore Control",
+            remote_service="AWS::BedrockAgentCore",
+            remote_operation="CreateGateway",
+            remote_resource_type="AWS::BedrockAgentCore::Gateway",
+            remote_resource_identifier=expected_identifier,
+            cloudformation_primary_identifier=expected_identifier,
+            span_name="Bedrock AgentCore Control.CreateGateway",
+        )
+
+    def test_bedrock_agentcore_create_gateway_target(self):
+        expected_identifier = "testTarget-123"
+        self.do_test_requests(
+            "bedrock-agentcore/gateway/creategatewaytarget/workinggateway-oersefsjga",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock AgentCore Control",
+            remote_service="AWS::BedrockAgentCore",
+            remote_operation="CreateGatewayTarget",
+            remote_resource_type="AWS::BedrockAgentCore::GatewayTarget",
+            remote_resource_identifier=expected_identifier,
+            cloudformation_primary_identifier=expected_identifier,
+            span_name="Bedrock AgentCore Control.CreateGatewayTarget",
+        )
+
+    def test_bedrock_agentcore_create_oauth2_credential_provider(self):
+        expected_identifier = "test-oauth2-provider-123"
+        self.do_test_requests(
+            "bedrock-agentcore/identity/createoauth2credentialprovider",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock AgentCore Control",
+            remote_service="AWS::BedrockAgentCore",
+            remote_operation="CreateOauth2CredentialProvider",
+            remote_resource_type="AWS::BedrockAgentCore::OAuth2CredentialProvider",
+            remote_resource_identifier=expected_identifier,
+            cloudformation_primary_identifier=expected_identifier,
+            span_name="Bedrock AgentCore Control.CreateOauth2CredentialProvider",
+        )
+
+    def test_bedrock_agentcore_create_api_key_credential_provider(self):
+        expected_identifier = "test-apikey-provider-123"
+        self.do_test_requests(
+            "bedrock-agentcore/identity/createapikeycredentialprovider",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock AgentCore Control",
+            remote_service="AWS::BedrockAgentCore",
+            remote_operation="CreateApiKeyCredentialProvider",
+            remote_resource_type="AWS::BedrockAgentCore::APIKeyCredentialProvider",
+            remote_resource_identifier=expected_identifier,
+            cloudformation_primary_identifier=expected_identifier,
+            span_name="Bedrock AgentCore Control.CreateApiKeyCredentialProvider",
         )
 
     def test_secretsmanager_describe_secret(self):

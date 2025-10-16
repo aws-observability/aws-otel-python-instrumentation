@@ -7,6 +7,7 @@ import tempfile
 from collections import namedtuple
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
+from pathlib import PurePath
 from threading import Thread
 
 import boto3
@@ -115,15 +116,74 @@ class RequestHandler(BaseHTTPRequestHandler):
         bedrock_agentcore_control_client = boto3.client(
             "bedrock-agentcore-control", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION
         )
-        # Bedrock AgentCore tests will have path of the following structure:
-        # /bedrock-agentcore/{service}/{operation}/{args}
-        path_parts = self.path.split("/")
-        operation = path_parts[3]
+        # Parse URL structure: /bedrock-agentcore/{service}/{operation}/{resource_id}
+        path = PurePath(self.path)
+        path_parts = path.parts[1:]  # Remove leading '/'
 
-        if self.in_path("runtime"):
+        service = path_parts[1] if len(path_parts) > 1 else None
+        operation = path_parts[2] if len(path_parts) > 2 else None
+        resource_id = path_parts[3] if len(path_parts) > 3 else None
+
+        set_main_status(200)
+        if service == "runtime":
+            agent_id = resource_id
+            if operation == "createagentruntime":
+                bedrock_agentcore_control_client.meta.events.register(
+                    "before-call.bedrock-agentcore-control.CreateAgentRuntime",
+                    lambda **kwargs: inject_200_success(
+                        agentRuntimeArn=f"arn:aws:bedrock-agentcore:{_AWS_REGION}:{_AWS_ACCOUNT_ID}:runtime/{agent_id}",
+                        agentRuntimeId=agent_id,
+                        agentRuntimeVersion="1.0",
+                        createdAt="2024-01-01T00:00:00Z",
+                        status="ACTIVE",
+                        workloadIdentityDetails={
+                            "workloadIdentityArn": (
+                                f"arn:aws:iam::{_AWS_ACCOUNT_ID}:role/service-role/"
+                                "AmazonBedrockAgentCoreRuntimeDefaultServiceRole"
+                            )
+                        },
+                        **kwargs,
+                    ),
+                )
+                bedrock_agentcore_control_client.create_agent_runtime(
+                    agentRuntimeName="completeAgent",
+                    description="Complete agent with all components",
+                    agentRuntimeArtifact={
+                        "containerConfiguration": {
+                            "containerUri": f"{_AWS_ACCOUNT_ID}.dkr.ecr.{_AWS_REGION}.amazonaws.com/test-agent:latest"
+                        }
+                    },
+                    roleArn=(
+                        f"arn:aws:iam::{_AWS_ACCOUNT_ID}:role/service-role/"
+                        "AmazonBedrockAgentCoreRuntimeDefaultServiceRole"
+                    ),
+                    networkConfiguration={"networkMode": "PUBLIC"},
+                    protocolConfiguration={"serverProtocol": "HTTP"},
+                )
+                return
+            if operation == "createendpoint":
+                bedrock_agentcore_control_client.meta.events.register(
+                    "before-call.bedrock-agentcore-control.CreateAgentRuntimeEndpoint",
+                    lambda **kwargs: inject_200_success(
+                        agentRuntimeArn=f"arn:aws:bedrock-agentcore:{_AWS_REGION}:{_AWS_ACCOUNT_ID}:runtime/{agent_id}",
+                        agentRuntimeEndpointArn=(
+                            f"arn:aws:bedrock-agentcore:{_AWS_REGION}:{_AWS_ACCOUNT_ID}:endpoint/invokeEndpoint"
+                        ),
+                        agentRuntimeId=agent_id,
+                        createdAt="2024-01-01T00:00:00Z",
+                        endpointName="invokeEndpoint",
+                        status="ACTIVE",
+                        targetVersion="1.0",
+                        **kwargs,
+                    ),
+                )
+                bedrock_agentcore_control_client.create_agent_runtime_endpoint(
+                    agentRuntimeId=agent_id,
+                    name="invokeEndpoint",
+                    description="Endpoint for invoking agent runtime",
+                )
+                return
             if operation == "invokeagentruntime":
-                agent_id = path_parts[4]
-                set_main_status(200)
                 bedrock_agentcore_client.meta.events.register(
                     "before-call.bedrock-agentcore.InvokeAgentRuntime",
                     inject_200_success,
@@ -133,36 +193,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                     payload=b'{"message": "Hello, test message"}',
                 )
                 return
-            if operation == "createendpoint":
-                set_main_status(200)
-                bedrock_agentcore_control_client.meta.events.register(
-                    "before-call.bedrock-agentcore-control.CreateAgentRuntimeEndpoint",
-                    lambda **kwargs: inject_200_success(
-                        agentRuntimeArn=(
-                            f"arn:aws:bedrock-agentcore:{_AWS_REGION}:{_AWS_ACCOUNT_ID}:"
-                            "runtime/completeAgent-w8slyU6q5M"
-                        ),
-                        agentRuntimeEndpointArn=(
-                            f"arn:aws:bedrock-agentcore:{_AWS_REGION}:{_AWS_ACCOUNT_ID}:endpoint/invokeEndpoint"
-                        ),
-                        agentRuntimeId="completeAgent-w8slyU6q5M",
-                        createdAt="2024-01-01T00:00:00Z",
-                        endpointName="invokeEndpoint",
-                        status="ACTIVE",
-                        targetVersion="1.0",
-                        **kwargs,
-                    ),
-                )
-                bedrock_agentcore_control_client.create_agent_runtime_endpoint(
-                    agentRuntimeId="completeAgent-w8slyU6q5M",
-                    name="invokeEndpoint",
-                    description="Endpoint for invoking agent runtime",
-                )
-                return
-        if self.in_path("browser"):
+        if service == "browser":
             if operation == "startbrowsersession":
-                browser_id = path_parts[4]
-                set_main_status(200)
+                browser_id = resource_id
                 bedrock_agentcore_client.meta.events.register(
                     "before-call.bedrock-agentcore.StartBrowserSession",
                     lambda **kwargs: inject_200_success(
@@ -183,6 +216,172 @@ class RequestHandler(BaseHTTPRequestHandler):
                     browserIdentifier=browser_id,
                     name="testBrowserSession",
                     viewPort={"width": 1920, "height": 1080},
+                )
+                return
+        if service == "codeinterpreter":
+            if operation == "startcodeinterpretersession":
+                code_interpreter_id = resource_id
+                bedrock_agentcore_client.meta.events.register(
+                    "before-call.bedrock-agentcore.StartCodeInterpreterSession",
+                    lambda **kwargs: inject_200_success(
+                        codeInterpreterIdentifier=code_interpreter_id,
+                        createdAt="2024-01-01T00:00:00Z",
+                        sessionId="testCodeInterpreterSession",
+                        **kwargs,
+                    ),
+                )
+                bedrock_agentcore_client.start_code_interpreter_session(
+                    codeInterpreterIdentifier=code_interpreter_id,
+                )
+                return
+        if service == "memory":
+            if operation == "createevent":
+                memory_id = resource_id
+                bedrock_agentcore_client.meta.events.register(
+                    "before-call.bedrock-agentcore.CreateEvent",
+                    lambda **kwargs: inject_200_success(
+                        memoryId=memory_id,
+                        eventId="test-event-123",
+                        createdAt="2024-01-01T00:00:00Z",
+                        **kwargs,
+                    ),
+                )
+                bedrock_agentcore_client.create_event(
+                    memoryId=memory_id,
+                    actorId="test-actor-123",
+                    eventTimestamp=1704067200,
+                    payload=[
+                        {
+                            "conversational": {
+                                "content": {"text": "Test memory event for testing"},
+                                "role": "USER",
+                            }
+                        }
+                    ],
+                )
+                return
+        if service == "gateway":
+            if operation == "creategateway":
+                gateway_id = resource_id
+                bedrock_agentcore_control_client.meta.events.register(
+                    "before-call.bedrock-agentcore-control.CreateGateway",
+                    lambda **kwargs: inject_200_success(
+                        gatewayId=gateway_id,
+                        gatewayArn=f"arn:aws:bedrock-agentcore:{_AWS_REGION}:{_AWS_ACCOUNT_ID}:gateway/{gateway_id}",
+                        name="agentGateway",
+                        status="ACTIVE",
+                        createdAt="2024-01-01T00:00:00Z",
+                        **kwargs,
+                    ),
+                )
+                bedrock_agentcore_control_client.create_gateway(
+                    name="workingGateway",
+                    description="Working test gateway",
+                    authorizerType="CUSTOM_JWT",
+                    protocolType="MCP",
+                    roleArn=(
+                        f"arn:aws:iam::{_AWS_ACCOUNT_ID}:role/service-role/"
+                        "AmazonBedrockAgentCoreRuntimeDefaultServiceRole-swsx9"
+                    ),
+                    authorizerConfiguration={
+                        "customJWTAuthorizer": {
+                            "discoveryUrl": "https://example.com/.well-known/openid-configuration",
+                            "allowedAudience": ["test-audience"],
+                            "allowedClients": ["test-client"],
+                        }
+                    },
+                )
+                return
+            if operation == "creategatewaytarget":
+                gateway_id = resource_id
+                bedrock_agentcore_control_client.meta.events.register(
+                    "before-call.bedrock-agentcore-control.CreateGatewayTarget",
+                    lambda **kwargs: inject_200_success(
+                        targetId="testTarget-123",
+                        gatewayArn=f"arn:aws:bedrock-agentcore:{_AWS_REGION}:{_AWS_ACCOUNT_ID}:gateway/{gateway_id}",
+                        name="testTarget",
+                        status="ACTIVE",
+                        createdAt="2024-01-01T00:00:00Z",
+                        description="Test gateway target",
+                        lastSynchronizedAt="2024-01-01T00:00:00Z",
+                        updatedAt="2024-01-01T00:00:00Z",
+                        **kwargs,
+                    ),
+                )
+                bedrock_agentcore_control_client.create_gateway_target(
+                    gatewayIdentifier=gateway_id,
+                    name="testTarget",
+                    description="Test gateway target",
+                    targetConfiguration={
+                        "mcp": {
+                            "openApiSchema": {
+                                "inlinePayload": (
+                                    '{"openapi": "3.0.0", "info": ' '{"title": "Test API", "version": "1.0.0"}}'
+                                )
+                            }
+                        }
+                    },
+                    credentialProviderConfigurations=[
+                        {
+                            "credentialProviderType": "API_KEY",
+                            "credentialProvider": {
+                                "apiKeyCredentialProvider": {
+                                    "providerArn": (
+                                        f"arn:aws:bedrock:{_AWS_REGION}:{_AWS_ACCOUNT_ID}:"
+                                        "api-key-credential-provider/test-provider"
+                                    ),
+                                    "credentialParameterName": "api-key",
+                                    "credentialLocation": "HEADER",
+                                }
+                            },
+                        }
+                    ],
+                )
+                return
+        if service == "identity":
+            if operation == "createoauth2credentialprovider":
+                bedrock_agentcore_control_client.meta.events.register(
+                    "before-call.bedrock-agentcore-control.CreateOauth2CredentialProvider",
+                    lambda **kwargs: inject_200_success(
+                        credentialProviderId="test-oauth2-provider-123",
+                        credentialProviderArn=(
+                            f"arn:aws:acps:{_AWS_REGION}:{_AWS_ACCOUNT_ID}:"
+                            "token-vault/default/oauth2credentialprovider/test-oauth2-provider-123"
+                        ),
+                        name="testOAuth2Provider",
+                        status="ACTIVE",
+                        createdAt="2024-01-01T00:00:00Z",
+                        **kwargs,
+                    ),
+                )
+                bedrock_agentcore_control_client.create_oauth2_credential_provider(
+                    name="testOAuth2Provider",
+                    credentialProviderVendor="CUSTOM",
+                    oauth2ProviderConfigInput={
+                        "customOauth2ProviderConfig": {
+                            "oauthDiscovery": {"discoveryUrl": "https://example.com/.well-known/openid-configuration"},
+                            "clientId": "test-client-id",
+                            "clientSecret": "test-client-secret",
+                        }
+                    },
+                )
+                return
+            if operation == "createapikeycredentialprovider":
+                bedrock_agentcore_control_client.meta.events.register(
+                    "before-call.bedrock-agentcore-control.CreateApiKeyCredentialProvider",
+                    lambda **kwargs: inject_200_success(
+                        credentialProviderId="test-apikey-provider-123",
+                        credentialProviderArn=(
+                            f"arn:aws:acps:{_AWS_REGION}:{_AWS_ACCOUNT_ID}:"
+                            "token-vault/default/apikeycredentialprovider/test-apikey-provider-123"
+                        ),
+                        name="testAPIKeyProvider",
+                        **kwargs,
+                    ),
+                )
+                bedrock_agentcore_control_client.create_api_key_credential_provider(
+                    name="testAPIKeyProvider",
+                    apiKey="test-api-key-value",
                 )
                 return
 
@@ -734,7 +933,6 @@ def prepare_aws_server() -> None:
 
 
 def inject_200_success(**kwargs):
-    print(f"inject_200_success kwargs: {kwargs}")
     response_metadata = {
         "HTTPStatusCode": 200,
         "RequestId": "mock-request-id",
