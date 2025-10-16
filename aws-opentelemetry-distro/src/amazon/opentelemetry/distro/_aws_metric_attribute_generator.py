@@ -75,7 +75,6 @@ from amazon.opentelemetry.distro.patches.semconv._incubating.attributes.gen_ai_a
     GEN_AI_BROWSER_ID,
     GEN_AI_CODE_INTERPRETER_ID,
     GEN_AI_GATEWAY_ID,
-    GEN_AI_MEMORY_ID,
     GEN_AI_RUNTIME_ID,
 )
 from amazon.opentelemetry.distro.regional_resource_arn_parser import RegionalResourceArnParser
