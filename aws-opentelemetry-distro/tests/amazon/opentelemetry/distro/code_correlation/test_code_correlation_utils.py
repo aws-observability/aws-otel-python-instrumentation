@@ -9,7 +9,6 @@ from types import FrameType
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
-from amazon.opentelemetry.distro.code_correlation.constants import CODE_FILE_PATH, CODE_FUNCTION_NAME, CODE_LINE_NUMBER
 from amazon.opentelemetry.distro.code_correlation.utils import (
     _construct_qualified_name,
     add_code_attributes_to_span,
@@ -17,6 +16,11 @@ from amazon.opentelemetry.distro.code_correlation.utils import (
     get_callable_fullname,
     get_function_fullname_from_frame,
     record_code_attributes,
+)
+from opentelemetry.semconv.attributes.code_attributes import (  # noqa: F401
+    CODE_FILE_PATH,
+    CODE_FUNCTION_NAME,
+    CODE_LINE_NUMBER,
 )
 
 

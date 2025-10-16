@@ -15,10 +15,10 @@ from typing import Optional
 
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
+from opentelemetry.semconv.attributes.code_attributes import CODE_FUNCTION_NAME
 from opentelemetry.trace import SpanKind
 
-from .constants import CODE_FUNCTION_NAME
-from .internal.packages import _build_package_mapping, _load_third_party_packages, is_user_code
+from .internal.packages_resolver import _build_package_mapping, _load_third_party_packages, is_user_code
 from .utils import add_code_attributes_to_span_from_frame
 
 
@@ -75,14 +75,14 @@ class CodeAttributesSpanProcessor(SpanProcessor):
 
         Returns False if:
         - Span already has code attributes
-        - Span is not a client span
+        - Span is SERVER or INTERNAL span
         """
         # Skip if span already has code attributes
         if span.attributes is not None and CODE_FUNCTION_NAME in span.attributes:
             return False
 
-        # Only process client spans
-        return span.kind == SpanKind.CLIENT
+        # Process spans except SERVER and INTERNAL spans
+        return span.kind not in (SpanKind.SERVER, SpanKind.INTERNAL)
 
     def _capture_code_attributes(self, span: Span) -> None:
         """Capture and attach code attributes from current stack trace."""

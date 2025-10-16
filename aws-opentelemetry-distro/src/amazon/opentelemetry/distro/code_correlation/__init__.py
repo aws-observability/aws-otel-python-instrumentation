@@ -21,16 +21,8 @@ from .utils import (
 # Version information
 __version__ = "1.0.0"
 
-# Import constants from separate module to avoid circular imports
-from .constants import CODE_FILE_PATH, CODE_FUNCTION_NAME, CODE_LINE_NUMBER, CODE_STACKTRACE
-
 # Define public API
 __all__ = [
-    # Constants
-    "CODE_FUNCTION_NAME",
-    "CODE_FILE_PATH",
-    "CODE_LINE_NUMBER",
-    "CODE_STACKTRACE",
     # Functions
     "add_code_attributes_to_span",
     "add_code_attributes_to_span_from_frame",

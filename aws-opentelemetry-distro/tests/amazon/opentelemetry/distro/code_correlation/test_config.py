@@ -220,14 +220,24 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):
 
         self.assertEqual(config.stack_depth, 0)
 
-    def test_from_env_negative_stack_depth(self):
+    @patch("amazon.opentelemetry.distro.code_correlation.config._logger")
+    def test_from_env_negative_stack_depth(self, mock_logger):
         """Test from_env with negative stack_depth."""
         config_data = {"stack_depth": -5}
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
         config = AwsCodeCorrelationConfig.from_env()
 
-        self.assertEqual(config.stack_depth, -5)
+        # Negative stack_depth should be corrected to 0
+        self.assertEqual(config.stack_depth, 0)
+
+        # Should log a warning
+        mock_logger.warning.assert_called_once()
+        args = mock_logger.warning.call_args[0]
+        self.assertIn("'stack_depth'", args[0])
+        self.assertIn("must be non-negative", args[0])
+        self.assertEqual(args[1], _ENV_CONFIG)
+        self.assertEqual(args[2], -5)
 
     def test_from_env_empty_include_list(self):
         """Test from_env with explicitly empty include list."""
@@ -332,7 +342,8 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):
         self.assertEqual(config.stack_depth, 10)
         # Extra fields should not affect the configuration
 
-    def test_from_env_wrong_type_values(self):
+    @patch("amazon.opentelemetry.distro.code_correlation.config._logger")
+    def test_from_env_wrong_type_values(self, mock_logger):
         """Test from_env with wrong type values."""
         config_data = {
             "include": "not_a_list",  # Should be a list
@@ -343,23 +354,37 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):
 
         config = AwsCodeCorrelationConfig.from_env()
 
-        # Should use the provided values even if they're wrong types
-        # This tests that the code doesn't crash on type mismatches
-        self.assertEqual(config.include, "not_a_list")
-        self.assertEqual(config.exclude, 42)
-        self.assertEqual(config.stack_depth, "not_a_number")
+        # Should validate and use defaults for invalid types
+        self.assertEqual(config.include, [])  # Corrected to empty list
+        self.assertEqual(config.exclude, [])  # Corrected to empty list
+        self.assertEqual(config.stack_depth, 0)  # Corrected to default value
 
-    def test_from_env_null_values(self):
+        # Should log warnings for all invalid types
+        self.assertEqual(mock_logger.warning.call_count, 3)
+        warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
+        self.assertTrue(any("'include'" in call and "must be a list" in call for call in warning_calls))
+        self.assertTrue(any("'exclude'" in call and "must be a list" in call for call in warning_calls))
+        self.assertTrue(any("'stack_depth'" in call and "must be an integer" in call for call in warning_calls))
+
+    @patch("amazon.opentelemetry.distro.code_correlation.config._logger")
+    def test_from_env_null_values(self, mock_logger):
         """Test from_env with null values in JSON."""
         config_data = {"include": None, "exclude": None, "stack_depth": None}
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
         config = AwsCodeCorrelationConfig.from_env()
 
-        # get() should return None for null values, and constructor should handle it
+        # get() should return None for null values, and validation should handle it
         self.assertEqual(config.include, [])  # Constructor converts None to []
         self.assertEqual(config.exclude, [])  # Constructor converts None to []
-        self.assertEqual(config.stack_depth, None)  # None is passed through for stack_depth
+        self.assertEqual(config.stack_depth, 0)  # None should be corrected to default value
+
+        # Should log warnings for invalid types
+        self.assertEqual(mock_logger.warning.call_count, 3)
+        warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
+        self.assertTrue(any("'include'" in call and "must be a list" in call for call in warning_calls))
+        self.assertTrue(any("'exclude'" in call and "must be a list" in call for call in warning_calls))
+        self.assertTrue(any("'stack_depth'" in call and "must be an integer" in call for call in warning_calls))
 
     def test_from_env_complex_package_names(self):
         """Test from_env with complex package names."""
@@ -388,6 +413,124 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):
     def test_env_constant_value(self):
         """Test that the environment variable constant has the expected value."""
         self.assertEqual(_ENV_CONFIG, "OTEL_AWS_CODE_CORRELATION_CONFIG")
+
+    @patch("amazon.opentelemetry.distro.code_correlation.config._logger")
+    def test_from_env_mixed_type_include_list(self, mock_logger):
+        """Test from_env with include list containing mixed types."""
+        config_data = {
+            "include": ["valid_string", 123, True, None, "another_valid_string"],
+            "exclude": [],
+            "stack_depth": 5
+        }
+        os.environ[_ENV_CONFIG] = json.dumps(config_data)
+
+        config = AwsCodeCorrelationConfig.from_env()
+
+        # Should only keep string items
+        self.assertEqual(config.include, ["valid_string", "another_valid_string"])
+        self.assertEqual(config.exclude, [])
+        self.assertEqual(config.stack_depth, 5)
+
+        # Should log warnings for non-string items
+        self.assertTrue(mock_logger.warning.call_count >= 3)  # At least 3 non-string items
+        warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
+        # Check that warnings mention non-string items being skipped
+        non_string_warnings = [call for call in warning_calls if "'include' list item" in call and "must be a string" in call]
+        self.assertEqual(len(non_string_warnings), 3)  # 123, True, None
+
+    @patch("amazon.opentelemetry.distro.code_correlation.config._logger")
+    def test_from_env_mixed_type_exclude_list(self, mock_logger):
+        """Test from_env with exclude list containing mixed types."""
+        config_data = {
+            "include": [],
+            "exclude": ["valid_exclude", 42, False, "another_valid_exclude", [1, 2, 3]],
+            "stack_depth": 10
+        }
+        os.environ[_ENV_CONFIG] = json.dumps(config_data)
+
+        config = AwsCodeCorrelationConfig.from_env()
+
+        # Should only keep string items
+        self.assertEqual(config.include, [])
+        self.assertEqual(config.exclude, ["valid_exclude", "another_valid_exclude"])
+        self.assertEqual(config.stack_depth, 10)
+
+        # Should log warnings for non-string items
+        self.assertTrue(mock_logger.warning.call_count >= 3)  # At least 3 non-string items
+        warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
+        # Check that warnings mention non-string items being skipped
+        non_string_warnings = [call for call in warning_calls if "'exclude' list item" in call and "must be a string" in call]
+        self.assertEqual(len(non_string_warnings), 3)  # 42, False, [1, 2, 3]
+
+    @patch("amazon.opentelemetry.distro.code_correlation.config._logger")
+    def test_from_env_all_non_string_list_items(self, mock_logger):
+        """Test from_env with lists containing only non-string types."""
+        config_data = {
+            "include": [123, True, None, {"key": "value"}, [1, 2, 3]],
+            "exclude": [456, False, 0, 1.5, {"another": "object"}],
+            "stack_depth": 5
+        }
+        os.environ[_ENV_CONFIG] = json.dumps(config_data)
+
+        config = AwsCodeCorrelationConfig.from_env()
+
+        # Should result in empty lists since no valid strings
+        self.assertEqual(config.include, [])
+        self.assertEqual(config.exclude, [])
+        self.assertEqual(config.stack_depth, 5)
+
+        # Should log warnings for all non-string items
+        self.assertTrue(mock_logger.warning.call_count >= 10)  # 5 + 5 non-string items
+        warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
+        include_warnings = [call for call in warning_calls if "'include' list item" in call and "must be a string" in call]
+        exclude_warnings = [call for call in warning_calls if "'exclude' list item" in call and "must be a string" in call]
+        self.assertEqual(len(include_warnings), 5)
+        self.assertEqual(len(exclude_warnings), 5)
+
+    @patch("amazon.opentelemetry.distro.code_correlation.config._logger")
+    def test_from_env_float_stack_depth(self, mock_logger):
+        """Test from_env with float stack_depth."""
+        config_data = {
+            "include": ["myapp"],
+            "exclude": ["vendor"],
+            "stack_depth": 5.7
+        }
+        os.environ[_ENV_CONFIG] = json.dumps(config_data)
+
+        config = AwsCodeCorrelationConfig.from_env()
+
+        # Float should be treated as invalid and corrected to 0
+        self.assertEqual(config.include, ["myapp"])
+        self.assertEqual(config.exclude, ["vendor"])
+        self.assertEqual(config.stack_depth, 0)
+
+        # Should log warning for invalid stack_depth type
+        mock_logger.warning.assert_called_once()
+        args = mock_logger.warning.call_args[0]
+        self.assertIn("'stack_depth'", args[0])
+        self.assertIn("must be an integer", args[0])
+        self.assertEqual(args[1], _ENV_CONFIG)
+        self.assertEqual(args[2], "float")
+
+    @patch("amazon.opentelemetry.distro.code_correlation.config._logger")
+    def test_from_env_empty_string_in_lists(self, mock_logger):
+        """Test from_env with empty strings in lists."""
+        config_data = {
+            "include": ["valid", "", "also_valid", ""],
+            "exclude": ["", "valid_exclude", ""],
+            "stack_depth": 5
+        }
+        os.environ[_ENV_CONFIG] = json.dumps(config_data)
+
+        config = AwsCodeCorrelationConfig.from_env()
+
+        # Empty strings are still strings, so they should be preserved
+        self.assertEqual(config.include, ["valid", "", "also_valid", ""])
+        self.assertEqual(config.exclude, ["", "valid_exclude", ""])
+        self.assertEqual(config.stack_depth, 5)
+
+        # Should not log warnings since empty strings are valid strings
+        mock_logger.warning.assert_not_called()
 
 
 class TestAwsCodeCorrelationConfigIntegration(TestCase):

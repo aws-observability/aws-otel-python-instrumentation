@@ -6,9 +6,9 @@ from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro.code_correlation.code_attributes_span_processor import CodeAttributesSpanProcessor
-from amazon.opentelemetry.distro.code_correlation.constants import CODE_FUNCTION_NAME
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, Span
+from opentelemetry.semconv.attributes.code_attributes import CODE_FUNCTION_NAME
 from opentelemetry.trace import SpanKind
 
 
@@ -108,12 +108,10 @@ class TestCodeAttributesSpanProcessor(TestCase):
         result = CodeAttributesSpanProcessor._should_process_span(span)
         self.assertFalse(result)
 
-    def test_should_process_span_non_client_spans(self):
-        """Test that non-CLIENT spans should not be processed."""
+    def test_should_process_span_server_and_internal_spans(self):
+        """Test that SERVER and INTERNAL spans should not be processed."""
         test_cases = [
             SpanKind.SERVER,
-            SpanKind.PRODUCER,
-            SpanKind.CONSUMER,
             SpanKind.INTERNAL,
         ]
 
@@ -122,6 +120,20 @@ class TestCodeAttributesSpanProcessor(TestCase):
                 span = self.create_mock_span(span_kind, attributes=None)
                 result = CodeAttributesSpanProcessor._should_process_span(span)
                 self.assertFalse(result)
+
+    def test_should_process_span_client_producer_consumer_spans(self):
+        """Test that CLIENT, PRODUCER, and CONSUMER spans should be processed."""
+        test_cases = [
+            SpanKind.CLIENT,
+            SpanKind.PRODUCER,
+            SpanKind.CONSUMER,
+        ]
+
+        for span_kind in test_cases:
+            with self.subTest(span_kind=span_kind):
+                span = self.create_mock_span(span_kind, attributes=None)
+                result = CodeAttributesSpanProcessor._should_process_span(span)
+                self.assertTrue(result)
 
     @patch("amazon.opentelemetry.distro.code_correlation.code_attributes_span_processor.sys._getframe")
     @patch("amazon.opentelemetry.distro.code_correlation.code_attributes_span_processor.is_user_code")

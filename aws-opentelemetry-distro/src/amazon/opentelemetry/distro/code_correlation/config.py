@@ -82,10 +82,73 @@ class AwsCodeCorrelationConfig:
             )
             config_data = {}
 
+        # Validate and extract include list
+        include_value = config_data.get("include", [])
+        if not isinstance(include_value, list):
+            _logger.warning(
+                "Configuration 'include' in %s must be a list, got %s. Using empty list.",
+                _ENV_CONFIG,
+                type(include_value).__name__,
+            )
+            include_value = []
+        else:
+            # Ensure all items in the list are strings
+            validated_include = []
+            for item in include_value:
+                if isinstance(item, str):
+                    validated_include.append(item)
+                else:
+                    _logger.warning(
+                        "Configuration 'include' list item in %s must be a string, got %s. Skipping item.",
+                        _ENV_CONFIG,
+                        type(item).__name__,
+                    )
+            include_value = validated_include
+
+        # Validate and extract exclude list
+        exclude_value = config_data.get("exclude", [])
+        if not isinstance(exclude_value, list):
+            _logger.warning(
+                "Configuration 'exclude' in %s must be a list, got %s. Using empty list.",
+                _ENV_CONFIG,
+                type(exclude_value).__name__,
+            )
+            exclude_value = []
+        else:
+            # Ensure all items in the list are strings
+            validated_exclude = []
+            for item in exclude_value:
+                if isinstance(item, str):
+                    validated_exclude.append(item)
+                else:
+                    _logger.warning(
+                        "Configuration 'exclude' list item in %s must be a string, got %s. Skipping item.",
+                        _ENV_CONFIG,
+                        type(item).__name__,
+                    )
+            exclude_value = validated_exclude
+
+        # Validate and extract stack_depth
+        stack_depth_value = config_data.get("stack_depth", 0)
+        if not isinstance(stack_depth_value, int):
+            _logger.warning(
+                "Configuration 'stack_depth' in %s must be an integer, got %s. Using default value 0.",
+                _ENV_CONFIG,
+                type(stack_depth_value).__name__,
+            )
+            stack_depth_value = 0
+        elif stack_depth_value < 0:
+            _logger.warning(
+                "Configuration 'stack_depth' in %s must be non-negative, got %d. Using default value 0.",
+                _ENV_CONFIG,
+                stack_depth_value,
+            )
+            stack_depth_value = 0
+
         return cls(
-            include=config_data.get("include", []),
-            exclude=config_data.get("exclude", []),
-            stack_depth=config_data.get("stack_depth", 0),
+            include=include_value,
+            exclude=exclude_value,
+            stack_depth=stack_depth_value,
         )
 
     def to_dict(self) -> Dict[str, Any]:

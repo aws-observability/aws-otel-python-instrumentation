@@ -15,6 +15,7 @@ from types import FrameType, FunctionType, MethodType
 from typing import Any, Callable
 
 from opentelemetry import trace
+from opentelemetry.semconv.attributes.code_attributes import CODE_FILE_PATH, CODE_FUNCTION_NAME, CODE_LINE_NUMBER
 
 
 def get_callable_fullname(obj) -> str:  # pylint: disable=too-many-return-statements
@@ -134,13 +135,6 @@ def add_code_attributes_to_span_from_frame(frame: FrameType, span) -> None:
         frame: The Python frame object to extract metadata from
         span: The OpenTelemetry span to add attributes to
     """
-    # Import constants here to avoid circular imports
-    from .constants import (  # pylint: disable=import-outside-toplevel
-        CODE_FILE_PATH,
-        CODE_FUNCTION_NAME,
-        CODE_LINE_NUMBER,
-    )
-
     if not span.is_recording():
         return
 
@@ -171,13 +165,6 @@ def add_code_attributes_to_span(span, func_or_class: Callable[..., Any]) -> None
         span: The OpenTelemetry span to add attributes to
         func_or_class: The Python function or class to extract metadata from
     """
-    # Import constants here to avoid circular imports
-    from .constants import (  # pylint: disable=import-outside-toplevel
-        CODE_FILE_PATH,
-        CODE_FUNCTION_NAME,
-        CODE_LINE_NUMBER,
-    )
-
     if not span.is_recording():
         return
 

@@ -14,6 +14,7 @@ This module provides utilities to:
 import logging
 import sys
 import sysconfig
+import threading
 from functools import lru_cache, wraps
 from inspect import FullArgSpec, getfullargspec, isgeneratorfunction
 from pathlib import Path
@@ -30,6 +31,7 @@ _code_attributes_config = AwsCodeCorrelationConfig.from_env()
 # Global caching variables
 _sys_path_hash: Optional[int] = None
 _resolved_sys_path: List[Path] = []
+_sys_path_lock = threading.Lock()
 
 # Standard library paths (computed once at module load)
 _STDLIB_PATH = Path(sysconfig.get_path("stdlib")).resolve()
@@ -112,12 +114,14 @@ def _determine_effective_root(relative_path: Path, parent_path: Path) -> str:
 
     if root_dir.is_dir() and (root_dir / "__init__.py").exists():
         return base_name
-    return "/".join(relative_path.parts[:2])
+    return str(Path(*relative_path.parts[:2]))
 
 
 def _resolve_system_paths() -> List[Path]:
     """
     Resolve and cache system paths from sys.path.
+
+    Uses double-checked locking for thread safety while maintaining performance.
 
     Returns:
         List of resolved Path objects from sys.path
@@ -125,9 +129,17 @@ def _resolve_system_paths() -> List[Path]:
     global _sys_path_hash, _resolved_sys_path  # pylint: disable=global-statement
 
     current_hash = hash(tuple(sys.path))
-    if current_hash != _sys_path_hash:
-        _sys_path_hash = current_hash
-        _resolved_sys_path = [Path(path).resolve() for path in sys.path]
+
+    # Fast path: check without lock (common case when no update needed)
+    if current_hash == _sys_path_hash:
+        return _resolved_sys_path
+
+    # Slow path: acquire lock and double-check
+    with _sys_path_lock:
+        # Double-check inside lock in case another thread already updated
+        if current_hash != _sys_path_hash:
+            _sys_path_hash = current_hash
+            _resolved_sys_path = [Path(path).resolve() for path in sys.path]
 
     return _resolved_sys_path
 
@@ -172,12 +184,6 @@ def _extract_root_module_name(file_path: Path) -> str:
             return _determine_effective_root(shortest_relative, best_parent)
         except IndexError:
             pass
-
-    # Handle Bazel runfiles (special case)
-    if any(parent.suffix == ".runfiles" for parent in file_path.parents):
-        for parent in file_path.parents:
-            if parent.parent.name == "site-packages":
-                return parent.name
 
     raise ValueError(f"Could not determine root module for path: {file_path}")
 

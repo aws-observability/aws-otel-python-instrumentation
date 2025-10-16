@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
-from amazon.opentelemetry.distro.code_correlation.internal.packages import (
+from amazon.opentelemetry.distro.code_correlation.internal.packages_resolver import (
     Distribution,
     _build_package_mapping,
     _determine_effective_root,
@@ -248,10 +248,12 @@ class TestResolveSystemPaths(TestCase):
 
     def test_resolve_system_paths_caching(self):
         """Test that system paths are cached properly."""
-        with patch("amazon.opentelemetry.distro.code_correlation.internal.packages.sys.path", ["/path1", "/path2"]):
+        with patch(
+            "amazon.opentelemetry.distro.code_correlation.internal.packages_resolver.sys.path", ["/path1", "/path2"]
+        ):
 
             # Clear cache by modifying global variables
-            import amazon.opentelemetry.distro.code_correlation.internal.packages as pkg_module
+            import amazon.opentelemetry.distro.code_correlation.internal.packages_resolver as pkg_module
 
             pkg_module._sys_path_hash = None
             pkg_module._resolved_sys_path = []
@@ -267,13 +269,15 @@ class TestResolveSystemPaths(TestCase):
 
     def test_resolve_system_paths_cache_invalidation(self):
         """Test that cache is invalidated when sys.path changes."""
-        import amazon.opentelemetry.distro.code_correlation.internal.packages as pkg_module
+        import amazon.opentelemetry.distro.code_correlation.internal.packages_resolver as pkg_module
 
-        with patch("amazon.opentelemetry.distro.code_correlation.internal.packages.sys.path", ["/path1"]):
+        with patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver.sys.path", ["/path1"]):
             pkg_module._sys_path_hash = None  # Clear cache
             result1 = _resolve_system_paths()
 
-        with patch("amazon.opentelemetry.distro.code_correlation.internal.packages.sys.path", ["/path1", "/path2"]):
+        with patch(
+            "amazon.opentelemetry.distro.code_correlation.internal.packages_resolver.sys.path", ["/path1", "/path2"]
+        ):
             result2 = _resolve_system_paths()
 
         self.assertNotEqual(len(result1), len(result2))
@@ -282,7 +286,7 @@ class TestResolveSystemPaths(TestCase):
 class TestExtractRootModuleName(TestCase):
     """Test the _extract_root_module_name function."""
 
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages._PURELIB_PATH")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._PURELIB_PATH")
     def test_extract_root_module_name_purelib(self, mock_purelib):
         """Test extracting root module name from purelib path."""
         mock_purelib.return_value = Path("/usr/lib/python3.9/site-packages")
@@ -290,7 +294,7 @@ class TestExtractRootModuleName(TestCase):
         with patch.object(Path, "resolve") as mock_resolve, patch.object(
             Path, "relative_to"
         ) as mock_relative_to, patch(
-            "amazon.opentelemetry.distro.code_correlation.internal.packages._determine_effective_root"
+            "amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._determine_effective_root"
         ) as mock_determine:
 
             mock_resolve.return_value = Path("/usr/lib/python3.9/site-packages/mypackage/module.py")
@@ -305,7 +309,8 @@ class TestExtractRootModuleName(TestCase):
     def test_extract_root_module_name_value_error(self):
         """Test _extract_root_module_name raises ValueError when module cannot be determined."""
         with patch.object(Path, "relative_to", side_effect=ValueError("not relative")), patch(
-            "amazon.opentelemetry.distro.code_correlation.internal.packages._resolve_system_paths", return_value=[]
+            "amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._resolve_system_paths",
+            return_value=[],
         ):
 
             file_path = Path("/unknown/path/module.py")
@@ -340,7 +345,7 @@ class TestBuildPackageMapping(TestCase):
         self.assertEqual(result["testpkg"].version, "1.0.0")
 
     @patch("importlib.metadata.distributions")
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages._logger")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._logger")
     def test_build_package_mapping_exception(self, mock_logger, mock_distributions):
         """Test package mapping build handles exceptions."""
         mock_distributions.side_effect = Exception("Import error")
@@ -400,7 +405,7 @@ class TestLoadThirdPartyPackages(TestCase):
     """Test the _load_third_party_packages function."""
 
     @patch("importlib.resources.read_text")
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages._code_attributes_config")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._code_attributes_config")
     def test_load_third_party_packages_success(self, mock_config, mock_read_text):
         """Test successful loading of third-party packages."""
         # Mock text file content
@@ -416,7 +421,7 @@ class TestLoadThirdPartyPackages(TestCase):
         self.assertEqual(result, expected)
 
     @patch("importlib.resources.read_text")
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages._logger")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._logger")
     def test_load_third_party_packages_exception(self, mock_logger, mock_read_text):
         """Test loading third-party packages handles exceptions."""
         mock_read_text.side_effect = Exception("Read error")
@@ -430,8 +435,8 @@ class TestLoadThirdPartyPackages(TestCase):
 class TestResolvePackageFromFilename(TestCase):
     """Test the resolve_package_from_filename function."""
 
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages._build_package_mapping")
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages._extract_root_module_name")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._build_package_mapping")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._extract_root_module_name")
     def test_resolve_package_from_filename_exact_match(self, mock_extract, mock_build):
         """Test resolving package with exact module name match."""
         # Mock package mapping
@@ -443,8 +448,8 @@ class TestResolvePackageFromFilename(TestCase):
 
         self.assertEqual(result, test_dist)
 
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages._build_package_mapping")
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages._extract_root_module_name")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._build_package_mapping")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._extract_root_module_name")
     def test_resolve_package_from_filename_name_match(self, mock_extract, mock_build):
         """Test resolving package with distribution name match."""
         test_dist = Distribution(name="test-package", version="1.0.0")
@@ -455,7 +460,7 @@ class TestResolvePackageFromFilename(TestCase):
 
         self.assertEqual(result, test_dist)
 
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages._build_package_mapping")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._build_package_mapping")
     def test_resolve_package_from_filename_no_mapping(self, mock_build):
         """Test resolving package when no mapping is available."""
         mock_build.return_value = None
@@ -464,8 +469,8 @@ class TestResolvePackageFromFilename(TestCase):
 
         self.assertIsNone(result)
 
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages._build_package_mapping")
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages._extract_root_module_name")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._build_package_mapping")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._extract_root_module_name")
     def test_resolve_package_from_filename_no_match(self, mock_extract, mock_build):
         """Test resolving package when no match is found."""
         mock_build.return_value = {"otherpkg": Distribution("other", "1.0")}
@@ -475,8 +480,8 @@ class TestResolvePackageFromFilename(TestCase):
 
         self.assertIsNone(result)
 
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages._build_package_mapping")
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages._extract_root_module_name")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._build_package_mapping")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._extract_root_module_name")
     def test_resolve_package_from_filename_path_object(self, mock_extract, mock_build):
         """Test resolving package with Path object input."""
         test_dist = Distribution(name="test-package", version="1.0.0")
@@ -488,9 +493,9 @@ class TestResolvePackageFromFilename(TestCase):
 
         self.assertEqual(result, test_dist)
 
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages._build_package_mapping")
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages._extract_root_module_name")
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages._logger")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._build_package_mapping")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._extract_root_module_name")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._logger")
     def test_resolve_package_from_filename_exception(self, mock_logger, mock_extract, mock_build):
         """Test resolving package handles exceptions."""
         mock_build.return_value = {"testpkg": Distribution("test", "1.0")}
@@ -541,8 +546,8 @@ class TestIsStandardLibrary(TestCase):
 class TestIsThirdPartyPackage(TestCase):
     """Test the is_third_party_package function."""
 
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages.resolve_package_from_filename")
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages._load_third_party_packages")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver.resolve_package_from_filename")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._load_third_party_packages")
     def test_is_third_party_package_true(self, mock_load_packages, mock_resolve):
         """Test detection of third-party package."""
         mock_resolve.return_value = Distribution(name="requests", version="2.25.1")
@@ -552,7 +557,7 @@ class TestIsThirdPartyPackage(TestCase):
 
         self.assertTrue(result)
 
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages.resolve_package_from_filename")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver.resolve_package_from_filename")
     def test_is_third_party_package_no_distribution(self, mock_resolve):
         """Test detection when no distribution is found."""
         mock_resolve.return_value = None
@@ -561,8 +566,8 @@ class TestIsThirdPartyPackage(TestCase):
 
         self.assertFalse(result)
 
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages.resolve_package_from_filename")
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages._load_third_party_packages")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver.resolve_package_from_filename")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._load_third_party_packages")
     def test_is_third_party_package_not_in_list(self, mock_load_packages, mock_resolve):
         """Test detection when package is not in third-party list."""
         mock_resolve.return_value = Distribution(name="myapp", version="1.0.0")
@@ -576,8 +581,8 @@ class TestIsThirdPartyPackage(TestCase):
 class TestIsUserCode(TestCase):
     """Test the is_user_code function."""
 
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages.is_standard_library")
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages.is_third_party_package")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver.is_standard_library")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver.is_third_party_package")
     def test_is_user_code_true(self, mock_is_third_party, mock_is_stdlib):
         """Test detection of user code."""
         mock_is_stdlib.return_value = False
@@ -587,8 +592,8 @@ class TestIsUserCode(TestCase):
 
         self.assertTrue(result)
 
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages.is_standard_library")
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages.is_third_party_package")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver.is_standard_library")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver.is_third_party_package")
     def test_is_user_code_stdlib(self, mock_is_third_party, mock_is_stdlib):
         """Test detection when file is standard library."""
         mock_is_stdlib.return_value = True
@@ -598,8 +603,8 @@ class TestIsUserCode(TestCase):
 
         self.assertFalse(result)
 
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages.is_standard_library")
-    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages.is_third_party_package")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver.is_standard_library")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver.is_third_party_package")
     def test_is_user_code_third_party(self, mock_is_third_party, mock_is_stdlib):
         """Test detection when file is third-party package."""
         mock_is_stdlib.return_value = False
@@ -616,9 +621,9 @@ class TestPackagesIntegration(TestCase):
     def test_distribution_in_resolve_package_workflow(self):
         """Test Distribution is properly used in the resolution workflow."""
         with patch(
-            "amazon.opentelemetry.distro.code_correlation.internal.packages._build_package_mapping"
+            "amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._build_package_mapping"
         ) as mock_build, patch(
-            "amazon.opentelemetry.distro.code_correlation.internal.packages._extract_root_module_name"
+            "amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._extract_root_module_name"
         ) as mock_extract:
 
             test_dist = Distribution(name="test-pkg", version="1.2.3")
@@ -635,9 +640,9 @@ class TestPackagesIntegration(TestCase):
         """Test that caching functions work correctly."""
         # Test that resolve_package_from_filename uses caching
         with patch(
-            "amazon.opentelemetry.distro.code_correlation.internal.packages._build_package_mapping"
+            "amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._build_package_mapping"
         ) as mock_build, patch(
-            "amazon.opentelemetry.distro.code_correlation.internal.packages._extract_root_module_name"
+            "amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._extract_root_module_name"
         ) as mock_extract:
 
             test_dist = Distribution(name="cached-pkg", version="1.0.0")
@@ -658,7 +663,7 @@ class TestPackagesIntegration(TestCase):
 
     def test_module_constants(self):
         """Test that module constants are properly initialized."""
-        from amazon.opentelemetry.distro.code_correlation.internal.packages import (
+        from amazon.opentelemetry.distro.code_correlation.internal.packages_resolver import (
             _PLATLIB_PATH,
             _PLATSTDLIB_PATH,
             _PURELIB_PATH,
