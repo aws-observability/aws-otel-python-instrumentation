@@ -71,7 +71,7 @@ from amazon.opentelemetry.distro.metric_attribute_generator import (
     SERVICE_METRIC,
     MetricAttributeGenerator,
 )
-from amazon.opentelemetry.distro.patches._bedrock_agentcore_patches import (
+from amazon.opentelemetry.distro.patches.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_BROWSER_ID,
     GEN_AI_CODE_INTERPRETER_ID,
     GEN_AI_GATEWAY_ID,
