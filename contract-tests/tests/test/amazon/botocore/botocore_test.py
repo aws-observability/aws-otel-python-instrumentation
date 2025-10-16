@@ -786,7 +786,7 @@ class BotocoreTest(ContractTestBase):
 
     def test_bedrock_agentcore_start_browser_session(self):
         self.do_test_requests(
-            "bedrock-agentcore/runtime/startbrowsersession/agentBrowser-qYkrpgjS2M",
+            "bedrock-agentcore/browser/startbrowsersession/agentBrowser-qYkrpgjS2M",
             "GET",
             200,
             0,
@@ -802,7 +802,7 @@ class BotocoreTest(ContractTestBase):
 
     def test_bedrock_agentcore_start_browser_session_v1(self):
         self.do_test_requests(
-            "bedrock-agentcore/runtime/startbrowsersession/aws.browser.v1",
+            "bedrock-agentcore/browser/startbrowsersession/aws.browser.v1",
             "GET",
             200,
             0,

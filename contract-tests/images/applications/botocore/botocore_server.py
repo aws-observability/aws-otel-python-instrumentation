@@ -115,11 +115,12 @@ class RequestHandler(BaseHTTPRequestHandler):
         bedrock_agentcore_control_client = boto3.client(
             "bedrock-agentcore-control", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION
         )
+        # Bedrock AgentCore tests will have path of the following structure:
+        # /bedrock-agentcore/{service}/{operation}/{args}
+        path_parts = self.path.split("/")
+        operation = path_parts[3]
 
         if self.in_path("runtime"):
-            path_parts = self.path.split("/")
-            operation = path_parts[3]
-
             if operation == "invokeagentruntime":
                 agent_id = path_parts[4]
                 set_main_status(200)
@@ -158,6 +159,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     description="Endpoint for invoking agent runtime",
                 )
                 return
+        if self.in_path("browser"):
             if operation == "startbrowsersession":
                 browser_id = path_parts[4]
                 set_main_status(200)
