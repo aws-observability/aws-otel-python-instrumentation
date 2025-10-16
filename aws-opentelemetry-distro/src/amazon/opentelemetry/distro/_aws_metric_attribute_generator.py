@@ -790,14 +790,10 @@ def _get_agentcore_resource_type_and_identifier(span: ReadableSpan) -> tuple[Opt
         return format_resource_type(resource_type), resource_identifier
 
     # Memory
-    memory_id = attrs.get(GEN_AI_MEMORY_ID)
     memory_arn = attrs.get(AWS_BEDROCK_AGENTCORE_MEMORY_ARN)
-    if memory_id or memory_arn:
+    if memory_arn:
         resource_type = "Memory"
-        if memory_arn:
-            resource_identifier = extract_id_from_arn(str(memory_arn)) if memory_arn else None
-        if memory_id:
-            resource_identifier = str(memory_id)
+        resource_identifier = str(memory_arn) if memory_arn else None
         return format_resource_type(resource_type), resource_identifier
 
     return None, None
