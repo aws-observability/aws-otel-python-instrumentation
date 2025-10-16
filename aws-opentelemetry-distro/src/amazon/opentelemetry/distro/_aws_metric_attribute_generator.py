@@ -488,7 +488,7 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
             _AWS_SDK_SERVICE_MAPPING.get(str(span.attributes.get(_RPC_SERVICE)))
             == _NORMALIZED_BEDROCK_AGENTCORE_SERVICE_NAME
         ):
-            agentcore_type, agentcore_identifier = _get_agentcore_resource_type_and_identifier(span)
+            agentcore_type, agentcore_identifier = _get_bedrock_agentcore_resource_type_and_identifier(span)
             remote_resource_type = agentcore_type
             remote_resource_identifier = _escape_delimiters(agentcore_identifier) if agentcore_identifier else None
         elif is_key_present(span, AWS_SECRETSMANAGER_SECRET_ARN):
@@ -700,7 +700,7 @@ def _set_span_kind_for_dependency(span: ReadableSpan, attributes: BoundedAttribu
 
 
 # pylint: disable=too-many-locals,too-many-return-statements
-def _get_agentcore_resource_type_and_identifier(span: ReadableSpan) -> tuple[Optional[str], Optional[str]]:
+def _get_bedrock_agentcore_resource_type_and_identifier(span: ReadableSpan) -> tuple[Optional[str], Optional[str]]:
     """Get BedrockAgentCore resource type and identifier based on span attributes."""
 
     attrs = span.attributes
