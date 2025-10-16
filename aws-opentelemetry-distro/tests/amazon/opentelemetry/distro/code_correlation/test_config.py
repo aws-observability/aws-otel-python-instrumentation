@@ -102,7 +102,7 @@ class TestAwsCodeCorrelationConfig(TestCase):
 
         result = repr(config)
 
-        expected = "AwsCodeCorrelationConfig(" "include=['app1', 'app2'], " "exclude=['lib1'], " "stack_depth=10)"
+        expected = "AwsCodeCorrelationConfig(include=['app1', 'app2'], exclude=['lib1'], stack_depth=10)"
         self.assertEqual(result, expected)
 
     def test_repr_with_defaults(self):
@@ -111,11 +111,11 @@ class TestAwsCodeCorrelationConfig(TestCase):
 
         result = repr(config)
 
-        expected = "AwsCodeCorrelationConfig(" "include=[], " "exclude=[], " "stack_depth=0)"
+        expected = "AwsCodeCorrelationConfig(include=[], exclude=[], stack_depth=0)"
         self.assertEqual(result, expected)
 
 
-class TestAwsCodeCorrelationConfigFromEnv(TestCase):
+class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many-public-methods
     """Test the from_env class method."""
 
     def setUp(self):
@@ -361,10 +361,29 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):
 
         # Should log warnings for all invalid types
         self.assertEqual(mock_logger.warning.call_count, 3)
-        warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
-        self.assertTrue(any("'include'" in call and "must be a list" in call for call in warning_calls))
-        self.assertTrue(any("'exclude'" in call and "must be a list" in call for call in warning_calls))
-        self.assertTrue(any("'stack_depth'" in call and "must be an integer" in call for call in warning_calls))
+        warning_calls = [call[0] for call in mock_logger.warning.call_args_list]
+
+        # Check for include warning - format string and arguments
+        include_warnings = [call for call in warning_calls if "must be a list" in call[0] and call[1] == "include"]
+        self.assertEqual(len(include_warnings), 1)
+        self.assertEqual(include_warnings[0][1], "include")
+        self.assertEqual(include_warnings[0][2], _ENV_CONFIG)
+        self.assertEqual(include_warnings[0][3], "str")
+
+        # Check for exclude warning
+        exclude_warnings = [call for call in warning_calls if "must be a list" in call[0] and call[1] == "exclude"]
+        self.assertEqual(len(exclude_warnings), 1)
+        self.assertEqual(exclude_warnings[0][1], "exclude")
+        self.assertEqual(exclude_warnings[0][2], _ENV_CONFIG)
+        self.assertEqual(exclude_warnings[0][3], "int")
+
+        # Check for stack_depth warning
+        stack_warnings = [
+            call for call in warning_calls if "'stack_depth'" in call[0] and "must be an integer" in call[0]
+        ]
+        self.assertEqual(len(stack_warnings), 1)
+        self.assertEqual(stack_warnings[0][1], _ENV_CONFIG)
+        self.assertEqual(stack_warnings[0][2], "str")
 
     @patch("amazon.opentelemetry.distro.code_correlation.config._logger")
     def test_from_env_null_values(self, mock_logger):
@@ -381,10 +400,29 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):
 
         # Should log warnings for invalid types
         self.assertEqual(mock_logger.warning.call_count, 3)
-        warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
-        self.assertTrue(any("'include'" in call and "must be a list" in call for call in warning_calls))
-        self.assertTrue(any("'exclude'" in call and "must be a list" in call for call in warning_calls))
-        self.assertTrue(any("'stack_depth'" in call and "must be an integer" in call for call in warning_calls))
+        warning_calls = [call[0] for call in mock_logger.warning.call_args_list]
+
+        # Check for include warning
+        include_warnings = [call for call in warning_calls if "must be a list" in call[0] and call[1] == "include"]
+        self.assertEqual(len(include_warnings), 1)
+        self.assertEqual(include_warnings[0][1], "include")
+        self.assertEqual(include_warnings[0][2], _ENV_CONFIG)
+        self.assertEqual(include_warnings[0][3], "NoneType")
+
+        # Check for exclude warning
+        exclude_warnings = [call for call in warning_calls if "must be a list" in call[0] and call[1] == "exclude"]
+        self.assertEqual(len(exclude_warnings), 1)
+        self.assertEqual(exclude_warnings[0][1], "exclude")
+        self.assertEqual(exclude_warnings[0][2], _ENV_CONFIG)
+        self.assertEqual(exclude_warnings[0][3], "NoneType")
+
+        # Check for stack_depth warning
+        stack_warnings = [
+            call for call in warning_calls if "'stack_depth'" in call[0] and "must be an integer" in call[0]
+        ]
+        self.assertEqual(len(stack_warnings), 1)
+        self.assertEqual(stack_warnings[0][1], _ENV_CONFIG)
+        self.assertEqual(stack_warnings[0][2], "NoneType")
 
     def test_from_env_complex_package_names(self):
         """Test from_env with complex package names."""
@@ -432,13 +470,22 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):
         self.assertEqual(config.stack_depth, 5)
 
         # Should log warnings for non-string items
-        self.assertTrue(mock_logger.warning.call_count >= 3)  # At least 3 non-string items
-        warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
+        self.assertEqual(mock_logger.warning.call_count, 3)  # Exactly 3 non-string items
+        warning_calls = [call[0] for call in mock_logger.warning.call_args_list]
+
         # Check that warnings mention non-string items being skipped
-        non_string_warnings = [
-            call for call in warning_calls if "'include' list item" in call and "must be a string" in call
+        include_warnings = [
+            call
+            for call in warning_calls
+            if "list item" in call[0] and "must be a string" in call[0] and call[1] == "include"
         ]
-        self.assertEqual(len(non_string_warnings), 3)  # 123, True, None
+        self.assertEqual(len(include_warnings), 3)  # 123, True, None
+
+        # Verify the specific types logged
+        logged_types = [call[3] for call in include_warnings]
+        self.assertIn("int", logged_types)  # 123
+        self.assertIn("bool", logged_types)  # True
+        self.assertIn("NoneType", logged_types)  # None
 
     @patch("amazon.opentelemetry.distro.code_correlation.config._logger")
     def test_from_env_mixed_type_exclude_list(self, mock_logger):
@@ -458,13 +505,22 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):
         self.assertEqual(config.stack_depth, 10)
 
         # Should log warnings for non-string items
-        self.assertTrue(mock_logger.warning.call_count >= 3)  # At least 3 non-string items
-        warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
+        self.assertEqual(mock_logger.warning.call_count, 3)  # Exactly 3 non-string items
+        warning_calls = [call[0] for call in mock_logger.warning.call_args_list]
+
         # Check that warnings mention non-string items being skipped
-        non_string_warnings = [
-            call for call in warning_calls if "'exclude' list item" in call and "must be a string" in call
+        exclude_warnings = [
+            call
+            for call in warning_calls
+            if "list item" in call[0] and "must be a string" in call[0] and call[1] == "exclude"
         ]
-        self.assertEqual(len(non_string_warnings), 3)  # 42, False, [1, 2, 3]
+        self.assertEqual(len(exclude_warnings), 3)  # 42, False, [1, 2, 3]
+
+        # Verify the specific types logged
+        logged_types = [call[3] for call in exclude_warnings]
+        self.assertIn("int", logged_types)  # 42
+        self.assertIn("bool", logged_types)  # False
+        self.assertIn("list", logged_types)  # [1, 2, 3]
 
     @patch("amazon.opentelemetry.distro.code_correlation.config._logger")
     def test_from_env_all_non_string_list_items(self, mock_logger):
@@ -484,16 +540,41 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):
         self.assertEqual(config.stack_depth, 5)
 
         # Should log warnings for all non-string items
-        self.assertTrue(mock_logger.warning.call_count >= 10)  # 5 + 5 non-string items
-        warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
+        self.assertEqual(mock_logger.warning.call_count, 10)  # Exactly 10 non-string items
+        warning_calls = [call[0] for call in mock_logger.warning.call_args_list]
+
+        # Check include warnings
         include_warnings = [
-            call for call in warning_calls if "'include' list item" in call and "must be a string" in call
-        ]
-        exclude_warnings = [
-            call for call in warning_calls if "'exclude' list item" in call and "must be a string" in call
+            call
+            for call in warning_calls
+            if "list item" in call[0] and "must be a string" in call[0] and call[1] == "include"
         ]
         self.assertEqual(len(include_warnings), 5)
+
+        # Check exclude warnings
+        exclude_warnings = [
+            call
+            for call in warning_calls
+            if "list item" in call[0] and "must be a string" in call[0] and call[1] == "exclude"
+        ]
         self.assertEqual(len(exclude_warnings), 5)
+
+        # Verify that different types are logged
+        include_logged_types = [call[3] for call in include_warnings]
+        exclude_logged_types = [call[3] for call in exclude_warnings]
+
+        # For include: [123, True, None, {"key": "value"}, [1, 2, 3]]
+        self.assertIn("int", include_logged_types)  # 123
+        self.assertIn("bool", include_logged_types)  # True
+        self.assertIn("NoneType", include_logged_types)  # None
+        self.assertIn("dict", include_logged_types)  # {"key": "value"}
+        self.assertIn("list", include_logged_types)  # [1, 2, 3]
+
+        # For exclude: [456, False, 0, 1.5, {"another": "object"}]
+        self.assertIn("int", exclude_logged_types)  # 456 and 0
+        self.assertIn("bool", exclude_logged_types)  # False
+        self.assertIn("float", exclude_logged_types)  # 1.5
+        self.assertIn("dict", exclude_logged_types)  # {"another": "object"}
 
     @patch("amazon.opentelemetry.distro.code_correlation.config._logger")
     def test_from_env_float_stack_depth(self, mock_logger):

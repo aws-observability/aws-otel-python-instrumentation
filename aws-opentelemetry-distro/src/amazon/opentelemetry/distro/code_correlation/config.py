@@ -62,7 +62,20 @@ class AwsCodeCorrelationConfig:
         Returns:
             AwsCodeCorrelationConfig: Configured instance
         """
-        # Parse JSON configuration
+        config_data = cls._parse_config_data()
+        include_value = cls._validate_string_list(config_data, "include")
+        exclude_value = cls._validate_string_list(config_data, "exclude")
+        stack_depth_value = cls._validate_stack_depth(config_data)
+
+        return cls(
+            include=include_value,
+            exclude=exclude_value,
+            stack_depth=stack_depth_value,
+        )
+
+    @classmethod
+    def _parse_config_data(cls) -> Dict[str, Any]:
+        """Parse configuration data from environment variable."""
         config_str = os.getenv(_ENV_CONFIG, "{}").strip()
         if not config_str:
             config_str = "{}"
@@ -71,64 +84,47 @@ class AwsCodeCorrelationConfig:
             config_data = json.loads(config_str)
         except json.JSONDecodeError as json_error:
             _logger.warning("Invalid JSON in %s: %s. Using empty configuration.", _ENV_CONFIG, json_error)
-            config_data = {}
+            return {}
 
-        # Ensure config_data is a dictionary
         if not isinstance(config_data, dict):
             _logger.warning(
                 "Configuration in %s must be a JSON object, got %s. Using empty configuration.",
                 _ENV_CONFIG,
                 type(config_data).__name__,
             )
-            config_data = {}
+            return {}
 
-        # Validate and extract include list
-        include_value = config_data.get("include", [])
-        if not isinstance(include_value, list):
+        return config_data
+
+    @classmethod
+    def _validate_string_list(cls, config_data: Dict[str, Any], field_name: str) -> List[str]:
+        """Validate and extract a string list from config data."""
+        field_value = config_data.get(field_name, [])
+        if not isinstance(field_value, list):
             _logger.warning(
-                "Configuration 'include' in %s must be a list, got %s. Using empty list.",
+                "Configuration '%s' in %s must be a list, got %s. Using empty list.",
+                field_name,
                 _ENV_CONFIG,
-                type(include_value).__name__,
+                type(field_value).__name__,
             )
-            include_value = []
-        else:
-            # Ensure all items in the list are strings
-            validated_include = []
-            for item in include_value:
-                if isinstance(item, str):
-                    validated_include.append(item)
-                else:
-                    _logger.warning(
-                        "Configuration 'include' list item in %s must be a string, got %s. Skipping item.",
-                        _ENV_CONFIG,
-                        type(item).__name__,
-                    )
-            include_value = validated_include
+            return []
 
-        # Validate and extract exclude list
-        exclude_value = config_data.get("exclude", [])
-        if not isinstance(exclude_value, list):
-            _logger.warning(
-                "Configuration 'exclude' in %s must be a list, got %s. Using empty list.",
-                _ENV_CONFIG,
-                type(exclude_value).__name__,
-            )
-            exclude_value = []
-        else:
-            # Ensure all items in the list are strings
-            validated_exclude = []
-            for item in exclude_value:
-                if isinstance(item, str):
-                    validated_exclude.append(item)
-                else:
-                    _logger.warning(
-                        "Configuration 'exclude' list item in %s must be a string, got %s. Skipping item.",
-                        _ENV_CONFIG,
-                        type(item).__name__,
-                    )
-            exclude_value = validated_exclude
+        validated_list = []
+        for item in field_value:
+            if isinstance(item, str):
+                validated_list.append(item)
+            else:
+                _logger.warning(
+                    "Configuration '%s' list item in %s must be a string, got %s. Skipping item.",
+                    field_name,
+                    _ENV_CONFIG,
+                    type(item).__name__,
+                )
+        return validated_list
 
-        # Validate and extract stack_depth
+    @classmethod
+    def _validate_stack_depth(cls, config_data: Dict[str, Any]) -> int:
+        """Validate and extract stack depth from config data."""
         stack_depth_value = config_data.get("stack_depth", 0)
         if not isinstance(stack_depth_value, int):
             _logger.warning(
@@ -136,20 +132,17 @@ class AwsCodeCorrelationConfig:
                 _ENV_CONFIG,
                 type(stack_depth_value).__name__,
             )
-            stack_depth_value = 0
-        elif stack_depth_value < 0:
+            return 0
+
+        if stack_depth_value < 0:
             _logger.warning(
-                "Configuration 'stack_depth' in %s must be non-negative, got %d. Using default value 0.",
+                "Configuration 'stack_depth' in %s must be non-negative, got %s. Using default value 0.",
                 _ENV_CONFIG,
                 stack_depth_value,
             )
-            stack_depth_value = 0
+            return 0
 
-        return cls(
-            include=include_value,
-            exclude=exclude_value,
-            stack_depth=stack_depth_value,
-        )
+        return stack_depth_value
 
     def to_dict(self) -> Dict[str, Any]:
         """
