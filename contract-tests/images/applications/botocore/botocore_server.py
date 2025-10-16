@@ -132,7 +132,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     payload=b'{"message": "Hello, test message"}',
                 )
                 return
-            elif operation == "createendpoint":
+            if operation == "createendpoint":
                 set_main_status(200)
                 bedrock_agentcore_control_client.meta.events.register(
                     "before-call.bedrock-agentcore-control.CreateAgentRuntimeEndpoint",
@@ -158,7 +158,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     description="Endpoint for invoking agent runtime",
                 )
                 return
-            elif operation == "startbrowsersession":
+            if operation == "startbrowsersession":
                 browser_id = path_parts[4]
                 set_main_status(200)
                 bedrock_agentcore_client.meta.events.register(
