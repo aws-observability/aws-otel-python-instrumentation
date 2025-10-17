@@ -21,16 +21,16 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_AGENTCORE_WORKLOAD_IDENTITY_ARN,
     AWS_GATEWAY_TARGET_ID,
 )
-from amazon.opentelemetry.distro.patches._bedrock_agentcore_patches import (
+from amazon.opentelemetry.distro.patches._instrumentation_patch import (
+    AWS_GEVENT_PATCH_MODULES,
+    apply_instrumentation_patches,
+)
+from amazon.opentelemetry.distro.patches.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_BROWSER_ID,
     GEN_AI_CODE_INTERPRETER_ID,
     GEN_AI_GATEWAY_ID,
     GEN_AI_MEMORY_ID,
     GEN_AI_RUNTIME_ID,
-)
-from amazon.opentelemetry.distro.patches._instrumentation_patch import (
-    AWS_GEVENT_PATCH_MODULES,
-    apply_instrumentation_patches,
 )
 from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS, bedrock_utils
