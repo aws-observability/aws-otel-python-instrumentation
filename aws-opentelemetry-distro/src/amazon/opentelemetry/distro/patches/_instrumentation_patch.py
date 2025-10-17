@@ -14,7 +14,7 @@ AWS_GEVENT_PATCH_MODULES = "AWS_GEVENT_PATCH_MODULES"
 _logger: Logger = getLogger(__name__)
 
 
-def apply_instrumentation_patches() -> None:
+def apply_instrumentation_patches() -> None:  # pylint: disable=too-many-branches
     """Apply patches to upstream instrumentation libraries.
 
     This method is invoked to apply changes to upstream instrumentation libraries, typically when changes to upstream
@@ -91,6 +91,27 @@ def apply_instrumentation_patches() -> None:
         from amazon.opentelemetry.distro.patches._django_patches import _apply_django_instrumentation_patches
 
         _apply_django_instrumentation_patches()
+
+    if is_installed("celery"):
+        # pylint: disable=import-outside-toplevel
+        # Delay import to only occur if patches is safe to apply (e.g. the instrumented library is installed).
+        from amazon.opentelemetry.distro.patches._celery_patches import _apply_celery_instrumentation_patches
+
+        _apply_celery_instrumentation_patches()
+
+    if is_installed("pika"):
+        # pylint: disable=import-outside-toplevel
+        # Delay import to only occur if patches is safe to apply (e.g. the instrumented library is installed).
+        from amazon.opentelemetry.distro.patches._pika_patches import _apply_pika_instrumentation_patches
+
+        _apply_pika_instrumentation_patches()
+
+    if is_installed("aio-pika"):
+        # pylint: disable=import-outside-toplevel
+        # Delay import to only occur if patches is safe to apply (e.g. the instrumented library is installed).
+        from amazon.opentelemetry.distro.patches._aio_pika_patches import _apply_aio_pika_instrumentation_patches
+
+        _apply_aio_pika_instrumentation_patches()
 
     # No need to check if library is installed as this patches opentelemetry.sdk,
     # which must be installed for the distro to work at all.

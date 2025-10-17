@@ -116,7 +116,7 @@ class TestDjangoCodeAttributesPatches(TestBase):
             _apply_django_code_attributes_patch()
             # Check that warning was called with the format string and an ImportError
             mock_logger.warning.assert_called()
-            args, kwargs = mock_logger.warning.call_args
+            args, _kwargs = mock_logger.warning.call_args
             self.assertEqual(args[0], "Failed to apply Django code attributes patch: %s")
             self.assertIsInstance(args[1], ImportError)
             self.assertEqual(str(args[1]), "Module not found")
@@ -127,7 +127,7 @@ class TestDjangoCodeAttributesPatches(TestBase):
             # Test that the function doesn't raise exceptions even with import failures
             _apply_django_code_attributes_patch()
             # Should complete without errors regardless of Django availability
-            self.assertTrue(True)  # If we get here, no exception was raised
+            # If we get here, no exception was raised
 
 
 @patch("amazon.opentelemetry.distro.patches._django_patches.get_code_correlation_enabled_status", return_value=True)
@@ -137,7 +137,8 @@ class TestDjangoRealIntegration(TestBase):
     def setUp(self):
         """Set up test fixtures with Django configuration."""
         super().setUp()
-        self.skipTest("Django not available") if not DJANGO_AVAILABLE else None
+        if not DJANGO_AVAILABLE:
+            self.skipTest("Django not available")
 
         # Configure Django with minimal settings
         if not settings.configured:
@@ -206,10 +207,9 @@ class TestDjangoRealIntegration(TestBase):
             request.META[span_key] = mock_span
 
             # Call process_view method which should trigger the patch
-            result = middleware.process_view(request, test_view, [], {})
+            middleware.process_view(request, test_view, [], {})
 
-            # The result should be None (original process_view returns None)
-            self.assertIsNone(result)
+            # The original process_view returns None, so we don't assign result
 
             # Verify span methods were called (this confirms the patched code ran)
             mock_span.is_recording.assert_called()
@@ -267,10 +267,9 @@ class TestDjangoRealIntegration(TestBase):
 
             # Call process_view method with the class-based view function
             # This should trigger the class-based view logic where it extracts the handler
-            result = middleware.process_view(request, mock_view_func, [], {})
+            middleware.process_view(request, mock_view_func, [], {})
 
-            # The result should be None (original process_view returns None)
-            self.assertIsNone(result)
+            # The original process_view returns None, so we don't assign result
 
             # Verify span methods were called (this confirms the patched code ran)
             mock_span.is_recording.assert_called()

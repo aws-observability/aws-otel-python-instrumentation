@@ -62,6 +62,7 @@ def _apply_django_code_attributes_patch() -> None:  # pylint: disable=too-many-s
                 ):  # pylint: disable=too-many-locals,too-many-nested-blocks,too-many-branches
                     """Patched process_view method to add code attributes to the span."""
                     # First call the original process_view method
+                    # pylint: disable=assignment-from-none
                     result = original_process_view(self, request, view_func, *args, **kwargs)
 
                     # Add code attributes if we have a span and view function
@@ -120,12 +121,12 @@ def _apply_django_code_attributes_patch() -> None:  # pylint: disable=too-many-s
             _patch_django_middleware()
 
             # Call the original _instrument method
-            original_instrument(self, **kwargs)
+            original_instrument(self, **kwargs)  # pylint: disable=assignment-from-none
 
         def patched_uninstrument(self, **kwargs):
             """Patched _uninstrument method with Django middleware patch restoration"""
             # Call the original _uninstrument method first
-            original_uninstrument(self, **kwargs)
+            original_uninstrument(self, **kwargs)  # pylint: disable=assignment-from-none
 
             # Restore original Django middleware
             _unpatch_django_middleware()
