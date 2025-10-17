@@ -733,13 +733,13 @@ def _handle_browser_attrs(attrs) -> tuple[Optional[str], Optional[str], Optional
     browser_id = attrs.get(GEN_AI_BROWSER_ID)
     browser_arn = attrs.get(AWS_BEDROCK_AGENTCORE_BROWSER_ARN)
     if browser_id or browser_arn:
-        resource_identifier = None
-        if browser_arn:
-            resource_identifier = extract_bedrock_agentcore_resource_id_from_arn(str(browser_arn))
+        agentcore_cfn_identifier = None
         if browser_id:
-            resource_identifier = str(browser_id)
-        resource_type = "Browser" if resource_identifier == "aws.browser.v1" else "BrowserCustom"
-        return resource_type, resource_identifier, resource_identifier
+            agentcore_cfn_identifier = str(browser_id)
+        elif browser_arn:
+            agentcore_cfn_identifier = extract_bedrock_agentcore_resource_id_from_arn(str(browser_arn))
+        resource_type = "Browser" if agentcore_cfn_identifier == "aws.browser.v1" else "BrowserCustom"
+        return resource_type, agentcore_cfn_identifier, agentcore_cfn_identifier
     return None, None, None
 
 
@@ -749,20 +749,20 @@ def _handle_gateway_attrs(attrs) -> tuple[Optional[str], Optional[str], Optional
     gateway_target_id = attrs.get(AWS_GATEWAY_TARGET_ID)
 
     if gateway_target_id:
-        resource_identifier = str(gateway_target_id)
-        if gateway_arn:
-            resource_identifier = extract_bedrock_agentcore_resource_id_from_arn(str(gateway_arn))
+        agentcore_cfn_identifier = str(gateway_target_id)
         if gateway_id:
-            resource_identifier = str(gateway_id)
-        return "GatewayTarget", resource_identifier, resource_identifier
+            agentcore_cfn_identifier = str(gateway_id)
+        elif gateway_arn:
+            agentcore_cfn_identifier = extract_bedrock_agentcore_resource_id_from_arn(str(gateway_arn))
+        return "GatewayTarget", agentcore_cfn_identifier, agentcore_cfn_identifier
 
     if gateway_arn or gateway_id:
-        resource_identifier = None
-        if gateway_arn:
-            resource_identifier = extract_bedrock_agentcore_resource_id_from_arn(str(gateway_arn))
+        agentcore_cfn_identifier = None
         if gateway_id:
-            resource_identifier = str(gateway_id)
-        return "Gateway", resource_identifier, resource_identifier
+            agentcore_cfn_identifier = str(gateway_id)
+        elif gateway_arn:
+            agentcore_cfn_identifier = extract_bedrock_agentcore_resource_id_from_arn(str(gateway_arn))
+        return "Gateway", agentcore_cfn_identifier, agentcore_cfn_identifier
 
     return None, None, None
 
@@ -773,16 +773,16 @@ def _handle_runtime_attrs(attrs) -> tuple[Optional[str], Optional[str], Optional
     runtime_endpoint_arn = attrs.get(AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN)
 
     if runtime_endpoint_arn:
-        resource_identifier = extract_bedrock_agentcore_resource_id_from_arn(str(runtime_endpoint_arn))
-        return "RuntimeEndpoint", resource_identifier, str(runtime_endpoint_arn)
+        agentcore_cfn_identifier = extract_bedrock_agentcore_resource_id_from_arn(str(runtime_endpoint_arn))
+        return "RuntimeEndpoint", agentcore_cfn_identifier, str(runtime_endpoint_arn)
 
     if runtime_arn or runtime_id:
-        resource_identifier = None
-        if runtime_arn:
-            resource_identifier = extract_bedrock_agentcore_resource_id_from_arn(str(runtime_arn))
+        agentcore_cfn_identifier = None
         if runtime_id:
-            resource_identifier = str(runtime_id)
-        return "Runtime", resource_identifier, resource_identifier
+            agentcore_cfn_identifier = str(runtime_id)
+        elif runtime_arn:
+            agentcore_cfn_identifier = extract_bedrock_agentcore_resource_id_from_arn(str(runtime_arn))
+        return "Runtime", agentcore_cfn_identifier, agentcore_cfn_identifier
 
     return None, None, None
 
@@ -792,15 +792,13 @@ def _handle_code_interpreter_attrs(attrs) -> tuple[Optional[str], Optional[str],
     code_interpreter_arn = attrs.get(AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN)
 
     if code_interpreter_id or code_interpreter_arn:
-        resource_identifier = None
-        if code_interpreter_arn:
-            resource_identifier = extract_bedrock_agentcore_resource_id_from_arn(str(code_interpreter_arn))
+        agentcore_cfn_identifier = None
         if code_interpreter_id:
-            resource_identifier = str(code_interpreter_id)
-        resource_type = (
-            "CodeInterpreter" if resource_identifier == "aws.codeinterpreter.v1" else "CodeInterpreterCustom"
-        )
-        return resource_type, resource_identifier, resource_identifier
+            agentcore_cfn_identifier = str(code_interpreter_id)
+        elif code_interpreter_arn:
+            agentcore_cfn_identifier = extract_bedrock_agentcore_resource_id_from_arn(str(code_interpreter_arn))
+        resource_type = "CodeInterpreter" if agentcore_cfn_identifier == "aws.codeinterpreter.v1" else "CodeInterpreterCustom"
+        return resource_type, agentcore_cfn_identifier, agentcore_cfn_identifier
 
     return None, None, None
 
@@ -813,10 +811,10 @@ def _handle_identity_attrs(attrs) -> tuple[Optional[str], Optional[str], Optiona
         resource_type = None
         if "apikeycredentialprovider" in credential_arn_str:
             resource_type = "APIKeyCredentialProvider"
-        if "oauth2credentialprovider" in credential_arn_str:
+        elif "oauth2credentialprovider" in credential_arn_str:
             resource_type = "OAuth2CredentialProvider"
-        resource_identifier = extract_bedrock_agentcore_resource_id_from_arn(credential_arn_str)
-        return resource_type, resource_identifier, resource_identifier
+        agentcore_cfn_identifier = extract_bedrock_agentcore_resource_id_from_arn(credential_arn_str)
+        return resource_type, agentcore_cfn_identifier, agentcore_cfn_identifier
 
     return None, None, None
 
@@ -826,14 +824,14 @@ def _handle_memory_attrs(attrs) -> tuple[Optional[str], Optional[str], Optional[
     memory_arn = attrs.get(AWS_BEDROCK_AGENTCORE_MEMORY_ARN)
 
     if memory_id or memory_arn:
-        resource_identifier = None
-        cfn_primary_identifier = None
-        if memory_arn:
-            resource_identifier = extract_bedrock_agentcore_resource_id_from_arn(str(memory_arn))
-            cfn_primary_identifier = str(memory_arn)
+        agentcore_cfn_identifier = None
+        agentcore_cfn_primary_identifier = None
         if memory_id:
-            resource_identifier = str(memory_id)
-        return "Memory", resource_identifier, cfn_primary_identifier
+            agentcore_cfn_identifier = str(memory_id)
+        elif memory_arn:
+            agentcore_cfn_identifier = extract_bedrock_agentcore_resource_id_from_arn(str(memory_arn))
+            agentcore_cfn_primary_identifier = str(memory_arn)
+        return "Memory", agentcore_cfn_identifier, agentcore_cfn_primary_identifier
 
     return None, None, None
 
