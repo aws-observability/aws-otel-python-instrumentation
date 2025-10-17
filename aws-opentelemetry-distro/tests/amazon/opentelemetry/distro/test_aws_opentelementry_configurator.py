@@ -777,6 +777,72 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
 
+    def test_customize_span_processors_with_code_correlation_enabled(self):
+        """Test that CodeAttributesSpanProcessor is added when code correlation is enabled"""
+        mock_tracer_provider: TracerProvider = MagicMock()
+
+        # Clean up environment to ensure consistent test state
+        os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
+        os.environ.pop(CODE_CORRELATION_ENABLED_CONFIG, None)
+
+        # Test without code correlation enabled - should not add CodeAttributesSpanProcessor
+        _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 0)
+
+        mock_tracer_provider.reset_mock()
+
+        # Test with code correlation enabled - should add CodeAttributesSpanProcessor
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "true"
+
+        with patch(
+            "amazon.opentelemetry.distro.code_correlation.CodeAttributesSpanProcessor"
+        ) as mock_code_processor_class:
+            mock_code_processor_instance = MagicMock()
+            mock_code_processor_class.return_value = mock_code_processor_instance
+
+            _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+
+            # Verify CodeAttributesSpanProcessor was created and added
+            mock_code_processor_class.assert_called_once()
+            mock_tracer_provider.add_span_processor.assert_called_once_with(mock_code_processor_instance)
+
+        mock_tracer_provider.reset_mock()
+
+        # Test with code correlation enabled along with application signals
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "true"
+        os.environ["OTEL_AWS_APPLICATION_SIGNALS_ENABLED"] = "True"
+        os.environ["OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED"] = "False"
+
+        with patch(
+            "amazon.opentelemetry.distro.code_correlation.CodeAttributesSpanProcessor"
+        ) as mock_code_processor_class:
+            mock_code_processor_instance = MagicMock()
+            mock_code_processor_class.return_value = mock_code_processor_instance
+
+            _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+
+            # Should have 3 processors: CodeAttributesSpanProcessor, AttributePropagatingSpanProcessor,
+            # and AwsSpanMetricsProcessor
+            self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 3)
+
+            # First should be CodeAttributesSpanProcessor
+            first_call_args = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
+            self.assertEqual(first_call_args, mock_code_processor_instance)
+
+            # Second should be AttributePropagatingSpanProcessor
+            second_call_args = mock_tracer_provider.add_span_processor.call_args_list[1].args[0]
+            self.assertIsInstance(second_call_args, AttributePropagatingSpanProcessor)
+
+            # Third should be AwsSpanMetricsProcessor
+            third_call_args = mock_tracer_provider.add_span_processor.call_args_list[2].args[0]
+            self.assertIsInstance(third_call_args, AwsSpanMetricsProcessor)
+
+        # Clean up
+        os.environ.pop(CODE_CORRELATION_ENABLED_CONFIG, None)
+        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
+        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", None)
+
     def test_customize_span_processors_lambda(self):
         mock_tracer_provider: TracerProvider = MagicMock()
         # Clean up environment to ensure consistent test state
