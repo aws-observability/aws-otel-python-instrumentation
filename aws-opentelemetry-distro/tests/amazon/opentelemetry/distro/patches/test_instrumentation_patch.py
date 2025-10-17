@@ -228,7 +228,6 @@ class TestInstrumentationPatch(TestCase):
         self._test_unpatched_process_anthropic_claude_chunk(None, None)
         self._test_unpatched_process_anthropic_claude_chunk({}, {})
 
-
     def _test_unpatched_gevent_instrumentation(self):
         self.assertFalse(gevent.monkey.is_module_patched("os"), "gevent os module has been patched")
         self.assertFalse(gevent.monkey.is_module_patched("thread"), "gevent thread module has been patched")
@@ -690,13 +689,19 @@ class TestInstrumentationPatch(TestCase):
         result = bedrock_utils.extract_tool_calls(message_with_string_content, True)
         self.assertIsNone(result)
 
-    def _test_patched_process_anthropic_claude_chunk(self, input_value: Dict[str, str], expected_output: Dict[str, str]):
+    def _test_patched_process_anthropic_claude_chunk(
+        self, input_value: Dict[str, str], expected_output: Dict[str, str]
+    ):
         self._test_process_anthropic_claude_chunk(input_value, expected_output, False)
 
-    def _test_unpatched_process_anthropic_claude_chunk(self, input_value: Dict[str, str], expected_output: Dict[str, str]):
+    def _test_unpatched_process_anthropic_claude_chunk(
+        self, input_value: Dict[str, str], expected_output: Dict[str, str]
+    ):
         self._test_process_anthropic_claude_chunk(input_value, expected_output, True)
 
-    def _test_process_anthropic_claude_chunk(self, input_value: Dict[str, str], expected_output: Dict[str, str], expect_exception: bool):
+    def _test_process_anthropic_claude_chunk(
+        self, input_value: Dict[str, str], expected_output: Dict[str, str], expect_exception: bool
+    ):
         """Test that _process_anthropic_claude_chunk handles various tool_use input formats."""
         wrapper = bedrock_utils.InvokeModelWithResponseStreamWrapper(
             stream=MagicMock(),
@@ -735,9 +740,7 @@ class TestInstrumentationPatch(TestCase):
 
         # Simulate content_block_stop
         try:
-            wrapper._process_anthropic_claude_chunk(
-                {"type": "content_block_stop", "index": 0}
-            )
+            wrapper._process_anthropic_claude_chunk({"type": "content_block_stop", "index": 0})
         except TypeError:
             if expect_exception:
                 return
