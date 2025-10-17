@@ -312,7 +312,7 @@ class BotocoreTest(ContractTestBase):
                 _AWS_SQS_QUEUE_NAME: "test_queue",
             },
             response_specific_attributes={
-                _AWS_SQS_QUEUE_URL: ("http://sqs.us-west-2.localhost.localstack.cloud:4566/000000000000/test_queue"),
+                _AWS_SQS_QUEUE_URL: "http://sqs.us-west-2.localhost.localstack.cloud:4566/000000000000/test_queue",
             },
             span_name="SQS.CreateQueue",
         )
