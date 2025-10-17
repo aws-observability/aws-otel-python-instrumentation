@@ -1,4 +1,4 @@
-# AWS Distro for OpenTelemetry - Instrumentation for Python
+# AWS Distro for OpenTelemetry - Instrumentation for Python 
 
 ## Introduction
 
