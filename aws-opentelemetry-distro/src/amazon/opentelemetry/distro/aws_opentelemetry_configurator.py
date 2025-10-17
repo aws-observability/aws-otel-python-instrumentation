@@ -473,6 +473,13 @@ def _customize_logs_exporter(log_exporter: LogExporter) -> LogExporter:
 
 
 def _customize_span_processors(provider: TracerProvider, resource: Resource) -> None:
+
+    if get_code_correlation_enabled_status() is True:
+        # pylint: disable=import-outside-toplevel
+        from amazon.opentelemetry.distro.code_correlation import CodeAttributesSpanProcessor
+
+        provider.add_span_processor(CodeAttributesSpanProcessor())
+
     # Add LambdaSpanProcessor to list of processors regardless of application signals.
     if _is_lambda_environment():
         provider.add_span_processor(AwsLambdaSpanProcessor())
