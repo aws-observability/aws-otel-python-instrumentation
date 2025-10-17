@@ -312,7 +312,7 @@ class BotocoreTest(ContractTestBase):
                 _AWS_SQS_QUEUE_NAME: "test_queue",
             },
             response_specific_attributes={
-                _AWS_SQS_QUEUE_URL: "http://sqs.us-west-2.localhost.localstack.cloud:4566/000000000000/test_queue",
+                _AWS_SQS_QUEUE_URL: ("http://sqs.us-west-2.localhost.localstack.cloud:4566/000000000000/test_queue"),
             },
             span_name="SQS.CreateQueue",
         )
@@ -768,7 +768,6 @@ class BotocoreTest(ContractTestBase):
         )
 
     def test_bedrock_agentcore_create_agent_runtime_endpoint(self):
-        expected_identifier = "arn:aws:bedrock-agentcore:us-west-2:123456789012:endpoint/invokeEndpoint"
         self.do_test_requests(
             "bedrock-agentcore/runtime/createendpoint/myAgent-w8slyU6q5M",
             "GET",
@@ -779,8 +778,10 @@ class BotocoreTest(ContractTestBase):
             remote_service="AWS::BedrockAgentCore",
             remote_operation="CreateAgentRuntimeEndpoint",
             remote_resource_type="AWS::BedrockAgentCore::RuntimeEndpoint",
-            remote_resource_identifier=expected_identifier,
-            cloudformation_primary_identifier=expected_identifier,
+            remote_resource_identifier="invokeEndpoint",
+            cloudformation_primary_identifier=(
+                "arn:aws:bedrock-agentcore:us-west-2:123456789012:endpoint/invokeEndpoint"
+            ),
             span_name="Bedrock AgentCore Control.CreateAgentRuntimeEndpoint",
         )
 
@@ -886,6 +887,25 @@ class BotocoreTest(ContractTestBase):
             span_name="Bedrock AgentCore.CreateEvent",
         )
 
+    def test_bedrock_agentcore_create_memory(self):
+        expected_identifier = "testMemory-abc123def456"
+        self.do_test_requests(
+            "bedrock-agentcore/memory/creatememory/testMemory-abc123def456",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock AgentCore Control",
+            remote_service="AWS::BedrockAgentCore",
+            remote_operation="CreateMemory",
+            remote_resource_type="AWS::BedrockAgentCore::Memory",
+            remote_resource_identifier=expected_identifier,
+            cloudformation_primary_identifier=(
+                f"arn:aws:bedrock-agentcore:us-west-2:123456789012:memory/{expected_identifier}"
+            ),
+            span_name="Bedrock AgentCore Control.CreateMemory",
+        )
+
     def test_bedrock_agentcore_create_gateway(self):
         expected_identifier = "agentGateway-k8Nt2pLm9Q"
         self.do_test_requests(
@@ -904,7 +924,7 @@ class BotocoreTest(ContractTestBase):
         )
 
     def test_bedrock_agentcore_create_gateway_target(self):
-        expected_identifier = "testTarget-123"
+        expected_identifier = "workinggateway-oersefsjga"
         self.do_test_requests(
             "bedrock-agentcore/gateway/creategatewaytarget/workinggateway-oersefsjga",
             "GET",

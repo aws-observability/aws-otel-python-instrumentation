@@ -13,6 +13,8 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_AUTH_REGION,
     AWS_BEDROCK_AGENT_ID,
     AWS_BEDROCK_AGENTCORE_BROWSER_ARN,
+    AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN,
+    AWS_BEDROCK_AGENTCORE_GATEWAY_ARN,
     AWS_BEDROCK_AGENTCORE_MEMORY_ARN,
     AWS_BEDROCK_AGENTCORE_RUNTIME_ARN,
     AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN,
@@ -246,6 +248,23 @@ class TestUtil(TestCase):
                 self.assertIsNone(dependency_attributes)
                 self.assertEqual(len(service_attributes), len(BoundedAttributes(attributes=expected_attributes)))
                 self.assertEqual(service_attributes, BoundedAttributes(attributes=expected_attributes))
+
+    def validate_bedrock_agentcore_resource(
+        self, attribute_keys, attribute_values, expected_type, expected_identifier, expected_cfn_primary_identifier
+    ):
+        keys = [SpanAttributes.RPC_SYSTEM, SpanAttributes.RPC_SERVICE]
+        values = ["aws-api", "Bedrock AgentCore"]
+        self._mock_attribute(keys, values)
+        self.span_mock.kind = SpanKind.CLIENT
+
+        self._mock_attribute(attribute_keys, attribute_values, keys, values)
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertEqual(actual_attributes.get(AWS_REMOTE_RESOURCE_TYPE), expected_type)
+        self.assertEqual(actual_attributes.get(AWS_REMOTE_RESOURCE_IDENTIFIER), expected_identifier)
+        self.assertEqual(actual_attributes.get(AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER), expected_cfn_primary_identifier)
+        self._mock_attribute(attribute_keys, [None] * len(attribute_keys))
 
 
 # pylint: disable=too-many-public-methods
@@ -2119,78 +2138,233 @@ class TestAwsMetricAttributeGenerator(TestUtil):
 
         keys, values = self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None], keys, values)
 
-    def test_bedrock_agentcore_resource_attributes(self):
-        """Test Bedrock AgentCore resource attributes for all resource types."""
+    def test_bedrock_agentcore_browser_resource_attributes(self):
+        """Test Bedrock AgentCore browser resource attributes."""
 
-        def validate_bedrock_agentcore_resource(attribute_keys, attribute_values, expected_type, expected_identifier):
-            keys = [SpanAttributes.RPC_SYSTEM, SpanAttributes.RPC_SERVICE]
-            values = ["aws-api", "Bedrock AgentCore"]
-            self._mock_attribute(keys, values)
-            self.span_mock.kind = SpanKind.CLIENT
+        # Test managed browser resource type when browser ID is aws.browser.v1
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[GEN_AI_BROWSER_ID],
+            attribute_values=["aws.browser.v1"],
+            expected_type="AWS::BedrockAgentCore::Browser",
+            expected_identifier="aws.browser.v1",
+            expected_cfn_primary_identifier="aws.browser.v1",
+        )
+        # Test custom browser resource type when browser ID is not the standard aws.browser.v1
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[GEN_AI_BROWSER_ID],
+            attribute_values=["testBrowser-1234567890"],
+            expected_type="AWS::BedrockAgentCore::BrowserCustom",
+            expected_identifier="testBrowser-1234567890",
+            expected_cfn_primary_identifier="testBrowser-1234567890",
+        )
+        # Test custom browser resource type when browser ARN is provided
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_BEDROCK_AGENTCORE_BROWSER_ARN],
+            attribute_values=["arn:aws:bedrock-agentcore:us-east-1:123456789012:browser/testBrowser-1234567890"],
+            expected_type="AWS::BedrockAgentCore::BrowserCustom",
+            expected_identifier="testBrowser-1234567890",
+            expected_cfn_primary_identifier="testBrowser-1234567890",
+        )
+        # Test managed browser resource type when browser ARN contains aws.browser.v1
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_BEDROCK_AGENTCORE_BROWSER_ARN],
+            attribute_values=["arn:aws:bedrock-agentcore:us-east-1:123456789012:browser/aws.browser.v1"],
+            expected_type="AWS::BedrockAgentCore::Browser",
+            expected_identifier="aws.browser.v1",
+            expected_cfn_primary_identifier="aws.browser.v1",
+        )
 
-            self._mock_attribute(attribute_keys, attribute_values, keys, values)
-            actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
-                DEPENDENCY_METRIC
-            )
-            self.assertEqual(actual_attributes.get(AWS_REMOTE_RESOURCE_TYPE), expected_type)
-            self.assertEqual(actual_attributes.get(AWS_REMOTE_RESOURCE_IDENTIFIER), expected_identifier)
-            self.assertEqual(actual_attributes.get(AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER), expected_identifier)
-            self._mock_attribute(attribute_keys, [None] * len(attribute_keys))
+    def test_bedrock_agentcore_gateway_resource_attributes(self):
+        """Test Bedrock AgentCore gateway resource attributes."""
 
-        validate_bedrock_agentcore_resource(
-            [GEN_AI_BROWSER_ID], ["aws.browser.v1"], "AWS::BedrockAgentCore::Browser", "aws.browser.v1"
+        # Test managed gateway resource: when both gateway ID and target ID are present, both resource and
+        # CFN identifiers should be set to the gateway ID
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[GEN_AI_GATEWAY_ID, AWS_GATEWAY_TARGET_ID],
+            attribute_values=["agentGateway-123456789", "target-123456789"],
+            expected_type="AWS::BedrockAgentCore::GatewayTarget",
+            expected_identifier="agentGateway-123456789",
+            expected_cfn_primary_identifier="agentGateway-123456789",
         )
-        validate_bedrock_agentcore_resource(
-            [GEN_AI_BROWSER_ID],
-            ["testBrowser-1234567890"],
-            "AWS::BedrockAgentCore::BrowserCustom",
-            "testBrowser-1234567890",
+        # Test gateway resource with ARN and target ID: both resource and CFN identifiers should be set to
+        # the extracted gateway ID from ARN
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_BEDROCK_AGENTCORE_GATEWAY_ARN, AWS_GATEWAY_TARGET_ID],
+            attribute_values=[
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:gateway/gateway-from-arn",
+                "target-123456789",
+            ],
+            expected_type="AWS::BedrockAgentCore::GatewayTarget",
+            expected_identifier="gateway-from-arn",
+            expected_cfn_primary_identifier="gateway-from-arn",
         )
-        validate_bedrock_agentcore_resource(
-            [AWS_BEDROCK_AGENTCORE_BROWSER_ARN],
-            ["arn:aws:bedrock-agentcore:us-east-1:123456789012:browser/testBrowser-1234567890"],
-            "AWS::BedrockAgentCore::BrowserCustom",
-            "testBrowser-1234567890",
+        # Test gateway target resource: when only target ID is present, both identifiers should be set to
+        # the target ID
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_GATEWAY_TARGET_ID],
+            attribute_values=["target-only-123456789"],
+            expected_type="AWS::BedrockAgentCore::GatewayTarget",
+            expected_identifier="target-only-123456789",
+            expected_cfn_primary_identifier="target-only-123456789",
         )
-        validate_bedrock_agentcore_resource(
-            [GEN_AI_GATEWAY_ID, AWS_GATEWAY_TARGET_ID],
-            ["agentGateway-123456789", "target-123456789"],
-            "AWS::BedrockAgentCore::GatewayTarget",
-            "target-123456789",
+        # Test gateway resource with ID only: both identifiers should be set to the gateway ID
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[GEN_AI_GATEWAY_ID],
+            attribute_values=["agentGateway-123456789"],
+            expected_type="AWS::BedrockAgentCore::Gateway",
+            expected_identifier="agentGateway-123456789",
+            expected_cfn_primary_identifier="agentGateway-123456789",
         )
-        validate_bedrock_agentcore_resource(
-            [GEN_AI_GATEWAY_ID], ["agentGateway-123456789"], "AWS::BedrockAgentCore::Gateway", "agentGateway-123456789"
+        # Test gateway resource with ARN only: both identifiers should be set to the extracted gateway ID
+        # from ARN
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_BEDROCK_AGENTCORE_GATEWAY_ARN],
+            attribute_values=["arn:aws:bedrock-agentcore:us-east-1:123456789012:gateway/gateway-arn-only"],
+            expected_type="AWS::BedrockAgentCore::Gateway",
+            expected_identifier="gateway-arn-only",
+            expected_cfn_primary_identifier="gateway-arn-only",
         )
-        validate_bedrock_agentcore_resource(
-            [GEN_AI_RUNTIME_ID, AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN],
-            ["test-runtime-123", "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime-endpoint/test-endpoint"],
-            "AWS::BedrockAgentCore::RuntimeEndpoint",
-            "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime-endpoint/test-endpoint",
+
+    def test_bedrock_agentcore_memory_resource_attributes(self):
+        """Test Bedrock AgentCore memory resource attributes."""
+
+        # Test memory resource with both ID and ARN: resource identifier should be set to the memory ID
+        # and CFN primary identifier should be set to the memory ARN
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[GEN_AI_MEMORY_ID, AWS_BEDROCK_AGENTCORE_MEMORY_ARN],
+            attribute_values=[
+                "agentMemory-123456789",
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/agentMemory-123456789",
+            ],
+            expected_type="AWS::BedrockAgentCore::Memory",
+            expected_identifier="agentMemory-123456789",
+            expected_cfn_primary_identifier=(
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/agentMemory-123456789"
+            ),
         )
-        validate_bedrock_agentcore_resource(
-            [GEN_AI_RUNTIME_ID], ["test-runtime-123"], "AWS::BedrockAgentCore::Runtime", "test-runtime-123"
+        # Test memory resource with ARN only: resource identifier should be set to the extracted memory ID
+        # and CFN primary identifier should be set to the memory ARN
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_BEDROCK_AGENTCORE_MEMORY_ARN],
+            attribute_values=["arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/memory-arn-only"],
+            expected_type="AWS::BedrockAgentCore::Memory",
+            expected_identifier="memory-arn-only",
+            expected_cfn_primary_identifier=("arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/memory-arn-only"),
         )
-        validate_bedrock_agentcore_resource(
-            [AWS_BEDROCK_AGENTCORE_RUNTIME_ARN],
-            ["arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/test-runtime-123"],
-            "AWS::BedrockAgentCore::Runtime",
-            "test-runtime-123",
+        # Test memory resource with ID only: both identifiers should be set to the memory ID
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[GEN_AI_MEMORY_ID],
+            attribute_values=["memory-id-only"],
+            expected_type="AWS::BedrockAgentCore::Memory",
+            expected_identifier="memory-id-only",
+            expected_cfn_primary_identifier="memory-id-only",
         )
-        validate_bedrock_agentcore_resource(
-            [GEN_AI_CODE_INTERPRETER_ID],
-            ["aws.codeinterpreter.v1"],
-            "AWS::BedrockAgentCore::CodeInterpreter",
-            "aws.codeinterpreter.v1",
+
+    def test_bedrock_agentcore_code_interpreter_resource_attributes(self):
+        """Test Bedrock AgentCore code interpreter resource attributes."""
+
+        # Test managed code interpreter resource type when code interpreter ID is aws.codeinterpreter.v1
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[GEN_AI_CODE_INTERPRETER_ID],
+            attribute_values=["aws.codeinterpreter.v1"],
+            expected_type="AWS::BedrockAgentCore::CodeInterpreter",
+            expected_identifier="aws.codeinterpreter.v1",
+            expected_cfn_primary_identifier="aws.codeinterpreter.v1",
         )
-        validate_bedrock_agentcore_resource(
-            [GEN_AI_CODE_INTERPRETER_ID],
-            ["testCodeInt-1234567890"],
-            "AWS::BedrockAgentCore::CodeInterpreterCustom",
-            "testCodeInt-1234567890",
+        # Test custom code interpreter resource type when code interpreter ID is not the standard
+        # aws.codeinterpreter.v1
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[GEN_AI_CODE_INTERPRETER_ID],
+            attribute_values=["testCodeInt-1234567890"],
+            expected_type="AWS::BedrockAgentCore::CodeInterpreterCustom",
+            expected_identifier="testCodeInt-1234567890",
+            expected_cfn_primary_identifier="testCodeInt-1234567890",
         )
-        validate_bedrock_agentcore_resource(
-            [GEN_AI_MEMORY_ID, AWS_BEDROCK_AGENTCORE_MEMORY_ARN],
-            ["agentMemory-123456789", "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/agentMemory-123456789"],
-            "AWS::BedrockAgentCore::Memory",
-            "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/agentMemory-123456789",
+        # Test custom code interpreter resource type when code interpreter ARN is provided
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN],
+            attribute_values=[
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:code-interpreter/" "testCodeInt-1234567890"
+            ],
+            expected_type="AWS::BedrockAgentCore::CodeInterpreterCustom",
+            expected_identifier="testCodeInt-1234567890",
+            expected_cfn_primary_identifier="testCodeInt-1234567890",
+        )
+        # Test managed code interpreter resource type when code interpreter ARN contains
+        # aws.codeinterpreter.v1
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN],
+            attribute_values=[
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:code-interpreter/" "aws.codeinterpreter.v1"
+            ],
+            expected_type="AWS::BedrockAgentCore::CodeInterpreter",
+            expected_identifier="aws.codeinterpreter.v1",
+            expected_cfn_primary_identifier="aws.codeinterpreter.v1",
+        )
+
+    def test_bedrock_agentcore_runtime_resource_attributes(self):
+        """Test Bedrock AgentCore runtime resource attributes."""
+        # Test runtime endpoint resource with all attributes: resource identifier should be set to extracted
+        # endpoint ID and CFN primary identifier should be set to endpoint ARN
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[
+                GEN_AI_RUNTIME_ID,
+                AWS_BEDROCK_AGENTCORE_RUNTIME_ARN,
+                AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN,
+            ],
+            attribute_values=[
+                "test-runtime-123",
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/test-runtime-123",
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime-endpoint/test-endpoint",
+            ],
+            expected_type="AWS::BedrockAgentCore::RuntimeEndpoint",
+            expected_identifier="test-endpoint",
+            expected_cfn_primary_identifier=(
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime-endpoint/test-endpoint"
+            ),
+        )
+        # Test runtime endpoint resource with runtime ID and endpoint ARN: resource identifier should be
+        # set to extracted endpoint ID and CFN primary identifier should be set to endpoint ARN
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[GEN_AI_RUNTIME_ID, AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN],
+            attribute_values=[
+                "test-runtime-123",
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime-endpoint/test-endpoint",
+            ],
+            expected_type="AWS::BedrockAgentCore::RuntimeEndpoint",
+            expected_identifier="test-endpoint",
+            expected_cfn_primary_identifier=(
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime-endpoint/test-endpoint"
+            ),
+        )
+        # Test runtime endpoint resource with runtime ARN and endpoint ARN: resource identifier should be
+        # set to extracted endpoint ID and CFN primary identifier should be set to endpoint ARN
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_BEDROCK_AGENTCORE_RUNTIME_ARN, AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN],
+            attribute_values=[
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/test-runtime-123",
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime-endpoint/test-endpoint",
+            ],
+            expected_type="AWS::BedrockAgentCore::RuntimeEndpoint",
+            expected_identifier="test-endpoint",
+            expected_cfn_primary_identifier=(
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime-endpoint/test-endpoint"
+            ),
+        )
+        # Test runtime resource with ID only: both identifiers should be set to the runtime ID
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[GEN_AI_RUNTIME_ID],
+            attribute_values=["test-runtime-123"],
+            expected_type="AWS::BedrockAgentCore::Runtime",
+            expected_identifier="test-runtime-123",
+            expected_cfn_primary_identifier="test-runtime-123",
+        )
+        # Test runtime resource with ARN only: both identifiers should be set to the extracted
+        # runtime ID from ARN
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_BEDROCK_AGENTCORE_RUNTIME_ARN],
+            attribute_values=["arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/test-runtime-123"],
+            expected_type="AWS::BedrockAgentCore::Runtime",
+            expected_identifier="test-runtime-123",
+            expected_cfn_primary_identifier="test-runtime-123",
         )

@@ -261,6 +261,29 @@ class RequestHandler(BaseHTTPRequestHandler):
                     ],
                 )
                 return
+            if operation == "creatememory":
+                memory_id = resource_id
+                bedrock_agentcore_control_client.meta.events.register(
+                    "before-call.bedrock-agentcore-control.CreateMemory",
+                    lambda **kwargs: inject_200_success(
+                        memory={
+                            "id": memory_id,
+                            "arn": f"arn:aws:bedrock-agentcore:{_AWS_REGION}:{_AWS_ACCOUNT_ID}:memory/{memory_id}",
+                            "name": "testMemory",
+                            "status": "ACTIVE",
+                            "createdAt": 1704067200,
+                            "updatedAt": 1704067200,
+                            "eventExpiryDuration": 30,
+                        },
+                        **kwargs,
+                    ),
+                )
+                bedrock_agentcore_control_client.create_memory(
+                    name="testMemory",
+                    eventExpiryDuration=30,
+                    description="Test memory for testing",
+                )
+                return
         if service == "gateway":
             if operation == "creategateway":
                 gateway_id = resource_id
