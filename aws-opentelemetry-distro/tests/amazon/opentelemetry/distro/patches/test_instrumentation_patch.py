@@ -689,6 +689,19 @@ class TestInstrumentationPatch(TestCase):
         result = bedrock_utils.extract_tool_calls(message_with_string_content, True)
         self.assertIsNone(result)
 
+        # Test with toolUse format to exercise the for loop
+        message_with_tool_use = {"role": "assistant", "content": [{"toolUse": {"toolUseId": "id1", "name": "func1"}}]}
+        result = bedrock_utils.extract_tool_calls(message_with_tool_use, True)
+        self.assertEqual(len(result), 1)
+
+        # Test with tool_use format to exercise the for loop
+        message_with_type_tool_use = {
+            "role": "assistant",
+            "content": [{"type": "tool_use", "id": "id2", "name": "func2"}],
+        }
+        result = bedrock_utils.extract_tool_calls(message_with_type_tool_use, True)
+        self.assertEqual(len(result), 1)
+
     def _test_patched_process_anthropic_claude_chunk(
         self, input_value: Dict[str, str], expected_output: Dict[str, str]
     ):
@@ -759,6 +772,11 @@ class TestInstrumentationPatch(TestCase):
             self.assertIsInstance(tool_block["input"], dict)
         else:
             self.assertNotIn("input", tool_block)
+
+        # Just adding this to do basic sanity checks and increase code coverage
+        wrapper._process_anthropic_claude_chunk({"type": "content_block_delta", "index": 0})
+        wrapper._process_anthropic_claude_chunk({"type": "message_delta"})
+        wrapper._process_anthropic_claude_chunk({"type": "message_stop"})
 
     def _test_patched_bedrock_agent_instrumentation(self):
         """For bedrock-agent service, both extract_attributes and on_success provides attributes,
