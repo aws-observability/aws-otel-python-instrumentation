@@ -120,10 +120,6 @@ class TestInstrumentationPatch(TestCase):
         self._test_unpatched_botocore_propagator()
         self._test_unpatched_gevent_instrumentation()
         self._test_unpatched_starlette_instrumentation()
-        # TODO: remove these tests once we bump botocore instrumentation version to 0.56b0
-        # Bedrock Runtime tests
-        self._test_unpatched_converse_stream_wrapper()
-        self._test_unpatched_extract_tool_calls()
 
         # Apply patches
         apply_instrumentation_patches()
@@ -222,6 +218,16 @@ class TestInstrumentationPatch(TestCase):
         # DynamoDB
         self.assertTrue("dynamodb" in _KNOWN_EXTENSIONS, "Upstream has removed a DynamoDB extension")
 
+        # Bedrock Runtime tests
+        # TODO: remove these tests once we bump botocore instrumentation version to 0.56b0
+        self._test_unpatched_converse_stream_wrapper()
+        self._test_unpatched_extract_tool_calls()
+
+        # TODO: remove these tests once we bump botocore instrumentation version to 0.60b0
+        self._test_unpatched_process_anthropic_claude_chunk({"location": "Seattle"}, {"location": "Seattle"})
+        self._test_unpatched_process_anthropic_claude_chunk(None, None)
+        self._test_unpatched_process_anthropic_claude_chunk({}, {})
+
     def _test_unpatched_gevent_instrumentation(self):
         self.assertFalse(gevent.monkey.is_module_patched("os"), "gevent os module has been patched")
         self.assertFalse(gevent.monkey.is_module_patched("thread"), "gevent thread module has been patched")
@@ -267,10 +273,14 @@ class TestInstrumentationPatch(TestCase):
         # Bedrock Agent Operation
         self._test_patched_bedrock_agent_instrumentation()
 
-        # TODO: remove these tests once we bump botocore instrumentation version to 0.56b0
         # Bedrock Runtime
+        # TODO: remove these tests once we bump botocore instrumentation version to 0.56b0
         self._test_patched_converse_stream_wrapper()
         self._test_patched_extract_tool_calls()
+        # TODO: remove these tests once we bump botocore instrumentation version to 0.60b0
+        self._test_patched_process_anthropic_claude_chunk({"location": "Seattle"}, {"location": "Seattle"})
+        self._test_patched_process_anthropic_claude_chunk(None, None)
+        self._test_patched_process_anthropic_claude_chunk({}, {})
 
         # Bedrock Agent Runtime
         self.assertTrue("bedrock-agent-runtime" in _KNOWN_EXTENSIONS)
@@ -672,6 +682,95 @@ class TestInstrumentationPatch(TestCase):
         message_with_string_content = {"role": "assistant", "content": "{"}
         result = bedrock_utils.extract_tool_calls(message_with_string_content, True)
         self.assertIsNone(result)
+
+        # Test with toolUse format to exercise the for loop
+        message_with_tool_use = {"role": "assistant", "content": [{"toolUse": {"toolUseId": "id1", "name": "func1"}}]}
+        result = bedrock_utils.extract_tool_calls(message_with_tool_use, True)
+        self.assertEqual(len(result), 1)
+
+        # Test with tool_use format to exercise the for loop
+        message_with_type_tool_use = {
+            "role": "assistant",
+            "content": [{"type": "tool_use", "id": "id2", "name": "func2"}],
+        }
+        result = bedrock_utils.extract_tool_calls(message_with_type_tool_use, True)
+        self.assertEqual(len(result), 1)
+
+    def _test_patched_process_anthropic_claude_chunk(
+        self, input_value: Dict[str, str], expected_output: Dict[str, str]
+    ):
+        self._test_process_anthropic_claude_chunk(input_value, expected_output, False)
+
+    def _test_unpatched_process_anthropic_claude_chunk(
+        self, input_value: Dict[str, str], expected_output: Dict[str, str]
+    ):
+        self._test_process_anthropic_claude_chunk(input_value, expected_output, True)
+
+    def _test_process_anthropic_claude_chunk(
+        self, input_value: Dict[str, str], expected_output: Dict[str, str], expect_exception: bool
+    ):
+        """Test that _process_anthropic_claude_chunk handles various tool_use input formats."""
+        wrapper = bedrock_utils.InvokeModelWithResponseStreamWrapper(
+            stream=MagicMock(),
+            stream_done_callback=MagicMock,
+            stream_error_callback=MagicMock,
+            model_id="anthropic.claude-3-5-sonnet-20240620-v1:0",
+        )
+
+        # Simulate message_start
+        wrapper._process_anthropic_claude_chunk(
+            {
+                "type": "message_start",
+                "message": {
+                    "role": "assistant",
+                    "content": [],
+                },
+            }
+        )
+
+        # Simulate content_block_start with specified input
+        content_block = {
+            "type": "tool_use",
+            "id": "test_id",
+            "name": "test_tool",
+        }
+        if input_value is not None:
+            content_block["input"] = input_value
+
+        wrapper._process_anthropic_claude_chunk(
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": content_block,
+            }
+        )
+
+        # Simulate content_block_stop
+        try:
+            wrapper._process_anthropic_claude_chunk({"type": "content_block_stop", "index": 0})
+        except TypeError:
+            if expect_exception:
+                return
+            else:
+                raise
+
+        # Verify the message content
+        self.assertEqual(len(wrapper._message["content"]), 1)
+        tool_block = wrapper._message["content"][0]
+        self.assertEqual(tool_block["type"], "tool_use")
+        self.assertEqual(tool_block["id"], "test_id")
+        self.assertEqual(tool_block["name"], "test_tool")
+
+        if expected_output is not None:
+            self.assertEqual(tool_block["input"], expected_output)
+            self.assertIsInstance(tool_block["input"], dict)
+        else:
+            self.assertNotIn("input", tool_block)
+
+        # Just adding this to do basic sanity checks and increase code coverage
+        wrapper._process_anthropic_claude_chunk({"type": "content_block_delta", "index": 0})
+        wrapper._process_anthropic_claude_chunk({"type": "message_delta"})
+        wrapper._process_anthropic_claude_chunk({"type": "message_stop"})
 
     def _test_patched_bedrock_agent_instrumentation(self):
         """For bedrock-agent service, both extract_attributes and on_success provides attributes,
