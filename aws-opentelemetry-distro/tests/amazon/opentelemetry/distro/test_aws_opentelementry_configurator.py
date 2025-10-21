@@ -17,6 +17,7 @@ from amazon.opentelemetry.distro.aws_batch_unsampled_span_processor import Batch
 from amazon.opentelemetry.distro.aws_lambda_span_processor import AwsLambdaSpanProcessor
 from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsMetricAttributesSpanExporter
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
+    CODE_CORRELATION_ENABLED_CONFIG,
     LAMBDA_SPAN_EXPORT_BATCH_SIZE,
     OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
     OTEL_EXPORTER_OTLP_LOGS_HEADERS,
@@ -44,6 +45,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _is_application_signals_runtime_enabled,
     _is_defer_to_workers_enabled,
     _is_wsgi_master_process,
+    get_code_correlation_enabled_status,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
@@ -92,6 +94,13 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
     @classmethod
     def setUpClass(cls):
+        # Store original environment variables to restore later
+        cls._original_env = {}
+        for key in list(os.environ.keys()):
+            if key.startswith("OTEL_"):
+                cls._original_env[key] = os.environ[key]
+                del os.environ[key]
+
         # Run AwsOpenTelemetryDistro to set up environment, then validate expected env values.
         aws_open_telemetry_distro: AwsOpenTelemetryDistro = AwsOpenTelemetryDistro()
         aws_open_telemetry_distro.configure(apply_patches=False)
@@ -768,6 +777,72 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
 
+    def test_customize_span_processors_with_code_correlation_enabled(self):
+        """Test that CodeAttributesSpanProcessor is added when code correlation is enabled"""
+        mock_tracer_provider: TracerProvider = MagicMock()
+
+        # Clean up environment to ensure consistent test state
+        os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
+        os.environ.pop(CODE_CORRELATION_ENABLED_CONFIG, None)
+
+        # Test without code correlation enabled - should not add CodeAttributesSpanProcessor
+        _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 0)
+
+        mock_tracer_provider.reset_mock()
+
+        # Test with code correlation enabled - should add CodeAttributesSpanProcessor
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "true"
+
+        with patch(
+            "amazon.opentelemetry.distro.code_correlation.CodeAttributesSpanProcessor"
+        ) as mock_code_processor_class:
+            mock_code_processor_instance = MagicMock()
+            mock_code_processor_class.return_value = mock_code_processor_instance
+
+            _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+
+            # Verify CodeAttributesSpanProcessor was created and added
+            mock_code_processor_class.assert_called_once()
+            mock_tracer_provider.add_span_processor.assert_called_once_with(mock_code_processor_instance)
+
+        mock_tracer_provider.reset_mock()
+
+        # Test with code correlation enabled along with application signals
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "true"
+        os.environ["OTEL_AWS_APPLICATION_SIGNALS_ENABLED"] = "True"
+        os.environ["OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED"] = "False"
+
+        with patch(
+            "amazon.opentelemetry.distro.code_correlation.CodeAttributesSpanProcessor"
+        ) as mock_code_processor_class:
+            mock_code_processor_instance = MagicMock()
+            mock_code_processor_class.return_value = mock_code_processor_instance
+
+            _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+
+            # Should have 3 processors: CodeAttributesSpanProcessor, AttributePropagatingSpanProcessor,
+            # and AwsSpanMetricsProcessor
+            self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 3)
+
+            # First should be CodeAttributesSpanProcessor
+            first_call_args = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
+            self.assertEqual(first_call_args, mock_code_processor_instance)
+
+            # Second should be AttributePropagatingSpanProcessor
+            second_call_args = mock_tracer_provider.add_span_processor.call_args_list[1].args[0]
+            self.assertIsInstance(second_call_args, AttributePropagatingSpanProcessor)
+
+            # Third should be AwsSpanMetricsProcessor
+            third_call_args = mock_tracer_provider.add_span_processor.call_args_list[2].args[0]
+            self.assertIsInstance(third_call_args, AwsSpanMetricsProcessor)
+
+        # Clean up
+        os.environ.pop(CODE_CORRELATION_ENABLED_CONFIG, None)
+        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
+        os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", None)
+
     def test_customize_span_processors_lambda(self):
         mock_tracer_provider: TracerProvider = MagicMock()
         # Clean up environment to ensure consistent test state
@@ -1424,6 +1499,66 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
                 self.assertIsNone(result)
                 mock_logger.error.assert_called_once()
+
+    def test_get_code_correlation_enabled_status(self):
+        """Test get_code_correlation_enabled_status function with various environment variable values"""
+        # Test when environment variable is not set (default state)
+        os.environ.pop(CODE_CORRELATION_ENABLED_CONFIG, None)
+        result = get_code_correlation_enabled_status()
+        self.assertIsNone(result)
+
+        # Test when environment variable is set to 'true' (case insensitive)
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "true"
+        result = get_code_correlation_enabled_status()
+        self.assertTrue(result)
+
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "TRUE"
+        result = get_code_correlation_enabled_status()
+        self.assertTrue(result)
+
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "True"
+        result = get_code_correlation_enabled_status()
+        self.assertTrue(result)
+
+        # Test when environment variable is set to 'false' (case insensitive)
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "false"
+        result = get_code_correlation_enabled_status()
+        self.assertFalse(result)
+
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "FALSE"
+        result = get_code_correlation_enabled_status()
+        self.assertFalse(result)
+
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "False"
+        result = get_code_correlation_enabled_status()
+        self.assertFalse(result)
+
+        # Test with leading/trailing whitespace
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "  true  "
+        result = get_code_correlation_enabled_status()
+        self.assertTrue(result)
+
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "  false  "
+        result = get_code_correlation_enabled_status()
+        self.assertFalse(result)
+
+        # Test invalid values (should return None and log warning)
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "invalid"
+        result = get_code_correlation_enabled_status()
+        self.assertIsNone(result)
+
+        # Test another invalid value
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "yes"
+        result = get_code_correlation_enabled_status()
+        self.assertIsNone(result)
+
+        # Test empty string (invalid)
+        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = ""
+        result = get_code_correlation_enabled_status()
+        self.assertIsNone(result)
+
+        # Clean up
+        os.environ.pop(CODE_CORRELATION_ENABLED_CONFIG, None)
 
 
 def validate_distro_environ():
