@@ -2259,6 +2259,17 @@ class TestAwsMetricAttributeGenerator(TestUtil):
             expected_identifier="memory-id-only",
             expected_cfn_primary_identifier="memory-id-only",
         )
+        # Test memory resource with both ID and ARN where ARN contains different ID: memory ID should be prioritized
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[GEN_AI_MEMORY_ID, AWS_BEDROCK_AGENTCORE_MEMORY_ARN],
+            attribute_values=[
+                "direct-memory-id",
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/arn-memory-id",
+            ],
+            expected_type="AWS::BedrockAgentCore::Memory",
+            expected_identifier="direct-memory-id",
+            expected_cfn_primary_identifier=("arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/arn-memory-id"),
+        )
 
     def test_bedrock_agentcore_code_interpreter_resource_attributes(self):
         """Test Bedrock AgentCore code interpreter resource attributes."""

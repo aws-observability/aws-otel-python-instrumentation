@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """
 Utility module holding attribute keys for incubating Gen AI semantic conventions.
-
 Remove this once we've contributed them to upstream.
 """
 

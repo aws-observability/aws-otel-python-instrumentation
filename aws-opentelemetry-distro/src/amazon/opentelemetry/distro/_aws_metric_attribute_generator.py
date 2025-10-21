@@ -729,7 +729,11 @@ def _get_bedrock_agentcore_resource_type_and_identifier(
     return None, None, None
 
 
-def _handle_browser_attrs(attrs) -> tuple[Optional[str], Optional[str], Optional[str]]:
+def _handle_browser_attrs(attrs: BoundedAttributes) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Handler for BedrockAgentCore Browser resources.
+    Returns (resource_type, resource_identifier, cfn_primary_identifier).
+    """
     browser_id = attrs.get(GEN_AI_BROWSER_ID)
     browser_arn = attrs.get(AWS_BEDROCK_AGENTCORE_BROWSER_ARN)
     if browser_id or browser_arn:
@@ -738,22 +742,35 @@ def _handle_browser_attrs(attrs) -> tuple[Optional[str], Optional[str], Optional
             agentcore_cfn_identifier = str(browser_id)
         elif browser_arn:
             agentcore_cfn_identifier = extract_bedrock_agentcore_resource_id_from_arn(str(browser_arn))
+
+        # Uses browser ID as both resource identifier and CFN primary identifier.
+        # aws.browser.v1 is a managed AWS resource, custom IDs are user-defined resources.
         resource_type = "Browser" if agentcore_cfn_identifier == "aws.browser.v1" else "BrowserCustom"
         return resource_type, agentcore_cfn_identifier, agentcore_cfn_identifier
     return None, None, None
 
 
-def _handle_gateway_attrs(attrs) -> tuple[Optional[str], Optional[str], Optional[str]]:
+def _handle_gateway_attrs(attrs: BoundedAttributes) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Handler for BedrockAgentCore Gateway resources.
+    Returns (resource_type, resource_identifier, cfn_primary_identifier).
+    """
     gateway_id = attrs.get(GEN_AI_GATEWAY_ID)
     gateway_arn = attrs.get(AWS_BEDROCK_AGENTCORE_GATEWAY_ARN)
     gateway_target_id = attrs.get(AWS_GATEWAY_TARGET_ID)
 
     if gateway_target_id:
-        agentcore_cfn_identifier = str(gateway_target_id)
         if gateway_id:
             agentcore_cfn_identifier = str(gateway_id)
         elif gateway_arn:
             agentcore_cfn_identifier = extract_bedrock_agentcore_resource_id_from_arn(str(gateway_arn))
+        else:
+            agentcore_cfn_identifier = str(gateway_target_id)
+
+        # GatewayTarget contains two primary identifiers: gateway ID and gateway target ID.
+        # Uses gateway ID and/or gateway target ID as both resource identifier and CFN primary identifier.
+        # If gateway ID exists or can be extracted from ARN, use it as CFN primary identifier,
+        # otherwise use target ID.
         return "GatewayTarget", agentcore_cfn_identifier, agentcore_cfn_identifier
 
     if gateway_arn or gateway_id:
@@ -762,18 +779,27 @@ def _handle_gateway_attrs(attrs) -> tuple[Optional[str], Optional[str], Optional
             agentcore_cfn_identifier = str(gateway_id)
         elif gateway_arn:
             agentcore_cfn_identifier = extract_bedrock_agentcore_resource_id_from_arn(str(gateway_arn))
+
+        # Uses gateway ID as both resource identifier and CFN primary identifier.
+        # If gateway ID is not available, extract it from the gateway ARN.
         return "Gateway", agentcore_cfn_identifier, agentcore_cfn_identifier
 
     return None, None, None
 
 
-def _handle_runtime_attrs(attrs) -> tuple[Optional[str], Optional[str], Optional[str]]:
+def _handle_runtime_attrs(attrs: BoundedAttributes) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Handler for BedrockAgentCore Runtime resources.
+    Returns (resource_type, resource_identifier, cfn_primary_identifier).
+    """
     runtime_id = attrs.get(GEN_AI_RUNTIME_ID)
     runtime_arn = attrs.get(AWS_BEDROCK_AGENTCORE_RUNTIME_ARN)
     runtime_endpoint_arn = attrs.get(AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN)
 
     if runtime_endpoint_arn:
         agentcore_cfn_identifier = extract_bedrock_agentcore_resource_id_from_arn(str(runtime_endpoint_arn))
+
+        # Uses extracted ID as resource identifier and full ARN as CFN primary identifier.
         return "RuntimeEndpoint", agentcore_cfn_identifier, str(runtime_endpoint_arn)
 
     if runtime_arn or runtime_id:
@@ -782,12 +808,19 @@ def _handle_runtime_attrs(attrs) -> tuple[Optional[str], Optional[str], Optional
             agentcore_cfn_identifier = str(runtime_id)
         elif runtime_arn:
             agentcore_cfn_identifier = extract_bedrock_agentcore_resource_id_from_arn(str(runtime_arn))
+
+        # Uses runtime ID as both resource identifier and CFN primary identifier.
+        # If runtime ID is not available, extract it from the runtime ARN.
         return "Runtime", agentcore_cfn_identifier, agentcore_cfn_identifier
 
     return None, None, None
 
 
-def _handle_code_interpreter_attrs(attrs) -> tuple[Optional[str], Optional[str], Optional[str]]:
+def _handle_code_interpreter_attrs(attrs: BoundedAttributes) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Handler for BedrockAgentCore CodeInterpreter resources.
+    Returns (resource_type, resource_identifier, cfn_primary_identifier).
+    """
     code_interpreter_id = attrs.get(GEN_AI_CODE_INTERPRETER_ID)
     code_interpreter_arn = attrs.get(AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN)
 
@@ -797,13 +830,22 @@ def _handle_code_interpreter_attrs(attrs) -> tuple[Optional[str], Optional[str],
             agentcore_cfn_identifier = str(code_interpreter_id)
         elif code_interpreter_arn:
             agentcore_cfn_identifier = extract_bedrock_agentcore_resource_id_from_arn(str(code_interpreter_arn))
-        resource_type = "CodeInterpreter" if agentcore_cfn_identifier == "aws.codeinterpreter.v1" else "CodeInterpreterCustom"
+
+        # Uses code interpreter ID as both resource identifier and CFN primary identifier.
+        # aws.codeinterpreter.v1 is a managed AWS resource, custom IDs are user-defined resources.
+        resource_type = (
+            "CodeInterpreter" if agentcore_cfn_identifier == "aws.codeinterpreter.v1" else "CodeInterpreterCustom"
+        )
         return resource_type, agentcore_cfn_identifier, agentcore_cfn_identifier
 
     return None, None, None
 
 
-def _handle_identity_attrs(attrs) -> tuple[Optional[str], Optional[str], Optional[str]]:
+def _handle_identity_attrs(attrs: BoundedAttributes) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Handler for BedrockAgentCore Identity resources.
+    Returns (resource_type, resource_identifier, cfn_primary_identifier).
+    """
     credential_arn = attrs.get(AWS_AUTH_CREDENTIAL_PROVIDER_ARN)
 
     if credential_arn:
@@ -814,12 +856,19 @@ def _handle_identity_attrs(attrs) -> tuple[Optional[str], Optional[str], Optiona
         elif "oauth2credentialprovider" in credential_arn_str:
             resource_type = "OAuth2CredentialProvider"
         agentcore_cfn_identifier = extract_bedrock_agentcore_resource_id_from_arn(credential_arn_str)
+
+        # Uses extracted ID from credential ARN as both resource identifier and CFN primary identifier.
+        # Resource type is determined by credential provider type in the ARN.
         return resource_type, agentcore_cfn_identifier, agentcore_cfn_identifier
 
     return None, None, None
 
 
-def _handle_memory_attrs(attrs) -> tuple[Optional[str], Optional[str], Optional[str]]:
+def _handle_memory_attrs(attrs: BoundedAttributes) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Handler for BedrockAgentCore Memory resources.
+    Returns (resource_type, resource_identifier, cfn_primary_identifier).
+    """
     memory_id = attrs.get(GEN_AI_MEMORY_ID)
     memory_arn = attrs.get(AWS_BEDROCK_AGENTCORE_MEMORY_ARN)
 
@@ -828,9 +877,14 @@ def _handle_memory_attrs(attrs) -> tuple[Optional[str], Optional[str], Optional[
         agentcore_cfn_primary_identifier = None
         if memory_id:
             agentcore_cfn_identifier = str(memory_id)
-        elif memory_arn:
-            agentcore_cfn_identifier = extract_bedrock_agentcore_resource_id_from_arn(str(memory_arn))
+        if memory_arn:
+            agentcore_cfn_identifier = agentcore_cfn_identifier or extract_bedrock_agentcore_resource_id_from_arn(
+                str(memory_arn)
+            )
             agentcore_cfn_primary_identifier = str(memory_arn)
+
+        # Uses memory ID as resource identifier and ARN as CFN primary identifier when available.
+        # If memory ID is not available, extract it from the memory ARN.
         return "Memory", agentcore_cfn_identifier, agentcore_cfn_primary_identifier
 
     return None, None, None
