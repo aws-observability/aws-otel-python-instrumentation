@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import random
 import time
 from unittest import TestCase
 from unittest.mock import patch
@@ -82,6 +83,9 @@ class TestOTLPAwsLogsExporter(TestCase):
     def test_should_export_again_with_backoff_if_retryable_and_no_retry_after_header(self, mock_request, mock_wait):
         """Tests that multiple export requests are made with exponential delay if the response status code is retryable.
         But there is no Retry-After header."""
+        # Set random seed for deterministic jitter
+        random.seed(42)
+
         self.exporter._timeout = 10000  # Large timeout to avoid early exit
         result = self.exporter.export(self.logs)
 
@@ -140,6 +144,9 @@ class TestOTLPAwsLogsExporter(TestCase):
     ):
         """Tests that multiple export requests are made with exponential delay if the response status code is retryable.
         but the Retry-After header is invalid or malformed."""
+        # Set random seed for deterministic jitter
+        random.seed(42)
+
         self.exporter._timeout = 10000  # Large timeout to avoid early exit
         result = self.exporter.export(self.logs)
 
