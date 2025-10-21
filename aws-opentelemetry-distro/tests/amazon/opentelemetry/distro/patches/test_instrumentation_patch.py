@@ -283,38 +283,32 @@ class TestInstrumentationPatch(TestCase):
 
         # Bedrock AgentCore
         self.assertTrue("bedrock-agentcore" in _KNOWN_EXTENSIONS)
-        bedrock_agentcore_attributes: Dict[str, str] = _do_extract_bedrock_agentcore_attributes()
-        # Runtime attributes
-        self.assertEqual(bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_RUNTIME_ARN], _AGENTCORE_RUNTIME_ARN)
-        self.assertEqual(
-            bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN], _AGENTCORE_RUNTIME_ENDPOINT_ARN
-        )
-        self.assertEqual(bedrock_agentcore_attributes[GEN_AI_RUNTIME_ID], _AGENTCORE_RUNTIME_ID)
-        # Browser attributes
-        self.assertEqual(bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_BROWSER_ARN], _AGENTCORE_BROWSER_ARN)
-        self.assertEqual(bedrock_agentcore_attributes[GEN_AI_BROWSER_ID], _AGENTCORE_BROWSER_ID)
-        # Code interpreter attributes
-        self.assertEqual(
-            bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN], _AGENTCORE_CODE_INTERPRETER_ARN
-        )
-        self.assertEqual(bedrock_agentcore_attributes[GEN_AI_CODE_INTERPRETER_ID], _AGENTCORE_CODE_INTERPRETER_ID)
-        # Gateway attributes
-        self.assertEqual(bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_GATEWAY_ARN], _AGENTCORE_GATEWAY_ARN)
-        self.assertEqual(bedrock_agentcore_attributes[GEN_AI_GATEWAY_ID], _AGENTCORE_GATEWAY_ID)
-        self.assertEqual(bedrock_agentcore_attributes[AWS_GATEWAY_TARGET_ID], _AGENTCORE_TARGET_ID)
-        # Memory attributes
-        self.assertEqual(bedrock_agentcore_attributes[GEN_AI_MEMORY_ID], _AGENTCORE_MEMORY_ID)
-        self.assertEqual(bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_MEMORY_ARN], _AGENTCORE_MEMORY_ARN)
-        # Auth and identity attributes
-        self.assertEqual(
-            bedrock_agentcore_attributes[AWS_AUTH_CREDENTIAL_PROVIDER_ARN], _AGENTCORE_CREDENTIAL_PROVIDER_ARN
-        )
-        self.assertEqual(
-            bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_WORKLOAD_IDENTITY_ARN], _AGENTCORE_WORKLOAD_IDENTITY_ARN
-        )
-
-        # Bedrock AgentCore Control
         self.assertTrue("bedrock-agentcore-control" in _KNOWN_EXTENSIONS)
+
+        _do_extract_bedrock_agentcore_attributes, _do_on_success_bedrock_agentcore = _do_bedrock_agentcore_tests()
+        bedrock_agentcore_attributes: Dict[str, str] = _do_extract_bedrock_agentcore_attributes()
+        bedrock_agentcore_success_attributes: Dict[str, str] = _do_on_success_bedrock_agentcore()
+
+        expected_attrs = {
+            AWS_BEDROCK_AGENTCORE_RUNTIME_ARN: _AGENTCORE_RUNTIME_ARN,
+            AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN: _AGENTCORE_RUNTIME_ENDPOINT_ARN,
+            GEN_AI_RUNTIME_ID: _AGENTCORE_RUNTIME_ID,
+            AWS_BEDROCK_AGENTCORE_BROWSER_ARN: _AGENTCORE_BROWSER_ARN,
+            GEN_AI_BROWSER_ID: _AGENTCORE_BROWSER_ID,
+            AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN: _AGENTCORE_CODE_INTERPRETER_ARN,
+            GEN_AI_CODE_INTERPRETER_ID: _AGENTCORE_CODE_INTERPRETER_ID,
+            AWS_BEDROCK_AGENTCORE_GATEWAY_ARN: _AGENTCORE_GATEWAY_ARN,
+            GEN_AI_GATEWAY_ID: _AGENTCORE_GATEWAY_ID,
+            AWS_GATEWAY_TARGET_ID: _AGENTCORE_TARGET_ID,
+            GEN_AI_MEMORY_ID: _AGENTCORE_MEMORY_ID,
+            AWS_BEDROCK_AGENTCORE_MEMORY_ARN: _AGENTCORE_MEMORY_ARN,
+            AWS_AUTH_CREDENTIAL_PROVIDER_ARN: _AGENTCORE_CREDENTIAL_PROVIDER_ARN,
+            AWS_BEDROCK_AGENTCORE_WORKLOAD_IDENTITY_ARN: _AGENTCORE_WORKLOAD_IDENTITY_ARN,
+        }
+
+        for attr_key, expected_value in expected_attrs.items():
+            self.assertEqual(bedrock_agentcore_attributes[attr_key], expected_value)
+            self.assertEqual(bedrock_agentcore_success_attributes[attr_key], expected_value)
 
         # BedrockRuntime
         self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
@@ -933,9 +927,8 @@ def _do_extract_lambda_attributes() -> Dict[str, str]:
     return _do_extract_attributes(service_name, params)
 
 
-def _do_extract_bedrock_agentcore_attributes() -> Dict[str, str]:
-    service_name: str = "bedrock-agentcore"
-    params: Dict[str, Any] = {
+def _do_bedrock_agentcore_tests():
+    test_data = {
         "agentRuntimeArn": _AGENTCORE_RUNTIME_ARN,
         "agentRuntimeEndpointArn": _AGENTCORE_RUNTIME_ENDPOINT_ARN,
         "agentRuntimeId": _AGENTCORE_RUNTIME_ID,
@@ -955,7 +948,14 @@ def _do_extract_bedrock_agentcore_attributes() -> Dict[str, str]:
         "memory": {"arn": _AGENTCORE_MEMORY_ARN, "id": _AGENTCORE_MEMORY_ID},
         "workloadIdentityDetails": {"workloadIdentityArn": _AGENTCORE_WORKLOAD_IDENTITY_ARN},
     }
-    return _do_extract_attributes(service_name, params)
+
+    def extract_attributes():
+        return _do_extract_attributes("bedrock-agentcore", test_data)
+
+    def on_success():
+        return _do_on_success("bedrock-agentcore", test_data)
+
+    return extract_attributes, on_success
 
 
 def _do_extract_attributes(service_name: str, params: Dict[str, Any], operation: str = None) -> Dict[str, str]:
