@@ -15,3 +15,5 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   ([#495](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/495))
 - Add botocore instrumentation extension for Bedrock AgentCore services with span attributes
   ([#490](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/490))
+- Fix timeout handling for exceeded deadline in retry logic in OTLPAwsLogsExporter
+  ([#501](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/501))
