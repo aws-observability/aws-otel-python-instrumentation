@@ -81,8 +81,10 @@ jobs:
     steps:
       - name: Set up regions matrix
         id: set-matrix
+        env:
+          AWS_REGIONS: ${{ github.event.inputs.aws_region }}
         run: |
-          IFS=',' read -ra REGIONS <<< "${{ github.event.inputs.aws_region }}"
+          IFS=',' read -ra REGIONS <<< "$AWS_REGIONS"
           MATRIX="["
           for region in "${REGIONS[@]}"; do
             trimmed_region=$(echo "$region" | xargs)
@@ -375,39 +377,60 @@ jobs:
         id: create_release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.event.inputs.version }}
         run: |
           # Extract all dependencies from pyproject.toml
           DEPS=$(python3 -c "
-            import re
-            with open('aws-opentelemetry-distro/pyproject.toml', 'r') as f:
-                content = f.read()
-            deps_match = re.search(r'dependencies\s*=\s*\[(.*?)\]', content, re.DOTALL)
-            if deps_match:
-                deps_content = deps_match.group(1)
-                dep_lines = re.findall(r'\"([^\"]+)\"', deps_content)
-                formatted_deps = []
-                for dep_line in dep_lines:
-                    if ' == ' in dep_line:
-                        package, version = dep_line.split(' == ', 1)
-                        formatted_deps.append(f'- \`{package}\` - {version}')
-                    else:
-                        formatted_deps.append(f'- \`{dep_line}\`')
-                print('\n'.join(formatted_deps))
+          import re
+          with open('aws-opentelemetry-distro/pyproject.toml', 'r') as f:
+              content = f.read()
+          deps_match = re.search(r'dependencies\s*=\s*\[(.*?)\]', content, re.DOTALL)
+          if deps_match:
+              deps_content = deps_match.group(1)
+              dep_lines = re.findall(r'\"([^\"]+)\"', deps_content)
+              formatted_deps = []
+              for dep_line in dep_lines:
+                  if ' == ' in dep_line:
+                      package, version = dep_line.split(' == ', 1)
+                      formatted_deps.append(f'- \`{package}\` - {version}')
+                  else:
+                      formatted_deps.append(f'- \`{dep_line}\`')
+              print('\n'.join(formatted_deps))
+          ")
+
+          # Extract CHANGELOG entries for this version
+          CHANGELOG_ENTRIES=$(python3 -c "
+          import re, os
+          version = os.environ['VERSION']
+          with open('CHANGELOG.md', 'r') as f:
+              content = f.read()
+          version_pattern = rf'## v{re.escape(version)}.*?\n(.*?)(?=\n## |\Z)'
+          version_match = re.search(version_pattern, content, re.DOTALL)
+          if version_match:
+              entries = version_match.group(1).strip()
+              if entries:
+                  print(entries)
           ")
 
           # Create release notes
           cat > release_notes.md << EOF
-          This release contains the following upstream components:
+          $(if [ -n "$CHANGELOG_ENTRIES" ]; then echo "## What's Changed"; echo "$CHANGELOG_ENTRIES"; echo ""; fi)
+
+          ## Upstream Components
 
           $DEPS
 
-          This release also publishes to public ECR and PyPi.
-          * See ADOT Python auto-instrumentation Docker image v${{ github.event.inputs.version }} in our public ECR repository:
+          ## Release Artifacts
+
+          This release publishes to public ECR and PyPi.
+          * See ADOT Python auto-instrumentation Docker image v$VERSION in our public ECR repository:
           https://gallery.ecr.aws/aws-observability/adot-autoinstrumentation-python
-          * See version ${{ github.event.inputs.version }} in our PyPi repository:
+          * See version $VERSION in our PyPi repository:
           https://pypi.org/project/aws-opentelemetry-distro/
 
-          This release also includes the AWS OpenTelemetry Lambda Layer for Python version ${{ github.event.inputs.version }}-$(echo $GITHUB_SHA | cut -c1-7).
+          ## Lambda Layer
+
+          This release includes the AWS OpenTelemetry Lambda Layer for Python version $VERSION-$(echo $GITHUB_SHA | cut -c1-7).
 
           Lambda Layer ARNs:
           ${{ needs.generate-lambda-release-note.outputs.layer-note }}
@@ -417,10 +440,10 @@ jobs:
           shasum -a 256 layer.zip > layer.zip.sha256
 
           gh release create --target "$GITHUB_REF_NAME" \
-             --title "Release v${{ github.event.inputs.version }}" \
+             --title "Release v$VERSION" \
              --notes-file release_notes.md \
              --draft \
-             "v${{ github.event.inputs.version }}" \
+             "v$VERSION" \
              ${{ env.ARTIFACT_NAME }} \
              ${{ env.ARTIFACT_NAME }}.sha256 \
              layer.zip \
