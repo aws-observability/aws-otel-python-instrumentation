@@ -211,7 +211,7 @@ jobs:
           VERSION: ${{ github.event.inputs.version }}
           SHA_SHORT: ${{ steps.commit.outputs.sha_short }}
         run: |
-          echo "AWS OpenTelemetry Lambda Layer for Python version ${VERSION}-${SHA_SHORT}" > release_notes.md
+          echo "AWS OpenTelemetry Lambda Layer for Python version $VERSION-$SHA_SHORT" > release_notes.md
           echo "" >> release_notes.md
           echo "" >> release_notes.md
           echo "See new Lambda Layer ARNs:" >> release_notes.md
@@ -227,10 +227,10 @@ jobs:
           SHA_SHORT: ${{ steps.commit.outputs.sha_short }}
         run: |
           gh release create --target "$GITHUB_REF_NAME" \
-             --title "Release lambda-v${VERSION}-${SHA_SHORT}" \
+             --title "Release lambda-v$VERSION-$SHA_SHORT" \
              --notes-file release_notes.md  \
              --draft \
-             "lambda-v${VERSION}-${SHA_SHORT}" \
+             "lambda-v$VERSION-$SHA_SHORT" \
              layer_arns.tf layer.zip
           echo Removing release_notes.md ...
           rm -f release_notes.md
