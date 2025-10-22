@@ -11,5 +11,7 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+
+## v0.12.2 - 2025-10-22
 - [PATCH] Only decode JSON input buffer in Anthropic Claude streaming
     ([#497](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/497))
