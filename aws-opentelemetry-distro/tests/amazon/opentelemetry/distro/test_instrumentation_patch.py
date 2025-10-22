@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+# pylint: disable=too-many-lines
 import os
 from importlib.metadata import PackageNotFoundError
 from typing import Any, Dict
@@ -678,8 +679,7 @@ class TestInstrumentationPatch(TestCase):
         except TypeError:
             if expect_exception:
                 return
-            else:
-                raise
+            raise
 
         # Verify the message content
         self.assertEqual(len(wrapper._message["content"]), 1)
