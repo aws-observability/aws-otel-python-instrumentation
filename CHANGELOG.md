@@ -11,17 +11,9 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
-
-## v0.12.1.dev0 - 10-03-2025
-
-- fake entry #1
-  ([101](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/300))
-
-- fake entry #2
-  ([101](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/300))
-
-- fake entry #3
-  ([101](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/300))
-
-- fake entry #4
-  ([101](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/300))
+- Add botocore instrumentation extension for Bedrock AgentCore services with span attributes
+  ([#490](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/490))
+- [PATCH] Only decode JSON input buffer in Anthropic Claude streaming
+    ([#497](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/497))
+- Fix timeout handling for exceeded deadline in retry logic in OTLPAwsLogsExporter
+  ([#501](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/501))
