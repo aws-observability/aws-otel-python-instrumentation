@@ -4,13 +4,13 @@
 """
 Patches for OpenTelemetry Aio-Pika instrumentation to add code correlation support.
 """
+# pylint: disable=duplicate-code
 
 import functools
 import logging
 
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import get_code_correlation_enabled_status
-from amazon.opentelemetry.distro.code_correlation.utils import add_code_attributes_to_span
-from opentelemetry import trace
+from amazon.opentelemetry.distro.code_correlation.utils import record_code_attributes
 
 logger = logging.getLogger(__name__)
 
@@ -21,20 +21,10 @@ def patch_callback_decorator_decorate(original_decorate):
     @functools.wraps(original_decorate)
     def patched_decorate(self, callback):
         # Decorate the original callback to add code attributes
-        async def enhanced_callback(message):
-            # Get current active span
-            current_span = trace.get_current_span()
-            if current_span and current_span.is_recording():
-                try:
-                    add_code_attributes_to_span(current_span, callback)
-                except Exception:  # pylint: disable=broad-exception-caught
-                    pass
-
-            # Call original callback
-            return await callback(message)
+        callback = record_code_attributes(callback)
 
         # Call original decorate method with our enhanced callback
-        return original_decorate(self, enhanced_callback)
+        return original_decorate(self, callback)
 
     return patched_decorate
 

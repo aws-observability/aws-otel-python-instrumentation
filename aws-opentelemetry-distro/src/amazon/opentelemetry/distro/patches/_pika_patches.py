@@ -4,6 +4,7 @@
 """
 Patches for OpenTelemetry Pika instrumentation to add code correlation support.
 """
+# pylint: disable=duplicate-code
 
 import functools
 import logging
@@ -28,12 +29,10 @@ def patch_decorate_callback(original_decorate_callback):
                 except Exception:  # pylint: disable=broad-exception-caught
                     pass
 
-            # Then call the original consume_hook if it exists
-            if consume_hook:
-                try:
-                    consume_hook(span, body, properties)
-                except Exception:  # pylint: disable=broad-exception-caught
-                    pass
+            try:
+                consume_hook(span, body, properties)
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
 
         # Call original with our enhanced hook
         return original_decorate_callback(callback, tracer, task_name, enhanced_consume_hook)
@@ -56,6 +55,7 @@ def _apply_pika_instrumentation_patches():
             return
 
         # Patch _decorate_callback
+        # pylint: disable=protected-access
         pika_utils._decorate_callback = patch_decorate_callback(pika_utils._decorate_callback)
 
     except Exception as exc:  # pylint: disable=broad-exception-caught

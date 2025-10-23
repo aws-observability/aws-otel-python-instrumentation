@@ -1,9 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import asyncio
+"""Tests for Aio-Pika patches functionality."""
+
 import unittest
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import Mock, patch
 
 from amazon.opentelemetry.distro.patches._aio_pika_patches import (
     _apply_aio_pika_instrumentation_patches,
@@ -12,13 +13,16 @@ from amazon.opentelemetry.distro.patches._aio_pika_patches import (
 
 
 class TestAioPikaPatches(unittest.TestCase):
+    """Test cases for Aio-Pika patches functionality."""
 
     def test_patch_callback_decorator_decorate(self):
+        """Test patch_callback_decorator_decorate function."""
         # Mock the original decorate method
         original_decorate = Mock()
 
         # Mock CallbackDecorator instance
         mock_decorator = Mock()
+        # pylint: disable=protected-access
         mock_decorator._tracer = Mock()
         mock_decorator._get_span = Mock(return_value=Mock())
 
@@ -42,130 +46,9 @@ class TestAioPikaPatches(unittest.TestCase):
         # Verify we got a function back (the enhanced decorated callback)
         self.assertTrue(callable(result))
 
-    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.trace.get_current_span")
-    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.add_code_attributes_to_span")
-    def test_enhanced_callback_with_no_span(self, mock_add_attributes, mock_get_span):
-        """Test enhanced_callback when no current span exists"""
-        # Arrange
-        mock_get_span.return_value = None
-        original_decorate = Mock()
-        mock_callback = AsyncMock()
-        mock_message = Mock()
-
-        # Create patched decorate function
-        patched_decorate = patch_callback_decorator_decorate(original_decorate)
-
-        # Call patched decorate to get the enhanced callback
-        patched_decorate(Mock(), mock_callback)
-
-        # Get the enhanced callback from the call
-        enhanced_callback = original_decorate.call_args[0][1]
-
-        # Act
-        asyncio.run(enhanced_callback(mock_message))
-
-        # Assert
-        mock_get_span.assert_called_once()
-        mock_add_attributes.assert_not_called()
-        mock_callback.assert_called_once_with(mock_message)
-
-    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.trace.get_current_span")
-    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.add_code_attributes_to_span")
-    def test_enhanced_callback_with_non_recording_span(self, mock_add_attributes, mock_get_span):
-        """Test enhanced_callback when span is not recording"""
-        # Arrange
-        mock_span = Mock()
-        mock_span.is_recording.return_value = False
-        mock_get_span.return_value = mock_span
-
-        original_decorate = Mock()
-        mock_callback = AsyncMock()
-        mock_message = Mock()
-
-        # Create patched decorate function
-        patched_decorate = patch_callback_decorator_decorate(original_decorate)
-
-        # Call patched decorate to get the enhanced callback
-        patched_decorate(Mock(), mock_callback)
-
-        # Get the enhanced callback from the call
-        enhanced_callback = original_decorate.call_args[0][1]
-
-        # Act
-        asyncio.run(enhanced_callback(mock_message))
-
-        # Assert
-        mock_get_span.assert_called_once()
-        mock_span.is_recording.assert_called_once()
-        mock_add_attributes.assert_not_called()
-        mock_callback.assert_called_once_with(mock_message)
-
-    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.trace.get_current_span")
-    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.add_code_attributes_to_span")
-    def test_enhanced_callback_with_exception_in_add_attributes(self, mock_add_attributes, mock_get_span):
-        """Test enhanced_callback when add_code_attributes_to_span raises exception"""
-        # Arrange
-        mock_span = Mock()
-        mock_span.is_recording.return_value = True
-        mock_get_span.return_value = mock_span
-        mock_add_attributes.side_effect = Exception("Test exception")
-
-        original_decorate = Mock()
-        mock_callback = AsyncMock()
-        mock_message = Mock()
-
-        # Create patched decorate function
-        patched_decorate = patch_callback_decorator_decorate(original_decorate)
-
-        # Call patched decorate to get the enhanced callback
-        patched_decorate(Mock(), mock_callback)
-
-        # Get the enhanced callback from the call
-        enhanced_callback = original_decorate.call_args[0][1]
-
-        # Act
-        asyncio.run(enhanced_callback(mock_message))
-
-        # Assert
-        mock_get_span.assert_called_once()
-        mock_span.is_recording.assert_called_once()
-        mock_add_attributes.assert_called_once_with(mock_span, mock_callback)
-        # Should still call original callback despite exception
-        mock_callback.assert_called_once_with(mock_message)
-
-    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.trace.get_current_span")
-    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.add_code_attributes_to_span")
-    def test_enhanced_callback_successful_execution(self, mock_add_attributes, mock_get_span):
-        """Test enhanced_callback normal execution path"""
-        # Arrange
-        mock_span = Mock()
-        mock_span.is_recording.return_value = True
-        mock_get_span.return_value = mock_span
-
-        original_decorate = Mock()
-        mock_callback = AsyncMock()
-        mock_message = Mock()
-
-        # Create patched decorate function
-        patched_decorate = patch_callback_decorator_decorate(original_decorate)
-
-        # Call patched decorate to get the enhanced callback
-        patched_decorate(Mock(), mock_callback)
-
-        # Get the enhanced callback from the call
-        enhanced_callback = original_decorate.call_args[0][1]
-
-        # Act
-        asyncio.run(enhanced_callback(mock_message))
-
-        # Assert
-        mock_get_span.assert_called_once()
-        mock_span.is_recording.assert_called_once()
-        mock_add_attributes.assert_called_once_with(mock_span, mock_callback)
-        mock_callback.assert_called_once_with(mock_message)
-
-    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.get_code_correlation_enabled_status")
+    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches." "get_code_correlation_enabled_status")
     def test_apply_aio_pika_instrumentation_patches_disabled(self, mock_get_status):
+        """Test patches are not applied when code correlation is disabled."""
         mock_get_status.return_value = False
 
         with patch.dict(
@@ -178,8 +61,9 @@ class TestAioPikaPatches(unittest.TestCase):
             # Should not raise exception when code correlation is disabled
             _apply_aio_pika_instrumentation_patches()
 
-    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.get_code_correlation_enabled_status")
+    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches." "get_code_correlation_enabled_status")
     def test_apply_aio_pika_instrumentation_patches_enabled(self, mock_get_status):
+        """Test patches are applied when code correlation is enabled."""
         mock_get_status.return_value = True
 
         # Mock CallbackDecorator
@@ -199,8 +83,9 @@ class TestAioPikaPatches(unittest.TestCase):
             # Verify the decorate method was patched
             self.assertTrue(hasattr(mock_callback_decorator, "decorate"))
 
-    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.get_code_correlation_enabled_status")
+    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches." "get_code_correlation_enabled_status")
     def test_apply_aio_pika_instrumentation_patches_import_error(self, mock_get_status):
+        """Test patches handle import errors gracefully."""
         mock_get_status.return_value = True
 
         with patch.dict(
@@ -214,8 +99,9 @@ class TestAioPikaPatches(unittest.TestCase):
             _apply_aio_pika_instrumentation_patches()
 
     @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.logger")
-    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.get_code_correlation_enabled_status")
+    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches." "get_code_correlation_enabled_status")
     def test_apply_aio_pika_instrumentation_patches_exception_handling(self, mock_get_status, mock_logger):
+        """Test patches handle general exceptions gracefully."""
         mock_get_status.side_effect = Exception("Test exception")
 
         # Should handle exceptions gracefully
