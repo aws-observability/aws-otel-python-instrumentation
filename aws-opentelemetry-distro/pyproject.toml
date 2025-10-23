@@ -7,7 +7,7 @@ name = "aws-opentelemetry-distro"
 dynamic = ["version"]
 description = "AWS OpenTelemetry Python Distro"
 readme = "README.rst"
-license = "Apache-2.0"
+license = {text = "Apache-2.0"}
 requires-python = ">=3.9"
 authors = [
   { name = "Amazon Web Services" },
