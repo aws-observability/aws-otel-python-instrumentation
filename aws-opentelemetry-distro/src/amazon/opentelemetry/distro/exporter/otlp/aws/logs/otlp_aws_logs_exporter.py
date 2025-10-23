@@ -104,7 +104,14 @@ class OTLPAwsLogExporter(OTLPLogExporter):
         # 3) Deadline timeout will be exceeded
         # 4) Non-retryable errors (4xx except 429) immediately exit the loop
         while True:
-            resp = self._send(data, deadline_sec - time())
+            # Check timeout before each attempt. The retry logic below also checks
+            # timeout, but this provides an additional safeguard against flaky timing edge cases.
+            remaining_time = deadline_sec - time()
+            if remaining_time <= 0:
+                _logger.error("Timeout deadline exceeded before attempt.")
+                return LogExportResult.FAILURE
+
+            resp = self._send(data, remaining_time)
 
             if resp.ok:
                 return LogExportResult.SUCCESS
@@ -172,8 +179,10 @@ class OTLPAwsLogExporter(OTLPLogExporter):
         """
         # Check for Retry-After header first, then use exponential backoff with jitter
         retry_after_delay = self._parse_retryable_header(headers.get(self._RETRY_AFTER_HEADER))
+
         if retry_after_delay > -1:
             return retry_after_delay
+
         # multiplying by a random number between .8 and 1.2 introduces a +/-20% jitter to each backoff.
         return 2**retry_num * random.uniform(0.8, 1.2)
 
