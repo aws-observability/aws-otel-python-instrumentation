@@ -21,7 +21,7 @@ RUN sed -i "/opentelemetry-exporter-otlp-proto-grpc/d" ./aws-opentelemetry-distr
 RUN mkdir workspace && pip install --target workspace ./aws-opentelemetry-distro
 
 # Stage 2: Build the cp-utility binary
-FROM public.ecr.aws/docker/library/rust:1.87 AS builder
+FROM public.ecr.aws/docker/library/rust:1.89 AS builder
 
 WORKDIR /usr/src/cp-utility
 COPY ./tools/cp-utility .
@@ -39,7 +39,7 @@ ARG TARGETARCH
 RUN if [ $TARGETARCH = "amd64" ]; then rustup component add rustfmt && cargo fmt --check ; fi
 
 # Audit dependencies
-RUN if [ $TARGETARCH = "amd64" ]; then cargo install cargo-audit && cargo audit ; fi
+RUN if [ $TARGETARCH = "amd64" ]; then cargo install cargo-audit@0.21.2 && cargo audit ; fi
 
 
 # Cross-compile based on the target platform.
