@@ -157,7 +157,7 @@ jobs:
       # The step below publishes to testpypi in order to catch any issues
       # with the package configuration that would cause a failure to upload to pypi.
       - name: Install twine
-        run: pip install twine
+        run: pip install twine==5.1.1
       
       - name: Download SDK artifact
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
