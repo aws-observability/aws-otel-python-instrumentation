@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from amazon.opentelemetry.distro.code_correlation.code_attributes_span_processor import CodeAttributesSpanProcessor
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, Span
+from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 from opentelemetry.semconv.attributes.code_attributes import CODE_FUNCTION_NAME
 from opentelemetry.trace import SpanKind
 
@@ -82,57 +83,85 @@ class TestCodeAttributesSpanProcessor(TestCase):
         """Test that MAX_STACK_FRAMES is set to expected value."""
         self.assertEqual(CodeAttributesSpanProcessor.MAX_STACK_FRAMES, 50)
 
-    def create_mock_span(self, span_kind=SpanKind.CLIENT, attributes=None):
+    def create_mock_span(self, span_kind=SpanKind.CLIENT, attributes=None, instrumentation_scope_name=None):
         """Helper to create a mock span with specified properties."""
         mock_span = MagicMock(spec=Span)
         mock_span.kind = span_kind
         mock_span.attributes = attributes
+
+        # Set up instrumentation scope
+        if instrumentation_scope_name is not None:
+            mock_scope = MagicMock(spec=InstrumentationScope)
+            mock_scope.name = instrumentation_scope_name
+            mock_span.instrumentation_scope = mock_scope
+        else:
+            mock_span.instrumentation_scope = None
+
         return mock_span
 
-    def test_should_process_span_client_span_without_attributes(self):
-        """Test that CLIENT spans without code attributes should be processed."""
-        span = self.create_mock_span(SpanKind.CLIENT, attributes=None)
-        result = CodeAttributesSpanProcessor._should_process_span(span)
+    def test_should_process_span_user_client_span_without_attributes(self):
+        """Test that user CLIENT spans without code attributes should be processed."""
+        span = self.create_mock_span(SpanKind.CLIENT, attributes=None, instrumentation_scope_name="my-app")
+        result = self.processor._should_process_span(span)
         self.assertTrue(result)
 
-    def test_should_process_span_client_span_with_empty_attributes(self):
-        """Test that CLIENT spans with empty attributes should be processed."""
-        span = self.create_mock_span(SpanKind.CLIENT, attributes={})
-        result = CodeAttributesSpanProcessor._should_process_span(span)
+    def test_should_process_span_user_client_span_with_empty_attributes(self):
+        """Test that user CLIENT spans with empty attributes should be processed."""
+        span = self.create_mock_span(SpanKind.CLIENT, attributes={}, instrumentation_scope_name="my-app")
+        result = self.processor._should_process_span(span)
         self.assertTrue(result)
 
     def test_should_process_span_client_span_with_existing_code_attributes(self):
-        """Test that CLIENT spans with existing code attributes should not be processed."""
+        """Test that spans with existing code attributes should not be processed."""
         attributes = {CODE_FUNCTION_NAME: "existing.function"}
-        span = self.create_mock_span(SpanKind.CLIENT, attributes=attributes)
-        result = CodeAttributesSpanProcessor._should_process_span(span)
+        span = self.create_mock_span(SpanKind.CLIENT, attributes=attributes, instrumentation_scope_name="my-app")
+        result = self.processor._should_process_span(span)
         self.assertFalse(result)
 
-    def test_should_process_span_server_and_internal_spans(self):
-        """Test that SERVER and INTERNAL spans should not be processed."""
+    def test_should_process_span_user_server_spans(self):
+        """Test that user SERVER spans should be processed (new logic)."""
+        span = self.create_mock_span(SpanKind.SERVER, attributes=None, instrumentation_scope_name="my-app")
+        result = self.processor._should_process_span(span)
+        self.assertTrue(result)
+
+    def test_should_process_span_library_server_spans_not_processed(self):
+        """Test that library instrumentation SERVER spans should not be processed."""
+        span = self.create_mock_span(
+            SpanKind.SERVER, attributes=None, instrumentation_scope_name="opentelemetry.instrumentation.flask"
+        )
+        result = self.processor._should_process_span(span)
+        self.assertFalse(result)
+
+    def test_should_process_span_library_internal_spans_not_processed(self):
+        """Test that library instrumentation INTERNAL spans should not be processed."""
+        span = self.create_mock_span(
+            SpanKind.INTERNAL, attributes=None, instrumentation_scope_name="opentelemetry.instrumentation.botocore"
+        )
+        result = self.processor._should_process_span(span)
+        self.assertFalse(result)
+
+    def test_should_process_span_library_client_spans_processed(self):
+        """Test that library instrumentation CLIENT spans should be processed."""
+        span = self.create_mock_span(
+            SpanKind.CLIENT, attributes=None, instrumentation_scope_name="opentelemetry.instrumentation.requests"
+        )
+        result = self.processor._should_process_span(span)
+        self.assertTrue(result)
+
+    def test_should_process_span_user_spans_all_kinds(self):
+        """Test that user spans of all kinds should be processed."""
         test_cases = [
+            SpanKind.CLIENT,
             SpanKind.SERVER,
+            SpanKind.PRODUCER,
+            SpanKind.CONSUMER,
             SpanKind.INTERNAL,
         ]
 
         for span_kind in test_cases:
             with self.subTest(span_kind=span_kind):
-                span = self.create_mock_span(span_kind, attributes=None)
-                result = CodeAttributesSpanProcessor._should_process_span(span)
-                self.assertFalse(result)
-
-    def test_should_process_span_client_producer_consumer_spans(self):
-        """Test that CLIENT, PRODUCER, and CONSUMER spans should be processed."""
-        test_cases = [
-            SpanKind.CLIENT,
-            SpanKind.PRODUCER,
-            SpanKind.CONSUMER,
-        ]
-
-        for span_kind in test_cases:
-            with self.subTest(span_kind=span_kind):
-                span = self.create_mock_span(span_kind, attributes=None)
-                result = CodeAttributesSpanProcessor._should_process_span(span)
+                span = self.create_mock_span(span_kind, attributes=None, instrumentation_scope_name="my-app")
+                result = self.processor._should_process_span(span)
                 self.assertTrue(result)
 
     @patch("amazon.opentelemetry.distro.code_correlation.code_attributes_span_processor.sys._getframe")
@@ -300,7 +329,8 @@ class TestCodeAttributesSpanProcessor(TestCase):
 
     def test_on_start_should_not_process_span(self):
         """Test on_start when span should not be processed."""
-        span = self.create_mock_span(SpanKind.SERVER)  # Non-client span
+        # Library instrumentation SERVER span should not be processed
+        span = self.create_mock_span(SpanKind.SERVER, instrumentation_scope_name="opentelemetry.instrumentation.flask")
 
         with patch.object(self.processor, "_capture_code_attributes") as mock_capture:
             self.processor.on_start(span)
