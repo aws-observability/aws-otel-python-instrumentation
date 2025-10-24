@@ -42,6 +42,7 @@ dependencies = [
   "opentelemetry-instrumentation-aws-lambda == 0.54b1",
   "opentelemetry-instrumentation-aio-pika == 0.54b1",
   "opentelemetry-instrumentation-aiohttp-client == 0.54b1",
+  "opentelemetry-instrumentation-aiokafka == 0.54b1",
   "opentelemetry-instrumentation-aiopg == 0.54b1",
   "opentelemetry-instrumentation-asgi == 0.54b1",
   "opentelemetry-instrumentation-asyncpg == 0.54b1",
