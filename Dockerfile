@@ -39,7 +39,7 @@ ARG TARGETARCH
 RUN if [ $TARGETARCH = "amd64" ]; then rustup component add rustfmt && cargo fmt --check ; fi
 
 # Audit dependencies
-RUN if [ $TARGETARCH = "amd64" ]; then cargo install cargo-audit@0.21.2 --locked && cargo audit ; fi
+RUN if [ $TARGETARCH = "amd64" ]; then cargo install cargo-audit --locked && cargo audit ; fi
 
 
 # Cross-compile based on the target platform.
