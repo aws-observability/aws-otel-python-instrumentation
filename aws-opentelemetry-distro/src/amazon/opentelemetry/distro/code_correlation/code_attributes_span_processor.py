@@ -22,6 +22,7 @@ from .internal.packages_resolver import _build_package_mapping, _load_third_part
 from .utils import add_code_attributes_to_span_from_frame
 
 
+# pylint: disable=no-self-use
 class CodeAttributesSpanProcessor(SpanProcessor):
     """
     A SpanProcessor that captures and attaches code attributes to spans.
@@ -68,26 +69,47 @@ class CodeAttributesSpanProcessor(SpanProcessor):
         # Capture code attributes from stack trace
         self._capture_code_attributes(span)
 
-    @staticmethod
-    def _should_process_span(span: Span) -> bool:
+    def _should_process_span(self, span: Span) -> bool:
         """
         Determine if span should be processed for code attributes.
 
         Returns False if:
+        - Span is library instrumentation SERVER or INTERNAL span
         - Span already has code attributes
-        - Span is SERVER or INTERNAL span
+
+        Note: Library instrumentation CLIENT/PRODUCER/CONSUMER spans are still processed
+        as they provide valuable context for tracing call chains.
         """
-        # Skip if span already has code attributes
+
+        if span.kind in (SpanKind.SERVER, SpanKind.INTERNAL) and self._is_library_instrumentation_span(span):
+            return False
+
         if span.attributes is not None and CODE_FUNCTION_NAME in span.attributes:
             return False
 
-        # Process spans except SERVER and INTERNAL spans
-        return span.kind not in (SpanKind.SERVER, SpanKind.INTERNAL)
+        return True
+
+    def _is_library_instrumentation_span(self, span: Span) -> bool:
+        """
+        Check if span is created by library instrumentation.
+
+        Args:
+            span: The span to check
+
+        Returns:
+            True if span is from library instrumentation, False otherwise
+        """
+        scope = span.instrumentation_scope
+
+        if scope is None or scope.name is None:
+            return False  # No scope info, assume user-created
+
+        return scope.name.startswith("opentelemetry.instrumentation")
 
     def _capture_code_attributes(self, span: Span) -> None:
         """Capture and attach code attributes from current stack trace."""
         try:
-            current_frame = sys._getframe(1)
+            current_frame = sys._getframe(1)  # pylint: disable=protected-access
 
             for frame_index, frame in enumerate(self._iter_stack_frames(current_frame)):
                 if frame_index >= self.MAX_STACK_FRAMES:
@@ -112,6 +134,6 @@ class CodeAttributesSpanProcessor(SpanProcessor):
         """Called when the processor is shutdown. No cleanup needed."""
         # No cleanup needed for code attributes processor
 
-    def force_flush(self, timeout_millis: int = 30000) -> bool:  # pylint: disable=no-self-use,unused-argument
+    def force_flush(self, timeout_millis: int = 30000) -> bool:  # pylint: disable=unused-argument
         """Force flush any pending spans. Always returns True as no pending work."""
         return True
