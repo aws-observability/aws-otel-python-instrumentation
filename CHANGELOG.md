@@ -11,6 +11,8 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+- Add Resource and CFN Attributes for Bedrock AgentCore spans
+  ([#495](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/495))
 - Add botocore instrumentation extension for Bedrock AgentCore services with span attributes
   ([#490](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/490))
 - [PATCH] Only decode JSON input buffer in Anthropic Claude streaming
