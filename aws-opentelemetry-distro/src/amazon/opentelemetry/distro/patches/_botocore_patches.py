@@ -23,6 +23,9 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_STEPFUNCTIONS_ACTIVITY_ARN,
     AWS_STEPFUNCTIONS_STATEMACHINE_ARN,
 )
+from amazon.opentelemetry.distro.patches._bedrock_agentcore_patches import (  # noqa # pylint: disable=unused-import
+    _BedrockAgentCoreExtension,
+)
 from amazon.opentelemetry.distro.patches._bedrock_patches import (  # noqa # pylint: disable=unused-import
     _BedrockAgentExtension,
     _BedrockAgentRuntimeExtension,
@@ -247,6 +250,10 @@ def _apply_botocore_bedrock_patch() -> None:  # pylint: disable=too-many-stateme
     _KNOWN_EXTENSIONS["bedrock"] = _lazy_load(".", "_BedrockExtension")
     _KNOWN_EXTENSIONS["bedrock-agent"] = _lazy_load(".", "_BedrockAgentExtension")
     _KNOWN_EXTENSIONS["bedrock-agent-runtime"] = _lazy_load(".", "_BedrockAgentRuntimeExtension")
+    _KNOWN_EXTENSIONS["bedrock-agentcore"] = _lazy_load(".._bedrock_agentcore_patches", "_BedrockAgentCoreExtension")
+    _KNOWN_EXTENSIONS["bedrock-agentcore-control"] = _lazy_load(
+        ".._bedrock_agentcore_patches", "_BedrockAgentCoreExtension"
+    )
 
     # TODO: The following code is to patch bedrock-runtime bugs that are fixed in
     # opentelemetry-instrumentation-botocore==0.56b0 in these PRs:
@@ -327,8 +334,89 @@ def _apply_botocore_bedrock_patch() -> None:  # pylint: disable=too-many-stateme
             tool_calls.append(tool_call)
         return tool_calls
 
+    # TODO: The following code is to patch a bedrock bug that was fixed in
+    # opentelemetry-instrumentation-botocore==0.60b0 in:
+    # https://github.com/open-telemetry/opentelemetry-python-contrib/pull/3875
+    # Remove this code once we've bumped opentelemetry-instrumentation-botocore dependency to 0.60b0
+    def patched_process_anthropic_claude_chunk(self, chunk):
+        # pylint: disable=too-many-return-statements,too-many-branches
+        if not (message_type := chunk.get("type")):
+            return
+
+        if message_type == "message_start":
+            # {'type': 'message_start', 'message': {'id': 'id', 'type': 'message', 'role': 'assistant',
+            # 'model': 'claude-2.0', 'content': [], 'stop_reason': None, 'stop_sequence': None,
+            # 'usage': {'input_tokens': 18, 'output_tokens': 1}}}
+            if chunk.get("message", {}).get("role") == "assistant":
+                self._record_message = True
+                message = chunk["message"]
+                self._message = {
+                    "role": message["role"],
+                    "content": message.get("content", []),
+                }
+            return
+
+        if message_type == "content_block_start":
+            # {'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text', 'text': ''}}
+            # {'type': 'content_block_start', 'index': 1, 'content_block':
+            # {'type': 'tool_use', 'id': 'id', 'name': 'func_name', 'input': {}}}
+            if self._record_message:
+                block = chunk.get("content_block", {})
+                if block.get("type") == "text":
+                    self._content_block = block
+                elif block.get("type") == "tool_use":
+                    self._content_block = block
+            return
+
+        if message_type == "content_block_delta":
+            # {'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': 'Here'}}
+            # {'type': 'content_block_delta', 'index': 1, 'delta': {'type': 'input_json_delta', 'partial_json': ''}}
+            if self._record_message:
+                delta = chunk.get("delta", {})
+                if delta.get("type") == "text_delta":
+                    self._content_block["text"] += delta.get("text", "")
+                elif delta.get("type") == "input_json_delta":
+                    self._tool_json_input_buf += delta.get("partial_json", "")
+            return
+
+        if message_type == "content_block_stop":
+            # {'type': 'content_block_stop', 'index': 0}
+            if self._tool_json_input_buf:
+                try:
+                    self._content_block["input"] = json.loads(self._tool_json_input_buf)
+                except json.JSONDecodeError:
+                    self._content_block["input"] = self._tool_json_input_buf
+            self._message["content"].append(self._content_block)
+            self._content_block = {}
+            self._tool_json_input_buf = ""
+            return
+
+        if message_type == "message_delta":
+            # {'type': 'message_delta', 'delta': {'stop_reason': 'end_turn', 'stop_sequence': None},
+            # 'usage': {'output_tokens': 123}}
+            if (stop_reason := chunk.get("delta", {}).get("stop_reason")) is not None:
+                self._response["stopReason"] = stop_reason
+            return
+
+        if message_type == "message_stop":
+            # {'type': 'message_stop', 'amazon-bedrock-invocationMetrics':
+            # {'inputTokenCount': 18, 'outputTokenCount': 123, 'invocationLatency': 5250, 'firstByteLatency': 290}}
+            if invocation_metrics := chunk.get("amazon-bedrock-invocationMetrics"):
+                self._process_invocation_metrics(invocation_metrics)
+
+            if self._record_message:
+                self._response["output"] = {"message": self._message}
+                self._record_message = False
+                self._message = None
+
+            self._stream_done_callback(self._response)
+            return
+
     bedrock_utils.ConverseStreamWrapper.__init__ = patched_init
     bedrock_utils.ConverseStreamWrapper._process_event = patched_process_event
+    bedrock_utils.InvokeModelWithResponseStreamWrapper._process_anthropic_claude_chunk = (
+        patched_process_anthropic_claude_chunk
+    )
     bedrock_utils.extract_tool_calls = patched_extract_tool_calls
 
     # END The OpenTelemetry Authors code

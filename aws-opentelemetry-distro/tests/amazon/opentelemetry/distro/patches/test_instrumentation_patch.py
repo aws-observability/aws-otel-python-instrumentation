@@ -1,19 +1,31 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-import os
 from importlib.metadata import PackageNotFoundError
 from typing import Any, Dict
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-import gevent.monkey
-
 import opentelemetry.sdk.extension.aws.resource.ec2 as ec2_resource
 import opentelemetry.sdk.extension.aws.resource.eks as eks_resource
-from amazon.opentelemetry.distro.patches._instrumentation_patch import (
-    AWS_GEVENT_PATCH_MODULES,
-    apply_instrumentation_patches,
+from amazon.opentelemetry.distro._aws_attribute_keys import (
+    AWS_AUTH_CREDENTIAL_PROVIDER_ARN,
+    AWS_BEDROCK_AGENTCORE_BROWSER_ARN,
+    AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN,
+    AWS_BEDROCK_AGENTCORE_GATEWAY_ARN,
+    AWS_BEDROCK_AGENTCORE_MEMORY_ARN,
+    AWS_BEDROCK_AGENTCORE_RUNTIME_ARN,
+    AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN,
+    AWS_BEDROCK_AGENTCORE_WORKLOAD_IDENTITY_ARN,
+    AWS_GATEWAY_TARGET_ID,
 )
+from amazon.opentelemetry.distro.patches._bedrock_agentcore_patches import (
+    GEN_AI_BROWSER_ID,
+    GEN_AI_CODE_INTERPRETER_ID,
+    GEN_AI_GATEWAY_ID,
+    GEN_AI_MEMORY_ID,
+    GEN_AI_RUNTIME_ID,
+)
+from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_instrumentation_patches
 from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS, bedrock_utils
 from opentelemetry.propagate import get_global_textmap
@@ -38,6 +50,24 @@ _ACTIVITY_ARN: str = "arn:aws:states:us-east-1:007003123456789012:activity:testA
 _LAMBDA_FUNCTION_NAME: str = "lambdaFunctionName"
 _LAMBDA_SOURCE_MAPPING_ID: str = "lambdaEventSourceMappingID"
 _TABLE_ARN: str = "arn:aws:dynamodb:us-west-2:123456789012:table/testTable"
+_AGENTCORE_RUNTIME_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/test-runtime-123"
+_AGENTCORE_RUNTIME_ENDPOINT_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime-endpoint/test-endpoint"
+_AGENTCORE_RUNTIME_ID: str = "test-runtime-123"
+_AGENTCORE_BROWSER_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:browser/testBrowser-1234567890"
+_AGENTCORE_BROWSER_ID: str = "testBrowser-1234567890"
+_AGENTCORE_CODE_INTERPRETER_ARN: str = (
+    "arn:aws:bedrock-agentcore:us-east-1:123456789012:code-interpreter/testCodeInt-1234567890"
+)
+_AGENTCORE_CODE_INTERPRETER_ID: str = "testCodeInt-1234567890"
+_AGENTCORE_GATEWAY_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:gateway/agentGateway-123456789"
+_AGENTCORE_GATEWAY_ID: str = "agentGateway-123456789"
+_AGENTCORE_TARGET_ID: str = "target-123456789"
+_AGENTCORE_MEMORY_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/agentMemory-123456789"
+_AGENTCORE_MEMORY_ID: str = "agentMemory-123456789"
+_AGENTCORE_CREDENTIAL_PROVIDER_ARN: str = (
+    "arn:aws:acps:us-east-1:123456789012:token-vault/test-vault/apikeycredentialprovider/test-provider"
+)
+_AGENTCORE_WORKLOAD_IDENTITY_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:workload-identity/test-wi"
 
 # Patch names
 IMPORTLIB_METADATA_VERSION_PATCH: str = "amazon.opentelemetry.distro._utils.version"
@@ -76,18 +106,11 @@ class TestInstrumentationPatch(TestCase):
     def _run_patch_behaviour_tests(self):
         # Test setup
         self.method_patches[IMPORTLIB_METADATA_VERSION_PATCH].return_value = "1.0.0"
-        # Test setup to not patch gevent
-        os.environ[AWS_GEVENT_PATCH_MODULES] = "none"
 
         # Validate unpatched upstream behaviour - important to detect upstream changes that may break instrumentation
         self._test_unpatched_botocore_instrumentation()
         self._test_unpatched_botocore_propagator()
-        self._test_unpatched_gevent_instrumentation()
         self._test_unpatched_starlette_instrumentation()
-        # TODO: remove these tests once we bump botocore instrumentation version to 0.56b0
-        # Bedrock Runtime tests
-        self._test_unpatched_converse_stream_wrapper()
-        self._test_unpatched_extract_tool_calls()
 
         # Apply patches
         apply_instrumentation_patches()
@@ -95,26 +118,13 @@ class TestInstrumentationPatch(TestCase):
         # Validate patched upstream behaviour - important to detect downstream changes that may break instrumentation
         self._test_patched_botocore_instrumentation()
         self._test_patched_botocore_propagator()
-        self._test_unpatched_gevent_instrumentation()
         self._test_patched_starlette_instrumentation()
-
-        # Test setup to check whether only these two modules get patched by gevent monkey
-        os.environ[AWS_GEVENT_PATCH_MODULES] = "os, ssl"
 
         # Apply patches
         apply_instrumentation_patches()
 
-        # Validate that os and ssl gevent monkey patch modules were patched
-        self._test_patched_gevent_os_ssl_instrumentation()
-
-        # Set the value to 'all' so that all the remaining gevent monkey patch modules are patched
-        os.environ[AWS_GEVENT_PATCH_MODULES] = "all"
-
         # Apply patches again.
         apply_instrumentation_patches()
-
-        # Validate that remaining gevent monkey patch modules were patched
-        self._test_patched_gevent_instrumentation()
 
         # Test teardown
         self._reset_mocks()
@@ -160,6 +170,14 @@ class TestInstrumentationPatch(TestCase):
             "bedrock-agent-runtime" in _KNOWN_EXTENSIONS, "Upstream has added a Bedrock Agent Runtime extension"
         )
 
+        # Bedrock AgentCore
+        self.assertFalse("bedrock-agentcore" in _KNOWN_EXTENSIONS, "Upstream has added a Bedrock AgentCore extension")
+
+        # Bedrock AgentCore Control
+        self.assertFalse(
+            "bedrock-agentcore-control" in _KNOWN_EXTENSIONS, "Upstream has added a Bedrock AgentCore Control extension"
+        )
+
         # BedrockRuntime
         self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS, "Upstream has added a bedrock-runtime extension")
 
@@ -177,20 +195,6 @@ class TestInstrumentationPatch(TestCase):
 
         # DynamoDB
         self.assertTrue("dynamodb" in _KNOWN_EXTENSIONS, "Upstream has removed a DynamoDB extension")
-
-    def _test_unpatched_gevent_instrumentation(self):
-        self.assertFalse(gevent.monkey.is_module_patched("os"), "gevent os module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("thread"), "gevent thread module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("time"), "gevent time module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("sys"), "gevent sys module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("socket"), "gevent socket module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("select"), "gevent select module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("ssl"), "gevent ssl module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("subprocess"), "gevent subprocess module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("builtins"), "gevent builtins module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("signal"), "gevent signal module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("queue"), "gevent queue module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("contextvars"), "gevent contextvars module has been patched")
 
     # pylint: disable=too-many-statements, too-many-locals
     def _test_patched_botocore_instrumentation(self):
@@ -223,10 +227,14 @@ class TestInstrumentationPatch(TestCase):
         # Bedrock Agent Operation
         self._test_patched_bedrock_agent_instrumentation()
 
-        # TODO: remove these tests once we bump botocore instrumentation version to 0.56b0
         # Bedrock Runtime
+        # TODO: remove these tests once we bump botocore instrumentation version to 0.56b0
         self._test_patched_converse_stream_wrapper()
         self._test_patched_extract_tool_calls()
+        # TODO: remove these tests once we bump botocore instrumentation version to 0.60b0
+        self._test_patched_process_anthropic_claude_chunk({"location": "Seattle"}, {"location": "Seattle"})
+        self._test_patched_process_anthropic_claude_chunk(None, None)
+        self._test_patched_process_anthropic_claude_chunk({}, {})
 
         # Bedrock Agent Runtime
         self.assertTrue("bedrock-agent-runtime" in _KNOWN_EXTENSIONS)
@@ -236,6 +244,41 @@ class TestInstrumentationPatch(TestCase):
         self.assertEqual(bedrock_agent_runtime_attributes["aws.bedrock.knowledge_base.id"], _BEDROCK_KNOWLEDGEBASE_ID)
         bedrock_agent_runtime_sucess_attributes: Dict[str, str] = _do_on_success_bedrock("bedrock-agent-runtime")
         self.assertEqual(len(bedrock_agent_runtime_sucess_attributes), 0)
+
+        # Bedrock AgentCore
+        self.assertTrue("bedrock-agentcore" in _KNOWN_EXTENSIONS)
+        bedrock_agentcore_attributes: Dict[str, str] = _do_extract_bedrock_agentcore_attributes()
+        # Runtime attributes
+        self.assertEqual(bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_RUNTIME_ARN], _AGENTCORE_RUNTIME_ARN)
+        self.assertEqual(
+            bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN], _AGENTCORE_RUNTIME_ENDPOINT_ARN
+        )
+        self.assertEqual(bedrock_agentcore_attributes[GEN_AI_RUNTIME_ID], _AGENTCORE_RUNTIME_ID)
+        # Browser attributes
+        self.assertEqual(bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_BROWSER_ARN], _AGENTCORE_BROWSER_ARN)
+        self.assertEqual(bedrock_agentcore_attributes[GEN_AI_BROWSER_ID], _AGENTCORE_BROWSER_ID)
+        # Code interpreter attributes
+        self.assertEqual(
+            bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN], _AGENTCORE_CODE_INTERPRETER_ARN
+        )
+        self.assertEqual(bedrock_agentcore_attributes[GEN_AI_CODE_INTERPRETER_ID], _AGENTCORE_CODE_INTERPRETER_ID)
+        # Gateway attributes
+        self.assertEqual(bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_GATEWAY_ARN], _AGENTCORE_GATEWAY_ARN)
+        self.assertEqual(bedrock_agentcore_attributes[GEN_AI_GATEWAY_ID], _AGENTCORE_GATEWAY_ID)
+        self.assertEqual(bedrock_agentcore_attributes[AWS_GATEWAY_TARGET_ID], _AGENTCORE_TARGET_ID)
+        # Memory attributes
+        self.assertEqual(bedrock_agentcore_attributes[GEN_AI_MEMORY_ID], _AGENTCORE_MEMORY_ID)
+        self.assertEqual(bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_MEMORY_ARN], _AGENTCORE_MEMORY_ARN)
+        # Auth and identity attributes
+        self.assertEqual(
+            bedrock_agentcore_attributes[AWS_AUTH_CREDENTIAL_PROVIDER_ARN], _AGENTCORE_CREDENTIAL_PROVIDER_ARN
+        )
+        self.assertEqual(
+            bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_WORKLOAD_IDENTITY_ARN], _AGENTCORE_WORKLOAD_IDENTITY_ARN
+        )
+
+        # Bedrock AgentCore Control
+        self.assertTrue("bedrock-agentcore-control" in _KNOWN_EXTENSIONS)
 
         # BedrockRuntime
         self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
@@ -427,38 +470,6 @@ class TestInstrumentationPatch(TestCase):
             self.assertTrue("aws.region" in initial_attributes)
             instrumentor.uninstrument()
 
-    def _test_patched_gevent_os_ssl_instrumentation(self):
-        # Only ssl and os module should have been patched since the environment variable was set to 'os, ssl'
-        self.assertTrue(gevent.monkey.is_module_patched("ssl"), "gevent ssl module has not been patched")
-        self.assertTrue(gevent.monkey.is_module_patched("os"), "gevent os module has not been patched")
-        # Rest should still be unpatched
-        self.assertFalse(gevent.monkey.is_module_patched("thread"), "gevent thread module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("time"), "gevent time module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("sys"), "gevent sys module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("socket"), "gevent socket module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("select"), "gevent select module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("subprocess"), "gevent subprocess module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("builtins"), "gevent builtins module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("signal"), "gevent signal module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("queue"), "gevent queue module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("contextvars"), "gevent contextvars module has been patched")
-
-    def _test_patched_gevent_instrumentation(self):
-        self.assertTrue(gevent.monkey.is_module_patched("os"), "gevent os module has not been patched")
-        self.assertTrue(gevent.monkey.is_module_patched("time"), "gevent time module has not been patched")
-        self.assertTrue(gevent.monkey.is_module_patched("socket"), "gevent socket module has not been patched")
-        self.assertTrue(gevent.monkey.is_module_patched("select"), "gevent select module has not been patched")
-        self.assertTrue(gevent.monkey.is_module_patched("ssl"), "gevent ssl module has not been patched")
-        self.assertTrue(gevent.monkey.is_module_patched("subprocess"), "gevent subprocess module has not been patched")
-        self.assertTrue(gevent.monkey.is_module_patched("signal"), "gevent signal module has not been patched")
-        self.assertTrue(gevent.monkey.is_module_patched("queue"), "gevent queue module has not been patched")
-
-        # Current version of gevent.monkey.patch_all() does not do anything to these modules despite being called
-        self.assertFalse(gevent.monkey.is_module_patched("thread"), "gevent thread module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("sys"), "gevent sys module has  been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("builtins"), "gevent builtins module not been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("contextvars"), "gevent contextvars module has been patched")
-
     def _test_botocore_installed_flag(self):
         with patch(
             "amazon.opentelemetry.distro.patches._botocore_patches._apply_botocore_instrumentation_patches"
@@ -599,6 +610,95 @@ class TestInstrumentationPatch(TestCase):
         message_with_string_content = {"role": "assistant", "content": "{"}
         result = bedrock_utils.extract_tool_calls(message_with_string_content, True)
         self.assertIsNone(result)
+
+        # Test with toolUse format to exercise the for loop
+        message_with_tool_use = {"role": "assistant", "content": [{"toolUse": {"toolUseId": "id1", "name": "func1"}}]}
+        result = bedrock_utils.extract_tool_calls(message_with_tool_use, True)
+        self.assertEqual(len(result), 1)
+
+        # Test with tool_use format to exercise the for loop
+        message_with_type_tool_use = {
+            "role": "assistant",
+            "content": [{"type": "tool_use", "id": "id2", "name": "func2"}],
+        }
+        result = bedrock_utils.extract_tool_calls(message_with_type_tool_use, True)
+        self.assertEqual(len(result), 1)
+
+    def _test_patched_process_anthropic_claude_chunk(
+        self, input_value: Dict[str, str], expected_output: Dict[str, str]
+    ):
+        self._test_process_anthropic_claude_chunk(input_value, expected_output, False)
+
+    def _test_unpatched_process_anthropic_claude_chunk(
+        self, input_value: Dict[str, str], expected_output: Dict[str, str]
+    ):
+        self._test_process_anthropic_claude_chunk(input_value, expected_output, True)
+
+    def _test_process_anthropic_claude_chunk(
+        self, input_value: Dict[str, str], expected_output: Dict[str, str], expect_exception: bool
+    ):
+        """Test that _process_anthropic_claude_chunk handles various tool_use input formats."""
+        wrapper = bedrock_utils.InvokeModelWithResponseStreamWrapper(
+            stream=MagicMock(),
+            stream_done_callback=MagicMock,
+            stream_error_callback=MagicMock,
+            model_id="anthropic.claude-3-5-sonnet-20240620-v1:0",
+        )
+
+        # Simulate message_start
+        wrapper._process_anthropic_claude_chunk(
+            {
+                "type": "message_start",
+                "message": {
+                    "role": "assistant",
+                    "content": [],
+                },
+            }
+        )
+
+        # Simulate content_block_start with specified input
+        content_block = {
+            "type": "tool_use",
+            "id": "test_id",
+            "name": "test_tool",
+        }
+        if input_value is not None:
+            content_block["input"] = input_value
+
+        wrapper._process_anthropic_claude_chunk(
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": content_block,
+            }
+        )
+
+        # Simulate content_block_stop
+        try:
+            wrapper._process_anthropic_claude_chunk({"type": "content_block_stop", "index": 0})
+        except TypeError:
+            if expect_exception:
+                return
+            else:
+                raise
+
+        # Verify the message content
+        self.assertEqual(len(wrapper._message["content"]), 1)
+        tool_block = wrapper._message["content"][0]
+        self.assertEqual(tool_block["type"], "tool_use")
+        self.assertEqual(tool_block["id"], "test_id")
+        self.assertEqual(tool_block["name"], "test_tool")
+
+        if expected_output is not None:
+            self.assertEqual(tool_block["input"], expected_output)
+            self.assertIsInstance(tool_block["input"], dict)
+        else:
+            self.assertNotIn("input", tool_block)
+
+        # Just adding this to do basic sanity checks and increase code coverage
+        wrapper._process_anthropic_claude_chunk({"type": "content_block_delta", "index": 0})
+        wrapper._process_anthropic_claude_chunk({"type": "message_delta"})
+        wrapper._process_anthropic_claude_chunk({"type": "message_stop"})
 
     def _test_patched_bedrock_agent_instrumentation(self):
         """For bedrock-agent service, both extract_attributes and on_success provides attributes,
@@ -851,6 +951,31 @@ def _do_extract_stepfunctions_attributes() -> Dict[str, str]:
 def _do_extract_lambda_attributes() -> Dict[str, str]:
     service_name: str = "lambda"
     params: Dict[str, str] = {"FunctionName": _LAMBDA_FUNCTION_NAME, "UUID": _LAMBDA_SOURCE_MAPPING_ID}
+    return _do_extract_attributes(service_name, params)
+
+
+def _do_extract_bedrock_agentcore_attributes() -> Dict[str, str]:
+    service_name: str = "bedrock-agentcore"
+    params: Dict[str, Any] = {
+        "agentRuntimeArn": _AGENTCORE_RUNTIME_ARN,
+        "agentRuntimeEndpointArn": _AGENTCORE_RUNTIME_ENDPOINT_ARN,
+        "agentRuntimeId": _AGENTCORE_RUNTIME_ID,
+        "browserArn": _AGENTCORE_BROWSER_ARN,
+        "browserId": _AGENTCORE_BROWSER_ID,
+        "browserIdentifier": _AGENTCORE_BROWSER_ID,
+        "codeInterpreterArn": _AGENTCORE_CODE_INTERPRETER_ARN,
+        "codeInterpreterId": _AGENTCORE_CODE_INTERPRETER_ID,
+        "codeInterpreterIdentifier": _AGENTCORE_CODE_INTERPRETER_ID,
+        "gatewayArn": _AGENTCORE_GATEWAY_ARN,
+        "gatewayId": _AGENTCORE_GATEWAY_ID,
+        "gatewayIdentifier": _AGENTCORE_GATEWAY_ID,
+        "targetId": _AGENTCORE_TARGET_ID,
+        "memoryId": _AGENTCORE_MEMORY_ID,
+        "credentialProviderArn": _AGENTCORE_CREDENTIAL_PROVIDER_ARN,
+        "workloadIdentityArn": _AGENTCORE_WORKLOAD_IDENTITY_ARN,
+        "memory": {"arn": _AGENTCORE_MEMORY_ARN, "id": _AGENTCORE_MEMORY_ID},
+        "workloadIdentityDetails": {"workloadIdentityArn": _AGENTCORE_WORKLOAD_IDENTITY_ARN},
+    }
     return _do_extract_attributes(service_name, params)
 
 
