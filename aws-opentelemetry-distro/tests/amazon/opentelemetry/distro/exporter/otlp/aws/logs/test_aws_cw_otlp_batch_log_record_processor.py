@@ -7,11 +7,11 @@ from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor import (
     AwsCloudWatchOtlpBatchLogRecordProcessor,
-    BatchLogExportStrategy,
 )
 from opentelemetry._logs.severity import SeverityNumber
 from opentelemetry.sdk._logs import LogData, LogRecord
 from opentelemetry.sdk._logs.export import LogExportResult
+from opentelemetry.sdk._shared_internal import BatchExportStrategy
 from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 from opentelemetry.trace import TraceFlags
 from opentelemetry.util.types import AnyValue
@@ -151,14 +151,14 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         for log in test_logs:
             size = self.processor._estimate_log_size(log)
             total_data_size += size
-            self.processor._queue.appendleft(log)
+            self.processor._batch_processor._queue.appendleft(log)
 
-        self.processor._export(batch_strategy=BatchLogExportStrategy.EXPORT_ALL)
+        self.processor._export(batch_strategy=BatchExportStrategy.EXPORT_ALL)
         args, _ = self.mock_exporter.export.call_args
         actual_batch = args[0]
 
         self.assertLess(total_data_size, self.processor._MAX_LOG_REQUEST_BYTE_SIZE)
-        self.assertEqual(len(self.processor._queue), 0)
+        self.assertEqual(len(self.processor._batch_processor._queue), 0)
         self.assertEqual(len(actual_batch), log_count)
         self.mock_exporter.export.assert_called_once()
 
@@ -175,11 +175,11 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         test_logs = self.generate_test_log_data(log_body=large_log_body, count=15)
 
         for log in test_logs:
-            self.processor._queue.appendleft(log)
+            self.processor._batch_processor._queue.appendleft(log)
 
-        self.processor._export(batch_strategy=BatchLogExportStrategy.EXPORT_ALL)
+        self.processor._export(batch_strategy=BatchExportStrategy.EXPORT_ALL)
 
-        self.assertEqual(len(self.processor._queue), 0)
+        self.assertEqual(len(self.processor._batch_processor._queue), 0)
         self.assertEqual(self.mock_exporter.export.call_count, len(test_logs))
 
         batches = self.mock_exporter.export.call_args_list
@@ -209,11 +209,11 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         test_logs = large_logs + small_logs
 
         for log in test_logs:
-            self.processor._queue.appendleft(log)
+            self.processor._batch_processor._queue.appendleft(log)
 
-        self.processor._export(batch_strategy=BatchLogExportStrategy.EXPORT_ALL)
+        self.processor._export(batch_strategy=BatchExportStrategy.EXPORT_ALL)
 
-        self.assertEqual(len(self.processor._queue), 0)
+        self.assertEqual(len(self.processor._batch_processor._queue), 0)
         self.assertEqual(self.mock_exporter.export.call_count, 5)
 
         batches = self.mock_exporter.export.call_args_list
@@ -249,22 +249,22 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
     def test_force_flush_exports_only_one_batch(self, _, __, ___):
         """Tests that force_flush should try to at least export one batch of logs. Rest of the logs will be dropped"""
         # Set max_export_batch_size to 5 to limit batch size
-        self.processor._max_export_batch_size = 5
-        self.processor._shutdown = False
+        self.processor._batch_processor._max_export_batch_size = 5
+        self.processor._batch_processor._shutdown = False
 
         # Add 6 logs to queue, after the export there should be 1 log remaining
         log_count = 6
         test_logs = self.generate_test_log_data(log_body="test message", count=log_count)
 
         for log in test_logs:
-            self.processor._queue.appendleft(log)
+            self.processor._batch_processor._queue.appendleft(log)
 
-        self.assertEqual(len(self.processor._queue), log_count)
+        self.assertEqual(len(self.processor._batch_processor._queue), log_count)
 
         result = self.processor.force_flush()
 
         self.assertTrue(result)
-        self.assertEqual(len(self.processor._queue), 1)
+        self.assertEqual(len(self.processor._batch_processor._queue), 1)
         self.mock_exporter.export.assert_called_once()
 
         # Verify only one batch of 5 logs was exported
@@ -287,10 +287,10 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         # Add logs to queue
         test_logs = self.generate_test_log_data(log_body="test message", count=2)
         for log in test_logs:
-            self.processor._queue.appendleft(log)
+            self.processor._batch_processor._queue.appendleft(log)
 
         # Call _export - should not raise exception
-        self.processor._export(batch_strategy=BatchLogExportStrategy.EXPORT_ALL)
+        self.processor._export(batch_strategy=BatchExportStrategy.EXPORT_ALL)
 
         # Verify exception was logged
         mock_logger.exception.assert_called_once()
@@ -298,7 +298,7 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         self.assertIn("Exception while exporting logs:", call_args[0])
 
         # Queue should be empty even though export failed
-        self.assertEqual(len(self.processor._queue), 0)
+        self.assertEqual(len(self.processor._batch_processor._queue), 0)
 
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor._logger")
     def test_estimate_log_size_debug_logging_on_depth_exceeded(self, mock_logger):
@@ -350,7 +350,7 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         self.assertEqual(custom_processor._exporter, self.mock_exporter)
 
         # Verify parameters are passed to parent constructor
-        self.assertEqual(custom_processor._max_export_batch_size, 100)
+        self.assertEqual(custom_processor._batch_processor._max_export_batch_size, 100)
 
     @staticmethod
     def generate_test_log_data(
