@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
-
 from importlib.metadata import PackageNotFoundError, version
 from logging import Logger, getLogger
+
 from packaging.requirements import Requirement
 
 _logger: Logger = getLogger(__name__)

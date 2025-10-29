@@ -45,9 +45,7 @@ class TestGeventPatches(TestCase):
 
     def test_apply_gevent_monkey_patch_when_gevent_not_installed(self):
         """Test apply_gevent_monkey_patch does nothing when gevent is not installed."""
-        with patch(
-            "amazon.opentelemetry.distro.patches._gevent_patches._is_gevent_installed"
-        ) as mock_is_installed:
+        with patch("amazon.opentelemetry.distro.patches._gevent_patches._is_gevent_installed") as mock_is_installed:
             mock_is_installed.return_value = False
 
             apply_gevent_monkey_patch()
@@ -386,9 +384,7 @@ class TestGeventPatches(TestCase):
 
     def test_apply_gevent_monkey_patch_import_error_handling(self):
         """Test apply_gevent_monkey_patch handles import errors gracefully."""
-        with patch(
-            "amazon.opentelemetry.distro.patches._gevent_patches._is_gevent_installed"
-        ) as mock_is_installed:
+        with patch("amazon.opentelemetry.distro.patches._gevent_patches._is_gevent_installed") as mock_is_installed:
             mock_is_installed.return_value = True
 
             # Mock the import to raise ImportError

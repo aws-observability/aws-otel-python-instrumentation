@@ -5,6 +5,7 @@
 # IMPORTANT: Do not put any imports before the following 2 lines.
 # Read the comments in the _gevent_patches.py for details.
 from amazon.opentelemetry.distro.patches._gevent_patches import apply_gevent_monkey_patch
+
 apply_gevent_monkey_patch()
 
 import importlib
