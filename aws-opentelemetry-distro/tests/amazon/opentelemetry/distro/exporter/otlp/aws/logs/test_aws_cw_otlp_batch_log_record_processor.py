@@ -272,6 +272,86 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         exported_batch = args[0]
         self.assertEqual(len(exported_batch), 5)
 
+    @patch(
+        "amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.attach",
+        return_value=MagicMock(),
+    )
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.detach")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor.set_value")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor._logger")
+    def test_export_handles_exception_gracefully(self, mock_logger, _, __, ___):
+        """Tests that exceptions during export are caught and logged"""
+        # Setup exporter to raise an exception
+        self.mock_exporter.export.side_effect = Exception("Export failed")
+
+        # Add logs to queue
+        test_logs = self.generate_test_log_data(log_body="test message", count=2)
+        for log in test_logs:
+            self.processor._queue.appendleft(log)
+
+        # Call _export - should not raise exception
+        self.processor._export(batch_strategy=BatchLogExportStrategy.EXPORT_ALL)
+
+        # Verify exception was logged
+        mock_logger.exception.assert_called_once()
+        call_args = mock_logger.exception.call_args[0]
+        self.assertIn("Exception while exporting logs:", call_args[0])
+
+        # Queue should be empty even though export failed
+        self.assertEqual(len(self.processor._queue), 0)
+
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor._logger")
+    def test_estimate_log_size_debug_logging_on_depth_exceeded(self, mock_logger):
+        """Tests that debug logging occurs when depth limit is exceeded"""
+        # Create deeply nested structure that exceeds depth limit
+        depth_limit = 1
+        log_body = {"level1": {"level2": {"level3": {"level4": "this should trigger debug log"}}}}
+
+        test_logs = self.generate_test_log_data(log_body=log_body, count=1)
+
+        # Call with limited depth that will be exceeded
+        self.processor._estimate_log_size(log=test_logs[0], depth=depth_limit)
+
+        # Verify debug logging was called
+        mock_logger.debug.assert_called_once()
+        call_args = mock_logger.debug.call_args[0]
+        self.assertIn("Max log depth of", call_args[0])
+        self.assertIn("exceeded", call_args[0])
+
+    def test_estimate_utf8_size_static_method(self):
+        """Tests the _estimate_utf8_size static method with various strings"""
+        # Test ASCII only string
+        ascii_result = AwsCloudWatchOtlpBatchLogRecordProcessor._estimate_utf8_size("hello")
+        self.assertEqual(ascii_result, 5)  # 5 ASCII chars = 5 bytes
+
+        # Test mixed ASCII and non-ASCII
+        mixed_result = AwsCloudWatchOtlpBatchLogRecordProcessor._estimate_utf8_size("café")
+        self.assertEqual(mixed_result, 7)  # 3 ASCII + 1 non-ASCII (4 bytes) = 7 bytes
+
+        # Test non-ASCII only
+        non_ascii_result = AwsCloudWatchOtlpBatchLogRecordProcessor._estimate_utf8_size("深入")
+        self.assertEqual(non_ascii_result, 8)  # 2 non-ASCII chars * 4 bytes = 8 bytes
+
+        # Test empty string
+        empty_result = AwsCloudWatchOtlpBatchLogRecordProcessor._estimate_utf8_size("")
+        self.assertEqual(empty_result, 0)
+
+    def test_constructor_with_custom_parameters(self):
+        """Tests constructor with custom parameters"""
+        custom_processor = AwsCloudWatchOtlpBatchLogRecordProcessor(
+            exporter=self.mock_exporter,
+            schedule_delay_millis=5000,
+            max_export_batch_size=100,
+            export_timeout_millis=10000,
+            max_queue_size=2000,
+        )
+
+        # Verify exporter is stored
+        self.assertEqual(custom_processor._exporter, self.mock_exporter)
+
+        # Verify parameters are passed to parent constructor
+        self.assertEqual(custom_processor._max_export_batch_size, 100)
+
     @staticmethod
     def generate_test_log_data(
         log_body,

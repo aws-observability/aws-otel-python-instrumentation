@@ -238,3 +238,161 @@ class TestAwsXRaySamplingClient(TestCase):
 
         URLLib3Instrumentor().uninstrument()
         RequestsInstrumentor().uninstrument()
+
+    def test_constructor_with_none_endpoint(self):
+        """Tests constructor behavior when endpoint is None"""
+        with self.assertLogs(_sampling_client_logger, level="ERROR") as cm:
+            # Constructor will log error but then crash on concatenation
+            with self.assertRaises(TypeError):
+                _AwsXRaySamplingClient(endpoint=None)
+
+            # Verify error log was called before the crash
+            self.assertIn("endpoint must be specified", cm.output[0])
+
+    def test_constructor_with_log_level(self):
+        """Tests constructor sets log level when specified"""
+        original_level = _sampling_client_logger.level
+        try:
+            _AwsXRaySamplingClient("http://test.com", log_level=logging.DEBUG)
+            self.assertEqual(_sampling_client_logger.level, logging.DEBUG)
+        finally:
+            # Reset log level
+            _sampling_client_logger.setLevel(original_level)
+
+    @patch("requests.Session.post")
+    def test_get_sampling_rules_none_response(self, mock_post):
+        """Tests get_sampling_rules when response is None"""
+        mock_post.return_value = None
+        client = _AwsXRaySamplingClient("http://127.0.0.1:2000")
+
+        with self.assertLogs(_sampling_client_logger, level="ERROR") as cm:
+            sampling_rules = client.get_sampling_rules()
+
+            # Verify error log and empty result
+            self.assertIn("GetSamplingRules response is None", cm.output[0])
+            self.assertEqual(len(sampling_rules), 0)
+
+    @patch("requests.Session.post")
+    def test_get_sampling_rules_request_exception(self, mock_post):
+        """Tests get_sampling_rules when RequestException occurs"""
+        mock_post.side_effect = requests.exceptions.RequestException("Connection error")
+        client = _AwsXRaySamplingClient("http://127.0.0.1:2000")
+
+        with self.assertLogs(_sampling_client_logger, level="ERROR") as cm:
+            sampling_rules = client.get_sampling_rules()
+
+            # Verify error log and empty result
+            self.assertIn("Request error occurred", cm.output[0])
+            self.assertIn("Connection error", cm.output[0])
+            self.assertEqual(len(sampling_rules), 0)
+
+    @patch("requests.Session.post")
+    def test_get_sampling_rules_json_decode_error(self, mock_post):
+        """Tests get_sampling_rules when JSON decode error occurs"""
+        # Mock response that raises JSONDecodeError when .json() is called
+        mock_response = mock_post.return_value
+        mock_response.json.side_effect = json.JSONDecodeError("Invalid JSON", "doc", 0)
+
+        client = _AwsXRaySamplingClient("http://127.0.0.1:2000")
+
+        with self.assertLogs(_sampling_client_logger, level="ERROR") as cm:
+            sampling_rules = client.get_sampling_rules()
+
+            # Verify error log and empty result
+            self.assertIn("Error in decoding JSON response", cm.output[0])
+            self.assertEqual(len(sampling_rules), 0)
+
+    @patch("requests.Session.post")
+    def test_get_sampling_rules_general_exception(self, mock_post):
+        """Tests get_sampling_rules when general exception occurs"""
+        mock_post.side_effect = Exception("Unexpected error")
+        client = _AwsXRaySamplingClient("http://127.0.0.1:2000")
+
+        with self.assertLogs(_sampling_client_logger, level="ERROR") as cm:
+            sampling_rules = client.get_sampling_rules()
+
+            # Verify error log and empty result
+            self.assertIn("Error occurred when attempting to fetch rules", cm.output[0])
+            self.assertIn("Unexpected error", cm.output[0])
+            self.assertEqual(len(sampling_rules), 0)
+
+    @patch("requests.Session.post")
+    def test_get_sampling_targets_none_response(self, mock_post):
+        """Tests get_sampling_targets when response is None"""
+        mock_post.return_value = None
+        client = _AwsXRaySamplingClient("http://127.0.0.1:2000")
+
+        with self.assertLogs(_sampling_client_logger, level="DEBUG") as cm:
+            response = client.get_sampling_targets([])
+
+            # Verify debug log and default response
+            self.assertIn("GetSamplingTargets response is None", cm.output[0])
+            self.assertEqual(response.SamplingTargetDocuments, [])
+            self.assertEqual(response.UnprocessedStatistics, [])
+            self.assertEqual(response.LastRuleModification, 0.0)
+
+    @patch("requests.Session.post")
+    def test_get_sampling_targets_invalid_response_format(self, mock_post):
+        """Tests get_sampling_targets when response format is invalid"""
+        # Missing required fields
+        mock_post.return_value.configure_mock(**{"json.return_value": {"InvalidField": "value"}})
+        client = _AwsXRaySamplingClient("http://127.0.0.1:2000")
+
+        with self.assertLogs(_sampling_client_logger, level="DEBUG") as cm:
+            response = client.get_sampling_targets([])
+
+            # Verify debug log and default response
+            self.assertIn("getSamplingTargets response is invalid", cm.output[0])
+            self.assertEqual(response.SamplingTargetDocuments, [])
+            self.assertEqual(response.UnprocessedStatistics, [])
+            self.assertEqual(response.LastRuleModification, 0.0)
+
+    @patch("requests.Session.post")
+    def test_get_sampling_targets_request_exception(self, mock_post):
+        """Tests get_sampling_targets when RequestException occurs"""
+        mock_post.side_effect = requests.exceptions.RequestException("Network error")
+        client = _AwsXRaySamplingClient("http://127.0.0.1:2000")
+
+        with self.assertLogs(_sampling_client_logger, level="DEBUG") as cm:
+            response = client.get_sampling_targets([])
+
+            # Verify debug log and default response
+            self.assertIn("Request error occurred", cm.output[0])
+            self.assertIn("Network error", cm.output[0])
+            self.assertEqual(response.SamplingTargetDocuments, [])
+            self.assertEqual(response.UnprocessedStatistics, [])
+            self.assertEqual(response.LastRuleModification, 0.0)
+
+    @patch("requests.Session.post")
+    def test_get_sampling_targets_json_decode_error(self, mock_post):
+        """Tests get_sampling_targets when JSON decode error occurs"""
+        # Mock response that raises JSONDecodeError when .json() is called
+        mock_response = mock_post.return_value
+        mock_response.json.side_effect = json.JSONDecodeError("Invalid JSON", "doc", 0)
+
+        client = _AwsXRaySamplingClient("http://127.0.0.1:2000")
+
+        with self.assertLogs(_sampling_client_logger, level="DEBUG") as cm:
+            response = client.get_sampling_targets([])
+
+            # Verify debug log and default response
+            self.assertIn("Error in decoding JSON response", cm.output[0])
+            self.assertEqual(response.SamplingTargetDocuments, [])
+            self.assertEqual(response.UnprocessedStatistics, [])
+            self.assertEqual(response.LastRuleModification, 0.0)
+
+    @patch("requests.Session.post")
+    def test_get_sampling_targets_general_exception(self, mock_post):
+        """Tests get_sampling_targets when general exception occurs"""
+        mock_post.side_effect = Exception("Unexpected error")
+        client = _AwsXRaySamplingClient("http://127.0.0.1:2000")
+
+        with self.assertLogs(_sampling_client_logger, level="DEBUG") as cm:
+            response = client.get_sampling_targets([])
+
+            # Verify debug log and default response
+            self.assertIn("Error occurred when attempting to fetch targets", cm.output[0])
+            self.assertIn("Unexpected error", cm.output[0])
+            self.assertEqual(response.SamplingTargetDocuments, [])
+            self.assertEqual(response.UnprocessedStatistics, [])
+            self.assertEqual(response.LastRuleModification, 0.0)
