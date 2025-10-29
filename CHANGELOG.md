@@ -19,5 +19,3 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
     ([#497](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/497))
 - Fix timeout handling for exceeded deadline in retry logic in OTLPAwsLogsExporter
   ([#501](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/501))
-- Fix: Unable to run ADOT Python unit tests with latest Tox release
-  ([#521](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/521))
