@@ -102,6 +102,8 @@ jobs:
         - [opentelemetry-propagator-aws-xray](https://pypi.org/project/opentelemetry-propagator-aws-xray/${{ steps.get_versions.outputs.opentelemetry_propagator_aws_xray_version }}/): ${{ steps.get_versions.outputs.opentelemetry_propagator_aws_xray_version }}
 
         **Upstream releases with breaking changes:**
+        Note: the mechanism to detect upstream breaking changes is not perfect. Be sure to check all new releases and understand if any additional changes need to be addressed.
+
         ${{ steps.breaking_changes.outputs.breaking_changes_info }}"
         
         if gh pr view "$BRANCH_NAME" --json state --jq '.state' 2>/dev/null | grep -q "OPEN"; then
