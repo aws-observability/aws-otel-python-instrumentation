@@ -8,12 +8,13 @@ from unittest.mock import MagicMock, patch
 
 # Create a mock gevent module that can be imported
 # This allows tests to run without gevent installed
+# The mock must be done before the import and that's why the #noqa: E402
 _mock_gevent = MagicMock()
 _mock_gevent.monkey = MagicMock()
 sys.modules["gevent"] = _mock_gevent
 sys.modules["gevent.monkey"] = _mock_gevent.monkey
 
-from amazon.opentelemetry.distro.patches._gevent_patches import (
+from amazon.opentelemetry.distro.patches._gevent_patches import (  # noqa: E402
     AWS_GEVENT_PATCH_MODULES,
     _is_gevent_installed,
     apply_gevent_monkey_patch,

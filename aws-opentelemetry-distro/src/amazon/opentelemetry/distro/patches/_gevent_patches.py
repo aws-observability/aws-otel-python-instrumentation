@@ -33,8 +33,23 @@ def _is_gevent_installed() -> bool:
 
 
 def apply_gevent_monkey_patch():
+    # This patch differs from other instrumentation patches in this directory as it addresses
+    # application compatibility rather than telemetry functionality. It prevents breaking user
+    # applications that run on Gevent and use libraries like boto3, requests, or urllib3 when
+    # instrumented with ADOT.
     #
-    # only apply the gevent monkey patch if gevent is installed is user application space.
+    # Without this patch, users encounter "RecursionError: maximum recursion depth exceeded"
+    # because by the time Gevent monkey-patches modules (such as ssl), those modules have already
+    # been imported by ADOT. Specifically, aws_xray_remote_sampler imports requests, which
+    # transitively imports ssl, leaving these modules in an inconsistent state for Gevent.
+    #
+    # Gevent recommends monkey-patching as early as possible:
+    # https://www.gevent.org/intro.html#monkey-patching
+    #
+    # Since ADOT initialization occurs before user application code, we perform the monkey-patch
+    # here to ensure proper module state for Gevent-based applications.
+
+    # Only apply the gevent monkey patch if gevent is installed is user application space.
     if _is_gevent_installed():
         try:
             gevent_patch_module = os.environ.get(AWS_GEVENT_PATCH_MODULES, "all")
