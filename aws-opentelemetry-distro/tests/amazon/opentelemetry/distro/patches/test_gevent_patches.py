@@ -1,9 +1,17 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import os
+import sys
 from importlib.metadata import PackageNotFoundError
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
+
+# Create a mock gevent module that can be imported
+# This allows tests to run without gevent installed
+_mock_gevent = MagicMock()
+_mock_gevent.monkey = MagicMock()
+sys.modules["gevent"] = _mock_gevent
+sys.modules["gevent.monkey"] = _mock_gevent.monkey
 
 from amazon.opentelemetry.distro.patches._gevent_patches import (
     AWS_GEVENT_PATCH_MODULES,
