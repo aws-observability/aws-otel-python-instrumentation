@@ -46,7 +46,7 @@ class TestAioPikaPatches(unittest.TestCase):
         # Verify we got a function back (the enhanced decorated callback)
         self.assertTrue(callable(result))
 
-    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches." "get_code_correlation_enabled_status")
+    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.get_code_correlation_enabled_status")
     def test_apply_aio_pika_instrumentation_patches_disabled(self, mock_get_status):
         """Test patches are not applied when code correlation is disabled."""
         mock_get_status.return_value = False
@@ -61,7 +61,7 @@ class TestAioPikaPatches(unittest.TestCase):
             # Should not raise exception when code correlation is disabled
             _apply_aio_pika_instrumentation_patches()
 
-    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches." "get_code_correlation_enabled_status")
+    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.get_code_correlation_enabled_status")
     def test_apply_aio_pika_instrumentation_patches_enabled(self, mock_get_status):
         """Test patches are applied when code correlation is enabled."""
         mock_get_status.return_value = True
@@ -83,7 +83,7 @@ class TestAioPikaPatches(unittest.TestCase):
             # Verify the decorate method was patched
             self.assertTrue(hasattr(mock_callback_decorator, "decorate"))
 
-    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches." "get_code_correlation_enabled_status")
+    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.get_code_correlation_enabled_status")
     def test_apply_aio_pika_instrumentation_patches_import_error(self, mock_get_status):
         """Test patches handle import errors gracefully."""
         mock_get_status.return_value = True
@@ -99,7 +99,7 @@ class TestAioPikaPatches(unittest.TestCase):
             _apply_aio_pika_instrumentation_patches()
 
     @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.logger")
-    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches." "get_code_correlation_enabled_status")
+    @patch("amazon.opentelemetry.distro.patches._aio_pika_patches.get_code_correlation_enabled_status")
     def test_apply_aio_pika_instrumentation_patches_exception_handling(self, mock_get_status, mock_logger):
         """Test patches handle general exceptions gracefully."""
         mock_get_status.side_effect = Exception("Test exception")
