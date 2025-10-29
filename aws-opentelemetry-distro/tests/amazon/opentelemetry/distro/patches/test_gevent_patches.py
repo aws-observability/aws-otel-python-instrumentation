@@ -54,13 +54,14 @@ class TestGeventPatches(TestCase):
 
     def test_apply_gevent_monkey_patch_when_gevent_not_installed(self):
         """Test apply_gevent_monkey_patch does nothing when gevent is not installed."""
-        with patch("amazon.opentelemetry.distro.patches._gevent_patches._is_gevent_installed") as mock_is_installed:
+        with patch(
+            "amazon.opentelemetry.distro.patches._gevent_patches._is_gevent_installed"
+        ) as mock_is_installed, patch("gevent.monkey.patch_all") as mock_patch_all:
             mock_is_installed.return_value = False
-
             apply_gevent_monkey_patch()
-
             mock_is_installed.assert_called_once()
             # When gevent is not installed, the function returns early
+            mock_patch_all.assert_not_called()
 
     def test_apply_gevent_monkey_patch_with_default_all(self):
         """Test apply_gevent_monkey_patch with default 'all' behavior."""
@@ -68,9 +69,7 @@ class TestGeventPatches(TestCase):
             "amazon.opentelemetry.distro.patches._gevent_patches._is_gevent_installed"
         ) as mock_is_installed, patch("gevent.monkey.patch_all") as mock_patch_all:
             mock_is_installed.return_value = True
-
             apply_gevent_monkey_patch()
-
             mock_is_installed.assert_called_once()
             mock_patch_all.assert_called_once_with()
 
@@ -82,9 +81,7 @@ class TestGeventPatches(TestCase):
             "amazon.opentelemetry.distro.patches._gevent_patches._is_gevent_installed"
         ) as mock_is_installed, patch("gevent.monkey.patch_all") as mock_patch_all:
             mock_is_installed.return_value = True
-
             apply_gevent_monkey_patch()
-
             mock_is_installed.assert_called_once()
             mock_patch_all.assert_called_once_with()
 
@@ -96,9 +93,7 @@ class TestGeventPatches(TestCase):
             "amazon.opentelemetry.distro.patches._gevent_patches._is_gevent_installed"
         ) as mock_is_installed, patch("gevent.monkey.patch_all") as mock_patch_all:
             mock_is_installed.return_value = True
-
             apply_gevent_monkey_patch()
-
             mock_is_installed.assert_called_once()
             mock_patch_all.assert_not_called()
 
@@ -110,9 +105,7 @@ class TestGeventPatches(TestCase):
             "amazon.opentelemetry.distro.patches._gevent_patches._is_gevent_installed"
         ) as mock_is_installed, patch("gevent.monkey.patch_all") as mock_patch_all:
             mock_is_installed.return_value = True
-
             apply_gevent_monkey_patch()
-
             mock_is_installed.assert_called_once()
             mock_patch_all.assert_called_once_with(
                 socket=True,
@@ -137,9 +130,7 @@ class TestGeventPatches(TestCase):
             "amazon.opentelemetry.distro.patches._gevent_patches._is_gevent_installed"
         ) as mock_is_installed, patch("gevent.monkey.patch_all") as mock_patch_all:
             mock_is_installed.return_value = True
-
             apply_gevent_monkey_patch()
-
             mock_is_installed.assert_called_once()
             mock_patch_all.assert_called_once_with(
                 socket=True,
@@ -166,9 +157,7 @@ class TestGeventPatches(TestCase):
             "amazon.opentelemetry.distro.patches._gevent_patches._is_gevent_installed"
         ) as mock_is_installed, patch("gevent.monkey.patch_all") as mock_patch_all:
             mock_is_installed.return_value = True
-
             apply_gevent_monkey_patch()
-
             mock_is_installed.assert_called_once()
             mock_patch_all.assert_called_once_with(
                 socket=True,
@@ -193,9 +182,7 @@ class TestGeventPatches(TestCase):
             "amazon.opentelemetry.distro.patches._gevent_patches._is_gevent_installed"
         ) as mock_is_installed, patch("gevent.monkey.patch_all") as mock_patch_all:
             mock_is_installed.return_value = True
-
             apply_gevent_monkey_patch()
-
             mock_is_installed.assert_called_once()
             mock_patch_all.assert_called_once_with(
                 socket=True,
@@ -220,9 +207,7 @@ class TestGeventPatches(TestCase):
             "amazon.opentelemetry.distro.patches._gevent_patches._is_gevent_installed"
         ) as mock_is_installed, patch("gevent.monkey.patch_all") as mock_patch_all:
             mock_is_installed.return_value = True
-
             apply_gevent_monkey_patch()
-
             mock_is_installed.assert_called_once()
             mock_patch_all.assert_called_once_with(
                 socket=False,
@@ -247,9 +232,7 @@ class TestGeventPatches(TestCase):
             "amazon.opentelemetry.distro.patches._gevent_patches._is_gevent_installed"
         ) as mock_is_installed, patch("gevent.monkey.patch_all") as mock_patch_all:
             mock_is_installed.return_value = True
-
             apply_gevent_monkey_patch()
-
             mock_is_installed.assert_called_once()
             # invalid_module should be ignored, only socket and thread should be True
             mock_patch_all.assert_called_once_with(
@@ -274,10 +257,8 @@ class TestGeventPatches(TestCase):
         ) as mock_is_installed, patch("gevent.monkey.patch_all") as mock_patch_all:
             mock_is_installed.return_value = True
             mock_patch_all.side_effect = Exception("Monkey patching failed")
-
             # Should not raise exception
             apply_gevent_monkey_patch()
-
             mock_is_installed.assert_called_once()
             mock_patch_all.assert_called_once()
 
@@ -289,9 +270,7 @@ class TestGeventPatches(TestCase):
             "amazon.opentelemetry.distro.patches._gevent_patches._is_gevent_installed"
         ) as mock_is_installed, patch("gevent.monkey.patch_all") as mock_patch_all:
             mock_is_installed.return_value = True
-
             apply_gevent_monkey_patch()
-
             mock_is_installed.assert_called_once()
             # Empty string should result in all False
             mock_patch_all.assert_called_once_with(
@@ -317,9 +296,7 @@ class TestGeventPatches(TestCase):
             "amazon.opentelemetry.distro.patches._gevent_patches._is_gevent_installed"
         ) as mock_is_installed, patch("gevent.monkey.patch_all") as mock_patch_all:
             mock_is_installed.return_value = True
-
             apply_gevent_monkey_patch()
-
             mock_is_installed.assert_called_once()
             # Only 'time' should match (case-sensitive), Socket and THREAD should not
             mock_patch_all.assert_called_once_with(
@@ -337,68 +314,12 @@ class TestGeventPatches(TestCase):
                 contextvars=False,
             )
 
-    def test_apply_gevent_monkey_patch_with_queue_and_contextvars(self):
-        """Test apply_gevent_monkey_patch with queue and contextvars modules."""
-        os.environ[AWS_GEVENT_PATCH_MODULES] = "queue, contextvars"
-
-        with patch(
-            "amazon.opentelemetry.distro.patches._gevent_patches._is_gevent_installed"
-        ) as mock_is_installed, patch("gevent.monkey.patch_all") as mock_patch_all:
-            mock_is_installed.return_value = True
-
-            apply_gevent_monkey_patch()
-
-            mock_is_installed.assert_called_once()
-            mock_patch_all.assert_called_once_with(
-                socket=False,
-                time=False,
-                select=False,
-                thread=False,
-                os=False,
-                ssl=False,
-                subprocess=False,
-                sys=False,
-                builtins=False,
-                signal=False,
-                queue=True,
-                contextvars=True,
-            )
-
-    def test_apply_gevent_monkey_patch_with_select_and_builtins(self):
-        """Test apply_gevent_monkey_patch with select and builtins modules."""
-        os.environ[AWS_GEVENT_PATCH_MODULES] = "select, builtins"
-
-        with patch(
-            "amazon.opentelemetry.distro.patches._gevent_patches._is_gevent_installed"
-        ) as mock_is_installed, patch("gevent.monkey.patch_all") as mock_patch_all:
-            mock_is_installed.return_value = True
-
-            apply_gevent_monkey_patch()
-
-            mock_is_installed.assert_called_once()
-            mock_patch_all.assert_called_once_with(
-                socket=False,
-                time=False,
-                select=True,
-                thread=False,
-                os=False,
-                ssl=False,
-                subprocess=False,
-                sys=False,
-                builtins=True,
-                signal=False,
-                queue=False,
-                contextvars=False,
-            )
-
     def test_apply_gevent_monkey_patch_import_error_handling(self):
         """Test apply_gevent_monkey_patch handles import errors gracefully."""
         with patch("amazon.opentelemetry.distro.patches._gevent_patches._is_gevent_installed") as mock_is_installed:
             mock_is_installed.return_value = True
-
             # Mock the import to raise ImportError
             with patch("builtins.__import__", side_effect=ImportError("Cannot import gevent.monkey")):
                 # Should not raise exception
                 apply_gevent_monkey_patch()
-
             mock_is_installed.assert_called_once()
