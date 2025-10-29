@@ -25,9 +25,9 @@ def _is_gevent_installed() -> bool:
     req = Requirement("gevent")
     try:
         dist_version = version(req.name)
-        _logger.debug(f"Gevent is installed: {dist_version}")
+        _logger.debug("Gevent is installed: %s", dist_version)
     except PackageNotFoundError as exc:
-        _logger.debug(f"Gevent is not installed. {exc}")
+        _logger.debug("Gevent is not installed. %s", exc)
         return False
     return True
 

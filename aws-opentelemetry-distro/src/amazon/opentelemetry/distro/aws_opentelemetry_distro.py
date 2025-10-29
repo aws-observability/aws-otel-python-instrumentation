@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # flake8: noqa: E402
+# pylint: disable=wrong-import-position
 
 # Apply the Gevent's patching as the very first step in the distro.
 # IMPORTANT: Do not put any imports before the following 2 lines.
