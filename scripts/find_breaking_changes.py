@@ -49,11 +49,9 @@ def get_releases_with_breaking_changes(repo, current_version, new_version):
                     release_version
                 ) <= version.parse(new_version):
 
-                    # Check if release notes mention breaking changes
-                    body = release.get("body", "").lower()
-                    if any(
-                        keyword in body for keyword in ["breaking change", "breaking changes", "breaking:", "breaking"]
-                    ):
+                    # Check if release notes have breaking changes header
+                    body = release.get("body", "")
+                    if re.search(r'^#+\s*breaking changes', body, re.MULTILINE | re.IGNORECASE):
                         breaking_releases.append(
                             {
                                 "version": release_version,
