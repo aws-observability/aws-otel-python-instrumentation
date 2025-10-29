@@ -22,6 +22,8 @@ jobs:
       has_changes: ${{ steps.check_changes.outputs.has_changes }}
       otel_python_version: ${{ steps.get_versions.outputs.otel_python_version }}
       otel_contrib_version: ${{ steps.get_versions.outputs.otel_contrib_version }}
+      aws_sdk_ext_version: ${{ steps.get_versions.outputs.opentelemetry_sdk_extension_aws_version }}
+      aws_xray_prop_version: ${{ steps.get_versions.outputs.opentelemetry_propagator_aws_xray_version }}
     
     steps:
     - name: Checkout repository
@@ -70,6 +72,8 @@ jobs:
       env:
         OTEL_PYTHON_VERSION: ${{ steps.get_versions.outputs.otel_python_version }}
         OTEL_CONTRIB_VERSION: ${{ steps.get_versions.outputs.otel_contrib_version }}
+        OPENTELEMETRY_SDK_EXTENSION_AWS_VERSION: ${{ steps.get_versions.outputs.opentelemetry_sdk_extension_aws_version }}
+        OPENTELEMETRY_PROPAGATOR_AWS_XRAY_VERSION: ${{ steps.get_versions.outputs.opentelemetry_propagator_aws_xray_version }}
       run: python scripts/update_dependencies.py
     
     - name: Check for changes and commit
@@ -94,6 +98,8 @@ jobs:
         **Updated versions:**
         - OpenTelemetry Python: ${{ steps.get_versions.outputs.otel_python_version }}
         - OpenTelemetry Contrib: ${{ steps.get_versions.outputs.otel_contrib_version }}
+        - [opentelemetry-sdk-extension-aws](https://pypi.org/project/opentelemetry-sdk-extension-aws/${{ steps.get_versions.outputs.opentelemetry_sdk_extension_aws_version }}/): ${{ steps.get_versions.outputs.opentelemetry_sdk_extension_aws_version }}
+        - [opentelemetry-propagator-aws-xray](https://pypi.org/project/opentelemetry-propagator-aws-xray/${{ steps.get_versions.outputs.opentelemetry_propagator_aws_xray_version }}/): ${{ steps.get_versions.outputs.opentelemetry_propagator_aws_xray_version }}
 
         **Upstream releases with breaking changes:**
         ${{ steps.breaking_changes.outputs.breaking_changes_info }}"

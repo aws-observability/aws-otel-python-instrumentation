@@ -6,8 +6,6 @@ import os
 import re
 import sys
 
-import requests
-
 # Dependencies that use the first version number (opentelemetry-python)
 PYTHON_CORE_DEPS = [
     "opentelemetry-api",
@@ -77,21 +75,11 @@ AWS_DEPS = [
 ]
 
 
-def get_latest_version(package_name):
-    """Get the latest version of a package from PyPI."""
-    try:
-        response = requests.get(f"https://pypi.org/pypi/{package_name}/json", timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        return data["info"]["version"]
-    except requests.RequestException as request_error:
-        print(f"Warning: Could not get latest version for {package_name}: {request_error}")
-        return None
-
-
 def main():
     otel_python_version = os.environ.get("OTEL_PYTHON_VERSION")
     otel_contrib_version = os.environ.get("OTEL_CONTRIB_VERSION")
+    aws_sdk_ext_version = os.environ.get("OPENTELEMETRY_SDK_EXTENSION_AWS_VERSION")
+    aws_xray_prop_version = os.environ.get("OPENTELEMETRY_PROPAGATOR_AWS_XRAY_VERSION")
 
     if not otel_python_version or not otel_contrib_version:
         print("Error: OTEL_PYTHON_VERSION and OTEL_CONTRIB_VERSION environment variables required")
@@ -121,16 +109,20 @@ def main():
                 content = re.sub(pattern, replacement, content)
                 updated = True
 
-        # Update dependencies with independent versioning
-        for dep in AWS_DEPS:
-            latest_version = get_latest_version(dep)
-            if latest_version:
+        # Update AWS dependencies with provided versions
+        aws_versions = {
+            "opentelemetry-sdk-extension-aws": aws_sdk_ext_version,
+            "opentelemetry-propagator-aws-xray": aws_xray_prop_version,
+        }
+        
+        for dep, version in aws_versions.items():
+            if version:
                 pattern = rf'"{re.escape(dep)} == [^"]*"'
-                replacement = f'"{dep} == {latest_version}"'
+                replacement = f'"{dep} == {version}"'
                 if re.search(pattern, content):
                     content = re.sub(pattern, replacement, content)
                     updated = True
-                    print(f"Updated {dep} to {latest_version}")
+                    print(f"Updated {dep} to {version}")
 
         if updated:
             with open(pyproject_path, "w", encoding="utf-8") as output_file:
