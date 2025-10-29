@@ -6,6 +6,7 @@ on:
       - main
       - "release/v*"
       - ci-workflow
+      - pintpoint-issue-branch
   workflow_dispatch: # be able to run the workflow on demand
 env:
   AWS_DEFAULT_REGION: us-east-1
@@ -13,9 +14,9 @@ env:
   STAGING_ECR_REPOSITORY: aws-observability/adot-autoinstrumentation-python-staging
   STAGING_S3_BUCKET: ${{ secrets.STAGING_BUCKET_NAME }}
 
-concurrency:
-  group: python-instrumentation-main-build
-  cancel-in-progress: false
+# concurrency:
+#   group: python-instrumentation-main-build
+#   cancel-in-progress: false
 
 permissions:
   id-token: write

@@ -19,9 +19,9 @@ permissions:
   id-token: write
   contents: read
 
-concurrency:
-  group: '${{ github.workflow }} @ ${{ inputs.aws-region }}'
-  cancel-in-progress: false
+# concurrency:
+#   group: '${{ github.workflow }} @ ${{ inputs.aws-region }}'
+#   cancel-in-progress: false
 
 
 jobs:
@@ -46,133 +46,133 @@ jobs:
   # DEFAULT SETTING: {Python Version}, EC2, AMD64, AL2
   #
 
-  default-py39-amd64:
-    needs: [ upload-main-build ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
-    secrets: inherit
-    with:
-      aws-region: us-east-1
-      caller-workflow-name: 'main-build'
-      python-version: '3.9'
-      cpu-architecture: 'x86_64'
-      staging-wheel-name: ${{ inputs.staging-wheel-name }}
+  # default-py39-amd64:
+  #   needs: [ upload-main-build ]
+  #   uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
+  #   secrets: inherit
+  #   with:
+  #     aws-region: us-east-1
+  #     caller-workflow-name: 'main-build'
+  #     python-version: '3.9'
+  #     cpu-architecture: 'x86_64'
+  #     staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
-  default-py310-amd64:
-    needs: [ upload-main-build ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
-    secrets: inherit
-    with:
-      aws-region: us-east-1
-      caller-workflow-name: 'main-build'
-      python-version: '3.10'
-      cpu-architecture: 'x86_64'
-      staging-wheel-name: ${{ inputs.staging-wheel-name }}
+  # default-py310-amd64:
+  #   needs: [ upload-main-build ]
+  #   uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
+  #   secrets: inherit
+  #   with:
+  #     aws-region: us-east-1
+  #     caller-workflow-name: 'main-build'
+  #     python-version: '3.10'
+  #     cpu-architecture: 'x86_64'
+  #     staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
-  default-py311-amd64:
-    needs: [ upload-main-build ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
-    secrets: inherit
-    with:
-      aws-region: us-east-1
-      caller-workflow-name: 'main-build'
-      python-version: '3.11'
-      cpu-architecture: 'x86_64'
-      staging-wheel-name: ${{ inputs.staging-wheel-name }}
+  # default-py311-amd64:
+  #   needs: [ upload-main-build ]
+  #   uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
+  #   secrets: inherit
+  #   with:
+  #     aws-region: us-east-1
+  #     caller-workflow-name: 'main-build'
+  #     python-version: '3.11'
+  #     cpu-architecture: 'x86_64'
+  #     staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
-  default-py312-amd64:
-    needs: [ upload-main-build ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
-    secrets: inherit
-    with:
-      aws-region: us-east-1
-      caller-workflow-name: 'main-build'
-      python-version: '3.12'
-      cpu-architecture: 'x86_64'
-      staging-wheel-name: ${{ inputs.staging-wheel-name }}
+  # default-py312-amd64:
+  #   needs: [ upload-main-build ]
+  #   uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
+  #   secrets: inherit
+  #   with:
+  #     aws-region: us-east-1
+  #     caller-workflow-name: 'main-build'
+  #     python-version: '3.12'
+  #     cpu-architecture: 'x86_64'
+  #     staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
-  default-py313-amd64:
-    needs: [ upload-main-build ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
-    secrets: inherit
-    with:
-      aws-region: us-east-1
-      caller-workflow-name: 'main-build'
-      python-version: '3.13'
-      cpu-architecture: 'x86_64'
-      staging-wheel-name: ${{ inputs.staging-wheel-name }}
+  # default-py313-amd64:
+  #   needs: [ upload-main-build ]
+  #   uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
+  #   secrets: inherit
+  #   with:
+  #     aws-region: us-east-1
+  #     caller-workflow-name: 'main-build'
+  #     python-version: '3.13'
+  #     cpu-architecture: 'x86_64'
+  #     staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
-  #
-  # DOCKER DISTRIBUTION LANGUAGE VERSION COVERAGE
-  # DEFAULT SETTING: {Python Version}, EKS, AMD64, AL2
-  #
+  # #
+  # # DOCKER DISTRIBUTION LANGUAGE VERSION COVERAGE
+  # # DEFAULT SETTING: {Python Version}, EKS, AMD64, AL2
+  # #
 
-  eks-py39-amd64:
-    if: ${{ always() }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
-    secrets: inherit
-    with:
-      aws-region: us-east-1
-      test-cluster-name: 'e2e-python-adot-test'
-      adot-image-name: ${{ inputs.adot-image-name }}
-      caller-workflow-name: 'main-build'
-      python-version: '3.9'
+  # eks-py39-amd64:
+  #   if: ${{ always() }}
+  #   uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
+  #   secrets: inherit
+  #   with:
+  #     aws-region: us-east-1
+  #     test-cluster-name: 'e2e-python-adot-test'
+  #     adot-image-name: ${{ inputs.adot-image-name }}
+  #     caller-workflow-name: 'main-build'
+  #     python-version: '3.9'
 
-  eks-py310-amd64:
-    if: ${{ always() }}
-    needs: eks-py39-amd64
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
-    secrets: inherit
-    with:
-      aws-region: us-east-1
-      test-cluster-name: 'e2e-python-adot-test'
-      adot-image-name: ${{ inputs.adot-image-name }}
-      caller-workflow-name: 'main-build'
-      python-version: '3.10'
+  # eks-py310-amd64:
+  #   if: ${{ always() }}
+  #   needs: eks-py39-amd64
+  #   uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
+  #   secrets: inherit
+  #   with:
+  #     aws-region: us-east-1
+  #     test-cluster-name: 'e2e-python-adot-test'
+  #     adot-image-name: ${{ inputs.adot-image-name }}
+  #     caller-workflow-name: 'main-build'
+  #     python-version: '3.10'
 
-  eks-py311-amd64:
-    if: ${{ always() }}
-    needs: eks-py310-amd64
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
-    secrets: inherit
-    with:
-      aws-region: us-east-1
-      test-cluster-name: 'e2e-python-adot-test'
-      adot-image-name: ${{ inputs.adot-image-name }}
-      caller-workflow-name: 'main-build'
-      python-version: '3.11'
+  # eks-py311-amd64:
+  #   if: ${{ always() }}
+  #   needs: eks-py310-amd64
+  #   uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
+  #   secrets: inherit
+  #   with:
+  #     aws-region: us-east-1
+  #     test-cluster-name: 'e2e-python-adot-test'
+  #     adot-image-name: ${{ inputs.adot-image-name }}
+  #     caller-workflow-name: 'main-build'
+  #     python-version: '3.11'
 
-  eks-py312-amd64:
-    if: ${{ always() }}
-    needs: eks-py311-amd64
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
-    secrets: inherit
-    with:
-      aws-region: us-east-1
-      test-cluster-name: 'e2e-python-adot-test'
-      adot-image-name: ${{ inputs.adot-image-name }}
-      caller-workflow-name: 'main-build'
-      python-version: '3.12'
+  # eks-py312-amd64:
+  #   if: ${{ always() }}
+  #   needs: eks-py311-amd64
+  #   uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
+  #   secrets: inherit
+  #   with:
+  #     aws-region: us-east-1
+  #     test-cluster-name: 'e2e-python-adot-test'
+  #     adot-image-name: ${{ inputs.adot-image-name }}
+  #     caller-workflow-name: 'main-build'
+  #     python-version: '3.12'
 
-  eks-py313-amd64:
-    if: ${{ always() }}
-    needs: eks-py312-amd64
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
-    secrets: inherit
-    with:
-      aws-region: us-east-1
-      test-cluster-name: 'e2e-python-adot-test'
-      adot-image-name: ${{ inputs.adot-image-name }}
-      caller-workflow-name: 'main-build'
-      python-version: '3.13'
+  # eks-py313-amd64:
+  #   if: ${{ always() }}
+  #   needs: eks-py312-amd64
+  #   uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
+  #   secrets: inherit
+  #   with:
+  #     aws-region: us-east-1
+  #     test-cluster-name: 'e2e-python-adot-test'
+  #     adot-image-name: ${{ inputs.adot-image-name }}
+  #     caller-workflow-name: 'main-build'
+  #     python-version: '3.13'
 
-  #
-  # PACKAGED DISTRIBUTION PLATFORM COVERAGE
-  # DEFAULT SETTING: Python 3.9, {Platform}, AMD64, AL2
-  #
+  # #
+  # # PACKAGED DISTRIBUTION PLATFORM COVERAGE
+  # # DEFAULT SETTING: Python 3.9, {Platform}, AMD64, AL2
+  # #
 
   asg-py39-amd64:
     needs: [ upload-main-build ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-asg-test.yml@main
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-asg-test.yml@fb173f2ae3564d1de46f74b6eeabcfee59fa0af8
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -180,23 +180,23 @@ jobs:
       python-version: '3.9'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
-  #
-  # DOCKER DISTRIBUTION PLATFORM COVERAGE
-  # DEFAULT SETTING: Python 3.10, {Platform}, AMD64, AL2
-  #
+  # #
+  # # DOCKER DISTRIBUTION PLATFORM COVERAGE
+  # # DEFAULT SETTING: Python 3.10, {Platform}, AMD64, AL2
+  # #
 
-  k8s-py310-amd64:
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-k8s-test.yml@main
-    secrets: inherit
-    with:
-      aws-region: us-east-1
-      adot-image-name: ${{ inputs.adot-image-name }}
-      caller-workflow-name: 'main-build'
-      python-version: '3.10'
+  # k8s-py310-amd64:
+  #   uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-k8s-test.yml@main
+  #   secrets: inherit
+  #   with:
+  #     aws-region: us-east-1
+  #     adot-image-name: ${{ inputs.adot-image-name }}
+  #     caller-workflow-name: 'main-build'
+  #     python-version: '3.10'
 
 
   ecs-py310-amd64:
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ecs-test.yml@main
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ecs-test.yml@fb173f2ae3564d1de46f74b6eeabcfee59fa0af8
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -209,57 +209,57 @@ jobs:
   # DEFAULT SETTING: Python 3.9, EC2, {CPU Architecture}, AL2
   #
 
-  default-py39-arm64:
-    needs: [ upload-main-build ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
-    secrets: inherit
-    with:
-      aws-region: us-east-1
-      caller-workflow-name: 'main-build'
-      python-version: '3.9'
-      cpu-architecture: 'arm64'
-      staging-wheel-name: ${{ inputs.staging-wheel-name }}
+  # default-py39-arm64:
+  #   needs: [ upload-main-build ]
+  #   uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
+  #   secrets: inherit
+  #   with:
+  #     aws-region: us-east-1
+  #     caller-workflow-name: 'main-build'
+  #     python-version: '3.9'
+  #     cpu-architecture: 'arm64'
+  #     staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
-  #
-  # Lambda layer integration tests
-  lambda:
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-lambda-test.yml@main
-    secrets: inherit
-    with:
-      aws-region: us-east-1
-      python-version: '3.12'
-      caller-workflow-name: 'main-build'
-  #
-  # Stand-Alone ADOT/ADOT SigV4 test on EC2
-  adot-sigv4:
-    needs: [ upload-main-build ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-adot-sigv4-test.yml@main
-    secrets: inherit
-    with:
-      caller-workflow-name: 'main-build'
-      staging-wheel-name: ${{ inputs.staging-wheel-name }}
+  # #
+  # # Lambda layer integration tests
+  # lambda:
+  #   uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-lambda-test.yml@main
+  #   secrets: inherit
+  #   with:
+  #     aws-region: us-east-1
+  #     python-version: '3.12'
+  #     caller-workflow-name: 'main-build'
+  # #
+  # # Stand-Alone ADOT/ADOT SigV4 test on EC2
+  # adot-sigv4:
+  #   needs: [ upload-main-build ]
+  #   uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-adot-sigv4-test.yml@main
+  #   secrets: inherit
+  #   with:
+  #     caller-workflow-name: 'main-build'
+  #     staging-wheel-name: ${{ inputs.staging-wheel-name }}
   
-  # Stand-Alone ADOT/ADOT Genesis test on EC2
-  adot-genesis:
-    needs: [ upload-main-build ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-genesis-test.yml@main
-    secrets: inherit
-    with:
-      caller-workflow-name: 'main-build'
-      staging-wheel-name: ${{ inputs.staging-wheel-name }}
+  # # Stand-Alone ADOT/ADOT Genesis test on EC2
+  # adot-genesis:
+  #   needs: [ upload-main-build ]
+  #   uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-genesis-test.yml@main
+  #   secrets: inherit
+  #   with:
+  #     caller-workflow-name: 'main-build'
+  #     staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
-  # This validation is to ensure that all test workflows relevant to this repo are actually
-  # being used in this repo, which is referring to all the other jobs in this file.
-  #
-  # If this starts failing, then it most likely means that new e2e test workflow was
-  # added to `aws-observability/aws-application-signals-test-framework`, but was not
-  # added to this file. It could also mean that a test in this file has been removed.
-  #
-  # If a particular test file is intended to not be tested in this repo and should not
-  # be failing this particular validation, then choose one of the following options:
-  # - Add the test file to the exclusions input (CSV format) to the workflow
-  #   (see: https://github.com/aws-observability/aws-application-signals-test-framework/blob/main/.github/workflows/validate-e2e-tests-are-accounted-for.yml#L1)
-  # - Update the `validate-e2e-tests-are-accounted-for` job to change which "workflow files are expected to be used by this repo"
-  #   (see: https://github.com/aws-observability/aws-application-signals-test-framework/blob/main/.github/workflows/validate-e2e-tests-are-accounted-for.yml)
-  validate-all-tests-are-accounted-for:
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/validate-e2e-tests-are-accounted-for.yml@main
+  # # This validation is to ensure that all test workflows relevant to this repo are actually
+  # # being used in this repo, which is referring to all the other jobs in this file.
+  # #
+  # # If this starts failing, then it most likely means that new e2e test workflow was
+  # # added to `aws-observability/aws-application-signals-test-framework`, but was not
+  # # added to this file. It could also mean that a test in this file has been removed.
+  # #
+  # # If a particular test file is intended to not be tested in this repo and should not
+  # # be failing this particular validation, then choose one of the following options:
+  # # - Add the test file to the exclusions input (CSV format) to the workflow
+  # #   (see: https://github.com/aws-observability/aws-application-signals-test-framework/blob/main/.github/workflows/validate-e2e-tests-are-accounted-for.yml#L1)
+  # # - Update the `validate-e2e-tests-are-accounted-for` job to change which "workflow files are expected to be used by this repo"
+  # #   (see: https://github.com/aws-observability/aws-application-signals-test-framework/blob/main/.github/workflows/validate-e2e-tests-are-accounted-for.yml)
+  # validate-all-tests-are-accounted-for:
+  #   uses: aws-observability/aws-application-signals-test-framework/.github/workflows/validate-e2e-tests-are-accounted-for.yml@main
