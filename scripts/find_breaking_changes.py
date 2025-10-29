@@ -60,15 +60,15 @@ def get_releases_with_breaking_changes(repo, current_version, new_version):
                                 "body": release.get("body", ""),
                             }
                         )
-            except (ValueError, KeyError):
-                # Skip releases with invalid version formats or missing data
+            except (ValueError, KeyError) as e:
+                print(f"Warning: Skipping release {release.get('name', 'unknown')} due to error: {e}")
                 continue
 
         return breaking_releases
 
     except requests.RequestException as request_error:
-        print(f"Warning: Could not get releases for {repo}: {request_error}")
-        return []
+        print(f"Error: Could not get releases for {repo}: {request_error}")
+        sys.exit(1)
 
 
 def main():
