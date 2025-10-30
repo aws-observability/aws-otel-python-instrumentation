@@ -49,15 +49,10 @@ def get_latest_aws_versions():
     versions = {}
     for dep in AWS_DEPS:
         try:
-            result = subprocess.run(
-                ["pip", "index", "versions", dep],
-                capture_output=True,
-                text=True,
-                check=True
-            )
+            result = subprocess.run(["pip", "index", "versions", dep], capture_output=True, text=True, check=True)
             # Parse output like "package (1.2.3)" from first line
-            first_line = result.stdout.strip().split('\n')[0]
-            match = re.search(r'\(([^)]+)\)', first_line)
+            first_line = result.stdout.strip().split("\n")[0]
+            match = re.search(r"\(([^)]+)\)", first_line)
             if match:
                 versions[dep] = match.group(1)
         except (subprocess.CalledProcessError, IndexError, AttributeError) as e:
@@ -72,7 +67,7 @@ def main():
 
     print(f"OTEL_PYTHON_VERSION={otel_python_version}")
     print(f"OTEL_CONTRIB_VERSION={otel_contrib_version}")
-    
+
     # Print AWS dependency versions
     for dep, version in aws_versions.items():
         env_name = dep.replace("-", "_").upper() + "_VERSION"
@@ -83,7 +78,7 @@ def main():
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output_file:
             output_file.write(f"otel_python_version={otel_python_version}\n")
             output_file.write(f"otel_contrib_version={otel_contrib_version}\n")
-            
+
             # Write AWS dependency versions
             for dep, version in aws_versions.items():
                 env_name = dep.replace("-", "_").lower() + "_version"

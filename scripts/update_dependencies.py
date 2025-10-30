@@ -84,7 +84,7 @@ def main():
     if not otel_python_version or not otel_contrib_version:
         print("Error: OTEL_PYTHON_VERSION and OTEL_CONTRIB_VERSION environment variables required")
         sys.exit(1)
-    
+
     if not aws_sdk_ext_version or not aws_xray_prop_version:
         print("Error: AWS dependency versions required")
         sys.exit(1)
@@ -118,7 +118,7 @@ def main():
             "opentelemetry-sdk-extension-aws": aws_sdk_ext_version,
             "opentelemetry-propagator-aws-xray": aws_xray_prop_version,
         }
-        
+
         for dep, version in aws_versions.items():
             if version:
                 pattern = rf'"{re.escape(dep)} == [^"]*"'
