@@ -84,6 +84,10 @@ def main():
     if not otel_python_version or not otel_contrib_version:
         print("Error: OTEL_PYTHON_VERSION and OTEL_CONTRIB_VERSION environment variables required")
         sys.exit(1)
+    
+    if not aws_sdk_ext_version or not aws_xray_prop_version:
+        print("Error: AWS dependency versions required")
+        sys.exit(1)
 
     pyproject_path = "aws-opentelemetry-distro/pyproject.toml"
 
@@ -122,7 +126,6 @@ def main():
                 if re.search(pattern, content):
                     content = re.sub(pattern, replacement, content)
                     updated = True
-                    print(f"Updated {dep} to {version}")
 
         if updated:
             with open(pyproject_path, "w", encoding="utf-8") as output_file:

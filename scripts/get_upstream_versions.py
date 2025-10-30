@@ -4,6 +4,7 @@
 
 import os
 import re
+import subprocess
 import sys
 
 import requests
@@ -44,16 +45,24 @@ def get_latest_otel_versions():
 
 
 def get_latest_aws_versions():
-    """Get latest versions of AWS dependencies from PyPI."""
+    """Get latest versions of AWS dependencies using pip."""
     versions = {}
     for dep in AWS_DEPS:
         try:
-            response = requests.get(f"https://pypi.org/pypi/{dep}/json", timeout=30)
-            response.raise_for_status()
-            data = response.json()
-            versions[dep] = data["info"]["version"]
-        except requests.RequestException as e:
-            print(f"Warning: Could not get latest version for {dep}: {e}", file=sys.stderr)
+            result = subprocess.run(
+                ["pip", "index", "versions", dep],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            # Parse output like "package (1.2.3)" from first line
+            first_line = result.stdout.strip().split('\n')[0]
+            match = re.search(r'\(([^)]+)\)', first_line)
+            if match:
+                versions[dep] = match.group(1)
+        except (subprocess.CalledProcessError, IndexError, AttributeError) as e:
+            print(f"Error: Could not get latest version for {dep}: {e}")
+            sys.exit(1)
     return versions
 
 
