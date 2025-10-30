@@ -60,8 +60,8 @@ def get_releases_with_breaking_changes(repo, current_version, new_version):
                                 "body": release.get("body", ""),
                             }
                         )
-            except (ValueError, KeyError) as e:
-                print(f"Warning: Skipping release {release.get('name', 'unknown')} due to error: {e}")
+            except (ValueError, KeyError) as parse_error:
+                print(f"Warning: Skipping release {release.get('name', 'unknown')} due to error: {parse_error}")
                 continue
 
         return breaking_releases

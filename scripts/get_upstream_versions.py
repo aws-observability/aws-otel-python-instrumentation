@@ -55,8 +55,8 @@ def get_latest_aws_versions():
             match = re.search(r"\(([^)]+)\)", first_line)
             if match:
                 versions[dep] = match.group(1)
-        except (subprocess.CalledProcessError, IndexError, AttributeError) as e:
-            print(f"Error: Could not get latest version for {dep}: {e}")
+        except (subprocess.CalledProcessError, IndexError, AttributeError) as error:
+            print(f"Error: Could not get latest version for {dep}: {error}")
             sys.exit(1)
     return versions
 
