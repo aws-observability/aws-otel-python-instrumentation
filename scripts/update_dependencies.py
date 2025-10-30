@@ -26,6 +26,7 @@ CONTRIB_DEPS = [
     "opentelemetry-instrumentation-aws-lambda",
     "opentelemetry-instrumentation-aio-pika",
     "opentelemetry-instrumentation-aiohttp-client",
+    "opentelemetry-instrumentation-aiokafka",
     "opentelemetry-instrumentation-aiopg",
     "opentelemetry-instrumentation-asgi",
     "opentelemetry-instrumentation-asyncpg",
