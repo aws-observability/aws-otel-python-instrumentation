@@ -17,10 +17,5 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
     ([#497](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/497))
 - Fix timeout handling for exceeded deadline in retry logic in OTLPAwsLogsExporter
   ([#501](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/501))
-- Fix: Unable to run ADOT Python unit tests with latest Tox release
-  ([#521](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/521))
 - Fix Gevent patch regression with correct import order
   ([#522](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/522))
-- Bump ADOT Python version to 0.13.0 and OTel dependencies to 1.37.0/0.58b0
-  ([#524](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/524))
-
