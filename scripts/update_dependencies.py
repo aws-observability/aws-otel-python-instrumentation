@@ -87,16 +87,17 @@ def update_file_dependencies(file_path, otel_python_version, otel_contrib_versio
 
         # Update opentelemetry-python dependencies
         for dep in PYTHON_CORE_DEPS:
-            pattern = rf'{re.escape(dep)}==[^\s,\]"]*'
-            replacement = f'{dep}=={otel_python_version}'
+            # Handle both "package == version" and package==version formats
+            pattern = rf'"?{re.escape(dep)}\s*==\s*[^\s,\]"]*"?'
+            replacement = f'"{dep} == {otel_python_version}"' if '"' in content else f'{dep}=={otel_python_version}'
             if re.search(pattern, content):
                 content = re.sub(pattern, replacement, content)
                 updated = True
 
         # Update opentelemetry-python-contrib dependencies
         for dep in CONTRIB_DEPS:
-            pattern = rf'{re.escape(dep)}==[^\s,\]"]*'
-            replacement = f'{dep}=={otel_contrib_version}'
+            pattern = rf'"?{re.escape(dep)}\s*==\s*[^\s,\]"]*"?'
+            replacement = f'"{dep} == {otel_contrib_version}"' if '"' in content else f'{dep}=={otel_contrib_version}'
             if re.search(pattern, content):
                 content = re.sub(pattern, replacement, content)
                 updated = True
@@ -104,8 +105,8 @@ def update_file_dependencies(file_path, otel_python_version, otel_contrib_versio
         # Update independently versioned AWS dependencies
         for dep, version in aws_versions.items():
             if version:
-                pattern = rf'{re.escape(dep)}==[^\s,\]"]*'
-                replacement = f'{dep}=={version}'
+                pattern = rf'"?{re.escape(dep)}\s*==\s*[^\s,\]"]*"?'
+                replacement = f'"{dep} == {version}"' if '"' in content else f'{dep}=={version}'
                 if re.search(pattern, content):
                     content = re.sub(pattern, replacement, content)
                     updated = True
