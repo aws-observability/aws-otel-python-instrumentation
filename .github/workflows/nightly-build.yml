@@ -19,7 +19,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  update-and-create-pr:
+  update-dependencies:
     runs-on: ubuntu-latest
     outputs:
       has_changes: ${{ steps.check_changes.outputs.has_changes }}
@@ -27,6 +27,7 @@ jobs:
       otel_contrib_version: ${{ steps.get_versions.outputs.otel_contrib_version }}
       aws_sdk_ext_version: ${{ steps.get_versions.outputs.opentelemetry_sdk_extension_aws_version }}
       aws_xray_prop_version: ${{ steps.get_versions.outputs.opentelemetry_propagator_aws_xray_version }}
+      breaking_changes_info: ${{ steps.breaking_changes.outputs.breaking_changes_info }}
     
     steps:
     - name: Checkout repository
@@ -93,39 +94,10 @@ jobs:
           git commit -m "chore: update OpenTelemetry dependencies to ${{ steps.get_versions.outputs.otel_python_version }}/${{ steps.get_versions.outputs.otel_contrib_version }}"
           git push origin "$BRANCH_NAME"
         fi
-    
-    - name: Create or update PR
-      run: |
-        PR_BODY="Automated update of OpenTelemetry dependencies.
-
-        **Updated versions:**
-        - OpenTelemetry Python: ${{ steps.get_versions.outputs.otel_python_version }}
-        - OpenTelemetry Contrib: ${{ steps.get_versions.outputs.otel_contrib_version }}
-        - [opentelemetry-sdk-extension-aws](https://pypi.org/project/opentelemetry-sdk-extension-aws/${{ steps.get_versions.outputs.opentelemetry_sdk_extension_aws_version }}/): ${{ steps.get_versions.outputs.opentelemetry_sdk_extension_aws_version }}
-        - [opentelemetry-propagator-aws-xray](https://pypi.org/project/opentelemetry-propagator-aws-xray/${{ steps.get_versions.outputs.opentelemetry_propagator_aws_xray_version }}/): ${{ steps.get_versions.outputs.opentelemetry_propagator_aws_xray_version }}
-
-        **Upstream releases with breaking changes:**
-        Note: the mechanism to detect upstream breaking changes is not perfect. Be sure to check all new releases and understand if any additional changes need to be addressed.
-
-        ${{ steps.breaking_changes.outputs.breaking_changes_info }}"
-        
-        if gh pr view "$BRANCH_NAME" --json state --jq '.state' 2>/dev/null | grep -q "OPEN"; then
-          echo "Open PR already exists, updating description..."
-          gh pr edit "$BRANCH_NAME" --body "$PR_BODY"
-        else
-          echo "Creating new PR..."
-          gh pr create \
-            --title "Nightly dependency update: OpenTelemetry ${{ steps.get_versions.outputs.otel_python_version }}/${{ steps.get_versions.outputs.otel_contrib_version }}" \
-            --body "$PR_BODY" \
-            --base main \
-            --head "$BRANCH_NAME"
-        fi
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-and-test:
-    needs: update-and-create-pr
-    if: needs.update-and-create-pr.outputs.has_changes == 'true'
+    needs: update-dependencies
+    if: needs.update-dependencies.outputs.has_changes == 'true'
     uses: ./.github/workflows/main-build.yml
     secrets: inherit
     permissions:
@@ -134,9 +106,54 @@ jobs:
     with:
       ref: nightly-dependency-updates
 
+  create-pr:
+    needs: [update-dependencies, build-and-test]
+    if: needs.update-dependencies.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Create or update PR
+      run: |
+        BUILD_STATUS="${{ needs.build-and-test.result }}"
+        BUILD_EMOJI="${{ needs.build-and-test.result == 'success' && '✅' || '❌' }}"
+        BUILD_LINK="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        
+        PR_BODY="Automated update of OpenTelemetry dependencies.
+
+        **Build Status:** ${BUILD_EMOJI} [${BUILD_STATUS}](${BUILD_LINK})
+
+        **Updated versions:**
+        - [OpenTelemetry Python](https://github.com/open-telemetry/opentelemetry-python/releases/tag/v${{ needs.update-dependencies.outputs.otel_python_version }}): ${{ needs.update-dependencies.outputs.otel_python_version }}
+        - [OpenTelemetry Contrib](https://github.com/open-telemetry/opentelemetry-python-contrib/releases/tag/v${{ needs.update-dependencies.outputs.otel_contrib_version }}): ${{ needs.update-dependencies.outputs.otel_contrib_version }}
+        - [opentelemetry-sdk-extension-aws](https://pypi.org/project/opentelemetry-sdk-extension-aws/${{ needs.update-dependencies.outputs.aws_sdk_ext_version }}/): ${{ needs.update-dependencies.outputs.aws_sdk_ext_version }}
+        - [opentelemetry-propagator-aws-xray](https://pypi.org/project/opentelemetry-propagator-aws-xray/${{ needs.update-dependencies.outputs.aws_xray_prop_version }}/): ${{ needs.update-dependencies.outputs.aws_xray_prop_version }}
+
+        **Upstream releases with breaking changes:**
+        Note: the mechanism to detect upstream breaking changes is not perfect. Be sure to check all new releases and understand if any additional changes need to be addressed.
+
+        ${{ needs.update-dependencies.outputs.breaking_changes_info }}"
+        
+        if gh pr view "$BRANCH_NAME" --json state --jq '.state' 2>/dev/null | grep -q "OPEN"; then
+          echo "Open PR already exists, updating description..."
+          gh pr edit "$BRANCH_NAME" --body "$PR_BODY"
+        else
+          echo "Creating new PR..."
+          gh pr create \
+            --title "Nightly dependency update: OpenTelemetry ${{ needs.update-dependencies.outputs.otel_python_version }}/${{ needs.update-dependencies.outputs.otel_contrib_version }}" \
+            --body "$PR_BODY" \
+            --base main \
+            --head "$BRANCH_NAME"
+        fi
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   publish-nightly-build-status:
     name: "Publish Nightly Build Status"
-    needs: [ update-and-create-pr, build-and-test ]
+    needs: [ update-dependencies, build-and-test ]
     runs-on: ubuntu-latest
     if: always()
     steps:
