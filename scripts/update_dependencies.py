@@ -89,7 +89,7 @@ def update_file_dependencies(file_path, otel_python_version, otel_contrib_versio
         for dep in PYTHON_CORE_DEPS:
             # Handle both "package == version" and package==version formats
             pattern = rf'"?{re.escape(dep)}\s*==\s*[^\s,\]"]*"?'
-            replacement = f'"{dep} == {otel_python_version}"' if '"' in content else f'{dep}=={otel_python_version}'
+            replacement = f'"{dep} == {otel_python_version}"' if '"' in content else f"{dep}=={otel_python_version}"
             if re.search(pattern, content):
                 content = re.sub(pattern, replacement, content)
                 updated = True
@@ -97,7 +97,7 @@ def update_file_dependencies(file_path, otel_python_version, otel_contrib_versio
         # Update opentelemetry-python-contrib dependencies
         for dep in CONTRIB_DEPS:
             pattern = rf'"?{re.escape(dep)}\s*==\s*[^\s,\]"]*"?'
-            replacement = f'"{dep} == {otel_contrib_version}"' if '"' in content else f'{dep}=={otel_contrib_version}'
+            replacement = f'"{dep} == {otel_contrib_version}"' if '"' in content else f"{dep}=={otel_contrib_version}"
             if re.search(pattern, content):
                 content = re.sub(pattern, replacement, content)
                 updated = True
@@ -106,7 +106,7 @@ def update_file_dependencies(file_path, otel_python_version, otel_contrib_versio
         for dep, version in aws_versions.items():
             if version:
                 pattern = rf'"?{re.escape(dep)}\s*==\s*[^\s,\]"]*"?'
-                replacement = f'"{dep} == {version}"' if '"' in content else f'{dep}=={version}'
+                replacement = f'"{dep} == {version}"' if '"' in content else f"{dep}=={version}"
                 if re.search(pattern, content):
                     content = re.sub(pattern, replacement, content)
                     updated = True
@@ -148,7 +148,7 @@ def main():
         "contract-tests/images/mock-collector/requirements.txt",
         "contract-tests/tests/pyproject.toml",
     ]
-    
+
     any_updated = False
     for file_path in files_to_update:
         if update_file_dependencies(file_path, otel_python_version, otel_contrib_version, aws_versions):
