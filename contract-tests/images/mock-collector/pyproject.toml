@@ -11,8 +11,8 @@ requires-python = ">=3.9"
 
 dependencies = [
     "grpcio ~= 1.66.0",
-    "opentelemetry-proto==1.33.1",
-    "opentelemetry-sdk==1.33.1",
+    "opentelemetry-proto == 1.38.0",
+    "opentelemetry-sdk == 1.38.0",
     "protobuf==5.29.5",
     "typing-extensions==4.12.2"
 ]
