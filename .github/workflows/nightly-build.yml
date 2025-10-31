@@ -108,7 +108,7 @@ jobs:
 
   create-pr:
     needs: [update-dependencies, build-and-test]
-    if: needs.update-dependencies.outputs.has_changes == 'true'
+    if: always() && needs.update-dependencies.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
     steps:
     - name: Checkout repository
