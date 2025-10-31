@@ -10,6 +10,7 @@ import sys
 PYTHON_CORE_DEPS = [
     "opentelemetry-api",
     "opentelemetry-sdk",
+    "opentelemetry-proto",
     "opentelemetry-exporter-otlp-proto-grpc",
     "opentelemetry-exporter-otlp-proto-http",
     "opentelemetry-propagator-b3",
@@ -76,6 +77,50 @@ AWS_DEPS = [
 ]
 
 
+def update_file_dependencies(file_path, otel_python_version, otel_contrib_version, aws_versions):
+    """Update all Otel dependencies in a given file"""
+    try:
+        with open(file_path, "r", encoding="utf-8") as input_file:
+            content = input_file.read()
+
+        updated = False
+
+        # Update opentelemetry-python dependencies
+        for dep in PYTHON_CORE_DEPS:
+            pattern = rf'{re.escape(dep)}==[^\s,\]"]*'
+            replacement = f'{dep}=={otel_python_version}'
+            if re.search(pattern, content):
+                content = re.sub(pattern, replacement, content)
+                updated = True
+
+        # Update opentelemetry-python-contrib dependencies
+        for dep in CONTRIB_DEPS:
+            pattern = rf'{re.escape(dep)}==[^\s,\]"]*'
+            replacement = f'{dep}=={otel_contrib_version}'
+            if re.search(pattern, content):
+                content = re.sub(pattern, replacement, content)
+                updated = True
+
+        # Update independently versioned AWS dependencies
+        for dep, version in aws_versions.items():
+            if version:
+                pattern = rf'{re.escape(dep)}==[^\s,\]"]*'
+                replacement = f'{dep}=={version}'
+                if re.search(pattern, content):
+                    content = re.sub(pattern, replacement, content)
+                    updated = True
+
+        if updated:
+            with open(file_path, "w", encoding="utf-8") as output_file:
+                output_file.write(content)
+            print(f"Updated {file_path}")
+
+        return updated
+    except (OSError, IOError) as file_error:
+        print(f"Error updating {file_path}: {file_error}")
+        return False
+
+
 def main():
     otel_python_version = os.environ.get("OTEL_PYTHON_VERSION")
     otel_contrib_version = os.environ.get("OTEL_CONTRIB_VERSION")
@@ -90,54 +135,28 @@ def main():
         print("Error: AWS dependency versions required")
         sys.exit(1)
 
-    pyproject_path = "aws-opentelemetry-distro/pyproject.toml"
+    aws_versions = {
+        "opentelemetry-sdk-extension-aws": aws_sdk_ext_version,
+        "opentelemetry-propagator-aws-xray": aws_xray_prop_version,
+    }
 
-    try:
-        with open(pyproject_path, "r", encoding="utf-8") as input_file:
-            content = input_file.read()
+    # All files to update
+    files_to_update = [
+        "aws-opentelemetry-distro/pyproject.toml",
+        "contract-tests/images/mock-collector/pyproject.toml",
+        "contract-tests/images/mock-collector/requirements.txt",
+        "contract-tests/tests/pyproject.toml",
+    ]
+    
+    any_updated = False
+    for file_path in files_to_update:
+        if update_file_dependencies(file_path, otel_python_version, otel_contrib_version, aws_versions):
+            any_updated = True
 
-        updated = False
-
-        # Update opentelemetry-python dependencies
-        for dep in PYTHON_CORE_DEPS:
-            pattern = rf'"{re.escape(dep)} == [^"]*"'
-            replacement = f'"{dep} == {otel_python_version}"'
-            if re.search(pattern, content):
-                content = re.sub(pattern, replacement, content)
-                updated = True
-
-        # Update opentelemetry-python-contrib dependencies
-        for dep in CONTRIB_DEPS:
-            pattern = rf'"{re.escape(dep)} == [^"]*"'
-            replacement = f'"{dep} == {otel_contrib_version}"'
-            if re.search(pattern, content):
-                content = re.sub(pattern, replacement, content)
-                updated = True
-
-        # Update AWS dependencies with provided versions
-        aws_versions = {
-            "opentelemetry-sdk-extension-aws": aws_sdk_ext_version,
-            "opentelemetry-propagator-aws-xray": aws_xray_prop_version,
-        }
-
-        for dep, version in aws_versions.items():
-            if version:
-                pattern = rf'"{re.escape(dep)} == [^"]*"'
-                replacement = f'"{dep} == {version}"'
-                if re.search(pattern, content):
-                    content = re.sub(pattern, replacement, content)
-                    updated = True
-
-        if updated:
-            with open(pyproject_path, "w", encoding="utf-8") as output_file:
-                output_file.write(content)
-            print(f"Dependencies updated to Python {otel_python_version} / Contrib {otel_contrib_version}")
-        else:
-            print("No OpenTelemetry dependencies found to update")
-
-    except (OSError, IOError) as file_error:
-        print(f"Error updating dependencies: {file_error}")
-        sys.exit(1)
+    if any_updated:
+        print(f"Dependencies updated to Python {otel_python_version} / Contrib {otel_contrib_version}")
+    else:
+        print("No OpenTelemetry dependencies found to update")
 
 
 if __name__ == "__main__":
