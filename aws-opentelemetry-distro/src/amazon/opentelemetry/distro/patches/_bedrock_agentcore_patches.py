@@ -13,6 +13,13 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_AGENTCORE_WORKLOAD_IDENTITY_ARN,
     AWS_GATEWAY_TARGET_ID,
 )
+from amazon.opentelemetry.distro.patches.semconv._incubating.attributes.gen_ai_attributes import (
+    GEN_AI_BROWSER_ID,
+    GEN_AI_CODE_INTERPRETER_ID,
+    GEN_AI_GATEWAY_ID,
+    GEN_AI_MEMORY_ID,
+    GEN_AI_RUNTIME_ID,
+)
 from opentelemetry.instrumentation.botocore.extensions.types import (
     _AttributeMapT,
     _AwsSdkExtension,
@@ -20,12 +27,6 @@ from opentelemetry.instrumentation.botocore.extensions.types import (
     _BotoResultT,
 )
 from opentelemetry.trace.span import Span
-
-GEN_AI_RUNTIME_ID = "gen_ai.runtime.id"
-GEN_AI_BROWSER_ID = "gen_ai.browser.id"
-GEN_AI_CODE_INTERPRETER_ID = "gen_ai.code_interpreter.id"
-GEN_AI_MEMORY_ID = "gen_ai.memory.id"
-GEN_AI_GATEWAY_ID = "gen_ai.gateway.id"
 
 # Mapping of flattened JSON paths to attribute keys
 _ATTRIBUTE_MAPPING = {
