@@ -23,6 +23,7 @@ CONTRIB_DEPS = [
     "opentelemetry-distro",
     "opentelemetry-processor-baggage",
     "opentelemetry-propagator-ot-trace",
+    "opentelemetry-test-utils",
     "opentelemetry-instrumentation",
     "opentelemetry-instrumentation-aws-lambda",
     "opentelemetry-instrumentation-aio-pika",
@@ -147,6 +148,7 @@ def main():
         "contract-tests/images/mock-collector/pyproject.toml",
         "contract-tests/images/mock-collector/requirements.txt",
         "contract-tests/tests/pyproject.toml",
+        "lambda-layer/src/tests/requirements.txt"
     ]
 
     any_updated = False
