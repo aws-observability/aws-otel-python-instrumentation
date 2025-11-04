@@ -192,7 +192,7 @@ jobs:
           TWINE_USERNAME: '__token__'
           TWINE_PASSWORD: ${{ env.PROD_PYPI_TOKEN_API_TOKEN }}
         run: |
-          twine upload --skip-existing --verbose ${{ env.ARTIFACT_NAME }} ${{ env.SOURCE_ARTIFACT_NAME }}
+          twine upload --skip-existing --verbose ${{ env.WHEEL_ARTIFACT_NAME }} ${{ env.SOURCE_ARTIFACT_NAME }}
 
       # Publish to public ECR
       - name: Build and push public ECR image
