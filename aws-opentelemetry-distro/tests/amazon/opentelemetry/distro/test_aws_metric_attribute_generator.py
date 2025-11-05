@@ -12,6 +12,12 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_AUTH_ACCESS_KEY,
     AWS_AUTH_REGION,
     AWS_BEDROCK_AGENT_ID,
+    AWS_BEDROCK_AGENTCORE_BROWSER_ARN,
+    AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN,
+    AWS_BEDROCK_AGENTCORE_GATEWAY_ARN,
+    AWS_BEDROCK_AGENTCORE_MEMORY_ARN,
+    AWS_BEDROCK_AGENTCORE_RUNTIME_ARN,
+    AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN,
     AWS_BEDROCK_DATA_SOURCE_ID,
     AWS_BEDROCK_GUARDRAIL_ARN,
     AWS_BEDROCK_GUARDRAIL_ID,
@@ -19,6 +25,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER,
     AWS_CONSUMER_PARENT_SPAN_KIND,
     AWS_DYNAMODB_TABLE_ARN,
+    AWS_GATEWAY_TARGET_ID,
     AWS_KINESIS_STREAM_ARN,
     AWS_KINESIS_STREAM_NAME,
     AWS_LAMBDA_FUNCTION_ARN,
@@ -45,6 +52,13 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
 )
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
 from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, SERVICE_METRIC
+from amazon.opentelemetry.distro.patches.semconv._incubating.attributes.gen_ai_attributes import (
+    GEN_AI_BROWSER_ID,
+    GEN_AI_CODE_INTERPRETER_ID,
+    GEN_AI_GATEWAY_ID,
+    GEN_AI_MEMORY_ID,
+    GEN_AI_RUNTIME_ID,
+)
 from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.sdk.resources import _DEFAULT_RESOURCE, SERVICE_NAME
 from opentelemetry.sdk.trace import ReadableSpan, Resource
@@ -75,8 +89,7 @@ _LOCAL_ROOT: str = "LOCAL_ROOT"
 _GENERATOR: _AwsMetricAttributeGenerator = _AwsMetricAttributeGenerator()
 
 
-# pylint: disable=too-many-public-methods
-class TestAwsMetricAttributeGenerator(TestCase):
+class TestUtil(TestCase):
     def setUp(self):
         self.attributes_mock: Attributes = MagicMock()
         self.instrumentation_scope_info_mock: InstrumentationScope = MagicMock()
@@ -95,6 +108,167 @@ class TestAwsMetricAttributeGenerator(TestCase):
         # OTel strongly recommends to start out with the default instead of Resource.empty()
         self.resource: Resource = _DEFAULT_RESOURCE
 
+    def _mock_attribute(
+        self,
+        keys: List[str],
+        values: Optional[List[str]],
+        exist_keys: Optional[List[str]] = None,
+        exist_values: Optional[List[str]] = None,
+    ) -> (Optional[List[str]], Optional[List[str]]):
+        if exist_keys is not None and exist_values is not None:
+            for key in exist_keys:
+                if key not in keys:
+                    keys = keys + [key]
+                    values = values + [exist_values[exist_keys.index(key)]]
+
+        def get_side_effect(get_key):
+            if get_key in keys:
+                return values[keys.index(get_key)]
+            return None
+
+        self.attributes_mock.get.side_effect = get_side_effect
+
+        return keys, values
+
+    def _validate_expected_remote_attributes(
+        self, expected_remote_service: str, expected_remote_operation: str
+    ) -> None:
+        self.span_mock.kind = SpanKind.CLIENT
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertEqual(actual_attributes[AWS_REMOTE_SERVICE], expected_remote_service)
+        self.assertEqual(actual_attributes[AWS_REMOTE_OPERATION], expected_remote_operation)
+
+        self.span_mock.kind = SpanKind.PRODUCER
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertEqual(actual_attributes[AWS_REMOTE_SERVICE], expected_remote_service)
+        self.assertEqual(actual_attributes[AWS_REMOTE_OPERATION], expected_remote_operation)
+
+    def _validate_and_remove_remote_attributes(
+        self,
+        remote_service_key: str,
+        remote_service_value: str,
+        remote_operation_key: str,
+        remote_operation_value: str,
+        keys: Optional[List[str]],
+        values: Optional[List[str]],
+    ):
+        keys, values = self._mock_attribute(
+            [remote_service_key, remote_operation_key], [remote_service_value, remote_operation_value], keys, values
+        )
+        self._validate_expected_remote_attributes(remote_service_value, remote_operation_value)
+
+        keys, values = self._mock_attribute(
+            [remote_service_key, remote_operation_key], [None, remote_operation_value], keys, values
+        )
+        self._validate_expected_remote_attributes(_UNKNOWN_REMOTE_SERVICE, remote_operation_value)
+
+        keys, values = self._mock_attribute(
+            [remote_service_key, remote_operation_key], [remote_service_value, None], keys, values
+        )
+        self._validate_expected_remote_attributes(remote_service_value, _UNKNOWN_REMOTE_OPERATION)
+
+        keys, values = self._mock_attribute([remote_service_key, remote_operation_key], [None, None], keys, values)
+        return keys, values
+
+    def _validate_remote_resource_attributes(
+        self,
+        expected_type: str,
+        expected_identifier: str,
+        expected_cfn_primary_id: str = None,
+        expected_region: str = None,
+        expected_account_id: str = None,
+        expected_access_key: str = None,
+    ) -> None:
+        # If expected_cfn_primary_id is not provided, it defaults to expected_identifier
+        if expected_cfn_primary_id is None:
+            expected_cfn_primary_id = expected_identifier
+
+        # Client, Producer, and Consumer spans should generate the expected remote resource attribute
+        for kind in [SpanKind.CLIENT, SpanKind.PRODUCER, SpanKind.CONSUMER]:
+            self.span_mock.kind = kind
+            actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+                DEPENDENCY_METRIC
+            )
+            self.assertEqual(expected_type, actual_attributes.get(AWS_REMOTE_RESOURCE_TYPE))
+            self.assertEqual(expected_identifier, actual_attributes.get(AWS_REMOTE_RESOURCE_IDENTIFIER))
+            self.assertEqual(expected_cfn_primary_id, actual_attributes.get(AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER))
+
+            # Cross account support
+            if expected_region is not None:
+                self.assertEqual(expected_region, actual_attributes.get(AWS_REMOTE_RESOURCE_REGION))
+            else:
+                self.assertNotIn(AWS_REMOTE_RESOURCE_REGION, actual_attributes)
+
+            if expected_access_key is not None:
+                self.assertEqual(expected_access_key, actual_attributes.get(AWS_REMOTE_RESOURCE_ACCESS_KEY))
+                self.assertNotIn(AWS_REMOTE_RESOURCE_ACCOUNT_ID, actual_attributes)
+            else:
+                self.assertNotIn(AWS_REMOTE_RESOURCE_ACCESS_KEY, actual_attributes)
+
+            if expected_account_id is not None:
+                self.assertEqual(expected_account_id, actual_attributes.get(AWS_REMOTE_RESOURCE_ACCOUNT_ID))
+                self.assertNotIn(AWS_REMOTE_RESOURCE_ACCESS_KEY, actual_attributes)
+            else:
+                self.assertNotIn(AWS_REMOTE_RESOURCE_ACCOUNT_ID, actual_attributes)
+
+        # Server span should not generate remote resource attribute
+        self.span_mock.kind = SpanKind.SERVER
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            SERVICE_METRIC
+        )
+        self.assertNotIn(AWS_REMOTE_RESOURCE_TYPE, actual_attributes)
+        self.assertNotIn(AWS_REMOTE_RESOURCE_IDENTIFIER, actual_attributes)
+        self.assertNotIn(AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER, actual_attributes)
+        self.assertNotIn(AWS_REMOTE_RESOURCE_REGION, actual_attributes)
+        self.assertNotIn(AWS_REMOTE_RESOURCE_ACCOUNT_ID, actual_attributes)
+        self.assertNotIn(AWS_REMOTE_RESOURCE_ACCESS_KEY, actual_attributes)
+
+        self._mock_attribute([SpanAttributes.DB_SYSTEM], [None])
+
+    def _validate_attributes_produced_for_non_local_root_span_of_kind(
+        self, expected_attributes: Attributes, kind: SpanKind
+    ) -> None:
+        self.span_mock.kind = kind
+
+        attribute_map: {str, BoundedAttributes} = _GENERATOR.generate_metric_attributes_dict_from_span(
+            self.span_mock, self.resource
+        )
+        service_attributes: BoundedAttributes = attribute_map.get(SERVICE_METRIC)
+        dependency_attributes: BoundedAttributes = attribute_map.get(DEPENDENCY_METRIC)
+        if attribute_map is not None and len(attribute_map) > 0:
+            if kind in [SpanKind.PRODUCER, SpanKind.CLIENT, SpanKind.CONSUMER]:
+                self.assertIsNone(service_attributes)
+                self.assertEqual(len(dependency_attributes), len(BoundedAttributes(attributes=expected_attributes)))
+                self.assertEqual(dependency_attributes, BoundedAttributes(attributes=expected_attributes))
+            else:
+                self.assertIsNone(dependency_attributes)
+                self.assertEqual(len(service_attributes), len(BoundedAttributes(attributes=expected_attributes)))
+                self.assertEqual(service_attributes, BoundedAttributes(attributes=expected_attributes))
+
+    def validate_bedrock_agentcore_resource(
+        self, attribute_keys, attribute_values, expected_type, expected_identifier, expected_cfn_primary_identifier
+    ):
+        keys = [SpanAttributes.RPC_SYSTEM, SpanAttributes.RPC_SERVICE]
+        values = ["aws-api", "Bedrock AgentCore"]
+        self._mock_attribute(keys, values)
+        self.span_mock.kind = SpanKind.CLIENT
+
+        self._mock_attribute(attribute_keys, attribute_values, keys, values)
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertEqual(actual_attributes.get(AWS_REMOTE_RESOURCE_TYPE), expected_type)
+        self.assertEqual(actual_attributes.get(AWS_REMOTE_RESOURCE_IDENTIFIER), expected_identifier)
+        self.assertEqual(actual_attributes.get(AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER), expected_cfn_primary_identifier)
+        self._mock_attribute(attribute_keys, [None] * len(attribute_keys))
+
+
+# pylint: disable=too-many-public-methods
+class TestAwsMetricAttributeGenerator(TestUtil):
     def test_span_attributes_for_empty_resource(self):
         self.resource = Resource.get_empty()
         expected_attributes: Attributes = {
@@ -897,6 +1071,8 @@ class TestAwsMetricAttributeGenerator(TestCase):
         self.validate_aws_sdk_service_normalization("Bedrock Agent", "AWS::Bedrock")
         self.validate_aws_sdk_service_normalization("Bedrock Agent Runtime", "AWS::Bedrock")
         self.validate_aws_sdk_service_normalization("Bedrock Runtime", "AWS::BedrockRuntime")
+        self.validate_aws_sdk_service_normalization("Bedrock AgentCore", "AWS::BedrockAgentCore")
+        self.validate_aws_sdk_service_normalization("Bedrock AgentCore Control", "AWS::BedrockAgentCore")
         self.validate_aws_sdk_service_normalization("Secrets Manager", "AWS::SecretsManager")
         self.validate_aws_sdk_service_normalization("SNS", "AWS::SNS")
         self.validate_aws_sdk_service_normalization("SFN", "AWS::StepFunctions")
@@ -946,72 +1122,6 @@ class TestAwsMetricAttributeGenerator(TestCase):
 
     def _update_resource_with_service_name(self) -> None:
         self.resource: Resource = Resource(attributes={SERVICE_NAME: _SERVICE_NAME_VALUE})
-
-    def _mock_attribute(
-        self,
-        keys: List[str],
-        values: Optional[List[str]],
-        exist_keys: Optional[List[str]] = None,
-        exist_values: Optional[List[str]] = None,
-    ) -> (Optional[List[str]], Optional[List[str]]):
-        if exist_keys is not None and exist_values is not None:
-            for key in exist_keys:
-                if key not in keys:
-                    keys = keys + [key]
-                    values = values + [exist_values[exist_keys.index(key)]]
-
-        def get_side_effect(get_key):
-            if get_key in keys:
-                return values[keys.index(get_key)]
-            return None
-
-        self.attributes_mock.get.side_effect = get_side_effect
-
-        return keys, values
-
-    def _validate_expected_remote_attributes(
-        self, expected_remote_service: str, expected_remote_operation: str
-    ) -> None:
-        self.span_mock.kind = SpanKind.CLIENT
-        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
-            DEPENDENCY_METRIC
-        )
-        self.assertEqual(actual_attributes[AWS_REMOTE_SERVICE], expected_remote_service)
-        self.assertEqual(actual_attributes[AWS_REMOTE_OPERATION], expected_remote_operation)
-
-        self.span_mock.kind = SpanKind.PRODUCER
-        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
-            DEPENDENCY_METRIC
-        )
-        self.assertEqual(actual_attributes[AWS_REMOTE_SERVICE], expected_remote_service)
-        self.assertEqual(actual_attributes[AWS_REMOTE_OPERATION], expected_remote_operation)
-
-    def _validate_and_remove_remote_attributes(
-        self,
-        remote_service_key: str,
-        remote_service_value: str,
-        remote_operation_key: str,
-        remote_operation_value: str,
-        keys: Optional[List[str]],
-        values: Optional[List[str]],
-    ):
-        keys, values = self._mock_attribute(
-            [remote_service_key, remote_operation_key], [remote_service_value, remote_operation_value], keys, values
-        )
-        self._validate_expected_remote_attributes(remote_service_value, remote_operation_value)
-
-        keys, values = self._mock_attribute(
-            [remote_service_key, remote_operation_key], [None, remote_operation_value], keys, values
-        )
-        self._validate_expected_remote_attributes(_UNKNOWN_REMOTE_SERVICE, remote_operation_value)
-
-        keys, values = self._mock_attribute(
-            [remote_service_key, remote_operation_key], [remote_service_value, None], keys, values
-        )
-        self._validate_expected_remote_attributes(remote_service_value, _UNKNOWN_REMOTE_OPERATION)
-
-        keys, values = self._mock_attribute([remote_service_key, remote_operation_key], [None, None], keys, values)
-        return keys, values
 
     def _validate_peer_service_does_override(self, remote_service_key: str) -> None:
         self._mock_attribute([remote_service_key, SpanAttributes.PEER_SERVICE], ["TestString", "PeerService"])
@@ -1858,81 +1968,6 @@ class TestAwsMetricAttributeGenerator(TestCase):
             [None],
         )
 
-    def _validate_remote_resource_attributes(
-        self,
-        expected_type: str,
-        expected_identifier: str,
-        expected_cfn_primary_id: str = None,
-        expected_region: str = None,
-        expected_account_id: str = None,
-        expected_access_key: str = None,
-    ) -> None:
-        # If expected_cfn_primary_id is not provided, it defaults to expected_identifier
-        if expected_cfn_primary_id is None:
-            expected_cfn_primary_id = expected_identifier
-
-        # Client, Producer, and Consumer spans should generate the expected remote resource attribute
-        for kind in [SpanKind.CLIENT, SpanKind.PRODUCER, SpanKind.CONSUMER]:
-            self.span_mock.kind = kind
-            actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
-                DEPENDENCY_METRIC
-            )
-            self.assertEqual(expected_type, actual_attributes.get(AWS_REMOTE_RESOURCE_TYPE))
-            self.assertEqual(expected_identifier, actual_attributes.get(AWS_REMOTE_RESOURCE_IDENTIFIER))
-            self.assertEqual(expected_cfn_primary_id, actual_attributes.get(AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER))
-
-            # Cross account support
-            if expected_region is not None:
-                self.assertEqual(expected_region, actual_attributes.get(AWS_REMOTE_RESOURCE_REGION))
-            else:
-                self.assertNotIn(AWS_REMOTE_RESOURCE_REGION, actual_attributes)
-
-            if expected_access_key is not None:
-                self.assertEqual(expected_access_key, actual_attributes.get(AWS_REMOTE_RESOURCE_ACCESS_KEY))
-                self.assertNotIn(AWS_REMOTE_RESOURCE_ACCOUNT_ID, actual_attributes)
-            else:
-                self.assertNotIn(AWS_REMOTE_RESOURCE_ACCESS_KEY, actual_attributes)
-
-            if expected_account_id is not None:
-                self.assertEqual(expected_account_id, actual_attributes.get(AWS_REMOTE_RESOURCE_ACCOUNT_ID))
-                self.assertNotIn(AWS_REMOTE_RESOURCE_ACCESS_KEY, actual_attributes)
-            else:
-                self.assertNotIn(AWS_REMOTE_RESOURCE_ACCOUNT_ID, actual_attributes)
-
-        # Server span should not generate remote resource attribute
-        self.span_mock.kind = SpanKind.SERVER
-        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
-            SERVICE_METRIC
-        )
-        self.assertNotIn(AWS_REMOTE_RESOURCE_TYPE, actual_attributes)
-        self.assertNotIn(AWS_REMOTE_RESOURCE_IDENTIFIER, actual_attributes)
-        self.assertNotIn(AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER, actual_attributes)
-        self.assertNotIn(AWS_REMOTE_RESOURCE_REGION, actual_attributes)
-        self.assertNotIn(AWS_REMOTE_RESOURCE_ACCOUNT_ID, actual_attributes)
-        self.assertNotIn(AWS_REMOTE_RESOURCE_ACCESS_KEY, actual_attributes)
-
-        self._mock_attribute([SpanAttributes.DB_SYSTEM], [None])
-
-    def _validate_attributes_produced_for_non_local_root_span_of_kind(
-        self, expected_attributes: Attributes, kind: SpanKind
-    ) -> None:
-        self.span_mock.kind = kind
-
-        attribute_map: {str, BoundedAttributes} = _GENERATOR.generate_metric_attributes_dict_from_span(
-            self.span_mock, self.resource
-        )
-        service_attributes: BoundedAttributes = attribute_map.get(SERVICE_METRIC)
-        dependency_attributes: BoundedAttributes = attribute_map.get(DEPENDENCY_METRIC)
-        if attribute_map is not None and len(attribute_map) > 0:
-            if kind in [SpanKind.PRODUCER, SpanKind.CLIENT, SpanKind.CONSUMER]:
-                self.assertIsNone(service_attributes)
-                self.assertEqual(len(dependency_attributes), len(BoundedAttributes(attributes=expected_attributes)))
-                self.assertEqual(dependency_attributes, BoundedAttributes(attributes=expected_attributes))
-            else:
-                self.assertIsNone(dependency_attributes)
-                self.assertEqual(len(service_attributes), len(BoundedAttributes(attributes=expected_attributes)))
-                self.assertEqual(service_attributes, BoundedAttributes(attributes=expected_attributes))
-
     def test_set_remote_environment(self):
         """Test remote environment setting for Lambda invoke operations."""
         keys = []
@@ -2102,3 +2137,245 @@ class TestAwsMetricAttributeGenerator(TestCase):
         )
 
         keys, values = self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None], keys, values)
+
+    def test_bedrock_agentcore_browser_resource_attributes(self):
+        """Test Bedrock AgentCore browser resource attributes."""
+
+        # Test managed browser resource type when browser ID is aws.browser.v1
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[GEN_AI_BROWSER_ID],
+            attribute_values=["aws.browser.v1"],
+            expected_type="AWS::BedrockAgentCore::Browser",
+            expected_identifier="aws.browser.v1",
+            expected_cfn_primary_identifier="aws.browser.v1",
+        )
+        # Test custom browser resource type when browser ID is not the standard aws.browser.v1
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[GEN_AI_BROWSER_ID],
+            attribute_values=["testBrowser-1234567890"],
+            expected_type="AWS::BedrockAgentCore::BrowserCustom",
+            expected_identifier="testBrowser-1234567890",
+            expected_cfn_primary_identifier="testBrowser-1234567890",
+        )
+        # Test custom browser resource type when browser ARN is provided
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_BEDROCK_AGENTCORE_BROWSER_ARN],
+            attribute_values=["arn:aws:bedrock-agentcore:us-east-1:123456789012:browser/testBrowser-1234567890"],
+            expected_type="AWS::BedrockAgentCore::BrowserCustom",
+            expected_identifier="testBrowser-1234567890",
+            expected_cfn_primary_identifier="testBrowser-1234567890",
+        )
+        # Test managed browser resource type when browser ARN contains aws.browser.v1
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_BEDROCK_AGENTCORE_BROWSER_ARN],
+            attribute_values=["arn:aws:bedrock-agentcore:us-east-1:123456789012:browser/aws.browser.v1"],
+            expected_type="AWS::BedrockAgentCore::Browser",
+            expected_identifier="aws.browser.v1",
+            expected_cfn_primary_identifier="aws.browser.v1",
+        )
+
+    def test_bedrock_agentcore_gateway_resource_attributes(self):
+        """Test Bedrock AgentCore gateway resource attributes."""
+
+        # Test managed gateway resource: when both gateway ID and target ID are present, both resource and
+        # CFN identifiers should be set to the gateway ID
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[GEN_AI_GATEWAY_ID, AWS_GATEWAY_TARGET_ID],
+            attribute_values=["agentGateway-123456789", "target-123456789"],
+            expected_type="AWS::BedrockAgentCore::GatewayTarget",
+            expected_identifier="agentGateway-123456789",
+            expected_cfn_primary_identifier="agentGateway-123456789",
+        )
+        # Test gateway resource with ARN and target ID: both resource and CFN identifiers should be set to
+        # the extracted gateway ID from ARN
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_BEDROCK_AGENTCORE_GATEWAY_ARN, AWS_GATEWAY_TARGET_ID],
+            attribute_values=[
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:gateway/gateway-from-arn",
+                "target-123456789",
+            ],
+            expected_type="AWS::BedrockAgentCore::GatewayTarget",
+            expected_identifier="gateway-from-arn",
+            expected_cfn_primary_identifier="gateway-from-arn",
+        )
+        # Test gateway target resource: when only target ID is present, both identifiers should be set to
+        # the target ID
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_GATEWAY_TARGET_ID],
+            attribute_values=["target-only-123456789"],
+            expected_type="AWS::BedrockAgentCore::GatewayTarget",
+            expected_identifier="target-only-123456789",
+            expected_cfn_primary_identifier="target-only-123456789",
+        )
+        # Test gateway resource with ID only: both identifiers should be set to the gateway ID
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[GEN_AI_GATEWAY_ID],
+            attribute_values=["agentGateway-123456789"],
+            expected_type="AWS::BedrockAgentCore::Gateway",
+            expected_identifier="agentGateway-123456789",
+            expected_cfn_primary_identifier="agentGateway-123456789",
+        )
+        # Test gateway resource with ARN only: both identifiers should be set to the extracted gateway ID
+        # from ARN
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_BEDROCK_AGENTCORE_GATEWAY_ARN],
+            attribute_values=["arn:aws:bedrock-agentcore:us-east-1:123456789012:gateway/gateway-arn-only"],
+            expected_type="AWS::BedrockAgentCore::Gateway",
+            expected_identifier="gateway-arn-only",
+            expected_cfn_primary_identifier="gateway-arn-only",
+        )
+
+    def test_bedrock_agentcore_memory_resource_attributes(self):
+        """Test Bedrock AgentCore memory resource attributes."""
+
+        # Test memory resource with both ID and ARN: resource identifier should be set to the memory ID
+        # and CFN primary identifier should be set to the memory ARN
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[GEN_AI_MEMORY_ID, AWS_BEDROCK_AGENTCORE_MEMORY_ARN],
+            attribute_values=[
+                "agentMemory-123456789",
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/agentMemory-123456789",
+            ],
+            expected_type="AWS::BedrockAgentCore::Memory",
+            expected_identifier="agentMemory-123456789",
+            expected_cfn_primary_identifier=(
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/agentMemory-123456789"
+            ),
+        )
+        # Test memory resource with ARN only: resource identifier should be set to the extracted memory ID
+        # and CFN primary identifier should be set to the memory ARN
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_BEDROCK_AGENTCORE_MEMORY_ARN],
+            attribute_values=["arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/memory-arn-only"],
+            expected_type="AWS::BedrockAgentCore::Memory",
+            expected_identifier="memory-arn-only",
+            expected_cfn_primary_identifier=("arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/memory-arn-only"),
+        )
+        # Test memory resource with ID only: both identifiers should be set to the memory ID
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[GEN_AI_MEMORY_ID],
+            attribute_values=["memory-id-only"],
+            expected_type="AWS::BedrockAgentCore::Memory",
+            expected_identifier="memory-id-only",
+            expected_cfn_primary_identifier="memory-id-only",
+        )
+        # Test memory resource with both ID and ARN where ARN contains different ID: memory ID should be prioritized
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[GEN_AI_MEMORY_ID, AWS_BEDROCK_AGENTCORE_MEMORY_ARN],
+            attribute_values=[
+                "direct-memory-id",
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/arn-memory-id",
+            ],
+            expected_type="AWS::BedrockAgentCore::Memory",
+            expected_identifier="direct-memory-id",
+            expected_cfn_primary_identifier=("arn:aws:bedrock-agentcore:us-east-1:123456789012:memory/arn-memory-id"),
+        )
+
+    def test_bedrock_agentcore_code_interpreter_resource_attributes(self):
+        """Test Bedrock AgentCore code interpreter resource attributes."""
+
+        # Test managed code interpreter resource type when code interpreter ID is aws.codeinterpreter.v1
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[GEN_AI_CODE_INTERPRETER_ID],
+            attribute_values=["aws.codeinterpreter.v1"],
+            expected_type="AWS::BedrockAgentCore::CodeInterpreter",
+            expected_identifier="aws.codeinterpreter.v1",
+            expected_cfn_primary_identifier="aws.codeinterpreter.v1",
+        )
+        # Test custom code interpreter resource type when code interpreter ID is not the standard
+        # aws.codeinterpreter.v1
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[GEN_AI_CODE_INTERPRETER_ID],
+            attribute_values=["testCodeInt-1234567890"],
+            expected_type="AWS::BedrockAgentCore::CodeInterpreterCustom",
+            expected_identifier="testCodeInt-1234567890",
+            expected_cfn_primary_identifier="testCodeInt-1234567890",
+        )
+        # Test custom code interpreter resource type when code interpreter ARN is provided
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN],
+            attribute_values=[
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:code-interpreter/" "testCodeInt-1234567890"
+            ],
+            expected_type="AWS::BedrockAgentCore::CodeInterpreterCustom",
+            expected_identifier="testCodeInt-1234567890",
+            expected_cfn_primary_identifier="testCodeInt-1234567890",
+        )
+        # Test managed code interpreter resource type when code interpreter ARN contains
+        # aws.codeinterpreter.v1
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN],
+            attribute_values=[
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:code-interpreter/" "aws.codeinterpreter.v1"
+            ],
+            expected_type="AWS::BedrockAgentCore::CodeInterpreter",
+            expected_identifier="aws.codeinterpreter.v1",
+            expected_cfn_primary_identifier="aws.codeinterpreter.v1",
+        )
+
+    def test_bedrock_agentcore_runtime_resource_attributes(self):
+        """Test Bedrock AgentCore runtime resource attributes."""
+        # Test runtime endpoint resource with all attributes: resource identifier should be set to extracted
+        # endpoint ID and CFN primary identifier should be set to endpoint ARN
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[
+                GEN_AI_RUNTIME_ID,
+                AWS_BEDROCK_AGENTCORE_RUNTIME_ARN,
+                AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN,
+            ],
+            attribute_values=[
+                "test-runtime-123",
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/test-runtime-123",
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime-endpoint/test-endpoint",
+            ],
+            expected_type="AWS::BedrockAgentCore::RuntimeEndpoint",
+            expected_identifier="test-endpoint",
+            expected_cfn_primary_identifier=(
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime-endpoint/test-endpoint"
+            ),
+        )
+        # Test runtime endpoint resource with runtime ID and endpoint ARN: resource identifier should be
+        # set to extracted endpoint ID and CFN primary identifier should be set to endpoint ARN
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[GEN_AI_RUNTIME_ID, AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN],
+            attribute_values=[
+                "test-runtime-123",
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime-endpoint/test-endpoint",
+            ],
+            expected_type="AWS::BedrockAgentCore::RuntimeEndpoint",
+            expected_identifier="test-endpoint",
+            expected_cfn_primary_identifier=(
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime-endpoint/test-endpoint"
+            ),
+        )
+        # Test runtime endpoint resource with runtime ARN and endpoint ARN: resource identifier should be
+        # set to extracted endpoint ID and CFN primary identifier should be set to endpoint ARN
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_BEDROCK_AGENTCORE_RUNTIME_ARN, AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN],
+            attribute_values=[
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/test-runtime-123",
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime-endpoint/test-endpoint",
+            ],
+            expected_type="AWS::BedrockAgentCore::RuntimeEndpoint",
+            expected_identifier="test-endpoint",
+            expected_cfn_primary_identifier=(
+                "arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime-endpoint/test-endpoint"
+            ),
+        )
+        # Test runtime resource with ID only: both identifiers should be set to the runtime ID
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[GEN_AI_RUNTIME_ID],
+            attribute_values=["test-runtime-123"],
+            expected_type="AWS::BedrockAgentCore::Runtime",
+            expected_identifier="test-runtime-123",
+            expected_cfn_primary_identifier="test-runtime-123",
+        )
+        # Test runtime resource with ARN only: both identifiers should be set to the extracted
+        # runtime ID from ARN
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_BEDROCK_AGENTCORE_RUNTIME_ARN],
+            attribute_values=["arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/test-runtime-123"],
+            expected_type="AWS::BedrockAgentCore::Runtime",
+            expected_identifier="test-runtime-123",
+            expected_cfn_primary_identifier="test-runtime-123",
+        )

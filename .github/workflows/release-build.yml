@@ -18,7 +18,8 @@ env:
   RELEASE_PRIVATE_REPOSITORY: 020628701572.dkr.ecr.us-west-2.amazonaws.com/adot-autoinstrumentation-python
   RELEASE_PRIVATE_REGISTRY: 020628701572.dkr.ecr.us-west-2.amazonaws.com
   PACKAGE_NAME: aws-opentelemetry-distro
-  ARTIFACT_NAME: aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
+  WHEEL_ARTIFACT_NAME: aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
+  SOURCE_ARTIFACT_NAME: aws_opentelemetry_distro-${{ github.event.inputs.version }}.tar.gz
   # Legacy list of commercial regions to deploy to. New regions should NOT be added here, and instead should be added to the `aws_region` default input to the workflow.
   LEGACY_COMMERCIAL_REGIONS: us-east-1, us-east-2, us-west-1, us-west-2, ap-south-1, ap-northeast-3, ap-northeast-2, ap-southeast-1, ap-southeast-2, ap-northeast-1, ca-central-1, eu-central-1, eu-west-1, eu-west-2, eu-west-3, eu-north-1, sa-east-1
   LAYER_NAME: AWSOpenTelemetryDistroPython
@@ -67,11 +68,17 @@ jobs:
       # release the artifacts. adot java for reference:
       # https://github.com/aws-observability/aws-otel-java-instrumentation/tree/93870a550ac30988fbdd5d3bf1e8f9f1b37916f5/smoke-tests
 
-      - name: Upload SDK artifact
+      - name: Upload SDK wheel artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
         with:
-          name: ${{ env.ARTIFACT_NAME }}
-          path: dist/${{ env.ARTIFACT_NAME }}
+          name: ${{ env.WHEEL_ARTIFACT_NAME }}
+          path: dist/${{ env.WHEEL_ARTIFACT_NAME }}
+
+      - name: Upload SDK source artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: ${{ env.SOURCE_ARTIFACT_NAME }}
+          path: dist/${{ env.SOURCE_ARTIFACT_NAME }}
   
   build-layer:
     needs: build-sdk
@@ -162,17 +169,22 @@ jobs:
       - name: Install twine
         run: pip install twine==5.1.1
       
-      - name: Download SDK artifact
+      - name: Download SDK wheel artifact
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
         with:
-          name: ${{ env.ARTIFACT_NAME }}
+          name: ${{ env.WHEEL_ARTIFACT_NAME }}
+
+      - name: Download SDK source artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
+        with:
+          name: ${{ env.SOURCE_ARTIFACT_NAME }}
       
       - name: Publish to TestPyPI
         env:
           TWINE_USERNAME: '__token__'
           TWINE_PASSWORD: ${{ env.TEST_PYPI_TOKEN_API_TOKEN }}
         run: |
-          twine upload --repository testpypi --skip-existing --verbose ${{ env.ARTIFACT_NAME }}
+          twine upload --repository testpypi --skip-existing --verbose ${{ env.WHEEL_ARTIFACT_NAME }} ${{ env.SOURCE_ARTIFACT_NAME }}
 
       # Publish to prod PyPI
       - name: Publish to PyPI
@@ -180,7 +192,7 @@ jobs:
           TWINE_USERNAME: '__token__'
           TWINE_PASSWORD: ${{ env.PROD_PYPI_TOKEN_API_TOKEN }}
         run: |
-          twine upload --skip-existing --verbose ${{ env.ARTIFACT_NAME }}
+          twine upload --skip-existing --verbose ${{ env.WHEEL_ARTIFACT_NAME }} ${{ env.SOURCE_ARTIFACT_NAME }}
 
       # Publish to public ECR
       - name: Build and push public ECR image
@@ -361,10 +373,10 @@ jobs:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
       
-      - name: Download SDK artifact
+      - name: Download SDK wheel artifact
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
         with:
-          name: ${{ env.ARTIFACT_NAME }}
+          name: ${{ env.WHEEL_ARTIFACT_NAME }}
       
       - name: Download layer.zip artifact
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
@@ -439,7 +451,7 @@ jobs:
           ${{ needs.generate-lambda-release-note.outputs.layer-note }}
           EOF
 
-          shasum -a 256 ${{ env.ARTIFACT_NAME }} > ${{ env.ARTIFACT_NAME }}.sha256
+          shasum -a 256 ${{ env.WHEEL_ARTIFACT_NAME }} > ${{ env.WHEEL_ARTIFACT_NAME }}.sha256
           shasum -a 256 layer.zip > layer.zip.sha256
 
           gh release create --target "$GITHUB_REF_NAME" \
@@ -447,7 +459,7 @@ jobs:
              --notes-file release_notes.md \
              --draft \
              "v$VERSION" \
-             ${{ env.ARTIFACT_NAME }} \
-             ${{ env.ARTIFACT_NAME }}.sha256 \
+             ${{ env.WHEEL_ARTIFACT_NAME }} \
+             ${{ env.WHEEL_ARTIFACT_NAME }}.sha256 \
              layer.zip \
              layer.zip.sha256
