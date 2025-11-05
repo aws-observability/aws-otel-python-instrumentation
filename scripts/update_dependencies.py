@@ -148,7 +148,7 @@ def main():
         "contract-tests/images/mock-collector/pyproject.toml",
         "contract-tests/images/mock-collector/requirements.txt",
         "contract-tests/tests/pyproject.toml",
-        "lambda-layer/src/tests/requirements.txt"
+        "lambda-layer/src/tests/requirements.txt",
     ]
 
     any_updated = False
