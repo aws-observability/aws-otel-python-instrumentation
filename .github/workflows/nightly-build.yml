@@ -153,7 +153,7 @@ jobs:
 
   publish-nightly-build-status:
     name: "Publish Nightly Build Status"
-    needs: [ update-dependencies, build-and-test ]
+    needs: [ update-dependencies, build-and-test, create-pr ]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -166,11 +166,13 @@ jobs:
       - name: Publish nightly build status
         run: |
           if [[ "${{ needs.build-and-test.result }}" == "skipped" ]]; then
-            echo "Build was skipped (no changes), not publishing metric"
+            echo "Build was skipped (no changes)"
+            value="0.0"
           else
-            value="${{ needs.build-and-test.result == 'success' && '0.0' || '1.0'}}"
-            aws cloudwatch put-metric-data --namespace 'ADOT/GitHubActions' \
-              --metric-name Failure \
-              --dimensions repository=${{ github.repository }},branch=${{ github.ref_name }},workflow=nightly_build \
-              --value $value
+            value="${{ (needs.build-and-test.result == 'success' && needs.create-pr.result == 'success') && '0.0' || '1.0'}}"
           fi
+          
+          aws cloudwatch put-metric-data --namespace 'ADOT/GitHubActions' \
+            --metric-name Failure \
+            --dimensions repository=${{ github.repository }},branch=${{ github.ref_name }},workflow=nightly_build \
+            --value $value
