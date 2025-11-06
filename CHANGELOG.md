@@ -25,4 +25,6 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   ([#522](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/522))
 - Bump ADOT Python version to 0.13.0 and OTel dependencies to 1.37.0/0.58b0
   ([#524](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/524))
+- Support credentials provider name for BedrockAgentCore Identity
+  ([#534](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/534))
 

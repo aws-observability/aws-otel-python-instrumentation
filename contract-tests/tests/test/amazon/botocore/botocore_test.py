@@ -974,6 +974,40 @@ class BotocoreTest(ContractTestBase):
             span_name="Bedrock AgentCore Control.CreateApiKeyCredentialProvider",
         )
 
+    def test_bedrock_agentcore_get_resource_oauth2_token(self):
+        expected_identifier = "test-oauth2-provider-123"
+        self.do_test_requests(
+            "bedrock-agentcore/identity/getresourceoauth2token",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock AgentCore",
+            remote_service="AWS::BedrockAgentCore",
+            remote_operation="GetResourceOauth2Token",
+            remote_resource_type="AWS::BedrockAgentCore::OAuth2CredentialProvider",
+            remote_resource_identifier=expected_identifier,
+            cloudformation_primary_identifier=expected_identifier,
+            span_name="Bedrock AgentCore.GetResourceOauth2Token",
+        )
+
+    def test_bedrock_agentcore_get_resource_api_key(self):
+        expected_identifier = "test-apikey-provider-123"
+        self.do_test_requests(
+            "bedrock-agentcore/identity/getresourceapikey",
+            "GET",
+            200,
+            0,
+            0,
+            rpc_service="Bedrock AgentCore",
+            remote_service="AWS::BedrockAgentCore",
+            remote_operation="GetResourceApiKey",
+            remote_resource_type="AWS::BedrockAgentCore::APIKeyCredentialProvider",
+            remote_resource_identifier=expected_identifier,
+            cloudformation_primary_identifier=expected_identifier,
+            span_name="Bedrock AgentCore.GetResourceApiKey",
+        )
+
     def test_secretsmanager_describe_secret(self):
         self.do_test_requests(
             "secretsmanager/describesecret/my-secret",

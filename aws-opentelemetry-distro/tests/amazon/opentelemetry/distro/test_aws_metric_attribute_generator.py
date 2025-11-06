@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_AUTH_ACCESS_KEY,
+    AWS_AUTH_CREDENTIAL_PROVIDER,
     AWS_AUTH_REGION,
     AWS_BEDROCK_AGENT_ID,
     AWS_BEDROCK_AGENTCORE_BROWSER_ARN,
@@ -254,6 +255,7 @@ class TestUtil(TestCase):
     ):
         keys = [SpanAttributes.RPC_SYSTEM, SpanAttributes.RPC_SERVICE]
         values = ["aws-api", "Bedrock AgentCore"]
+
         self._mock_attribute(keys, values)
         self.span_mock.kind = SpanKind.CLIENT
 
@@ -2311,6 +2313,167 @@ class TestAwsMetricAttributeGenerator(TestUtil):
             expected_type="AWS::BedrockAgentCore::CodeInterpreter",
             expected_identifier="aws.codeinterpreter.v1",
             expected_cfn_primary_identifier="aws.codeinterpreter.v1",
+        )
+
+    def test_bedrock_agentcore_identity_resource_attributes(self):
+        """Test Bedrock AgentCore identity resource attributes."""
+
+        # Test all OAuth and API key methods
+        oauth_methods = [
+            "CreateOauth2CredentialProvider",
+            "DeleteOauth2CredentialProvider",
+            "GetOauth2CredentialProvider",
+            "ListOauth2CredentialProviders",
+            "UpdateOauth2CredentialProvider",
+            "GetResourceOauth2Token",
+        ]
+
+        apikey_methods = [
+            "CreateApiKeyCredentialProvider",
+            "DeleteApiKeyCredentialProvider",
+            "GetApiKeyCredentialProvider",
+            "ListApiKeyCredentialProviders",
+            "UpdateApiKeyCredentialProvider",
+            "GetResourceApiKey",
+        ]
+
+        for method in oauth_methods:
+            self.validate_bedrock_agentcore_resource(
+                attribute_keys=[AWS_AUTH_CREDENTIAL_PROVIDER, SpanAttributes.RPC_METHOD],
+                attribute_values=["test-oauth2-provider", method],
+                expected_type="AWS::BedrockAgentCore::OAuth2CredentialProvider",
+                expected_identifier="test-oauth2-provider",
+                expected_cfn_primary_identifier="test-oauth2-provider",
+            )
+
+        for method in apikey_methods:
+            self.validate_bedrock_agentcore_resource(
+                attribute_keys=[AWS_AUTH_CREDENTIAL_PROVIDER, SpanAttributes.RPC_METHOD],
+                attribute_values=["test-apikey-provider", method],
+                expected_type="AWS::BedrockAgentCore::APIKeyCredentialProvider",
+                expected_identifier="test-apikey-provider",
+                expected_cfn_primary_identifier="test-apikey-provider",
+            )
+
+        # Test API Key credential provider with ARN
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_AUTH_CREDENTIAL_PROVIDER, SpanAttributes.RPC_METHOD],
+            attribute_values=[
+                "arn:aws:acps:us-east-1:123456789012:token-vault/my-vault/apikeycredentialprovider/my-api-key-provider",
+                "GetResourceApiKey",
+            ],
+            expected_type="AWS::BedrockAgentCore::APIKeyCredentialProvider",
+            expected_identifier="my-api-key-provider",
+            expected_cfn_primary_identifier="my-api-key-provider",
+        )
+
+        # Test OAuth2 credential provider with ARN
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_AUTH_CREDENTIAL_PROVIDER, SpanAttributes.RPC_METHOD],
+            attribute_values=[
+                "arn:aws:acps:us-east-1:123456789012:token-vault/my-vault/oauth2credentialprovider/my-oauth2-provider",
+                "GetResourceOauth2Token",
+            ],
+            expected_type="AWS::BedrockAgentCore::OAuth2CredentialProvider",
+            expected_identifier="my-oauth2-provider",
+            expected_cfn_primary_identifier="my-oauth2-provider",
+        )
+
+        # Test malformed ARN (insufficient parts) falls back to original string
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_AUTH_CREDENTIAL_PROVIDER, SpanAttributes.RPC_METHOD],
+            attribute_values=["arn:aws:incomplete", "GetResourceApiKey"],
+            expected_type="AWS::BedrockAgentCore::APIKeyCredentialProvider",
+            expected_identifier="arn:aws:incomplete",
+            expected_cfn_primary_identifier="arn:aws:incomplete",
+        )
+
+        # Test ARN with invalid account ID falls back to original string
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_AUTH_CREDENTIAL_PROVIDER, SpanAttributes.RPC_METHOD],
+            attribute_values=[
+                "arn:aws:acps:us-east-1:invalid-account:token-vault/my-vault/apikeycredentialprovider/test-provider",
+                "GetResourceApiKey",
+            ],
+            expected_type="AWS::BedrockAgentCore::APIKeyCredentialProvider",
+            expected_identifier=(
+                "arn:aws:acps:us-east-1:invalid-account:token-vault/my-vault/apikeycredentialprovider/test-provider"
+            ),
+            expected_cfn_primary_identifier=(
+                "arn:aws:acps:us-east-1:invalid-account:token-vault/my-vault/apikeycredentialprovider/test-provider"
+            ),
+        )
+
+        # Test API Key credential provider with name only (no ARN)
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_AUTH_CREDENTIAL_PROVIDER, SpanAttributes.RPC_METHOD],
+            attribute_values=["my-apikeycredentialprovider-name", "GetResourceApiKey"],
+            expected_type="AWS::BedrockAgentCore::APIKeyCredentialProvider",
+            expected_identifier="my-apikeycredentialprovider-name",
+            expected_cfn_primary_identifier="my-apikeycredentialprovider-name",
+        )
+
+        # Test OAuth2 credential provider with name only (no ARN)
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_AUTH_CREDENTIAL_PROVIDER, SpanAttributes.RPC_METHOD],
+            attribute_values=["my-oauth2credentialprovider-name", "GetResourceOauth2Token"],
+            expected_type="AWS::BedrockAgentCore::OAuth2CredentialProvider",
+            expected_identifier="my-oauth2credentialprovider-name",
+            expected_cfn_primary_identifier="my-oauth2credentialprovider-name",
+        )
+
+        # Test API Key detection from RPC method
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_AUTH_CREDENTIAL_PROVIDER, SpanAttributes.RPC_METHOD],
+            attribute_values=["test-provider-123", "GetResourceApiKey"],
+            expected_type="AWS::BedrockAgentCore::APIKeyCredentialProvider",
+            expected_identifier="test-provider-123",
+            expected_cfn_primary_identifier="test-provider-123",
+        )
+
+        # Test OAuth2 detection from RPC method
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_AUTH_CREDENTIAL_PROVIDER, SpanAttributes.RPC_METHOD],
+            attribute_values=["test-oauth2-provider-123", "GetResourceOauth2Token"],
+            expected_type="AWS::BedrockAgentCore::OAuth2CredentialProvider",
+            expected_identifier="test-oauth2-provider-123",
+            expected_cfn_primary_identifier="test-oauth2-provider-123",
+        )
+
+        # Test malformed ARN-like string (starts with "arn" but invalid format)
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_AUTH_CREDENTIAL_PROVIDER, SpanAttributes.RPC_METHOD],
+            attribute_values=["arn:abc:123", "GetResourceApiKey"],
+            expected_type="AWS::BedrockAgentCore::APIKeyCredentialProvider",
+            expected_identifier="arn:abc:123",
+            expected_cfn_primary_identifier="arn:abc:123",
+        )
+
+        # Test empty ARN string
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_AUTH_CREDENTIAL_PROVIDER, SpanAttributes.RPC_METHOD],
+            attribute_values=["", "GetResourceOauth2Token"],
+            expected_type=None,
+            expected_identifier=None,
+            expected_cfn_primary_identifier=None,
+        )
+
+        # Test missing RPC method should not set resource type
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_AUTH_CREDENTIAL_PROVIDER, SpanAttributes.RPC_METHOD],
+            attribute_values=["test-provider", None],
+            expected_type=None,
+            expected_identifier=None,
+            expected_cfn_primary_identifier=None,
+        )
+
+        # Test missing credentials provider should not set resource type
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_AUTH_CREDENTIAL_PROVIDER, SpanAttributes.RPC_METHOD],
+            attribute_values=[None, "GetResourceApiKey"],
+            expected_type=None,
+            expected_identifier=None,
+            expected_cfn_primary_identifier=None,
         )
 
     def test_bedrock_agentcore_runtime_resource_attributes(self):

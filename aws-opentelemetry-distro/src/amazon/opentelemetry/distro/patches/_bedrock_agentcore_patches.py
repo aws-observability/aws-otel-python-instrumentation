@@ -3,7 +3,7 @@
 from typing import Any, Dict
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
-    AWS_AUTH_CREDENTIAL_PROVIDER_ARN,
+    AWS_AUTH_CREDENTIAL_PROVIDER,
     AWS_BEDROCK_AGENTCORE_BROWSER_ARN,
     AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN,
     AWS_BEDROCK_AGENTCORE_GATEWAY_ARN,
@@ -46,7 +46,8 @@ _ATTRIBUTE_MAPPING = {
     "memory.arn": AWS_BEDROCK_AGENTCORE_MEMORY_ARN,
     "memory.id": GEN_AI_MEMORY_ID,
     "memoryId": GEN_AI_MEMORY_ID,
-    "credentialProviderArn": AWS_AUTH_CREDENTIAL_PROVIDER_ARN,
+    "credentialProviderArn": AWS_AUTH_CREDENTIAL_PROVIDER,
+    "resourceCredentialProviderName": AWS_AUTH_CREDENTIAL_PROVIDER,
     "workloadIdentityArn": AWS_BEDROCK_AGENTCORE_WORKLOAD_IDENTITY_ARN,
     "workloadIdentityDetails.workloadIdentityArn": AWS_BEDROCK_AGENTCORE_WORKLOAD_IDENTITY_ARN,
 }
