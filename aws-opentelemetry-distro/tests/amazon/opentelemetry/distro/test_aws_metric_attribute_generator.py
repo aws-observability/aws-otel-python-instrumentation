@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_AUTH_ACCESS_KEY,
+    AWS_AUTH_CREDENTIAL_PROVIDER,
     AWS_AUTH_REGION,
     AWS_BEDROCK_AGENT_ID,
     AWS_BEDROCK_AGENTCORE_BROWSER_ARN,
@@ -2312,6 +2313,101 @@ class TestAwsMetricAttributeGenerator(TestUtil):
             expected_identifier="aws.codeinterpreter.v1",
             expected_cfn_primary_identifier="aws.codeinterpreter.v1",
         )
+
+    def test_bedrock_agentcore_identity_resource_attributes(self):
+        """Test Bedrock AgentCore identity resource attributes."""
+
+        # Test API Key credential provider with ARN
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_AUTH_CREDENTIAL_PROVIDER],
+            attribute_values=[
+                "arn:aws:acps:us-east-1:123456789012:token-vault/my-vault/apikeycredentialprovider/my-api-key-provider"
+            ],
+            expected_type="AWS::BedrockAgentCore::APIKeyCredentialProvider",
+            expected_identifier="my-api-key-provider",
+            expected_cfn_primary_identifier="my-api-key-provider",
+        )
+
+        # Test OAuth2 credential provider with ARN
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_AUTH_CREDENTIAL_PROVIDER],
+            attribute_values=[
+                "arn:aws:acps:us-east-1:123456789012:token-vault/my-vault/oauth2credentialprovider/my-oauth2-provider"
+            ],
+            expected_type="AWS::BedrockAgentCore::OAuth2CredentialProvider",
+            expected_identifier="my-oauth2-provider",
+            expected_cfn_primary_identifier="my-oauth2-provider",
+        )
+
+        # Test API Key credential provider with name only (no ARN)
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_AUTH_CREDENTIAL_PROVIDER],
+            attribute_values=["my-apikeycredentialprovider-name"],
+            expected_type="AWS::BedrockAgentCore::APIKeyCredentialProvider",
+            expected_identifier="my-apikeycredentialprovider-name",
+            expected_cfn_primary_identifier="my-apikeycredentialprovider-name",
+        )
+
+        # Test OAuth2 credential provider with name only (no ARN)
+        self.validate_bedrock_agentcore_resource(
+            attribute_keys=[AWS_AUTH_CREDENTIAL_PROVIDER],
+            attribute_values=["my-oauth2credentialprovider-name"],
+            expected_type="AWS::BedrockAgentCore::OAuth2CredentialProvider",
+            expected_identifier="my-oauth2credentialprovider-name",
+            expected_cfn_primary_identifier="my-oauth2credentialprovider-name",
+        )
+
+        # Test credential provider type detection from RPC method when credential is just a name
+        keys = [SpanAttributes.RPC_SYSTEM, SpanAttributes.RPC_SERVICE]
+        values = ["aws-api", "Bedrock AgentCore"]
+        self._mock_attribute(keys, values)
+        self.span_mock.kind = SpanKind.CLIENT
+
+        # Test API Key detection from RPC method
+        self._mock_attribute(
+            [AWS_AUTH_CREDENTIAL_PROVIDER, SpanAttributes.RPC_METHOD],
+            ["test-provider-123", "GetResourceApiKey"],
+            keys,
+            values,
+        )
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertEqual(
+            actual_attributes.get(AWS_REMOTE_RESOURCE_TYPE), "AWS::BedrockAgentCore::APIKeyCredentialProvider"
+        )
+        self.assertEqual(actual_attributes.get(AWS_REMOTE_RESOURCE_IDENTIFIER), "test-provider-123")
+        self.assertEqual(actual_attributes.get(AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER), "test-provider-123")
+
+        # Test OAuth2 detection from RPC method
+        self._mock_attribute(
+            [AWS_AUTH_CREDENTIAL_PROVIDER, SpanAttributes.RPC_METHOD],
+            ["test-oauth2-provider-123", "GetResourceOauth2Token"],
+            keys,
+            values,
+        )
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertEqual(
+            actual_attributes.get(AWS_REMOTE_RESOURCE_TYPE), "AWS::BedrockAgentCore::OAuth2CredentialProvider"
+        )
+        self.assertEqual(actual_attributes.get(AWS_REMOTE_RESOURCE_IDENTIFIER), "test-oauth2-provider-123")
+        self.assertEqual(actual_attributes.get(AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER), "test-oauth2-provider-123")
+
+        # Test unknown credential provider type (no type info in name or RPC method)
+        self._mock_attribute(
+            [AWS_AUTH_CREDENTIAL_PROVIDER, SpanAttributes.RPC_METHOD],
+            ["test-unknown-provider", "SomeOtherMethod"],
+            keys,
+            values,
+        )
+        actual_attributes = _GENERATOR.generate_metric_attributes_dict_from_span(self.span_mock, self.resource).get(
+            DEPENDENCY_METRIC
+        )
+        self.assertIsNone(actual_attributes.get(AWS_REMOTE_RESOURCE_TYPE))
+        self.assertIsNone(actual_attributes.get(AWS_REMOTE_RESOURCE_IDENTIFIER))
+        self.assertIsNone(actual_attributes.get(AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER))
 
     def test_bedrock_agentcore_runtime_resource_attributes(self):
         """Test Bedrock AgentCore runtime resource attributes."""

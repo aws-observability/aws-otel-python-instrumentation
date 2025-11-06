@@ -409,6 +409,41 @@ class RequestHandler(BaseHTTPRequestHandler):
                     apiKey="test-api-key-value",
                 )
                 return
+            if operation == "getresourceoauth2token":
+                bedrock_agentcore_client.meta.events.register(
+                    "before-call.bedrock-agentcore.GetResourceOauth2Token",
+                    lambda **kwargs: inject_200_success(
+                        accessToken="mock-access-token-12345",
+                        sessionStatus="IN_PROGRESS",
+                        sessionUri="urn:ietf:params:oauth:request_uri:test-session-123",
+                        authorizationUrl="https://example.com/oauth/authorize?client_id=test&state=test",
+                        **kwargs,
+                    ),
+                )
+                bedrock_agentcore_client.get_resource_oauth2_token(
+                    oauth2Flow="USER_FEDERATION",
+                    resourceCredentialProviderName="test-oauth2-provider-123",
+                    scopes=["read", "write"],
+                    workloadIdentityToken="mock-workload-identity-token",
+                    customState="test-csrf-state",
+                    forceAuthentication=False,
+                    resourceOauth2ReturnUrl="https://example.com/callback",
+                    sessionUri="urn:ietf:params:oauth:request_uri:test-session-123",
+                )
+                return
+            if operation == "getresourceapikey":
+                bedrock_agentcore_client.meta.events.register(
+                    "before-call.bedrock-agentcore.GetResourceApiKey",
+                    lambda **kwargs: inject_200_success(
+                        apiKey="mock-api-key-value-12345",
+                        **kwargs,
+                    ),
+                )
+                bedrock_agentcore_client.get_resource_api_key(
+                    resourceCredentialProviderName="test-apikey-provider-123",
+                    workloadIdentityToken="mock-workload-identity-token",
+                )
+                return
 
         set_main_status(404)
 

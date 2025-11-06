@@ -8,7 +8,7 @@ from urllib.parse import ParseResult, urlparse
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_AUTH_ACCESS_KEY,
-    AWS_AUTH_CREDENTIAL_PROVIDER_ARN,
+    AWS_AUTH_CREDENTIAL_PROVIDER,
     AWS_AUTH_REGION,
     AWS_BEDROCK_AGENT_ID,
     AWS_BEDROCK_AGENTCORE_BROWSER_ARN,
@@ -844,21 +844,31 @@ def _handle_code_interpreter_attrs(attrs: BoundedAttributes) -> tuple[Optional[s
 def _handle_identity_attrs(attrs: BoundedAttributes) -> tuple[Optional[str], Optional[str], Optional[str]]:
     """
     Handler for BedrockAgentCore Identity resources.
-    Returns (resource_type, resource_identifier, cfn_primary_identifier).
     """
-    credential_arn = attrs.get(AWS_AUTH_CREDENTIAL_PROVIDER_ARN)
+    credentials_provider = attrs.get(AWS_AUTH_CREDENTIAL_PROVIDER)
+    rpc_method = attrs.get(_RPC_METHOD)
 
-    if credential_arn:
-        credential_arn_str = str(credential_arn)
+    if credentials_provider:
+        credentials_provider_str = str(credentials_provider)
+        rpc_method_str = str(rpc_method).lower() if rpc_method else ""
         resource_type = None
-        if "apikeycredentialprovider" in credential_arn_str:
-            resource_type = "APIKeyCredentialProvider"
-        elif "oauth2credentialprovider" in credential_arn_str:
-            resource_type = "OAuth2CredentialProvider"
-        agentcore_cfn_identifier = extract_bedrock_agentcore_resource_id_from_arn(credential_arn_str)
 
-        # Uses extracted ID from credential ARN as both resource identifier and CFN primary identifier.
-        # Resource type is determined by credential provider type in the ARN.
+        # Determine credential provider type from identifier or RPC method.
+        # When credential is just a name (not ARN), we infer type from the API operation being called.
+        if "apikey" in credentials_provider_str.lower() or "apikey" in rpc_method_str:
+            resource_type = "APIKeyCredentialProvider"
+        elif "oauth2" in credentials_provider_str.lower() or "oauth2" in rpc_method_str:
+            resource_type = "OAuth2CredentialProvider"
+
+        # CFN identifier is the credentials provider name.
+        # If the credentials provider is an ARN, we extract the name from the ARN.
+        agentcore_cfn_identifier = (
+            extract_bedrock_agentcore_resource_id_from_arn(credentials_provider_str)
+            if credentials_provider_str.startswith("arn:")
+            else credentials_provider_str
+        )
+
+        # Uses credential name as both resource identifier and CFN primary identifier.
         return resource_type, agentcore_cfn_identifier, agentcore_cfn_identifier
 
     return None, None, None

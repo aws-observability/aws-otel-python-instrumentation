@@ -20,7 +20,7 @@ AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER: str = "aws.remote.resource.cfn.primary.id
 # TODO：Move to Semantic Conventions when these attributes are added.
 AWS_AUTH_ACCESS_KEY: str = "aws.auth.account.access_key"
 AWS_AUTH_REGION: str = "aws.auth.region"
-AWS_AUTH_CREDENTIAL_PROVIDER_ARN: str = "aws.auth.credential_provider.arn"
+AWS_AUTH_CREDENTIAL_PROVIDER: str = "aws.auth.credential_provider"
 AWS_GATEWAY_TARGET_ID = "aws.gateway.target.id"
 AWS_SQS_QUEUE_URL: str = "aws.sqs.queue.url"
 AWS_SQS_QUEUE_NAME: str = "aws.sqs.queue.name"
