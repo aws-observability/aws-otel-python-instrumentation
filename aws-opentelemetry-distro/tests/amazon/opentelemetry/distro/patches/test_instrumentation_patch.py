@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import opentelemetry.sdk.extension.aws.resource.ec2 as ec2_resource
 import opentelemetry.sdk.extension.aws.resource.eks as eks_resource
 from amazon.opentelemetry.distro._aws_attribute_keys import (
-    AWS_AUTH_CREDENTIAL_PROVIDER_ARN,
+    AWS_AUTH_CREDENTIAL_PROVIDER,
     AWS_BEDROCK_AGENTCORE_BROWSER_ARN,
     AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN,
     AWS_BEDROCK_AGENTCORE_GATEWAY_ARN,
@@ -67,6 +67,7 @@ _AGENTCORE_MEMORY_ID: str = "agentMemory-123456789"
 _AGENTCORE_CREDENTIAL_PROVIDER_ARN: str = (
     "arn:aws:acps:us-east-1:123456789012:token-vault/test-vault/apikeycredentialprovider/test-provider"
 )
+_AGENTCORE_CREDENTIAL_PROVIDER_NAME: str = "test-oauth2-provider-123"
 _AGENTCORE_WORKLOAD_IDENTITY_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:workload-identity/test-wi"
 
 # Patch names
@@ -266,13 +267,23 @@ class TestInstrumentationPatch(TestCase):
             AWS_GATEWAY_TARGET_ID: _AGENTCORE_TARGET_ID,
             GEN_AI_MEMORY_ID: _AGENTCORE_MEMORY_ID,
             AWS_BEDROCK_AGENTCORE_MEMORY_ARN: _AGENTCORE_MEMORY_ARN,
-            AWS_AUTH_CREDENTIAL_PROVIDER_ARN: _AGENTCORE_CREDENTIAL_PROVIDER_ARN,
+            AWS_AUTH_CREDENTIAL_PROVIDER: _AGENTCORE_CREDENTIAL_PROVIDER_ARN,
             AWS_BEDROCK_AGENTCORE_WORKLOAD_IDENTITY_ARN: _AGENTCORE_WORKLOAD_IDENTITY_ARN,
         }
 
         for attr_key, expected_value in expected_attrs.items():
             self.assertEqual(bedrock_agentcore_attributes[attr_key], expected_value)
             self.assertEqual(bedrock_agentcore_success_attributes[attr_key], expected_value)
+
+        # Test resourceCredentialProviderName
+        name_attrs = _do_extract_attributes(
+            "bedrock-agentcore", {"resourceCredentialProviderName": _AGENTCORE_CREDENTIAL_PROVIDER_NAME}
+        )
+        name_success_attrs = _do_on_success(
+            "bedrock-agentcore", {"resourceCredentialProviderName": _AGENTCORE_CREDENTIAL_PROVIDER_NAME}
+        )
+        self.assertEqual(name_attrs[AWS_AUTH_CREDENTIAL_PROVIDER], _AGENTCORE_CREDENTIAL_PROVIDER_NAME)
+        self.assertEqual(name_success_attrs[AWS_AUTH_CREDENTIAL_PROVIDER], _AGENTCORE_CREDENTIAL_PROVIDER_NAME)
 
         # BedrockRuntime
         self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
