@@ -1,7 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import sys
-from unittest.mock import patch
 
 from fastapi import APIRouter, FastAPI
 
@@ -58,15 +57,12 @@ class TestFastAPIPatchesRealApp(TestBase):
         except Exception:
             pass
 
-    @patch("amazon.opentelemetry.distro.patches._fastapi_patches.get_code_correlation_enabled_status")
-    def test_fastapi_patches_with_real_app(self, mock_get_status):
+    def test_fastapi_patches_with_real_app(self):
         """Test FastAPI patches core functionality."""
-        mock_get_status.return_value = True
         original_add_api_route = _ORIGINAL_APIROUTER_ADD_API_ROUTE
 
         # Apply patches
         _apply_fastapi_instrumentation_patches()
-        mock_get_status.assert_called_once()
 
         # Test method wrapping
         instrumentor = FastAPIInstrumentor()
@@ -84,25 +80,8 @@ class TestFastAPIPatchesRealApp(TestBase):
         restored_add_api_route = APIRouter.add_api_route
         self.assertEqual(restored_add_api_route, original_add_api_route)
 
-    @patch("amazon.opentelemetry.distro.patches._fastapi_patches.get_code_correlation_enabled_status")
-    def test_fastapi_patches_disabled(self, mock_get_status):
-        """Test FastAPI patches when disabled."""
-        mock_get_status.return_value = False
-
-        _apply_fastapi_instrumentation_patches()
-        instrumentor = FastAPIInstrumentor()
-        instrumentor.instrument_app(self.app)
-
-        mock_get_status.assert_called_once()
-        self.assertIsNotNone(self.app)
-
-        spans = self.memory_exporter.get_finished_spans()
-        self.assertEqual(len(spans), 0)
-
-    @patch("amazon.opentelemetry.distro.patches._fastapi_patches.get_code_correlation_enabled_status")
-    def test_fastapi_patches_import_error_handling(self, mock_get_status):
+    def test_fastapi_patches_import_error_handling(self):
         """Test FastAPI patches with import errors."""
-        mock_get_status.return_value = True
         original_modules = sys.modules.copy()
 
         try:
@@ -117,17 +96,13 @@ class TestFastAPIPatchesRealApp(TestBase):
                     del sys.modules[module]
 
             _apply_fastapi_instrumentation_patches()
-            mock_get_status.assert_called_once()
 
         finally:
             sys.modules.clear()
             sys.modules.update(original_modules)
 
-    @patch("amazon.opentelemetry.distro.patches._fastapi_patches.get_code_correlation_enabled_status")
-    def test_fastapi_patches_endpoint_decoration(self, mock_get_status):
+    def test_fastapi_patches_endpoint_decoration(self):
         """Test endpoint decoration functionality."""
-        mock_get_status.return_value = True
-
         instrumentor = FastAPIInstrumentor()
         instrumentor.instrument_app(self.app)
         _apply_fastapi_instrumentation_patches()
@@ -143,11 +118,8 @@ class TestFastAPIPatchesRealApp(TestBase):
 
         self.assertTrue(len(self.app.routes) > 0)
 
-    @patch("amazon.opentelemetry.distro.patches._fastapi_patches.get_code_correlation_enabled_status")
-    def test_fastapi_patches_uninstrument_error_handling(self, mock_get_status):
+    def test_fastapi_patches_uninstrument_error_handling(self):
         """Test uninstrument error handling."""
-        mock_get_status.return_value = True
-
         instrumentor = FastAPIInstrumentor()
         _apply_fastapi_instrumentation_patches()
         instrumentor._instrument()
@@ -161,10 +133,8 @@ class TestFastAPIPatchesRealApp(TestBase):
         except Exception:
             pass  # Expected to handle gracefully
 
-    @patch("amazon.opentelemetry.distro.patches._fastapi_patches.get_code_correlation_enabled_status")
-    def test_fastapi_patches_code_correlation_import_error(self, mock_get_status):
+    def test_fastapi_patches_code_correlation_import_error(self):
         """Test code correlation import error handling."""
-        mock_get_status.return_value = True
         original_modules = sys.modules.copy()
 
         try:
@@ -185,11 +155,8 @@ class TestFastAPIPatchesRealApp(TestBase):
             sys.modules.clear()
             sys.modules.update(original_modules)
 
-    @patch("amazon.opentelemetry.distro.patches._fastapi_patches.get_code_correlation_enabled_status")
-    def test_fastapi_patches_double_decoration_prevention(self, mock_get_status):
+    def test_fastapi_patches_double_decoration_prevention(self):
         """Test prevention of double decoration."""
-        mock_get_status.return_value = True
-
         _apply_fastapi_instrumentation_patches()
         instrumentor = FastAPIInstrumentor()
         instrumentor._instrument()
@@ -206,11 +173,8 @@ class TestFastAPIPatchesRealApp(TestBase):
 
         self.assertTrue(len(self.app.routes) > 0)
 
-    @patch("amazon.opentelemetry.distro.patches._fastapi_patches.get_code_correlation_enabled_status")
-    def test_fastapi_patches_none_endpoint_handling(self, mock_get_status):
+    def test_fastapi_patches_none_endpoint_handling(self):
         """Test handling of None endpoints."""
-        mock_get_status.return_value = True
-
         _apply_fastapi_instrumentation_patches()
         instrumentor = FastAPIInstrumentor()
         instrumentor._instrument()

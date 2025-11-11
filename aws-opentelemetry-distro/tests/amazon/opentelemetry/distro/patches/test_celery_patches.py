@@ -22,72 +22,46 @@ class TestCeleryPatches(TestBase):
         """Clean up after tests."""
         super().tearDown()
 
-    @patch("amazon.opentelemetry.distro.patches._celery_patches.get_code_correlation_enabled_status")
     @patch("amazon.opentelemetry.distro.patches._celery_patches.CeleryInstrumentor")
-    def test_apply_celery_instrumentation_patches_enabled(self, mock_instrumentor, mock_get_status):
-        """Test Celery instrumentation patches when code correlation is enabled."""
-        mock_get_status.return_value = True
-
+    def test_apply_celery_instrumentation_patches_enabled(self, mock_instrumentor):
+        """Test Celery instrumentation patches when CeleryInstrumentor is available."""
         # Mock CeleryInstrumentor
         mock_original_trace_prerun = Mock()
         mock_instrumentor._trace_prerun = mock_original_trace_prerun
 
         _apply_celery_instrumentation_patches()
 
-        mock_get_status.assert_called_once()
         # Verify that the _trace_prerun method was replaced
         self.assertNotEqual(mock_instrumentor._trace_prerun, mock_original_trace_prerun)
 
-    @patch("amazon.opentelemetry.distro.patches._celery_patches.get_code_correlation_enabled_status")
-    def test_apply_celery_instrumentation_patches_disabled(self, mock_get_status):
-        """Test Celery instrumentation patches when code correlation is disabled."""
-        mock_get_status.return_value = False
-
-        with patch("amazon.opentelemetry.distro.patches._celery_patches.logger") as mock_logger:
-            _apply_celery_instrumentation_patches()
-
-            mock_get_status.assert_called_once()
-            # No warning should be logged since it returns early
-            mock_logger.warning.assert_not_called()
-
-    @patch("amazon.opentelemetry.distro.patches._celery_patches.get_code_correlation_enabled_status")
-    def test_apply_celery_instrumentation_patches_none_status(self, mock_get_status):
-        """Test Celery instrumentation patches when status is None."""
-        mock_get_status.return_value = None
-
-        with patch("amazon.opentelemetry.distro.patches._celery_patches.logger") as mock_logger:
-            _apply_celery_instrumentation_patches()
-
-            mock_get_status.assert_called_once()
-            # No warning should be logged since it returns early
-            mock_logger.warning.assert_not_called()
-
-    @patch("amazon.opentelemetry.distro.patches._celery_patches.get_code_correlation_enabled_status")
     @patch("amazon.opentelemetry.distro.patches._celery_patches.logger")
-    def test_apply_celery_instrumentation_patches_import_error(self, mock_logger, mock_get_status):
+    def test_apply_celery_instrumentation_patches_import_error(self, mock_logger):
         """Test Celery instrumentation patches with import error."""
-        mock_get_status.return_value = True
-
         # Patch CeleryInstrumentor to None to simulate import failure
         with patch("amazon.opentelemetry.distro.patches._celery_patches.CeleryInstrumentor", None):
             _apply_celery_instrumentation_patches()
 
-            mock_get_status.assert_called_once()
             mock_logger.warning.assert_called_once()
             args = mock_logger.warning.call_args[0]
             self.assertIn("Failed to apply Celery patches: CeleryInstrumentor not available", args[0])
 
-    @patch("amazon.opentelemetry.distro.patches._celery_patches.get_code_correlation_enabled_status")
     @patch("amazon.opentelemetry.distro.patches._celery_patches.logger")
-    def test_apply_celery_instrumentation_patches_exception(self, mock_logger, mock_get_status):
+    def test_apply_celery_instrumentation_patches_exception(self, mock_logger):
         """Test Celery instrumentation patches with general exception."""
-        mock_get_status.side_effect = Exception("Unexpected error")
+        # Mock CeleryInstrumentor to raise an exception when accessing _trace_prerun
+        mock_instrumentor = Mock()
 
-        _apply_celery_instrumentation_patches()
+        def raise_exception():
+            raise Exception("Unexpected error")
 
-        mock_logger.warning.assert_called_once()
-        args = mock_logger.warning.call_args[0]
-        self.assertIn("Failed to apply Celery instrumentation patches", args[0])
+        type(mock_instrumentor).__getattr__ = Mock(side_effect=raise_exception)
+
+        with patch("amazon.opentelemetry.distro.patches._celery_patches.CeleryInstrumentor", mock_instrumentor):
+            _apply_celery_instrumentation_patches()
+
+            mock_logger.warning.assert_called_once()
+            args = mock_logger.warning.call_args[0]
+            self.assertIn("Failed to apply Celery instrumentation patches", args[0])
 
 
 class TestExtractTaskFunction(TestBase):
@@ -398,12 +372,9 @@ class TestCeleryPatchesIntegration(TestBase):
         """Set up test fixtures."""
         super().setUp()
 
-    @patch("amazon.opentelemetry.distro.patches._celery_patches.get_code_correlation_enabled_status")
     @patch("amazon.opentelemetry.distro.patches._celery_patches.CeleryInstrumentor")
-    def test_full_patch_application_flow(self, mock_instrumentor, mock_get_status):
+    def test_full_patch_application_flow(self, mock_instrumentor):
         """Test the complete flow of applying Celery patches."""
-        mock_get_status.return_value = True
-
         # Create a realistic mock setup
         original_trace_prerun = Mock(__name__="original_trace_prerun")
         mock_instrumentor._trace_prerun = original_trace_prerun
