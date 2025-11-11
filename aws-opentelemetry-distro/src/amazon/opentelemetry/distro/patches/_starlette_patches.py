@@ -5,7 +5,6 @@ from logging import Logger, getLogger
 from typing import Collection
 
 from amazon.opentelemetry.distro._utils import is_agent_observability_enabled
-from amazon.opentelemetry.distro.aws_opentelemetry_configurator import get_code_correlation_enabled_status
 
 _logger: Logger = getLogger(__name__)
 
@@ -16,8 +15,7 @@ def _apply_starlette_instrumentation_patches() -> None:
     This applies both version compatibility patches and code attributes support.
     """
     _apply_starlette_version_patches()
-    if get_code_correlation_enabled_status() is True:
-        _apply_starlette_code_attributes_patch()
+    _apply_starlette_code_attributes_patch()
 
 
 # Upstream fix available in OpenTelemetry 1.34.0/0.55b0 (2025-06-04)

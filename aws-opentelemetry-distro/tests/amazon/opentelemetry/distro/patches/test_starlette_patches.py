@@ -17,6 +17,9 @@ class TestStarlettePatch(TestCase):
         """Test that the Starlette instrumentation patch is applied successfully."""
         for agent_enabled in [True, False]:
             with self.subTest(agent_enabled=agent_enabled):
+                # Reset mock for each sub-test
+                mock_logger.reset_mock()
+
                 with patch.dict("os.environ", {"AGENT_OBSERVABILITY_ENABLED": "true" if agent_enabled else "false"}):
                     # Create a mock StarletteInstrumentor class
                     mock_instrumentor_class = MagicMock()
@@ -68,9 +71,14 @@ class TestStarlettePatch(TestCase):
                             self.assertFalse(mock_middleware_instance.exclude_receive_span)
                             self.assertFalse(mock_middleware_instance.exclude_send_span)
 
-                        # Verify logging
-                        mock_logger.debug.assert_called_with(
-                            "Successfully patched Starlette instrumentation_dependencies method"
+                        # Verify logging - expect two debug calls from both patch functions
+                        self.assertEqual(mock_logger.debug.call_count, 2)
+
+                        # Check that both expected debug messages were logged
+                        debug_calls = [call[0][0] for call in mock_logger.debug.call_args_list]
+                        self.assertIn("Successfully patched Starlette instrumentation_dependencies method", debug_calls)
+                        self.assertIn(
+                            "Starlette instrumentation code attributes patch applied successfully", debug_calls
                         )
 
     @patch("amazon.opentelemetry.distro.patches._starlette_patches._logger")
@@ -81,10 +89,13 @@ class TestStarlettePatch(TestCase):
             # This should not raise an exception
             _apply_starlette_instrumentation_patches()
 
-            # Verify warning was logged
-            mock_logger.warning.assert_called_once()
-            args = mock_logger.warning.call_args[0]
-            self.assertIn("Failed to apply Starlette instrumentation patches", args[0])
+            # Verify warning was logged - expect two warnings from both sub-functions
+            self.assertEqual(mock_logger.warning.call_count, 2)
+
+            # Check that both expected warning messages were logged
+            warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
+            self.assertIn("Failed to apply Starlette instrumentation patches", warning_calls[0])
+            self.assertIn("Failed to apply Starlette code attributes patch", warning_calls[1])
 
 
 class TestStarletteCodeAttributesPatch(TestCase):

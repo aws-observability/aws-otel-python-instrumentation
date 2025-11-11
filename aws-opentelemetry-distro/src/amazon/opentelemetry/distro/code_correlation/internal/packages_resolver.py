@@ -20,13 +20,13 @@ from inspect import FullArgSpec, getfullargspec, isgeneratorfunction
 from pathlib import Path
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Union
 
-from ..config import AwsCodeCorrelationConfig
+from ..config import AwsCodeAttributesConfig
 
 # Module-level constants
 _logger = logging.getLogger(__name__)
 
 # Configuration
-_code_attributes_config = AwsCodeCorrelationConfig.from_env()
+_code_attributes_config = AwsCodeAttributesConfig.from_env()
 
 # Global caching variables
 _sys_path_hash: Optional[int] = None
