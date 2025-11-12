@@ -12,7 +12,6 @@ import functools
 import logging
 from typing import Any, Callable, Optional
 
-from amazon.opentelemetry.distro.aws_opentelemetry_configurator import get_code_correlation_enabled_status
 from amazon.opentelemetry.distro.code_correlation.utils import add_code_attributes_to_span
 
 logger = logging.getLogger(__name__)
@@ -125,9 +124,6 @@ def _apply_celery_instrumentation_patches():
     Apply code correlation patches to the Celery instrumentation.
     """
     try:
-        if get_code_correlation_enabled_status() is not True:
-            return
-
         if CeleryInstrumentor is None:
             logger.warning("Failed to apply Celery patches: CeleryInstrumentor not available")
             return

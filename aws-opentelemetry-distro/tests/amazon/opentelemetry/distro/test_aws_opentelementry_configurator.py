@@ -17,8 +17,8 @@ from amazon.opentelemetry.distro.aws_batch_unsampled_span_processor import Batch
 from amazon.opentelemetry.distro.aws_lambda_span_processor import AwsLambdaSpanProcessor
 from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsMetricAttributesSpanExporter
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
-    CODE_CORRELATION_ENABLED_CONFIG,
     LAMBDA_SPAN_EXPORT_BATCH_SIZE,
+    OTEL_AWS_ENHANCED_CODE_ATTRIBUTES,
     OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
     OTEL_EXPORTER_OTLP_LOGS_HEADERS,
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
@@ -45,7 +45,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _is_application_signals_runtime_enabled,
     _is_defer_to_workers_enabled,
     _is_wsgi_master_process,
-    get_code_correlation_enabled_status,
+    is_enhanced_code_attributes,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
@@ -784,7 +784,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         # Clean up environment to ensure consistent test state
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
-        os.environ.pop(CODE_CORRELATION_ENABLED_CONFIG, None)
+        os.environ.pop(OTEL_AWS_ENHANCED_CODE_ATTRIBUTES, None)
 
         # Test without code correlation enabled - should not add CodeAttributesSpanProcessor
         _customize_span_processors(mock_tracer_provider, Resource.get_empty())
@@ -793,7 +793,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         mock_tracer_provider.reset_mock()
 
         # Test with code correlation enabled - should add CodeAttributesSpanProcessor
-        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "true"
+        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "true"
 
         with patch(
             "amazon.opentelemetry.distro.code_correlation.CodeAttributesSpanProcessor"
@@ -810,7 +810,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         mock_tracer_provider.reset_mock()
 
         # Test with code correlation enabled along with application signals
-        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "true"
+        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "true"
         os.environ["OTEL_AWS_APPLICATION_SIGNALS_ENABLED"] = "True"
         os.environ["OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED"] = "False"
 
@@ -839,7 +839,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             self.assertIsInstance(third_call_args, AwsSpanMetricsProcessor)
 
         # Clean up
-        os.environ.pop(CODE_CORRELATION_ENABLED_CONFIG, None)
+        os.environ.pop(OTEL_AWS_ENHANCED_CODE_ATTRIBUTES, None)
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", None)
 
@@ -1500,65 +1500,65 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
                 self.assertIsNone(result)
                 mock_logger.error.assert_called_once()
 
-    def test_get_code_correlation_enabled_status(self):
-        """Test get_code_correlation_enabled_status function with various environment variable values"""
+    def test_is_enhanced_code_attributes(self):
+        """Test is_enhanced_code_attributes function with various environment variable values"""
         # Test when environment variable is not set (default state)
-        os.environ.pop(CODE_CORRELATION_ENABLED_CONFIG, None)
-        result = get_code_correlation_enabled_status()
-        self.assertIsNone(result)
+        os.environ.pop(OTEL_AWS_ENHANCED_CODE_ATTRIBUTES, None)
+        result = is_enhanced_code_attributes()
+        self.assertFalse(result)
 
         # Test when environment variable is set to 'true' (case insensitive)
-        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "true"
-        result = get_code_correlation_enabled_status()
+        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "true"
+        result = is_enhanced_code_attributes()
         self.assertTrue(result)
 
-        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "TRUE"
-        result = get_code_correlation_enabled_status()
+        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "TRUE"
+        result = is_enhanced_code_attributes()
         self.assertTrue(result)
 
-        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "True"
-        result = get_code_correlation_enabled_status()
+        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "True"
+        result = is_enhanced_code_attributes()
         self.assertTrue(result)
 
         # Test when environment variable is set to 'false' (case insensitive)
-        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "false"
-        result = get_code_correlation_enabled_status()
+        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "false"
+        result = is_enhanced_code_attributes()
         self.assertFalse(result)
 
-        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "FALSE"
-        result = get_code_correlation_enabled_status()
+        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "FALSE"
+        result = is_enhanced_code_attributes()
         self.assertFalse(result)
 
-        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "False"
-        result = get_code_correlation_enabled_status()
+        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "False"
+        result = is_enhanced_code_attributes()
         self.assertFalse(result)
 
         # Test with leading/trailing whitespace
-        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "  true  "
-        result = get_code_correlation_enabled_status()
+        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "  true  "
+        result = is_enhanced_code_attributes()
         self.assertTrue(result)
 
-        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "  false  "
-        result = get_code_correlation_enabled_status()
+        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "  false  "
+        result = is_enhanced_code_attributes()
         self.assertFalse(result)
 
-        # Test invalid values (should return None and log warning)
-        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "invalid"
-        result = get_code_correlation_enabled_status()
-        self.assertIsNone(result)
+        # Test invalid values (should return False)
+        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "invalid"
+        result = is_enhanced_code_attributes()
+        self.assertFalse(result)
 
         # Test another invalid value
-        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = "yes"
-        result = get_code_correlation_enabled_status()
-        self.assertIsNone(result)
+        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "yes"
+        result = is_enhanced_code_attributes()
+        self.assertFalse(result)
 
         # Test empty string (invalid)
-        os.environ[CODE_CORRELATION_ENABLED_CONFIG] = ""
-        result = get_code_correlation_enabled_status()
-        self.assertIsNone(result)
+        os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = ""
+        result = is_enhanced_code_attributes()
+        self.assertFalse(result)
 
         # Clean up
-        os.environ.pop(CODE_CORRELATION_ENABLED_CONFIG, None)
+        os.environ.pop(OTEL_AWS_ENHANCED_CODE_ATTRIBUTES, None)
 
 
 def validate_distro_environ():

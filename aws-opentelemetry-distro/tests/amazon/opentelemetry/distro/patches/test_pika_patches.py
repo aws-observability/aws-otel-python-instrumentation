@@ -12,11 +12,8 @@ from opentelemetry.test.test_base import TestBase
 class TestPikaPatches(TestBase):
     """Test Pika patches functionality."""
 
-    @patch("amazon.opentelemetry.distro.patches._pika_patches.get_code_correlation_enabled_status")
-    def test_apply_pika_instrumentation_patches_enabled(self, mock_get_status):
-        """Test Pika instrumentation patches when code correlation is enabled."""
-        mock_get_status.return_value = True
-
+    def test_apply_pika_instrumentation_patches_success(self):
+        """Test Pika instrumentation patches when import is successful."""
         # Mock pika utils
         mock_utils = Mock()
         mock_original_decorate_callback = Mock()
@@ -31,40 +28,12 @@ class TestPikaPatches(TestBase):
         ):
             _apply_pika_instrumentation_patches()
 
-            mock_get_status.assert_called_once()
             # Verify that the _decorate_callback method was replaced
             self.assertNotEqual(mock_utils._decorate_callback, mock_original_decorate_callback)
 
-    @patch("amazon.opentelemetry.distro.patches._pika_patches.get_code_correlation_enabled_status")
-    def test_apply_pika_instrumentation_patches_disabled(self, mock_get_status):
-        """Test Pika instrumentation patches when code correlation is disabled."""
-        mock_get_status.return_value = False
-
-        with patch("amazon.opentelemetry.distro.patches._pika_patches.logger") as mock_logger:
-            _apply_pika_instrumentation_patches()
-
-            mock_get_status.assert_called_once()
-            # No warning should be logged since it returns early
-            mock_logger.warning.assert_not_called()
-
-    @patch("amazon.opentelemetry.distro.patches._pika_patches.get_code_correlation_enabled_status")
-    def test_apply_pika_instrumentation_patches_none_status(self, mock_get_status):
-        """Test Pika instrumentation patches when status is None."""
-        mock_get_status.return_value = None
-
-        with patch("amazon.opentelemetry.distro.patches._pika_patches.logger") as mock_logger:
-            _apply_pika_instrumentation_patches()
-
-            mock_get_status.assert_called_once()
-            # No warning should be logged since it returns early
-            mock_logger.warning.assert_not_called()
-
-    @patch("amazon.opentelemetry.distro.patches._pika_patches.get_code_correlation_enabled_status")
     @patch("amazon.opentelemetry.distro.patches._pika_patches.logger")
-    def test_apply_pika_instrumentation_patches_import_error(self, mock_logger, mock_get_status):
+    def test_apply_pika_instrumentation_patches_import_error(self, mock_logger):
         """Test Pika instrumentation patches with import error."""
-        mock_get_status.return_value = True
-
         # Patch the specific import that would fail
         with patch.dict(
             "sys.modules",
@@ -72,22 +41,26 @@ class TestPikaPatches(TestBase):
         ):
             _apply_pika_instrumentation_patches()
 
-            mock_get_status.assert_called_once()
+            mock_logger.warning.assert_called_once()
+            args = mock_logger.warning.call_args[0]
+            self.assertIn("Failed to apply Pika patches: pika utils not available", args[0])
+
+    @patch("amazon.opentelemetry.distro.patches._pika_patches.logger")
+    def test_apply_pika_instrumentation_patches_exception(self, mock_logger):
+        """Test Pika instrumentation patches with general exception."""
+
+        # Mock import that raises an exception
+        def failing_import(*args, **kwargs):
+            if "pika" in str(args):
+                raise Exception("Unexpected error")
+            return Mock()
+
+        with patch("builtins.__import__", side_effect=failing_import):
+            _apply_pika_instrumentation_patches()
+
             mock_logger.warning.assert_called_once()
             args = mock_logger.warning.call_args[0]
             self.assertIn("Failed to apply Pika patches", args[0])
-
-    @patch("amazon.opentelemetry.distro.patches._pika_patches.get_code_correlation_enabled_status")
-    @patch("amazon.opentelemetry.distro.patches._pika_patches.logger")
-    def test_apply_pika_instrumentation_patches_exception(self, mock_logger, mock_get_status):
-        """Test Pika instrumentation patches with general exception."""
-        mock_get_status.side_effect = Exception("Unexpected error")
-
-        _apply_pika_instrumentation_patches()
-
-        mock_logger.warning.assert_called_once()
-        args = mock_logger.warning.call_args[0]
-        self.assertIn("Failed to apply Pika patches", args[0])
 
 
 class TestPatchDecorateCallback(TestBase):
@@ -291,11 +264,8 @@ class TestPatchDecorateCallback(TestBase):
 class TestPikaPatchesIntegration(TestBase):
     """Test Pika patches integration scenarios."""
 
-    @patch("amazon.opentelemetry.distro.patches._pika_patches.get_code_correlation_enabled_status")
-    def test_full_patch_application_flow(self, mock_get_status):
+    def test_full_patch_application_flow(self):
         """Test the complete flow of applying Pika patches."""
-        mock_get_status.return_value = True
-
         # Create a realistic mock setup
         mock_utils = Mock()
         original_decorate_callback = Mock(__name__="original_decorate_callback")
@@ -326,12 +296,9 @@ class TestPikaPatchesIntegration(TestBase):
             # Original function should be called
             original_decorate_callback.assert_called_once()
 
-    @patch("amazon.opentelemetry.distro.patches._pika_patches.get_code_correlation_enabled_status")
     @patch("amazon.opentelemetry.distro.patches._pika_patches.add_code_attributes_to_span")
-    def test_end_to_end_enhanced_consume_hook(self, mock_add_attributes, mock_get_status):
+    def test_end_to_end_enhanced_consume_hook(self, mock_add_attributes):
         """Test end-to-end flow with enhanced consume hook."""
-        mock_get_status.return_value = True
-
         # Create a realistic mock setup
         mock_utils = Mock()
         original_decorate_callback = Mock(return_value="decorated_result")

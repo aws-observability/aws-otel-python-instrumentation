@@ -4,8 +4,6 @@
 
 from logging import getLogger
 
-from amazon.opentelemetry.distro.aws_opentelemetry_configurator import get_code_correlation_enabled_status
-
 _logger = getLogger(__name__)
 
 
@@ -16,8 +14,7 @@ def _apply_fastapi_instrumentation_patches() -> None:
     This patches the FastAPI instrumentation to automatically add code attributes
     to spans by decorating view functions with record_code_attributes.
     """
-    if get_code_correlation_enabled_status() is True:
-        _apply_fastapi_code_attributes_patch()
+    _apply_fastapi_code_attributes_patch()
 
 
 def _apply_fastapi_code_attributes_patch() -> None:
