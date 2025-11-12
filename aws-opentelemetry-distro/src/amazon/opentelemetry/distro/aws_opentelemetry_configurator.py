@@ -95,7 +95,7 @@ SYSTEM_METRICS_INSTRUMENTATION_SCOPE_NAME = "opentelemetry.instrumentation.syste
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
 OTEL_EXPORTER_OTLP_LOGS_HEADERS = "OTEL_EXPORTER_OTLP_LOGS_HEADERS"
-CODE_CORRELATION_ENABLED_CONFIG = "OTEL_AWS_CODE_CORRELATION_ENABLED"
+OTEL_AWS_ENHANCED_CODE_ATTRIBUTES = "OTEL_AWS_ENHANCED_CODE_ATTRIBUTES"
 
 XRAY_SERVICE = "xray"
 LOGS_SERIVCE = "logs"
@@ -473,7 +473,7 @@ def _customize_logs_exporter(log_exporter: LogExporter) -> LogExporter:
 
 def _customize_span_processors(provider: TracerProvider, resource: Resource) -> None:
 
-    if get_code_correlation_enabled_status() is True:
+    if is_enhanced_code_attributes() is True:
         # pylint: disable=import-outside-toplevel
         from amazon.opentelemetry.distro.code_correlation import CodeAttributesSpanProcessor
 
@@ -622,32 +622,21 @@ def _is_application_signals_runtime_enabled():
     )
 
 
-def get_code_correlation_enabled_status() -> Optional[bool]:
+def is_enhanced_code_attributes() -> bool:
     """
-    Get the code correlation enabled status from environment variable.
+    Get the enhanced code attributes enabled status from environment variable.
 
     Returns:
-        True if OTEL_AWS_CODE_CORRELATION_ENABLED is set to 'true'
-        False if OTEL_AWS_CODE_CORRELATION_ENABLED is set to 'false'
-        None if OTEL_AWS_CODE_CORRELATION_ENABLED is not set (default state)
+        True if OTEL_AWS_ENHANCED_CODE_ATTRIBUTES is set to 'true'
+        else False
     """
-    env_value = os.environ.get(CODE_CORRELATION_ENABLED_CONFIG)
-
-    if env_value is None:
-        return None  # Default state - environment variable not set
+    env_value = os.environ.get(OTEL_AWS_ENHANCED_CODE_ATTRIBUTES, "false")
 
     env_value_lower = env_value.strip().lower()
     if env_value_lower == "true":
         return True
-    if env_value_lower == "false":
-        return False
-    # Invalid value, treat as default and log warning
-    _logger.warning(
-        "Invalid value for %s: %s. Expected 'true' or 'false'. Using default.",
-        CODE_CORRELATION_ENABLED_CONFIG,
-        env_value,
-    )
-    return None
+
+    return False
 
 
 def _is_lambda_environment():
