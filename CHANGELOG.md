@@ -11,6 +11,8 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+
+## v0.13.0 - 2025-11-12
 - Add Resource and CFN Attributes for Bedrock AgentCore spans
   ([#495](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/495))
 - Add botocore instrumentation extension for Bedrock AgentCore services with span attributes
