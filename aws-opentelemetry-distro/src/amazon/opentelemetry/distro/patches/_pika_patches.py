@@ -9,7 +9,6 @@ Patches for OpenTelemetry Pika instrumentation to add code correlation support.
 import functools
 import logging
 
-from amazon.opentelemetry.distro.aws_opentelemetry_configurator import get_code_correlation_enabled_status
 from amazon.opentelemetry.distro.code_correlation.utils import add_code_attributes_to_span
 
 logger = logging.getLogger(__name__)
@@ -43,9 +42,6 @@ def patch_decorate_callback(original_decorate_callback):
 def _apply_pika_instrumentation_patches():
     """Apply pika patches if code correlation is enabled."""
     try:
-        if get_code_correlation_enabled_status() is not True:
-            return
-
         # Import pika_utils inside function to allow proper testing
         try:
             # pylint: disable=import-outside-toplevel
