@@ -734,3 +734,18 @@ class TestUtilsIntegration(TestCase):
                 break
 
         self.assertTrue(function_name_set, "Function name attribute was not set")
+
+    def test_decorator_with_custom_callable_object(self):
+        """Test decorator with custom callable object (should return unchanged)."""
+
+        class CustomCallable:
+            async def __call__(self, scope, receive, send):
+                if scope["type"] == "http":
+                    response_data = {"message": "Hello from custom callable"}
+                    return response_data
+
+        custom_callable = CustomCallable()
+        result = record_code_attributes(custom_callable)
+
+        # Should return the original callable object unchanged
+        self.assertIs(result, custom_callable)
