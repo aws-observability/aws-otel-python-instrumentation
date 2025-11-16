@@ -10,12 +10,15 @@ code metadata with telemetry data.
 
 import functools
 import inspect
+import logging
 from functools import wraps
 from types import FrameType, FunctionType, MethodType
 from typing import Any, Callable
 
 from opentelemetry import trace
 from opentelemetry.semconv.attributes.code_attributes import CODE_FILE_PATH, CODE_FUNCTION_NAME, CODE_LINE_NUMBER
+
+logger = logging.getLogger(__name__)
 
 
 def get_callable_fullname(obj) -> str:  # pylint: disable=too-many-return-statements
@@ -222,6 +225,7 @@ def record_code_attributes(func: Callable[..., Any]) -> Callable[..., Any]:
     """
     # Only accept functions and methods, return original callable otherwise
     if not (inspect.isfunction(func) or inspect.ismethod(func)):
+        logger.debug("Skipping decoration for non-function/method: %s", type(func))
         return func
 
     # Detect async functions
