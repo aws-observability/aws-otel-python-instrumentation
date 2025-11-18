@@ -27,4 +27,5 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   ([#524](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/524))
 - Support credentials provider name for BedrockAgentCore Identity
   ([#534](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/534))
-
+- Upgrade Django to version 5.1.14 to address the SQL injection vulnerability CVE-2025-64459
+  ([#539](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/539))
