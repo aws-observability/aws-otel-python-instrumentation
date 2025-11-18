@@ -995,7 +995,7 @@ class TestInstrumentationPatch(TestCase):
                 mock_apply_patches.assert_called()
 
     def _test_fastapi_installed_flag(self):
-        """Test that fastapi patches are only applied when fastapi is installed and enhanced code attributes is enabled."""
+        """When fastapi is installed and enhanced code attributes is enabled."""
         with patch(
             "amazon.opentelemetry.distro.patches._fastapi_patches._apply_fastapi_instrumentation_patches"
         ) as mock_apply_patches:
@@ -1036,7 +1036,7 @@ class TestInstrumentationPatch(TestCase):
                 mock_apply_patches.assert_called()
 
     def _test_django_installed_flag(self):
-        """Test that django patches are only applied when django is installed and enhanced code attributes is enabled."""
+        """When django is installed and enhanced code attributes is enabled."""
         with patch(
             "amazon.opentelemetry.distro.patches._django_patches._apply_django_instrumentation_patches"
         ) as mock_apply_patches:
@@ -1077,7 +1077,7 @@ class TestInstrumentationPatch(TestCase):
                 mock_apply_patches.assert_called()
 
     def _test_celery_installed_flag(self):
-        """Test that celery patches are only applied when celery is installed and enhanced code attributes is enabled."""
+        """When celery is installed and enhanced code attributes is enabled."""
         with patch(
             "amazon.opentelemetry.distro.patches._celery_patches._apply_celery_instrumentation_patches"
         ) as mock_apply_patches:
@@ -1159,7 +1159,7 @@ class TestInstrumentationPatch(TestCase):
                 mock_apply_patches.assert_called()
 
     def _test_aio_pika_installed_flag(self):
-        """Test that aio-pika patches are only applied when aio-pika is installed and enhanced code attributes is enabled."""
+        """When aio-pika is installed and enhanced code attributes is enabled."""
         with patch(
             "amazon.opentelemetry.distro.patches._aio_pika_patches._apply_aio_pika_instrumentation_patches"
         ) as mock_apply_patches:
