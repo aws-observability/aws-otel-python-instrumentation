@@ -298,12 +298,8 @@ class TestInstrumentationPatch(TestCase):
             "bedrock-agentcore",
             {"resourceCredentialProviderName": _AGENTCORE_CREDENTIAL_PROVIDER_NAME},
         )
-        self.assertEqual(
-            name_attrs[AWS_AUTH_CREDENTIAL_PROVIDER], _AGENTCORE_CREDENTIAL_PROVIDER_NAME
-        )
-        self.assertEqual(
-            name_success_attrs[AWS_AUTH_CREDENTIAL_PROVIDER], _AGENTCORE_CREDENTIAL_PROVIDER_NAME
-        )
+        self.assertEqual(name_attrs[AWS_AUTH_CREDENTIAL_PROVIDER], _AGENTCORE_CREDENTIAL_PROVIDER_NAME)
+        self.assertEqual(name_success_attrs[AWS_AUTH_CREDENTIAL_PROVIDER], _AGENTCORE_CREDENTIAL_PROVIDER_NAME)
 
         # BedrockRuntime
         self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
