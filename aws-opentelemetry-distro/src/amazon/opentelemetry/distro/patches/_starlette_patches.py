@@ -12,7 +12,7 @@ _logger: Logger = getLogger(__name__)
 def _apply_starlette_instrumentation_patches() -> None:
     """Apply patches to the Starlette instrumentation.
 
-    This applies both version compatibility patches and code attributes support.
+    This applies both version compatibility patches and code attributes patches.
     """
     _apply_starlette_version_patches()
     _apply_starlette_code_attributes_patch()
