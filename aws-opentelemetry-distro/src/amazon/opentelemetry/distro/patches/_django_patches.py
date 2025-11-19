@@ -16,6 +16,7 @@ def _apply_django_instrumentation_patches() -> None:
     Also patches Django's path/re_path functions for URL pattern instrumentation.
     """
     _apply_django_code_attributes_patch()
+    _apply_django_rest_framework_patch()
 
 
 def _apply_django_code_attributes_patch() -> None:  # pylint: disable=too-many-statements
@@ -136,3 +137,61 @@ def _apply_django_code_attributes_patch() -> None:  # pylint: disable=too-many-s
 
     except Exception as exc:  # pylint: disable=broad-exception-caught
         _logger.warning("Failed to apply Django code attributes patch: %s", exc)
+
+
+def _apply_django_rest_framework_patch() -> None:
+    """Django REST Framework patch for accurate code attributes
+
+    This patch specifically handles Django REST Framework ViewSets to provide
+    accurate code attributes that point to the actual ViewSet methods (list, create, etc.)
+    instead of the generic APIView.dispatch method.
+    """
+    try:
+        # Check if Django REST Framework is available
+        try:
+            import rest_framework  # pylint: disable=import-outside-toplevel,unused-import  # noqa: F401
+        except ImportError:
+            # DRF not installed, skip patching
+            _logger.debug("Django REST Framework not installed, skipping DRF code attributes patch")
+            return
+
+        from rest_framework.views import APIView  # pylint: disable=import-outside-toplevel
+        from rest_framework.viewsets import ViewSetMixin  # pylint: disable=import-outside-toplevel
+
+        from amazon.opentelemetry.distro.code_correlation import (  # pylint: disable=import-outside-toplevel
+            add_code_attributes_to_span,
+        )
+        from opentelemetry import trace  # pylint: disable=import-outside-toplevel
+
+        # Store original dispatch method
+        original_dispatch = APIView.dispatch
+
+        def patched_dispatch(self, request, *args, **kwargs):
+            """Patched dispatch method to add accurate code attributes for ViewSets."""
+            # Call original dispatch method first
+            response = original_dispatch(self, request, *args, **kwargs)
+
+            # Add code attributes if this is a ViewSet
+            try:
+                if isinstance(self, ViewSetMixin):
+                    span = trace.get_current_span()
+                    if span and span.is_recording():
+                        # Get the actual ViewSet method that will be executed
+                        action = getattr(self, "action", None)
+                        if action:
+                            # Get the actual method (list, create, retrieve, etc.)
+                            handler = getattr(self, action, None)
+                            if handler and callable(handler):
+                                # Add code attributes pointing to the actual ViewSet method
+                                add_code_attributes_to_span(span, handler)
+            except Exception:  # pylint: disable=broad-exception-caught
+                _logger.info("Failed to add DRF ViewSet code attributes")
+
+            return response
+
+        # Apply the patch
+        APIView.dispatch = patched_dispatch
+        _logger.debug("Django REST Framework ViewSet code attributes patch applied successfully")
+
+    except Exception:  # pylint: disable=broad-exception-caught
+        _logger.info("Failed to apply Django REST Framework code attributes patch")
