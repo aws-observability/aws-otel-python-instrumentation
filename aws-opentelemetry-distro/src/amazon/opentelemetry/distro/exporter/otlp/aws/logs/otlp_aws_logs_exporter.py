@@ -18,7 +18,6 @@ from requests.structures import CaseInsensitiveDict
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 from opentelemetry.exporter.otlp.proto.common._log_encoder import encode_logs
 from opentelemetry.exporter.otlp.proto.http import Compression
-from opentelemetry.exporter.otlp.proto.http._common import _is_retryable
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.sdk._logs import LogData
 from opentelemetry.sdk._logs.export import LogExportResult
@@ -172,7 +171,7 @@ class OTLPAwsLogExporter(OTLPLogExporter):
         """
         # See: https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
 
-        return resp.status_code in (429, 503) or _is_retryable(resp)
+        return resp.status_code in (429, 503) or OTLPLogExporter._retryable(resp)
 
     def _get_retry_delay_sec(self, headers: CaseInsensitiveDict, retry_num: int) -> float:
         """
