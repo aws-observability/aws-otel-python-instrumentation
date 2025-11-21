@@ -43,7 +43,7 @@ from opentelemetry.sdk._configuration import (
     _import_id_generator,
     _import_sampler,
     _OTelSDKConfigurator,
-    _overwrite_logging_config_fns,
+    _patch_basic_config,
 )
 from opentelemetry.sdk._events import EventLoggerProvider
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
@@ -95,7 +95,7 @@ SYSTEM_METRICS_INSTRUMENTATION_SCOPE_NAME = "opentelemetry.instrumentation.syste
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
 OTEL_EXPORTER_OTLP_LOGS_HEADERS = "OTEL_EXPORTER_OTLP_LOGS_HEADERS"
-OTEL_AWS_ENHANCED_CODE_ATTRIBUTES = "OTEL_AWS_ENHANCED_CODE_ATTRIBUTES"
+OTEL_AWS_ENHANCED_CODE_ATTRIBUTES = "OTEL_AWS_EXPERIMENTAL_CODE_ATTRIBUTES"
 
 XRAY_SERVICE = "xray"
 LOGS_SERIVCE = "logs"
@@ -230,10 +230,11 @@ def _init_logging(
     set_event_logger_provider(event_logger_provider)
 
     if setup_logging_handler:
+        _patch_basic_config()
+
         # Add OTel handler
         handler = LoggingHandler(level=logging.NOTSET, logger_provider=provider)
         logging.getLogger().addHandler(handler)
-        _overwrite_logging_config_fns(handler)
 
 
 def _init_tracing(

@@ -10,12 +10,15 @@ code metadata with telemetry data.
 
 import functools
 import inspect
+import logging
 from functools import wraps
 from types import FrameType, FunctionType, MethodType
 from typing import Any, Callable
 
 from opentelemetry import trace
 from opentelemetry.semconv.attributes.code_attributes import CODE_FILE_PATH, CODE_FUNCTION_NAME, CODE_LINE_NUMBER
+
+logger = logging.getLogger(__name__)
 
 
 def get_callable_fullname(obj) -> str:  # pylint: disable=too-many-return-statements
@@ -200,6 +203,7 @@ def record_code_attributes(func: Callable[..., Any]) -> Callable[..., Any]:
     - code.line.number: The line number where the function is defined
 
     This decorator supports both synchronous and asynchronous functions.
+    If the callable is not a function or method, it returns the original callable unchanged.
 
     Usage:
         @record_code_attributes
@@ -216,8 +220,14 @@ def record_code_attributes(func: Callable[..., Any]) -> Callable[..., Any]:
         func: The function to be decorated
 
     Returns:
-        The wrapped function with current span code attributes tracing
+        The wrapped function with current span code attributes tracing,
+        or the original callable if it's not a function or method
     """
+    # Only accept functions and methods, return original callable otherwise
+    if not (inspect.isfunction(func) or inspect.ismethod(func)):
+        logger.debug("Skipping decoration for non-function/method: %s", type(func))
+        return func
+
     # Detect async functions
     is_async = inspect.iscoroutinefunction(func)
 

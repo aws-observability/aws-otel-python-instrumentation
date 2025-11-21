@@ -145,6 +145,20 @@ class TestInstrumentationPatch(TestCase):
         self._reset_mocks()
         self._test_starlette_installed_flag()
         self._reset_mocks()
+        self._test_enhanced_code_attributes_patches()
+        self._reset_mocks()
+        self._test_flask_installed_flag()
+        self._reset_mocks()
+        self._test_fastapi_installed_flag()
+        self._reset_mocks()
+        self._test_django_installed_flag()
+        self._reset_mocks()
+        self._test_celery_installed_flag()
+        self._reset_mocks()
+        self._test_pika_installed_flag()
+        self._reset_mocks()
+        self._test_aio_pika_installed_flag()
+        self._reset_mocks()
 
     def _test_unpatched_botocore_instrumentation(self):
         # Kinesis
@@ -189,7 +203,7 @@ class TestInstrumentationPatch(TestCase):
         self.assertTrue("sns" in _KNOWN_EXTENSIONS, "Upstream has removed the SNS extension")
 
         # StepFunctions
-        self.assertTrue("stepfunctions" in _KNOWN_EXTENSIONS, "Upstream has removed the StepFunctions extension")
+        self.assertFalse("stepfunctions" in _KNOWN_EXTENSIONS, "Upstream has added a StepFunctions extension")
 
         # Lambda
         self.assertTrue("lambda" in _KNOWN_EXTENSIONS, "Upstream has removed the Lambda extension")
@@ -277,10 +291,12 @@ class TestInstrumentationPatch(TestCase):
 
         # Test resourceCredentialProviderName
         name_attrs = _do_extract_attributes(
-            "bedrock-agentcore", {"resourceCredentialProviderName": _AGENTCORE_CREDENTIAL_PROVIDER_NAME}
+            "bedrock-agentcore",
+            {"resourceCredentialProviderName": _AGENTCORE_CREDENTIAL_PROVIDER_NAME},
         )
         name_success_attrs = _do_on_success(
-            "bedrock-agentcore", {"resourceCredentialProviderName": _AGENTCORE_CREDENTIAL_PROVIDER_NAME}
+            "bedrock-agentcore",
+            {"resourceCredentialProviderName": _AGENTCORE_CREDENTIAL_PROVIDER_NAME},
         )
         self.assertEqual(name_attrs[AWS_AUTH_CREDENTIAL_PROVIDER], _AGENTCORE_CREDENTIAL_PROVIDER_NAME)
         self.assertEqual(name_success_attrs[AWS_AUTH_CREDENTIAL_PROVIDER], _AGENTCORE_CREDENTIAL_PROVIDER_NAME)
@@ -752,7 +768,8 @@ class TestInstrumentationPatch(TestCase):
                 self.assertEqual(len(bedrock_agent_extract_attributes), 2)
                 self.assertEqual(bedrock_agent_extract_attributes[attribute_tuple[0]], attribute_tuple[1])
                 self.assertEqual(
-                    bedrock_agent_extract_attributes["aws.bedrock.knowledge_base.id"], _BEDROCK_KNOWLEDGEBASE_ID
+                    bedrock_agent_extract_attributes["aws.bedrock.knowledge_base.id"],
+                    _BEDROCK_KNOWLEDGEBASE_ID,
                 )
             else:
                 self.assertEqual(len(bedrock_agent_extract_attributes), 1)
@@ -837,7 +854,7 @@ class TestInstrumentationPatch(TestCase):
             instrumentor = StarletteInstrumentor()
             deps = original_deps(instrumentor)
             # Default should have version constraint
-            self.assertEqual(deps, ("starlette >= 0.13",))
+            self.assertEqual(deps, ("starlette >= 0.13, <0.15",))
         except ImportError:
             # If starlette instrumentation is not installed, skip this test
             pass
@@ -859,8 +876,10 @@ class TestInstrumentationPatch(TestCase):
     def _test_starlette_installed_flag(self):  # pylint: disable=no-self-use
         """Test that starlette patches are only applied when starlette is installed."""
         with patch(
-            "amazon.opentelemetry.distro.patches._starlette_patches._apply_starlette_instrumentation_patches"
-        ) as mock_apply_patches:
+            "amazon.opentelemetry.distro.patches._starlette_patches._apply_starlette_version_patches"
+        ) as mock_apply_version_patches, patch(
+            "amazon.opentelemetry.distro.patches._starlette_patches._apply_starlette_code_attributes_patch"
+        ) as mock_apply_code_patches:
             # Test when starlette is not installed
             with patch(
                 "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=False
@@ -869,9 +888,11 @@ class TestInstrumentationPatch(TestCase):
                 # Check that is_installed was called for starlette
                 mock_is_installed.assert_any_call("starlette")
                 # Patches should not be applied when starlette is not installed
-                mock_apply_patches.assert_not_called()
+                mock_apply_version_patches.assert_not_called()
+                mock_apply_code_patches.assert_not_called()
 
-            mock_apply_patches.reset_mock()
+            mock_apply_version_patches.reset_mock()
+            mock_apply_code_patches.reset_mock()
 
             # Test when starlette is installed
             with patch(
@@ -880,7 +901,302 @@ class TestInstrumentationPatch(TestCase):
                 apply_instrumentation_patches()
                 # Check that is_installed was called for starlette
                 mock_is_installed.assert_any_call("starlette")
-                # Patches should be applied when starlette is installed
+                # Version patches should always be applied when starlette is installed
+                mock_apply_version_patches.assert_called()
+                # Code attributes patches should only be applied if enhanced code attributes is enabled
+                # We don't test that specific condition here as it depends on configuration
+
+    def _test_enhanced_code_attributes_patches(self):
+        """Test enhanced code attributes patches are applied correctly."""
+        with patch(
+            "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes", return_value=True
+        ) as mock_enhanced_code_attrs, patch(
+            "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+        ) as mock_is_installed:
+            # Mock all the patch application functions
+            with patch(
+                "amazon.opentelemetry.distro.patches._starlette_patches._apply_starlette_code_attributes_patch"
+            ) as mock_starlette_patch, patch(
+                "amazon.opentelemetry.distro.patches._flask_patches._apply_flask_instrumentation_patches"
+            ) as mock_flask_patch, patch(
+                "amazon.opentelemetry.distro.patches._fastapi_patches._apply_fastapi_instrumentation_patches"
+            ) as mock_fastapi_patch, patch(
+                "amazon.opentelemetry.distro.patches._django_patches._apply_django_instrumentation_patches"
+            ) as mock_django_patch, patch(
+                "amazon.opentelemetry.distro.patches._celery_patches._apply_celery_instrumentation_patches"
+            ) as mock_celery_patch, patch(
+                "amazon.opentelemetry.distro.patches._pika_patches._apply_pika_instrumentation_patches"
+            ) as mock_pika_patch, patch(
+                "amazon.opentelemetry.distro.patches._aio_pika_patches._apply_aio_pika_instrumentation_patches"
+            ) as mock_aio_pika_patch:
+
+                apply_instrumentation_patches()
+
+                # Verify enhanced code attributes check was called
+                mock_enhanced_code_attrs.assert_called()
+
+                # Verify all library installation checks were called
+                mock_is_installed.assert_any_call("starlette")
+                mock_is_installed.assert_any_call("flask")
+                mock_is_installed.assert_any_call("fastapi")
+                mock_is_installed.assert_any_call("django")
+                mock_is_installed.assert_any_call("celery")
+                mock_is_installed.assert_any_call("pika")
+                mock_is_installed.assert_any_call("aio-pika")
+
+                # Verify all patches were applied since all libraries are "installed"
+                mock_starlette_patch.assert_called()
+                mock_flask_patch.assert_called()
+                mock_fastapi_patch.assert_called()
+                mock_django_patch.assert_called()
+                mock_celery_patch.assert_called()
+                mock_pika_patch.assert_called()
+                mock_aio_pika_patch.assert_called()
+
+    def _test_flask_installed_flag(self):
+        """Test that flask patches are only applied when flask is installed and enhanced code attributes is enabled."""
+        with patch(
+            "amazon.opentelemetry.distro.patches._flask_patches._apply_flask_instrumentation_patches"
+        ) as mock_apply_patches:
+            # Test when flask is not installed
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=False
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("flask")
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when flask is installed but enhanced code attributes is disabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ), patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=False,
+            ):
+                apply_instrumentation_patches()
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when flask is installed and enhanced code attributes is enabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("flask")
+                mock_apply_patches.assert_called()
+
+    def _test_fastapi_installed_flag(self):
+        """When fastapi is installed and enhanced code attributes is enabled."""
+        with patch(
+            "amazon.opentelemetry.distro.patches._fastapi_patches._apply_fastapi_instrumentation_patches"
+        ) as mock_apply_patches:
+            # Test when fastapi is not installed
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=False
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("fastapi")
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when fastapi is installed but enhanced code attributes is disabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ), patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=False,
+            ):
+                apply_instrumentation_patches()
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when fastapi is installed and enhanced code attributes is enabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("fastapi")
+                mock_apply_patches.assert_called()
+
+    def _test_django_installed_flag(self):
+        """When django is installed and enhanced code attributes is enabled."""
+        with patch(
+            "amazon.opentelemetry.distro.patches._django_patches._apply_django_instrumentation_patches"
+        ) as mock_apply_patches:
+            # Test when django is not installed
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=False
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("django")
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when django is installed but enhanced code attributes is disabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ), patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=False,
+            ):
+                apply_instrumentation_patches()
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when django is installed and enhanced code attributes is enabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("django")
+                mock_apply_patches.assert_called()
+
+    def _test_celery_installed_flag(self):
+        """When celery is installed and enhanced code attributes is enabled."""
+        with patch(
+            "amazon.opentelemetry.distro.patches._celery_patches._apply_celery_instrumentation_patches"
+        ) as mock_apply_patches:
+            # Test when celery is not installed
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=False
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("celery")
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when celery is installed but enhanced code attributes is disabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ), patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=False,
+            ):
+                apply_instrumentation_patches()
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when celery is installed and enhanced code attributes is enabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("celery")
+                mock_apply_patches.assert_called()
+
+    def _test_pika_installed_flag(self):
+        """Test that pika patches are only applied when pika is installed and enhanced code attributes is enabled."""
+        with patch(
+            "amazon.opentelemetry.distro.patches._pika_patches._apply_pika_instrumentation_patches"
+        ) as mock_apply_patches:
+            # Test when pika is not installed
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=False
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("pika")
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when pika is installed but enhanced code attributes is disabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ), patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=False,
+            ):
+                apply_instrumentation_patches()
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when pika is installed and enhanced code attributes is enabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("pika")
+                mock_apply_patches.assert_called()
+
+    def _test_aio_pika_installed_flag(self):
+        """When aio-pika is installed and enhanced code attributes is enabled."""
+        with patch(
+            "amazon.opentelemetry.distro.patches._aio_pika_patches._apply_aio_pika_instrumentation_patches"
+        ) as mock_apply_patches:
+            # Test when aio-pika is not installed
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=False
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("aio-pika")
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when aio-pika is installed but enhanced code attributes is disabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ), patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=False,
+            ):
+                apply_instrumentation_patches()
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when aio-pika is installed and enhanced code attributes is enabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("aio-pika")
                 mock_apply_patches.assert_called()
 
     def _reset_mocks(self):
