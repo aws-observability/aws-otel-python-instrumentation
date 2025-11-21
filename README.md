@@ -21,6 +21,11 @@ Check out the [getting started documentation](https://aws-otel.github.io/docs/ge
 ## Supported Python libraries and frameworks
 For the complete list of supported frameworks, please refer to the [OpenTelemetry for Python documentation](https://github.com/open-telemetry/opentelemetry-python-contrib/blob/main/instrumentation/README.md).
 
+## Experimental Features
+
+This distribution includes experimental features that are under active development. For detailed information about experimental features including code attributes, please refer to the [aws-opentelemetry-distro README](aws-opentelemetry-distro/README.md).
+
+
 ## Support
 
 Please note that as per policy, we're providing support via GitHub on a best effort basis. However, if you have AWS Enterprise Support you can create a ticket and we will provide direct support within the respective SLAs.
