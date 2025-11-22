@@ -23,7 +23,21 @@ For the complete list of supported frameworks, please refer to the [OpenTelemetr
 
 ## Experimental Features
 
-This distribution includes experimental features that are under active development. For detailed information about experimental features including code attributes, please refer to the [aws-opentelemetry-distro README](aws-opentelemetry-distro/README.md).
+**⚠️ Note: Experimental features and their behavior may change in future versions.**
+
+### Code Attributes
+
+Code attributes is an experimental feature that automatically captures source code context information when trace data is generated. This feature enhances observability by providing precise code-level details that help developers quickly identify and debug issues.
+
+Code attributes capture:
+* **Source file path** - The exact file where the telemetry originated
+* **Function name** - The method or function fully-qualified name, including class/namespace context when applicable (e.g., `com.example.MyService.processRequest`, `MyClass.my_method`)
+* **Line numbers** - Precise code location for pinpoint debugging
+
+To enable code attributes, set the following environment variable:
+```bash
+export OTEL_AWS_EXPERIMENTAL_CODE_ATTRIBUTES=true
+```
 
 
 ## Support
