@@ -577,6 +577,18 @@ class TestIsThirdPartyPackage(TestCase):
 
         self.assertFalse(result)
 
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver.resolve_package_from_filename")
+    @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._load_third_party_packages")
+    def test_is_third_party_package_case_insensitive_match(self, mock_load_packages, mock_resolve):
+        """Test case-insensitive detection of third-party package."""
+        # Test with uppercase package name in distribution but lowercase in third-party list
+        mock_resolve.return_value = Distribution(name="Django", version="4.2.0")
+        mock_load_packages.return_value = {"django", "requests", "urllib3"}
+
+        result = is_third_party_package(Path("/path/to/Django/__init__.py"))
+
+        self.assertTrue(result)
+
 
 class TestIsUserCode(TestCase):
     """Test the is_user_code function."""
