@@ -250,6 +250,7 @@ class TestInstrumentationPatch(TestCase):
         self._test_patched_process_anthropic_claude_chunk({"location": "Seattle"}, {"location": "Seattle"})
         self._test_patched_process_anthropic_claude_chunk(None, None)
         self._test_patched_process_anthropic_claude_chunk({}, {})
+        self._test_patched_from_converse_with_malformed_response()
 
         # Bedrock Agent Runtime
         self.assertTrue("bedrock-agent-runtime" in _KNOWN_EXTENSIONS)
@@ -644,6 +645,15 @@ class TestInstrumentationPatch(TestCase):
         }
         result = bedrock_utils.extract_tool_calls(message_with_type_tool_use, True)
         self.assertEqual(len(result), 1)
+
+    def _test_patched_from_converse_with_malformed_response(self):
+        """Test patched from_converse handles malformed response missing output key"""
+        malformed_response = {"stopReason": "end_turn"}
+        choice = bedrock_utils._Choice.from_converse(malformed_response, capture_content=False)
+
+        self.assertEqual(choice.finish_reason, "end_turn")
+        self.assertEqual(choice.message, {})
+        self.assertEqual(choice.index, 0)
 
     def _test_patched_process_anthropic_claude_chunk(
         self, input_value: Dict[str, str], expected_output: Dict[str, str]
