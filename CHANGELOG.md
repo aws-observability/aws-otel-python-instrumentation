@@ -23,4 +23,6 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   ([#522](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/522))
 - Support credentials provider name for BedrockAgentCore Identity
   ([#534](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/534))
+- [PATCH] Add safety check for bedrock ConverseStream responses
+  ([#547](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/547))
 
