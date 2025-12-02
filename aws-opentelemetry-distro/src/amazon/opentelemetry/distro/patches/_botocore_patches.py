@@ -425,8 +425,8 @@ def _apply_botocore_bedrock_patch() -> None:  # pylint: disable=too-many-stateme
 
         if tool_calls := bedrock_utils.extract_tool_calls(orig_message, capture_content):
             message["tool_calls"] = tool_calls
-        elif capture_content:
-            message["content"] = orig_message["content"]
+        elif capture_content and (content := orig_message.get("content")):
+            message["content"] = content
 
         return cls(message, response["stopReason"], index=0)
 
