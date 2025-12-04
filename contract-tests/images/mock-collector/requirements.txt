@@ -1,5 +1,5 @@
 grpcio==1.76.0
-opentelemetry-proto==1.38.0
-opentelemetry-sdk==1.38.0
+opentelemetry-proto==1.39.0
+opentelemetry-sdk==1.39.0
 protobuf==6.33.0
 typing-extensions==4.15.0
