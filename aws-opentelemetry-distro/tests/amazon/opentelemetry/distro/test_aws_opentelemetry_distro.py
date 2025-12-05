@@ -101,14 +101,21 @@ class TestAwsOpenTelemetryDistro(TestCase):
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.get_aws_region")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_installed")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
     def test_configure_with_agent_observability_enabled(
-        self, mock_super_configure, mock_apply_patches, mock_is_agent_observability, mock_get_aws_region
+        self,
+        mock_super_configure,
+        mock_apply_patches,
+        mock_is_installed,
+        mock_is_agent_observability,
+        mock_get_aws_region,
     ):
         """Test that _configure sets agent observability defaults when enabled"""
         mock_is_agent_observability.return_value = True
         mock_get_aws_region.return_value = "us-west-2"
+        mock_is_installed.return_value = False  # Mock Django as not installed to avoid interference
 
         distro = AwsOpenTelemetryDistro()
         distro._configure()
