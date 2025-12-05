@@ -12,6 +12,10 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+## v0.14.1 - 2025-12-12
+- Add Service and Environment dimensions to EMF metrics when Application Signals EMF export is enabled
+  ([#548](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/548))
+
 ## v0.14.0 - 2025-11-19
 - Add Resource and CFN Attributes for Bedrock AgentCore spans
   ([#495](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/495))
