@@ -16,7 +16,7 @@ import os
 import sys
 from logging import ERROR, Logger, getLogger
 
-from amazon.opentelemetry.distro._utils import get_aws_region, is_agent_observability_enabled
+from amazon.opentelemetry.distro._utils import get_aws_region, is_agent_observability_enabled, is_installed
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     APPLICATION_SIGNALS_ENABLED_CONFIG,
     OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
@@ -85,6 +85,21 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
         _logger.debug("Current working directory path: %s", cwd_path)
         if cwd_path not in sys.path:
             sys.path.insert(0, cwd_path)
+
+        # Check if Django is installed and determine if Django instrumentation should be enabled
+        if is_installed("django"):
+            # Django instrumentation is allowed when DJANGO_SETTINGS_MODULE is set
+            if not os.getenv("DJANGO_SETTINGS_MODULE"):
+                # DJANGO_SETTINGS_MODULE is not set, disable Django instrumentation
+                disabled_instrumentations = os.getenv("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", "")
+                os.environ["OTEL_PYTHON_DISABLED_INSTRUMENTATIONS"] = disabled_instrumentations + ",django"
+                _logger.warning(
+                    "Django is installed but DJANGO_SETTINGS_MODULE is not set. Disabling django instrumentation."
+                )
+            else:
+                _logger.debug(
+                    "Django instrumentation enabled: DJANGO_SETTINGS_MODULE=%s", os.getenv("DJANGO_SETTINGS_MODULE")
+                )
 
         os.environ.setdefault(OTEL_EXPORTER_OTLP_PROTOCOL, "http/protobuf")
 
