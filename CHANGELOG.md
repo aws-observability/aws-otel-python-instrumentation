@@ -11,6 +11,10 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+- [PATCH] Add safety check for bedrock ConverseStream responses
+  ([#547](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/547))
+- Add Service and Environment dimensions to EMF metrics when Application Signals EMF export is enabled
+  ([#548](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/548))
 
 ## v0.14.0 - 2025-11-19
 - Add Resource and CFN Attributes for Bedrock AgentCore spans
