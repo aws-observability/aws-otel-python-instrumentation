@@ -1327,7 +1327,9 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             result = _create_emf_exporter()
 
             self.assertEqual(result, mock_exporter_instance)
-            mock_console_exporter.assert_called_once_with(namespace="test-namespace")
+            mock_console_exporter.assert_called_once_with(
+                namespace="test-namespace",
+            )
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
@@ -1474,7 +1476,9 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             result = _create_emf_exporter()
 
             self.assertEqual(result, mock_exporter_instance)
-            mock_console_exporter.assert_called_once_with(namespace=None)
+            mock_console_exporter.assert_called_once_with(
+                namespace=None,
+            )
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._fetch_logs_header")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment")
