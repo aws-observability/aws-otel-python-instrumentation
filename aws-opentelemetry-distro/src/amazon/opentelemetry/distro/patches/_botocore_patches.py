@@ -334,9 +334,10 @@ def _apply_botocore_bedrock_patch() -> None:  # pylint: disable=too-many-stateme
             tool_calls.append(tool_call)
         return tool_calls
 
-    # TODO: The following code is to patch a bedrock bug that was fixed in
+    # TODO: The following code is to patch bedrock bugs that were fixed in
     # opentelemetry-instrumentation-botocore==0.60b0 in:
     # https://github.com/open-telemetry/opentelemetry-python-contrib/pull/3875
+    # https://github.com/open-telemetry/opentelemetry-python-contrib/pull/3990
     # Remove this code once we've bumped opentelemetry-instrumentation-botocore dependency to 0.60b0
     def patched_process_anthropic_claude_chunk(self, chunk):
         # pylint: disable=too-many-return-statements,too-many-branches
@@ -412,12 +413,30 @@ def _apply_botocore_bedrock_patch() -> None:  # pylint: disable=too-many-stateme
             self._stream_done_callback(self._response)
             return
 
+    def patched_from_converse(cls, response: dict[str, Any], capture_content: bool) -> bedrock_utils._Choice:
+        # be defensive about malformed responses, refer to #3958 for more context
+        output = response.get("output", {})
+        orig_message = output.get("message", {})
+        if role := orig_message.get("role"):
+            message = {"role": role}
+        else:
+            # amazon.titan does not serialize the role
+            message = {}
+
+        if tool_calls := bedrock_utils.extract_tool_calls(orig_message, capture_content):
+            message["tool_calls"] = tool_calls
+        elif capture_content and (content := orig_message.get("content")):
+            message["content"] = content
+
+        return cls(message, response["stopReason"], index=0)
+
     bedrock_utils.ConverseStreamWrapper.__init__ = patched_init
     bedrock_utils.ConverseStreamWrapper._process_event = patched_process_event
     bedrock_utils.InvokeModelWithResponseStreamWrapper._process_anthropic_claude_chunk = (
         patched_process_anthropic_claude_chunk
     )
     bedrock_utils.extract_tool_calls = patched_extract_tool_calls
+    bedrock_utils._Choice.from_converse = classmethod(patched_from_converse)
 
     # END The OpenTelemetry Authors code
 
