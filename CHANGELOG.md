@@ -17,6 +17,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   ([#547](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/547))
 - Add Service and Environment dimensions to EMF metrics when Application Signals EMF export is enabled
   ([#548](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/548))
+- Refactor configuration for adding Application Signals Dimensions to EMF exporter
+  ([#552](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/552))
 - Fix CVE-2025-66471. No associated PR since `urllib3` dependency will auto-bump to `2.6.x` upon release.
 
 ## v0.14.0 - 2025-11-19

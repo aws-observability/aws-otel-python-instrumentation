@@ -308,151 +308,110 @@ class TestBaseEmfExporter(unittest.TestCase):
         # Empty list
         self.assertFalse(self.exporter._has_dimension_case_insensitive([], "Service"))
 
+    @patch.dict(os.environ, {"OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS": "false"})
     def test_add_application_signals_dimensions_disabled(self):
         """Test that dimensions are not added when feature is disabled."""
-        # Default exporter has feature disabled
         dimension_names = ["operation"]
         emf_log = {}
-        resource = Resource.create({"service.name": "my-service", "deployment.environment": "production"})
+        resource_attributes = {"service.name": "my-service", "deployment.environment": "production"}
 
-        self.exporter._add_application_signals_dimensions(dimension_names, emf_log, resource)
+        self.exporter._add_application_signals_dimensions(dimension_names, emf_log, resource_attributes)
 
         # Dimensions should not be added
         self.assertEqual(dimension_names, ["operation"])
         self.assertNotIn("Service", emf_log)
         self.assertNotIn("Environment", emf_log)
 
-    @patch.dict(
-        os.environ,
-        {"OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "true", "OTEL_AWS_APPLICATION_SIGNALS_EMF_EXPORT_ENABLED": "true"},
-    )
-    def test_add_application_signals_dimensions_enabled(self):
-        """Test that dimensions are added when feature is enabled."""
-        exporter = ConcreteEmfExporter(namespace="TestNamespace")
-        dimension_names = ["operation"]
-        emf_log = {}
-        resource = Resource.create({"service.name": "my-service", "deployment.environment": "production"})
-
-        exporter._add_application_signals_dimensions(dimension_names, emf_log, resource)
-
-        # Service and Environment should be added at the beginning
-        self.assertEqual(dimension_names, ["Service", "Environment", "operation"])
-        self.assertEqual(emf_log["Service"], "my-service")
-        self.assertEqual(emf_log["Environment"], "production")
-
-    @patch.dict(
-        os.environ,
-        {"OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "true", "OTEL_AWS_APPLICATION_SIGNALS_EMF_EXPORT_ENABLED": "true"},
-    )
-    def test_add_application_signals_dimensions_fallback_values(self):
-        """Test fallback values when resource attributes are not available."""
-        exporter = ConcreteEmfExporter(namespace="TestNamespace")
-        dimension_names = ["operation"]
-        emf_log = {}
-        # Resource without deployment.environment
-        resource = Resource.create({"service.name": "my-service"})
-
-        exporter._add_application_signals_dimensions(dimension_names, emf_log, resource)
-
-        # Service should use service.name, Environment should fallback to lambda:default
-        self.assertIn("Service", dimension_names)
-        self.assertIn("Environment", dimension_names)
-        self.assertEqual(emf_log["Service"], "my-service")
-        self.assertEqual(emf_log["Environment"], "lambda:default")
-
-    @patch.dict(
-        os.environ,
-        {"OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "true", "OTEL_AWS_APPLICATION_SIGNALS_EMF_EXPORT_ENABLED": "true"},
-    )
-    def test_add_application_signals_dimensions_no_resource(self):
-        """Test fallback when resource is None."""
-        exporter = ConcreteEmfExporter(namespace="TestNamespace")
-        dimension_names = ["operation"]
-        emf_log = {}
-
-        exporter._add_application_signals_dimensions(dimension_names, emf_log, None)
-
-        # Should use fallback values
-        self.assertIn("Service", dimension_names)
-        self.assertIn("Environment", dimension_names)
-        self.assertEqual(emf_log["Service"], "UnknownService")
-        self.assertEqual(emf_log["Environment"], "lambda:default")
-
-    @patch.dict(
-        os.environ,
-        {"OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "true", "OTEL_AWS_APPLICATION_SIGNALS_EMF_EXPORT_ENABLED": "true"},
-    )
-    def test_add_application_signals_dimensions_service_already_set(self):
-        """Test that Service dimension is not overwritten if already set (case-insensitive)."""
+    @patch.dict(os.environ, {"OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS": "true"})
+    def test_application_signals_dimensions_scenarios(self):
+        """Test various scenarios for application signals dimensions."""
         exporter = ConcreteEmfExporter(namespace="TestNamespace")
 
-        # User has set "service" (lowercase)
-        dimension_names = ["service", "operation"]
-        emf_log = {"service": "user-service"}
-        resource = Resource.create({"service.name": "my-service", "deployment.environment": "production"})
+        test_cases = [
+            # (resource_attributes, expected_service, expected_environment, description)
+            (
+                {"service.name": "test-service", "deployment.environment.name": "prod"},
+                "test-service",
+                "prod",
+                "Both service.name and deployment.environment.name provided",
+            ),
+            (
+                {"service.name": "test-service"},
+                "test-service",
+                "generic:default",
+                "Only service.name provided, environment defaults to generic:default",
+            ),
+            (
+                {"deployment.environment.name": "staging"},
+                "UnknownService",
+                "staging",
+                "No service.name, defaults to UnknownService",
+            ),
+            (
+                {"service.name": "", "deployment.environment.name": "dev"},
+                "UnknownService",
+                "dev",
+                "Empty service.name, defaults to UnknownService",
+            ),
+            (
+                {},
+                "UnknownService",
+                "generic:default",
+                "No attributes, both default",
+            ),
+            (
+                {"service.name": "ec2-service", "cloud.platform": "aws_ec2"},
+                "ec2-service",
+                "ec2:default",
+                "cloud.platform=aws_ec2, environment defaults to ec2:default",
+            ),
+            (
+                {"service.name": "ecs-service", "cloud.platform": "aws_ecs"},
+                "ecs-service",
+                "ecs:default",
+                "cloud.platform=aws_ecs, environment defaults to ecs:default",
+            ),
+            (
+                {"service.name": "eks-service", "cloud.platform": "aws_eks"},
+                "eks-service",
+                "eks:default",
+                "cloud.platform=aws_eks, environment defaults to eks:default",
+            ),
+            (
+                {"service.name": "lambda-service", "cloud.platform": "aws_lambda"},
+                "lambda-service",
+                "lambda:default",
+                "cloud.platform=aws_lambda, environment defaults to lambda:default",
+            ),
+            (
+                {
+                    "service.name": "override-service",
+                    "deployment.environment.name": "custom-env",
+                    "cloud.platform": "aws_ec2",
+                },
+                "override-service",
+                "custom-env",
+                "deployment.environment.name takes precedence over cloud.platform",
+            ),
+            (
+                {"service.name": "unknown_service:python", "cloud.platform": "aws_ec2"},
+                "UnknownService",
+                "ec2:default",
+                "service.name set to unknown_service:python, should default to UnknownService",
+            ),
+        ]
 
-        exporter._add_application_signals_dimensions(dimension_names, emf_log, resource)
+        for resource_attrs, expected_service, expected_env, description in test_cases:
+            with self.subTest(description=description):
+                dimension_names = []
+                emf_log = {}
 
-        # Service should NOT be added (case-insensitive match), but Environment should be
-        self.assertIn("Environment", dimension_names)
-        self.assertNotIn("Service", dimension_names)  # "Service" not added because "service" exists
-        self.assertEqual(emf_log.get("service"), "user-service")  # User value preserved
-        self.assertEqual(emf_log.get("Environment"), "production")
+                exporter._add_application_signals_dimensions(dimension_names, emf_log, resource_attrs)
 
-    @patch.dict(
-        os.environ,
-        {"OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "true", "OTEL_AWS_APPLICATION_SIGNALS_EMF_EXPORT_ENABLED": "true"},
-    )
-    def test_add_application_signals_dimensions_environment_already_set(self):
-        """Test that Environment dimension is not overwritten if already set (case-insensitive)."""
-        exporter = ConcreteEmfExporter(namespace="TestNamespace")
-
-        # User has set "ENVIRONMENT" (uppercase)
-        dimension_names = ["ENVIRONMENT", "operation"]
-        emf_log = {"ENVIRONMENT": "user-environment"}
-        resource = Resource.create({"service.name": "my-service", "deployment.environment": "production"})
-
-        exporter._add_application_signals_dimensions(dimension_names, emf_log, resource)
-
-        # Environment should NOT be added (case-insensitive match), but Service should be
-        self.assertIn("Service", dimension_names)
-        self.assertNotIn("Environment", dimension_names)  # "Environment" not added because "ENVIRONMENT" exists
-        self.assertEqual(emf_log.get("Service"), "my-service")
-        self.assertEqual(emf_log.get("ENVIRONMENT"), "user-environment")  # User value preserved
-
-    @patch.dict(
-        os.environ,
-        {"OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "true", "OTEL_AWS_APPLICATION_SIGNALS_EMF_EXPORT_ENABLED": "true"},
-    )
-    def test_create_emf_log_with_application_signals_enabled(self):
-        """Test EMF log creation with Application Signals EMF export enabled."""
-        exporter = ConcreteEmfExporter(namespace="TestNamespace")
-
-        record = exporter._create_metric_record("test_metric", "Count", "Test")
-        record.value = 50.0
-        record.timestamp = 1234567890
-        record.attributes = {"operation": "test"}
-
-        records = [record]
-        resource = Resource.create(
-            {
-                "service.name": "test-service",
-                "deployment.environment": "production",
-            }
-        )
-
-        result = exporter._create_emf_log(records, resource, 1234567890)
-
-        # Check that Service and Environment dimensions were added
-        self.assertEqual(result["Service"], "test-service")
-        self.assertEqual(result["Environment"], "production")
-
-        # Check CloudWatch metrics dimensions include Service and Environment
-        cw_metrics = result["_aws"]["CloudWatchMetrics"][0]
-        dimensions = cw_metrics["Dimensions"][0]
-        self.assertIn("Service", dimensions)
-        self.assertIn("Environment", dimensions)
-        self.assertIn("operation", dimensions)
+                self.assertEqual(emf_log.get("Service"), expected_service, f"Failed for: {description}")
+                self.assertEqual(emf_log.get("Environment"), expected_env, f"Failed for: {description}")
+                self.assertIn("Service", dimension_names, f"Service not in dimensions for: {description}")
+                self.assertIn("Environment", dimension_names, f"Environment not in dimensions for: {description}")
 
 
 if __name__ == "__main__":
