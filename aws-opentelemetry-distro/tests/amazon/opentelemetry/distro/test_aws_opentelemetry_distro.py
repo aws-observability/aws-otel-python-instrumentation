@@ -32,6 +32,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
             "OTEL_PYTHON_DISABLED_INSTRUMENTATIONS",
             "OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED",
             "OTEL_AWS_APPLICATION_SIGNALS_ENABLED",
+            "OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS",
             "DJANGO_SETTINGS_MODULE",
         ]
 
@@ -139,6 +140,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
         )
         self.assertEqual(os.environ.get("OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED"), "true")
         self.assertEqual(os.environ.get("OTEL_AWS_APPLICATION_SIGNALS_ENABLED"), "false")
+        self.assertEqual(os.environ.get("OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS"), "false")
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.get_aws_region")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_agent_observability_enabled")
@@ -398,3 +400,26 @@ class TestAwsOpenTelemetryDistro(TestCase):
         self.assertIn("django", disabled_instrumentations)
 
         mock_is_installed.assert_called_once_with("django")
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.get_aws_region")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_installed")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
+    def test_application_signals_dimensions_disabled_with_agent_observability(
+        self,
+        mock_super_configure,
+        mock_apply_patches,
+        mock_is_installed,
+        mock_is_agent_observability,
+        mock_get_aws_region,
+    ):
+        """Test that OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS is disabled in agent observability mode"""
+        mock_is_agent_observability.return_value = True
+        mock_get_aws_region.return_value = "us-west-2"
+        mock_is_installed.return_value = False
+
+        distro = AwsOpenTelemetryDistro()
+        distro._configure()
+
+        self.assertEqual(os.environ.get("OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS"), "false")
