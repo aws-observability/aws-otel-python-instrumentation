@@ -308,14 +308,14 @@ class TestBaseEmfExporter(unittest.TestCase):
         # Empty list
         self.assertFalse(self.exporter._has_dimension_case_insensitive([], "Service"))
 
+    @patch.dict(os.environ, {"OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS": "false"})
     def test_add_application_signals_dimensions_disabled(self):
         """Test that dimensions are not added when feature is disabled."""
-        # Default exporter has feature disabled
         dimension_names = ["operation"]
         emf_log = {}
-        resource = Resource.create({"service.name": "my-service", "deployment.environment": "production"})
+        resource_attributes = {"service.name": "my-service", "deployment.environment": "production"}
 
-        self.exporter._add_application_signals_dimensions(dimension_names, emf_log, resource)
+        self.exporter._add_application_signals_dimensions(dimension_names, emf_log, resource_attributes)
 
         # Dimensions should not be added
         self.assertEqual(dimension_names, ["operation"])
