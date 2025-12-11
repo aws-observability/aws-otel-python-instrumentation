@@ -358,8 +358,10 @@ class TestAwsCloudWatchEmfExporter(unittest.TestCase):
         # Check that the result is JSON serializable
         json.dumps(result)  # Should not raise exception
 
+    @patch.dict("os.environ", {"OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS": "false"})
     def test_create_emf_log_with_resource(self):
         """Test EMF log creation with resource attributes."""
+
         # Create test records
         gauge_record = self.exporter._create_metric_record("gauge_metric", "Count", "Gauge")
         gauge_record.value = 50.0
@@ -395,8 +397,10 @@ class TestAwsCloudWatchEmfExporter(unittest.TestCase):
         self.assertEqual(set(cw_metrics["Dimensions"][0]), {"env", "service"})
         self.assertEqual(cw_metrics["Metrics"][0]["Name"], "gauge_metric")
 
+    @patch.dict("os.environ", {"OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS": "false"})
     def test_create_emf_log_without_dimensions(self):
         """Test EMF log creation with metrics but no dimensions."""
+
         # Create test record without attributes (no dimensions)
         gauge_record = self.exporter._create_metric_record("gauge_metric", "Count", "Gauge")
         gauge_record.value = 75.0
