@@ -16,7 +16,12 @@ import os
 import sys
 from logging import ERROR, Logger, getLogger
 
-from amazon.opentelemetry.distro._utils import get_aws_region, is_agent_observability_enabled, is_installed
+from amazon.opentelemetry.distro._utils import (
+    OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS,
+    get_aws_region,
+    is_agent_observability_enabled,
+    is_installed,
+)
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     APPLICATION_SIGNALS_ENABLED_CONFIG,
     OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
@@ -158,6 +163,7 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
 
             # Disable AWS Application Signals by default
             os.environ.setdefault(APPLICATION_SIGNALS_ENABLED_CONFIG, "false")
+            os.environ.setdefault(OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS, "false")
 
         super(AwsOpenTelemetryDistro, self)._configure()
 

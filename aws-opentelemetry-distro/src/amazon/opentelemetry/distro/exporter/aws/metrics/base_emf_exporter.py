@@ -6,13 +6,12 @@
 import json
 import logging
 import math
-import os
 import time
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
-from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
+from amazon.opentelemetry.distro._utils import should_add_application_signals_dimensions
 from opentelemetry.sdk.metrics import Counter
 from opentelemetry.sdk.metrics import Histogram as HistogramInstr
 from opentelemetry.sdk.metrics import ObservableCounter, ObservableGauge, ObservableUpDownCounter, UpDownCounter
@@ -30,6 +29,7 @@ from opentelemetry.sdk.metrics.export import (
 )
 from opentelemetry.sdk.metrics.view import ExponentialBucketHistogramAggregation
 from opentelemetry.sdk.resources import Resource
+from opentelemetry.semconv._incubating.attributes.cloud_attributes import CloudPlatformValues
 from opentelemetry.semconv.resource import ResourceAttributes
 from opentelemetry.util.types import Attributes
 
@@ -39,9 +39,19 @@ logger = logging.getLogger(__name__)
 SERVICE_DIMENSION_NAME: str = "Service"
 ENVIRONMENT_DIMENSION_NAME: str = "Environment"
 
+# Resource attribute constant for deployment.environment.name
+# deployment.environment is deprecated in favor of deployment.environment.name
+# but not yet available in current OTel Python version
+# https://github.com/open-telemetry/opentelemetry.io/commit/b04507d7be1e916f6705126c56d66dbe9536503e
+DEPLOYMENT_ENVIRONMENT_NAME: str = "deployment.environment.name"
+
 # Constants
-LAMBDA_DEFAULT: str = "lambda:default"
 UNKNOWN_SERVICE: str = "UnknownService"
+UNKNOWN_ENVIRONMENT: str = "generic:default"
+EC2_DEFAULT: str = "ec2:default"
+ECS_DEFAULT: str = "ecs:default"
+EKS_DEFAULT: str = "eks:default"
+LAMBDA_DEFAULT: str = "lambda:default"
 
 
 class MetricRecord:
@@ -195,52 +205,59 @@ class BaseEmfExporter(MetricExporter, ABC):
         # For now, use all attributes as dimensions
         return list(attributes.keys())
 
+    def _add_application_signals_dimensions(
+        self, dimension_names: List[str], emf_log: Dict, resource_attributes: Optional[Attributes]
+    ) -> None:
+        """Add Service and Environment dimensions if not already present."""
+        if not should_add_application_signals_dimensions():
+            return
+
+        if not self._has_dimension_case_insensitive(dimension_names, SERVICE_DIMENSION_NAME):
+            service_name = resource_attributes.get(ResourceAttributes.SERVICE_NAME) if resource_attributes else None
+            service_name_str = str(service_name) if service_name else ""
+            # https://github.com/open-telemetry/opentelemetry-python/blob/102fec2be1fe9d0a8e299598a21ad6ec3b96dcca/opentelemetry-semantic-conventions/src/opentelemetry/semconv/attributes/service_attributes.py#L20
+            if (
+                not service_name
+                or service_name_str == "unknown_service"
+                or service_name_str.startswith("unknown_service:")
+            ):
+                service_name = UNKNOWN_SERVICE
+            dimension_names.append(SERVICE_DIMENSION_NAME)
+            emf_log[SERVICE_DIMENSION_NAME] = service_name
+
+        if not self._has_dimension_case_insensitive(dimension_names, ENVIRONMENT_DIMENSION_NAME):
+            environment_name = self._get_deployment_environment(resource_attributes)
+            dimension_names.append(ENVIRONMENT_DIMENSION_NAME)
+            emf_log[ENVIRONMENT_DIMENSION_NAME] = environment_name
+
     def _has_dimension_case_insensitive(self, dimension_names: List[str], dimension_to_check: str) -> bool:
-        """Check if dimension already exists (case-insensitive match)."""
+        """Check if dimension already exists."""
         dimension_lower = dimension_to_check.lower()
         return any(dim.lower() == dimension_lower for dim in dimension_names)
 
-    @staticmethod
-    def _is_application_signals_emf_export_enabled() -> bool:
-        """Check if Application Signals EMF export is enabled.
+    def _get_deployment_environment(self, resource_attributes: Optional[Attributes]) -> str:
+        """Get deployment environment from resource attributes or cloud platform."""
+        if not resource_attributes:
+            return UNKNOWN_ENVIRONMENT
 
-        Returns True only if BOTH:
-        - OTEL_AWS_APPLICATION_SIGNALS_ENABLED is true
-        - OTEL_AWS_APPLICATION_SIGNALS_EMF_EXPORT_ENABLED is true
-        """
-        app_signals_enabled = os.environ.get("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "false").lower() == "true"
-        emf_export_enabled = (
-            os.environ.get("OTEL_AWS_APPLICATION_SIGNALS_EMF_EXPORT_ENABLED", "false").lower() == "true"
-        )
-        return app_signals_enabled and emf_export_enabled
+        environment_name = resource_attributes.get(DEPLOYMENT_ENVIRONMENT_NAME)
+        if not environment_name:
+            environment_name = resource_attributes.get(ResourceAttributes.DEPLOYMENT_ENVIRONMENT)
 
-    def _add_application_signals_dimensions(
-        self, dimension_names: List[str], emf_log: Dict, resource: Resource
-    ) -> None:
-        """Add Service and Environment dimensions if not already present (case-insensitive)."""
-        if not self._is_application_signals_emf_export_enabled():
-            return
-
-        # Add Service dimension if not already set by user
-        if not self._has_dimension_case_insensitive(dimension_names, SERVICE_DIMENSION_NAME):
-            if resource:
-                service_name, _ = get_service_attribute(resource)
-            else:
-                service_name = UNKNOWN_SERVICE
-            dimension_names.insert(0, SERVICE_DIMENSION_NAME)
-            emf_log[SERVICE_DIMENSION_NAME] = str(service_name)
-
-        # Add Environment dimension if not already set by user
-        if not self._has_dimension_case_insensitive(dimension_names, ENVIRONMENT_DIMENSION_NAME):
-            environment_value = None
-            if resource and resource.attributes:
-                environment_value = resource.attributes.get(ResourceAttributes.DEPLOYMENT_ENVIRONMENT)
-            if not environment_value:
-                environment_value = LAMBDA_DEFAULT
-            # Insert after Service if it exists, otherwise at the beginning
-            insert_pos = 1 if SERVICE_DIMENSION_NAME in dimension_names else 0
-            dimension_names.insert(insert_pos, ENVIRONMENT_DIMENSION_NAME)
-            emf_log[ENVIRONMENT_DIMENSION_NAME] = str(environment_value)
+        if not environment_name:
+            platform = resource_attributes.get(ResourceAttributes.CLOUD_PLATFORM)
+            if platform:
+                if platform == CloudPlatformValues.AWS_EC2.value:
+                    return EC2_DEFAULT
+                if platform == CloudPlatformValues.AWS_ECS.value:
+                    return ECS_DEFAULT
+                if platform == CloudPlatformValues.AWS_EKS.value:
+                    return EKS_DEFAULT
+                if platform == CloudPlatformValues.AWS_LAMBDA.value:
+                    return LAMBDA_DEFAULT
+                return UNKNOWN_ENVIRONMENT
+            return UNKNOWN_ENVIRONMENT
+        return str(environment_name)
 
     def _get_attributes_key(self, attributes: Attributes) -> str:
         """
@@ -552,7 +569,8 @@ class BaseEmfExporter(MetricExporter, ABC):
             emf_log[name] = str(value)
 
         # Add Service and Environment dimensions if Application Signals EMF export is enabled
-        self._add_application_signals_dimensions(dimension_names, emf_log, resource)
+        resource_attributes = resource.attributes if resource else {}
+        self._add_application_signals_dimensions(dimension_names, emf_log, resource_attributes)
 
         # Add CloudWatch Metrics if we have metrics, include dimensions only if they exist
         if metric_definitions:
