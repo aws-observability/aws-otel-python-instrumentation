@@ -6,10 +6,10 @@ from amazon.opentelemetry.distro.version import __version__
 
 
 def build_user_agent() -> str:
-    user_agent = f"ADOT-Python-{__version__}"
+    user_agent = f"ADOT-OTLP-Exporter-Python/{__version__}"
 
     if is_agent_observability_enabled():
-        user_agent = f"ADOT-Python-GenAI-{__version__}"
+        user_agent = f"ADOT-GenAI-OTLP-Exporter-Python/{__version__}"
 
     return user_agent
 
