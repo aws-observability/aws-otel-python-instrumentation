@@ -244,20 +244,19 @@ class BaseEmfExporter(MetricExporter, ABC):
         if not environment_name:
             environment_name = resource_attributes.get(ResourceAttributes.DEPLOYMENT_ENVIRONMENT)
 
-        if not environment_name:
-            platform = resource_attributes.get(ResourceAttributes.CLOUD_PLATFORM)
-            if platform:
-                if platform == CloudPlatformValues.AWS_EC2.value:
-                    return EC2_DEFAULT
-                if platform == CloudPlatformValues.AWS_ECS.value:
-                    return ECS_DEFAULT
-                if platform == CloudPlatformValues.AWS_EKS.value:
-                    return EKS_DEFAULT
-                if platform == CloudPlatformValues.AWS_LAMBDA.value:
-                    return LAMBDA_DEFAULT
-                return UNKNOWN_ENVIRONMENT
-            return UNKNOWN_ENVIRONMENT
-        return str(environment_name)
+        if environment_name:
+            return str(environment_name)
+
+        platform = resource_attributes.get(ResourceAttributes.CLOUD_PLATFORM)
+        if platform:
+            platform_defaults = {
+                CloudPlatformValues.AWS_EC2.value: EC2_DEFAULT,
+                CloudPlatformValues.AWS_ECS.value: ECS_DEFAULT,
+                CloudPlatformValues.AWS_EKS.value: EKS_DEFAULT,
+                CloudPlatformValues.AWS_LAMBDA.value: LAMBDA_DEFAULT,
+            }
+            return platform_defaults.get(str(platform), UNKNOWN_ENVIRONMENT)
+        return UNKNOWN_ENVIRONMENT
 
     def _get_attributes_key(self, attributes: Attributes) -> str:
         """
