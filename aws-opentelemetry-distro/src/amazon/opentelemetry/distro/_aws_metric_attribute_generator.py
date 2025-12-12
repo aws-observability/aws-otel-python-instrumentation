@@ -8,14 +8,22 @@ from urllib.parse import ParseResult, urlparse
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_AUTH_ACCESS_KEY,
+    AWS_AUTH_CREDENTIAL_PROVIDER,
     AWS_AUTH_REGION,
     AWS_BEDROCK_AGENT_ID,
+    AWS_BEDROCK_AGENTCORE_BROWSER_ARN,
+    AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN,
+    AWS_BEDROCK_AGENTCORE_GATEWAY_ARN,
+    AWS_BEDROCK_AGENTCORE_MEMORY_ARN,
+    AWS_BEDROCK_AGENTCORE_RUNTIME_ARN,
+    AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN,
     AWS_BEDROCK_DATA_SOURCE_ID,
     AWS_BEDROCK_GUARDRAIL_ARN,
     AWS_BEDROCK_GUARDRAIL_ID,
     AWS_BEDROCK_KNOWLEDGE_BASE_ID,
     AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER,
     AWS_DYNAMODB_TABLE_ARN,
+    AWS_GATEWAY_TARGET_ID,
     AWS_KINESIS_STREAM_ARN,
     AWS_KINESIS_STREAM_NAME,
     AWS_LAMBDA_FUNCTION_ARN,
@@ -63,6 +71,13 @@ from amazon.opentelemetry.distro.metric_attribute_generator import (
     SERVICE_METRIC,
     MetricAttributeGenerator,
 )
+from amazon.opentelemetry.distro.patches.semconv._incubating.attributes.gen_ai_attributes import (
+    GEN_AI_BROWSER_ID,
+    GEN_AI_CODE_INTERPRETER_ID,
+    GEN_AI_GATEWAY_ID,
+    GEN_AI_MEMORY_ID,
+    GEN_AI_RUNTIME_ID,
+)
 from amazon.opentelemetry.distro.regional_resource_arn_parser import RegionalResourceArnParser
 from amazon.opentelemetry.distro.sqs_url_parser import SqsUrlParser
 from opentelemetry.sdk.resources import Resource
@@ -105,6 +120,7 @@ _NORMALIZED_S3_SERVICE_NAME: str = "AWS::S3"
 _NORMALIZED_SQS_SERVICE_NAME: str = "AWS::SQS"
 _NORMALIZED_BEDROCK_SERVICE_NAME: str = "AWS::Bedrock"
 _NORMALIZED_BEDROCK_RUNTIME_SERVICE_NAME: str = "AWS::BedrockRuntime"
+_NORMALIZED_BEDROCK_AGENTCORE_SERVICE_NAME: str = "AWS::BedrockAgentCore"
 _NORMALIZED_SECRETSMANAGER_SERVICE_NAME: str = "AWS::SecretsManager"
 _NORMALIZED_SNS_SERVICE_NAME: str = "AWS::SNS"
 _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME: str = "AWS::StepFunctions"
@@ -117,6 +133,19 @@ _LAMBDA_INVOKE_OPERATION: str = "Invoke"
 
 # Special DEPENDENCY attribute value if GRAPHQL_OPERATION_TYPE attribute key is present.
 _GRAPHQL: str = "graphql"
+
+# AWS SDK service mapping for normalization
+_AWS_SDK_SERVICE_MAPPING = {
+    "Bedrock Agent": _NORMALIZED_BEDROCK_SERVICE_NAME,
+    "Bedrock Agent Runtime": _NORMALIZED_BEDROCK_SERVICE_NAME,
+    "Bedrock Runtime": _NORMALIZED_BEDROCK_RUNTIME_SERVICE_NAME,
+    "Bedrock AgentCore Control": _NORMALIZED_BEDROCK_AGENTCORE_SERVICE_NAME,
+    "Bedrock AgentCore": _NORMALIZED_BEDROCK_AGENTCORE_SERVICE_NAME,
+    "Secrets Manager": _NORMALIZED_SECRETSMANAGER_SERVICE_NAME,
+    "SNS": _NORMALIZED_SNS_SERVICE_NAME,
+    "SFN": _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME,
+    "Lambda": _NORMALIZED_LAMBDA_SERVICE_NAME,
+}
 
 _logger: Logger = getLogger(__name__)
 
@@ -327,16 +356,6 @@ def _normalize_remote_service_name(span: ReadableSpan, service_name: str) -> str
     as the associated remote resource (Model) is not listed in Cloud Control.
     """
     if is_aws_sdk_span(span):
-        aws_sdk_service_mapping = {
-            "Bedrock Agent": _NORMALIZED_BEDROCK_SERVICE_NAME,
-            "Bedrock Agent Runtime": _NORMALIZED_BEDROCK_SERVICE_NAME,
-            "Bedrock Runtime": _NORMALIZED_BEDROCK_RUNTIME_SERVICE_NAME,
-            "Secrets Manager": _NORMALIZED_SECRETSMANAGER_SERVICE_NAME,
-            "SNS": _NORMALIZED_SNS_SERVICE_NAME,
-            "SFN": _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME,
-            "Lambda": _NORMALIZED_LAMBDA_SERVICE_NAME,
-        }
-
         # Special handling for Lambda invoke operations
         if _is_lambda_invoke_operation(span):
             lambda_function_name = span.attributes.get(AWS_LAMBDA_FUNCTION_NAME)
@@ -345,7 +364,7 @@ def _normalize_remote_service_name(span: ReadableSpan, service_name: str) -> str
             # is missing rather than falling back to a generic service name
             return lambda_function_name if lambda_function_name else UNKNOWN_REMOTE_SERVICE
 
-        return aws_sdk_service_mapping.get(service_name, "AWS::" + service_name)
+        return _AWS_SDK_SERVICE_MAPPING.get(service_name, "AWS::" + service_name)
     return service_name
 
 
@@ -466,6 +485,16 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
         elif is_key_present(span, GEN_AI_REQUEST_MODEL):
             remote_resource_type = _NORMALIZED_BEDROCK_SERVICE_NAME + "::Model"
             remote_resource_identifier = _escape_delimiters(span.attributes.get(GEN_AI_REQUEST_MODEL))
+        elif (
+            _AWS_SDK_SERVICE_MAPPING.get(str(span.attributes.get(_RPC_SERVICE)))
+            == _NORMALIZED_BEDROCK_AGENTCORE_SERVICE_NAME
+        ):
+            agentcore_type, agentcore_identifier, agentcore_cfn_id = (
+                _get_bedrock_agentcore_resource_type_and_identifier(span)
+            )
+            remote_resource_type = agentcore_type
+            remote_resource_identifier = _escape_delimiters(agentcore_identifier) if agentcore_identifier else None
+            cloudformation_primary_identifier = _escape_delimiters(agentcore_cfn_id) if agentcore_cfn_id else None
         elif is_key_present(span, AWS_SECRETSMANAGER_SECRET_ARN):
             remote_resource_type = _NORMALIZED_SECRETSMANAGER_SERVICE_NAME + "::Secret"
             remote_resource_identifier = _escape_delimiters(
@@ -672,6 +701,217 @@ def _set_remote_db_user(span: ReadableSpan, attributes: BoundedAttributes) -> No
 def _set_span_kind_for_dependency(span: ReadableSpan, attributes: BoundedAttributes) -> None:
     span_kind: str = span.kind.name
     attributes[AWS_SPAN_KIND] = span_kind
+
+
+def _get_bedrock_agentcore_resource_type_and_identifier(
+    span: ReadableSpan,
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Get BedrockAgentCore resource type, identifier, and CFN primary identifier based on span attributes."""
+    attrs = span.attributes
+    if not attrs:
+        return None, None, None
+
+    def format_resource_type(resource_type: Optional[str]) -> Optional[str]:
+        return f"{_NORMALIZED_BEDROCK_AGENTCORE_SERVICE_NAME}::{resource_type}" if resource_type else None
+
+    for handler in [
+        _handle_browser_attrs,
+        _handle_gateway_attrs,
+        _handle_runtime_attrs,
+        _handle_code_interpreter_attrs,
+        _handle_identity_attrs,
+        _handle_memory_attrs,
+    ]:
+        resource_type, resource_identifier, cfn_primary_identifier = handler(attrs)
+        if resource_type:
+            return format_resource_type(resource_type), resource_identifier, cfn_primary_identifier
+
+    return None, None, None
+
+
+def _handle_browser_attrs(attrs: BoundedAttributes) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Handler for BedrockAgentCore Browser resources.
+    Returns (resource_type, resource_identifier, cfn_primary_identifier).
+    """
+    browser_id = attrs.get(GEN_AI_BROWSER_ID)
+    browser_arn = attrs.get(AWS_BEDROCK_AGENTCORE_BROWSER_ARN)
+    if browser_id or browser_arn:
+        agentcore_cfn_identifier = None
+        if browser_id:
+            agentcore_cfn_identifier = str(browser_id)
+        elif browser_arn:
+            agentcore_cfn_identifier = RegionalResourceArnParser.extract_bedrock_agentcore_resource_id_from_arn(
+                str(browser_arn)
+            )
+
+        # Uses browser ID as both resource identifier and CFN primary identifier.
+        # aws.browser.v1 is a managed AWS resource, custom IDs are user-defined resources.
+        resource_type = "Browser" if agentcore_cfn_identifier == "aws.browser.v1" else "BrowserCustom"
+        return resource_type, agentcore_cfn_identifier, agentcore_cfn_identifier
+    return None, None, None
+
+
+def _handle_gateway_attrs(attrs: BoundedAttributes) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Handler for BedrockAgentCore Gateway resources.
+    Returns (resource_type, resource_identifier, cfn_primary_identifier).
+    """
+    gateway_id = attrs.get(GEN_AI_GATEWAY_ID)
+    gateway_arn = attrs.get(AWS_BEDROCK_AGENTCORE_GATEWAY_ARN)
+    gateway_target_id = attrs.get(AWS_GATEWAY_TARGET_ID)
+
+    if gateway_target_id:
+        if gateway_id:
+            agentcore_cfn_identifier = str(gateway_id)
+        elif gateway_arn:
+            agentcore_cfn_identifier = RegionalResourceArnParser.extract_bedrock_agentcore_resource_id_from_arn(
+                str(gateway_arn)
+            )
+        else:
+            agentcore_cfn_identifier = str(gateway_target_id)
+
+        # GatewayTarget contains two primary identifiers: gateway ID and gateway target ID.
+        # Uses gateway ID and/or gateway target ID as both resource identifier and CFN primary identifier.
+        # If gateway ID exists or can be extracted from ARN, use it as CFN primary identifier,
+        # otherwise use target ID.
+        return "GatewayTarget", agentcore_cfn_identifier, agentcore_cfn_identifier
+
+    if gateway_arn or gateway_id:
+        agentcore_cfn_identifier = None
+        if gateway_id:
+            agentcore_cfn_identifier = str(gateway_id)
+        elif gateway_arn:
+            agentcore_cfn_identifier = RegionalResourceArnParser.extract_bedrock_agentcore_resource_id_from_arn(
+                str(gateway_arn)
+            )
+
+        # Uses gateway ID as both resource identifier and CFN primary identifier.
+        # If gateway ID is not available, extract it from the gateway ARN.
+        return "Gateway", agentcore_cfn_identifier, agentcore_cfn_identifier
+
+    return None, None, None
+
+
+def _handle_runtime_attrs(attrs: BoundedAttributes) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Handler for BedrockAgentCore Runtime resources.
+    Returns (resource_type, resource_identifier, cfn_primary_identifier).
+    """
+    runtime_id = attrs.get(GEN_AI_RUNTIME_ID)
+    runtime_arn = attrs.get(AWS_BEDROCK_AGENTCORE_RUNTIME_ARN)
+    runtime_endpoint_arn = attrs.get(AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN)
+
+    if runtime_endpoint_arn:
+        agentcore_cfn_identifier = RegionalResourceArnParser.extract_bedrock_agentcore_resource_id_from_arn(
+            str(runtime_endpoint_arn)
+        )
+
+        # Uses extracted ID as resource identifier and full ARN as CFN primary identifier.
+        return "RuntimeEndpoint", agentcore_cfn_identifier, str(runtime_endpoint_arn)
+
+    if runtime_arn or runtime_id:
+        agentcore_cfn_identifier = None
+        if runtime_id:
+            agentcore_cfn_identifier = str(runtime_id)
+        elif runtime_arn:
+            agentcore_cfn_identifier = RegionalResourceArnParser.extract_bedrock_agentcore_resource_id_from_arn(
+                str(runtime_arn)
+            )
+
+        # Uses runtime ID as both resource identifier and CFN primary identifier.
+        # If runtime ID is not available, extract it from the runtime ARN.
+        return "Runtime", agentcore_cfn_identifier, agentcore_cfn_identifier
+
+    return None, None, None
+
+
+def _handle_code_interpreter_attrs(attrs: BoundedAttributes) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Handler for BedrockAgentCore CodeInterpreter resources.
+    Returns (resource_type, resource_identifier, cfn_primary_identifier).
+    """
+    code_interpreter_id = attrs.get(GEN_AI_CODE_INTERPRETER_ID)
+    code_interpreter_arn = attrs.get(AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN)
+
+    if code_interpreter_id or code_interpreter_arn:
+        agentcore_cfn_identifier = None
+        if code_interpreter_id:
+            agentcore_cfn_identifier = str(code_interpreter_id)
+        elif code_interpreter_arn:
+            agentcore_cfn_identifier = RegionalResourceArnParser.extract_bedrock_agentcore_resource_id_from_arn(
+                str(code_interpreter_arn)
+            )
+
+        # Uses code interpreter ID as both resource identifier and CFN primary identifier.
+        # aws.codeinterpreter.v1 is a managed AWS resource, custom IDs are user-defined resources.
+        resource_type = (
+            "CodeInterpreter" if agentcore_cfn_identifier == "aws.codeinterpreter.v1" else "CodeInterpreterCustom"
+        )
+        return resource_type, agentcore_cfn_identifier, agentcore_cfn_identifier
+
+    return None, None, None
+
+
+def _handle_identity_attrs(attrs: BoundedAttributes) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Handler for BedrockAgentCore Identity resources.
+    """
+    credentials_provider = attrs.get(AWS_AUTH_CREDENTIAL_PROVIDER)
+    rpc_method = attrs.get(_RPC_METHOD)
+
+    if credentials_provider and rpc_method:
+        credentials_provider_str = str(credentials_provider)
+        rpc_method_str = str(rpc_method).lower()
+        resource_type = None
+
+        # Determine the credential provider type from the RPC method.
+        # The credential provider can be either an ARN or a name. While ARNs contain
+        # type information, names do not, so we infer the type from the API operation.
+        if "apikey" in rpc_method_str:
+            resource_type = "APIKeyCredentialProvider"
+        elif "oauth2" in rpc_method_str:
+            resource_type = "OAuth2CredentialProvider"
+
+        if resource_type:
+            # CFN identifier is the credentials provider name.
+            # If the credentials provider is an ARN, we extract the name from the ARN.
+            agentcore_cfn_identifier = (
+                RegionalResourceArnParser.extract_bedrock_agentcore_resource_id_from_arn(credentials_provider_str)
+                or credentials_provider_str
+            )
+
+            # Uses credential name as both resource identifier and CFN primary identifier.
+            return resource_type, agentcore_cfn_identifier, agentcore_cfn_identifier
+
+    return None, None, None
+
+
+def _handle_memory_attrs(attrs: BoundedAttributes) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Handler for BedrockAgentCore Memory resources.
+    Returns (resource_type, resource_identifier, cfn_primary_identifier).
+    """
+    memory_id = attrs.get(GEN_AI_MEMORY_ID)
+    memory_arn = attrs.get(AWS_BEDROCK_AGENTCORE_MEMORY_ARN)
+
+    if memory_id or memory_arn:
+        agentcore_cfn_identifier = None
+        agentcore_cfn_primary_identifier = None
+        if memory_id:
+            agentcore_cfn_identifier = str(memory_id)
+        if memory_arn:
+            agentcore_cfn_identifier = (
+                agentcore_cfn_identifier
+                or RegionalResourceArnParser.extract_bedrock_agentcore_resource_id_from_arn(str(memory_arn))
+            )
+            agentcore_cfn_primary_identifier = str(memory_arn)
+
+        # Uses memory ID as resource identifier and ARN as CFN primary identifier when available.
+        # If memory ID is not available, extract it from the memory ARN.
+        return "Memory", agentcore_cfn_identifier, agentcore_cfn_primary_identifier
+
+    return None, None, None
 
 
 def _log_unknown_attribute(attribute_key: str, span: ReadableSpan) -> None:

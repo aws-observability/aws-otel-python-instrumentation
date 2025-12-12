@@ -1,8 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from amazon.opentelemetry.distro.exporter.aws.metrics.base_emf_exporter import BaseEmfExporter, MetricRecord
 from opentelemetry.sdk.metrics.export import MetricExportResult
@@ -285,6 +286,132 @@ class TestBaseEmfExporter(unittest.TestCase):
 
         result = self.exporter.export(metrics_data)
         self.assertEqual(result, MetricExportResult.FAILURE)
+
+    def test_has_dimension_case_insensitive(self):
+        """Test case-insensitive dimension checking."""
+        dimension_names = ["Service", "Environment", "operation"]
+
+        # Exact match
+        self.assertTrue(self.exporter._has_dimension_case_insensitive(dimension_names, "Service"))
+        self.assertTrue(self.exporter._has_dimension_case_insensitive(dimension_names, "Environment"))
+
+        # Case variations
+        self.assertTrue(self.exporter._has_dimension_case_insensitive(dimension_names, "service"))
+        self.assertTrue(self.exporter._has_dimension_case_insensitive(dimension_names, "SERVICE"))
+        self.assertTrue(self.exporter._has_dimension_case_insensitive(dimension_names, "environment"))
+        self.assertTrue(self.exporter._has_dimension_case_insensitive(dimension_names, "ENVIRONMENT"))
+        self.assertTrue(self.exporter._has_dimension_case_insensitive(dimension_names, "OPERATION"))
+
+        # Non-existent dimension
+        self.assertFalse(self.exporter._has_dimension_case_insensitive(dimension_names, "NotExists"))
+
+        # Empty list
+        self.assertFalse(self.exporter._has_dimension_case_insensitive([], "Service"))
+
+    @patch.dict(os.environ, {"OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS": "false"})
+    def test_add_application_signals_dimensions_disabled(self):
+        """Test that dimensions are not added when feature is disabled."""
+        dimension_names = ["operation"]
+        emf_log = {}
+        resource_attributes = {"service.name": "my-service", "deployment.environment": "production"}
+
+        self.exporter._add_application_signals_dimensions(dimension_names, emf_log, resource_attributes)
+
+        # Dimensions should not be added
+        self.assertEqual(dimension_names, ["operation"])
+        self.assertNotIn("Service", emf_log)
+        self.assertNotIn("Environment", emf_log)
+
+    @patch.dict(os.environ, {"OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS": "true"})
+    def test_application_signals_dimensions_scenarios(self):
+        """Test various scenarios for application signals dimensions."""
+        exporter = ConcreteEmfExporter(namespace="TestNamespace")
+
+        test_cases = [
+            # (resource_attributes, expected_service, expected_environment, description)
+            (
+                {"service.name": "test-service", "deployment.environment.name": "prod"},
+                "test-service",
+                "prod",
+                "Both service.name and deployment.environment.name provided",
+            ),
+            (
+                {"service.name": "test-service"},
+                "test-service",
+                "generic:default",
+                "Only service.name provided, environment defaults to generic:default",
+            ),
+            (
+                {"deployment.environment.name": "staging"},
+                "UnknownService",
+                "staging",
+                "No service.name, defaults to UnknownService",
+            ),
+            (
+                {"service.name": "", "deployment.environment.name": "dev"},
+                "UnknownService",
+                "dev",
+                "Empty service.name, defaults to UnknownService",
+            ),
+            (
+                {},
+                "UnknownService",
+                "generic:default",
+                "No attributes, both default",
+            ),
+            (
+                {"service.name": "ec2-service", "cloud.platform": "aws_ec2"},
+                "ec2-service",
+                "ec2:default",
+                "cloud.platform=aws_ec2, environment defaults to ec2:default",
+            ),
+            (
+                {"service.name": "ecs-service", "cloud.platform": "aws_ecs"},
+                "ecs-service",
+                "ecs:default",
+                "cloud.platform=aws_ecs, environment defaults to ecs:default",
+            ),
+            (
+                {"service.name": "eks-service", "cloud.platform": "aws_eks"},
+                "eks-service",
+                "eks:default",
+                "cloud.platform=aws_eks, environment defaults to eks:default",
+            ),
+            (
+                {"service.name": "lambda-service", "cloud.platform": "aws_lambda"},
+                "lambda-service",
+                "lambda:default",
+                "cloud.platform=aws_lambda, environment defaults to lambda:default",
+            ),
+            (
+                {
+                    "service.name": "override-service",
+                    "deployment.environment.name": "custom-env",
+                    "cloud.platform": "aws_ec2",
+                },
+                "override-service",
+                "custom-env",
+                "deployment.environment.name takes precedence over cloud.platform",
+            ),
+            (
+                {"service.name": "unknown_service:python", "cloud.platform": "aws_ec2"},
+                "UnknownService",
+                "ec2:default",
+                "service.name set to unknown_service:python, should default to UnknownService",
+            ),
+        ]
+
+        for resource_attrs, expected_service, expected_env, description in test_cases:
+            with self.subTest(description=description):
+                dimension_names = []
+                emf_log = {}
+
+                exporter._add_application_signals_dimensions(dimension_names, emf_log, resource_attrs)
+
+                self.assertEqual(emf_log.get("Service"), expected_service, f"Failed for: {description}")
+                self.assertEqual(emf_log.get("Environment"), expected_env, f"Failed for: {description}")
+                self.assertIn("Service", dimension_names, f"Service not in dimensions for: {description}")
+                self.assertIn("Environment", dimension_names, f"Environment not in dimensions for: {description}")
 
 
 if __name__ == "__main__":

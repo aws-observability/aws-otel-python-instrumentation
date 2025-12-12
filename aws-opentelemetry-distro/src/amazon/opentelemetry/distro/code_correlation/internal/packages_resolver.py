@@ -20,13 +20,13 @@ from inspect import FullArgSpec, getfullargspec, isgeneratorfunction
 from pathlib import Path
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Union
 
-from ..config import AwsCodeCorrelationConfig
+from ..config import AwsCodeAttributesConfig
 
 # Module-level constants
 _logger = logging.getLogger(__name__)
 
 # Configuration
-_code_attributes_config = AwsCodeCorrelationConfig.from_env()
+_code_attributes_config = AwsCodeAttributesConfig.from_env()
 
 # Global caching variables
 _sys_path_hash: Optional[int] = None
@@ -364,7 +364,8 @@ def is_third_party_package(file_path: Path) -> bool:
         return False
 
     third_party_packages = _load_third_party_packages()
-    return distribution.name in third_party_packages
+    # Perform case-insensitive comparison to handle packages like 'Django' vs 'django'
+    return distribution.name.lower() in third_party_packages
 
 
 @lru_cache(maxsize=1024)

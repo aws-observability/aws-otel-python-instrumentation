@@ -1,17 +1,14 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-import os
 from importlib.metadata import PackageNotFoundError
 from typing import Any, Dict
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-import gevent.monkey
-
 import opentelemetry.sdk.extension.aws.resource.ec2 as ec2_resource
 import opentelemetry.sdk.extension.aws.resource.eks as eks_resource
 from amazon.opentelemetry.distro._aws_attribute_keys import (
-    AWS_AUTH_CREDENTIAL_PROVIDER_ARN,
+    AWS_AUTH_CREDENTIAL_PROVIDER,
     AWS_BEDROCK_AGENTCORE_BROWSER_ARN,
     AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN,
     AWS_BEDROCK_AGENTCORE_GATEWAY_ARN,
@@ -21,16 +18,13 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_AGENTCORE_WORKLOAD_IDENTITY_ARN,
     AWS_GATEWAY_TARGET_ID,
 )
-from amazon.opentelemetry.distro.patches._bedrock_agentcore_patches import (
+from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_instrumentation_patches
+from amazon.opentelemetry.distro.patches.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_BROWSER_ID,
     GEN_AI_CODE_INTERPRETER_ID,
     GEN_AI_GATEWAY_ID,
     GEN_AI_MEMORY_ID,
     GEN_AI_RUNTIME_ID,
-)
-from amazon.opentelemetry.distro.patches._instrumentation_patch import (
-    AWS_GEVENT_PATCH_MODULES,
-    apply_instrumentation_patches,
 )
 from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS, bedrock_utils
@@ -73,6 +67,7 @@ _AGENTCORE_MEMORY_ID: str = "agentMemory-123456789"
 _AGENTCORE_CREDENTIAL_PROVIDER_ARN: str = (
     "arn:aws:acps:us-east-1:123456789012:token-vault/test-vault/apikeycredentialprovider/test-provider"
 )
+_AGENTCORE_CREDENTIAL_PROVIDER_NAME: str = "test-oauth2-provider-123"
 _AGENTCORE_WORKLOAD_IDENTITY_ARN: str = "arn:aws:bedrock-agentcore:us-east-1:123456789012:workload-identity/test-wi"
 
 # Patch names
@@ -112,18 +107,11 @@ class TestInstrumentationPatch(TestCase):
     def _run_patch_behaviour_tests(self):
         # Test setup
         self.method_patches[IMPORTLIB_METADATA_VERSION_PATCH].return_value = "1.0.0"
-        # Test setup to not patch gevent
-        os.environ[AWS_GEVENT_PATCH_MODULES] = "none"
 
         # Validate unpatched upstream behaviour - important to detect upstream changes that may break instrumentation
         self._test_unpatched_botocore_instrumentation()
         self._test_unpatched_botocore_propagator()
-        self._test_unpatched_gevent_instrumentation()
         self._test_unpatched_starlette_instrumentation()
-        # TODO: remove these tests once we bump botocore instrumentation version to 0.56b0
-        # Bedrock Runtime tests
-        self._test_unpatched_converse_stream_wrapper()
-        self._test_unpatched_extract_tool_calls()
 
         # Apply patches
         apply_instrumentation_patches()
@@ -131,26 +119,13 @@ class TestInstrumentationPatch(TestCase):
         # Validate patched upstream behaviour - important to detect downstream changes that may break instrumentation
         self._test_patched_botocore_instrumentation()
         self._test_patched_botocore_propagator()
-        self._test_unpatched_gevent_instrumentation()
         self._test_patched_starlette_instrumentation()
-
-        # Test setup to check whether only these two modules get patched by gevent monkey
-        os.environ[AWS_GEVENT_PATCH_MODULES] = "os, ssl"
 
         # Apply patches
         apply_instrumentation_patches()
 
-        # Validate that os and ssl gevent monkey patch modules were patched
-        self._test_patched_gevent_os_ssl_instrumentation()
-
-        # Set the value to 'all' so that all the remaining gevent monkey patch modules are patched
-        os.environ[AWS_GEVENT_PATCH_MODULES] = "all"
-
         # Apply patches again.
         apply_instrumentation_patches()
-
-        # Validate that remaining gevent monkey patch modules were patched
-        self._test_patched_gevent_instrumentation()
 
         # Test teardown
         self._reset_mocks()
@@ -169,6 +144,20 @@ class TestInstrumentationPatch(TestCase):
         self._test_resource_detector_patches()
         self._reset_mocks()
         self._test_starlette_installed_flag()
+        self._reset_mocks()
+        self._test_enhanced_code_attributes_patches()
+        self._reset_mocks()
+        self._test_flask_installed_flag()
+        self._reset_mocks()
+        self._test_fastapi_installed_flag()
+        self._reset_mocks()
+        self._test_django_installed_flag()
+        self._reset_mocks()
+        self._test_celery_installed_flag()
+        self._reset_mocks()
+        self._test_pika_installed_flag()
+        self._reset_mocks()
+        self._test_aio_pika_installed_flag()
         self._reset_mocks()
 
     def _test_unpatched_botocore_instrumentation(self):
@@ -222,20 +211,6 @@ class TestInstrumentationPatch(TestCase):
         # DynamoDB
         self.assertTrue("dynamodb" in _KNOWN_EXTENSIONS, "Upstream has removed a DynamoDB extension")
 
-    def _test_unpatched_gevent_instrumentation(self):
-        self.assertFalse(gevent.monkey.is_module_patched("os"), "gevent os module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("thread"), "gevent thread module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("time"), "gevent time module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("sys"), "gevent sys module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("socket"), "gevent socket module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("select"), "gevent select module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("ssl"), "gevent ssl module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("subprocess"), "gevent subprocess module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("builtins"), "gevent builtins module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("signal"), "gevent signal module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("queue"), "gevent queue module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("contextvars"), "gevent contextvars module has been patched")
-
     # pylint: disable=too-many-statements, too-many-locals
     def _test_patched_botocore_instrumentation(self):
         # Kinesis
@@ -267,10 +242,15 @@ class TestInstrumentationPatch(TestCase):
         # Bedrock Agent Operation
         self._test_patched_bedrock_agent_instrumentation()
 
-        # TODO: remove these tests once we bump botocore instrumentation version to 0.56b0
         # Bedrock Runtime
+        # TODO: remove these tests once we bump botocore instrumentation version to 0.56b0
         self._test_patched_converse_stream_wrapper()
         self._test_patched_extract_tool_calls()
+        # TODO: remove these tests once we bump botocore instrumentation version to 0.60b0
+        self._test_patched_process_anthropic_claude_chunk({"location": "Seattle"}, {"location": "Seattle"})
+        self._test_patched_process_anthropic_claude_chunk(None, None)
+        self._test_patched_process_anthropic_claude_chunk({}, {})
+        self._test_patched_from_converse_with_malformed_response()
 
         # Bedrock Agent Runtime
         self.assertTrue("bedrock-agent-runtime" in _KNOWN_EXTENSIONS)
@@ -283,38 +263,44 @@ class TestInstrumentationPatch(TestCase):
 
         # Bedrock AgentCore
         self.assertTrue("bedrock-agentcore" in _KNOWN_EXTENSIONS)
-        bedrock_agentcore_attributes: Dict[str, str] = _do_extract_bedrock_agentcore_attributes()
-        # Runtime attributes
-        self.assertEqual(bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_RUNTIME_ARN], _AGENTCORE_RUNTIME_ARN)
-        self.assertEqual(
-            bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN], _AGENTCORE_RUNTIME_ENDPOINT_ARN
-        )
-        self.assertEqual(bedrock_agentcore_attributes[GEN_AI_RUNTIME_ID], _AGENTCORE_RUNTIME_ID)
-        # Browser attributes
-        self.assertEqual(bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_BROWSER_ARN], _AGENTCORE_BROWSER_ARN)
-        self.assertEqual(bedrock_agentcore_attributes[GEN_AI_BROWSER_ID], _AGENTCORE_BROWSER_ID)
-        # Code interpreter attributes
-        self.assertEqual(
-            bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN], _AGENTCORE_CODE_INTERPRETER_ARN
-        )
-        self.assertEqual(bedrock_agentcore_attributes[GEN_AI_CODE_INTERPRETER_ID], _AGENTCORE_CODE_INTERPRETER_ID)
-        # Gateway attributes
-        self.assertEqual(bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_GATEWAY_ARN], _AGENTCORE_GATEWAY_ARN)
-        self.assertEqual(bedrock_agentcore_attributes[GEN_AI_GATEWAY_ID], _AGENTCORE_GATEWAY_ID)
-        self.assertEqual(bedrock_agentcore_attributes[AWS_GATEWAY_TARGET_ID], _AGENTCORE_TARGET_ID)
-        # Memory attributes
-        self.assertEqual(bedrock_agentcore_attributes[GEN_AI_MEMORY_ID], _AGENTCORE_MEMORY_ID)
-        self.assertEqual(bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_MEMORY_ARN], _AGENTCORE_MEMORY_ARN)
-        # Auth and identity attributes
-        self.assertEqual(
-            bedrock_agentcore_attributes[AWS_AUTH_CREDENTIAL_PROVIDER_ARN], _AGENTCORE_CREDENTIAL_PROVIDER_ARN
-        )
-        self.assertEqual(
-            bedrock_agentcore_attributes[AWS_BEDROCK_AGENTCORE_WORKLOAD_IDENTITY_ARN], _AGENTCORE_WORKLOAD_IDENTITY_ARN
-        )
-
-        # Bedrock AgentCore Control
         self.assertTrue("bedrock-agentcore-control" in _KNOWN_EXTENSIONS)
+
+        _do_extract_bedrock_agentcore_attributes, _do_on_success_bedrock_agentcore = _do_bedrock_agentcore_tests()
+        bedrock_agentcore_attributes: Dict[str, str] = _do_extract_bedrock_agentcore_attributes()
+        bedrock_agentcore_success_attributes: Dict[str, str] = _do_on_success_bedrock_agentcore()
+
+        expected_attrs = {
+            AWS_BEDROCK_AGENTCORE_RUNTIME_ARN: _AGENTCORE_RUNTIME_ARN,
+            AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN: _AGENTCORE_RUNTIME_ENDPOINT_ARN,
+            GEN_AI_RUNTIME_ID: _AGENTCORE_RUNTIME_ID,
+            AWS_BEDROCK_AGENTCORE_BROWSER_ARN: _AGENTCORE_BROWSER_ARN,
+            GEN_AI_BROWSER_ID: _AGENTCORE_BROWSER_ID,
+            AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN: _AGENTCORE_CODE_INTERPRETER_ARN,
+            GEN_AI_CODE_INTERPRETER_ID: _AGENTCORE_CODE_INTERPRETER_ID,
+            AWS_BEDROCK_AGENTCORE_GATEWAY_ARN: _AGENTCORE_GATEWAY_ARN,
+            GEN_AI_GATEWAY_ID: _AGENTCORE_GATEWAY_ID,
+            AWS_GATEWAY_TARGET_ID: _AGENTCORE_TARGET_ID,
+            GEN_AI_MEMORY_ID: _AGENTCORE_MEMORY_ID,
+            AWS_BEDROCK_AGENTCORE_MEMORY_ARN: _AGENTCORE_MEMORY_ARN,
+            AWS_AUTH_CREDENTIAL_PROVIDER: _AGENTCORE_CREDENTIAL_PROVIDER_ARN,
+            AWS_BEDROCK_AGENTCORE_WORKLOAD_IDENTITY_ARN: _AGENTCORE_WORKLOAD_IDENTITY_ARN,
+        }
+
+        for attr_key, expected_value in expected_attrs.items():
+            self.assertEqual(bedrock_agentcore_attributes[attr_key], expected_value)
+            self.assertEqual(bedrock_agentcore_success_attributes[attr_key], expected_value)
+
+        # Test resourceCredentialProviderName
+        name_attrs = _do_extract_attributes(
+            "bedrock-agentcore",
+            {"resourceCredentialProviderName": _AGENTCORE_CREDENTIAL_PROVIDER_NAME},
+        )
+        name_success_attrs = _do_on_success(
+            "bedrock-agentcore",
+            {"resourceCredentialProviderName": _AGENTCORE_CREDENTIAL_PROVIDER_NAME},
+        )
+        self.assertEqual(name_attrs[AWS_AUTH_CREDENTIAL_PROVIDER], _AGENTCORE_CREDENTIAL_PROVIDER_NAME)
+        self.assertEqual(name_success_attrs[AWS_AUTH_CREDENTIAL_PROVIDER], _AGENTCORE_CREDENTIAL_PROVIDER_NAME)
 
         # BedrockRuntime
         self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
@@ -506,38 +492,6 @@ class TestInstrumentationPatch(TestCase):
             self.assertTrue("aws.region" in initial_attributes)
             instrumentor.uninstrument()
 
-    def _test_patched_gevent_os_ssl_instrumentation(self):
-        # Only ssl and os module should have been patched since the environment variable was set to 'os, ssl'
-        self.assertTrue(gevent.monkey.is_module_patched("ssl"), "gevent ssl module has not been patched")
-        self.assertTrue(gevent.monkey.is_module_patched("os"), "gevent os module has not been patched")
-        # Rest should still be unpatched
-        self.assertFalse(gevent.monkey.is_module_patched("thread"), "gevent thread module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("time"), "gevent time module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("sys"), "gevent sys module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("socket"), "gevent socket module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("select"), "gevent select module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("subprocess"), "gevent subprocess module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("builtins"), "gevent builtins module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("signal"), "gevent signal module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("queue"), "gevent queue module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("contextvars"), "gevent contextvars module has been patched")
-
-    def _test_patched_gevent_instrumentation(self):
-        self.assertTrue(gevent.monkey.is_module_patched("os"), "gevent os module has not been patched")
-        self.assertTrue(gevent.monkey.is_module_patched("time"), "gevent time module has not been patched")
-        self.assertTrue(gevent.monkey.is_module_patched("socket"), "gevent socket module has not been patched")
-        self.assertTrue(gevent.monkey.is_module_patched("select"), "gevent select module has not been patched")
-        self.assertTrue(gevent.monkey.is_module_patched("ssl"), "gevent ssl module has not been patched")
-        self.assertTrue(gevent.monkey.is_module_patched("subprocess"), "gevent subprocess module has not been patched")
-        self.assertTrue(gevent.monkey.is_module_patched("signal"), "gevent signal module has not been patched")
-        self.assertTrue(gevent.monkey.is_module_patched("queue"), "gevent queue module has not been patched")
-
-        # Current version of gevent.monkey.patch_all() does not do anything to these modules despite being called
-        self.assertFalse(gevent.monkey.is_module_patched("thread"), "gevent thread module has been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("sys"), "gevent sys module has  been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("builtins"), "gevent builtins module not been patched")
-        self.assertFalse(gevent.monkey.is_module_patched("contextvars"), "gevent contextvars module has been patched")
-
     def _test_botocore_installed_flag(self):
         with patch(
             "amazon.opentelemetry.distro.patches._botocore_patches._apply_botocore_instrumentation_patches"
@@ -679,6 +633,104 @@ class TestInstrumentationPatch(TestCase):
         result = bedrock_utils.extract_tool_calls(message_with_string_content, True)
         self.assertIsNone(result)
 
+        # Test with toolUse format to exercise the for loop
+        message_with_tool_use = {"role": "assistant", "content": [{"toolUse": {"toolUseId": "id1", "name": "func1"}}]}
+        result = bedrock_utils.extract_tool_calls(message_with_tool_use, True)
+        self.assertEqual(len(result), 1)
+
+        # Test with tool_use format to exercise the for loop
+        message_with_type_tool_use = {
+            "role": "assistant",
+            "content": [{"type": "tool_use", "id": "id2", "name": "func2"}],
+        }
+        result = bedrock_utils.extract_tool_calls(message_with_type_tool_use, True)
+        self.assertEqual(len(result), 1)
+
+    def _test_patched_from_converse_with_malformed_response(self):
+        """Test patched from_converse handles malformed response missing output key"""
+        malformed_response = {"stopReason": "end_turn"}
+        choice = bedrock_utils._Choice.from_converse(malformed_response, capture_content=False)
+
+        self.assertEqual(choice.finish_reason, "end_turn")
+        self.assertEqual(choice.message, {})
+        self.assertEqual(choice.index, 0)
+
+    def _test_patched_process_anthropic_claude_chunk(
+        self, input_value: Dict[str, str], expected_output: Dict[str, str]
+    ):
+        self._test_process_anthropic_claude_chunk(input_value, expected_output, False)
+
+    def _test_unpatched_process_anthropic_claude_chunk(
+        self, input_value: Dict[str, str], expected_output: Dict[str, str]
+    ):
+        self._test_process_anthropic_claude_chunk(input_value, expected_output, True)
+
+    def _test_process_anthropic_claude_chunk(
+        self, input_value: Dict[str, str], expected_output: Dict[str, str], expect_exception: bool
+    ):
+        """Test that _process_anthropic_claude_chunk handles various tool_use input formats."""
+        wrapper = bedrock_utils.InvokeModelWithResponseStreamWrapper(
+            stream=MagicMock(),
+            stream_done_callback=MagicMock,
+            stream_error_callback=MagicMock,
+            model_id="anthropic.claude-3-5-sonnet-20240620-v1:0",
+        )
+
+        # Simulate message_start
+        wrapper._process_anthropic_claude_chunk(
+            {
+                "type": "message_start",
+                "message": {
+                    "role": "assistant",
+                    "content": [],
+                },
+            }
+        )
+
+        # Simulate content_block_start with specified input
+        content_block = {
+            "type": "tool_use",
+            "id": "test_id",
+            "name": "test_tool",
+        }
+        if input_value is not None:
+            content_block["input"] = input_value
+
+        wrapper._process_anthropic_claude_chunk(
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": content_block,
+            }
+        )
+
+        # Simulate content_block_stop
+        try:
+            wrapper._process_anthropic_claude_chunk({"type": "content_block_stop", "index": 0})
+        except TypeError:
+            if expect_exception:
+                return
+            else:
+                raise
+
+        # Verify the message content
+        self.assertEqual(len(wrapper._message["content"]), 1)
+        tool_block = wrapper._message["content"][0]
+        self.assertEqual(tool_block["type"], "tool_use")
+        self.assertEqual(tool_block["id"], "test_id")
+        self.assertEqual(tool_block["name"], "test_tool")
+
+        if expected_output is not None:
+            self.assertEqual(tool_block["input"], expected_output)
+            self.assertIsInstance(tool_block["input"], dict)
+        else:
+            self.assertNotIn("input", tool_block)
+
+        # Just adding this to do basic sanity checks and increase code coverage
+        wrapper._process_anthropic_claude_chunk({"type": "content_block_delta", "index": 0})
+        wrapper._process_anthropic_claude_chunk({"type": "message_delta"})
+        wrapper._process_anthropic_claude_chunk({"type": "message_stop"})
+
     def _test_patched_bedrock_agent_instrumentation(self):
         """For bedrock-agent service, both extract_attributes and on_success provides attributes,
         the attributes depend on the API being invoked."""
@@ -726,7 +778,8 @@ class TestInstrumentationPatch(TestCase):
                 self.assertEqual(len(bedrock_agent_extract_attributes), 2)
                 self.assertEqual(bedrock_agent_extract_attributes[attribute_tuple[0]], attribute_tuple[1])
                 self.assertEqual(
-                    bedrock_agent_extract_attributes["aws.bedrock.knowledge_base.id"], _BEDROCK_KNOWLEDGEBASE_ID
+                    bedrock_agent_extract_attributes["aws.bedrock.knowledge_base.id"],
+                    _BEDROCK_KNOWLEDGEBASE_ID,
                 )
             else:
                 self.assertEqual(len(bedrock_agent_extract_attributes), 1)
@@ -833,8 +886,10 @@ class TestInstrumentationPatch(TestCase):
     def _test_starlette_installed_flag(self):  # pylint: disable=no-self-use
         """Test that starlette patches are only applied when starlette is installed."""
         with patch(
-            "amazon.opentelemetry.distro.patches._starlette_patches._apply_starlette_instrumentation_patches"
-        ) as mock_apply_patches:
+            "amazon.opentelemetry.distro.patches._starlette_patches._apply_starlette_version_patches"
+        ) as mock_apply_version_patches, patch(
+            "amazon.opentelemetry.distro.patches._starlette_patches._apply_starlette_code_attributes_patch"
+        ) as mock_apply_code_patches:
             # Test when starlette is not installed
             with patch(
                 "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=False
@@ -843,9 +898,11 @@ class TestInstrumentationPatch(TestCase):
                 # Check that is_installed was called for starlette
                 mock_is_installed.assert_any_call("starlette")
                 # Patches should not be applied when starlette is not installed
-                mock_apply_patches.assert_not_called()
+                mock_apply_version_patches.assert_not_called()
+                mock_apply_code_patches.assert_not_called()
 
-            mock_apply_patches.reset_mock()
+            mock_apply_version_patches.reset_mock()
+            mock_apply_code_patches.reset_mock()
 
             # Test when starlette is installed
             with patch(
@@ -854,7 +911,302 @@ class TestInstrumentationPatch(TestCase):
                 apply_instrumentation_patches()
                 # Check that is_installed was called for starlette
                 mock_is_installed.assert_any_call("starlette")
-                # Patches should be applied when starlette is installed
+                # Version patches should always be applied when starlette is installed
+                mock_apply_version_patches.assert_called()
+                # Code attributes patches should only be applied if enhanced code attributes is enabled
+                # We don't test that specific condition here as it depends on configuration
+
+    def _test_enhanced_code_attributes_patches(self):
+        """Test enhanced code attributes patches are applied correctly."""
+        with patch(
+            "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes", return_value=True
+        ) as mock_enhanced_code_attrs, patch(
+            "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+        ) as mock_is_installed:
+            # Mock all the patch application functions
+            with patch(
+                "amazon.opentelemetry.distro.patches._starlette_patches._apply_starlette_code_attributes_patch"
+            ) as mock_starlette_patch, patch(
+                "amazon.opentelemetry.distro.patches._flask_patches._apply_flask_instrumentation_patches"
+            ) as mock_flask_patch, patch(
+                "amazon.opentelemetry.distro.patches._fastapi_patches._apply_fastapi_instrumentation_patches"
+            ) as mock_fastapi_patch, patch(
+                "amazon.opentelemetry.distro.patches._django_patches._apply_django_instrumentation_patches"
+            ) as mock_django_patch, patch(
+                "amazon.opentelemetry.distro.patches._celery_patches._apply_celery_instrumentation_patches"
+            ) as mock_celery_patch, patch(
+                "amazon.opentelemetry.distro.patches._pika_patches._apply_pika_instrumentation_patches"
+            ) as mock_pika_patch, patch(
+                "amazon.opentelemetry.distro.patches._aio_pika_patches._apply_aio_pika_instrumentation_patches"
+            ) as mock_aio_pika_patch:
+
+                apply_instrumentation_patches()
+
+                # Verify enhanced code attributes check was called
+                mock_enhanced_code_attrs.assert_called()
+
+                # Verify all library installation checks were called
+                mock_is_installed.assert_any_call("starlette")
+                mock_is_installed.assert_any_call("flask")
+                mock_is_installed.assert_any_call("fastapi")
+                mock_is_installed.assert_any_call("django")
+                mock_is_installed.assert_any_call("celery")
+                mock_is_installed.assert_any_call("pika")
+                mock_is_installed.assert_any_call("aio-pika")
+
+                # Verify all patches were applied since all libraries are "installed"
+                mock_starlette_patch.assert_called()
+                mock_flask_patch.assert_called()
+                mock_fastapi_patch.assert_called()
+                mock_django_patch.assert_called()
+                mock_celery_patch.assert_called()
+                mock_pika_patch.assert_called()
+                mock_aio_pika_patch.assert_called()
+
+    def _test_flask_installed_flag(self):
+        """Test that flask patches are only applied when flask is installed and enhanced code attributes is enabled."""
+        with patch(
+            "amazon.opentelemetry.distro.patches._flask_patches._apply_flask_instrumentation_patches"
+        ) as mock_apply_patches:
+            # Test when flask is not installed
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=False
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("flask")
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when flask is installed but enhanced code attributes is disabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ), patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=False,
+            ):
+                apply_instrumentation_patches()
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when flask is installed and enhanced code attributes is enabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("flask")
+                mock_apply_patches.assert_called()
+
+    def _test_fastapi_installed_flag(self):
+        """When fastapi is installed and enhanced code attributes is enabled."""
+        with patch(
+            "amazon.opentelemetry.distro.patches._fastapi_patches._apply_fastapi_instrumentation_patches"
+        ) as mock_apply_patches:
+            # Test when fastapi is not installed
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=False
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("fastapi")
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when fastapi is installed but enhanced code attributes is disabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ), patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=False,
+            ):
+                apply_instrumentation_patches()
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when fastapi is installed and enhanced code attributes is enabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("fastapi")
+                mock_apply_patches.assert_called()
+
+    def _test_django_installed_flag(self):
+        """When django is installed and enhanced code attributes is enabled."""
+        with patch(
+            "amazon.opentelemetry.distro.patches._django_patches._apply_django_instrumentation_patches"
+        ) as mock_apply_patches:
+            # Test when django is not installed
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=False
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("django")
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when django is installed but enhanced code attributes is disabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ), patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=False,
+            ):
+                apply_instrumentation_patches()
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when django is installed and enhanced code attributes is enabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("django")
+                mock_apply_patches.assert_called()
+
+    def _test_celery_installed_flag(self):
+        """When celery is installed and enhanced code attributes is enabled."""
+        with patch(
+            "amazon.opentelemetry.distro.patches._celery_patches._apply_celery_instrumentation_patches"
+        ) as mock_apply_patches:
+            # Test when celery is not installed
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=False
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("celery")
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when celery is installed but enhanced code attributes is disabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ), patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=False,
+            ):
+                apply_instrumentation_patches()
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when celery is installed and enhanced code attributes is enabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("celery")
+                mock_apply_patches.assert_called()
+
+    def _test_pika_installed_flag(self):
+        """Test that pika patches are only applied when pika is installed and enhanced code attributes is enabled."""
+        with patch(
+            "amazon.opentelemetry.distro.patches._pika_patches._apply_pika_instrumentation_patches"
+        ) as mock_apply_patches:
+            # Test when pika is not installed
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=False
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("pika")
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when pika is installed but enhanced code attributes is disabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ), patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=False,
+            ):
+                apply_instrumentation_patches()
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when pika is installed and enhanced code attributes is enabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("pika")
+                mock_apply_patches.assert_called()
+
+    def _test_aio_pika_installed_flag(self):
+        """When aio-pika is installed and enhanced code attributes is enabled."""
+        with patch(
+            "amazon.opentelemetry.distro.patches._aio_pika_patches._apply_aio_pika_instrumentation_patches"
+        ) as mock_apply_patches:
+            # Test when aio-pika is not installed
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=False
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("aio-pika")
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when aio-pika is installed but enhanced code attributes is disabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ), patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=False,
+            ):
+                apply_instrumentation_patches()
+                mock_apply_patches.assert_not_called()
+
+            mock_apply_patches.reset_mock()
+
+            # Test when aio-pika is installed and enhanced code attributes is enabled
+            with patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_installed", return_value=True
+            ) as mock_is_installed, patch(
+                "amazon.opentelemetry.distro.patches._instrumentation_patch.is_enhanced_code_attributes",
+                return_value=True,
+            ):
+                apply_instrumentation_patches()
+                mock_is_installed.assert_any_call("aio-pika")
                 mock_apply_patches.assert_called()
 
     def _reset_mocks(self):
@@ -933,9 +1285,8 @@ def _do_extract_lambda_attributes() -> Dict[str, str]:
     return _do_extract_attributes(service_name, params)
 
 
-def _do_extract_bedrock_agentcore_attributes() -> Dict[str, str]:
-    service_name: str = "bedrock-agentcore"
-    params: Dict[str, Any] = {
+def _do_bedrock_agentcore_tests():
+    test_data = {
         "agentRuntimeArn": _AGENTCORE_RUNTIME_ARN,
         "agentRuntimeEndpointArn": _AGENTCORE_RUNTIME_ENDPOINT_ARN,
         "agentRuntimeId": _AGENTCORE_RUNTIME_ID,
@@ -955,7 +1306,14 @@ def _do_extract_bedrock_agentcore_attributes() -> Dict[str, str]:
         "memory": {"arn": _AGENTCORE_MEMORY_ARN, "id": _AGENTCORE_MEMORY_ID},
         "workloadIdentityDetails": {"workloadIdentityArn": _AGENTCORE_WORKLOAD_IDENTITY_ARN},
     }
-    return _do_extract_attributes(service_name, params)
+
+    def extract_attributes():
+        return _do_extract_attributes("bedrock-agentcore", test_data)
+
+    def on_success():
+        return _do_on_success("bedrock-agentcore", test_data)
+
+    return extract_attributes, on_success
 
 
 def _do_extract_attributes(service_name: str, params: Dict[str, Any], operation: str = None) -> Dict[str, str]:

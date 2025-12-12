@@ -1,13 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from unittest.mock import patch
-
 import flask
 from werkzeug.test import Client
 from werkzeug.wrappers import Response
 
 from amazon.opentelemetry.distro.patches._flask_patches import _apply_flask_instrumentation_patches
-from opentelemetry import trace
 from opentelemetry.instrumentation.flask import FlaskInstrumentor
 from opentelemetry.test.test_base import TestBase
 
@@ -89,20 +86,14 @@ class TestFlaskPatchesRealApp(TestBase):
         except Exception:  # pylint: disable=broad-exception-caught
             pass
 
-    @patch("amazon.opentelemetry.distro.patches._flask_patches.get_code_correlation_enabled_status")
-    def test_flask_patches_with_real_app(self, mock_get_status):
+    def test_flask_patches_with_real_app(self):
         """Test Flask patches with real Flask app covering various scenarios."""
-        mock_get_status.return_value = True
-
         # Store original Flask methods - use the module level constants
         original_add_url_rule = _ORIGINAL_FLASK_ADD_URL_RULE
         original_dispatch_request = _ORIGINAL_FLASK_DISPATCH_REQUEST
 
         # Apply patches FIRST
         _apply_flask_instrumentation_patches()
-
-        # Verify that get_status was called
-        mock_get_status.assert_called_once()
 
         # Create instrumentor and manually call _instrument to trigger Flask method wrapping
         instrumentor = FlaskInstrumentor()
@@ -136,45 +127,8 @@ class TestFlaskPatchesRealApp(TestBase):
             restored_dispatch_request, original_dispatch_request, "Flask.dispatch_request should be restored"
         )
 
-    @patch("amazon.opentelemetry.distro.patches._flask_patches.get_code_correlation_enabled_status")
-    def test_flask_patches_disabled(self, mock_get_status):
-        """Test Flask patches when code correlation is disabled."""
-        mock_get_status.return_value = False
-
-        # Apply patches (should not modify anything)
-        _apply_flask_instrumentation_patches()
-
-        # Instrument the app normally
-        instrumentor = FlaskInstrumentor()
-        instrumentor.instrument_app(self.app)
-
-        # Verify that get_status was called
-        mock_get_status.assert_called_once()
-
-        # Make a request
-        resp = self.client.get("/hello")
-        self.assertEqual(200, resp.status_code)
-        self.assertEqual([b"Hello!"], list(resp.response))
-
-        # Check spans were still generated (normal instrumentation)
-        spans = self.memory_exporter.get_finished_spans()
-        self.assertEqual(len(spans), 1)
-
-        span = spans[0]
-        self.assertEqual(span.name, "GET /hello")
-        self.assertEqual(span.kind, trace.SpanKind.SERVER)
-
-        # Clean up - avoid Flask instrumentation issues
-        try:
-            instrumentor.uninstrument_app(self.app)
-        except Exception:
-            pass  # Flask instrumentation cleanup may fail, that's ok
-
-    @patch("amazon.opentelemetry.distro.patches._flask_patches.get_code_correlation_enabled_status")
-    def test_flask_patches_import_error_handling(self, mock_get_status):
+    def test_flask_patches_import_error_handling(self):
         """Test Flask patches with import errors."""
-        mock_get_status.return_value = True
-
         # Test that patches handle import errors gracefully by mocking sys.modules
         import sys
 
@@ -188,19 +142,13 @@ class TestFlaskPatchesRealApp(TestBase):
             # Should not raise exception even with missing flask
             _apply_flask_instrumentation_patches()
 
-            # Verify status was checked
-            mock_get_status.assert_called_once()
-
         finally:
             # Restore original modules
             sys.modules.clear()
             sys.modules.update(original_modules)
 
-    @patch("amazon.opentelemetry.distro.patches._flask_patches.get_code_correlation_enabled_status")
-    def test_flask_patches_view_function_decoration(self, mock_get_status):
+    def test_flask_patches_view_function_decoration(self):
         """Test Flask patches view function decoration edge cases."""
-        mock_get_status.return_value = True
-
         # Create instrumentor and apply patches
         instrumentor = FlaskInstrumentor()
         instrumentor.instrument_app(self.app)
@@ -227,11 +175,8 @@ class TestFlaskPatchesRealApp(TestBase):
 
         # Clean up - don't call uninstrument_app to avoid Flask instrumentation issues
 
-    @patch("amazon.opentelemetry.distro.patches._flask_patches.get_code_correlation_enabled_status")
-    def test_flask_patches_dispatch_request_coverage(self, mock_get_status):
+    def test_flask_patches_dispatch_request_coverage(self):
         """Test Flask patches dispatch_request method coverage."""
-        mock_get_status.return_value = True
-
         # Create a special app with deferred view function binding
         test_app = flask.Flask(__name__)
 
@@ -251,11 +196,8 @@ class TestFlaskPatchesRealApp(TestBase):
         resp = client.get("/deferred")
         self.assertEqual(200, resp.status_code)
 
-    @patch("amazon.opentelemetry.distro.patches._flask_patches.get_code_correlation_enabled_status")
-    def test_flask_patches_uninstrument_error_handling(self, mock_get_status):
+    def test_flask_patches_uninstrument_error_handling(self):
         """Test Flask patches uninstrument error handling."""
-        mock_get_status.return_value = True
-
         # Create instrumentor and apply patches
         instrumentor = FlaskInstrumentor()
         _apply_flask_instrumentation_patches()
@@ -273,11 +215,8 @@ class TestFlaskPatchesRealApp(TestBase):
         except Exception:
             pass  # Expected to handle gracefully
 
-    @patch("amazon.opentelemetry.distro.patches._flask_patches.get_code_correlation_enabled_status")
-    def test_flask_patches_code_correlation_import_error(self, mock_get_status):
+    def test_flask_patches_code_correlation_import_error(self):
         """Test Flask patches when code_correlation import fails."""
-        mock_get_status.return_value = True
-
         # Mock import error for code_correlation module
         import sys
 

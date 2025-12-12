@@ -11,6 +11,7 @@ from packaging.requirements import Requirement
 _logger: Logger = getLogger(__name__)
 
 AGENT_OBSERVABILITY_ENABLED = "AGENT_OBSERVABILITY_ENABLED"
+OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS = "OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS"
 
 
 def is_installed(req: str) -> bool:
@@ -36,6 +37,11 @@ def is_installed(req: str) -> bool:
 def is_agent_observability_enabled() -> bool:
     """Is the Agentic AI monitoring flag set to true?"""
     return os.environ.get(AGENT_OBSERVABILITY_ENABLED, "false").lower() == "true"
+
+
+def should_add_application_signals_dimensions() -> bool:
+    """Should Service and Environment Application Signals dimensions be added to EMF logs?"""
+    return os.environ.get(OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS, "true").lower() == "true"
 
 
 IS_BOTOCORE_INSTALLED: bool = is_installed("botocore")
