@@ -20,6 +20,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 - Refactor configuration for adding Application Signals Dimensions to EMF exporter
   ([#552](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/552))
 - Fix CVE-2025-66471. No associated PR since `urllib3` dependency will auto-bump to `2.6.x` upon release.
+- [PATCH] Add safety check for bedrock ConverseStream responses
+  ([#547](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/547))
 
 ## v0.14.0 - 2025-11-19
 - Add Resource and CFN Attributes for Bedrock AgentCore spans
@@ -34,6 +36,4 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   ([#522](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/522))
 - Support credentials provider name for BedrockAgentCore Identity
   ([#534](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/534))
-- [PATCH] Add safety check for bedrock ConverseStream responses
-  ([#547](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/547))
 
