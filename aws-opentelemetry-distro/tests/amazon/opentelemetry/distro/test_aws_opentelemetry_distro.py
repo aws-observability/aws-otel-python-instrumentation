@@ -32,6 +32,8 @@ class TestAwsOpenTelemetryDistro(TestCase):
             "OTEL_PYTHON_DISABLED_INSTRUMENTATIONS",
             "OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED",
             "OTEL_AWS_APPLICATION_SIGNALS_ENABLED",
+            "OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS",
+            "DJANGO_SETTINGS_MODULE",
         ]
 
         # First, save all current values
@@ -100,14 +102,21 @@ class TestAwsOpenTelemetryDistro(TestCase):
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.get_aws_region")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_installed")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
     def test_configure_with_agent_observability_enabled(
-        self, mock_super_configure, mock_apply_patches, mock_is_agent_observability, mock_get_aws_region
+        self,
+        mock_super_configure,
+        mock_apply_patches,
+        mock_is_installed,
+        mock_is_agent_observability,
+        mock_get_aws_region,
     ):
         """Test that _configure sets agent observability defaults when enabled"""
         mock_is_agent_observability.return_value = True
         mock_get_aws_region.return_value = "us-west-2"
+        mock_is_installed.return_value = False  # Mock Django as not installed to avoid interference
 
         distro = AwsOpenTelemetryDistro()
         distro._configure()
@@ -131,6 +140,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
         )
         self.assertEqual(os.environ.get("OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED"), "true")
         self.assertEqual(os.environ.get("OTEL_AWS_APPLICATION_SIGNALS_ENABLED"), "false")
+        self.assertEqual(os.environ.get("OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS"), "false")
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.get_aws_region")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_agent_observability_enabled")
@@ -277,3 +287,139 @@ class TestAwsOpenTelemetryDistro(TestCase):
         for prop in individual_propagators:
             actual_propagators.append(type(prop).__name__)
         self.assertEqual(expected_propagators, actual_propagators)
+
+    # Django Instrumentation Tests
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_installed")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
+    def test_django_instrumentation_enabled_with_settings_module(
+        self, mock_super_configure, mock_apply_patches, mock_is_installed
+    ):
+        """Test that Django instrumentation is enabled when DJANGO_SETTINGS_MODULE is set"""
+        mock_is_installed.return_value = True
+        os.environ["DJANGO_SETTINGS_MODULE"] = "myproject.settings"
+
+        distro = AwsOpenTelemetryDistro()
+        distro._configure()
+
+        # Verify that django is NOT in disabled instrumentations
+        disabled_instrumentations = os.environ.get("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", "")
+        self.assertNotIn("django", disabled_instrumentations)
+
+        mock_is_installed.assert_called_once_with("django")
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_installed")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
+    def test_django_instrumentation_disabled_without_settings_module(
+        self, mock_super_configure, mock_apply_patches, mock_is_installed
+    ):
+        """Test that Django instrumentation is disabled when DJANGO_SETTINGS_MODULE is not set"""
+        mock_is_installed.return_value = True
+
+        distro = AwsOpenTelemetryDistro()
+        distro._configure()
+
+        # Verify that django is in disabled instrumentations
+        disabled_instrumentations = os.environ.get("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", "")
+        self.assertIn("django", disabled_instrumentations)
+
+        mock_is_installed.assert_called_once_with("django")
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_installed")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
+    def test_django_instrumentation_disabled_with_existing_disabled_instrumentations(
+        self, mock_super_configure, mock_apply_patches, mock_is_installed
+    ):
+        """Test that Django is appended to existing disabled instrumentations"""
+        mock_is_installed.return_value = True
+        os.environ["OTEL_PYTHON_DISABLED_INSTRUMENTATIONS"] = "flask,fastapi"
+
+        distro = AwsOpenTelemetryDistro()
+        distro._configure()
+
+        # Verify that django is appended to existing disabled instrumentations
+        disabled_instrumentations = os.environ.get("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", "")
+        self.assertEqual("flask,fastapi,django", disabled_instrumentations)
+
+        mock_is_installed.assert_called_once_with("django")
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_installed")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
+    def test_django_not_installed_no_effect(self, mock_super_configure, mock_apply_patches, mock_is_installed):
+        """Test that when Django is not installed, no changes are made to disabled instrumentations"""
+        mock_is_installed.return_value = False
+
+        distro = AwsOpenTelemetryDistro()
+        distro._configure()
+
+        # Verify that OTEL_PYTHON_DISABLED_INSTRUMENTATIONS is not affected
+        disabled_instrumentations = os.environ.get("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", "")
+        self.assertEqual("", disabled_instrumentations)
+
+        mock_is_installed.assert_called_once_with("django")
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_installed")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
+    def test_django_instrumentation_enabled_with_settings_module_and_existing_disabled(
+        self, mock_super_configure, mock_apply_patches, mock_is_installed
+    ):
+        """Test that Django instrumentation is enabled even with existing disabled instrumentations"""
+        mock_is_installed.return_value = True
+        os.environ["DJANGO_SETTINGS_MODULE"] = "myproject.settings"
+        os.environ["OTEL_PYTHON_DISABLED_INSTRUMENTATIONS"] = "flask,fastapi"
+
+        distro = AwsOpenTelemetryDistro()
+        distro._configure()
+
+        # Verify that django is NOT added to disabled instrumentations
+        disabled_instrumentations = os.environ.get("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", "")
+        self.assertEqual("flask,fastapi", disabled_instrumentations)
+        self.assertNotIn("django", disabled_instrumentations)
+
+        mock_is_installed.assert_called_once_with("django")
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_installed")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
+    def test_django_instrumentation_disabled_empty_settings_module(
+        self, mock_super_configure, mock_apply_patches, mock_is_installed
+    ):
+        """Test that Django instrumentation is disabled when DJANGO_SETTINGS_MODULE is empty"""
+        mock_is_installed.return_value = True
+        os.environ["DJANGO_SETTINGS_MODULE"] = ""
+
+        distro = AwsOpenTelemetryDistro()
+        distro._configure()
+
+        # Verify that django is in disabled instrumentations
+        disabled_instrumentations = os.environ.get("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", "")
+        self.assertIn("django", disabled_instrumentations)
+
+        mock_is_installed.assert_called_once_with("django")
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.get_aws_region")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_installed")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
+    def test_application_signals_dimensions_disabled_with_agent_observability(
+        self,
+        mock_super_configure,
+        mock_apply_patches,
+        mock_is_installed,
+        mock_is_agent_observability,
+        mock_get_aws_region,
+    ):
+        """Test that OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS is disabled in agent observability mode"""
+        mock_is_agent_observability.return_value = True
+        mock_get_aws_region.return_value = "us-west-2"
+        mock_is_installed.return_value = False
+
+        distro = AwsOpenTelemetryDistro()
+        distro._configure()
+
+        self.assertEqual(os.environ.get("OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS"), "false")
