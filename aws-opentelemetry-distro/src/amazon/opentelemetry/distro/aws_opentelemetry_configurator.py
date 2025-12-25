@@ -92,6 +92,7 @@ AWS_LAMBDA_FUNCTION_NAME_CONFIG = "AWS_LAMBDA_FUNCTION_NAME"
 AWS_XRAY_DAEMON_ADDRESS_CONFIG = "AWS_XRAY_DAEMON_ADDRESS"
 OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED_CONFIG = "OTEL_AWS_PYTHON_DEFER_TO_WORKERS_ENABLED"
 SYSTEM_METRICS_INSTRUMENTATION_SCOPE_NAME = "opentelemetry.instrumentation.system_metrics"
+OTEL_EXPORTER_OTLP_ENDPOINT = "OTEL_EXPORTER_OTLP_ENDPOINT"
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
 OTEL_EXPORTER_OTLP_LOGS_HEADERS = "OTEL_EXPORTER_OTLP_LOGS_HEADERS"
@@ -406,7 +407,8 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
     traces_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
     if _is_lambda_environment():
         # Override OTLP http default endpoint to UDP
-        if isinstance(span_exporter, OTLPSpanExporter) and traces_endpoint is None:
+        # Check for custom endpoint using both signal-specific and generic env vars per OTel spec
+        if isinstance(span_exporter, OTLPSpanExporter) and not _has_custom_otlp_traces_endpoint():
             traces_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
             span_exporter = OTLPUdpSpanExporter(endpoint=traces_endpoint)
 
@@ -643,6 +645,18 @@ def is_enhanced_code_attributes() -> bool:
 def _is_lambda_environment():
     # detect if running in AWS Lambda environment
     return AWS_LAMBDA_FUNCTION_NAME_CONFIG in os.environ
+
+
+def _has_custom_otlp_traces_endpoint():
+    """Check if a custom OTLP traces endpoint is configured.
+
+    Per OpenTelemetry OTLP Exporter specification, check for signal-specific
+    endpoint first, then fall back to generic endpoint.
+    """
+    return (
+        os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT) is not None
+        or os.environ.get(OTEL_EXPORTER_OTLP_ENDPOINT) is not None
+    )
 
 
 def _is_aws_otlp_endpoint(otlp_endpoint: Optional[str], service: str) -> bool:
