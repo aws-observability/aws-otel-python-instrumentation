@@ -34,7 +34,7 @@ class CodeAttributesTest(ContractTestBase):
         """
         return {
             "OTEL_INSTRUMENTATION_COMMON_PEER_SERVICE_MAPPING": "backend=backend:8080",
-            "OTEL_AWS_CODE_CORRELATION_ENABLED": "true",
+            "OTEL_AWS_EXPERIMENTAL_CODE_ATTRIBUTES": "true",
         }
 
     def test_success(self) -> None:

@@ -6,15 +6,15 @@ import os
 from unittest import TestCase
 from unittest.mock import patch
 
-from amazon.opentelemetry.distro.code_correlation.config import _ENV_CONFIG, AwsCodeCorrelationConfig
+from amazon.opentelemetry.distro.code_correlation.config import _ENV_CONFIG, AwsCodeAttributesConfig
 
 
-class TestAwsCodeCorrelationConfig(TestCase):
-    """Test the AwsCodeCorrelationConfig class."""
+class TestAwsCodeAttributesConfig(TestCase):
+    """Test the AwsCodeAttributesConfig class."""
 
     def test_init_with_defaults(self):
         """Test initialization with default parameters."""
-        config = AwsCodeCorrelationConfig()
+        config = AwsCodeAttributesConfig()
 
         self.assertEqual(config.include, [])
         self.assertEqual(config.exclude, [])
@@ -22,7 +22,7 @@ class TestAwsCodeCorrelationConfig(TestCase):
 
     def test_init_with_none_parameters(self):
         """Test initialization with None parameters."""
-        config = AwsCodeCorrelationConfig(include=None, exclude=None, stack_depth=0)
+        config = AwsCodeAttributesConfig(include=None, exclude=None, stack_depth=0)
 
         self.assertEqual(config.include, [])
         self.assertEqual(config.exclude, [])
@@ -34,7 +34,7 @@ class TestAwsCodeCorrelationConfig(TestCase):
         exclude = ["third-party", "vendor"]
         stack_depth = 10
 
-        config = AwsCodeCorrelationConfig(include=include, exclude=exclude, stack_depth=stack_depth)
+        config = AwsCodeAttributesConfig(include=include, exclude=exclude, stack_depth=stack_depth)
 
         self.assertEqual(config.include, include)
         self.assertEqual(config.exclude, exclude)
@@ -42,7 +42,7 @@ class TestAwsCodeCorrelationConfig(TestCase):
 
     def test_init_with_empty_lists(self):
         """Test initialization with empty lists."""
-        config = AwsCodeCorrelationConfig(include=[], exclude=[], stack_depth=5)
+        config = AwsCodeAttributesConfig(include=[], exclude=[], stack_depth=5)
 
         self.assertEqual(config.include, [])
         self.assertEqual(config.exclude, [])
@@ -50,7 +50,7 @@ class TestAwsCodeCorrelationConfig(TestCase):
 
     def test_to_dict(self):
         """Test conversion to dictionary."""
-        config = AwsCodeCorrelationConfig(include=["app1", "app2"], exclude=["lib1", "lib2"], stack_depth=15)
+        config = AwsCodeAttributesConfig(include=["app1", "app2"], exclude=["lib1", "lib2"], stack_depth=15)
 
         result = config.to_dict()
 
@@ -59,7 +59,7 @@ class TestAwsCodeCorrelationConfig(TestCase):
 
     def test_to_dict_with_defaults(self):
         """Test conversion to dictionary with default values."""
-        config = AwsCodeCorrelationConfig()
+        config = AwsCodeAttributesConfig()
 
         result = config.to_dict()
 
@@ -68,7 +68,7 @@ class TestAwsCodeCorrelationConfig(TestCase):
 
     def test_to_json_with_indent(self):
         """Test conversion to JSON with indentation."""
-        config = AwsCodeCorrelationConfig(include=["myapp"], exclude=["vendor"], stack_depth=5)
+        config = AwsCodeAttributesConfig(include=["myapp"], exclude=["vendor"], stack_depth=5)
 
         result = config.to_json(indent=2)
 
@@ -78,7 +78,7 @@ class TestAwsCodeCorrelationConfig(TestCase):
 
     def test_to_json_without_indent(self):
         """Test conversion to JSON without indentation."""
-        config = AwsCodeCorrelationConfig(include=["myapp"], exclude=["vendor"], stack_depth=5)
+        config = AwsCodeAttributesConfig(include=["myapp"], exclude=["vendor"], stack_depth=5)
 
         result = config.to_json(indent=None)
 
@@ -88,7 +88,7 @@ class TestAwsCodeCorrelationConfig(TestCase):
 
     def test_to_json_default_indent(self):
         """Test conversion to JSON with default indentation."""
-        config = AwsCodeCorrelationConfig(include=["myapp"], exclude=["vendor"], stack_depth=5)
+        config = AwsCodeAttributesConfig(include=["myapp"], exclude=["vendor"], stack_depth=5)
 
         result = config.to_json()
 
@@ -98,24 +98,24 @@ class TestAwsCodeCorrelationConfig(TestCase):
 
     def test_repr(self):
         """Test string representation."""
-        config = AwsCodeCorrelationConfig(include=["app1", "app2"], exclude=["lib1"], stack_depth=10)
+        config = AwsCodeAttributesConfig(include=["app1", "app2"], exclude=["lib1"], stack_depth=10)
 
         result = repr(config)
 
-        expected = "AwsCodeCorrelationConfig(include=['app1', 'app2'], exclude=['lib1'], stack_depth=10)"
+        expected = "AwsCodeAttributesConfig(include=['app1', 'app2'], exclude=['lib1'], stack_depth=10)"
         self.assertEqual(result, expected)
 
     def test_repr_with_defaults(self):
         """Test string representation with default values."""
-        config = AwsCodeCorrelationConfig()
+        config = AwsCodeAttributesConfig()
 
         result = repr(config)
 
-        expected = "AwsCodeCorrelationConfig(include=[], exclude=[], stack_depth=0)"
+        expected = "AwsCodeAttributesConfig(include=[], exclude=[], stack_depth=0)"
         self.assertEqual(result, expected)
 
 
-class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many-public-methods
+class TestAwsCodeAttributesConfigFromEnv(TestCase):  # pylint: disable=too-many-public-methods
     """Test the from_env class method."""
 
     def setUp(self):
@@ -131,7 +131,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
 
     def test_from_env_no_environment_variable(self):
         """Test from_env when environment variable is not set."""
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         self.assertEqual(config.include, [])
         self.assertEqual(config.exclude, [])
@@ -141,7 +141,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         """Test from_env when environment variable is empty."""
         os.environ[_ENV_CONFIG] = ""
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         self.assertEqual(config.include, [])
         self.assertEqual(config.exclude, [])
@@ -151,7 +151,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         """Test from_env when environment variable contains only whitespace."""
         os.environ[_ENV_CONFIG] = "   \t\n  "
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         self.assertEqual(config.include, [])
         self.assertEqual(config.exclude, [])
@@ -161,7 +161,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         """Test from_env with empty JSON object."""
         os.environ[_ENV_CONFIG] = "{}"
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         self.assertEqual(config.include, [])
         self.assertEqual(config.exclude, [])
@@ -172,7 +172,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         config_data = {"include": ["myapp", "mylib"], "exclude": ["third-party", "vendor"], "stack_depth": 15}
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         self.assertEqual(config.include, ["myapp", "mylib"])
         self.assertEqual(config.exclude, ["third-party", "vendor"])
@@ -183,7 +183,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         config_data = {"include": ["myapp"]}
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         self.assertEqual(config.include, ["myapp"])
         self.assertEqual(config.exclude, [])  # Default value
@@ -194,7 +194,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         config_data = {"exclude": ["vendor", "third-party"]}
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         self.assertEqual(config.include, [])  # Default value
         self.assertEqual(config.exclude, ["vendor", "third-party"])
@@ -205,7 +205,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         config_data = {"stack_depth": 25}
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         self.assertEqual(config.include, [])  # Default value
         self.assertEqual(config.exclude, [])  # Default value
@@ -216,7 +216,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         config_data = {"stack_depth": 0}
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         self.assertEqual(config.stack_depth, 0)
 
@@ -226,7 +226,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         config_data = {"stack_depth": -5}
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         # Negative stack_depth should be corrected to 0
         self.assertEqual(config.stack_depth, 0)
@@ -244,7 +244,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         config_data = {"include": [], "exclude": ["vendor"], "stack_depth": 5}
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         self.assertEqual(config.include, [])
         self.assertEqual(config.exclude, ["vendor"])
@@ -255,7 +255,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         config_data = {"include": ["myapp"], "exclude": [], "stack_depth": 5}
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         self.assertEqual(config.include, ["myapp"])
         self.assertEqual(config.exclude, [])
@@ -266,7 +266,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         config_data = {"include": ["single_app"], "exclude": ["single_vendor"]}
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         self.assertEqual(config.include, ["single_app"])
         self.assertEqual(config.exclude, ["single_vendor"])
@@ -276,7 +276,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         """Test from_env with invalid JSON."""
         os.environ[_ENV_CONFIG] = "invalid json {"
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         # Should use default values when JSON is invalid
         self.assertEqual(config.include, [])
@@ -294,7 +294,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         """Test from_env with malformed JSON that causes syntax error."""
         os.environ[_ENV_CONFIG] = '{"include": ["app1", "app2"'  # Missing closing bracket and brace
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         # Should use default values
         self.assertEqual(config.include, [])
@@ -309,7 +309,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         """Test from_env with valid JSON that's not an object."""
         os.environ[_ENV_CONFIG] = '["not", "an", "object"]'
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         # Should handle gracefully and use defaults
         self.assertEqual(config.include, [])
@@ -335,7 +335,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         }
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         self.assertEqual(config.include, ["myapp"])
         self.assertEqual(config.exclude, ["vendor"])
@@ -352,7 +352,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         }
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         # Should validate and use defaults for invalid types
         self.assertEqual(config.include, [])  # Corrected to empty list
@@ -391,7 +391,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         config_data = {"include": None, "exclude": None, "stack_depth": None}
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         # get() should return None for null values, and validation should handle it
         self.assertEqual(config.include, [])  # Constructor converts None to []
@@ -432,7 +432,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         }
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         self.assertEqual(
             config.include, ["my.app.module", "com.company.service", "app_with_underscores", "app-with-dashes"]
@@ -444,13 +444,13 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         config_data = {"stack_depth": 999999}
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         self.assertEqual(config.stack_depth, 999999)
 
     def test_env_constant_value(self):
         """Test that the environment variable constant has the expected value."""
-        self.assertEqual(_ENV_CONFIG, "OTEL_AWS_CODE_CORRELATION_CONFIG")
+        self.assertEqual(_ENV_CONFIG, "OTEL_AWS_CODE_ATTRIBUTES_CONFIG")
 
     @patch("amazon.opentelemetry.distro.code_correlation.config._logger")
     def test_from_env_mixed_type_include_list(self, mock_logger):
@@ -462,7 +462,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         }
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         # Should only keep string items
         self.assertEqual(config.include, ["valid_string", "another_valid_string"])
@@ -497,7 +497,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         }
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         # Should only keep string items
         self.assertEqual(config.include, [])
@@ -532,7 +532,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         }
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         # Should result in empty lists since no valid strings
         self.assertEqual(config.include, [])
@@ -582,7 +582,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         config_data = {"include": ["myapp"], "exclude": ["vendor"], "stack_depth": 5.7}
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         # Float should be treated as invalid and corrected to 0
         self.assertEqual(config.include, ["myapp"])
@@ -607,7 +607,7 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         }
         os.environ[_ENV_CONFIG] = json.dumps(config_data)
 
-        config = AwsCodeCorrelationConfig.from_env()
+        config = AwsCodeAttributesConfig.from_env()
 
         # Empty strings are still strings, so they should be preserved
         self.assertEqual(config.include, ["valid", "", "also_valid", ""])
@@ -618,8 +618,8 @@ class TestAwsCodeCorrelationConfigFromEnv(TestCase):  # pylint: disable=too-many
         mock_logger.warning.assert_not_called()
 
 
-class TestAwsCodeCorrelationConfigIntegration(TestCase):
-    """Integration tests for AwsCodeCorrelationConfig."""
+class TestAwsCodeAttributesConfigIntegration(TestCase):
+    """Integration tests for AwsCodeAttributesConfig."""
 
     def setUp(self):
         """Set up test fixtures."""
@@ -634,7 +634,7 @@ class TestAwsCodeCorrelationConfigIntegration(TestCase):
 
     def test_roundtrip_to_dict_from_env(self):
         """Test roundtrip: config -> to_dict -> env -> from_env -> config."""
-        original_config = AwsCodeCorrelationConfig(
+        original_config = AwsCodeAttributesConfig(
             include=["app1", "app2"], exclude=["vendor1", "vendor2"], stack_depth=20
         )
 
@@ -643,7 +643,7 @@ class TestAwsCodeCorrelationConfigIntegration(TestCase):
         os.environ[_ENV_CONFIG] = json.dumps(config_dict)
 
         # Create new config from environment
-        new_config = AwsCodeCorrelationConfig.from_env()
+        new_config = AwsCodeAttributesConfig.from_env()
 
         # Should be equivalent
         self.assertEqual(new_config.include, original_config.include)
@@ -653,14 +653,14 @@ class TestAwsCodeCorrelationConfigIntegration(TestCase):
 
     def test_roundtrip_to_json_from_env(self):
         """Test roundtrip: config -> to_json -> env -> from_env -> config."""
-        original_config = AwsCodeCorrelationConfig(include=["myapp"], exclude=["third-party"], stack_depth=5)
+        original_config = AwsCodeAttributesConfig(include=["myapp"], exclude=["third-party"], stack_depth=5)
 
         # Convert to JSON for environment
         config_json = original_config.to_json(indent=None)  # Compact JSON
         os.environ[_ENV_CONFIG] = config_json
 
         # Create new config from environment
-        new_config = AwsCodeCorrelationConfig.from_env()
+        new_config = AwsCodeAttributesConfig.from_env()
 
         # Should be equivalent
         self.assertEqual(new_config.include, original_config.include)
@@ -670,9 +670,9 @@ class TestAwsCodeCorrelationConfigIntegration(TestCase):
 
     def test_config_equality_comparison(self):
         """Test that configs with same values produce same representations."""
-        config1 = AwsCodeCorrelationConfig(include=["app"], exclude=["vendor"], stack_depth=10)
+        config1 = AwsCodeAttributesConfig(include=["app"], exclude=["vendor"], stack_depth=10)
 
-        config2 = AwsCodeCorrelationConfig(include=["app"], exclude=["vendor"], stack_depth=10)
+        config2 = AwsCodeAttributesConfig(include=["app"], exclude=["vendor"], stack_depth=10)
 
         # They should have the same string representation
         self.assertEqual(repr(config1), repr(config2))

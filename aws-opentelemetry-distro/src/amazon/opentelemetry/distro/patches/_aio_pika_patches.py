@@ -9,7 +9,6 @@ Patches for OpenTelemetry Aio-Pika instrumentation to add code correlation suppo
 import functools
 import logging
 
-from amazon.opentelemetry.distro.aws_opentelemetry_configurator import get_code_correlation_enabled_status
 from amazon.opentelemetry.distro.code_correlation.utils import record_code_attributes
 
 logger = logging.getLogger(__name__)
@@ -32,9 +31,6 @@ def patch_callback_decorator_decorate(original_decorate):
 def _apply_aio_pika_instrumentation_patches():
     """Apply aio-pika patches if code correlation is enabled."""
     try:
-        if get_code_correlation_enabled_status() is not True:
-            return
-
         # Import CallbackDecorator inside function to allow proper testing
         try:
             # pylint: disable=import-outside-toplevel
