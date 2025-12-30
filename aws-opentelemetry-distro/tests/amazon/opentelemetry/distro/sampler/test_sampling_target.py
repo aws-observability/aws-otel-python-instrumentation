@@ -11,9 +11,10 @@ class TestSamplingTarget(TestCase):
         self.assertEqual(target_response.LastRuleModification, 0.0)
         self.assertEqual(target_response.SamplingTargetDocuments, [])
         self.assertEqual(target_response.UnprocessedStatistics, [])
+        self.assertEqual(target_response.UnprocessedBoostStatistics, [])
 
     def test_sampling_target_response_with_invalid_inputs(self):
-        target_response = _SamplingTargetResponse(1.0, [{}], [{}])
+        target_response = _SamplingTargetResponse(1.0, [{}], [{}], [{}])
         self.assertEqual(target_response.LastRuleModification, 1.0)
         self.assertEqual(len(target_response.SamplingTargetDocuments), 1)
         self.assertEqual(target_response.SamplingTargetDocuments[0].FixedRate, 0)
@@ -27,6 +28,12 @@ class TestSamplingTarget(TestCase):
         self.assertEqual(target_response.UnprocessedStatistics[0].Message, "")
         self.assertEqual(target_response.UnprocessedStatistics[0].RuleName, "")
 
+        self.assertEqual(len(target_response.UnprocessedBoostStatistics), 1)
+        self.assertEqual(target_response.UnprocessedBoostStatistics[0].ErrorCode, "")
+        self.assertEqual(target_response.UnprocessedBoostStatistics[0].Message, "")
+        self.assertEqual(target_response.UnprocessedBoostStatistics[0].RuleName, "")
+
         target_response = _SamplingTargetResponse(1.0, [{"foo": "bar"}], [{"dog": "cat"}])
         self.assertEqual(len(target_response.SamplingTargetDocuments), 0)
         self.assertEqual(len(target_response.UnprocessedStatistics), 0)
+        self.assertEqual(len(target_response.UnprocessedBoostStatistics), 0)

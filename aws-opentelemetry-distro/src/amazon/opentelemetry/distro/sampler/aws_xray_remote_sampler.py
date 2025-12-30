@@ -7,12 +7,15 @@ from typing import Optional, Sequence
 
 from typing_extensions import override
 
+from amazon.opentelemetry.distro.sampler._aws_xray_adaptive_sampling_config import _AWSXRayAdaptiveSamplingConfig
 from amazon.opentelemetry.distro.sampler._aws_xray_sampling_client import _AwsXRaySamplingClient
 from amazon.opentelemetry.distro.sampler._clock import _Clock
 from amazon.opentelemetry.distro.sampler._fallback_sampler import _FallbackSampler
 from amazon.opentelemetry.distro.sampler._rule_cache import DEFAULT_TARGET_POLLING_INTERVAL_SECONDS, _RuleCache
 from opentelemetry.context import Context
 from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
 from opentelemetry.sdk.trace.sampling import ParentBased, Sampler, SamplingResult
 from opentelemetry.trace import Link, SpanKind
 from opentelemetry.trace.span import TraceState
@@ -24,48 +27,7 @@ DEFAULT_RULES_POLLING_INTERVAL_SECONDS = 300
 DEFAULT_SAMPLING_PROXY_ENDPOINT = "http://127.0.0.1:2000"
 
 
-# Wrapper class to ensure that all XRay Sampler Functionality in _AwsXRayRemoteSampler
-# uses ParentBased logic to respect the parent span's sampling decision
 class AwsXRayRemoteSampler(Sampler):
-    def __init__(
-        self,
-        resource: Resource,
-        endpoint: str = None,
-        polling_interval: int = None,
-        log_level=None,
-    ):
-        self._root = ParentBased(
-            _AwsXRayRemoteSampler(
-                resource=resource, endpoint=endpoint, polling_interval=polling_interval, log_level=log_level
-            )
-        )
-
-    # pylint: disable=no-self-use
-    @override
-    def should_sample(
-        self,
-        parent_context: Optional[Context],
-        trace_id: int,
-        name: str,
-        kind: SpanKind = None,
-        attributes: Attributes = None,
-        links: Sequence[Link] = None,
-        trace_state: TraceState = None,
-    ) -> SamplingResult:
-        return self._root.should_sample(
-            parent_context, trace_id, name, kind=kind, attributes=attributes, links=links, trace_state=trace_state
-        )
-
-    # pylint: disable=no-self-use
-    @override
-    def get_description(self) -> str:
-        return f"AwsXRayRemoteSampler{{root:{self._root.get_description()}}}"
-
-
-# _AwsXRayRemoteSampler contains all core XRay Sampler Functionality,
-# however it is NOT Parent-based (e.g. Sample logic runs for each span)
-# Not intended for external use, use Parent-based `AwsXRayRemoteSampler` instead.
-class _AwsXRayRemoteSampler(Sampler):
     """
     Remote Sampler for OpenTelemetry that gets sampling configurations from AWS X-Ray
 
@@ -99,7 +61,7 @@ class _AwsXRayRemoteSampler(Sampler):
         self.__client_id = self.__generate_client_id()
         self._clock = _Clock()
         self.__xray_client = _AwsXRaySamplingClient(endpoint, log_level=log_level)
-        self.__fallback_sampler = _FallbackSampler(self._clock)
+        self.__fallback_sampler = ParentBased(_FallbackSampler(self._clock))
 
         self.__polling_interval = polling_interval
         self.__target_polling_interval = DEFAULT_TARGET_POLLING_INTERVAL_SECONDS
@@ -130,6 +92,9 @@ class _AwsXRayRemoteSampler(Sampler):
         self._targets_timer.daemon = True  # Ensures that when the main thread exits, the Timer threads are killed
         self._targets_timer.start()
 
+        self.adaptive_sampling_config: Optional[_AWSXRayAdaptiveSamplingConfig] = None
+        self._bsp: Optional[_UniversalBatchSpanProcessor] = None
+
     # pylint: disable=no-self-use
     @override
     def should_sample(
@@ -155,8 +120,35 @@ class _AwsXRayRemoteSampler(Sampler):
     # pylint: disable=no-self-use
     @override
     def get_description(self) -> str:
-        description = "_AwsXRayRemoteSampler{remote sampling with AWS X-Ray}"
-        return description
+        return "AwsXRayRemoteSampler{remote sampling with AWS X-Ray}"
+
+    # TODO: Fix bug handling
+    # TODO: There's no XRayRulesSampler here?
+    def set_adaptive_sampling_config(self, config: _AWSXRayAdaptiveSamplingConfig) -> None:
+        if self.adaptive_sampling_config is not None:
+            _logger.warning("Programming bug - Adaptive sampling config is already set")
+            return
+        elif self.adaptive_sampling_config is None and config is not None:
+            self.adaptive_sampling_config = config
+            self.__rule_cache.set_adaptive_sampling_config(config)
+
+    # TODO: Fix bug handling
+    def set_span_exporter(self, span_exporter: SpanExporter) -> None:
+        if self._bsp is not None:
+            _logger.warning("Programming bug - BSP is already set")
+            return
+        elif self._bsp is None and span_exporter is not None:
+            self._bsp = _UniversalBatchSpanProcessor(span_exporter)
+
+    # TODO: Fix bug handling
+    # TODO: Fix input
+    def adapt_sampling(self, span: ReadableSpan) -> None:
+        if self._bsp is None:
+            _logger.error("Programming bug - BatchSpanProcessor is null while trying to adapt sampling")
+            return
+
+        if self.adaptive_sampling_config is not None:
+            self.__rule_cache.adapt_sampling(span, self._bsp.on_end)
 
     def __get_and_update_sampling_rules(self) -> None:
         sampling_rules = self.__xray_client.get_sampling_rules()
@@ -195,3 +187,11 @@ class _AwsXRayRemoteSampler(Sampler):
         for _ in range(0, 24):
             client_id_array.append(random.choice(hex_chars))
         return "".join(client_id_array)
+
+
+class _UniversalBatchSpanProcessor(BatchSpanProcessor):
+    """BatchSpanProcessor that exports all spans regardless of sampling status."""
+
+    @override
+    def on_end(self, span: ReadableSpan) -> None:
+        self._batch_processor.emit(span)

@@ -2,10 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 import json
 from logging import getLogger
+from typing import Dict, List
 
 import requests
 
-from amazon.opentelemetry.distro.sampler._sampling_rule import _SamplingRule
+from amazon.opentelemetry.distro.sampler._sampling_rule import _SamplingRateBoost, _SamplingRule
 from amazon.opentelemetry.distro.sampler._sampling_target import _SamplingTargetResponse
 
 _logger = getLogger(__name__)
@@ -24,7 +25,7 @@ class _AwsXRaySamplingClient:
 
         self.__session = requests.Session()
 
-    def get_sampling_rules(self) -> [_SamplingRule]:
+    def get_sampling_rules(self) -> List[_SamplingRule]:
         sampling_rules = []
         headers = {"content-type": "application/json"}
 
@@ -44,7 +45,7 @@ class _AwsXRaySamplingClient:
                 if "SamplingRule" not in record:
                     _logger.error("SamplingRule is missing in SamplingRuleRecord")
                 else:
-                    sampling_rules.append(_SamplingRule(**record["SamplingRule"]))
+                    sampling_rules.append(self._generate_sampling_rule(record))
 
         except requests.exceptions.RequestException as req_err:
             _logger.error("Request error occurred: %s", req_err)
@@ -56,9 +57,14 @@ class _AwsXRaySamplingClient:
 
         return sampling_rules
 
-    def get_sampling_targets(self, statistics: [dict]) -> _SamplingTargetResponse:
+    def get_sampling_targets(
+        self, statistics: List[Dict], boostStatistics: List[Dict] = None
+    ) -> _SamplingTargetResponse:
         sampling_targets_response = _SamplingTargetResponse(
-            LastRuleModification=None, SamplingTargetDocuments=None, UnprocessedStatistics=None
+            LastRuleModification=None,
+            SamplingTargetDocuments=None,
+            UnprocessedStatistics=None,
+            UnprocessedBoostStatistics=None,
         )
         headers = {"content-type": "application/json"}
         try:
@@ -66,7 +72,10 @@ class _AwsXRaySamplingClient:
                 url=self.__get_sampling_targets_endpoint,
                 headers=headers,
                 timeout=20,
-                json={"SamplingStatisticsDocuments": statistics},
+                json={
+                    "SamplingStatisticsDocuments": statistics,
+                    "SamplingBoostStatisticsDocuments": boostStatistics,
+                },
             )
             if xray_response is None:
                 _logger.debug("GetSamplingTargets response is None. Unable to update targets.")
@@ -90,3 +99,16 @@ class _AwsXRaySamplingClient:
             _logger.debug("Error occurred when attempting to fetch targets: %s", err)
 
         return sampling_targets_response
+
+    def _generate_sampling_rule(self, record: Dict) -> _SamplingRule:
+        # Fields that are also objects themselves
+        nested_fields = ["SamplingRateBoost"]
+
+        # Parse JSON response
+        rule_data = record["SamplingRule"]
+        boost_data = rule_data.get("SamplingRateBoost")
+
+        return _SamplingRule(
+            **{k: v for k, v in rule_data.items() if k not in nested_fields},
+            SamplingRateBoost=_SamplingRateBoost(**boost_data) if boost_data else None,
+        )

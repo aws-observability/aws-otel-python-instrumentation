@@ -45,6 +45,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _is_application_signals_runtime_enabled,
     _is_defer_to_workers_enabled,
     _is_wsgi_master_process,
+    _parse_config_string,
     is_enhanced_code_attributes,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
@@ -60,7 +61,7 @@ from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter i
 from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler._aws_xray_sampling_client import _AwsXRaySamplingClient
-from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import _AwsXRayRemoteSampler
+from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
 from opentelemetry.environment_variables import OTEL_LOGS_EXPORTER, OTEL_METRICS_EXPORTER, OTEL_TRACES_EXPORTER
 from opentelemetry.exporter.otlp.proto.common._internal.metrics_encoder import OTLPMetricExporterMixin
@@ -82,6 +83,9 @@ from opentelemetry.sdk.trace.export import SpanExporter
 from opentelemetry.sdk.trace.sampling import DEFAULT_ON, Sampler
 from opentelemetry.semconv.resource import ResourceAttributes
 from opentelemetry.trace import get_tracer_provider
+
+TEST_DIR = os.path.dirname(os.path.realpath(__file__))
+DATA_DIR = os.path.join(TEST_DIR, "data")
 
 
 # pylint: disable=too-many-public-methods
@@ -166,28 +170,28 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
     # Test method for importing xray sampler
     # Cannot test this logic via `aws_otel_configurator.configure()` because that will
     # attempt to setup tracer provider again, which can be only be done once (already done)
-    @patch.object(_AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
-    @patch.object(_AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
+    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
+    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
     def test_import_xray_sampler_without_environment_arguments(self):
         os.environ.pop(OTEL_TRACES_SAMPLER_ARG, None)
 
         xray_sampler: Sampler = _custom_import_sampler("xray", resource=None)
-        xray_client: _AwsXRaySamplingClient = xray_sampler._root._root._AwsXRayRemoteSampler__xray_client
-        self.assertEqual(xray_sampler._root._root._AwsXRayRemoteSampler__polling_interval, 300)
+        xray_client: _AwsXRaySamplingClient = xray_sampler._AwsXRayRemoteSampler__xray_client
+        self.assertEqual(xray_sampler._AwsXRayRemoteSampler__polling_interval, 300)
         self.assertEqual(
             xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint,
             "http://127.0.0.1:2000/GetSamplingRules",
         )
 
-    @patch.object(_AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
-    @patch.object(_AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
+    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
+    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
     def test_import_xray_sampler_with_valid_environment_arguments(self):
         os.environ.pop(OTEL_TRACES_SAMPLER_ARG, None)
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "endpoint=http://localhost:2000,polling_interval=600")
 
         xray_sampler: Sampler = _custom_import_sampler("xray", resource=None)
-        xray_client: _AwsXRaySamplingClient = xray_sampler._root._root._AwsXRayRemoteSampler__xray_client
-        self.assertEqual(xray_sampler._root._root._AwsXRayRemoteSampler__polling_interval, 600)
+        xray_client: _AwsXRaySamplingClient = xray_sampler._AwsXRayRemoteSampler__xray_client
+        self.assertEqual(xray_sampler._AwsXRayRemoteSampler__polling_interval, 600)
         self.assertEqual(
             xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint, "http://localhost:2000/GetSamplingRules"
         )
@@ -196,8 +200,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "polling_interval=123")
 
         xray_sampler: Sampler = _custom_import_sampler("xray", resource=None)
-        xray_client: _AwsXRaySamplingClient = xray_sampler._root._root._AwsXRayRemoteSampler__xray_client
-        self.assertEqual(xray_sampler._root._root._AwsXRayRemoteSampler__polling_interval, 123)
+        xray_client: _AwsXRaySamplingClient = xray_sampler._AwsXRayRemoteSampler__xray_client
+        self.assertEqual(xray_sampler._AwsXRayRemoteSampler__polling_interval, 123)
         self.assertEqual(
             xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint, "http://127.0.0.1:2000/GetSamplingRules"
         )
@@ -206,22 +210,22 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "endpoint=http://cloudwatch-agent.amazon-cloudwatch:2000")
 
         xray_sampler: Sampler = _custom_import_sampler("xray", resource=None)
-        xray_client: _AwsXRaySamplingClient = xray_sampler._root._root._AwsXRayRemoteSampler__xray_client
-        self.assertEqual(xray_sampler._root._root._AwsXRayRemoteSampler__polling_interval, 300)
+        xray_client: _AwsXRaySamplingClient = xray_sampler._AwsXRayRemoteSampler__xray_client
+        self.assertEqual(xray_sampler._AwsXRayRemoteSampler__polling_interval, 300)
         self.assertEqual(
             xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint,
             "http://cloudwatch-agent.amazon-cloudwatch:2000/GetSamplingRules",
         )
 
-    @patch.object(_AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
-    @patch.object(_AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
+    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
+    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
     def test_import_xray_sampler_with_invalid_environment_arguments(self):
         os.environ.pop(OTEL_TRACES_SAMPLER_ARG, None)
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "endpoint=h=tt=p://=loca=lho=st:2000,polling_interval=FOOBAR")
 
         xray_sampler: Sampler = _custom_import_sampler("xray", resource=None)
-        xray_client: _AwsXRaySamplingClient = xray_sampler._root._root._AwsXRayRemoteSampler__xray_client
-        self.assertEqual(xray_sampler._root._root._AwsXRayRemoteSampler__polling_interval, 300)
+        xray_client: _AwsXRaySamplingClient = xray_sampler._AwsXRayRemoteSampler__xray_client
+        self.assertEqual(xray_sampler._AwsXRayRemoteSampler__polling_interval, 300)
         self.assertEqual(
             xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint,
             "h=tt=p://=loca=lho=st:2000/GetSamplingRules",
@@ -231,8 +235,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, ",,=,==,,===,")
 
         xray_sampler: Sampler = _custom_import_sampler("xray", resource=None)
-        xray_client: _AwsXRaySamplingClient = xray_sampler._root._root._AwsXRayRemoteSampler__xray_client
-        self.assertEqual(xray_sampler._root._root._AwsXRayRemoteSampler__polling_interval, 300)
+        xray_client: _AwsXRaySamplingClient = xray_sampler._AwsXRayRemoteSampler__xray_client
+        self.assertEqual(xray_sampler._AwsXRayRemoteSampler__polling_interval, 300)
         self.assertEqual(
             xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint,
             "http://127.0.0.1:2000/GetSamplingRules",
@@ -242,8 +246,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.setdefault(OTEL_TRACES_SAMPLER_ARG, "endpoint,polling_interval")
 
         xray_sampler: Sampler = _custom_import_sampler("xray", resource=None)
-        xray_client: _AwsXRaySamplingClient = xray_sampler._root._root._AwsXRayRemoteSampler__xray_client
-        self.assertEqual(xray_sampler._root._root._AwsXRayRemoteSampler__polling_interval, 300)
+        xray_client: _AwsXRaySamplingClient = xray_sampler._AwsXRayRemoteSampler__xray_client
+        self.assertEqual(xray_sampler._AwsXRayRemoteSampler__polling_interval, 300)
         self.assertEqual(
             xray_client._AwsXRaySamplingClient__get_sampling_rules_endpoint, "http://127.0.0.1:2000/GetSamplingRules"
         )
@@ -256,8 +260,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(default_sampler.get_description(), DEFAULT_ON.get_description())
         # DEFAULT_ON is a ParentBased(ALWAYS_ON) sampler
 
-    @patch.object(_AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
-    @patch.object(_AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
+    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
+    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
     def test_using_xray_sampler_sets_url_exclusion_env_vars(self):
         targets_to_exclude = "SamplingTargets,GetSamplingRules"
         os.environ.pop("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", None)
@@ -269,8 +273,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(os.environ.get("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", None), targets_to_exclude)
         self.assertEqual(os.environ.get("OTEL_PYTHON_URLLIB3_EXCLUDED_URLS", None), targets_to_exclude)
 
-    @patch.object(_AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
-    @patch.object(_AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
+    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_rule_poller", lambda x: None)
+    @patch.object(AwsXRayRemoteSampler, "_AwsXRayRemoteSampler__start_sampling_target_poller", lambda x: None)
     def test_using_xray_sampler_appends_url_exclusion_env_vars(self):
         targets_to_exclude = "SamplingTargets,GetSamplingRules"
         os.environ.pop("OTEL_PYTHON_REQUESTS_EXCLUDED_URLS", None)
@@ -337,6 +341,56 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertIsInstance(customized_sampler, AlwaysRecordSampler)
         self.assertEqual(mock_sampler, customized_sampler._root_sampler)
 
+    def test_parse_adaptive_sampling_config_valid(self):
+        """Tests that _parse_config_string correctly parses a valid configuration"""
+        self.assertEqual(_parse_config_string("version: 1").version, 1.0)
+
+    def test_parse_adaptive_sampling_config_null(self):
+        """Tests that _parse_config_string handles None without throwing"""
+        result = _parse_config_string(None)
+        self.assertIsNone(result)
+
+    def test_parse_adaptive_sampling_config_missing_version(self):
+        """Tests that _parse_config_string raises exception for missing version"""
+        with self.assertRaises(Exception):
+            _parse_config_string("")
+
+    def test_parse_adaptive_sampling_config_unsupported_version(self):
+        """Tests that _parse_config_string raises exception for unsupported version"""
+        with self.assertRaises(ValueError):
+            _parse_config_string("{version: 5000.1}")
+
+    def test_parse_adaptive_sampling_config_invalid_yaml(self):
+        """Tests that _parse_config_string raises exception for invalid YAML"""
+        with self.assertRaises(Exception):
+            _parse_config_string("{version: 1, invalid: yaml: structure}")
+
+    def test_parse_adaptive_sampling_config_from_file_valid(self):
+        """Tests that _parse_config_string correctly parses a valid YAML file"""
+        import os
+
+        config_path = os.path.join(DATA_DIR, "adaptive-sampling-config-valid.yaml")
+        config = _parse_config_string(config_path)
+        self.assertIsNotNone(config)
+        self.assertEqual(config.version, 1.0)
+        self.assertEqual(config.anomaly_capture_limit.anomaly_traces_per_second, 10)
+
+    def test_parse_adaptive_sampling_config_from_file_invalid(self):
+        """Tests that _parse_config_string raises exception for invalid YAML file"""
+        import os
+
+        config_path = os.path.join(DATA_DIR, "adaptive-sampling-config-invalid.yaml")
+        with self.assertRaises(Exception):
+            _parse_config_string(config_path)
+
+    def test_parse_adaptive_sampling_config_from_file_non_existant(self):
+        """Tests that _parse_config_string raises exception for non-existent YAML file"""
+        import os
+
+        config_path = os.path.join(DATA_DIR, "done.yaml")
+        with self.assertRaises(ValueError):
+            _parse_config_string(config_path)
+
     def test_customize_span_exporter(self):
         mock_exporter: SpanExporter = MagicMock(spec=OTLPSpanExporter)
         customized_exporter: SpanExporter = _customize_span_exporter(mock_exporter, Resource.get_empty())
@@ -390,16 +444,17 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
     def test_customize_span_processors_with_agent_observability(self):
         mock_tracer_provider: TracerProvider = MagicMock()
+        mock_sampler: Sampler = MagicMock()
 
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
-        _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+        _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
         self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 0)
 
         mock_tracer_provider.reset_mock()
 
         os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
         os.environ["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] = "https://xray.us-east-1.amazonaws.com/v1/traces"
-        _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+        _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
         self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 2)
 
         first_processor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
@@ -418,9 +473,10 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         # Create a new tracer provider for this test
         tracer_provider = TracerProvider()
+        mock_sampler: Sampler = MagicMock()
 
         # Add our span processors
-        _customize_span_processors(tracer_provider, Resource.get_empty())
+        _customize_span_processors(tracer_provider, Resource.get_empty(), mock_sampler)
 
         # Verify that the BaggageSpanProcessor was added
         # The _active_span_processor is a composite processor containing all processors
@@ -744,18 +800,19 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
     def test_customize_span_processors(self):
         mock_tracer_provider: TracerProvider = MagicMock()
+        mock_sampler: Sampler = MagicMock()
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", None)
 
-        _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+        _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
         self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 0)
 
         mock_tracer_provider.reset_mock()
 
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", "False")
-        _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+        _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
         self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 2)
         first_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
         self.assertIsInstance(first_processor, AttributePropagatingSpanProcessor)
@@ -766,7 +823,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         os.environ.setdefault("AGENT_OBSERVABILITY_ENABLED", "true")
         os.environ.setdefault("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "https://xray.us-east-1.amazonaws.com/v1/traces")
-        _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+        _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
         self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 4)
 
         processors = [call.args[0] for call in mock_tracer_provider.add_span_processor.call_args_list]
@@ -780,6 +837,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
     def test_customize_span_processors_with_code_correlation_enabled(self):
         """Test that CodeAttributesSpanProcessor is added when code correlation is enabled"""
         mock_tracer_provider: TracerProvider = MagicMock()
+        mock_sampler: Sampler = MagicMock()
 
         # Clean up environment to ensure consistent test state
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
@@ -787,7 +845,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop(OTEL_AWS_ENHANCED_CODE_ATTRIBUTES, None)
 
         # Test without code correlation enabled - should not add CodeAttributesSpanProcessor
-        _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+        _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
         self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 0)
 
         mock_tracer_provider.reset_mock()
@@ -801,7 +859,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             mock_code_processor_instance = MagicMock()
             mock_code_processor_class.return_value = mock_code_processor_instance
 
-            _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+            _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
 
             # Verify CodeAttributesSpanProcessor was created and added
             mock_code_processor_class.assert_called_once()
@@ -820,7 +878,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             mock_code_processor_instance = MagicMock()
             mock_code_processor_class.return_value = mock_code_processor_instance
 
-            _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+            _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
 
             # Should have 3 processors: CodeAttributesSpanProcessor, AttributePropagatingSpanProcessor,
             # and AwsSpanMetricsProcessor
@@ -845,17 +903,18 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
     def test_customize_span_processors_lambda(self):
         mock_tracer_provider: TracerProvider = MagicMock()
+        mock_sampler: Sampler = MagicMock()
         # Clean up environment to ensure consistent test state
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
         os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
 
-        _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+        _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
         self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 0)
 
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
         os.environ.setdefault("AWS_LAMBDA_FUNCTION_NAME", "myLambdaFunc")
-        _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+        _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
         self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 3)
         first_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
         self.assertIsInstance(first_processor, AwsLambdaSpanProcessor)
@@ -1001,19 +1060,20 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
     def test_customize_span_processors_calls_export_unsampled_span(self):
         """Test that _customize_span_processors calls _export_unsampled_span_for_agent_observability"""
         mock_tracer_provider: TracerProvider = MagicMock()
+        mock_sampler: Sampler = MagicMock()
 
         with patch(
             "amazon.opentelemetry.distro.aws_opentelemetry_configurator._export_unsampled_span_for_agent_observability"
         ) as mock_agent_observability:
             # Test that agent observability function is NOT called when disabled
             os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
-            _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+            _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
             mock_agent_observability.assert_not_called()
 
             # Test that agent observability function is called when enabled
             mock_agent_observability.reset_mock()
             os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
-            _customize_span_processors(mock_tracer_provider, Resource.get_empty())
+            _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
             mock_agent_observability.assert_called_once_with(mock_tracer_provider, Resource.get_empty())
 
             # Clean up
