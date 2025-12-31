@@ -19,6 +19,7 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsM
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     LAMBDA_SPAN_EXPORT_BATCH_SIZE,
     OTEL_AWS_ENHANCED_CODE_ATTRIBUTES,
+    OTEL_EXPORTER_OTLP_ENDPOINT,
     OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
     OTEL_EXPORTER_OTLP_LOGS_HEADERS,
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
@@ -40,6 +41,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _export_unsampled_span_for_agent_observability,
     _export_unsampled_span_for_lambda,
     _fetch_logs_header,
+    _has_custom_otlp_traces_endpoint,
     _init_logging,
     _is_application_signals_enabled,
     _is_application_signals_runtime_enabled,
@@ -387,6 +389,37 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         # Clean up
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
         os.environ.pop(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, None)
+
+    def test_customize_span_exporter_lambda_with_generic_otlp_endpoint(self):
+        """Test that setting OTEL_EXPORTER_OTLP_ENDPOINT in Lambda uses OTLP exporter, not UDP.
+
+        Per OpenTelemetry OTLP Exporter specification, the generic endpoint should be
+        recognized as a custom endpoint and prevent fallback to UDP export.
+        Fixes: https://github.com/aws-observability/aws-otel-js-instrumentation/issues/297
+        """
+        # Set Lambda environment and generic OTLP endpoint (not signal-specific)
+        os.environ["AWS_LAMBDA_FUNCTION_NAME"] = "myLambdaFunc"
+        os.environ[OTEL_EXPORTER_OTLP_ENDPOINT] = "http://my-collector:4318"
+
+        try:
+            mock_exporter = MagicMock(spec=OTLPSpanExporter)
+            customized_exporter = _customize_span_exporter(mock_exporter, Resource.get_empty())
+
+            # Should NOT be converted to UDP - the generic endpoint should be respected
+            self.assertNotIsInstance(customized_exporter, OTLPUdpSpanExporter)
+            # Should remain as the original exporter (not wrapped since App Signals not enabled)
+            self.assertEqual(mock_exporter, customized_exporter)
+
+            # Also verify the helper function works correctly
+            self.assertTrue(_has_custom_otlp_traces_endpoint())
+        finally:
+            os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
+            os.environ.pop(OTEL_EXPORTER_OTLP_ENDPOINT, None)
+
+        # Verify helper returns False when no endpoints are set
+        os.environ.pop(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, None)
+        os.environ.pop(OTEL_EXPORTER_OTLP_ENDPOINT, None)
+        self.assertFalse(_has_custom_otlp_traces_endpoint())
 
     def test_customize_span_processors_with_agent_observability(self):
         mock_tracer_provider: TracerProvider = MagicMock()
