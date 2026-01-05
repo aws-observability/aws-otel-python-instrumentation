@@ -21,6 +21,25 @@ Check out the [getting started documentation](https://aws-otel.github.io/docs/ge
 ## Supported Python libraries and frameworks
 For the complete list of supported frameworks, please refer to the [OpenTelemetry for Python documentation](https://github.com/open-telemetry/opentelemetry-python-contrib/blob/main/instrumentation/README.md).
 
+## Experimental Features
+
+**⚠️ Note: Experimental features and their behavior may change in future versions.**
+
+### Code Attributes
+
+Code attributes is an experimental feature that automatically captures source code context information when trace data is generated. This feature enhances observability by providing precise code-level details that help developers quickly identify and debug issues.
+
+Code attributes capture:
+* **Source file path** - The exact file where the telemetry originated
+* **Function name** - The method or function fully-qualified name, including class/namespace context when applicable (e.g., `com.example.MyService.processRequest`, `MyClass.my_method`)
+* **Line numbers** - Precise code location for pinpoint debugging
+
+To enable code attributes, set the following environment variable:
+```bash
+export OTEL_AWS_EXPERIMENTAL_CODE_ATTRIBUTES=true
+```
+
+
 ## Support
 
 Please note that as per policy, we're providing support via GitHub on a best effort basis. However, if you have AWS Enterprise Support you can create a ticket and we will provide direct support within the respective SLAs.
