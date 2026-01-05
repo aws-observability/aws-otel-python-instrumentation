@@ -364,7 +364,8 @@ def is_third_party_package(file_path: Path) -> bool:
         return False
 
     third_party_packages = _load_third_party_packages()
-    return distribution.name in third_party_packages
+    # Perform case-insensitive comparison to handle packages like 'Django' vs 'django'
+    return distribution.name.lower() in third_party_packages
 
 
 @lru_cache(maxsize=1024)
