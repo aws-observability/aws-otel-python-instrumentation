@@ -52,6 +52,9 @@ htmlcov
 # VSCode
 .vscode
 
+# Kiro
+.kiro
+
 # Sphinx
 _build/
 
