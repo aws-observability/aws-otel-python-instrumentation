@@ -13,6 +13,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 ## Unreleased
 - Support PyPI Signature
   ([#571](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/571))
+- Remove redundant environment variable configuration in Lambda layer
+  ([#570](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/570))
 - Add custom ADOT UserAgent for OTLP Spans Exporter
   ([#554](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/554))
 - Disable django instrumentation if DJANGO_SETTINGS_MODULE is not set
