@@ -115,10 +115,6 @@ if [ -z "${OTEL_AWS_APPLICATION_SIGNALS_ENABLED}" ]; then
     export OTEL_AWS_APPLICATION_SIGNALS_ENABLED="true";
 fi
 
-if [ -z "${OTEL_AWS_APPLICATION_SIGNALS_EMF_EXPORT_ENABLED}" ]; then
-    export OTEL_AWS_APPLICATION_SIGNALS_EMF_EXPORT_ENABLED="true";
-fi
-
 # - If Application Signals is enabled
 
 if [ "${OTEL_AWS_APPLICATION_SIGNALS_ENABLED}" = "true" ]; then
