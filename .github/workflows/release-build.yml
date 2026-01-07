@@ -60,7 +60,7 @@ jobs:
           path: dist/${{ env.SOURCE_ARTIFACT_NAME }}
 
   publish-sdk:
-    needs: [build-sdk, build-layer]
+    needs: [build-sdk]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
