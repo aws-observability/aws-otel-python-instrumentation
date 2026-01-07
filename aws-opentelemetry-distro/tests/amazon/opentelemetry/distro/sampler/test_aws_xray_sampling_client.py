@@ -89,6 +89,19 @@ class TestAwsXRaySamplingClient(TestCase):
         self.assertEqual(len(sampling_rules), len(sampling_records))
         self.validate_match_sampling_rules_properties_with_records(sampling_rules, sampling_records)
 
+    @patch("requests.Session.post")
+    def test_get_sampling_rules_with_boost(self, mock_post=None):
+        with open(f"{DATA_DIR}/get-sampling-rules-response-sample-3.json", encoding="UTF-8") as file:
+            sample_response = json.load(file)
+            mock_post.return_value.configure_mock(**{"json.return_value": sample_response})
+            file.close()
+        client = _AwsXRaySamplingClient("http://127.0.0.1:2000")
+        sampling_rules = client.get_sampling_rules()
+        rule = sampling_rules[0]
+
+        self.assertEqual(rule.SamplingRateBoost.MaxRate, 0.5)
+        self.assertEqual(rule.SamplingRateBoost.CooldownWindowMinutes, 1)
+
     def validate_match_sampling_rules_properties_with_records(self, sampling_rules, sampling_records):
         for _, (sampling_rule, sampling_record) in enumerate(zip(sampling_rules, sampling_records)):
             self.assertIsNotNone(sampling_rule.Attributes)

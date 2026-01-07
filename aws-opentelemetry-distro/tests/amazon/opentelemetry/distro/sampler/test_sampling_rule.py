@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from unittest import TestCase
 
-from amazon.opentelemetry.distro.sampler._sampling_rule import _SamplingRule
+from amazon.opentelemetry.distro.sampler._sampling_rule import _SamplingRateBoost, _SamplingRule
 
 
 class TestSamplingRule(TestCase):
@@ -85,3 +85,45 @@ class TestSamplingRule(TestCase):
 
         self.assertFalse(sampling_rule == sampling_rule_updated)
         self.assertFalse(sampling_rule == sampling_rule_updated_2)
+
+        sampling_rule_with_boost_1 = _SamplingRule(
+            Attributes={},
+            FixedRate=0,
+            HTTPMethod="*",
+            Host="*",
+            Priority=20,
+            ReservoirSize=1,
+            ResourceARN="*",
+            RuleARN="arn:aws:xray:us-east-1:999999999999:sampling-rule/test",
+            RuleName="test",
+            ServiceName="*",
+            ServiceType="*",
+            URLPath="*",
+            Version=1,
+            SamplingRateBoost=_SamplingRateBoost(
+                MaxRate=0.1,
+                CooldownWindowMinutes=0.05,
+            ),
+        )
+
+        sampling_rule_with_boost_2 = _SamplingRule(
+            Attributes={},
+            FixedRate=0,
+            HTTPMethod="*",
+            Host="*",
+            Priority=20,
+            ReservoirSize=1,
+            ResourceARN="*",
+            RuleARN="arn:aws:xray:us-east-1:999999999999:sampling-rule/test",
+            RuleName="test",
+            ServiceName="*",
+            ServiceType="*",
+            URLPath="*",
+            Version=1,
+            SamplingRateBoost=_SamplingRateBoost(
+                MaxRate=0.1,
+                CooldownWindowMinutes=1,
+            ),
+        )
+
+        self.assertFalse(sampling_rule_with_boost_1 == sampling_rule_with_boost_2)

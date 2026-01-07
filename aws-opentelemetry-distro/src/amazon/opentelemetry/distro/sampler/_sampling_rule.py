@@ -4,6 +4,23 @@
 
 # Disable snake_case naming style so this class can match the sampling rules response from X-Ray
 # pylint: disable=invalid-name
+class _SamplingRateBoost:
+    def __init__(
+        self,
+        MaxRate: float | None = None,
+        CooldownWindowMinutes: int | None = None,
+    ):
+        self.MaxRate = MaxRate if MaxRate is not None else 0.0
+        self.CooldownWindowMinutes = CooldownWindowMinutes if CooldownWindowMinutes is not None else 0
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _SamplingRateBoost):
+            return False
+        return self.MaxRate == other.MaxRate and self.CooldownWindowMinutes == other.CooldownWindowMinutes
+
+
+# Disable snake_case naming style so this class can match the sampling rules response from X-Ray
+# pylint: disable=invalid-name
 class _SamplingRule:
     def __init__(
         self,
@@ -20,6 +37,7 @@ class _SamplingRule:
         ServiceType: str = None,
         URLPath: str = None,
         Version: int = None,
+        SamplingRateBoost: _SamplingRateBoost = None,
     ):
         self.Attributes = Attributes if Attributes is not None else {}
         self.FixedRate = FixedRate if FixedRate is not None else 0.0
@@ -35,6 +53,7 @@ class _SamplingRule:
         self.ServiceType = ServiceType if ServiceType is not None else ""
         self.URLPath = URLPath if URLPath is not None else ""
         self.Version = Version if Version is not None else 0
+        self.SamplingRateBoost = SamplingRateBoost
 
     def __lt__(self, other: "_SamplingRule") -> bool:
         if self.Priority == other.Priority:
@@ -60,4 +79,5 @@ class _SamplingRule:
             and self.URLPath == other.URLPath
             and self.Version == other.Version
             and self.Attributes == other.Attributes
+            and self.SamplingRateBoost == other.SamplingRateBoost
         )
