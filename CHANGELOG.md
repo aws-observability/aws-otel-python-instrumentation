@@ -17,7 +17,7 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   ([#571](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/571))
 - Remove redundant environment variable configuration in Lambda layer
   ([#570](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/570))
-- Fix CVE-2026-21441. No associated PR since `urllib3` dependency will auto-bump to `2.6.x` upon release.
+- Fix CVE-2026-21441. No associated PR since `urllib3` dependency will auto-bump to latest `2.6.x` version upon release.
 - Update opentelemetry-sdk-extension-aws to version 2.1.0, and remove unneeded Resource Detector patches
   ([#572](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/572))
 
