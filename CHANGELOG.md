@@ -11,6 +11,8 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+- Add cloud.platform attribute to resource attributes in lambda
+  ([#561](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/561))
 - Sign Lambda layer by AWS Signer
   ([#573](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/573))
 - Update opentelemetry-sdk-extension-aws to version 2.1.0, and remove unneeded Resource Detector patches
@@ -19,7 +21,6 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   ([#571](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/571))
 - Remove redundant environment variable configuration in Lambda layer
   ([#570](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/570))
-
 
 ## v0.14.1 - 2025-12-15
 - Add custom ADOT UserAgent for OTLP Spans Exporter
