@@ -27,7 +27,7 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   ([#548](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/548))
 - Refactor configuration for adding Application Signals Dimensions to EMF exporter
   ([#552](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/552))
-- Fix CVE-2025-66471. No associated PR since `urllib3` dependency will auto-bump to `2.6.x` upon release.
+- Fix CVE-2025-66471 and CVE-2026-21441. No associated PR since `urllib3` dependency will auto-bump to the latest `2.6.x` version upon release.
 - Update opentelemetry-sdk-extension-aws to version 2.1.0, and remove unneeded Resource Detector patches
   ([#572](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/572))
 - Add cloud.platform attribute to resource attributes in lambda
@@ -60,4 +60,3 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   ([#522](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/522))
 - Support credentials provider name for BedrockAgentCore Identity
   ([#534](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/534))
-
