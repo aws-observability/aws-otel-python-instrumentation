@@ -15,13 +15,19 @@ class _AwsSamplingResult(SamplingResult):
     def __init__(
         self,
         decision: Decision,
-        attributes: "Attributes" = {},
+        attributes: "Attributes" = None,
         trace_state: Optional["TraceState"] = None,
         sampling_rule_name: Optional[str] = None,
         has_adaptive_sampling_config: bool = False,
     ):
+        # Define attributes that will be defined by super()
+        self.decision = decision
+        self.trace_state = None
+        self.attributes = None
+
         super().__init__(decision, attributes, trace_state)
 
+        # super will have defined self.attributes by this point
         self.attributes = MappingProxyType(
             {
                 **self.attributes,

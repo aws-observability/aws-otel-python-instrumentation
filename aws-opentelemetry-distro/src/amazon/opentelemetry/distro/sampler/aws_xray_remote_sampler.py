@@ -16,7 +16,7 @@ from amazon.opentelemetry.distro.sampler._rule_cache import DEFAULT_TARGET_POLLI
 from opentelemetry.context import Context
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
+from opentelemetry.sdk.trace.export import SpanExporter
 from opentelemetry.sdk.trace.sampling import ParentBased, Sampler, SamplingResult
 from opentelemetry.trace import Link, SpanKind
 from opentelemetry.trace.span import TraceState
@@ -129,7 +129,8 @@ class AwsXRayRemoteSampler(Sampler):
         if self.adaptive_sampling_config is not None:
             _logger.warning("Programming bug - Adaptive sampling config is already set")
             return
-        elif self.adaptive_sampling_config is None and config is not None:
+
+        if self.adaptive_sampling_config is None and config is not None:
             self.adaptive_sampling_config = config
             self.__rule_cache.set_adaptive_sampling_config(config)
 

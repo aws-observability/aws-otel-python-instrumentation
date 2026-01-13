@@ -304,6 +304,7 @@ class TestRuleCache(TestCase):
         readable_span_mock: ReadableSpan = MagicMock()
 
         def stubbed_consumer(span):
+            nonlocal export_counter
             export_counter += 1
 
         rule_cache.adapt_sampling(readable_span_mock, stubbed_consumer)

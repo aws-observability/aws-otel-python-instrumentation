@@ -8,11 +8,11 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 from cachetools import TTLCache
 
-import opentelemetry.baggage as baggage
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_OPERATION
 from amazon.opentelemetry.distro._aws_span_processing_util import _generate_ingress_operation
 from amazon.opentelemetry.distro.sampler._aws_sampling_result import _AwsSamplingResult
 from amazon.opentelemetry.distro.sampler._aws_xray_adaptive_sampling_config import (
+    _AnomalyConditions,
     _AWSXRayAdaptiveSamplingConfig,
     _UsageType,
 )
@@ -22,6 +22,7 @@ from amazon.opentelemetry.distro.sampler._rate_limiter import _RateLimiter
 from amazon.opentelemetry.distro.sampler._sampling_rule import _SamplingRule
 from amazon.opentelemetry.distro.sampler._sampling_rule_applier import _SamplingRuleApplier
 from amazon.opentelemetry.distro.sampler._sampling_target import _SamplingTarget, _SamplingTargetResponse
+from opentelemetry import baggage
 from opentelemetry.context import Context
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, StatusCode
@@ -82,9 +83,9 @@ class _RuleCache:
             _AwsSamplingResult.AWS_XRAY_SAMPLING_RULE_TRACE_STATE_KEY
         )
         if upstream_matched_rule is None:
-            b = baggage.get_all(parent_context)
+            bag = baggage.get_all(parent_context)
             upstream_matched_rule = (
-                b.get(_AwsSamplingResult.AWS_XRAY_SAMPLING_RULE_TRACE_STATE_KEY) if b is not None else None
+                bag.get(_AwsSamplingResult.AWS_XRAY_SAMPLING_RULE_TRACE_STATE_KEY) if bag is not None else None
             )
         result: SamplingResult = None
         for rule_applier in self.__rule_appliers:
@@ -138,6 +139,7 @@ class _RuleCache:
             else:
                 self._anomaly_capture_rate_limiter = _RateLimiter(1, 1, self._clock)
 
+    # pylint: disable=too-many-locals
     def adapt_sampling(self, span: ReadableSpan, span_batcher: Callable[[ReadableSpan], None]) -> None:
         if not self._adaptive_sampling_rule_exists and self._adaptive_sampling_config is None:
             return
@@ -203,12 +205,13 @@ class _RuleCache:
 
         self.__update_trace_usage_cache(trace_id, is_span_captured, is_counted_as_anomaly_for_boost)
 
+    # pylint: disable=too-many-branches
     def __is_anomaly(self, span: ReadableSpan) -> "_AnomalyDetectionResult":
         should_boost_sampling: bool = False
         should_capture_anomaly_span: bool = False
         status_code: int = span.attributes.get(HTTP_STATUS_CODE)
 
-        anomaly_conditions = (
+        anomaly_conditions: List[_AnomalyConditions] = (
             self._adaptive_sampling_config.anomaly_conditions if self._adaptive_sampling_config else None
         )
         # Empty list -> no conditions will apply and we will not do anything
@@ -217,6 +220,8 @@ class _RuleCache:
             if operation is None:
                 operation = _generate_ingress_operation(span)
 
+            # It is an iterable, but the current pylint version doesn't recognize it
+            # pylint: disable=not-an-iterable
             for condition in anomaly_conditions:
                 # Skip condition if it would only re-apply action already being taken
                 if (should_boost_sampling and condition.usage == _UsageType.SAMPLING_BOOST) or (

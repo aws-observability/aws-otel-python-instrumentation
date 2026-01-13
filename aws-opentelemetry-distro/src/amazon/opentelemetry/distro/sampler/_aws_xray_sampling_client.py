@@ -6,7 +6,7 @@ from typing import Dict, List
 
 import requests
 
-from amazon.opentelemetry.distro.sampler._sampling_rule import _SamplingRateBoost, _SamplingRule
+from amazon.opentelemetry.distro.sampler._sampling_rule import _SamplingRule
 from amazon.opentelemetry.distro.sampler._sampling_target import _SamplingTargetResponse
 
 _logger = getLogger(__name__)
@@ -58,7 +58,7 @@ class _AwsXRaySamplingClient:
         return sampling_rules
 
     def get_sampling_targets(
-        self, statistics: List[Dict], boostStatistics: List[Dict] = None
+        self, statistics: List[Dict], boost_statistics: List[Dict] = None
     ) -> _SamplingTargetResponse:
         sampling_targets_response = _SamplingTargetResponse(
             LastRuleModification=None,
@@ -74,7 +74,7 @@ class _AwsXRaySamplingClient:
                 timeout=20,
                 json={
                     "SamplingStatisticsDocuments": statistics,
-                    "SamplingBoostStatisticsDocuments": boostStatistics,
+                    "SamplingBoostStatisticsDocuments": boost_statistics,
                 },
             )
             if xray_response is None:

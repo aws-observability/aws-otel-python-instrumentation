@@ -86,5 +86,5 @@ class TestRateLimitingSampler(TestCase):
         sampler = _RateLimitingSampler(1, MockClock())
         self.assertEqual(
             sampler.get_description(),
-            "RateLimitingSampler{rate limiting sampling with sampling config of 1 req/sec and 0% of additional requests}",
+            "RateLimitingSampler{rate limiting sampling with sampling config of 1 req/s and 0% of additional requests}",
         )

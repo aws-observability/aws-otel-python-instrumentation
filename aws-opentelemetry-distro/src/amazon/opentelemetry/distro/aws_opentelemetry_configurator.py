@@ -413,14 +413,11 @@ def _customize_sampler(sampler: Sampler) -> Sampler:
 
         try:
             parsed_config = _parse_config_string(config)
-        except Exception as e:
-            _logger.warning("Failed to parse adaptive sampling configuration: %s", str(e))
+        except ValueError as error:
+            _logger.warning("Failed to parse adaptive sampling configuration: %s", str(error))
 
         if parsed_config is not None:
-            try:
-                sampler.set_adaptive_sampling_config(parsed_config)
-            except Exception as e:
-                _logger.warning("Error processing adaptive sampling config: %s", str(e))
+            sampler.set_adaptive_sampling_config(parsed_config)
 
     if not _is_application_signals_enabled():
         return sampler
@@ -937,8 +934,8 @@ def _parse_config_string(config: str) -> Optional[_AWSXRayAdaptiveSamplingConfig
     if path.exists():
         try:
             config = path.read_text(encoding="utf-8")
-        except IOError as e:
-            raise ValueError(f"Failed to read adaptive sampling configuration file: {e}") from e
+        except IOError as err:
+            raise ValueError(f"Failed to read adaptive sampling configuration file: {err}") from err
     elif config.endswith(".yml") or config.endswith(".yaml"):
         raise ValueError("Adaptive sampling configuration file must be a YAML file")
     else:
@@ -958,10 +955,10 @@ def _parse_config_string(config: str) -> Optional[_AWSXRayAdaptiveSamplingConfig
     if version_obj is None:
         raise ValueError("Missing required 'version' field in adaptive sampling configuration")
 
-    version = float(version_obj)
-    if version < 1.0 or version >= 2.0:
+    config_version = float(version_obj)
+    if config_version < 1.0 or config_version >= 2.0:
         raise ValueError(
-            f"Incompatible adaptive sampling config version: {version}. "
+            f"Incompatible adaptive sampling config version: {config_version}. "
             "This version of the AWS X-Ray remote sampler only supports version 1.X."
         )
 
@@ -987,5 +984,5 @@ def _parse_config_string(config: str) -> Optional[_AWSXRayAdaptiveSamplingConfig
         )
 
     return _AWSXRayAdaptiveSamplingConfig(
-        version=version, anomaly_conditions=anomaly_conditions, anomaly_capture_limit=anomaly_capture_limit
+        version=config_version, anomaly_conditions=anomaly_conditions, anomaly_capture_limit=anomaly_capture_limit
     )

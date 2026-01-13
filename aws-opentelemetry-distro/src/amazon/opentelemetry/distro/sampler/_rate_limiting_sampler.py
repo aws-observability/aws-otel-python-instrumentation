@@ -36,6 +36,6 @@ class _RateLimitingSampler(Sampler):
         description = (
             "RateLimitingSampler{rate limiting sampling with sampling config of "
             + str(self.__quota)
-            + " req/sec and 0% of additional requests}"
+            + " req/s and 0% of additional requests}"
         )
         return description

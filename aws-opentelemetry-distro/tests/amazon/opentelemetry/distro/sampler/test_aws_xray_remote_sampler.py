@@ -13,11 +13,9 @@ from mock_clock import MockClock
 from amazon.opentelemetry.distro.sampler._aws_xray_adaptive_sampling_config import _AWSXRayAdaptiveSamplingConfig
 from amazon.opentelemetry.distro.sampler._sampling_rule import _SamplingRule
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
-from opentelemetry.context import Context
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Tracer, TracerProvider
 from opentelemetry.sdk.trace.sampling import Decision
-from opentelemetry.trace import get_current_span
 
 TEST_DIR = os.path.dirname(os.path.realpath(__file__))
 DATA_DIR = os.path.join(TEST_DIR, "data")
