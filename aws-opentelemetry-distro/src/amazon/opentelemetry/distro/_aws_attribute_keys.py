@@ -15,6 +15,7 @@ AWS_CONSUMER_PARENT_SPAN_KIND: str = "aws.consumer.parent.span.kind"
 AWS_TRACE_FLAG_SAMPLED: str = "aws.trace.flag.sampled"
 AWS_TRACE_LAMBDA_FLAG_MULTIPLE_SERVER: str = "aws.trace.lambda.multiple-server"
 AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER: str = "aws.remote.resource.cfn.primary.identifier"
+AWS_XRAY_ADAPTIVE_SAMPLING_CONFIGURED_ATTRIBUTE_KEY: str = "aws.xray.adaptive_sampling_configured"
 
 # AWS_#_NAME attributes are not supported in python as they are not part of the Semantic Conventions.
 # TODO：Move to Semantic Conventions when these attributes are added.

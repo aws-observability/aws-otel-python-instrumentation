@@ -11,6 +11,9 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+
+- Adaptive Sampling support
+  ([#576](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/576))
 - Sign Lambda layer by AWS Signer
   ([#573](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/573))
 - Support PyPI Signature

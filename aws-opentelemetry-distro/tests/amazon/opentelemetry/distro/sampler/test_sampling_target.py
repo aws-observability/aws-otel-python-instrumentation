@@ -7,13 +7,14 @@ from amazon.opentelemetry.distro.sampler._sampling_target import _SamplingTarget
 
 class TestSamplingTarget(TestCase):
     def test_sampling_target_response_with_none_inputs(self):
-        target_response = _SamplingTargetResponse(None, None, None)
+        target_response = _SamplingTargetResponse(None, None, None, None)
         self.assertEqual(target_response.LastRuleModification, 0.0)
         self.assertEqual(target_response.SamplingTargetDocuments, [])
         self.assertEqual(target_response.UnprocessedStatistics, [])
+        self.assertEqual(target_response.UnprocessedBoostStatistics, [])
 
     def test_sampling_target_response_with_invalid_inputs(self):
-        target_response = _SamplingTargetResponse(1.0, [{}], [{}])
+        target_response = _SamplingTargetResponse(1.0, [{}], [{}], [{}])
         self.assertEqual(target_response.LastRuleModification, 1.0)
         self.assertEqual(len(target_response.SamplingTargetDocuments), 1)
         self.assertEqual(target_response.SamplingTargetDocuments[0].FixedRate, 0)
@@ -27,6 +28,23 @@ class TestSamplingTarget(TestCase):
         self.assertEqual(target_response.UnprocessedStatistics[0].Message, "")
         self.assertEqual(target_response.UnprocessedStatistics[0].RuleName, "")
 
-        target_response = _SamplingTargetResponse(1.0, [{"foo": "bar"}], [{"dog": "cat"}])
-        self.assertEqual(len(target_response.SamplingTargetDocuments), 0)
-        self.assertEqual(len(target_response.UnprocessedStatistics), 0)
+        self.assertEqual(len(target_response.UnprocessedBoostStatistics), 1)
+        self.assertEqual(target_response.UnprocessedBoostStatistics[0].ErrorCode, "")
+        self.assertEqual(target_response.UnprocessedBoostStatistics[0].Message, "")
+        self.assertEqual(target_response.UnprocessedBoostStatistics[0].RuleName, "")
+
+        target_response = _SamplingTargetResponse(1.0, [{"foo": "bar"}], [{"dog": "cat"}], [{"bird": "plane"}])
+        self.assertEqual(len(target_response.SamplingTargetDocuments), 1)
+        self.assertEqual(len(target_response.UnprocessedStatistics), 1)
+        self.assertEqual(len(target_response.UnprocessedBoostStatistics), 1)
+        self.assertFalse(hasattr(target_response.SamplingTargetDocuments[0], "foo"))
+
+    def test_sampling_target_response_with_extra_inputs(self):
+        target_response = _SamplingTargetResponse(1.0, [{}], [{}], [{}], EXTRA_ARG="does_nothing")
+        self.assertEqual(target_response.LastRuleModification, 1.0)
+        self.assertEqual(len(target_response.SamplingTargetDocuments), 1)
+        self.assertEqual(target_response.SamplingTargetDocuments[0].FixedRate, 0)
+        self.assertEqual(target_response.SamplingTargetDocuments[0].Interval, None)
+        self.assertEqual(target_response.SamplingTargetDocuments[0].ReservoirQuota, None)
+        self.assertEqual(target_response.SamplingTargetDocuments[0].ReservoirQuotaTTL, None)
+        self.assertEqual(target_response.SamplingTargetDocuments[0].RuleName, "")
