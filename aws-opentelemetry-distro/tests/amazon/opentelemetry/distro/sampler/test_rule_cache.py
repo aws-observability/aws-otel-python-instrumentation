@@ -23,6 +23,7 @@ from amazon.opentelemetry.distro.sampler._sampling_statistics_document import _S
 from amazon.opentelemetry.distro.sampler._sampling_target import _SamplingTargetResponse
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 from opentelemetry.semconv._incubating.attributes.http_attributes import HTTP_STATUS_CODE
 from opentelemetry.trace import TraceState
 
@@ -208,6 +209,13 @@ class TestRuleCache(TestCase):
         target_response.LastRuleModification = mock_clock.now().timestamp() + 1
         refresh_rules, _ = rule_cache.update_sampling_targets(target_response)
         self.assertTrue(refresh_rules)
+
+    def test_should_sample_without_rules(self):
+        rule_cache = _RuleCache(Resource.get_empty(), ALWAYS_ON, "", _Clock(), Lock())
+
+        with patch("amazon.opentelemetry.distro.sampler._rule_cache._logger") as mock_logger:
+            self.assertTrue(rule_cache.should_sample(None, 0, "name").decision.is_sampled())
+            mock_logger.debug.assert_called_once_with("No sampling rules were matched")
 
     def test_should_sample_with_adaptive_sampling_config(self):
         sampling_rule_1 = _SamplingRule(
