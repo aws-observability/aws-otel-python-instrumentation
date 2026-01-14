@@ -83,6 +83,8 @@ dependencies = [
   "opentelemetry-instrumentation-urllib3 == 0.54b1",
   "opentelemetry-instrumentation-wsgi == 0.54b1",
   "opentelemetry-instrumentation-cassandra == 0.54b1",
+  "cachetools == 6.2.4",
+  "pyyaml == 6.0.3",
 ]
 
 [project.optional-dependencies]

@@ -5,8 +5,10 @@ import logging
 import os
 import re
 from logging import Logger, getLogger
+from pathlib import Path
 from typing import ClassVar, Dict, List, NamedTuple, Optional, Type, Union
 
+import yaml
 from importlib_metadata import version
 from typing_extensions import override
 
@@ -25,6 +27,12 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
 from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import CompactConsoleLogExporter
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
+from amazon.opentelemetry.distro.sampler._aws_xray_adaptive_sampling_config import (
+    _AnomalyCaptureLimit,
+    _AnomalyConditions,
+    _AWSXRayAdaptiveSamplingConfig,
+    _UsageType,
+)
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
 from amazon.opentelemetry.distro.scope_based_filtering_view import ScopeBasedRetainingView
@@ -96,6 +104,7 @@ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 OTEL_EXPORTER_OTLP_LOGS_ENDPOINT = "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
 OTEL_EXPORTER_OTLP_LOGS_HEADERS = "OTEL_EXPORTER_OTLP_LOGS_HEADERS"
 OTEL_AWS_ENHANCED_CODE_ATTRIBUTES = "OTEL_AWS_EXPERIMENTAL_CODE_ATTRIBUTES"
+AWS_XRAY_ADAPTIVE_SAMPLING_CONFIG = "AWS_XRAY_ADAPTIVE_SAMPLING_CONFIG"
 
 XRAY_SERVICE = "xray"
 LOGS_SERIVCE = "logs"
@@ -243,7 +252,8 @@ def _init_tracing(
     sampler: Sampler = None,
     resource: Resource = None,
 ):
-    sampler = _customize_sampler(sampler)
+    original_sampler = sampler
+    sampler = _customize_sampler(original_sampler)
 
     trace_provider: TracerProvider = TracerProvider(
         id_generator=id_generator,
@@ -254,12 +264,12 @@ def _init_tracing(
     for _, exporter_class in exporters.items():
         exporter_args: Dict[str, any] = {}
         span_exporter: SpanExporter = exporter_class(**exporter_args)
-        span_exporter = _customize_span_exporter(span_exporter, resource)
+        span_exporter = _customize_span_exporter(span_exporter, resource, original_sampler)
         trace_provider.add_span_processor(
             BatchSpanProcessor(span_exporter=span_exporter, max_export_batch_size=_span_export_batch_size())
         )
 
-    _customize_span_processors(trace_provider, resource)
+    _customize_span_processors(trace_provider, resource, original_sampler)
 
     set_tracer_provider(trace_provider)
 
@@ -397,12 +407,24 @@ def _custom_import_sampler(sampler_name: str, resource: Resource) -> Sampler:
 
 
 def _customize_sampler(sampler: Sampler) -> Sampler:
+    if isinstance(sampler, AwsXRayRemoteSampler):
+        config = os.environ.get(AWS_XRAY_ADAPTIVE_SAMPLING_CONFIG)
+        parsed_config = None
+
+        try:
+            parsed_config = _parse_config_string(config)
+        except ValueError as error:
+            _logger.warning("Failed to parse adaptive sampling configuration: %s", str(error))
+
+        if parsed_config is not None:
+            sampler.set_adaptive_sampling_config(parsed_config)
+
     if not _is_application_signals_enabled():
         return sampler
     return AlwaysRecordSampler(sampler)
 
 
-def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) -> SpanExporter:
+def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource, sampler: Sampler = None) -> SpanExporter:
     traces_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
     if _is_lambda_environment():
         # Override OTLP http default endpoint to UDP
@@ -425,7 +447,10 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource) ->
     if not _is_application_signals_enabled():
         return span_exporter
 
-    return AwsMetricAttributesSpanExporterBuilder(span_exporter, resource).build()
+    span_exporter = AwsMetricAttributesSpanExporterBuilder(span_exporter, resource).build()
+    if sampler is not None and isinstance(sampler, AwsXRayRemoteSampler):
+        sampler.set_span_exporter(span_exporter)
+    return span_exporter
 
 
 def _customize_log_record_processor(logger_provider: LoggerProvider, log_exporter: Optional[LogExporter]) -> None:
@@ -472,7 +497,7 @@ def _customize_logs_exporter(log_exporter: LogExporter) -> LogExporter:
     return log_exporter
 
 
-def _customize_span_processors(provider: TracerProvider, resource: Resource) -> None:
+def _customize_span_processors(provider: TracerProvider, resource: Resource, sampler: Sampler) -> None:
 
     if is_enhanced_code_attributes() is True:
         # pylint: disable=import-outside-toplevel
@@ -518,7 +543,7 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource) -> 
     )
     meter_provider: MeterProvider = MeterProvider(resource=resource, metric_readers=[periodic_exporting_metric_reader])
     # Construct and set application signals metrics processor
-    provider.add_span_processor(AwsSpanMetricsProcessorBuilder(meter_provider, resource).build())
+    provider.add_span_processor(AwsSpanMetricsProcessorBuilder(meter_provider, resource).set_sampler(sampler).build())
 
     return
 
@@ -898,3 +923,66 @@ def _create_aws_otlp_exporter(endpoint: str, service: str, region: str):
     except Exception as errors:
         _logger.error("Failed to create AWS OTLP exporter: %s", errors)
         return None
+
+
+def _parse_config_string(config: str) -> Optional[_AWSXRayAdaptiveSamplingConfig]:
+    if config is None:
+        return None
+
+    # Check if the config is a file path and the file exists
+    path = Path(config)
+    if path.exists():
+        try:
+            config = path.read_text(encoding="utf-8")
+        except IOError as err:
+            raise ValueError(f"Failed to read adaptive sampling configuration file: {err}") from err
+    elif config.endswith(".yml") or config.endswith(".yaml"):
+        raise ValueError("Adaptive sampling configuration file must be a YAML file")
+    else:
+        _logger.debug("Adaptive sampling configuration is not a file path, assuming it's a YAML string")
+
+    # Parse YAML config
+    config_map = yaml.safe_load(config)
+    if not isinstance(config_map, dict):
+        raise ValueError("Adaptive sampling configuration must be a valid YAML mapping")
+
+    # Ensure only relevant data is in the YAML configuration
+    for key in config_map:
+        if key not in ["version", "anomalyConditions", "anomalyCaptureLimit"]:
+            raise ValueError(f"Invalid key in adaptive sampling configuration: {key}")
+
+    version_obj = config_map.get("version")
+    if version_obj is None:
+        raise ValueError("Missing required 'version' field in adaptive sampling configuration")
+
+    config_version = float(version_obj)
+    if config_version < 1.0 or config_version >= 2.0:
+        raise ValueError(
+            f"Incompatible adaptive sampling config version: {config_version}. "
+            "This version of the AWS X-Ray remote sampler only supports version 1.X."
+        )
+
+    # Parse anomaly conditions
+    anomaly_conditions = None
+    if "anomalyConditions" in config_map:
+        anomaly_conditions = [
+            _AnomalyConditions(
+                error_code_regex=cond.get("errorCodeRegex"),
+                operations=cond.get("operations"),
+                high_latency_ms=cond.get("highLatencyMs"),
+                usage=_UsageType(cond["usage"]) if "usage" in cond else None,
+            )
+            for cond in config_map["anomalyConditions"]
+        ]
+
+    # Parse anomaly capture limit
+    anomaly_capture_limit = None
+    if "anomalyCaptureLimit" in config_map:
+        anomaly_capture_limit_data = config_map["anomalyCaptureLimit"]
+        anomaly_capture_limit = _AnomalyCaptureLimit(
+            anomaly_traces_per_second=anomaly_capture_limit_data["anomalyTracesPerSecond"]
+        )
+
+    return _AWSXRayAdaptiveSamplingConfig(
+        version=config_version, anomaly_conditions=anomaly_conditions, anomaly_capture_limit=anomaly_capture_limit
+    )
