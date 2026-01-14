@@ -1,6 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from logging import getLogger
+
+_logger = getLogger(__name__)
+
 
 # Disable snake_case naming style so this class can match the sampling rules response from X-Ray
 # pylint: disable=invalid-name
@@ -20,6 +24,7 @@ class _SamplingRule:
         ServiceType: str = None,
         URLPath: str = None,
         Version: int = None,
+        **kwargs,
     ):
         self.Attributes = Attributes if Attributes is not None else {}
         self.FixedRate = FixedRate if FixedRate is not None else 0.0
@@ -35,6 +40,10 @@ class _SamplingRule:
         self.ServiceType = ServiceType if ServiceType is not None else ""
         self.URLPath = URLPath if URLPath is not None else ""
         self.Version = Version if Version is not None else 0
+
+        # Log unknown fields for debugging/monitoring
+        if kwargs:
+            _logger.debug("Ignoring unknown fields in _SamplingRule: %s", list(kwargs.keys()))
 
     def __lt__(self, other: "_SamplingRule") -> bool:
         if self.Priority == other.Priority:

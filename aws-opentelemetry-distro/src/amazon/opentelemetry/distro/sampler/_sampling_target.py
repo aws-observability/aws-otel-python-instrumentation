@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 from logging import getLogger
+from typing import List
 
 _logger = getLogger(__name__)
 
@@ -15,12 +16,17 @@ class _SamplingTarget:
         ReservoirQuota: int = None,
         ReservoirQuotaTTL: float = None,
         RuleName: str = None,
+        **kwargs,
     ):
         self.FixedRate = FixedRate if FixedRate is not None else 0.0
         self.Interval = Interval  # can be None
         self.ReservoirQuota = ReservoirQuota  # can be None
         self.ReservoirQuotaTTL = ReservoirQuotaTTL  # can be None
         self.RuleName = RuleName if RuleName is not None else ""
+
+        # Log unknown fields for debugging/monitoring
+        if kwargs:
+            _logger.debug("Ignoring unknown fields in _SamplingTarget: %s", list(kwargs.keys()))
 
 
 class _UnprocessedStatistics:
@@ -29,22 +35,28 @@ class _UnprocessedStatistics:
         ErrorCode: str = None,
         Message: str = None,
         RuleName: str = None,
+        **kwargs,
     ):
         self.ErrorCode = ErrorCode if ErrorCode is not None else ""
         self.Message = Message if ErrorCode is not None else ""
         self.RuleName = RuleName if ErrorCode is not None else ""
+
+        # Log unknown fields for debugging/monitoring
+        if kwargs:
+            _logger.debug("Ignoring unknown fields in _UnprocessedStatistics: %s", list(kwargs.keys()))
 
 
 class _SamplingTargetResponse:
     def __init__(
         self,
         LastRuleModification: float,
-        SamplingTargetDocuments: [dict] = None,
-        UnprocessedStatistics: [dict] = None,
+        SamplingTargetDocuments: List[dict] = None,
+        UnprocessedStatistics: List[dict] = None,
+        **kwargs,
     ):
         self.LastRuleModification: float = LastRuleModification if LastRuleModification is not None else 0.0
 
-        self.SamplingTargetDocuments: [_SamplingTarget] = []
+        self.SamplingTargetDocuments: List[_SamplingTarget] = []
         if SamplingTargetDocuments is not None:
             for document in SamplingTargetDocuments:
                 try:
@@ -52,10 +64,14 @@ class _SamplingTargetResponse:
                 except TypeError as e:
                     _logger.debug("TypeError occurred: %s", e)
 
-        self.UnprocessedStatistics: [_UnprocessedStatistics] = []
+        self.UnprocessedStatistics: List[_UnprocessedStatistics] = []
         if UnprocessedStatistics is not None:
             for unprocessed in UnprocessedStatistics:
                 try:
                     self.UnprocessedStatistics.append(_UnprocessedStatistics(**unprocessed))
                 except TypeError as e:
                     _logger.debug("TypeError occurred: %s", e)
+
+        # Log unknown fields for debugging/monitoring
+        if kwargs:
+            _logger.debug("Ignoring unknown fields in _SamplingTargetResponse: %s", list(kwargs.keys()))
