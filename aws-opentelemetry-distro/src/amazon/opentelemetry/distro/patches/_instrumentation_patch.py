@@ -5,7 +5,6 @@ from logging import Logger, getLogger
 
 from amazon.opentelemetry.distro._utils import is_installed
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import is_enhanced_code_attributes
-from amazon.opentelemetry.distro.patches._resource_detector_patches import _apply_resource_detector_patches
 
 _logger: Logger = getLogger(__name__)
 
@@ -85,7 +84,3 @@ def apply_instrumentation_patches() -> None:  # pylint: disable=too-many-branche
             from amazon.opentelemetry.distro.patches._aio_pika_patches import _apply_aio_pika_instrumentation_patches
 
             _apply_aio_pika_instrumentation_patches()
-
-    # No need to check if library is installed as this patches opentelemetry.sdk,
-    # which must be installed for the distro to work at all.
-    _apply_resource_detector_patches()

@@ -124,21 +124,6 @@ jobs:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
 
-      - name: Configure AWS credentials for PyPI secrets
-        uses: aws-actions/configure-aws-credentials@a03048d87541d1d9fcf2ecf528a4a65ba9bd7838 #v5.0.0
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN_SECRETS_MANAGER }}
-          aws-region: ${{ env.AWS_DEFAULT_REGION }}
-      
-      - name: Get PyPI secrets
-        uses: aws-actions/aws-secretsmanager-get-secrets@a9a7eb4e2f2871d30dc5b892576fde60a2ecc802 #v2.0.10
-        id: pypi_secrets
-        with:
-          secret-ids: |
-            PROD_PYPI_TOKEN,${{ secrets.PYPI_PROD_TOKEN_SECRET_ARN }}
-            TEST_PYPI_TOKEN,${{ secrets.PYPI_TEST_TOKEN_SECRET_ARN }}
-          parse-json-secrets: true
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 #3.11.1
 
@@ -163,36 +148,35 @@ jobs:
         uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 #v3.5.0
         with:
           registry: public.ecr.aws
-
-      # The step below publishes to testpypi in order to catch any issues
-      # with the package configuration that would cause a failure to upload to pypi.
-      - name: Install twine
-        run: pip install twine==5.1.1
-      
+     
       - name: Download SDK wheel artifact
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
         with:
           name: ${{ env.WHEEL_ARTIFACT_NAME }}
+          path: dist-pypi
 
       - name: Download SDK source artifact
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
         with:
           name: ${{ env.SOURCE_ARTIFACT_NAME }}
+          path: dist-pypi
       
+      # The step below publishes to testpypi in order to catch any issues 
       - name: Publish to TestPyPI
-        env:
-          TWINE_USERNAME: '__token__'
-          TWINE_PASSWORD: ${{ env.TEST_PYPI_TOKEN_API_TOKEN }}
-        run: |
-          twine upload --repository testpypi --skip-existing --verbose ${{ env.WHEEL_ARTIFACT_NAME }} ${{ env.SOURCE_ARTIFACT_NAME }}
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+          verbose: true
+          packages-dir: dist-pypi
 
       # Publish to prod PyPI
       - name: Publish to PyPI
-        env:
-          TWINE_USERNAME: '__token__'
-          TWINE_PASSWORD: ${{ env.PROD_PYPI_TOKEN_API_TOKEN }}
-        run: |
-          twine upload --skip-existing --verbose ${{ env.WHEEL_ARTIFACT_NAME }} ${{ env.SOURCE_ARTIFACT_NAME }}
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e
+        with:
+          skip-existing: true
+          verbose: true
+          packages-dir: dist-pypi
 
       # Publish to public ECR
       - name: Build and push public ECR image
@@ -256,10 +240,31 @@ jobs:
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
         with:
           name: layer.zip
-      - name: publish
+      
+      - name: Upload to S3 and Sign
+        continue-on-error: true
         run: |
           aws s3 mb s3://${{ env.BUCKET_NAME }}
           aws s3 cp aws-opentelemetry-python-layer.zip s3://${{ env.BUCKET_NAME }}
+          
+          # Sign the layer
+          PROFILE=$(aws signer list-signing-profiles --query "profiles[?profileName=='ADOTLambdaLayerSigningProfile'].arn" --output text 2>/dev/null)
+          [ -z "$PROFILE" ] && exit 0
+          
+          JOB_ID=$(aws signer start-signing-job \
+            --source "s3={bucketName=${{ env.BUCKET_NAME }},key=aws-opentelemetry-python-layer.zip,version=null}" \
+            --destination "s3={bucketName=${{ env.BUCKET_NAME }},prefix=signed-}" \
+            --profile-name ADOTLambdaLayerSigningProfile \
+            --query 'jobId' --output text 2>/dev/null) || exit 0
+          [ -z "$JOB_ID" ] && exit 0
+          
+          aws signer wait successful-signing-job --job-id "$JOB_ID" || exit 0
+          
+          SIGNED=$(aws signer describe-signing-job --job-id "$JOB_ID" --query 'signedObject.s3.key' --output text 2>/dev/null)
+          [ -n "$SIGNED" ] && aws s3 mv "s3://${{ env.BUCKET_NAME }}/$SIGNED" "s3://${{ env.BUCKET_NAME }}/aws-opentelemetry-python-layer.zip"
+      
+      - name: Publish Layer Version
+        run: |
           layerARN=$(
             aws lambda publish-layer-version \
               --layer-name ${{ env.LAYER_NAME }} \
@@ -276,6 +281,11 @@ jobs:
           mkdir ${{ env.LAYER_NAME }}
           echo $layerARN > ${{ env.LAYER_NAME }}/${{ matrix.aws_region }}
           cat ${{ env.LAYER_NAME }}/${{ matrix.aws_region }}
+          
+          # Output SigningProfileVersionArn
+          aws lambda get-layer-version-by-arn \
+            --arn $layerARN \
+            --output json | jq -r '.Content.SigningProfileVersionArn'
       - name: public layer
         run: |
           layerVersion=$(
