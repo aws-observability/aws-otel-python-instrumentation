@@ -169,6 +169,10 @@ jobs:
           skip-existing: true
           verbose: true
           packages-dir: dist-pypi
+          
+      # Remove any attestation files created by TestPyPi step
+      - name: Clean previous builds
+        run: rm -rf dist-pypi/*.attestation
 
       # Publish to prod PyPI
       - name: Publish to PyPI
