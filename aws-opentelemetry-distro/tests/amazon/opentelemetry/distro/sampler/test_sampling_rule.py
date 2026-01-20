@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 from unittest import TestCase
+from unittest.mock import patch
 
 from amazon.opentelemetry.distro.sampler._sampling_rule import _SamplingRule
 
@@ -15,6 +16,36 @@ class TestSamplingRule(TestCase):
         rule6 = _SamplingRule(Priority=200, RuleName="abcdef", Version=1)
 
         self.assertTrue(rule1 < rule2 < rule3 < rule4 < rule5 < rule6)
+
+    def test_sampling_rule_with_extra_fields(self):
+        inputs = {
+            "Attributes": {},
+            "FixedRate": 0.1,
+            "HTTPMethod": "GET",
+            "Host": "localhost",
+            "Priority": 20,
+            "ReservoirSize": 1,
+            "ResourceARN": "*",
+            "RuleARN": "arn:aws:xray:us-east-1:999999999999:sampling-rule/test",
+            "RuleName": "test",
+            "ServiceName": "myServiceName",
+            "ServiceType": "AWS::EKS::Container",
+            "URLPath": "/helloworld",
+            "Version": 1,
+            "ExtraField1": "cat",
+            "ExtraField2": 123,
+        }
+
+        # Does not throw an error and logs debug message about unknown fields
+        with patch("amazon.opentelemetry.distro.sampler._sampling_rule._logger") as mock_logger:
+            rule = _SamplingRule(**inputs)
+            mock_logger.debug.assert_called_once_with(
+                "Ignoring unknown fields in _SamplingRule: %s", ["ExtraField1", "ExtraField2"]
+            )
+
+            self.assertEqual(rule.FixedRate, 0.1)
+            self.assertEqual(rule.RuleName, "test")
+            self.assertEqual(rule.ServiceName, "myServiceName")
 
     def test_sampling_rule_equality(self):
         sampling_rule = _SamplingRule(

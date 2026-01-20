@@ -11,6 +11,17 @@ For any change that affects end users of this package, please add an entry under
 If your change does not need a CHANGELOG entry, add the "skip changelog" label to your PR.
 
 ## Unreleased
+
+- Fix: Support new fields in X-Ray API responses
+  ([#577](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/577))
+- Sign Lambda layer by AWS Signer
+  ([#573](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/573))
+- Support PyPI Signature
+  ([#571](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/571))
+- Remove redundant environment variable configuration in Lambda layer
+  ([#570](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/570))
+- Add custom ADOT UserAgent for OTLP Spans Exporter
+  ([#554](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/554))
 - Disable django instrumentation if DJANGO_SETTINGS_MODULE is not set
   ([#549](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/549))
 - [PATCH] Add safety check for bedrock ConverseStream responses
@@ -19,7 +30,25 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   ([#548](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/548))
 - Refactor configuration for adding Application Signals Dimensions to EMF exporter
   ([#552](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/552))
+- Fix CVE-2025-66471 and CVE-2026-21441. No associated PR since `urllib3` dependency will auto-bump to the latest `2.6.x` version upon release.
+- Update opentelemetry-sdk-extension-aws to version 2.1.0, and remove unneeded Resource Detector patches
+  ([#572](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/572))
+- Add cloud.platform attribute to resource attributes in lambda
+  ([#561](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/561))
+
+## v0.14.1 - 2025-12-15
+- Add custom ADOT UserAgent for OTLP Spans Exporter
+  ([#554](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/554))
+- Disable django instrumentation if DJANGO_SETTINGS_MODULE is not set
+  ([#549](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/549))
+- Add Service and Environment dimensions to EMF metrics when Application Signals EMF export is enabled
+  ([#548](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/548))
+- Refactor configuration for adding Application Signals Dimensions to EMF exporter
+  ([#552](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/552))
 - Fix CVE-2025-66471. No associated PR since `urllib3` dependency will auto-bump to `2.6.x` upon release.
+- [PATCH] Add safety check for bedrock ConverseStream responses
+  ([#547](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/547))
+
 
 ## v0.14.0 - 2025-11-19
 - Add Resource and CFN Attributes for Bedrock AgentCore spans
@@ -34,4 +63,3 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   ([#522](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/522))
 - Support credentials provider name for BedrockAgentCore Identity
   ([#534](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/534))
-

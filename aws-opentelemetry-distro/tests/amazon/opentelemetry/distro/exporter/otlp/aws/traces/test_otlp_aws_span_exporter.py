@@ -5,6 +5,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro._utils import get_aws_session
+from amazon.opentelemetry.distro.exporter.otlp.aws.common._aws_http_headers import _OTLP_AWS_HTTP_HEADERS
 from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk._logs import LoggerProvider
@@ -34,6 +35,20 @@ class TestOTLPAwsSpanExporter(TestCase):
         self.assertIsNone(exporter._logger_provider)
         self.assertEqual(exporter._aws_region, "us-west-2")
         self.assertIsNone(exporter._llo_handler)
+
+    def test_aws_headers_applied(self):
+        endpoint = "https://xray.us-east-1.amazonaws.com/v1/traces"
+        custom_headers = {"X-Custom-Header": "custom-value"}
+
+        exporter = OTLPAwsSpanExporter(
+            session=get_aws_session(), aws_region="us-east-1", endpoint=endpoint, headers=custom_headers
+        )
+
+        for key in _OTLP_AWS_HTTP_HEADERS.keys():
+            self.assertIn(key, exporter._session.headers)
+
+        self.assertEqual(exporter._session.headers["X-Custom-Header"], "custom-value")
+        self.assertIn("User-Agent", exporter._session.headers)
 
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agent_observability_enabled")
     def test_ensure_llo_handler_when_disabled(self, mock_is_enabled):
