@@ -24,10 +24,11 @@ class CrewAIInstrumentor(BaseInstrumentor):
     Note: Semantic conventions may change in future versions.
     """
 
-    def instrumentation_dependencies(self) -> Collection[str]:
-        return ("crewai >= 0.119.0",)
+    def instrumentation_dependencies(self) -> Collection[str]:  # pylint: disable=no-self-use
+        return ("crewai >= 0.41.0",)
 
-    def _instrument(self, **kwargs: Any) -> None:
+    # disabling these linters rules as these are instance methods from BaseInstrumentor
+    def _instrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
 
@@ -35,7 +36,8 @@ class CrewAIInstrumentor(BaseInstrumentor):
         wrap_function_wrapper("crewai", "Task._execute_core", _TaskExecuteCoreWrapper(tracer))
         wrap_function_wrapper("crewai.tools.tool_usage", "ToolUsage._use", _ToolUseWrapper(tracer))
 
-    def _uninstrument(self, **kwargs: Any) -> None:
+    def _uninstrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
+        # pylint: disable=import-outside-toplevel
         import crewai
         from crewai.tools import tool_usage
 
