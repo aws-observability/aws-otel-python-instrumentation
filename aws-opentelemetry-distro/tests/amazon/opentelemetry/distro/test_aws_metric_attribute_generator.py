@@ -53,7 +53,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
 )
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
 from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, SERVICE_METRIC
-from amazon.opentelemetry.distro.patches.semconv._incubating.attributes.gen_ai_attributes import (
+from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_BROWSER_ID,
     GEN_AI_CODE_INTERPRETER_ID,
     GEN_AI_GATEWAY_ID,

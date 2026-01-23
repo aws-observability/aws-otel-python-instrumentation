@@ -47,12 +47,26 @@ fi
 cd ..
 for dir in contract-tests/images/applications/*
 do
-  application="${dir##*/}"
-  docker build . -t aws-application-signals-tests-${application}-app -f ${dir}/Dockerfile --build-arg="DISTRO=${DISTRO}"
-  if [ $? = 1 ]; then
-    echo "Docker build for ${application} application failed"
-    exit 1
+  if [ -f "${dir}/Dockerfile" ]; then
+    application="${dir##*/}"
+    docker build . -t aws-application-signals-tests-${application}-app -f ${dir}/Dockerfile --build-arg="DISTRO=${DISTRO}"
+    if [ $? = 1 ]; then
+      echo "Docker build for ${application} application failed"
+      exit 1
+    fi
   fi
+  for subdir in ${dir}/*/
+  do
+    if [ -f "${subdir}Dockerfile" ]; then
+      application="${subdir%/}"
+      application="${application##*/}"
+      docker build . -t aws-application-signals-tests-${application}-app -f ${subdir}Dockerfile --build-arg="DISTRO=${DISTRO}"
+      if [ $? = 1 ]; then
+        echo "Docker build for ${application} application failed"
+        exit 1
+      fi
+    fi
+  done
 done
 
 # Build and install mock-collector

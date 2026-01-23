@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- Add native CrewAI instrumentation support
+  ([#586](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/586))
 - Fix: Support new fields in X-Ray API responses
   ([#577](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/577))
 - Sign Lambda layer by AWS Signer
