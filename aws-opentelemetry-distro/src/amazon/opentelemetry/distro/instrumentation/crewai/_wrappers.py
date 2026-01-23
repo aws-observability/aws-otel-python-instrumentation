@@ -152,18 +152,21 @@ class _CrewKickoffWrapper(_BaseWrapper):
     # see:
     # https://github.com/crewAIInc/crewAI/blob/06d953bf46c636ff9f2d64f45574493d05fb7771/lib/crewai/src/crewai/crew.py#L676-L679
     # Note: The span name "crew_kickoff {crew_name}" does not conform to any current OTel semantic
-    # conventions. This is because CrewAI's orchestration workflow where a Crew can contain multiple
-    # agents but there currently does not exist any semantic convention naming schema to capture
-    # this architecture.
+    # conventions. This is because CrewAI's workflow can contain multiple agents but there currently
+    # does not exist any semantic convention naming schema to capture this system.
 
     def _get_span_name(self, instance: "Crew", args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> str:
         crew_name = getattr(instance, "name", None)
         return f"crew_kickoff {crew_name}" if crew_name else "crew_kickoff"
 
     def _get_attributes(self, instance: "Crew", args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> Dict[str, Any]:
+        # Note: As of OTel semconv v1.39.0, there are no semantic conventions that support
+        # multi-agent systems. We intentionally do not set gen_ai.provider.name or
+        # gen_ai.request.model here because a Crew can contain multiple agents with different
+        # providers/models. Per-agent provider/model info is captured in child invoke_agent spans.
+        # TODO: Revisit span attributes when OTel semconv adds multi-agent system support.
         attributes: Dict[str, Any] = {
             GEN_AI_OPERATION_NAME: _OPERATION_INVOKE_AGENT,
-            GEN_AI_PROVIDER_NAME: _PROVIDER_CREWAI,
         }
 
         crew_name = getattr(instance, "name", None)
@@ -174,14 +177,6 @@ class _CrewKickoffWrapper(_BaseWrapper):
 
         agents = getattr(instance, "agents", [])
         if agents:
-            first_agent: Agent = agents[0]
-            llm: Optional[LLM] = getattr(first_agent, "llm", None)
-            provider, model = self._extract_provider_and_model(llm)
-            if provider:
-                attributes[GEN_AI_PROVIDER_NAME] = provider
-            if model:
-                attributes[GEN_AI_REQUEST_MODEL] = model
-
             all_tools = []
             for agent in agents:
                 all_tools.extend(getattr(agent, "tools", []) or [])

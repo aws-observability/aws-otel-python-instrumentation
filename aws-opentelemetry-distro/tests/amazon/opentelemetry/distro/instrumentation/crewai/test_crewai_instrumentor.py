@@ -121,9 +121,10 @@ class TestCrewAIInstrumentor(TestCase):
             crew.kickoff()
 
         spans = self.span_exporter.get_finished_spans()
-        agent_id = str(crew.agents[0].id)
         crew_id = str(crew.id)
+        agent_id = str(crew.agents[0].id)
         crew_span = next((s for s in spans if s.name == "crew_kickoff GreetingCrew"), None)
+
         self._assert_span_attributes(
             self,
             spans,
@@ -132,10 +133,10 @@ class TestCrewAIInstrumentor(TestCase):
                 GEN_AI_OPERATION_NAME: "invoke_agent",
                 GEN_AI_AGENT_NAME: "GreetingCrew",
                 GEN_AI_AGENT_ID: crew_id,
-                GEN_AI_PROVIDER_NAME: provider,
-                GEN_AI_REQUEST_MODEL: model_id,
             },
         )
+        self.assertNotIn(GEN_AI_PROVIDER_NAME, crew_span.attributes)  # type: ignore
+        self.assertNotIn(GEN_AI_REQUEST_MODEL, crew_span.attributes)  # type: ignore
         self.assertIn(GEN_AI_TOOL_DEFINITIONS, crew_span.attributes)  # type: ignore
         self.assertIn("get_greeting", crew_span.attributes[GEN_AI_TOOL_DEFINITIONS])  # type: ignore
         self._assert_span_attributes(
