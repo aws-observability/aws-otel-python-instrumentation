@@ -103,7 +103,7 @@ _SKIP_CHAIN_TYPES = {
     "PydanticOutputFunctionsParser",
     "PydanticAttrOutputFunctionsParser",
     # TODO: consider suppressing LangGraph internal node names as well
-
+}
 
 @dataclass
 class SpanHolder:
