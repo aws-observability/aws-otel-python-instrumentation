@@ -59,6 +59,7 @@ class _RuleCache:
         self._adaptive_sampling_rule_exists = False
         self._adaptive_sampling_config: Optional[_AWSXRayAdaptiveSamplingConfig] = None
         self._anomaly_capture_rate_limiter: Optional[_RateLimiter] = None
+        self._trace_usage_cache_lock = Lock()
         self._trace_usage_cache: TTLCache[int, _UsageType] = TTLCache(
             maxsize=TRACE_USAGE_CACHE_MAX_SIZE,
             ttl=TRACE_USAGE_CACHE_TTL_SECONDS,
@@ -151,8 +152,12 @@ class _RuleCache:
         should_capture_anomaly_span = result.should_capture_anomaly_span
 
         trace_id: int = span.context.trace_id
-        existing_usage: _UsageType = self._trace_usage_cache.get(trace_id)
-        is_new_trace: bool = existing_usage is None
+        is_new_trace: bool = False
+        with self._trace_usage_cache_lock:
+            existing_usage: _UsageType = self._trace_usage_cache.get(trace_id)
+            is_new_trace = existing_usage is None
+            if existing_usage is None:
+                self._trace_usage_cache[trace_id] = _UsageType.NEITHER
 
         # Anomaly Capture
         is_span_captured = False
@@ -275,25 +280,26 @@ class _RuleCache:
     def __update_trace_usage_cache(
         self, trace_id: int, is_span_captured: bool, is_counted_as_anomaly_for_boost: bool
     ) -> None:
-        existing_usage = self._trace_usage_cache.get(trace_id)
+        with self._trace_usage_cache_lock:
+            existing_usage = self._trace_usage_cache.get(trace_id)
 
-        # Any interaction with a cache entry will reset the expiration timer of that entry
-        if is_span_captured and is_counted_as_anomaly_for_boost:
-            self._trace_usage_cache[trace_id] = _UsageType.BOTH
-        elif is_span_captured:
-            if _UsageType.is_used_for_boost(existing_usage):
+            # Any interaction with a cache entry will reset the expiration timer of that entry
+            if is_span_captured and is_counted_as_anomaly_for_boost:
                 self._trace_usage_cache[trace_id] = _UsageType.BOTH
+            elif is_span_captured:
+                if _UsageType.is_used_for_boost(existing_usage):
+                    self._trace_usage_cache[trace_id] = _UsageType.BOTH
+                else:
+                    self._trace_usage_cache[trace_id] = _UsageType.ANOMALY_TRACE_CAPTURE
+            elif is_counted_as_anomaly_for_boost:
+                if _UsageType.is_used_for_anomaly_trace_capture(existing_usage):
+                    self._trace_usage_cache[trace_id] = _UsageType.BOTH
+                else:
+                    self._trace_usage_cache[trace_id] = _UsageType.SAMPLING_BOOST
+            elif existing_usage is not None:
+                self._trace_usage_cache[trace_id] = existing_usage
             else:
-                self._trace_usage_cache[trace_id] = _UsageType.ANOMALY_TRACE_CAPTURE
-        elif is_counted_as_anomaly_for_boost:
-            if _UsageType.is_used_for_anomaly_trace_capture(existing_usage):
-                self._trace_usage_cache[trace_id] = _UsageType.BOTH
-            else:
-                self._trace_usage_cache[trace_id] = _UsageType.SAMPLING_BOOST
-        elif existing_usage is not None:
-            self._trace_usage_cache[trace_id] = existing_usage
-        else:
-            self._trace_usage_cache[trace_id] = _UsageType.NEITHER
+                self._trace_usage_cache[trace_id] = _UsageType.NEITHER
 
     def update_sampling_rules(self, new_sampling_rules: List[_SamplingRule]) -> None:
         new_sampling_rules.sort()

@@ -1,6 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
+
+# pylint: disable=too-many-lines
+
 import logging
 import os
 import re
@@ -413,7 +416,8 @@ def _customize_sampler(sampler: Sampler) -> Sampler:
 
         try:
             parsed_config = _parse_config_string(config)
-        except ValueError as error:
+        # pylint: disable=broad-exception-caught
+        except Exception as error:
             _logger.warning("Failed to parse adaptive sampling configuration: %s", str(error))
 
         if parsed_config is not None:
@@ -925,6 +929,7 @@ def _create_aws_otlp_exporter(endpoint: str, service: str, region: str):
         return None
 
 
+# pylint: disable=too-many-return-statements,too-many-branches
 def _parse_config_string(config: str) -> Optional[_AWSXRayAdaptiveSamplingConfig]:
     if config is None:
         return None
@@ -935,54 +940,71 @@ def _parse_config_string(config: str) -> Optional[_AWSXRayAdaptiveSamplingConfig
         try:
             config = path.read_text(encoding="utf-8")
         except IOError as err:
-            raise ValueError(f"Failed to read adaptive sampling configuration file: {err}") from err
+            _logger.warning("Failed to read adaptive sampling configuration file: %s", err)
+            return None
     elif config.endswith(".yml") or config.endswith(".yaml"):
-        raise ValueError("Adaptive sampling configuration file must be a YAML file")
+        _logger.warning("Adaptive sampling configuration file must be a YAML file")
+        return None
     else:
         _logger.debug("Adaptive sampling configuration is not a file path, assuming it's a YAML string")
 
     # Parse YAML config
-    config_map = yaml.safe_load(config)
+    config_map = None
+    try:
+        config_map = yaml.safe_load(config)
+    # pylint: disable=broad-exception-caught
+    except Exception as exception:
+        _logger.warning("Adaptive sampling configuration must be a valid YAML mapping: %s", exception)
     if not isinstance(config_map, dict):
-        raise ValueError("Adaptive sampling configuration must be a valid YAML mapping")
+        _logger.warning("Adaptive sampling configuration must be a valid YAML mapping")
+        return None
 
     # Ensure only relevant data is in the YAML configuration
     for key in config_map:
         if key not in ["version", "anomalyConditions", "anomalyCaptureLimit"]:
-            raise ValueError(f"Invalid key in adaptive sampling configuration: {key}")
+            _logger.warning("Invalid key in adaptive sampling configuration: %s", key)
+            return None
 
     version_obj = config_map.get("version")
     if version_obj is None:
-        raise ValueError("Missing required 'version' field in adaptive sampling configuration")
+        _logger.warning("Missing required 'version' field in adaptive sampling configuration")
+        return None
 
-    config_version = float(version_obj)
-    if config_version < 1.0 or config_version >= 2.0:
-        raise ValueError(
-            f"Incompatible adaptive sampling config version: {config_version}. "
-            "This version of the AWS X-Ray remote sampler only supports version 1.X."
-        )
-
-    # Parse anomaly conditions
-    anomaly_conditions = None
-    if "anomalyConditions" in config_map:
-        anomaly_conditions = [
-            _AnomalyConditions(
-                error_code_regex=cond.get("errorCodeRegex"),
-                operations=cond.get("operations"),
-                high_latency_ms=cond.get("highLatencyMs"),
-                usage=_UsageType(cond["usage"]) if "usage" in cond else None,
+    try:
+        config_version = float(version_obj)
+        if config_version < 1.0 or config_version >= 2.0:
+            _logger.warning(
+                "Incompatible adaptive sampling config version: %s. "
+                "This version of the AWS X-Ray remote sampler only supports version 1.X.",
+                config_version,
             )
-            for cond in config_map["anomalyConditions"]
-        ]
+            return None
 
-    # Parse anomaly capture limit
-    anomaly_capture_limit = None
-    if "anomalyCaptureLimit" in config_map:
-        anomaly_capture_limit_data = config_map["anomalyCaptureLimit"]
-        anomaly_capture_limit = _AnomalyCaptureLimit(
-            anomaly_traces_per_second=anomaly_capture_limit_data["anomalyTracesPerSecond"]
+        # Parse anomaly conditions
+        anomaly_conditions = None
+        if "anomalyConditions" in config_map:
+            anomaly_conditions = [
+                _AnomalyConditions(
+                    error_code_regex=cond.get("errorCodeRegex"),
+                    operations=cond.get("operations"),
+                    high_latency_ms=cond.get("highLatencyMs"),
+                    usage=_UsageType(cond["usage"]) if "usage" in cond else None,
+                )
+                for cond in config_map["anomalyConditions"]
+            ]
+
+        # Parse anomaly capture limit
+        anomaly_capture_limit = None
+        if "anomalyCaptureLimit" in config_map:
+            anomaly_capture_limit_data = config_map["anomalyCaptureLimit"]
+            anomaly_capture_limit = _AnomalyCaptureLimit(
+                anomaly_traces_per_second=anomaly_capture_limit_data["anomalyTracesPerSecond"]
+            )
+
+        return _AWSXRayAdaptiveSamplingConfig(
+            version=config_version, anomaly_conditions=anomaly_conditions, anomaly_capture_limit=anomaly_capture_limit
         )
+    except ValueError as err:
+        _logger.warning("Failed to load AWS X-Ray adaptive sampling configuration: %s", err)
 
-    return _AWSXRayAdaptiveSamplingConfig(
-        version=config_version, anomaly_conditions=anomaly_conditions, anomaly_capture_limit=anomaly_capture_limit
-    )
+    return None

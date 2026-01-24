@@ -351,19 +351,46 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertIsNone(result)
 
     def test_parse_adaptive_sampling_config_missing_version(self):
-        """Tests that _parse_config_string raises exception for missing version"""
-        with self.assertRaises(Exception):
-            _parse_config_string("")
+        """Tests that _parse_config_string returns None for missing version and logs warning"""
+        with patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._logger") as mock_logger:
+            result = _parse_config_string("anomalyConditions: []")
+            self.assertIsNone(result)
+            mock_logger.warning.assert_called_with(
+                "Missing required 'version' field in adaptive sampling configuration"
+            )
 
     def test_parse_adaptive_sampling_config_unsupported_version(self):
-        """Tests that _parse_config_string raises exception for unsupported version"""
-        with self.assertRaises(ValueError):
-            _parse_config_string("{version: 5000.1}")
+        """Tests that _parse_config_string returns None for unsupported version and logs warning"""
+        with patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._logger") as mock_logger:
+            result = _parse_config_string("{version: 5000.1}")
+            self.assertIsNone(result)
+            mock_logger.warning.assert_called_with(
+                "Incompatible adaptive sampling config version: %s. "
+                "This version of the AWS X-Ray remote sampler only supports version 1.X.",
+                5000.1,
+            )
 
     def test_parse_adaptive_sampling_config_invalid_yaml(self):
-        """Tests that _parse_config_string raises exception for invalid YAML"""
-        with self.assertRaises(Exception):
-            _parse_config_string("{version: 1, invalid: yaml: structure}")
+        """Tests that _parse_config_string returns None for invalid YAML and logs warning"""
+        with patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._logger") as mock_logger_1:
+            result = _parse_config_string("{version: 1, invalid: yaml: structure}")
+            self.assertIsNone(result)
+            mock_logger_1.warning.assert_called()
+            warning_calls = [str(call) for call in mock_logger_1.warning.call_args_list]
+            self.assertTrue(
+                any("must be a valid YAML mapping" in call for call in warning_calls),
+                f"Expected warning about invalid YAML, got: {warning_calls}",
+            )
+
+        with patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._logger") as mock_logger_2:
+            result = _parse_config_string("{version: 1, {anomalyCaptureLimit: {anomalyTracesPerSecond: 1}}}")
+            self.assertIsNone(result)
+            mock_logger_2.warning.assert_called()
+            warning_calls = [str(call) for call in mock_logger_2.warning.call_args_list]
+            self.assertTrue(
+                any("must be a valid YAML mapping" in call for call in warning_calls),
+                f"Expected warning about invalid YAML, got: {warning_calls}",
+            )
 
     def test_parse_adaptive_sampling_config_from_file_valid(self):
         """Tests that _parse_config_string correctly parses a valid YAML file"""
@@ -376,20 +403,29 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(config.anomaly_capture_limit.anomaly_traces_per_second, 10)
 
     def test_parse_adaptive_sampling_config_from_file_invalid(self):
-        """Tests that _parse_config_string raises exception for invalid YAML file"""
+        """Tests that _parse_config_string returns None for invalid YAML file and logs warning"""
         import os
 
         config_path = os.path.join(DATA_DIR, "adaptive-sampling-config-invalid.yaml")
-        with self.assertRaises(Exception):
-            _parse_config_string(config_path)
+        with patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._logger") as mock_logger:
+            result = _parse_config_string(config_path)
+            self.assertIsNone(result)
+            mock_logger.warning.assert_called()
+            warning_calls = [str(call) for call in mock_logger.warning.call_args_list]
+            self.assertTrue(
+                any("Failed to load AWS X-Ray adaptive sampling configuration" in call for call in warning_calls),
+                f"Expected warning about failed configuration loading, got: {warning_calls}",
+            )
 
     def test_parse_adaptive_sampling_config_from_file_non_existant(self):
-        """Tests that _parse_config_string raises exception for non-existent YAML file"""
+        """Tests that _parse_config_string returns None for non-existent YAML file and logs warning"""
         import os
 
         config_path = os.path.join(DATA_DIR, "done.yaml")
-        with self.assertRaises(ValueError):
-            _parse_config_string(config_path)
+        with patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator._logger") as mock_logger:
+            result = _parse_config_string(config_path)
+            self.assertIsNone(result)
+            mock_logger.warning.assert_called_with("Adaptive sampling configuration file must be a YAML file")
 
     def test_customize_span_exporter(self):
         mock_exporter: SpanExporter = MagicMock(spec=OTLPSpanExporter)
