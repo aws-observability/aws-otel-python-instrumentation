@@ -249,20 +249,32 @@ jobs:
           aws s3 cp aws-opentelemetry-python-layer.zip s3://${{ env.BUCKET_NAME }}
           
           # Sign the layer
+          echo "Checking for signing profile..."
           PROFILE=$(aws signer list-signing-profiles --query "profiles[?profileName=='ADOTLambdaLayerSigningProfile'].arn" --output text 2>/dev/null)
-          [ -z "$PROFILE" ] && exit 0
+          [ -z "$PROFILE" ] && echo "No signing profile found, skipping" && exit 0
           
+          echo "Starting signing job..."
           JOB_ID=$(aws signer start-signing-job \
             --source "s3={bucketName=${{ env.BUCKET_NAME }},key=aws-opentelemetry-python-layer.zip,version=null}" \
             --destination "s3={bucketName=${{ env.BUCKET_NAME }},prefix=signed-}" \
             --profile-name ADOTLambdaLayerSigningProfile \
             --query 'jobId' --output text 2>/dev/null) || exit 0
-          [ -z "$JOB_ID" ] && exit 0
+          [ -z "$JOB_ID" ] && echo "No job ID returned" && exit 0
+          echo "Job ID: $JOB_ID"
           
+          echo "Waiting for signing job to complete..."
           aws signer wait successful-signing-job --job-id "$JOB_ID" || exit 0
+          echo "Signing completed"
           
+          echo "Moving signed layer..."
           SIGNED=$(aws signer describe-signing-job --job-id "$JOB_ID" --query 'signedObject.s3.key' --output text 2>/dev/null)
-          [ -n "$SIGNED" ] && aws s3 mv "s3://${{ env.BUCKET_NAME }}/$SIGNED" "s3://${{ env.BUCKET_NAME }}/aws-opentelemetry-python-layer.zip"
+          echo "SIGNED value: '$SIGNED'"
+          if [ -n "$SIGNED" ]; then
+            aws s3 mv "s3://${{ env.BUCKET_NAME }}/$SIGNED" "s3://${{ env.BUCKET_NAME }}/aws-opentelemetry-python-layer.zip --clobber"
+            echo "Signed layer moved successfully"
+          else
+            echo "No SIGNED value returned, skipping move"
+          fi
       
       - name: Publish Layer Version
         run: |
@@ -523,4 +535,4 @@ jobs:
             --id ${{ steps.ecr-signing-profile.outputs.profile_arn }}
           echo "Successfully signed public ECR image"
           echo "Image: ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ github.event.inputs.version }}"
-          echo "Profile ARN: ${{ steps.ecr-signing-profile.outputs.profile_arn }}" 
+          echo "Profile ARN: ${{ steps.ecr-signing-profile.outputs.profile_arn }}"
