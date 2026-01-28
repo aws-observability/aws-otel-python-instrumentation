@@ -30,6 +30,22 @@ class TestAlwaysRecordSampler(TestCase):
     def test_drop_sampling_decision(self):
         self.validate_should_sample(Decision.DROP, Decision.RECORD_ONLY)
 
+    def test_drop_decision_preserves_root_sampler_attributes(self):
+        root_result = _build_root_sampling_result(Decision.DROP, {"attr_key": "attr_val"})
+        self.mock_sampler.should_sample.return_value = root_result
+
+        actual_result = self.sampler.should_sample(
+            parent_context=Context(),
+            trace_id=0,
+            name="name",
+            kind=SpanKind.CLIENT,
+            attributes={},
+            trace_state=TraceState(),
+        )
+
+        self.assertEqual(actual_result.decision, Decision.RECORD_ONLY)
+        self.assertEqual(actual_result.attributes.get("attr_key"), "attr_val")
+
     def validate_should_sample(self, root_decision: Decision, expected_decision: Decision):
         root_result: SamplingResult = _build_root_sampling_result(root_decision)
         self.mock_sampler.should_sample.return_value = root_result
@@ -53,8 +69,8 @@ class TestAlwaysRecordSampler(TestCase):
         self.assertEqual(actual_result.trace_state, root_result.trace_state)
 
 
-def _build_root_sampling_result(sampling_decision: Decision):
-    sampling_attr: Attributes = {"key": sampling_decision.name}
+def _build_root_sampling_result(sampling_decision: Decision, attributes: Attributes = None):
+    sampling_attr: Attributes = attributes if attributes is not None else {"key": sampling_decision.name}
     sampling_trace_state: TraceState = TraceState()
     sampling_trace_state.add("key", sampling_decision.name)
     sampling_result: SamplingResult = SamplingResult(
