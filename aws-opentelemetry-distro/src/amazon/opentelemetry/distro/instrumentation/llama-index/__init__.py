@@ -3,13 +3,10 @@
 import logging
 from typing import Any, Collection, Optional
 
-from opentelemetry import trace as trace_api
+from amazon.opentelemetry.distro.version import __version__
+from opentelemetry import trace
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor  # type: ignore
 from opentelemetry.trace import Span
-
-from openinference.instrumentation import OITracer, TraceConfig
-from openinference.instrumentation.llama_index.package import _instruments
-from openinference.instrumentation.llama_index.version import __version__
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
@@ -21,26 +18,16 @@ class LlamaIndexInstrumentor(BaseInstrumentor):  # type: ignore
     """
 
     __slots__ = (
-        "_config",
         "_span_handler",
         "_event_handler",
     )
 
     def instrumentation_dependencies(self) -> Collection[str]:
-        return _instruments
+        return ("llama-index-core >= 0.10.43",)
 
     def _instrument(self, **kwargs: Any) -> None:
-        if not (tracer_provider := kwargs.get("tracer_provider")):
-            tracer_provider = trace_api.get_tracer_provider()
-        if not (config := kwargs.get("config")):
-            config = TraceConfig()
-        else:
-            assert isinstance(config, TraceConfig)
-        
-        tracer = OITracer(
-            trace_api.get_tracer(__name__, __version__, tracer_provider),
-            config=config,
-        )
+        tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
+        tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
         
         from llama_index.core.instrumentation import (  # type: ignore[attr-defined]
             get_dispatcher,
@@ -88,7 +75,7 @@ class LlamaIndexInstrumentor(BaseInstrumentor):  # type: ignore
 
 def get_current_span() -> Optional[Span]:
     from llama_index.core.instrumentation.span import active_span_id
-    from openinference.instrumentation.llama_index._handler import _SpanHandler
+    from amazon.opentelemetry.distro.instrumentation.llama_index._handler import _SpanHandler
 
     if not isinstance(id_ := active_span_id.get(), str):
         return None
