@@ -958,7 +958,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertIsInstance(second_processor, AttributePropagatingSpanProcessor)
         third_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[2].args[0]
         self.assertIsInstance(third_processor, BatchUnsampledSpanProcessor)
-        self.assertEqual(third_processor.max_export_batch_size, LAMBDA_SPAN_EXPORT_BATCH_SIZE)
+        self.assertEqual(third_processor._batch_processor._max_export_batch_size, LAMBDA_SPAN_EXPORT_BATCH_SIZE)
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
         os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
 

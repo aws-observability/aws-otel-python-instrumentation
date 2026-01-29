@@ -54,7 +54,7 @@ from opentelemetry.sdk._configuration import (
     _import_id_generator,
     _import_sampler,
     _OTelSDKConfigurator,
-    _patch_basic_config,
+    _overwrite_logging_config_fns,
 )
 from opentelemetry.sdk._events import EventLoggerProvider
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
@@ -242,11 +242,10 @@ def _init_logging(
     set_event_logger_provider(event_logger_provider)
 
     if setup_logging_handler:
-        _patch_basic_config()
-
         # Add OTel handler
         handler = LoggingHandler(level=logging.NOTSET, logger_provider=provider)
         logging.getLogger().addHandler(handler)
+        _overwrite_logging_config_fns(handler)
 
 
 def _init_tracing(

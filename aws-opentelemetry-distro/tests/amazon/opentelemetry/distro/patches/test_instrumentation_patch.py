@@ -199,7 +199,7 @@ class TestInstrumentationPatch(TestCase):
         self.assertTrue("sns" in _KNOWN_EXTENSIONS, "Upstream has removed the SNS extension")
 
         # StepFunctions
-        self.assertFalse("stepfunctions" in _KNOWN_EXTENSIONS, "Upstream has added a StepFunctions extension")
+        self.assertTrue("stepfunctions" in _KNOWN_EXTENSIONS, "Upstream has removed the StepFunctions extension")
 
         # Lambda
         self.assertTrue("lambda" in _KNOWN_EXTENSIONS, "Upstream has removed the Lambda extension")
@@ -813,7 +813,7 @@ class TestInstrumentationPatch(TestCase):
             instrumentor = StarletteInstrumentor()
             deps = original_deps(instrumentor)
             # Default should have version constraint
-            self.assertEqual(deps, ("starlette >= 0.13, <0.15",))
+            self.assertEqual(deps, ("starlette >= 0.13",))
         except ImportError:
             # If starlette instrumentation is not installed, skip this test
             pass

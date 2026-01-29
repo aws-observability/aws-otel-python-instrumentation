@@ -10,13 +10,13 @@ license = "Apache-2.0"
 requires-python = ">=3.9"
 
 dependencies = [
-    "opentelemetry-proto==1.33.1",
-    "opentelemetry-sdk==1.33.1",
+    "opentelemetry-proto==1.37.0",
+    "opentelemetry-sdk==1.37.0",
     "testcontainers==3.7.1",
-    "grpcio==1.66.2",
+    "grpcio==1.76.0",
     "docker==7.1.0",
     "mock-collector==1.0.0",
-    "requests==2.32.4"
+    "requests==2.32.5"
 ]
 
 [project.optional-dependencies]
