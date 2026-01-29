@@ -14,6 +14,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 - Add native CrewAI instrumentation support
   ([#586](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/586))
+- Adaptive Sampling support
+  ([#576](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/576))
 - Fix: Support new fields in X-Ray API responses
   ([#577](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/577))
 - Sign Lambda layer by AWS Signer
@@ -37,6 +39,21 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   ([#572](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/572))
 - Add cloud.platform attribute to resource attributes in lambda
   ([#561](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/561))
+
+## v0.14.2 - 2026-01-15
+- Fix: Support new fields in X-Ray API responses
+  ([#577](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/577))
+- Fix CVE-2025-66471 and CVE-2026-21441. No associated PR since `urllib3` dependency will auto-bump to the latest `2.6.x` version upon release.
+- Add cloud.platform attribute to resource attributes in lambda
+  ([#561](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/561))
+- Sign Lambda layer by AWS Signer
+  ([#573](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/573))
+- Update opentelemetry-sdk-extension-aws to version 2.1.0, and remove unneeded Resource Detector patches
+  ([#572](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/572))
+- Support PyPI Signature
+  ([#571](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/571))
+- Remove redundant environment variable configuration in Lambda layer
+  ([#570](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/570))
 
 ## v0.14.1 - 2025-12-15
 - Add custom ADOT UserAgent for OTLP Spans Exporter
