@@ -295,7 +295,6 @@ class _Span(BaseSpan):
             # https://github.com/open-telemetry/opentelemetry-python/blob/2b9dcfc5d853d1c10176937a6bcaade54cda1a31/opentelemetry-api/src/opentelemetry/trace/__init__.py#L588  # noqa E501
             description = f"{type(exception).__name__}: {exception}"
             status = Status(status_code=StatusCode.ERROR, description=description)
-        # self[OPENINFERENCE_SPAN_KIND] = self._span_kind or CHAIN
         self._otel_span.set_status(status=status)
         self._otel_span.set_attributes(self._attributes)
         self._otel_span.end(end_time=self._end_time)
@@ -318,8 +317,6 @@ class _Span(BaseSpan):
         if isinstance(instance, FunctionCallingLLM) and isinstance(
             (tools := bound_args.kwargs.get("tools")), Iterable
         ):
-            # Convert tools to a list and set as gen_ai.tool.definitions
-            # OTel expects an array of tool definitions
             tools_list = list(tools)
             if tools_list:
                 self[GEN_AI_TOOL_DEFINITIONS] = json.dumps(tools_list, default=str, ensure_ascii=False)
@@ -332,7 +329,6 @@ class _Span(BaseSpan):
     def _(self, instance: Union[BaseLLM, MultiModalLLM]) -> None:
         if metadata := instance.metadata:
             self[GEN_AI_REQUEST_MODEL] = metadata.model_name
-            # self[LLM_INVOCATION_PARAMETERS] = metadata.json(exclude_unset=True)
 
         # Add LLM provider detection
         if provider := _detect_llm_provider(instance):
@@ -351,11 +347,6 @@ class _Span(BaseSpan):
             self[GEN_AI_TOOL_NAME] = metadata.get_name()
         except BaseException:
             pass
-        # Note: Tool schema (metadata.fn_schema_str) is not captured here.
-        # gen_ai.tool.definitions is meant for an array of all available tools at the
-        # agent/model level, not a single tool's schema. Tool name and description are
-        # sufficient for individual tool spans. Actual call arguments are captured in
-        # AgentToolCallEvent via gen_ai.tool.call.arguments.
 
     def process_event(self, event: BaseEvent) -> None:
         self._process_event(event)
@@ -417,12 +408,6 @@ class _Span(BaseSpan):
         if name := tool.name:
             self[GEN_AI_TOOL_NAME] = name
         self[GEN_AI_TOOL_DESCRIPTION] = tool.description
-        # Note: tool.get_parameters_dict() returns the tool's parameter schema (definition),
-        # not the actual arguments passed during this call. OTel's gen_ai.tool.call.arguments
-        # is for actual call arguments, and gen_ai.tool.definitions is for an array of tool
-        # definitions at the agent level. Neither is appropriate for a single tool's schema
-        # in a tool call event, so we omit it.
-        # Omitted: tool parameter schema from get_parameters_dict()
 
     @_process_event.register
     def _(self, event: EmbeddingStartEvent) -> None:
@@ -431,11 +416,6 @@ class _Span(BaseSpan):
 
     @_process_event.register
     def _(self, event: EmbeddingEndEvent) -> None:
-        # Note: OpenTelemetry gen_ai semantic conventions (as of v1.39.0) do not include
-        # attributes for embedding vectors or input texts. These can be very large and would
-        # bloat spans significantly. OTel focuses on metadata like dimension count.
-        # Omitted OpenInference attributes: embedding.embeddings[].text, embedding.embeddings[].vector
-        
         # Capture embedding dimension count if available
         if event.embeddings and len(event.embeddings) > 0:
             first_embedding = event.embeddings[0]
@@ -461,9 +441,6 @@ class _Span(BaseSpan):
     def _(self, event: LLMPredictStartEvent) -> None:
         if not self._span_kind:
             self._span_kind = LLM
-        # Note: LLMPredictStartEvent uses templates, but OTel doesn't have
-        # standard attributes for prompt templates. The actual LLM input
-        # will be captured via gen_ai.input.messages in chat events.
 
     @_process_event.register
     def _(self, event: LLMPredictEndEvent) -> None:
@@ -482,11 +459,6 @@ class _Span(BaseSpan):
     def _(self, event: LLMCompletionStartEvent) -> None:
         if not self._span_kind:
             self._span_kind = LLM
-        # Note: OpenTelemetry gen_ai semantic conventions (as of v1.39.0) do not include
-        # attributes for completion-style prompts. The deprecated gen_ai.prompt attribute
-        # was removed in favor of gen_ai.input.messages for chat-style interactions.
-        # Completion API prompts are not captured to avoid span bloat.
-        # Omitted OpenInference attribute: llm.prompts
 
     @_process_event.register
     def _(self, event: LLMCompletionInProgressEvent) -> None: ...
@@ -529,13 +501,7 @@ class _Span(BaseSpan):
     def _(self, event: ReRankStartEvent) -> None:
         if not self._span_kind:
             self._span_kind = RERANKER
-        # Map reranker model name to standard gen_ai attribute
         self[GEN_AI_REQUEST_MODEL] = event.model_name
-        # Note: OpenTelemetry gen_ai semantic conventions (as of v1.39.0) do not include
-        # attributes for reranking operations. These are RAG-specific concepts not yet
-        # standardized in OTel semconv.
-        # Omitted OpenInference attributes: reranker.query, reranker.top_k,
-        # reranker.input_documents, reranker.output_documents
 
     @_process_event.register
     def _(self, event: ReRankEndEvent) -> None:
@@ -545,10 +511,6 @@ class _Span(BaseSpan):
     def _(self, event: RetrievalStartEvent) -> None:
         if not self._span_kind:
             self._span_kind = RETRIEVER
-        # Note: OpenTelemetry gen_ai semantic conventions (as of v1.39.0) do not include
-        # attributes for retrieval operations or document results. These are RAG-specific
-        # concepts not yet standardized in OTel semconv.
-        # Omitted OpenInference attributes: retrieval.documents (document content, IDs, scores, metadata)
 
     @_process_event.register
     def _(self, event: RetrievalEndEvent) -> None:
@@ -878,15 +840,7 @@ def _get_token_counts_from_mapping(
 def _get_token_counts_impl(
     usage: Union[object, Mapping[str, Any]], get_value: Callable[[Any, str], Any]
 ) -> Iterator[Tuple[str, Any]]:
-    # Note: OpenTelemetry gen_ai semantic conventions (as of v1.39.0) only support
-    # input and output token counts. Total tokens and detailed token breakdowns
-    # (cached tokens, audio tokens, reasoning tokens) are not part of the standard.
-    # Omitted OpenInference attributes: llm.token_count.total,
-    # llm.token_count.prompt.details.cache_read, llm.token_count.prompt.details.cache_write,
-    # llm.token_count.prompt.details.audio, llm.token_count.completion.details.reasoning,
-    # llm.token_count.completion.details.audio
-    
-    # OpenAI format
+    # OpenAI
     if (prompt_tokens := get_value(usage, "prompt_tokens")) is not None:
         try:
             yield GEN_AI_USAGE_INPUT_TOKENS, int(prompt_tokens)
@@ -898,7 +852,7 @@ def _get_token_counts_impl(
         except BaseException:
             pass
 
-    # Anthropic format
+    # Anthropic
     if (output_tokens := get_value(usage, "output_tokens")) is not None:
         try:
             yield GEN_AI_USAGE_OUTPUT_TOKENS, int(output_tokens)
@@ -910,7 +864,7 @@ def _get_token_counts_impl(
         except BaseException:
             pass
 
-    # VertexAI format
+    # VertexAI
     if (prompt_token_count := get_value(usage, "prompt_token_count")) is not None:
         try:
             yield GEN_AI_USAGE_INPUT_TOKENS, int(prompt_token_count)
