@@ -36,6 +36,7 @@ from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attribute
     GEN_AI_EMBEDDINGS_DIMENSION_COUNT,
     GEN_AI_INPUT_MESSAGES,
     GEN_AI_OUTPUT_MESSAGES,
+    GEN_AI_PROVIDER_NAME,
     GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_CALL_ID,
@@ -58,7 +59,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
 )
 from opentelemetry import context as context_api
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
-from opentelemetry.trace import Span, Status, StatusCode, Tracer, set_span_in_context
+from opentelemetry.trace import Span, SpanKind, Status, StatusCode, Tracer, set_span_in_context
 from opentelemetry.util.types import AttributeValue
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import PrivateAttr
@@ -163,6 +164,25 @@ logger.addHandler(logging.NullHandler())
 
 LLAMA_INDEX_VERSION = tuple(map(int, version("llama-index-core").split(".")[:3]))
 
+# OpenTelemetry well-known operation names for gen_ai.operation.name
+_OPERATION_CHAT = "chat"
+_OPERATION_TEXT_COMPLETION = "text_completion"
+_OPERATION_EMBEDDINGS = "embeddings"
+_OPERATION_INVOKE_AGENT = "invoke_agent"
+_OPERATION_EXECUTE_TOOL = "execute_tool"
+
+# Custom operation names for LlamaIndex-specific operations
+_OPERATION_RERANK = "rerank"
+_OPERATION_RETRIEVE = "retrieve"
+_OPERATION_SYNTHESIZE = "synthesize"
+_OPERATION_QUERY = "query"
+
+# Default value for gen_ai.provider.name, a required attribute per OpenTelemetry
+# semantic conventions.
+# "llama_index" is not a standard provider name in semconv v1.39, but serves as a fallback when the
+# underlying LLM provider cannot be determined.
+_PROVIDER_LLAMA_INDEX = "llama_index"
+
 STREAMING_FINISHED_EVENTS = (
     LLMChatEndEvent,
     LLMCompletionEndEvent,
@@ -252,7 +272,6 @@ class _Span(BaseSpan):
     _otel_span: Span = PrivateAttr()
     _attributes: Dict[str, AttributeValue] = PrivateAttr()
     _active: bool = PrivateAttr()
-    _span_kind: Optional[str] = PrivateAttr()
     _parent: Optional["_Span"] = PrivateAttr()
     _first_token_timestamp: Optional[int] = PrivateAttr()
 
@@ -262,14 +281,12 @@ class _Span(BaseSpan):
     def __init__(
         self,
         otel_span: Span,
-        span_kind: Optional[str] = None,
         parent: Optional["_Span"] = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self._otel_span = otel_span
         self._active = otel_span.is_recording()
-        self._span_kind = span_kind
         self._parent = parent
         self._first_token_timestamp = None
         self._attributes = {}
@@ -283,6 +300,24 @@ class _Span(BaseSpan):
     def record_exception(self, exception: BaseException) -> None:
         self._otel_span.record_exception(exception)
 
+    def _get_span_name(self) -> str:
+        operation_name = self._attributes.get(GEN_AI_OPERATION_NAME)
+        
+        # generic fallback if no operation name
+        if not operation_name:
+            return "llama_index.operation"
+        
+        if operation_name == _OPERATION_INVOKE_AGENT:
+            if agent_name := self._attributes.get(GEN_AI_AGENT_NAME):
+                return f"{operation_name} {agent_name}"
+        elif operation_name == _OPERATION_EXECUTE_TOOL:
+            if tool_name := self._attributes.get(GEN_AI_TOOL_NAME):
+                return f"{operation_name} {tool_name}"
+        elif model := self._attributes.get(GEN_AI_REQUEST_MODEL):
+            return f"{operation_name} {model}"
+        
+        return operation_name
+
     def end(self, exception: Optional[BaseException] = None) -> None:
         if not self._active:
             return
@@ -295,6 +330,12 @@ class _Span(BaseSpan):
             # https://github.com/open-telemetry/opentelemetry-python/blob/2b9dcfc5d853d1c10176937a6bcaade54cda1a31/opentelemetry-api/src/opentelemetry/trace/__init__.py#L588  # noqa E501
             description = f"{type(exception).__name__}: {exception}"
             status = Status(status_code=StatusCode.ERROR, description=description)
+        
+        if GEN_AI_PROVIDER_NAME not in self._attributes:
+            self._attributes[GEN_AI_PROVIDER_NAME] = _PROVIDER_LLAMA_INDEX
+        
+        self._otel_span.update_name(self._get_span_name())
+        
         self._otel_span.set_status(status=status)
         self._otel_span.set_attributes(self._attributes)
         self._otel_span.end(end_time=self._end_time)
@@ -384,26 +425,26 @@ class _Span(BaseSpan):
 
     @_process_event.register
     def _(self, event: AgentChatWithStepStartEvent) -> None:
-        if not self._span_kind:
-            self._span_kind = AGENT
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_INVOKE_AGENT
 
     @_process_event.register
     def _(self, event: AgentChatWithStepEndEvent) -> None:
-        pass
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_INVOKE_AGENT
 
     @_process_event.register
     def _(self, event: AgentRunStepStartEvent) -> None:
-        if not self._span_kind:
-            self._span_kind = AGENT
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_INVOKE_AGENT
 
     @_process_event.register
     def _(self, event: AgentRunStepEndEvent) -> None:
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_INVOKE_AGENT
         # FIXME: not sure what to do here with interim outputs since
         # there is no corresponding semantic convention.
         ...
 
     @_process_event.register
     def _(self, event: AgentToolCallEvent) -> None:
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_EXECUTE_TOOL
         tool = event.tool
         if name := tool.name:
             self[GEN_AI_TOOL_NAME] = name
@@ -411,11 +452,11 @@ class _Span(BaseSpan):
 
     @_process_event.register
     def _(self, event: EmbeddingStartEvent) -> None:
-        if not self._span_kind:
-            self._span_kind = EMBEDDING
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_EMBEDDINGS
 
     @_process_event.register
     def _(self, event: EmbeddingEndEvent) -> None:
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_EMBEDDINGS
         # Capture embedding dimension count if available
         if event.embeddings and len(event.embeddings) > 0:
             first_embedding = event.embeddings[0]
@@ -424,8 +465,7 @@ class _Span(BaseSpan):
 
     @_process_event.register
     def _(self, event: StreamChatStartEvent) -> None:
-        if not self._span_kind:
-            self._span_kind = LLM
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_CHAT
 
     @_process_event.register
     def _(self, event: StreamChatDeltaReceivedEvent) -> None: ...
@@ -435,42 +475,40 @@ class _Span(BaseSpan):
         self.record_exception(event.exception)
 
     @_process_event.register
-    def _(self, event: StreamChatEndEvent) -> None: ...
+    def _(self, event: StreamChatEndEvent) -> None:
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_CHAT
 
     @_process_event.register
     def _(self, event: LLMPredictStartEvent) -> None:
-        if not self._span_kind:
-            self._span_kind = LLM
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_TEXT_COMPLETION
 
     @_process_event.register
     def _(self, event: LLMPredictEndEvent) -> None:
-        pass
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_TEXT_COMPLETION
 
     @_process_event.register
     def _(self, event: LLMStructuredPredictStartEvent) -> None:
-        if not self._span_kind:
-            self._span_kind = LLM
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_TEXT_COMPLETION
 
     @_process_event.register
     def _(self, event: LLMStructuredPredictEndEvent) -> None:
-        pass
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_TEXT_COMPLETION
 
     @_process_event.register
     def _(self, event: LLMCompletionStartEvent) -> None:
-        if not self._span_kind:
-            self._span_kind = LLM
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_TEXT_COMPLETION
 
     @_process_event.register
     def _(self, event: LLMCompletionInProgressEvent) -> None: ...
 
     @_process_event.register
     def _(self, event: LLMCompletionEndEvent) -> None:
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_TEXT_COMPLETION
         self._extract_token_counts(event.response)
 
     @_process_event.register
     def _(self, event: LLMChatStartEvent) -> None:
-        if not self._span_kind:
-            self._span_kind = LLM
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_CHAT
         self._process_messages(
             GEN_AI_INPUT_MESSAGES,
             *event.messages,
@@ -481,6 +519,7 @@ class _Span(BaseSpan):
 
     @_process_event.register
     def _(self, event: LLMChatEndEvent) -> None:
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_CHAT
         if (response := event.response) is None:
             return
         self._extract_token_counts(response)
@@ -491,30 +530,28 @@ class _Span(BaseSpan):
 
     @_process_event.register
     def _(self, event: QueryStartEvent) -> None:
-        pass
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_QUERY
 
     @_process_event.register
     def _(self, event: QueryEndEvent) -> None:
-        pass
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_QUERY
 
     @_process_event.register
     def _(self, event: ReRankStartEvent) -> None:
-        if not self._span_kind:
-            self._span_kind = RERANKER
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_RERANK
         self[GEN_AI_REQUEST_MODEL] = event.model_name
 
     @_process_event.register
     def _(self, event: ReRankEndEvent) -> None:
-        pass
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_RERANK
 
     @_process_event.register
     def _(self, event: RetrievalStartEvent) -> None:
-        if not self._span_kind:
-            self._span_kind = RETRIEVER
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_RETRIEVE
 
     @_process_event.register
     def _(self, event: RetrievalEndEvent) -> None:
-        pass
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_RETRIEVE
 
     @_process_event.register
     def _(self, event: SpanDropEvent) -> None:
@@ -523,21 +560,19 @@ class _Span(BaseSpan):
 
     @_process_event.register
     def _(self, event: SynthesizeStartEvent) -> None:
-        if not self._span_kind:
-            self._span_kind = CHAIN
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_SYNTHESIZE
 
     @_process_event.register
     def _(self, event: SynthesizeEndEvent) -> None:
-        pass
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_SYNTHESIZE
 
     @_process_event.register
     def _(self, event: GetResponseStartEvent) -> None:
-        if not self._span_kind:
-            self._span_kind = CHAIN
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_SYNTHESIZE
 
     @_process_event.register
     def _(self, event: GetResponseEndEvent) -> None:
-        pass
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_SYNTHESIZE
 
     def _extract_token_counts(self, response: Union[ChatResponse, CompletionResponse]) -> None:
         if raw := getattr(response, "raw", None):
@@ -678,9 +713,10 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         with self.lock:
             parent = self.open_spans.get(parent_span_id) if parent_span_id else None
         otel_span = self._otel_tracer.start_span(
-            name=id_.partition("-")[0],
+            name="llama_index.operation",  # generic operation name, updated in span.end()
             start_time=time_ns(),
             attributes={},
+            kind=SpanKind.INTERNAL,
             context=(
                 parent.context
                 if parent
@@ -689,7 +725,6 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         )
         span = _Span(
             otel_span=otel_span,
-            span_kind=_init_span_kind(instance),
             parent=parent,
             id_=id_,
             parent_id=parent_span_id,
@@ -877,46 +912,6 @@ def _get_token_counts_impl(
             pass
 
 
-@singledispatch
-def _init_span_kind(_: Any) -> Optional[str]:
-    return None
-
-
-# Only register agent handlers if the classes exist
-if BaseAgent is not None:
-
-    @_init_span_kind.register
-    def _agent_span_kind(_: BaseAgent) -> str:  # type: ignore[misc]
-        return AGENT
-
-
-if BaseAgentWorker is not None:
-
-    @_init_span_kind.register
-    def _agent_worker_span_kind(_: BaseAgentWorker) -> str:  # type: ignore[misc]
-        return AGENT
-
-
-@_init_span_kind.register
-def _(_: BaseLLM) -> str:
-    return LLM
-
-
-@_init_span_kind.register
-def _(_: BaseRetriever) -> str:
-    return RETRIEVER
-
-
-@_init_span_kind.register
-def _(_: BaseEmbedding) -> str:
-    return EMBEDDING
-
-
-@_init_span_kind.register
-def _(_: BaseTool) -> str:
-    return TOOL
-
-
 class _Encoder(json.JSONEncoder):
     def __init__(self, **kwargs: Any) -> None:
         kwargs.pop("default", None)
@@ -1013,12 +1008,3 @@ def is_iterable_of(lst: Iterable[object], tp: T) -> bool:
 
 def is_base64_url(url: str) -> bool:
     return url.startswith("data:image/") and "base64" in url
-
-
-AGENT = OpenInferenceSpanKindValues.AGENT.value
-CHAIN = OpenInferenceSpanKindValues.CHAIN.value
-EMBEDDING = OpenInferenceSpanKindValues.EMBEDDING.value
-LLM = OpenInferenceSpanKindValues.LLM.value
-RERANKER = OpenInferenceSpanKindValues.RERANKER.value
-RETRIEVER = OpenInferenceSpanKindValues.RETRIEVER.value
-TOOL = OpenInferenceSpanKindValues.TOOL.value
