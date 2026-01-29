@@ -60,9 +60,10 @@ class AlwaysRecordSampler(Sampler):
         return "AlwaysRecordSampler{" + self._root_sampler.get_description() + "}"
 
 
-def _wrap_result_with_record_only_result(result: SamplingResult, attributes: Attributes) -> SamplingResult:
-    return SamplingResult(
-        Decision.RECORD_ONLY,
-        attributes,
-        result.trace_state,
-    )
+def _wrap_result_with_record_only_result(result: SamplingResult, original_attributes: Attributes) -> SamplingResult:
+    """
+    Wraps a DROP decision result as RECORD_ONLY, merging input and root sampler attributes.
+    Sampler attributes take precedence over original attributes.
+    """
+    merged = {**(original_attributes or {}), **(result.attributes or {})}
+    return SamplingResult(Decision.RECORD_ONLY, merged, result.trace_state)
