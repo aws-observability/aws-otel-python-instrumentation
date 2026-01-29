@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix: Ensure AlwaysRecordSampler respects root sampling result attributes
+  ([#594](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/594))
 - Adaptive Sampling support
   ([#576](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/576))
 - Fix: Support new fields in X-Ray API responses
