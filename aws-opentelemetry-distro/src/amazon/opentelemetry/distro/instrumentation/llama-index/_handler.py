@@ -32,6 +32,30 @@ from typing import (
     Union,
 )
 
+from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attributes import (
+    GEN_AI_EMBEDDINGS_DIMENSION_COUNT,
+    GEN_AI_INPUT_MESSAGES,
+    GEN_AI_OUTPUT_MESSAGES,
+    GEN_AI_SYSTEM_INSTRUCTIONS,
+    GEN_AI_TOOL_CALL_ARGUMENTS,
+    GEN_AI_TOOL_CALL_ID,
+    GEN_AI_TOOL_CALL_RESULT,
+    GEN_AI_TOOL_DEFINITIONS,
+)
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
+    GEN_AI_AGENT_DESCRIPTION,
+    GEN_AI_AGENT_ID,
+    GEN_AI_AGENT_NAME,
+    GEN_AI_OPERATION_NAME,
+    GEN_AI_REQUEST_MAX_TOKENS,
+    GEN_AI_REQUEST_MODEL,
+    GEN_AI_REQUEST_TEMPERATURE,
+    GEN_AI_TOOL_DESCRIPTION,
+    GEN_AI_TOOL_NAME,
+    GEN_AI_TOOL_TYPE,
+    GEN_AI_USAGE_INPUT_TOKENS,
+    GEN_AI_USAGE_OUTPUT_TOKENS
+)
 from opentelemetry import context as context_api
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
 from opentelemetry.trace import Span, Status, StatusCode, Tracer, set_span_in_context
@@ -133,10 +157,6 @@ from llama_index.core.schema import BaseNode, NodeWithScore, QueryType
 from llama_index.core.tools import BaseTool
 from llama_index.core.types import RESPONSE_TEXT_TYPE
 from llama_index.core.workflow.errors import WorkflowDone  # type: ignore[attr-defined]
-from openinference.instrumentation import (
-    get_attributes_from_context,
-    safe_json_dumps,
-)
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
@@ -179,7 +199,7 @@ def _detect_llm_provider(instance: Any) -> Optional[str]:
         from llama_index.llms.openai import OpenAI as LlamaIndexOpenAI
 
         if isinstance(instance, LlamaIndexOpenAI):
-            return OpenInferenceLLMProviderValues.OPENAI.value
+            return "openai"
     except ImportError:
         pass
 
@@ -187,7 +207,7 @@ def _detect_llm_provider(instance: Any) -> Optional[str]:
         from llama_index.llms.anthropic import Anthropic as LlamaIndexAnthropic
 
         if isinstance(instance, LlamaIndexAnthropic):
-            return OpenInferenceLLMProviderValues.ANTHROPIC.value
+            return "anthropic"
     except ImportError:
         pass
 
@@ -195,7 +215,7 @@ def _detect_llm_provider(instance: Any) -> Optional[str]:
         from llama_index.llms.azure_openai import AzureOpenAI as LlamaIndexAzureOpenAI
 
         if isinstance(instance, LlamaIndexAzureOpenAI):
-            return OpenInferenceLLMProviderValues.AZURE.value
+            return "azure.ai.openai"
     except ImportError:
         pass
 
@@ -203,7 +223,7 @@ def _detect_llm_provider(instance: Any) -> Optional[str]:
         from llama_index.llms.vertex import Vertex as LlamaIndexVertex
 
         if isinstance(instance, LlamaIndexVertex):
-            return OpenInferenceLLMProviderValues.GOOGLE.value
+            return "gcp.vertex_ai"
     except ImportError:
         pass
 
@@ -211,70 +231,14 @@ def _detect_llm_provider(instance: Any) -> Optional[str]:
     class_name = instance.__class__.__name__.lower()
     if "openai" in class_name:
         if "azure" in class_name:
-            return OpenInferenceLLMProviderValues.AZURE.value
-        return OpenInferenceLLMProviderValues.OPENAI.value
+            return "azure.ai.openai"
+        return "openai"
     elif "anthropic" in class_name:
-        return OpenInferenceLLMProviderValues.ANTHROPIC.value
-    elif "vertex" in class_name or "gemini" in class_name:
-        return OpenInferenceLLMProviderValues.GOOGLE.value
-
-    return None
-
-
-def _detect_llm_system(instance: Any) -> Optional[str]:
-    """
-    Detect LLM system (AI product) using lazy imports to avoid import errors when
-    optional LLM provider packages are not installed.
-
-    Args:
-        instance: The LLM instance to check
-
-    Returns:
-        System string if detected, None otherwise
-    """
-    # Try specific system imports with lazy loading
-    try:
-        from llama_index.llms.openai import OpenAI as LlamaIndexOpenAI
-
-        if isinstance(instance, LlamaIndexOpenAI):
-            return OpenInferenceLLMSystemValues.OPENAI.value
-    except ImportError:
-        pass
-
-    try:
-        from llama_index.llms.azure_openai import AzureOpenAI as LlamaIndexAzureOpenAI
-
-        if isinstance(instance, LlamaIndexAzureOpenAI):
-            return OpenInferenceLLMSystemValues.OPENAI.value  # Azure OpenAI uses OpenAI's system
-    except ImportError:
-        pass
-
-    try:
-        from llama_index.llms.anthropic import Anthropic as LlamaIndexAnthropic
-
-        if isinstance(instance, LlamaIndexAnthropic):
-            return OpenInferenceLLMSystemValues.ANTHROPIC.value
-    except ImportError:
-        pass
-
-    try:
-        from llama_index.llms.vertex import Vertex as LlamaIndexVertex
-
-        if isinstance(instance, LlamaIndexVertex):
-            return OpenInferenceLLMSystemValues.VERTEXAI.value
-    except ImportError:
-        pass
-
-    # Fallback: check class name if imports fail
-    class_name = instance.__class__.__name__.lower()
-    if "openai" in class_name:
-        return (
-            OpenInferenceLLMSystemValues.OPENAI.value
-        )  # Both OpenAI and Azure OpenAI use OpenAI system
-    elif "anthropic" in class_name:
-        return OpenInferenceLLMSystemValues.ANTHROPIC.value
-    elif "vertex" in class_name or "gemini" in class_name:
-        return OpenInferenceLLMSystemValues.VERTEXAI.value
+        return "anthropic"
+    elif "vertex" in class_name:
+        return "gcp.vertex_ai"
+    elif "gemini" in class_name:
+        return "gcp.gemini"
 
     return None
 
@@ -331,7 +295,7 @@ class _Span(BaseSpan):
             # https://github.com/open-telemetry/opentelemetry-python/blob/2b9dcfc5d853d1c10176937a6bcaade54cda1a31/opentelemetry-api/src/opentelemetry/trace/__init__.py#L588  # noqa E501
             description = f"{type(exception).__name__}: {exception}"
             status = Status(status_code=StatusCode.ERROR, description=description)
-        self[OPENINFERENCE_SPAN_KIND] = self._span_kind or CHAIN
+        # self[OPENINFERENCE_SPAN_KIND] = self._span_kind or CHAIN
         self._otel_span.set_status(status=status)
         self._otel_span.set_attributes(self._attributes)
         self._otel_span.end(end_time=self._end_time)
@@ -354,49 +318,11 @@ class _Span(BaseSpan):
         if isinstance(instance, FunctionCallingLLM) and isinstance(
             (tools := bound_args.kwargs.get("tools")), Iterable
         ):
-            for i, tool in enumerate(tools):
-                self[f"{LLM_TOOLS}.{i}.{TOOL_JSON_SCHEMA}"] = safe_json_dumps(tool)
-        try:
-            self[INPUT_VALUE] = safe_json_dumps(bound_args.arguments, cls=_Encoder)
-            self[INPUT_MIME_TYPE] = JSON
-        except BaseException as e:
-            logger.exception(str(e))
-            pass
-
-    def process_output(self, instance: Any, result: Any) -> None:
-        if OUTPUT_VALUE in self._attributes:
-            # If the output value was set up by event handling, we don't
-            # need to continue
-            return
-        if result is None:
-            return
-        if repr_str := _show_repr_str(result):
-            self[OUTPUT_VALUE] = repr_str
-            return
-        if isinstance(result, (Generator, AsyncGenerator)):
-            return
-        if isinstance(instance, (BaseEmbedding,)):
-            # these outputs are too large
-            return
-        if isinstance(result, (str, SupportsFloat, bool)):
-            self[OUTPUT_VALUE] = str(result)
-        elif isinstance(result, BaseModel):
-            _ensure_result_model_is_serializable(result)
-            try:
-                self[OUTPUT_VALUE] = result.model_dump_json(exclude_unset=True)
-                self[OUTPUT_MIME_TYPE] = JSON
-            except Exception:
-                try:
-                    self[OUTPUT_VALUE] = repr(result)
-                except Exception:
-                    pass
-        else:
-            try:
-                self[OUTPUT_VALUE] = safe_json_dumps(result, cls=_Encoder)
-                self[OUTPUT_MIME_TYPE] = JSON
-            except BaseException as e:
-                logger.exception(str(e))
-                pass
+            # Convert tools to a list and set as gen_ai.tool.definitions
+            # OTel expects an array of tool definitions
+            tools_list = list(tools)
+            if tools_list:
+                self[GEN_AI_TOOL_DEFINITIONS] = json.dumps(tools_list, default=str, ensure_ascii=False)
 
     @singledispatchmethod
     def process_instance(self, instance: Any) -> None: ...
@@ -405,34 +331,31 @@ class _Span(BaseSpan):
     @process_instance.register(MultiModalLLM)
     def _(self, instance: Union[BaseLLM, MultiModalLLM]) -> None:
         if metadata := instance.metadata:
-            self[LLM_MODEL_NAME] = metadata.model_name
-            self[LLM_INVOCATION_PARAMETERS] = metadata.json(exclude_unset=True)
+            self[GEN_AI_REQUEST_MODEL] = metadata.model_name
+            # self[LLM_INVOCATION_PARAMETERS] = metadata.json(exclude_unset=True)
 
         # Add LLM provider detection
         if provider := _detect_llm_provider(instance):
-            self[LLM_PROVIDER] = provider
-
-        # Add LLM system detection
-        if system := _detect_llm_system(instance):
-            self[LLM_SYSTEM] = system
+            self[GEN_AI_PROVIDER_NAME] = provider
 
     @process_instance.register
     def _(self, instance: BaseEmbedding) -> None:
         if name := instance.model_name:
-            self[EMBEDDING_MODEL_NAME] = name
+            self[GEN_AI_REQUEST_MODEL] = name
 
     @process_instance.register
     def _(self, instance: BaseTool) -> None:
         metadata = instance.metadata
-        self[TOOL_DESCRIPTION] = metadata.description
+        self[GEN_AI_TOOL_DESCRIPTION] = metadata.description
         try:
-            self[TOOL_NAME] = metadata.get_name()
+            self[GEN_AI_TOOL_NAME] = metadata.get_name()
         except BaseException:
             pass
-        try:
-            self[TOOL_PARAMETERS] = metadata.fn_schema_str
-        except BaseException:
-            pass
+        # Note: Tool schema (metadata.fn_schema_str) is not captured here.
+        # gen_ai.tool.definitions is meant for an array of all available tools at the
+        # agent/model level, not a single tool's schema. Tool name and description are
+        # sufficient for individual tool spans. Actual call arguments are captured in
+        # AgentToolCallEvent via gen_ai.tool.call.arguments.
 
     def process_event(self, event: BaseEvent) -> None:
         self._process_event(event)
@@ -472,20 +395,15 @@ class _Span(BaseSpan):
     def _(self, event: AgentChatWithStepStartEvent) -> None:
         if not self._span_kind:
             self._span_kind = AGENT
-        self[INPUT_VALUE] = event.user_msg
-        self._attributes.pop(INPUT_MIME_TYPE, None)
 
     @_process_event.register
     def _(self, event: AgentChatWithStepEndEvent) -> None:
-        self[OUTPUT_VALUE] = str(event.response)
+        pass
 
     @_process_event.register
     def _(self, event: AgentRunStepStartEvent) -> None:
         if not self._span_kind:
             self._span_kind = AGENT
-        if input := event.input:
-            self[INPUT_VALUE] = input
-            self._attributes.pop(INPUT_MIME_TYPE, None)
 
     @_process_event.register
     def _(self, event: AgentRunStepEndEvent) -> None:
@@ -497,9 +415,14 @@ class _Span(BaseSpan):
     def _(self, event: AgentToolCallEvent) -> None:
         tool = event.tool
         if name := tool.name:
-            self[TOOL_NAME] = name
-        self[TOOL_DESCRIPTION] = tool.description
-        self[TOOL_PARAMETERS] = safe_json_dumps(tool.get_parameters_dict())
+            self[GEN_AI_TOOL_NAME] = name
+        self[GEN_AI_TOOL_DESCRIPTION] = tool.description
+        # Note: tool.get_parameters_dict() returns the tool's parameter schema (definition),
+        # not the actual arguments passed during this call. OTel's gen_ai.tool.call.arguments
+        # is for actual call arguments, and gen_ai.tool.definitions is for an array of tool
+        # definitions at the agent level. Neither is appropriate for a single tool's schema
+        # in a tool call event, so we omit it.
+        # Omitted: tool parameter schema from get_parameters_dict()
 
     @_process_event.register
     def _(self, event: EmbeddingStartEvent) -> None:
@@ -508,12 +431,16 @@ class _Span(BaseSpan):
 
     @_process_event.register
     def _(self, event: EmbeddingEndEvent) -> None:
-        i = self._list_attr_len[EMBEDDING_EMBEDDINGS]
-        for text, vector in zip(event.chunks, event.embeddings):
-            self[f"{EMBEDDING_EMBEDDINGS}.{i}.{EMBEDDING_TEXT}"] = text
-            self[f"{EMBEDDING_EMBEDDINGS}.{i}.{EMBEDDING_VECTOR}"] = vector
-            i += 1
-        self._list_attr_len[EMBEDDING_EMBEDDINGS] = i
+        # Note: OpenTelemetry gen_ai semantic conventions (as of v1.39.0) do not include
+        # attributes for embedding vectors or input texts. These can be very large and would
+        # bloat spans significantly. OTel focuses on metadata like dimension count.
+        # Omitted OpenInference attributes: embedding.embeddings[].text, embedding.embeddings[].vector
+        
+        # Capture embedding dimension count if available
+        if event.embeddings and len(event.embeddings) > 0:
+            first_embedding = event.embeddings[0]
+            if hasattr(first_embedding, '__len__'):
+                self[GEN_AI_EMBEDDINGS_DIMENSION_COUNT] = len(first_embedding)
 
     @_process_event.register
     def _(self, event: StreamChatStartEvent) -> None:
@@ -534,24 +461,13 @@ class _Span(BaseSpan):
     def _(self, event: LLMPredictStartEvent) -> None:
         if not self._span_kind:
             self._span_kind = LLM
-        template = event.template
-        self[LLM_PROMPT_TEMPLATE] = template.get_template()
-        variable_names: List[str] = template.template_vars
-        argument_values: Dict[str, str] = {
-            **template.kwargs,
-            **(event.template_args if event.template_args else {}),
-        }
-        template_arguments = {
-            variable_name: argument_value
-            for variable_name in variable_names
-            if (argument_value := argument_values.get(variable_name)) is not None
-        }
-        if template_arguments:
-            self[LLM_PROMPT_TEMPLATE_VARIABLES] = safe_json_dumps(template_arguments)
+        # Note: LLMPredictStartEvent uses templates, but OTel doesn't have
+        # standard attributes for prompt templates. The actual LLM input
+        # will be captured via gen_ai.input.messages in chat events.
 
     @_process_event.register
     def _(self, event: LLMPredictEndEvent) -> None:
-        self[OUTPUT_VALUE] = event.output
+        pass
 
     @_process_event.register
     def _(self, event: LLMStructuredPredictStartEvent) -> None:
@@ -560,21 +476,23 @@ class _Span(BaseSpan):
 
     @_process_event.register
     def _(self, event: LLMStructuredPredictEndEvent) -> None:
-        self[OUTPUT_VALUE] = event.output.json(exclude_unset=True)
-        self[OUTPUT_MIME_TYPE] = JSON
+        pass
 
     @_process_event.register
     def _(self, event: LLMCompletionStartEvent) -> None:
         if not self._span_kind:
             self._span_kind = LLM
-        self[LLM_PROMPTS] = [event.prompt]
+        # Note: OpenTelemetry gen_ai semantic conventions (as of v1.39.0) do not include
+        # attributes for completion-style prompts. The deprecated gen_ai.prompt attribute
+        # was removed in favor of gen_ai.input.messages for chat-style interactions.
+        # Completion API prompts are not captured to avoid span bloat.
+        # Omitted OpenInference attribute: llm.prompts
 
     @_process_event.register
     def _(self, event: LLMCompletionInProgressEvent) -> None: ...
 
     @_process_event.register
     def _(self, event: LLMCompletionEndEvent) -> None:
-        self[OUTPUT_VALUE] = event.response.text
         self._extract_token_counts(event.response)
 
     @_process_event.register
@@ -582,7 +500,7 @@ class _Span(BaseSpan):
         if not self._span_kind:
             self._span_kind = LLM
         self._process_messages(
-            LLM_INPUT_MESSAGES,
+            GEN_AI_INPUT_MESSAGES,
             *event.messages,
         )
 
@@ -593,50 +511,48 @@ class _Span(BaseSpan):
     def _(self, event: LLMChatEndEvent) -> None:
         if (response := event.response) is None:
             return
-        self[OUTPUT_VALUE] = str(response)
         self._extract_token_counts(response)
         self._process_messages(
-            LLM_OUTPUT_MESSAGES,
+            GEN_AI_OUTPUT_MESSAGES,
             response.message,
         )
 
     @_process_event.register
     def _(self, event: QueryStartEvent) -> None:
-        self._process_query_type(event.query)
+        pass
 
     @_process_event.register
     def _(self, event: QueryEndEvent) -> None:
-        self._process_response_type(event.response)
+        pass
 
     @_process_event.register
     def _(self, event: ReRankStartEvent) -> None:
         if not self._span_kind:
             self._span_kind = RERANKER
-        if query := event.query:
-            self._process_query_type(query)
-            if isinstance(query, QueryBundle):
-                self[RERANKER_QUERY] = query.query_str
-            elif isinstance(query, str):
-                self[RERANKER_QUERY] = query
-            else:
-                assert_never(query)
-        self[RERANKER_TOP_K] = event.top_n
-        self[RERANKER_MODEL_NAME] = event.model_name
-        self._process_nodes(RERANKER_INPUT_DOCUMENTS, *event.nodes)
+        # Map reranker model name to standard gen_ai attribute
+        self[GEN_AI_REQUEST_MODEL] = event.model_name
+        # Note: OpenTelemetry gen_ai semantic conventions (as of v1.39.0) do not include
+        # attributes for reranking operations. These are RAG-specific concepts not yet
+        # standardized in OTel semconv.
+        # Omitted OpenInference attributes: reranker.query, reranker.top_k,
+        # reranker.input_documents, reranker.output_documents
 
     @_process_event.register
     def _(self, event: ReRankEndEvent) -> None:
-        self._process_nodes(RERANKER_OUTPUT_DOCUMENTS, *event.nodes)
+        pass
 
     @_process_event.register
     def _(self, event: RetrievalStartEvent) -> None:
         if not self._span_kind:
             self._span_kind = RETRIEVER
-        self._process_query_type(event.str_or_query_bundle)
+        # Note: OpenTelemetry gen_ai semantic conventions (as of v1.39.0) do not include
+        # attributes for retrieval operations or document results. These are RAG-specific
+        # concepts not yet standardized in OTel semconv.
+        # Omitted OpenInference attributes: retrieval.documents (document content, IDs, scores, metadata)
 
     @_process_event.register
     def _(self, event: RetrievalEndEvent) -> None:
-        self._process_nodes(RETRIEVAL_DOCUMENTS, *event.nodes)
+        pass
 
     @_process_event.register
     def _(self, event: SpanDropEvent) -> None:
@@ -647,28 +563,19 @@ class _Span(BaseSpan):
     def _(self, event: SynthesizeStartEvent) -> None:
         if not self._span_kind:
             self._span_kind = CHAIN
-        self._process_query_type(event.query)
 
     @_process_event.register
     def _(self, event: SynthesizeEndEvent) -> None:
-        self._process_response_type(event.response)
+        pass
 
     @_process_event.register
     def _(self, event: GetResponseStartEvent) -> None:
         if not self._span_kind:
             self._span_kind = CHAIN
-        self[INPUT_VALUE] = event.query_str
-        self._attributes.pop(INPUT_MIME_TYPE, None)
 
     @_process_event.register
     def _(self, event: GetResponseEndEvent) -> None:
-        """
-        (2024-06-03) Payload was removed by the following PR.
-        https://github.com/run-llama/llama_index/pull/13901/files
-        """
-        if not hasattr(event, "response"):
-            return
-        self._process_response_text_type(event.response)
+        pass
 
     def _extract_token_counts(self, response: Union[ChatResponse, CompletionResponse]) -> None:
         if raw := getattr(response, "raw", None):
@@ -705,154 +612,13 @@ class _Span(BaseSpan):
             for k, v in _get_token_counts(additional_kwargs):
                 self[k] = v
 
-    def _process_nodes(self, prefix: str, *nodes: NodeWithScore) -> None:
-        for i, node in enumerate(nodes):
-            self[f"{prefix}.{i}.{DOCUMENT_ID}"] = node.node_id
-            if content := node.get_content():
-                self[f"{prefix}.{i}.{DOCUMENT_CONTENT}"] = content
-            if (score := node.get_score()) is not None:
-                self[f"{prefix}.{i}.{DOCUMENT_SCORE}"] = score
-            if metadata := node.metadata:
-                self[f"{prefix}.{i}.{DOCUMENT_METADATA}"] = safe_json_dumps(metadata)
-
     def _process_messages(
         self,
         prefix: str,
         *messages: ChatMessage,
     ) -> None:
-        for i, message in enumerate(messages):
-            self[f"{prefix}.{i}.{MESSAGE_ROLE}"] = message.role.value
-            blocks = message.blocks
-            tool_calls = []
-            if len(blocks) == 1 and isinstance(blocks[0], TextBlock):
-                self[f"{prefix}.{i}.{MESSAGE_CONTENT}"] = blocks[0].text
-            else:
-                for j, block in enumerate(blocks):
-                    if ToolCallBlock is not None and isinstance(block, ToolCallBlock):
-                        tool_calls.append(block)
-                    for k, v in _get_attributes_from_content_block(
-                        block,
-                        prefix=f"{prefix}.{i}.{MESSAGE_CONTENTS}.{j}.",
-                    ):
-                        self[k] = v
-            additional_kwargs = message.additional_kwargs
-            if name := additional_kwargs.get("name"):
-                self[f"{prefix}.{i}.{MESSAGE_NAME}"] = name
-            if tool_calls := (additional_kwargs.get("tool_calls") or tool_calls):
-                for j, tool_call in enumerate(tool_calls):
-                    for k, v in _get_tool_call(tool_call):
-                        self[f"{prefix}.{i}.{MESSAGE_TOOL_CALLS}.{j}.{k}"] = v
-            if tool_call_id := additional_kwargs.get("tool_call_id"):
-                self[f"{prefix}.{i}.{MESSAGE_TOOL_CALL_ID}"] = tool_call_id
-
-    def _process_query_type(self, query: Optional[QueryType]) -> None:
-        if query is None:
-            return
-        if isinstance(query, str):
-            self[INPUT_VALUE] = query
-            self._attributes.pop(INPUT_MIME_TYPE, None)
-        elif isinstance(query, QueryBundle):
-            query_dict = {k: v for k, v in query.to_dict().items() if v is not None}
-            query_dict.pop("embedding", None)  # because it takes up too much space
-            if len(query_dict) == 1 and query.query_str:
-                self[INPUT_VALUE] = query.query_str
-                self._attributes.pop(INPUT_MIME_TYPE, None)
-            else:
-                self[INPUT_VALUE] = safe_json_dumps(query_dict)
-                self[INPUT_MIME_TYPE] = JSON
-        else:
-            assert_never(query)
-
-    def _process_response_type(self, response: Optional[RESPONSE_TYPE]) -> None:
-        if response is None:
-            return
-        if isinstance(response, (Response, PydanticResponse)):
-            self._process_response_text_type(response.response)
-        elif isinstance(response, (StreamingResponse, AsyncStreamingResponse)):
-            pass
-        else:
-            assert_never(response)
-
-    def _process_response_text_type(self, response: Optional[RESPONSE_TEXT_TYPE]) -> None:
-        if response is None:
-            return
-        if isinstance(response, str):
-            self[OUTPUT_VALUE] = response
-        elif isinstance(response, BaseModel):
-            self[OUTPUT_VALUE] = response.json(exclude_unset=True)
-            self[OUTPUT_MIME_TYPE] = JSON
-        elif isinstance(response, (Generator, AsyncGenerator)):
-            pass
-        else:
-            assert_never(response)
-
-    def _get_attributes_from_message_content(
-        self,
-        content: Mapping[str, Any],
-    ) -> Iterator[Tuple[str, AttributeValue]]:
-        content = dict(content)
-        type_ = content.get("type")
-        if type_ == "text":
-            yield f"{MessageContentAttributes.MESSAGE_CONTENT_TYPE}", "text"
-            if text := content.pop("text"):
-                yield (f"{MessageContentAttributes.MESSAGE_CONTENT_TEXT}", text)
-        elif type_ == "image_url":
-            yield f"{MessageContentAttributes.MESSAGE_CONTENT_TYPE}", "image"
-            if image := content.pop("image_url"):
-                for key, value in self._get_attributes_from_image(image):
-                    yield f"{MessageContentAttributes.MESSAGE_CONTENT_IMAGE}.{key}", value
-
-    def _get_attributes_from_image(
-        self,
-        image: Mapping[str, Any],
-    ) -> Iterator[Tuple[str, AttributeValue]]:
-        if url := image.get("url"):
-            yield f"{ImageAttributes.IMAGE_URL}", url
-
-
-def _get_attributes_from_content_block(
-    obj: ContentBlock,
-    prefix: str,
-) -> Iterator[Tuple[str, AttributeValue]]:
-    if isinstance(obj, TextBlock):
-        yield from _get_attributes_from_text_block(obj, prefix=prefix)
-    elif isinstance(obj, ImageBlock):
-        yield from _get_attributes_from_image_block(obj, prefix=prefix)
-
-
-def _get_attributes_from_text_block(
-    obj: TextBlock,
-    prefix: str = "",
-) -> Iterator[Tuple[str, AttributeValue]]:
-    yield f"{prefix}{MESSAGE_CONTENT_TYPE}", "text"
-    if isinstance(obj.text, str):
-        yield f"{prefix}{MESSAGE_CONTENT_TEXT}", obj.text
-    else:
-        yield f"{prefix}{MESSAGE_CONTENT_TEXT}", safe_json_dumps(obj.text)
-
-
-def _get_attributes_from_image_block(
-    obj: ImageBlock,
-    prefix: str = "",
-) -> Iterator[Tuple[str, AttributeValue]]:
-    if obj.image and obj.image_mimetype:
-        url = None
-        if isinstance(obj.image, bytes):
-            image_bytes = obj.image
-            url = f"data:{obj.image_mimetype};base64,{image_bytes.decode()}"
-        elif isinstance(obj.image, IOBase):
-            obj.image.seek(0)
-            image_bytes = obj.image.read()
-            url = f"data:{obj.image_mimetype};base64,{image_bytes.decode()}"
-        if url:
-            yield f"{prefix}{MESSAGE_CONTENT_IMAGE}.{IMAGE_URL}", url
-            yield f"{prefix}{MESSAGE_CONTENT_TYPE}", "image"
-    elif obj.url:
-        yield f"{prefix}{MESSAGE_CONTENT_IMAGE}.{IMAGE_URL}", str(obj.url)
-        yield f"{prefix}{MESSAGE_CONTENT_TYPE}", "image"
-    elif obj.path:
-        yield f"{prefix}{MESSAGE_CONTENT_IMAGE}.{IMAGE_URL}", str(obj.path)
-        yield f"{prefix}{MESSAGE_CONTENT_TYPE}", "image"
+        if messages:
+            self[prefix] = json.dumps(list(messages), default=str, ensure_ascii=False)
 
 
 END_OF_QUEUE = None
@@ -952,7 +718,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         otel_span = self._otel_tracer.start_span(
             name=id_.partition("-")[0],
             start_time=time_ns(),
-            attributes=dict(get_attributes_from_context()),
+            attributes={},
             context=(
                 parent.context
                 if parent
@@ -992,7 +758,6 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
                 span._end_time = time_ns()
                 self._export_queue.put(span)
                 return span
-            span.process_output(instance, result)
             span.end()
         else:
             logger.warning(f"Open span is missing for {id_=}")
@@ -1049,42 +814,42 @@ class EventHandler(BaseEventHandler, extra="allow"):
 def _get_tool_call(tool_call: object) -> Iterator[Tuple[str, Any]]:
     if isinstance(tool_call, dict):
         if tool_call_id := tool_call.get("id"):
-            yield TOOL_CALL_ID, tool_call_id
+            yield GEN_AI_TOOL_CALL_ID, tool_call_id
         if name := tool_call.get("name"):
-            yield TOOL_CALL_FUNCTION_NAME, name
+            yield GEN_AI_TOOL_NAME, name
         if function := tool_call.get("function"):
-            yield TOOL_CALL_FUNCTION_NAME, function.get("name")
+            yield GEN_AI_TOOL_NAME, function.get("name")
             if isinstance(function.get("arguments"), str):
-                yield TOOL_CALL_FUNCTION_ARGUMENTS_JSON, function.get("arguments")
+                yield GEN_AI_TOOL_CALL_ARGUMENTS, function.get("arguments")
             else:
-                yield TOOL_CALL_FUNCTION_ARGUMENTS_JSON, safe_json_dumps(function.get("arguments"))
+                yield GEN_AI_TOOL_CALL_ARGUMENTS, json.dumps(function.get("arguments"), default=str, ensure_ascii=False)
         if arguments := tool_call.get("input"):
             if isinstance(arguments, str):
-                yield TOOL_CALL_FUNCTION_ARGUMENTS_JSON, arguments
+                yield GEN_AI_TOOL_CALL_ARGUMENTS, arguments
             elif isinstance(arguments, dict):
-                yield TOOL_CALL_FUNCTION_ARGUMENTS_JSON, safe_json_dumps(arguments)
+                yield GEN_AI_TOOL_CALL_ARGUMENTS, json.dumps(arguments, default=str, ensure_ascii=False)
     elif ToolCallBlock is not None and isinstance(tool_call, ToolCallBlock):
         if tool_call_id := getattr(tool_call, "tool_call_id", None):
-            yield TOOL_CALL_ID, tool_call_id
+            yield GEN_AI_TOOL_CALL_ID, tool_call_id
         if name := getattr(tool_call, "tool_name", None):
-            yield TOOL_CALL_FUNCTION_NAME, name
+            yield GEN_AI_TOOL_NAME, name
         if isinstance(getattr(tool_call, "tool_kwargs", None), str):
-            yield TOOL_CALL_FUNCTION_ARGUMENTS_JSON, getattr(tool_call, "tool_kwargs", None)
+            yield GEN_AI_TOOL_CALL_ARGUMENTS, getattr(tool_call, "tool_kwargs", None)
         else:
             yield (
-                TOOL_CALL_FUNCTION_ARGUMENTS_JSON,
-                safe_json_dumps(getattr(tool_call, "tool_kwargs", None)),
+                GEN_AI_TOOL_CALL_ARGUMENTS,
+                json.dumps(getattr(tool_call, "tool_kwargs", None), default=str, ensure_ascii=False),
             )
     elif function := getattr(tool_call, "function", None):
         if tool_call_id := getattr(tool_call, "id", None):
-            yield TOOL_CALL_ID, tool_call_id
+            yield GEN_AI_TOOL_CALL_ID, tool_call_id
         if name := getattr(function, "name", None):
-            yield TOOL_CALL_FUNCTION_NAME, name
+            yield GEN_AI_TOOL_NAME, name
         if arguments := getattr(function, "arguments", None):
             if isinstance(arguments, str):
-                yield TOOL_CALL_FUNCTION_ARGUMENTS_JSON, arguments
+                yield GEN_AI_TOOL_CALL_ARGUMENTS, arguments
             else:
-                yield TOOL_CALL_FUNCTION_ARGUMENTS_JSON, safe_json_dumps(arguments)
+                yield GEN_AI_TOOL_CALL_ARGUMENTS, json.dumps(arguments, default=str, ensure_ascii=False)
 
 
 def _get_token_counts(usage: Union[object, Mapping[str, Any]]) -> Iterator[Tuple[str, Any]]:
@@ -1113,92 +878,47 @@ def _get_token_counts_from_mapping(
 def _get_token_counts_impl(
     usage: Union[object, Mapping[str, Any]], get_value: Callable[[Any, str], Any]
 ) -> Iterator[Tuple[str, Any]]:
-    # OpenAI
+    # Note: OpenTelemetry gen_ai semantic conventions (as of v1.39.0) only support
+    # input and output token counts. Total tokens and detailed token breakdowns
+    # (cached tokens, audio tokens, reasoning tokens) are not part of the standard.
+    # Omitted OpenInference attributes: llm.token_count.total,
+    # llm.token_count.prompt.details.cache_read, llm.token_count.prompt.details.cache_write,
+    # llm.token_count.prompt.details.audio, llm.token_count.completion.details.reasoning,
+    # llm.token_count.completion.details.audio
+    
+    # OpenAI format
     if (prompt_tokens := get_value(usage, "prompt_tokens")) is not None:
         try:
-            yield LLM_TOKEN_COUNT_PROMPT, int(prompt_tokens)
+            yield GEN_AI_USAGE_INPUT_TOKENS, int(prompt_tokens)
         except BaseException:
             pass
-    if (prompt_token_details := get_value(usage, "prompt_tokens_details")) is not None:
-        if (cached_tokens := get_value(prompt_token_details, "cached_tokens")) is not None:
-            try:
-                yield LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_READ, int(cached_tokens)
-            except BaseException:
-                pass
-        if (audio_tokens := get_value(prompt_token_details, "audio_tokens")) is not None:
-            try:
-                yield LLM_TOKEN_COUNT_PROMPT_DETAILS_AUDIO, int(audio_tokens)
-            except BaseException:
-                pass
     if (completion_tokens := get_value(usage, "completion_tokens")) is not None:
         try:
-            yield LLM_TOKEN_COUNT_COMPLETION, int(completion_tokens)
-        except BaseException:
-            pass
-    if (completion_tokens_details := get_value(usage, "completion_tokens_details")) is not None:
-        if (
-            reasoning_tokens := get_value(completion_tokens_details, "reasoning_tokens")
-        ) is not None:
-            try:
-                yield LLM_TOKEN_COUNT_COMPLETION_DETAILS_REASONING, int(reasoning_tokens)
-            except BaseException:
-                pass
-        if (
-            completion_audio_tokens := get_value(
-                completion_tokens_details, "audio_tokens" if isinstance(usage, object) else "audio"
-            )
-        ) is not None:
-            try:
-                yield LLM_TOKEN_COUNT_COMPLETION_DETAILS_AUDIO, int(completion_audio_tokens)
-            except BaseException:
-                pass
-    if (total_tokens := get_value(usage, "total_tokens")) is not None:
-        try:
-            yield LLM_TOKEN_COUNT_TOTAL, int(total_tokens)
+            yield GEN_AI_USAGE_OUTPUT_TOKENS, int(completion_tokens)
         except BaseException:
             pass
 
-    # Anthropic
+    # Anthropic format
     if (output_tokens := get_value(usage, "output_tokens")) is not None:
         try:
-            yield LLM_TOKEN_COUNT_COMPLETION, int(output_tokens)
-        except BaseException:
-            pass
-    if (cache_creation_input_tokens := get_value(usage, "cache_creation_input_tokens")) is not None:
-        try:
-            yield LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_WRITE, int(cache_creation_input_tokens)
-        except BaseException:
-            pass
-    if (cache_read_input_tokens := get_value(usage, "cache_read_input_tokens")) is not None:
-        try:
-            yield LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_READ, int(cache_read_input_tokens)
+            yield GEN_AI_USAGE_OUTPUT_TOKENS, int(output_tokens)
         except BaseException:
             pass
     if (input_tokens := get_value(usage, "input_tokens")) is not None:
         try:
-            input_tokens = int(input_tokens)
-            if cache_creation_input_tokens is not None:
-                input_tokens += int(cache_creation_input_tokens)
-            if cache_read_input_tokens is not None:
-                input_tokens += int(cache_read_input_tokens)
-            yield LLM_TOKEN_COUNT_PROMPT, input_tokens
+            yield GEN_AI_USAGE_INPUT_TOKENS, int(input_tokens)
         except BaseException:
             pass
 
-    # VertexAI
+    # VertexAI format
     if (prompt_token_count := get_value(usage, "prompt_token_count")) is not None:
         try:
-            yield LLM_TOKEN_COUNT_PROMPT, int(prompt_token_count)
+            yield GEN_AI_USAGE_INPUT_TOKENS, int(prompt_token_count)
         except BaseException:
             pass
     if (candidates_token_count := get_value(usage, "candidates_token_count")) is not None:
         try:
-            yield LLM_TOKEN_COUNT_COMPLETION, int(candidates_token_count)
-        except BaseException:
-            pass
-    if (total_token_count := get_value(usage, "total_token_count")) is not None:
-        try:
-            yield LLM_TOKEN_COUNT_TOTAL, int(total_token_count)
+            yield GEN_AI_USAGE_OUTPUT_TOKENS, int(candidates_token_count)
         except BaseException:
             pass
 
@@ -1340,71 +1060,6 @@ def is_iterable_of(lst: Iterable[object], tp: T) -> bool:
 def is_base64_url(url: str) -> bool:
     return url.startswith("data:image/") and "base64" in url
 
-
-DOCUMENT_CONTENT = DocumentAttributes.DOCUMENT_CONTENT
-DOCUMENT_ID = DocumentAttributes.DOCUMENT_ID
-DOCUMENT_METADATA = DocumentAttributes.DOCUMENT_METADATA
-DOCUMENT_SCORE = DocumentAttributes.DOCUMENT_SCORE
-EMBEDDING_EMBEDDINGS = SpanAttributes.EMBEDDING_EMBEDDINGS
-EMBEDDING_MODEL_NAME = SpanAttributes.EMBEDDING_MODEL_NAME
-EMBEDDING_TEXT = EmbeddingAttributes.EMBEDDING_TEXT
-EMBEDDING_VECTOR = EmbeddingAttributes.EMBEDDING_VECTOR
-INPUT_MIME_TYPE = SpanAttributes.INPUT_MIME_TYPE
-INPUT_VALUE = SpanAttributes.INPUT_VALUE
-LLM_INPUT_MESSAGES = SpanAttributes.LLM_INPUT_MESSAGES
-LLM_INVOCATION_PARAMETERS = SpanAttributes.LLM_INVOCATION_PARAMETERS
-LLM_MODEL_NAME = SpanAttributes.LLM_MODEL_NAME
-LLM_OUTPUT_MESSAGES = SpanAttributes.LLM_OUTPUT_MESSAGES
-LLM_PROMPTS = SpanAttributes.LLM_PROMPTS
-LLM_PROMPT_TEMPLATE = SpanAttributes.LLM_PROMPT_TEMPLATE
-LLM_PROMPT_TEMPLATE_VARIABLES = SpanAttributes.LLM_PROMPT_TEMPLATE_VARIABLES
-LLM_PROVIDER = SpanAttributes.LLM_PROVIDER
-LLM_SYSTEM = SpanAttributes.LLM_SYSTEM
-LLM_TOKEN_COUNT_COMPLETION = SpanAttributes.LLM_TOKEN_COUNT_COMPLETION
-LLM_TOKEN_COUNT_COMPLETION_DETAILS_AUDIO = SpanAttributes.LLM_TOKEN_COUNT_COMPLETION_DETAILS_AUDIO
-LLM_TOKEN_COUNT_COMPLETION_DETAILS_REASONING = (
-    SpanAttributes.LLM_TOKEN_COUNT_COMPLETION_DETAILS_REASONING
-)
-LLM_TOKEN_COUNT_PROMPT = SpanAttributes.LLM_TOKEN_COUNT_PROMPT
-LLM_TOKEN_COUNT_PROMPT_DETAILS_AUDIO = SpanAttributes.LLM_TOKEN_COUNT_PROMPT_DETAILS_AUDIO
-LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_READ = SpanAttributes.LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_READ
-LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_WRITE = (
-    SpanAttributes.LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_WRITE
-)
-
-LLM_TOKEN_COUNT_TOTAL = SpanAttributes.LLM_TOKEN_COUNT_TOTAL
-LLM_TOOLS = SpanAttributes.LLM_TOOLS
-MESSAGE_CONTENT = MessageAttributes.MESSAGE_CONTENT
-MESSAGE_CONTENTS = MessageAttributes.MESSAGE_CONTENTS
-MESSAGE_CONTENT_TYPE = MessageContentAttributes.MESSAGE_CONTENT_TYPE
-MESSAGE_CONTENT_TEXT = MessageContentAttributes.MESSAGE_CONTENT_TEXT
-MESSAGE_CONTENT_IMAGE = MessageContentAttributes.MESSAGE_CONTENT_IMAGE
-IMAGE_URL = ImageAttributes.IMAGE_URL
-MESSAGE_FUNCTION_CALL_ARGUMENTS_JSON = MessageAttributes.MESSAGE_FUNCTION_CALL_ARGUMENTS_JSON
-MESSAGE_FUNCTION_CALL_NAME = MessageAttributes.MESSAGE_FUNCTION_CALL_NAME
-MESSAGE_NAME = MessageAttributes.MESSAGE_NAME
-MESSAGE_ROLE = MessageAttributes.MESSAGE_ROLE
-MESSAGE_TOOL_CALLS = MessageAttributes.MESSAGE_TOOL_CALLS
-MESSAGE_TOOL_CALL_ID = MessageAttributes.MESSAGE_TOOL_CALL_ID
-OPENINFERENCE_SPAN_KIND = SpanAttributes.OPENINFERENCE_SPAN_KIND
-OUTPUT_MIME_TYPE = SpanAttributes.OUTPUT_MIME_TYPE
-OUTPUT_VALUE = SpanAttributes.OUTPUT_VALUE
-RERANKER_INPUT_DOCUMENTS = RerankerAttributes.RERANKER_INPUT_DOCUMENTS
-RERANKER_MODEL_NAME = RerankerAttributes.RERANKER_MODEL_NAME
-RERANKER_OUTPUT_DOCUMENTS = RerankerAttributes.RERANKER_OUTPUT_DOCUMENTS
-RERANKER_QUERY = RerankerAttributes.RERANKER_QUERY
-RERANKER_TOP_K = RerankerAttributes.RERANKER_TOP_K
-RETRIEVAL_DOCUMENTS = SpanAttributes.RETRIEVAL_DOCUMENTS
-TOOL_CALL_ID = ToolCallAttributes.TOOL_CALL_ID
-TOOL_CALL_FUNCTION_ARGUMENTS_JSON = ToolCallAttributes.TOOL_CALL_FUNCTION_ARGUMENTS_JSON
-TOOL_CALL_FUNCTION_NAME = ToolCallAttributes.TOOL_CALL_FUNCTION_NAME
-TOOL_DESCRIPTION = SpanAttributes.TOOL_DESCRIPTION
-TOOL_NAME = SpanAttributes.TOOL_NAME
-TOOL_PARAMETERS = SpanAttributes.TOOL_PARAMETERS
-
-TOOL_JSON_SCHEMA = ToolAttributes.TOOL_JSON_SCHEMA
-
-JSON = OpenInferenceMimeTypeValues.JSON.value
 
 AGENT = OpenInferenceSpanKindValues.AGENT.value
 CHAIN = OpenInferenceSpanKindValues.CHAIN.value
