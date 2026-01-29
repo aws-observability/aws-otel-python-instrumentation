@@ -43,6 +43,7 @@ from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attribute
     GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_DEFINITIONS,
 )
+from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_DESCRIPTION,
     GEN_AI_AGENT_ID,
@@ -326,6 +327,7 @@ class _Span(BaseSpan):
             status = Status(status_code=StatusCode.OK)
         else:
             self._otel_span.record_exception(exception)
+            self._attributes[ERROR_TYPE] = type(exception).__name__
             # Follow the format in OTEL SDK for description, see:
             # https://github.com/open-telemetry/opentelemetry-python/blob/2b9dcfc5d853d1c10176937a6bcaade54cda1a31/opentelemetry-api/src/opentelemetry/trace/__init__.py#L588  # noqa E501
             description = f"{type(exception).__name__}: {exception}"
@@ -360,7 +362,18 @@ class _Span(BaseSpan):
         ):
             tools_list = list(tools)
             if tools_list:
-                self[GEN_AI_TOOL_DEFINITIONS] = json.dumps(tools_list, default=str, ensure_ascii=False)
+                # Convert FunctionTool objects to OpenAI tool format
+                tool_defs = []
+                for tool in tools_list:
+                    try:
+                        # Try to get the OpenAI tool format from metadata
+                        if hasattr(tool, 'metadata') and hasattr(tool.metadata, 'to_openai_tool'):
+                            tool_defs.append(tool.metadata.to_openai_tool())
+                        else:
+                            tool_defs.append(str(tool))
+                    except Exception:
+                        tool_defs.append(str(tool))
+                self[GEN_AI_TOOL_DEFINITIONS] = json.dumps(tool_defs, default=str, ensure_ascii=False)
 
     @singledispatchmethod
     def process_instance(self, instance: Any) -> None: ...
