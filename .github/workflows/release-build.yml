@@ -534,6 +534,6 @@ jobs:
           notation sign ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }} \
             --plugin com.amazonaws.signer.notation.plugin \
             --id ${{ steps.ecr-signing-profile.outputs.profile_arn }}
-          echo "Successfully signed public ECR imafge"
+          echo "Successfully signed public ECR image"
           echo "Image: ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}"
           echo "Profile ARN: ${{ steps.ecr-signing-profile.outputs.profile_arn }}"
