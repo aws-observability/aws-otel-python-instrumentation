@@ -23,6 +23,7 @@ env:
   # Legacy list of commercial regions to deploy to. New regions should NOT be added here, and instead should be added to the `aws_region` default input to the workflow.
   LEGACY_COMMERCIAL_REGIONS: us-east-1, us-east-2, us-west-1, us-west-2, ap-south-1, ap-northeast-3, ap-northeast-2, ap-southeast-1, ap-southeast-2, ap-northeast-1, ca-central-1, eu-central-1, eu-west-1, eu-west-2, eu-west-3, eu-north-1, sa-east-1
   LAYER_NAME: AWSOpenTelemetryDistroPython
+  VERSION: ${{ github.event.inputs.version }}
 
 permissions:
   id-token: write
@@ -530,9 +531,9 @@ jobs:
         if: steps.ecr-signing-profile.outputs.profile_arn != ''
         run: |
           # Sign the released public ECR image
-          notation sign ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ github.event.inputs.version }} \
+          notation sign ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }} \
             --plugin com.amazonaws.signer.notation.plugin \
             --id ${{ steps.ecr-signing-profile.outputs.profile_arn }}
           echo "Successfully signed public ECR image"
-          echo "Image: ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ github.event.inputs.version }}"
+          echo "Image: ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}"
           echo "Profile ARN: ${{ steps.ecr-signing-profile.outputs.profile_arn }}"
