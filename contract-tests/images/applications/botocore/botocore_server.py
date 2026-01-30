@@ -555,11 +555,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             )
         elif self.in_path("consumequeue/some-queue"):
             set_main_status(200)
-            sqs_client.send_message(
-                QueueUrl="http://localstack:4566/000000000000/test_put_get_queue", MessageBody="test_message"
-            )
             sqs_client.receive_message(
-                QueueUrl="http://localstack:4566/000000000000/test_put_get_queue", MaxNumberOfMessages=1
+                QueueUrl="http://localstack:4566/000000000000/test_receive_queue", MaxNumberOfMessages=1
             )
         else:
             set_main_status(404)
@@ -951,6 +948,10 @@ def prepare_aws_server() -> None:
         # Set up SQS so tests can access a queue.
         sqs_client: BaseClient = boto3.client("sqs", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
         sqs_client.create_queue(QueueName="test_put_get_queue")
+        sqs_client.create_queue(QueueName="test_receive_queue")
+        sqs_client.send_message(
+            QueueUrl="http://localstack:4566/000000000000/test_receive_queue", MessageBody="test_message"
+        )
 
         # Set up Kinesis so tests can access a stream.
         kinesis_client: BaseClient = boto3.client("kinesis", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
