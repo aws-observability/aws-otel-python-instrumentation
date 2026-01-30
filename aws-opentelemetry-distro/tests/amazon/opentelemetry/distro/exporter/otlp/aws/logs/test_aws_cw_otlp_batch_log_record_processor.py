@@ -8,9 +8,9 @@ from unittest.mock import MagicMock, patch
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor import (
     AwsCloudWatchOtlpBatchLogRecordProcessor,
 )
+from opentelemetry._logs._internal import LogRecord
 from opentelemetry._logs.severity import SeverityNumber
 from opentelemetry.sdk._logs import ReadableLogRecord
-from opentelemetry._logs._internal import LogRecord
 from opentelemetry.sdk._logs.export import LogRecordExportResult
 from opentelemetry.sdk._shared_internal import BatchExportStrategy
 from opentelemetry.sdk.resources import Resource

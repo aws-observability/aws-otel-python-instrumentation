@@ -3,7 +3,9 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import CompactConsoleLogRecordExporter
+from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import (
+    CompactConsoleLogRecordExporter,
+)
 from opentelemetry.sdk._logs.export import LogRecordExportResult
 
 

@@ -8,10 +8,13 @@ import requests
 from requests.structures import CaseInsensitiveDict
 
 from amazon.opentelemetry.distro._utils import get_aws_session
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import _MAX_RETRYS, OTLPAwsLogRecordExporter
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import (
+    _MAX_RETRYS,
+    OTLPAwsLogRecordExporter,
+)
+from opentelemetry._logs._internal import LogRecord
 from opentelemetry._logs.severity import SeverityNumber
 from opentelemetry.sdk._logs import ReadableLogRecord
-from opentelemetry._logs._internal import LogRecord
 from opentelemetry.sdk._logs.export import LogRecordExportResult
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.util.instrumentation import InstrumentationScope
@@ -23,7 +26,9 @@ class TestOTLPAwsLogsExporter(TestCase):
 
     def setUp(self):
         self.logs = self.generate_test_log_data()
-        self.exporter = OTLPAwsLogRecordExporter(session=get_aws_session(), aws_region="us-east-1", endpoint=self._ENDPOINT)
+        self.exporter = OTLPAwsLogRecordExporter(
+            session=get_aws_session(), aws_region="us-east-1", endpoint=self._ENDPOINT
+        )
 
         self.good_response = requests.Response()
         self.good_response.status_code = 200
