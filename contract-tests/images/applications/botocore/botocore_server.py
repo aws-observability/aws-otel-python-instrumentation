@@ -60,6 +60,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._handle_stepfunctions_request()
         if self.in_path("sns"):
             self._handle_sns_request()
+        if self.in_path("lambda"):
+            self._handle_lambda_request()
         if self.in_path("cross-account"):
             self._handle_cross_account_request()
 
@@ -761,6 +763,24 @@ class RequestHandler(BaseHTTPRequestHandler):
             sns_client.get_topic_attributes(
                 TopicArn="arn:aws:sns:us-west-2:000000000000:test-topic",
             )
+        elif self.in_path("publish/test-topic"):
+            set_main_status(200)
+            sns_client.publish(
+                TopicArn="arn:aws:sns:us-west-2:000000000000:test-topic",
+                Message="test message",
+            )
+        else:
+            set_main_status(404)
+
+    def _handle_lambda_request(self) -> None:
+        lambda_client = boto3.client("lambda", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
+        if self.in_path("invoke/test-function"):
+            set_main_status(200)
+            lambda_client.meta.events.register(
+                "before-call.lambda.Invoke",
+                inject_200_success,
+            )
+            lambda_client.invoke(FunctionName="test-function")
         else:
             set_main_status(404)
 
