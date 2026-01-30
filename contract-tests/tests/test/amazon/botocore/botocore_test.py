@@ -42,7 +42,7 @@ _DB_OPERATION: str = "db.operation"
 _NET_PEER_NAME: str = "net.peer.name"
 _MESSAGING_DESTINATION_KIND: str = "messaging.destination_kind"
 _MESSAGING_DESTINATION_NAME: str = "messaging.destination.name"
-_MESSAGING_MESSAGE_ID: str = "messaging.message_id"
+_MESSAGING_MESSAGE_ID: str = "messaging.message.id"
 _FAAS_INVOKED_PROVIDER: str = "faas.invoked_provider"
 _FAAS_INVOKED_NAME: str = "faas.invoked_name"
 _FAAS_INVOKED_REGION: str = "faas.invoked_region"
@@ -1283,6 +1283,7 @@ class BotocoreTest(ContractTestBase):
                 _MESSAGING_DESTINATION_NAME: "arn:aws:sns:us-west-2:000000000000:test-topic",
             },
             span_name="test-topic send",
+            span_kind=Span.SPAN_KIND_PRODUCER,
         )
 
     def test_lambda_invoke(self):
@@ -1293,7 +1294,7 @@ class BotocoreTest(ContractTestBase):
             0,
             0,
             rpc_service="Lambda",
-            remote_service="AWS::Lambda",
+            remote_service="test-function",
             remote_operation="Invoke",
             remote_resource_type="AWS::Lambda::Function",
             remote_resource_identifier="test-function",
@@ -1410,9 +1411,10 @@ class BotocoreTest(ContractTestBase):
     @override
     def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs) -> None:
         target_spans: List[Span] = []
+        expected_span_kind = kwargs.get("span_kind", Span.SPAN_KIND_CLIENT)
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
-            if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
+            if resource_scope_span.span.kind == expected_span_kind:
                 target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
@@ -1483,9 +1485,10 @@ class BotocoreTest(ContractTestBase):
         self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str, status_code: int, **kwargs
     ) -> None:
         target_spans: List[Span] = []
+        expected_span_kind = kwargs.get("span_kind", Span.SPAN_KIND_CLIENT)
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
-            if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
+            if resource_scope_span.span.kind == expected_span_kind:
                 target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)

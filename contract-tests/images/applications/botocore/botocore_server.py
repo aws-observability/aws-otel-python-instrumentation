@@ -555,6 +555,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             )
         elif self.in_path("consumequeue/some-queue"):
             set_main_status(200)
+            sqs_client.send_message(
+                QueueUrl="http://localstack:4566/000000000000/test_put_get_queue", MessageBody="test_message"
+            )
             sqs_client.receive_message(
                 QueueUrl="http://localstack:4566/000000000000/test_put_get_queue", MaxNumberOfMessages=1
             )
