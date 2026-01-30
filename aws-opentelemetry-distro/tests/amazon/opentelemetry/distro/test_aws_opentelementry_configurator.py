@@ -50,14 +50,14 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
-from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import CompactConsoleLogExporter
+from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import CompactConsoleLogRecordExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 
 # pylint: disable=line-too-long
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor import (
     AwsCloudWatchOtlpBatchLogRecordProcessor,
 )
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogRecordExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler._aws_xray_sampling_client import _AwsXRaySamplingClient
@@ -74,7 +74,7 @@ from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExp
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.metrics import get_meter_provider
 from opentelemetry.processor.baggage import BaggageSpanProcessor
-from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogExporter
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogRecordExporter
 from opentelemetry.sdk.environment_variables import OTEL_TRACES_SAMPLER, OTEL_TRACES_SAMPLER_ARG
 from opentelemetry.sdk.metrics._internal.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
@@ -725,7 +725,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
                 config,
                 _customize_logs_exporter,
                 OTLPLogExporter(),
-                OTLPAwsLogExporter,
+                OTLPAwsLogRecordExporter,
                 AwsAuthSession,
                 Compression.Gzip,
             )
@@ -795,14 +795,14 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         mock_get_logger,
         mock_logging_handler,
     ):
-        """Test that ConsoleLogExporter is replaced with CompactConsoleLogExporter when in Lambda"""
+        """Test that ConsoleLogRecordExporter is replaced with CompactConsoleLogRecordExporter when in Lambda"""
 
         # Mock _is_lambda_environment to return True
         with patch(
             "amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment", return_value=True
         ):
-            # Test with ConsoleLogExporter
-            exporters = {"console": ConsoleLogExporter}
+            # Test with ConsoleLogRecordExporter
+            exporters = {"console": ConsoleLogRecordExporter}
             _init_logging(exporters, Resource.get_empty())
 
             # Verify that _customize_log_record_processor was called
@@ -812,8 +812,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             call_args = mock_customize_logs_exporter.call_args
             exporter_instance = call_args[0][0]
 
-            # Verify it's a CompactConsoleLogExporter instance
-            self.assertIsInstance(exporter_instance, CompactConsoleLogExporter)
+            # Verify it's a CompactConsoleLogRecordExporter instance
+            self.assertIsInstance(exporter_instance, CompactConsoleLogRecordExporter)
 
         # Reset mocks
         mock_customize_processor.reset_mock()
@@ -823,16 +823,16 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         with patch(
             "amazon.opentelemetry.distro.aws_opentelemetry_configurator._is_lambda_environment", return_value=False
         ):
-            exporters = {"console": ConsoleLogExporter}
+            exporters = {"console": ConsoleLogRecordExporter}
             _init_logging(exporters, Resource.get_empty())
 
             # Get the exporter that was passed to _customize_logs_exporter
             call_args = mock_customize_logs_exporter.call_args
             exporter_instance = call_args[0][0]
 
-            # Verify it's still a regular ConsoleLogExporter
-            self.assertIsInstance(exporter_instance, ConsoleLogExporter)
-            self.assertNotIsInstance(exporter_instance, CompactConsoleLogExporter)
+            # Verify it's still a regular ConsoleLogRecordExporter
+            self.assertIsInstance(exporter_instance, ConsoleLogRecordExporter)
+            self.assertNotIsInstance(exporter_instance, CompactConsoleLogRecordExporter)
 
     def test_customize_span_processors(self):
         mock_tracer_provider: TracerProvider = MagicMock()
@@ -1265,7 +1265,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
     def test_customize_log_record_processor_without_agent_observability(self, _):
         """Test that BatchLogRecordProcessor is used when agent observability is not enabled"""
         mock_logger_provider = MagicMock()
-        mock_exporter = MagicMock(spec=OTLPAwsLogExporter)
+        mock_exporter = MagicMock(spec=OTLPAwsLogRecordExporter)
 
         _customize_log_record_processor(mock_logger_provider, mock_exporter)
 
@@ -1279,7 +1279,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
     def test_customize_log_record_processor_with_agent_observability(self, _):
         """Test that AwsCloudWatchOtlpBatchLogRecordProcessor is used when agent observability is enabled"""
         mock_logger_provider = MagicMock()
-        mock_exporter = MagicMock(spec=OTLPAwsLogExporter)
+        mock_exporter = MagicMock(spec=OTLPAwsLogRecordExporter)
 
         _customize_log_record_processor(mock_logger_provider, mock_exporter)
 
@@ -1338,7 +1338,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         # Test logs service
         with patch(
-            "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter.OTLPAwsLogExporter"
+            "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter.OTLPAwsLogRecordExporter"
         ) as mock_log_exporter_class:
             mock_exporter_instance = MagicMock()
             mock_log_exporter_class.return_value = mock_exporter_instance

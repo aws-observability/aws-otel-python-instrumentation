@@ -5,9 +5,9 @@
 import logging
 from typing import Mapping, Optional, Sequence, cast
 
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogRecordExporter
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY, attach, detach, set_value
-from opentelemetry.sdk._logs import LogData
+from opentelemetry.sdk._logs import ReadableLogRecord
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk._shared_internal import BatchExportStrategy
 from opentelemetry.util.types import AnyValue
@@ -72,7 +72,7 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
 
     def __init__(
         self,
-        exporter: OTLPAwsLogExporter,
+        exporter: OTLPAwsLogRecordExporter,
         schedule_delay_millis: Optional[float] = None,
         max_export_batch_size: Optional[int] = None,
         export_timeout_millis: Optional[float] = None,
@@ -115,7 +115,7 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
                     batch = []
 
                     for _ in range(batch_length):
-                        log_data: LogData = self._batch_processor._queue.pop()
+                        log_data: ReadableLogRecord = self._batch_processor._queue.pop()
                         log_size = self._estimate_log_size(log_data)
 
                         if batch and (batch_data_size + log_size > self._MAX_LOG_REQUEST_BYTE_SIZE):
@@ -132,7 +132,7 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
                     _logger.exception("Exception while exporting logs: %s", exception)
                 detach(token)
 
-    def _estimate_log_size(self, log: LogData, depth: int = 3) -> int:  # pylint: disable=too-many-branches
+    def _estimate_log_size(self, log: ReadableLogRecord, depth: int = 3) -> int:  # pylint: disable=too-many-branches
         """
         Estimates the size in bytes of a log by calculating the size of its body and its attributes
         and adding a buffer amount to account for other log metadata information.

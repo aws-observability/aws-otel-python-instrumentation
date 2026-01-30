@@ -9,9 +9,11 @@ from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_r
     AwsCloudWatchOtlpBatchLogRecordProcessor,
 )
 from opentelemetry._logs.severity import SeverityNumber
-from opentelemetry.sdk._logs import LogData, LogRecord
-from opentelemetry.sdk._logs.export import LogExportResult
+from opentelemetry.sdk._logs import ReadableLogRecord
+from opentelemetry._logs._internal import LogRecord
+from opentelemetry.sdk._logs.export import LogRecordExportResult
 from opentelemetry.sdk._shared_internal import BatchExportStrategy
+from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 from opentelemetry.trace import TraceFlags
 from opentelemetry.util.types import AnyValue
@@ -21,7 +23,7 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
 
     def setUp(self):
         self.mock_exporter = MagicMock()
-        self.mock_exporter.export.return_value = LogExportResult.SUCCESS
+        self.mock_exporter.export.return_value = LogRecordExportResult.SUCCESS
 
         self.processor = AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=self.mock_exporter)
 
@@ -63,7 +65,11 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
             body=log_body,
             attributes={attr_key: attr_value},
         )
-        log_data = LogData(log_record=record, instrumentation_scope=InstrumentationScope("test-scope", "1.0.0"))
+        log_data = ReadableLogRecord(
+            log_record=record,
+            resource=Resource.create(),
+            instrumentation_scope=InstrumentationScope("test-scope", "1.0.0"),
+        )
 
         expected_size = len(log_body) + len(attr_key) + len(attr_value)
         actual_size = self.processor._estimate_log_size(log_data)
@@ -359,7 +365,7 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         log_body_depth=0,
         count=5,
         create_map=True,
-    ) -> List[LogData]:
+    ) -> List[ReadableLogRecord]:
 
         def generate_nested_value(depth, value, create_map=True) -> AnyValue:
             if depth <= 0:
@@ -383,7 +389,11 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
                 body=generate_nested_value(log_body_depth, log_body, create_map),
             )
 
-            log_data = LogData(log_record=record, instrumentation_scope=InstrumentationScope("test-scope", "1.0.0"))
+            log_data = ReadableLogRecord(
+                log_record=record,
+                resource=Resource.create(),
+                instrumentation_scope=InstrumentationScope("test-scope", "1.0.0"),
+            )
             logs.append(log_data)
 
         return logs

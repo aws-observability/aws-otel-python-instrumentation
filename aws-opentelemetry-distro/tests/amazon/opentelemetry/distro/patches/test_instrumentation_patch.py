@@ -193,7 +193,7 @@ class TestInstrumentationPatch(TestCase):
         self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS, "Upstream has added a bedrock-runtime extension")
 
         # SecretsManager
-        self.assertFalse("secretsmanager" in _KNOWN_EXTENSIONS, "Upstream has added a SecretsManager extension")
+        self.assertTrue("secretsmanager" in _KNOWN_EXTENSIONS, "Upstream has removed the SecretsManager extension")
 
         # SNS
         self.assertTrue("sns" in _KNOWN_EXTENSIONS, "Upstream has removed the SNS extension")
@@ -301,7 +301,7 @@ class TestInstrumentationPatch(TestCase):
         # BedrockRuntime
         self.assertTrue("bedrock-runtime" in _KNOWN_EXTENSIONS)
 
-        # SecretsManager
+        # SecretsManager - now in upstream, verify it still works
         self.assertTrue("secretsmanager" in _KNOWN_EXTENSIONS)
         secretsmanager_attributes: Dict[str, str] = _do_extract_secretsmanager_attributes()
         self.assertTrue("aws.secretsmanager.secret.arn" in secretsmanager_attributes)
@@ -310,19 +310,19 @@ class TestInstrumentationPatch(TestCase):
         self.assertTrue("aws.secretsmanager.secret.arn" in secretsmanager_success_attributes)
         self.assertEqual(secretsmanager_success_attributes["aws.secretsmanager.secret.arn"], _SECRET_ARN)
 
-        # SNS
+        # SNS - now in upstream, verify it still works
         self.assertTrue("sns" in _KNOWN_EXTENSIONS)
         sns_attributes: Dict[str, str] = _do_extract_sns_attributes()
         self.assertTrue("aws.sns.topic.arn" in sns_attributes)
         self.assertEqual(sns_attributes["aws.sns.topic.arn"], _TOPIC_ARN)
 
-        # StepFunctions
+        # StepFunctions - now in upstream, verify it still works
         self.assertTrue("stepfunctions" in _KNOWN_EXTENSIONS)
         stepfunctions_attributes: Dict[str, str] = _do_extract_stepfunctions_attributes()
-        self.assertTrue("aws.stepfunctions.state_machine.arn" in stepfunctions_attributes)
-        self.assertEqual(stepfunctions_attributes["aws.stepfunctions.state_machine.arn"], _STATE_MACHINE_ARN)
-        self.assertTrue("aws.stepfunctions.activity.arn" in stepfunctions_attributes)
-        self.assertEqual(stepfunctions_attributes["aws.stepfunctions.activity.arn"], _ACTIVITY_ARN)
+        self.assertTrue("aws.step_functions.state_machine.arn" in stepfunctions_attributes)
+        self.assertEqual(stepfunctions_attributes["aws.step_functions.state_machine.arn"], _STATE_MACHINE_ARN)
+        self.assertTrue("aws.step_functions.activity.arn" in stepfunctions_attributes)
+        self.assertEqual(stepfunctions_attributes["aws.step_functions.activity.arn"], _ACTIVITY_ARN)
 
         # Lambda
         self.assertTrue("lambda" in _KNOWN_EXTENSIONS)
@@ -380,7 +380,7 @@ class TestInstrumentationPatch(TestCase):
         ), patch(
             "opentelemetry.instrumentation.botocore.get_tracer", return_value=mock_tracer
         ), patch(
-            "opentelemetry.instrumentation.botocore.get_event_logger", return_value=MagicMock()
+            "opentelemetry.instrumentation.botocore.get_logger", return_value=MagicMock()
         ), patch(
             "opentelemetry.instrumentation.botocore.get_meter", return_value=MagicMock()
         ):
@@ -428,7 +428,7 @@ class TestInstrumentationPatch(TestCase):
         ), patch(
             "opentelemetry.instrumentation.botocore.get_tracer", return_value=mock_tracer
         ), patch(
-            "opentelemetry.instrumentation.botocore.get_event_logger", return_value=MagicMock()
+            "opentelemetry.instrumentation.botocore.get_logger", return_value=MagicMock()
         ), patch(
             "opentelemetry.instrumentation.botocore.get_meter", return_value=MagicMock()
         ):
@@ -476,7 +476,7 @@ class TestInstrumentationPatch(TestCase):
         ), patch(
             "opentelemetry.instrumentation.botocore.get_tracer", return_value=mock_tracer
         ), patch(
-            "opentelemetry.instrumentation.botocore.get_event_logger", return_value=MagicMock()
+            "opentelemetry.instrumentation.botocore.get_logger", return_value=MagicMock()
         ), patch(
             "opentelemetry.instrumentation.botocore.get_meter", return_value=MagicMock()
         ):
@@ -835,7 +835,7 @@ class TestInstrumentationPatch(TestCase):
     def _test_starlette_installed_flag(self):  # pylint: disable=no-self-use
         """Test that starlette patches are only applied when starlette is installed."""
         with patch(
-            "amazon.opentelemetry.distro.patches._starlette_patches._apply_starlette_version_patches"
+            "amazon.opentelemetry.distro.patches._starlette_patches._apply_starlette_instrumentation_patches"
         ) as mock_apply_version_patches, patch(
             "amazon.opentelemetry.distro.patches._starlette_patches._apply_starlette_code_attributes_patch"
         ) as mock_apply_code_patches:
