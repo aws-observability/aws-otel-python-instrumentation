@@ -19,16 +19,12 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN,
     AWS_BEDROCK_DATA_SOURCE_ID,
     AWS_BEDROCK_GUARDRAIL_ARN,
-    AWS_BEDROCK_GUARDRAIL_ID,
-    AWS_BEDROCK_KNOWLEDGE_BASE_ID,
     AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER,
     AWS_DYNAMODB_TABLE_ARN,
     AWS_GATEWAY_TARGET_ID,
     AWS_KINESIS_STREAM_ARN,
-    AWS_KINESIS_STREAM_NAME,
     AWS_LAMBDA_FUNCTION_ARN,
     AWS_LAMBDA_FUNCTION_NAME,
-    AWS_LAMBDA_RESOURCEMAPPING_ID,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_REMOTE_DB_USER,
@@ -40,13 +36,8 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_REMOTE_RESOURCE_REGION,
     AWS_REMOTE_RESOURCE_TYPE,
     AWS_REMOTE_SERVICE,
-    AWS_SECRETSMANAGER_SECRET_ARN,
-    AWS_SNS_TOPIC_ARN,
     AWS_SPAN_KIND,
     AWS_SQS_QUEUE_NAME,
-    AWS_SQS_QUEUE_URL,
-    AWS_STEPFUNCTIONS_ACTIVITY_ARN,
-    AWS_STEPFUNCTIONS_STATEMACHINE_ARN,
 )
 from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
 from amazon.opentelemetry.distro._aws_span_processing_util import (
@@ -82,6 +73,17 @@ from amazon.opentelemetry.distro.regional_resource_arn_parser import RegionalRes
 from amazon.opentelemetry.distro.sqs_url_parser import SqsUrlParser
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import BoundedAttributes, ReadableSpan
+from opentelemetry.semconv._incubating.attributes.aws_attributes import (
+    AWS_BEDROCK_GUARDRAIL_ID,
+    AWS_BEDROCK_KNOWLEDGE_BASE_ID,
+    AWS_KINESIS_STREAM_NAME,
+    AWS_LAMBDA_RESOURCE_MAPPING_ID,
+    AWS_SECRETSMANAGER_SECRET_ARN,
+    AWS_SNS_TOPIC_ARN,
+    AWS_SQS_QUEUE_URL,
+    AWS_STEP_FUNCTIONS_ACTIVITY_ARN,
+    AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN,
+)
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import GEN_AI_REQUEST_MODEL
 from opentelemetry.semconv.trace import SpanAttributes
 
@@ -509,24 +511,24 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
                 RegionalResourceArnParser.extract_resource_name_from_arn(span.attributes.get(AWS_SNS_TOPIC_ARN))
             )
             cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_SNS_TOPIC_ARN))
-        elif is_key_present(span, AWS_STEPFUNCTIONS_STATEMACHINE_ARN):
+        elif is_key_present(span, AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN):
             remote_resource_type = _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME + "::StateMachine"
             remote_resource_identifier = _escape_delimiters(
                 RegionalResourceArnParser.extract_resource_name_from_arn(
-                    span.attributes.get(AWS_STEPFUNCTIONS_STATEMACHINE_ARN)
+                    span.attributes.get(AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN)
                 )
             )
             cloudformation_primary_identifier = _escape_delimiters(
-                span.attributes.get(AWS_STEPFUNCTIONS_STATEMACHINE_ARN)
+                span.attributes.get(AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN)
             )
-        elif is_key_present(span, AWS_STEPFUNCTIONS_ACTIVITY_ARN):
+        elif is_key_present(span, AWS_STEP_FUNCTIONS_ACTIVITY_ARN):
             remote_resource_type = _NORMALIZED_STEPFUNCTIONS_SERVICE_NAME + "::Activity"
             remote_resource_identifier = _escape_delimiters(
                 RegionalResourceArnParser.extract_resource_name_from_arn(
-                    span.attributes.get(AWS_STEPFUNCTIONS_ACTIVITY_ARN)
+                    span.attributes.get(AWS_STEP_FUNCTIONS_ACTIVITY_ARN)
                 )
             )
-            cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_STEPFUNCTIONS_ACTIVITY_ARN))
+            cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_STEP_FUNCTIONS_ACTIVITY_ARN))
         elif is_key_present(span, AWS_LAMBDA_FUNCTION_NAME):
             # For non-Invoke Lambda operations, treat Lambda as a resource,
             # see normalize_remote_service_name for more information.
@@ -534,9 +536,9 @@ def _set_remote_type_and_identifier(span: ReadableSpan, attributes: BoundedAttri
                 remote_resource_type = _NORMALIZED_LAMBDA_SERVICE_NAME + "::Function"
                 remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_FUNCTION_NAME))
                 cloudformation_primary_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_FUNCTION_ARN))
-        elif is_key_present(span, AWS_LAMBDA_RESOURCEMAPPING_ID):
+        elif is_key_present(span, AWS_LAMBDA_RESOURCE_MAPPING_ID):
             remote_resource_type = _NORMALIZED_LAMBDA_SERVICE_NAME + "::EventSourceMapping"
-            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_RESOURCEMAPPING_ID))
+            remote_resource_identifier = _escape_delimiters(span.attributes.get(AWS_LAMBDA_RESOURCE_MAPPING_ID))
     elif is_db_span(span):
         remote_resource_type = _DB_CONNECTION_STRING_TYPE
         remote_resource_identifier = _get_db_connection(span)
@@ -564,8 +566,8 @@ def _set_remote_account_id_and_region(span: ReadableSpan, attributes: BoundedAtt
         AWS_KINESIS_STREAM_ARN,
         AWS_SNS_TOPIC_ARN,
         AWS_SECRETSMANAGER_SECRET_ARN,
-        AWS_STEPFUNCTIONS_STATEMACHINE_ARN,
-        AWS_STEPFUNCTIONS_ACTIVITY_ARN,
+        AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN,
+        AWS_STEP_FUNCTIONS_ACTIVITY_ARN,
         AWS_BEDROCK_GUARDRAIL_ARN,
         AWS_LAMBDA_FUNCTION_ARN,
     ]

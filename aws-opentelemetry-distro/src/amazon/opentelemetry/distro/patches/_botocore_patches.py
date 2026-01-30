@@ -10,12 +10,9 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_AUTH_REGION,
     AWS_DYNAMODB_TABLE_ARN,
     AWS_KINESIS_STREAM_ARN,
-    AWS_KINESIS_STREAM_NAME,
     AWS_LAMBDA_FUNCTION_ARN,
     AWS_LAMBDA_FUNCTION_NAME,
-    AWS_LAMBDA_RESOURCEMAPPING_ID,
     AWS_SQS_QUEUE_NAME,
-    AWS_SQS_QUEUE_URL,
 )
 from amazon.opentelemetry.distro.patches._bedrock_agentcore_patches import (  # noqa # pylint: disable=unused-import
     _BedrockAgentCoreExtension,
@@ -44,6 +41,11 @@ from opentelemetry.instrumentation.botocore.extensions.types import (
 from opentelemetry.instrumentation.botocore.utils import get_server_attributes
 from opentelemetry.instrumentation.utils import is_instrumentation_enabled, suppress_http_instrumentation
 from opentelemetry.propagate import get_global_textmap
+from opentelemetry.semconv._incubating.attributes.aws_attributes import (
+    AWS_KINESIS_STREAM_NAME,
+    AWS_LAMBDA_RESOURCE_MAPPING_ID,
+    AWS_SQS_QUEUE_URL,
+)
 from opentelemetry.semconv.trace import SpanAttributes
 from opentelemetry.trace.span import Span
 
@@ -110,7 +112,7 @@ def _apply_botocore_lambda_patch() -> None:
             attributes[AWS_LAMBDA_FUNCTION_NAME] = function_name
         resource_mapping_id = self._call_context.params.get("UUID")
         if resource_mapping_id:
-            attributes[AWS_LAMBDA_RESOURCEMAPPING_ID] = resource_mapping_id
+            attributes[AWS_LAMBDA_RESOURCE_MAPPING_ID] = resource_mapping_id
 
     old_on_success = _LambdaExtension.on_success
 
