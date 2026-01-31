@@ -28,7 +28,9 @@ from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder imp
     AwsMetricAttributesSpanExporterBuilder,
 )
 from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
-from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import CompactConsoleLogExporter
+from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import (
+    CompactConsoleLogRecordExporter,
+)
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler._aws_xray_adaptive_sampling_config import (
     _AnomalyCaptureLimit,
@@ -54,11 +56,11 @@ from opentelemetry.sdk._configuration import (
     _import_id_generator,
     _import_sampler,
     _OTelSDKConfigurator,
-    _patch_basic_config,
+    _overwrite_logging_config_fns,
 )
 from opentelemetry.sdk._events import EventLoggerProvider
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
-from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogExporter, LogExporter
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogRecordExporter, LogRecordExporter
 from opentelemetry.sdk.environment_variables import (
     _OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED,
     OTEL_EXPORTER_OTLP_METRICS_PROTOCOL,
@@ -222,7 +224,7 @@ def _initialize_components():
 
 
 def _init_logging(
-    exporters: dict[str, Type[LogExporter]],
+    exporters: dict[str, Type[LogRecordExporter]],
     resource: Optional[Resource] = None,
     setup_logging_handler: bool = True,
 ):
@@ -230,9 +232,11 @@ def _init_logging(
     set_logger_provider(provider)
 
     for _, exporter_class in exporters.items():
-        if exporter_class is ConsoleLogExporter and _is_lambda_environment():
-            exporter_class = CompactConsoleLogExporter
-            _logger.debug("Lambda environment detected, using CompactConsoleLogExporter instead of ConsoleLogExporter")
+        if exporter_class is ConsoleLogRecordExporter and _is_lambda_environment():
+            exporter_class = CompactConsoleLogRecordExporter
+            _logger.debug(
+                "Lambda environment detected, using CompactConsoleLogRecordExporter instead of ConsoleLogRecordExporter"
+            )
         exporter_args = {}
         _customize_log_record_processor(
             logger_provider=provider, log_exporter=_customize_logs_exporter(exporter_class(**exporter_args))
@@ -242,11 +246,10 @@ def _init_logging(
     set_event_logger_provider(event_logger_provider)
 
     if setup_logging_handler:
-        _patch_basic_config()
-
         # Add OTel handler
         handler = LoggingHandler(level=logging.NOTSET, logger_provider=provider)
         logging.getLogger().addHandler(handler)
+        _overwrite_logging_config_fns(handler)
 
 
 def _init_tracing(
@@ -457,7 +460,7 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource, sa
     return span_exporter
 
 
-def _customize_log_record_processor(logger_provider: LoggerProvider, log_exporter: Optional[LogExporter]) -> None:
+def _customize_log_record_processor(logger_provider: LoggerProvider, log_exporter: Optional[LogRecordExporter]) -> None:
     if not log_exporter:
         return
 
@@ -472,7 +475,7 @@ def _customize_log_record_processor(logger_provider: LoggerProvider, log_exporte
         logger_provider.add_log_record_processor(BatchLogRecordProcessor(exporter=log_exporter))
 
 
-def _customize_logs_exporter(log_exporter: LogExporter) -> LogExporter:
+def _customize_logs_exporter(log_exporter: LogRecordExporter) -> LogRecordExporter:
     logs_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT)
 
     if logs_endpoint and _is_aws_otlp_endpoint(logs_endpoint, LOGS_SERIVCE):
@@ -903,7 +906,7 @@ def _create_aws_otlp_exporter(endpoint: str, service: str, region: str):
             return None
 
         # pylint: disable=import-outside-toplevel
-        from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
+        from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogRecordExporter
         from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 
         if service == XRAY_SERVICE:
@@ -920,7 +923,7 @@ def _create_aws_otlp_exporter(endpoint: str, service: str, region: str):
             return OTLPAwsSpanExporter(session=session, endpoint=endpoint, aws_region=region)
 
         if service == LOGS_SERIVCE:
-            return OTLPAwsLogExporter(session=session, aws_region=region)
+            return OTLPAwsLogRecordExporter(session=session, aws_region=region)
 
         return None
     # pylint: disable=broad-exception-caught
