@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- Add native LlamaIndex instrumentation support
+  ([#595](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/595))
 - Add native CrewAI instrumentation support
   ([#586](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/586))
 - Adaptive Sampling support
