@@ -14,6 +14,10 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 - Add native CrewAI instrumentation support
   ([#586](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/586))
+- fix: Ensure AlwaysRecordSampler respects root sampling result attributes
+  ([#594](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/594))
+- Adaptive Sampling support
+  ([#576](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/576))
 - Fix: Support new fields in X-Ray API responses
   ([#577](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/577))
 - Sign Lambda layer by AWS Signer

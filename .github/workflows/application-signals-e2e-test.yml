@@ -90,6 +90,14 @@ jobs:
       cpu-architecture: 'x86_64'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
+  python-ec2-adaptive-sampling-test:
+    needs: [ upload-main-build ]
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-adaptive-sampling-test.yml@main
+    secrets: inherit
+    with:
+      caller-workflow-name: 'main-build'
+      staging-wheel-name: ${{ inputs.staging-wheel-name }}
+
   default-py313-amd64:
     needs: [ upload-main-build ]
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
