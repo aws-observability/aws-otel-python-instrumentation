@@ -29,7 +29,7 @@ _GEN_AI_TOOL_DESCRIPTION: str = "gen_ai.tool.description"
 _GEN_AI_TOOL_CALL_ARGUMENTS: str = "gen_ai.tool.call.arguments"
 _GEN_AI_TOOL_CALL_RESULT: str = "gen_ai.tool.call.result"
 _GEN_AI_TOOL_CALL_ID: str = "gen_ai.tool.call.id"
-_GEN_AI_EMBEDDINGS_DIMENSION_COUNT: str = "gen_ai.embeddings.dimension_count"
+_GEN_AI_EMBEDDINGS_DIMENSION_COUNT: str = "gen_ai.embeddings.dimension.count"
 _GEN_AI_AGENT_ID: str = "gen_ai.agent.id"
 _GEN_AI_AGENT_NAME: str = "gen_ai.agent.name"
 _GEN_AI_AGENT_DESCRIPTION: str = "gen_ai.agent.description"
@@ -192,7 +192,7 @@ class LlamaIndexTest(ContractTestBase):
             self._assert_str_attribute(attrs, _GEN_AI_REQUEST_MODEL, "gpt-4")
             
             self.assertIn(_GEN_AI_REQUEST_TEMPERATURE, attrs)
-            temp = attrs[_GEN_AI_REQUEST_TEMPERATURE].int_value
+            temp = attrs[_GEN_AI_REQUEST_TEMPERATURE].double_value
             self.assertEqual(temp, 0.7, "Expected temperature to be 0.7")
             
             self.assertIn(_GEN_AI_REQUEST_MAX_TOKENS, attrs)

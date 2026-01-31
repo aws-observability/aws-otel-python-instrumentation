@@ -387,6 +387,14 @@ class _Span(BaseSpan):
         # Add LLM provider detection
         if provider := _detect_llm_provider(instance):
             self[GEN_AI_PROVIDER_NAME] = provider
+        
+        # Capture temperature if available
+        if hasattr(instance, 'temperature') and instance.temperature is not None:
+            self[GEN_AI_REQUEST_TEMPERATURE] = instance.temperature
+        
+        # Capture max_tokens if available
+        if hasattr(instance, 'max_tokens') and instance.max_tokens is not None:
+            self[GEN_AI_REQUEST_MAX_TOKENS] = instance.max_tokens
 
     @process_instance.register
     def _(self, instance: BaseEmbedding) -> None:
