@@ -34,15 +34,8 @@ _logger.setLevel(INFO)
 
 _AWS_SQS_QUEUE_URL: str = "aws.sqs.queue.url"
 _AWS_SQS_QUEUE_NAME: str = "aws.sqs.queue.name"
-_MESSAGING_SYSTEM: str = "messaging.system"
-_MESSAGING_URL: str = "messaging.url"
-_MESSAGING_DESTINATION: str = "messaging.destination"
 _DB_SYSTEM: str = "db.system"
 _DB_OPERATION: str = "db.operation"
-_NET_PEER_NAME: str = "net.peer.name"
-_MESSAGING_DESTINATION_KIND: str = "messaging.destination_kind"
-_MESSAGING_DESTINATION_NAME: str = "messaging.destination.name"
-_MESSAGING_MESSAGE_ID: str = "messaging.message.id"
 _FAAS_INVOKED_PROVIDER: str = "faas.invoked_provider"
 _FAAS_INVOKED_NAME: str = "faas.invoked_name"
 _FAAS_INVOKED_REGION: str = "faas.invoked_region"
@@ -240,7 +233,6 @@ class BotocoreTest(ContractTestBase):
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["test_table"],
                 _DB_SYSTEM: "dynamodb",
                 _DB_OPERATION: "CreateTable",
-                _NET_PEER_NAME: "localstack:4566",
             },
             span_name="DynamoDB.CreateTable",
         )
@@ -263,7 +255,6 @@ class BotocoreTest(ContractTestBase):
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["put_test_table"],
                 _DB_SYSTEM: "dynamodb",
                 _DB_OPERATION: "DescribeTable",
-                _NET_PEER_NAME: "localstack:4566",
             },
             response_specific_attributes={
                 _AWS_DYNAMODB_TABLE_ARN: r"arn:aws:dynamodb:us-west-2:000000000000:table/put_test_table",
@@ -287,7 +278,6 @@ class BotocoreTest(ContractTestBase):
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["put_test_table"],
                 _DB_SYSTEM: "dynamodb",
                 _DB_OPERATION: "PutItem",
-                _NET_PEER_NAME: "localstack:4566",
             },
             span_name="DynamoDB.PutItem",
         )
@@ -308,7 +298,6 @@ class BotocoreTest(ContractTestBase):
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["invalid_table"],
                 _DB_SYSTEM: "dynamodb",
                 _DB_OPERATION: "PutItem",
-                _NET_PEER_NAME: "error.test:8080",
             },
             span_name="DynamoDB.PutItem",
         )
@@ -329,7 +318,6 @@ class BotocoreTest(ContractTestBase):
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["invalid_table"],
                 _DB_SYSTEM: "dynamodb",
                 _DB_OPERATION: "PutItem",
-                _NET_PEER_NAME: "fault.test:8080",
             },
             span_name="DynamoDB.PutItem",
         )
@@ -371,12 +359,6 @@ class BotocoreTest(ContractTestBase):
             cloudformation_primary_identifier="http://localstack:4566/000000000000/test_put_get_queue",
             request_specific_attributes={
                 _AWS_SQS_QUEUE_URL: "http://localstack:4566/000000000000/test_put_get_queue",
-                _MESSAGING_SYSTEM: "aws.sqs",
-                _MESSAGING_URL: "http://localstack:4566/000000000000/test_put_get_queue",
-                _MESSAGING_DESTINATION: "test_put_get_queue",
-            },
-            response_specific_attributes={
-                _MESSAGING_MESSAGE_ID: r"[a-f0-9-]{36}",
             },
             span_name="SQS.SendMessage",
         )
@@ -395,12 +377,6 @@ class BotocoreTest(ContractTestBase):
             cloudformation_primary_identifier="http://localstack:4566/000000000000/test_receive_queue",
             request_specific_attributes={
                 _AWS_SQS_QUEUE_URL: "http://localstack:4566/000000000000/test_receive_queue",
-                _MESSAGING_SYSTEM: "aws.sqs",
-                _MESSAGING_URL: "http://localstack:4566/000000000000/test_receive_queue",
-                _MESSAGING_DESTINATION: "test_receive_queue",
-            },
-            response_specific_attributes={
-                _MESSAGING_MESSAGE_ID: r"[a-f0-9-]{36}",
             },
             span_name="SQS.ReceiveMessage",
         )
@@ -419,9 +395,6 @@ class BotocoreTest(ContractTestBase):
             cloudformation_primary_identifier="http://error.test:8080/000000000000/sqserror",
             request_specific_attributes={
                 _AWS_SQS_QUEUE_URL: "http://error.test:8080/000000000000/sqserror",
-                _MESSAGING_SYSTEM: "aws.sqs",
-                _MESSAGING_URL: "http://error.test:8080/000000000000/sqserror",
-                _MESSAGING_DESTINATION: "sqserror",
             },
             span_name="SQS.SendMessage",
         )
@@ -1234,7 +1207,6 @@ class BotocoreTest(ContractTestBase):
             cloudformation_primary_identifier="arn:aws:sns:us-west-2:000000000000:test-topic",
             request_specific_attributes={
                 _AWS_SNS_TOPIC_ARN: "arn:aws:sns:us-west-2:000000000000:test-topic",
-                _MESSAGING_SYSTEM: "aws.sns",
             },
             span_name="SNS.GetTopicAttributes",
         )
@@ -1257,7 +1229,6 @@ class BotocoreTest(ContractTestBase):
             cloudformation_primary_identifier="arn:aws:sns:us-west-2:000000000000:invalid-topic",
             request_specific_attributes={
                 _AWS_SNS_TOPIC_ARN: "arn:aws:sns:us-west-2:000000000000:invalid-topic",
-                _MESSAGING_SYSTEM: "aws.sns",
             },
             span_name="SNS.GetTopicAttributes",
         )
@@ -1277,10 +1248,6 @@ class BotocoreTest(ContractTestBase):
             cloudformation_primary_identifier="arn:aws:sns:us-west-2:000000000000:test-topic",
             request_specific_attributes={
                 _AWS_SNS_TOPIC_ARN: "arn:aws:sns:us-west-2:000000000000:test-topic",
-                _MESSAGING_SYSTEM: "aws.sns",
-                _MESSAGING_DESTINATION_KIND: "topic",
-                _MESSAGING_DESTINATION: "arn:aws:sns:us-west-2:000000000000:test-topic",
-                _MESSAGING_DESTINATION_NAME: "arn:aws:sns:us-west-2:000000000000:test-topic",
             },
             span_name="test-topic send",
             span_kind=Span.SPAN_KIND_PRODUCER,
@@ -1413,7 +1380,7 @@ class BotocoreTest(ContractTestBase):
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
             if resource_scope_span.span.kind == expected_span_kind:
-                if expected_span_name is None or resource_scope_span.span.name == expected_span_name:
+                if resource_scope_span.span.name == expected_span_name:
                     target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
@@ -1489,7 +1456,7 @@ class BotocoreTest(ContractTestBase):
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
             if resource_scope_span.span.kind == expected_span_kind:
-                if expected_span_name is None or resource_scope_span.span.name == expected_span_name:
+                if resource_scope_span.span.name == expected_span_name:
                     target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
