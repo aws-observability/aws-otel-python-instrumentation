@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix: Pin protobuf version to prevent Any recursion depth bypass (CVE-2026-0994)
+  ([#602](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/602))
 - fix: Ensure AlwaysRecordSampler respects root sampling result attributes
   ([#594](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/594))
 - Adaptive Sampling support
