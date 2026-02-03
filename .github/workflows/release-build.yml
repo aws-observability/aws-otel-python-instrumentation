@@ -23,6 +23,7 @@ env:
   # Legacy list of commercial regions to deploy to. New regions should NOT be added here, and instead should be added to the `aws_region` default input to the workflow.
   LEGACY_COMMERCIAL_REGIONS: us-east-1, us-east-2, us-west-1, us-west-2, ap-south-1, ap-northeast-3, ap-northeast-2, ap-southeast-1, ap-southeast-2, ap-northeast-1, ca-central-1, eu-central-1, eu-west-1, eu-west-2, eu-west-3, eu-north-1, sa-east-1
   LAYER_NAME: AWSOpenTelemetryDistroPython
+  LAYER_ARTIFACT_NAME: aws-opentelemetry-python-layer.zip
   VERSION: ${{ github.event.inputs.version }}
 
 permissions:
@@ -116,7 +117,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
         with:
           name: layer.zip
-          path: lambda-layer/src/build/aws-opentelemetry-python-layer.zip
+          path: lambda-layer/src/build/${{ env.LAYER_ARTIFACT_NAME }}
 
   publish-sdk:
     needs: [build-sdk, build-layer]
@@ -247,31 +248,57 @@ jobs:
         continue-on-error: true
         run: |
           aws s3 mb s3://${{ env.BUCKET_NAME }}
-          aws s3 cp aws-opentelemetry-python-layer.zip s3://${{ env.BUCKET_NAME }}
+          aws s3 cp ${{ env.LAYER_ARTIFACT_NAME }} s3://${{ env.BUCKET_NAME }}
           
           # Sign the layer
           echo "Checking for signing profile..."
           PROFILE=$(aws signer list-signing-profiles --query "profiles[?profileName=='ADOTLambdaLayerSigningProfile'].arn" --output text 2>/dev/null)
           [ -z "$PROFILE" ] && echo "No signing profile found, skipping" && exit 0
-          
+
+          echo "PROFILE is: $PROFILE"
+
           echo "Starting signing job..."
-          JOB_ID=$(aws signer start-signing-job \
-            --source "s3={bucketName=${{ env.BUCKET_NAME }},key=aws-opentelemetry-python-layer.zip,version=null}" \
+          # Capture both stdout and stderr to properly handle errors
+          SIGNING_OUTPUT=$(aws signer start-signing-job \
+            --source "s3={bucketName=${{ env.BUCKET_NAME }},key=${{ env.LAYER_ARTIFACT_NAME }},version=null}" \
             --destination "s3={bucketName=${{ env.BUCKET_NAME }},prefix=signed-}" \
             --profile-name ADOTLambdaLayerSigningProfile \
-            --query 'jobId' --output text 2>/dev/null) || exit 0
+            --query 'jobId' --output text 2>&1)
+          SIGNING_EXIT_CODE=$?
+          
+          if [ $SIGNING_EXIT_CODE -ne 0 ]; then
+            echo "Signing job failed with exit code $SIGNING_EXIT_CODE"
+            echo "Error output: $SIGNING_OUTPUT"
+            exit 0  # Continue workflow but log the failure
+          fi
+          
+          JOB_ID="$SIGNING_OUTPUT"
           [ -z "$JOB_ID" ] && echo "No job ID returned" && exit 0
           echo "Job ID: $JOB_ID"
-          
+
           echo "Waiting for signing job to complete..."
-          aws signer wait successful-signing-job --job-id "$JOB_ID" || exit 0
+          if ! aws signer wait successful-signing-job --job-id "$JOB_ID" 2>&1; then
+            echo "Warning: Signing job wait failed or timed out"
+            exit 0
+          fi
           echo "Signing completed"
           
           echo "Moving signed layer..."
-          SIGNED=$(aws signer describe-signing-job --job-id "$JOB_ID" --query 'signedObject.s3.key' --output text 2>/dev/null)
+          SIGNED=$(aws signer describe-signing-job --job-id "$JOB_ID" --query 'signedObject.s3.key' --output text 2>&1)
+          DESCRIBE_EXIT_CODE=$?
+          
+          if [ $DESCRIBE_EXIT_CODE -ne 0 ]; then
+            echo "Warning: Failed to describe signing job"
+            echo "Error: $SIGNED"
+            exit 0
+          fi
+          
           echo "SIGNED value: '$SIGNED'"
           if [ -n "$SIGNED" ]; then
-            aws s3 mv "s3://${{ env.BUCKET_NAME }}/$SIGNED" "s3://${{ env.BUCKET_NAME }}/aws-opentelemetry-python-layer.zip --clobber"
+            # Delete the original unsigned file first
+            aws s3 rm "s3://${{ env.BUCKET_NAME }}/${{ env.LAYER_ARTIFACT_NAME }}"
+            # Move the signed file to replace it
+            aws s3 mv "s3://${{ env.BUCKET_NAME }}/$SIGNED" "s3://${{ env.BUCKET_NAME }}/${{ env.LAYER_ARTIFACT_NAME }}"
             echo "Signed layer moved successfully"
           else
             echo "No SIGNED value returned, skipping move"
@@ -282,7 +309,7 @@ jobs:
           layerARN=$(
             aws lambda publish-layer-version \
               --layer-name ${{ env.LAYER_NAME }} \
-              --content S3Bucket=${{ env.BUCKET_NAME }},S3Key=aws-opentelemetry-python-layer.zip \
+              --content S3Bucket=${{ env.BUCKET_NAME }},S3Key=${{ env.LAYER_ARTIFACT_NAME }} \
               --compatible-runtimes python3.10 python3.11 python3.12 python3.13 \
               --compatible-architectures "arm64" "x86_64" \
               --license-info "Apache-2.0" \
@@ -409,7 +436,7 @@ jobs:
 
       - name: Rename layer file
         run: |
-          cp aws-opentelemetry-python-layer.zip layer.zip
+          cp ${{ env.LAYER_ARTIFACT_NAME }} layer.zip
 
       # Publish to GitHub releases
       - name: Create GH release
