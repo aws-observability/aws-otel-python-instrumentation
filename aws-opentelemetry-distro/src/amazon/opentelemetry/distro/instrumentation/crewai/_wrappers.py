@@ -151,9 +151,10 @@ class _BaseWrapper(ABC):
     def _get_attributes(self, instance: Any, args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> Dict[str, Any]:
         pass
 
-    def _before_call(self, instance: Any, args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> Any:
+    def _before_call(  # pylint: disable=no-self-use
+        self, instance: Any, args: Tuple[Any, ...], kwargs: Mapping[str, Any]
+    ) -> Any:
         """Hook called before wrapped function execution. Returns state to pass to _on_success."""
-        return None
 
     def _on_success(self, span: trace.Span, result: Any, instance: Any = None, pre_call_state: Any = None) -> None:
         """Hook called on successful execution."""
@@ -361,6 +362,7 @@ class _NativeToolCallsWrapper(_BaseWrapper):
         if not tool_calls:
             return None, None
 
+        # pylint: disable=import-outside-toplevel
         from crewai.utilities.agent_utils import extract_tool_call_info
 
         result = extract_tool_call_info(tool_calls[0])
@@ -376,6 +378,7 @@ class _NativeToolCallsWrapper(_BaseWrapper):
         if not tool_name:
             return None
 
+        # pylint: disable=import-outside-toplevel
         from crewai.utilities.string_utils import sanitize_tool_name
 
         # tool_name is already sanitized by extract_tool_call_info, but we need to sanitize
