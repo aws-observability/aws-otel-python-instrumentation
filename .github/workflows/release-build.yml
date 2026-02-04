@@ -17,6 +17,8 @@ env:
   RELEASE_PUBLIC_REPOSITORY: public.ecr.aws/aws-observability/adot-autoinstrumentation-python
   RELEASE_PRIVATE_REPOSITORY: 020628701572.dkr.ecr.us-west-2.amazonaws.com/adot-autoinstrumentation-python
   RELEASE_PRIVATE_REGISTRY: 020628701572.dkr.ecr.us-west-2.amazonaws.com
+  STAGING_ECR_REGISTRY: 637423224110.dkr.ecr.us-east-1.amazonaws.com
+  STAGING_ECR_REPOSITORY: aws-observability/adot-autoinstrumentation-python-staging
   PACKAGE_NAME: aws-opentelemetry-distro
   WHEEL_ARTIFACT_NAME: aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
   SOURCE_ARTIFACT_NAME: aws_opentelemetry_distro-${{ github.event.inputs.version }}.tar.gz
@@ -32,6 +34,8 @@ jobs:
   build-sdk:
     environment: Release
     runs-on: ubuntu-latest
+    outputs:
+      staging_image: ${{ steps.staging_output.outputs.staging_image }}
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
@@ -54,19 +58,23 @@ jobs:
           fi
           echo "Main build succeeded, proceeding with release"
 
-      - name: Build Wheel and Image Files
+      - name: Set staging image output
+        id: staging_output
+        run: |
+          echo "staging_image=${{ env.STAGING_ECR_REGISTRY }}/${{ env.STAGING_ECR_REPOSITORY }}:${{ github.event.inputs.version }}-${{ github.sha }}" >> $GITHUB_OUTPUT
+
+      - name: Build and Push Wheel and Image Files
         uses: ./.github/actions/artifacts_build
         with:
-          image_uri_with_tag: "adot-autoinstrumentation-python:test"
-          push_image: false
-          load_image: true
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+          image_uri_with_tag: ${{ steps.staging_output.outputs.staging_image }}
+          image_registry: ${{ env.STAGING_ECR_REGISTRY }}
+          snapshot-ecr-role: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
+          push_image: true
+          load_image: false
           python_version: "3.10"
           package_name: aws-opentelemetry-distro
           os: ubuntu-latest
-
-      # TODO: Add some sort of smoke/integration testing before we go
-      # release the artifacts. adot java for reference:
-      # https://github.com/aws-observability/aws-otel-java-instrumentation/tree/93870a550ac30988fbdd5d3bf1e8f9f1b37916f5/smoke-tests
 
       - name: Upload SDK wheel artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
@@ -117,362 +125,392 @@ jobs:
           name: layer.zip
           path: lambda-layer/src/build/aws-opentelemetry-python-layer.zip
 
-  publish-sdk:
+  contract-tests:
     needs: [build-sdk, build-layer]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 #3.11.1
-
-      - name: Configure AWS credentials for private ECR
-        uses: aws-actions/configure-aws-credentials@a03048d87541d1d9fcf2ecf528a4a65ba9bd7838 #v5.0.0
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c #v6.0.0
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN_ECR_RELEASE }}
-          aws-region: ${{ env.AWS_PRIVATE_ECR_REGION }}
+          python-version: '3.10'
 
-      - name: Log in to AWS private ECR
-        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 #v3.5.0
+      - name: Download SDK wheel artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
         with:
-          registry: ${{ env.RELEASE_PRIVATE_REGISTRY }}
+          name: ${{ env.WHEEL_ARTIFACT_NAME }}
+          path: dist
 
-      - name: Configure AWS credentials for public ECR
-        uses: aws-actions/configure-aws-credentials@a03048d87541d1d9fcf2ecf528a4a65ba9bd7838 #v5.0.0
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN_ECR_RELEASE }}
-          aws-region: ${{ env.AWS_PUBLIC_ECR_REGION }}
+      - name: Set up and run contract tests
+        run: |
+          bash scripts/set-up-contract-tests.sh
+          pytest contract-tests/tests
 
-      - name: Log in to AWS public ECR
-        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 #v3.5.0
-        with:
-          registry: public.ecr.aws
+  application-signals-e2e-test:
+    needs: [build-sdk, build-layer]
+    uses: ./.github/workflows/application-signals-e2e-test.yml
+    secrets: inherit
+    with:
+      staging-wheel-name: aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
+      adot-image-name: ${{ needs.build-sdk.outputs.staging_image }}
+
+  publish-sdk:
+    needs: [build-sdk, build-layer, contract-tests, application-signals-e2e-test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+
+  #     - name: Set up Docker Buildx
+  #       uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 #3.11.1
+
+  #     - name: Configure AWS credentials for private ECR
+  #       uses: aws-actions/configure-aws-credentials@a03048d87541d1d9fcf2ecf528a4a65ba9bd7838 #v5.0.0
+  #       with:
+  #         role-to-assume: ${{ secrets.AWS_ROLE_ARN_ECR_RELEASE }}
+  #         aws-region: ${{ env.AWS_PRIVATE_ECR_REGION }}
+
+  #     - name: Log in to AWS private ECR
+  #       uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 #v3.5.0
+  #       with:
+  #         registry: ${{ env.RELEASE_PRIVATE_REGISTRY }}
+
+  #     - name: Configure AWS credentials for public ECR
+  #       uses: aws-actions/configure-aws-credentials@a03048d87541d1d9fcf2ecf528a4a65ba9bd7838 #v5.0.0
+  #       with:
+  #         role-to-assume: ${{ secrets.AWS_ROLE_ARN_ECR_RELEASE }}
+  #         aws-region: ${{ env.AWS_PUBLIC_ECR_REGION }}
+
+  #     - name: Log in to AWS public ECR
+  #       uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 #v3.5.0
+  #       with:
+  #         registry: public.ecr.aws
      
-      - name: Download SDK wheel artifact
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
-        with:
-          name: ${{ env.WHEEL_ARTIFACT_NAME }}
-          path: dist-pypi
+  #     - name: Download SDK wheel artifact
+  #       uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
+  #       with:
+  #         name: ${{ env.WHEEL_ARTIFACT_NAME }}
+  #         path: dist-pypi
 
-      - name: Download SDK source artifact
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
-        with:
-          name: ${{ env.SOURCE_ARTIFACT_NAME }}
-          path: dist-pypi
+  #     - name: Download SDK source artifact
+  #       uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
+  #       with:
+  #         name: ${{ env.SOURCE_ARTIFACT_NAME }}
+  #         path: dist-pypi
       
-      # The step below publishes to testpypi in order to catch any issues 
-      - name: Publish to TestPyPI
-        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          attestations: false
-          skip-existing: true
-          verbose: true
-          packages-dir: dist-pypi
+  #     # The step below publishes to testpypi in order to catch any issues 
+  #     - name: Publish to TestPyPI
+  #       uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e
+  #       with:
+  #         repository-url: https://test.pypi.org/legacy/
+  #         attestations: false
+  #         skip-existing: true
+  #         verbose: true
+  #         packages-dir: dist-pypi
 
-      # Publish to prod PyPI
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e
-        with:
-          skip-existing: true
-          verbose: true
-          packages-dir: dist-pypi
+  #     # Publish to prod PyPI
+  #     - name: Publish to PyPI
+  #       uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e
+  #       with:
+  #         skip-existing: true
+  #         verbose: true
+  #         packages-dir: dist-pypi
 
-      # Publish to public ECR
-      - name: Build and push public ECR image
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
-        with:
-          push: true
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ github.event.inputs.version }}
+  #     # Publish to public ECR
+  #     - name: Build and push public ECR image
+  #       uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
+  #       with:
+  #         push: true
+  #         context: .
+  #         file: ./Dockerfile
+  #         platforms: linux/amd64,linux/arm64
+  #         tags: |
+  #           ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ github.event.inputs.version }}
 
-      # Publish to private ECR
-      - name: Build and push private ECR image
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
-        with:
-          push: true
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ github.event.inputs.version }}
+  #     # Publish to private ECR
+  #     - name: Build and push private ECR image
+  #       uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
+  #       with:
+  #         push: true
+  #         context: .
+  #         file: ./Dockerfile
+  #         platforms: linux/amd64,linux/arm64
+  #         tags: |
+  #           ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ github.event.inputs.version }}
   
-  publish-layer-prod:
-    runs-on: ubuntu-latest
-    needs: [build-layer, publish-sdk]
-    strategy:
-      matrix:
-        aws_region: ${{ fromJson(needs.build-layer.outputs.aws_regions_json) }}
-    steps:
-      - name: role arn
-        env:
-          LEGACY_COMMERCIAL_REGIONS: ${{ env.LEGACY_COMMERCIAL_REGIONS }}
-        run: |
-          LEGACY_COMMERCIAL_REGIONS_ARRAY=(${LEGACY_COMMERCIAL_REGIONS//,/ })
-          FOUND=false
-          for REGION in "${LEGACY_COMMERCIAL_REGIONS_ARRAY[@]}"; do
-            if [[ "$REGION" == "${{ matrix.aws_region }}" ]]; then
-              FOUND=true
-              break
-            fi
-          done
-          if [ "$FOUND" = true ]; then
-            echo "Found ${{ matrix.aws_region }} in LEGACY_COMMERCIAL_REGIONS"
-            SECRET_KEY="LAMBDA_LAYER_RELEASE"
-          else
-            echo "Not found ${{ matrix.aws_region }} in LEGACY_COMMERCIAL_REGIONS"
-            SECRET_KEY="${{ matrix.aws_region }}_LAMBDA_LAYER_RELEASE"
-          fi
-          SECRET_KEY=${SECRET_KEY//-/_}
-          echo "SECRET_KEY=${SECRET_KEY}" >> $GITHUB_ENV
-      - uses: aws-actions/configure-aws-credentials@a03048d87541d1d9fcf2ecf528a4a65ba9bd7838 #v5.0.0
-        with:
-          role-to-assume: ${{ secrets[env.SECRET_KEY] }}
-          role-duration-seconds: 1200
-          aws-region: ${{ matrix.aws_region }}
-      - name: Get s3 bucket name for release 
-        run: |
-          echo BUCKET_NAME=python-lambda-layer-${{ github.run_id }}-${{ matrix.aws_region }} | tee --append $GITHUB_ENV
-      - name: download layer.zip
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
-        with:
-          name: layer.zip
+  # publish-layer-prod:
+  #   runs-on: ubuntu-latest
+  #   needs: [build-layer, publish-sdk]
+  #   strategy:
+  #     matrix:
+  #       aws_region: ${{ fromJson(needs.build-layer.outputs.aws_regions_json) }}
+  #   steps:
+  #     - name: role arn
+  #       env:
+  #         LEGACY_COMMERCIAL_REGIONS: ${{ env.LEGACY_COMMERCIAL_REGIONS }}
+  #       run: |
+  #         LEGACY_COMMERCIAL_REGIONS_ARRAY=(${LEGACY_COMMERCIAL_REGIONS//,/ })
+  #         FOUND=false
+  #         for REGION in "${LEGACY_COMMERCIAL_REGIONS_ARRAY[@]}"; do
+  #           if [[ "$REGION" == "${{ matrix.aws_region }}" ]]; then
+  #             FOUND=true
+  #             break
+  #           fi
+  #         done
+  #         if [ "$FOUND" = true ]; then
+  #           echo "Found ${{ matrix.aws_region }} in LEGACY_COMMERCIAL_REGIONS"
+  #           SECRET_KEY="LAMBDA_LAYER_RELEASE"
+  #         else
+  #           echo "Not found ${{ matrix.aws_region }} in LEGACY_COMMERCIAL_REGIONS"
+  #           SECRET_KEY="${{ matrix.aws_region }}_LAMBDA_LAYER_RELEASE"
+  #         fi
+  #         SECRET_KEY=${SECRET_KEY//-/_}
+  #         echo "SECRET_KEY=${SECRET_KEY}" >> $GITHUB_ENV
+  #     - uses: aws-actions/configure-aws-credentials@a03048d87541d1d9fcf2ecf528a4a65ba9bd7838 #v5.0.0
+  #       with:
+  #         role-to-assume: ${{ secrets[env.SECRET_KEY] }}
+  #         role-duration-seconds: 1200
+  #         aws-region: ${{ matrix.aws_region }}
+  #     - name: Get s3 bucket name for release 
+  #       run: |
+  #         echo BUCKET_NAME=python-lambda-layer-${{ github.run_id }}-${{ matrix.aws_region }} | tee --append $GITHUB_ENV
+  #     - name: download layer.zip
+  #       uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
+  #       with:
+  #         name: layer.zip
       
-      - name: Upload to S3 and Sign
-        continue-on-error: true
-        run: |
-          aws s3 mb s3://${{ env.BUCKET_NAME }}
-          aws s3 cp aws-opentelemetry-python-layer.zip s3://${{ env.BUCKET_NAME }}
+  #     - name: Upload to S3 and Sign
+  #       continue-on-error: true
+  #       run: |
+  #         aws s3 mb s3://${{ env.BUCKET_NAME }}
+  #         aws s3 cp aws-opentelemetry-python-layer.zip s3://${{ env.BUCKET_NAME }}
           
-          # Sign the layer
-          PROFILE=$(aws signer list-signing-profiles --query "profiles[?profileName=='ADOTLambdaLayerSigningProfile'].arn" --output text 2>/dev/null)
-          [ -z "$PROFILE" ] && exit 0
+  #         # Sign the layer
+  #         PROFILE=$(aws signer list-signing-profiles --query "profiles[?profileName=='ADOTLambdaLayerSigningProfile'].arn" --output text 2>/dev/null)
+  #         [ -z "$PROFILE" ] && exit 0
           
-          JOB_ID=$(aws signer start-signing-job \
-            --source "s3={bucketName=${{ env.BUCKET_NAME }},key=aws-opentelemetry-python-layer.zip,version=null}" \
-            --destination "s3={bucketName=${{ env.BUCKET_NAME }},prefix=signed-}" \
-            --profile-name ADOTLambdaLayerSigningProfile \
-            --query 'jobId' --output text 2>/dev/null) || exit 0
-          [ -z "$JOB_ID" ] && exit 0
+  #         JOB_ID=$(aws signer start-signing-job \
+  #           --source "s3={bucketName=${{ env.BUCKET_NAME }},key=aws-opentelemetry-python-layer.zip,version=null}" \
+  #           --destination "s3={bucketName=${{ env.BUCKET_NAME }},prefix=signed-}" \
+  #           --profile-name ADOTLambdaLayerSigningProfile \
+  #           --query 'jobId' --output text 2>/dev/null) || exit 0
+  #         [ -z "$JOB_ID" ] && exit 0
           
-          aws signer wait successful-signing-job --job-id "$JOB_ID" || exit 0
+  #         aws signer wait successful-signing-job --job-id "$JOB_ID" || exit 0
           
-          SIGNED=$(aws signer describe-signing-job --job-id "$JOB_ID" --query 'signedObject.s3.key' --output text 2>/dev/null)
-          [ -n "$SIGNED" ] && aws s3 mv "s3://${{ env.BUCKET_NAME }}/$SIGNED" "s3://${{ env.BUCKET_NAME }}/aws-opentelemetry-python-layer.zip"
+  #         SIGNED=$(aws signer describe-signing-job --job-id "$JOB_ID" --query 'signedObject.s3.key' --output text 2>/dev/null)
+  #         [ -n "$SIGNED" ] && aws s3 mv "s3://${{ env.BUCKET_NAME }}/$SIGNED" "s3://${{ env.BUCKET_NAME }}/aws-opentelemetry-python-layer.zip"
       
-      - name: Publish Layer Version
-        run: |
-          layerARN=$(
-            aws lambda publish-layer-version \
-              --layer-name ${{ env.LAYER_NAME }} \
-              --content S3Bucket=${{ env.BUCKET_NAME }},S3Key=aws-opentelemetry-python-layer.zip \
-              --compatible-runtimes python3.10 python3.11 python3.12 python3.13 \
-              --compatible-architectures "arm64" "x86_64" \
-              --license-info "Apache-2.0" \
-              --description "AWS Distro of OpenTelemetry Lambda Layer for Python Runtime" \
-              --query 'LayerVersionArn' \
-              --output text
-          )
-          echo $layerARN
-          echo "LAYER_ARN=${layerARN}" >> $GITHUB_ENV
-          mkdir ${{ env.LAYER_NAME }}
-          echo $layerARN > ${{ env.LAYER_NAME }}/${{ matrix.aws_region }}
-          cat ${{ env.LAYER_NAME }}/${{ matrix.aws_region }}
+  #     - name: Publish Layer Version
+  #       run: |
+  #         layerARN=$(
+  #           aws lambda publish-layer-version \
+  #             --layer-name ${{ env.LAYER_NAME }} \
+  #             --content S3Bucket=${{ env.BUCKET_NAME }},S3Key=aws-opentelemetry-python-layer.zip \
+  #             --compatible-runtimes python3.10 python3.11 python3.12 python3.13 \
+  #             --compatible-architectures "arm64" "x86_64" \
+  #             --license-info "Apache-2.0" \
+  #             --description "AWS Distro of OpenTelemetry Lambda Layer for Python Runtime" \
+  #             --query 'LayerVersionArn' \
+  #             --output text
+  #         )
+  #         echo $layerARN
+  #         echo "LAYER_ARN=${layerARN}" >> $GITHUB_ENV
+  #         mkdir ${{ env.LAYER_NAME }}
+  #         echo $layerARN > ${{ env.LAYER_NAME }}/${{ matrix.aws_region }}
+  #         cat ${{ env.LAYER_NAME }}/${{ matrix.aws_region }}
           
-          # Output SigningProfileVersionArn
-          aws lambda get-layer-version-by-arn \
-            --arn $layerARN \
-            --output json | jq -r '.Content.SigningProfileVersionArn'
-      - name: public layer
-        run: |
-          layerVersion=$(
-            aws lambda list-layer-versions \
-              --layer-name ${{ env.LAYER_NAME }} \
-              --query 'max_by(LayerVersions, &Version).Version'
-          )
-          aws lambda add-layer-version-permission \
-            --layer-name ${{ env.LAYER_NAME }} \
-            --version-number $layerVersion \
-            --principal "*" \
-            --statement-id publish \
-            --action lambda:GetLayerVersion
-      - name: upload layer arn artifact
-        if: ${{ success() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
-        with:
-          name: ${{ env.LAYER_NAME }}-${{ matrix.aws_region }}
-          path: ${{ env.LAYER_NAME }}/${{ matrix.aws_region }}
-      - name: clean s3
-        if: always()
-        run: |
-          aws s3 rb --force s3://${{ env.BUCKET_NAME }}
+  #         # Output SigningProfileVersionArn
+  #         aws lambda get-layer-version-by-arn \
+  #           --arn $layerARN \
+  #           --output json | jq -r '.Content.SigningProfileVersionArn'
+  #     - name: public layer
+  #       run: |
+  #         layerVersion=$(
+  #           aws lambda list-layer-versions \
+  #             --layer-name ${{ env.LAYER_NAME }} \
+  #             --query 'max_by(LayerVersions, &Version).Version'
+  #         )
+  #         aws lambda add-layer-version-permission \
+  #           --layer-name ${{ env.LAYER_NAME }} \
+  #           --version-number $layerVersion \
+  #           --principal "*" \
+  #           --statement-id publish \
+  #           --action lambda:GetLayerVersion
+  #     - name: upload layer arn artifact
+  #       if: ${{ success() }}
+  #       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+  #       with:
+  #         name: ${{ env.LAYER_NAME }}-${{ matrix.aws_region }}
+  #         path: ${{ env.LAYER_NAME }}/${{ matrix.aws_region }}
+  #     - name: clean s3
+  #       if: always()
+  #       run: |
+  #         aws s3 rb --force s3://${{ env.BUCKET_NAME }}
 
-  generate-lambda-release-note:
-    runs-on: ubuntu-latest
-    needs: publish-layer-prod
-    outputs:
-      layer-note: ${{ steps.layer-note.outputs.layer-note }}
-    steps:
-      - name: Checkout Repo @ SHA - ${{ github.sha }}
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
-      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd #v3.1.2
-      - name: download layerARNs
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
-        with:
-          pattern: ${{ env.LAYER_NAME }}-*
-          path: ${{ env.LAYER_NAME }}
-          merge-multiple: true
-      - name: show layerARNs
-        run: |
-          for file in ${{ env.LAYER_NAME }}/*
-          do
-          echo $file
-          cat $file
-          done
-      - name: generate layer-note
-        id: layer-note
-        working-directory: ${{ env.LAYER_NAME }}
-        run: |
-          echo "| Region | Layer ARN |" >> ../layer-note
-          echo "|  ----  | ----  |" >> ../layer-note
-          for file in *
-          do
-          read arn < $file
-          echo "| " $file " | " $arn " |" >> ../layer-note
-          done
-          cd ..
-          {
-            echo "layer-note<<EOF"
-            cat layer-note
-            echo "EOF"
-          } >> $GITHUB_OUTPUT
-          cat layer-note
-      - name: generate tf layer
-        working-directory: ${{ env.LAYER_NAME }}
-        run: |
-          echo "locals {" >> ../layer_arns.tf
-          echo "  sdk_layer_arns = {" >> ../layer_arns.tf
-          for file in *
-          do
-          read arn < $file
-          echo "    \""$file"\" = \""$arn"\"" >> ../layer_arns.tf
-          done
-          cd ..
-          echo "  }" >> layer_arns.tf
-          echo "}" >> layer_arns.tf
-          terraform fmt layer_arns.tf
-          cat layer_arns.tf
-      - name: generate layer ARN constants for CDK
-        working-directory: ${{ env.LAYER_NAME }}
-        run: |
-          echo "{" > ../layer_cdk
-          for file in *; do
-            read arn < "$file"
-            echo "    \"$file\": \"$arn\"," >> ../layer_cdk
-          done
-          echo "}" >> ../layer_cdk
-          cat ../layer_cdk
+  # generate-lambda-release-note:
+  #   runs-on: ubuntu-latest
+  #   needs: publish-layer-prod
+  #   outputs:
+  #     layer-note: ${{ steps.layer-note.outputs.layer-note }}
+  #   steps:
+  #     - name: Checkout Repo @ SHA - ${{ github.sha }}
+  #       uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+  #     - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd #v3.1.2
+  #     - name: download layerARNs
+  #       uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
+  #       with:
+  #         pattern: ${{ env.LAYER_NAME }}-*
+  #         path: ${{ env.LAYER_NAME }}
+  #         merge-multiple: true
+  #     - name: show layerARNs
+  #       run: |
+  #         for file in ${{ env.LAYER_NAME }}/*
+  #         do
+  #         echo $file
+  #         cat $file
+  #         done
+  #     - name: generate layer-note
+  #       id: layer-note
+  #       working-directory: ${{ env.LAYER_NAME }}
+  #       run: |
+  #         echo "| Region | Layer ARN |" >> ../layer-note
+  #         echo "|  ----  | ----  |" >> ../layer-note
+  #         for file in *
+  #         do
+  #         read arn < $file
+  #         echo "| " $file " | " $arn " |" >> ../layer-note
+  #         done
+  #         cd ..
+  #         {
+  #           echo "layer-note<<EOF"
+  #           cat layer-note
+  #           echo "EOF"
+  #         } >> $GITHUB_OUTPUT
+  #         cat layer-note
+  #     - name: generate tf layer
+  #       working-directory: ${{ env.LAYER_NAME }}
+  #       run: |
+  #         echo "locals {" >> ../layer_arns.tf
+  #         echo "  sdk_layer_arns = {" >> ../layer_arns.tf
+  #         for file in *
+  #         do
+  #         read arn < $file
+  #         echo "    \""$file"\" = \""$arn"\"" >> ../layer_arns.tf
+  #         done
+  #         cd ..
+  #         echo "  }" >> layer_arns.tf
+  #         echo "}" >> layer_arns.tf
+  #         terraform fmt layer_arns.tf
+  #         cat layer_arns.tf
+  #     - name: generate layer ARN constants for CDK
+  #       working-directory: ${{ env.LAYER_NAME }}
+  #       run: |
+  #         echo "{" > ../layer_cdk
+  #         for file in *; do
+  #           read arn < "$file"
+  #           echo "    \"$file\": \"$arn\"," >> ../layer_cdk
+  #         done
+  #         echo "}" >> ../layer_cdk
+  #         cat ../layer_cdk
 
-  publish-github:
-    needs: generate-lambda-release-note
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repo @ SHA - ${{ github.sha }}
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+  # publish-github:
+  #   needs: generate-lambda-release-note
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout Repo @ SHA - ${{ github.sha }}
+  #       uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
       
-      - name: Download SDK wheel artifact
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
-        with:
-          name: ${{ env.WHEEL_ARTIFACT_NAME }}
+  #     - name: Download SDK wheel artifact
+  #       uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
+  #       with:
+  #         name: ${{ env.WHEEL_ARTIFACT_NAME }}
       
-      - name: Download layer.zip artifact
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
-        with:
-          name: layer.zip
+  #     - name: Download layer.zip artifact
+  #       uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
+  #       with:
+  #         name: layer.zip
 
-      - name: Rename layer file
-        run: |
-          cp aws-opentelemetry-python-layer.zip layer.zip
+  #     - name: Rename layer file
+  #       run: |
+  #         cp aws-opentelemetry-python-layer.zip layer.zip
 
-      # Publish to GitHub releases
-      - name: Create GH release
-        id: create_release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ github.event.inputs.version }}
-        run: |
-          # Extract all dependencies from pyproject.toml
-          DEPS=$(python3 -c "
-          import re
-          with open('aws-opentelemetry-distro/pyproject.toml', 'r') as f:
-              content = f.read()
-          deps_match = re.search(r'dependencies\s*=\s*\[(.*?)\]', content, re.DOTALL)
-          if deps_match:
-              deps_content = deps_match.group(1)
-              dep_lines = re.findall(r'\"([^\"]+)\"', deps_content)
-              formatted_deps = []
-              for dep_line in dep_lines:
-                  if ' == ' in dep_line:
-                      package, version = dep_line.split(' == ', 1)
-                      formatted_deps.append(f'- \`{package}\` - {version}')
-                  else:
-                      formatted_deps.append(f'- \`{dep_line}\`')
-              print('\n'.join(formatted_deps))
-          ")
+  #     # Publish to GitHub releases
+  #     - name: Create GH release
+  #       id: create_release
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #         VERSION: ${{ github.event.inputs.version }}
+  #       run: |
+  #         # Extract all dependencies from pyproject.toml
+  #         DEPS=$(python3 -c "
+  #         import re
+  #         with open('aws-opentelemetry-distro/pyproject.toml', 'r') as f:
+  #             content = f.read()
+  #         deps_match = re.search(r'dependencies\s*=\s*\[(.*?)\]', content, re.DOTALL)
+  #         if deps_match:
+  #             deps_content = deps_match.group(1)
+  #             dep_lines = re.findall(r'\"([^\"]+)\"', deps_content)
+  #             formatted_deps = []
+  #             for dep_line in dep_lines:
+  #                 if ' == ' in dep_line:
+  #                     package, version = dep_line.split(' == ', 1)
+  #                     formatted_deps.append(f'- \`{package}\` - {version}')
+  #                 else:
+  #                     formatted_deps.append(f'- \`{dep_line}\`')
+  #             print('\n'.join(formatted_deps))
+  #         ")
 
-          # Extract CHANGELOG entries for this version
-          CHANGELOG_ENTRIES=$(python3 -c "
-          import re, os
-          version = os.environ['VERSION']
-          with open('CHANGELOG.md', 'r') as f:
-              content = f.read()
-          version_pattern = rf'## v{re.escape(version)}.*?\n(.*?)(?=\n## |\Z)'
-          version_match = re.search(version_pattern, content, re.DOTALL)
-          if version_match:
-              entries = version_match.group(1).strip()
-              if entries:
-                  print(entries)
-          ")
+  #         # Extract CHANGELOG entries for this version
+  #         CHANGELOG_ENTRIES=$(python3 -c "
+  #         import re, os
+  #         version = os.environ['VERSION']
+  #         with open('CHANGELOG.md', 'r') as f:
+  #             content = f.read()
+  #         version_pattern = rf'## v{re.escape(version)}.*?\n(.*?)(?=\n## |\Z)'
+  #         version_match = re.search(version_pattern, content, re.DOTALL)
+  #         if version_match:
+  #             entries = version_match.group(1).strip()
+  #             if entries:
+  #                 print(entries)
+  #         ")
 
-          # Create release notes
-          cat > release_notes.md << EOF
-          $(if [ -n "$CHANGELOG_ENTRIES" ]; then echo "## What's Changed"; echo "$CHANGELOG_ENTRIES"; echo ""; fi)
+  #         # Create release notes
+  #         cat > release_notes.md << EOF
+  #         $(if [ -n "$CHANGELOG_ENTRIES" ]; then echo "## What's Changed"; echo "$CHANGELOG_ENTRIES"; echo ""; fi)
 
-          ## Upstream Components
+  #         ## Upstream Components
 
-          $DEPS
+  #         $DEPS
 
-          ## Release Artifacts
+  #         ## Release Artifacts
 
-          This release publishes to public ECR and PyPi.
-          * See ADOT Python auto-instrumentation Docker image v$VERSION in our public ECR repository:
-          https://gallery.ecr.aws/aws-observability/adot-autoinstrumentation-python
-          * See version $VERSION in our PyPi repository:
-          https://pypi.org/project/aws-opentelemetry-distro/
+  #         This release publishes to public ECR and PyPi.
+  #         * See ADOT Python auto-instrumentation Docker image v$VERSION in our public ECR repository:
+  #         https://gallery.ecr.aws/aws-observability/adot-autoinstrumentation-python
+  #         * See version $VERSION in our PyPi repository:
+  #         https://pypi.org/project/aws-opentelemetry-distro/
 
-          ## Lambda Layer
+  #         ## Lambda Layer
 
-          This release includes the AWS OpenTelemetry Lambda Layer for Python version $VERSION-$(echo $GITHUB_SHA | cut -c1-7).
+  #         This release includes the AWS OpenTelemetry Lambda Layer for Python version $VERSION-$(echo $GITHUB_SHA | cut -c1-7).
 
-          **Note: the new Lambda Layer versions are not yet deployed to the Lambda and CloudWatch Application Signals consoles. You can add them to your Lambda functions using the AWS CLI.**
+  #         **Note: the new Lambda Layer versions are not yet deployed to the Lambda and CloudWatch Application Signals consoles. You can add them to your Lambda functions using the AWS CLI.**
 
-          Lambda Layer ARNs:
-          ${{ needs.generate-lambda-release-note.outputs.layer-note }}
-          EOF
+  #         Lambda Layer ARNs:
+  #         ${{ needs.generate-lambda-release-note.outputs.layer-note }}
+  #         EOF
 
-          shasum -a 256 ${{ env.WHEEL_ARTIFACT_NAME }} > ${{ env.WHEEL_ARTIFACT_NAME }}.sha256
-          shasum -a 256 layer.zip > layer.zip.sha256
+  #         shasum -a 256 ${{ env.WHEEL_ARTIFACT_NAME }} > ${{ env.WHEEL_ARTIFACT_NAME }}.sha256
+  #         shasum -a 256 layer.zip > layer.zip.sha256
 
-          gh release create --target "$GITHUB_REF_NAME" \
-             --title "Release v$VERSION" \
-             --notes-file release_notes.md \
-             --draft \
-             "v$VERSION" \
-             ${{ env.WHEEL_ARTIFACT_NAME }} \
-             ${{ env.WHEEL_ARTIFACT_NAME }}.sha256 \
-             layer.zip \
-             layer.zip.sha256
+  #         gh release create --target "$GITHUB_REF_NAME" \
+  #            --title "Release v$VERSION" \
+  #            --notes-file release_notes.md \
+  #            --draft \
+  #            "v$VERSION" \
+  #            ${{ env.WHEEL_ARTIFACT_NAME }} \
+  #            ${{ env.WHEEL_ARTIFACT_NAME }}.sha256 \
+  #            layer.zip \
+  #            layer.zip.sha256
