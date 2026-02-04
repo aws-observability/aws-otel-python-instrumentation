@@ -77,7 +77,7 @@ class _BaseWrapper(ABC):
         if context.get_value(context._SUPPRESS_INSTRUMENTATION_KEY):
             return wrapped(*args, **kwargs)
 
-        pre_call_state = self._before_call(instance, args, kwargs)
+        pre_call_state = self._before_call(instance, args, kwargs)  # pylint: disable=assignment-from-no-return
 
         with self._tracer.start_as_current_span(
             self._get_span_name(instance, args, kwargs),
@@ -374,7 +374,8 @@ class _NativeToolCallsWrapper(_BaseWrapper):
             return func_name, func_args
         return func_name, self._serialize_to_json(func_args) if func_args else None
 
-    def _find_tool_description(self, instance: Any, tool_name: Optional[str]) -> Optional[str]:
+    @staticmethod
+    def _find_tool_description(instance: Any, tool_name: Optional[str]) -> Optional[str]:
         if not tool_name:
             return None
 
