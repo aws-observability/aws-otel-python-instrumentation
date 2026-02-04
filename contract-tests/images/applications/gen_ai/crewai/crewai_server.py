@@ -23,32 +23,71 @@ _llm_call_count = 0
 class MockLLMHandler(BaseHTTPRequestHandler):
     # pylint: disable=invalid-name
     def do_POST(self):
+
+        # mocks LLM endpoint that simulates OpenAI chat completions.
+        # CrewAI agents call the LLM twice per task:
+        # First call: LLM returns a tool_call telling the agent which tool to use
+        # Second call: After tool execution, LLM returns the final text response
+
+        # For multi-agent scenarios, each agent has different tools. We parse the request
+        # body to see which tools are available to the calling agent, then return a
+        # tool_call for that agent's first tool.
+
         global _llm_call_count  # pylint: disable=global-statement
         _llm_call_count += 1
 
-        if _llm_call_count % 2 == 1:
-            content = (
-                "Thought: I should use the get_greeting tool.\n"
-                "Action: get_greeting\n"
-                'Action Input: {"name": "World"}'
-            )
-        else:
-            content = "Thought: I now know the final answer\nFinal Answer: Hello, World!"
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = json.loads(self.rfile.read(content_length).decode("utf-8")) if content_length > 0 else {}
+        tools = [t["function"]["name"] for t in body.get("tools", [])]
 
-        response = {
-            "id": "chatcmpl-mock",
-            "object": "chat.completion",
-            "created": 1234567890,
-            "model": "gpt-4",
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {"role": "assistant", "content": content},
-                    "finish_reason": "stop",
-                }
-            ],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+        mock_args = {
+            "get_greeting": '{"name": "World"}',
+            "format_message": '{"message": "Hello, World!"}',
         }
+
+        if _llm_call_count % 2 == 1:
+            response = {
+                "id": "chatcmpl-mock",
+                "object": "chat.completion",
+                "created": 1234567890,
+                "model": "gpt-4",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_mock_123",
+                                    "type": "function",
+                                    "function": {
+                                        "name": tools[0],
+                                        "arguments": mock_args.get(tools[0], "{}"),
+                                    },
+                                }
+                            ],
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+            }
+        else:
+            response = {
+                "id": "chatcmpl-mock",
+                "object": "chat.completion",
+                "created": 1234567890,
+                "model": "gpt-4",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "Hello, World!"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+            }
 
         self.send_response(200)
         self.send_header("Content-Type", "application/json")

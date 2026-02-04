@@ -10,26 +10,28 @@ from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumentor
 from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attributes import (
-    GEN_AI_AGENT_DESCRIPTION,
-    GEN_AI_AGENT_ID,
-    GEN_AI_AGENT_NAME,
-    GEN_AI_OPERATION_NAME,
     GEN_AI_PROVIDER_NAME,
-    GEN_AI_REQUEST_MAX_TOKENS,
-    GEN_AI_REQUEST_MODEL,
-    GEN_AI_REQUEST_TEMPERATURE,
     GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_DEFINITIONS,
-    GEN_AI_TOOL_DESCRIPTION,
-    GEN_AI_TOOL_NAME,
-    GEN_AI_TOOL_TYPE,
 )
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
+    GEN_AI_AGENT_DESCRIPTION,
+    GEN_AI_AGENT_ID,
+    GEN_AI_AGENT_NAME,
+    GEN_AI_OPERATION_NAME,
+    GEN_AI_REQUEST_MAX_TOKENS,
+    GEN_AI_REQUEST_MODEL,
+    GEN_AI_REQUEST_TEMPERATURE,
+    GEN_AI_TOOL_DESCRIPTION,
+    GEN_AI_TOOL_NAME,
+    GEN_AI_TOOL_TYPE,
+)
 
 
 # https://pypi.org/project/crewai/
@@ -106,13 +108,19 @@ class TestCrewAIInstrumentor(TestCase):
 
     def _run_crew_kickoff_test(self, model: str, provider: str, model_id: str):
         """Helper to test crew kickoff with different model providers."""
+        mock_tool_call = MagicMock()
+        mock_tool_call.id = "call_123"
+        mock_tool_call.function = MagicMock()
+        mock_tool_call.function.name = "get_greeting"
+        mock_tool_call.function.arguments = '{"name": "World"}'
+
         mock_llm = MagicMock()
         mock_llm.provider = model.split("/")[0] if "/" in model else None
         mock_llm.model = model_id
         mock_llm.temperature = 0.7
         mock_llm.max_tokens = 1024
         mock_llm.call.side_effect = [
-            'Thought: I should use the get_greeting tool.\nAction: get_greeting\nAction Input: {"name": "World"}',
+            [mock_tool_call],
             "Thought: I now know the final answer\nFinal Answer: Hello! Welcome!",
         ]
 

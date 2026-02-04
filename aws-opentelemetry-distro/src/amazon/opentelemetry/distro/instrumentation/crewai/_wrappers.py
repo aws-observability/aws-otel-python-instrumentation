@@ -6,24 +6,26 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Callable, Dict, Mapping, Optional, Tuple
 
 from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attributes import (
-    GEN_AI_AGENT_DESCRIPTION,
-    GEN_AI_AGENT_ID,
-    GEN_AI_AGENT_NAME,
-    GEN_AI_OPERATION_NAME,
     GEN_AI_PROVIDER_NAME,
-    GEN_AI_REQUEST_MAX_TOKENS,
-    GEN_AI_REQUEST_MODEL,
-    GEN_AI_REQUEST_TEMPERATURE,
     GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_DEFINITIONS,
+)
+from opentelemetry import context, trace
+from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
+    GEN_AI_AGENT_DESCRIPTION,
+    GEN_AI_AGENT_ID,
+    GEN_AI_AGENT_NAME,
+    GEN_AI_OPERATION_NAME,
+    GEN_AI_REQUEST_MAX_TOKENS,
+    GEN_AI_REQUEST_MODEL,
+    GEN_AI_REQUEST_TEMPERATURE,
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
 )
-from opentelemetry import context, trace
-from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
 if TYPE_CHECKING:
@@ -38,11 +40,6 @@ if TYPE_CHECKING:
 
 _OPERATION_INVOKE_AGENT = "invoke_agent"
 _OPERATION_EXECUTE_TOOL = "execute_tool"
-# default value for gen_ai.provider.name, a required attribute per OpenTelemetry
-# semantic conventions.
-# "crewai" is not a standard provider name in semconv v1.39, but serves as a fallback when the
-# underlying LLM provider cannot be determined.
-_PROVIDER_CREWAI = "crewai"
 
 
 class _BaseWrapper(ABC):
@@ -80,6 +77,8 @@ class _BaseWrapper(ABC):
         if context.get_value(context._SUPPRESS_INSTRUMENTATION_KEY):
             return wrapped(*args, **kwargs)
 
+        pre_call_state = self._before_call(instance, args, kwargs)
+
         with self._tracer.start_as_current_span(
             self._get_span_name(instance, args, kwargs),
             kind=SpanKind.INTERNAL,
@@ -87,7 +86,7 @@ class _BaseWrapper(ABC):
         ) as span:
             try:
                 result = wrapped(*args, **kwargs)
-                self._on_success(span, result)
+                self._on_success(span, result, instance, pre_call_state)
                 span.set_status(Status(StatusCode.OK))
                 return result
             except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -96,8 +95,17 @@ class _BaseWrapper(ABC):
                 span.record_exception(exc)
                 raise
 
+    def _set_agent_llm_attributes(self, attributes: Dict[str, Any], agent: Any) -> None:
+        if not agent:
+            return
+        llm = getattr(agent, "llm", None)
+        provider, model = self._extract_provider_and_model(llm)
+        if provider:
+            attributes[GEN_AI_PROVIDER_NAME] = provider
+        if model:
+            attributes[GEN_AI_REQUEST_MODEL] = model
+
     def _extract_provider_and_model(self, llm: Optional["LLM"]) -> Tuple[Optional[str], Optional[str]]:
-        # extracts provider name and model from CrewAI LLM object
         if not llm:
             return None, None
 
@@ -143,7 +151,11 @@ class _BaseWrapper(ABC):
     def _get_attributes(self, instance: Any, args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> Dict[str, Any]:
         pass
 
-    def _on_success(self, span: trace.Span, result: Any) -> None:
+    def _before_call(self, instance: Any, args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> Any:
+        """Hook called before wrapped function execution. Returns state to pass to _on_success."""
+        return None
+
+    def _on_success(self, span: trace.Span, result: Any, instance: Any = None, pre_call_state: Any = None) -> None:
         """Hook called on successful execution."""
 
 
@@ -221,7 +233,6 @@ class _TaskExecuteCoreWrapper(_BaseWrapper):
         agent: Optional[Agent] = args[0] if args else kwargs.get("agent")
         attributes: Dict[str, Any] = {
             GEN_AI_OPERATION_NAME: _OPERATION_INVOKE_AGENT,
-            GEN_AI_PROVIDER_NAME: _PROVIDER_CREWAI,
         }
 
         if agent:
@@ -235,13 +246,9 @@ class _TaskExecuteCoreWrapper(_BaseWrapper):
             if goal:
                 attributes[GEN_AI_AGENT_DESCRIPTION] = goal
 
-            llm: Optional[LLM] = getattr(agent, "llm", None)
-            provider, model = self._extract_provider_and_model(llm)
-            if provider:
-                attributes[GEN_AI_PROVIDER_NAME] = provider
-            if model:
-                attributes[GEN_AI_REQUEST_MODEL] = model
+            self._set_agent_llm_attributes(attributes, agent)
 
+            llm = getattr(agent, "llm", None)
             if llm:
                 temperature = getattr(llm, "temperature", None)
                 if temperature is not None:
@@ -274,7 +281,6 @@ class _ToolUseWrapper(_BaseWrapper):
         calling: Optional[ToolCalling] = args[2] if len(args) > 2 else kwargs.get("calling")
         attributes: Dict[str, Any] = {
             GEN_AI_OPERATION_NAME: _OPERATION_EXECUTE_TOOL,
-            GEN_AI_PROVIDER_NAME: _PROVIDER_CREWAI,
             GEN_AI_TOOL_TYPE: "function",
         }
 
@@ -291,17 +297,97 @@ class _ToolUseWrapper(_BaseWrapper):
             if call_args:
                 attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = self._serialize_to_json(call_args)
 
-        agent: Optional[Agent] = getattr(instance, "agent", None)
-        if agent:
-            llm: Optional[LLM] = getattr(agent, "llm", None)
-            provider, model = self._extract_provider_and_model(llm)
-            if provider:
-                attributes[GEN_AI_PROVIDER_NAME] = provider
-            if model:
-                attributes[GEN_AI_REQUEST_MODEL] = model
+        self._set_agent_llm_attributes(attributes, getattr(instance, "agent", None))
 
         return attributes
 
-    def _on_success(self, span: trace.Span, result: Any) -> None:
+    def _on_success(self, span: trace.Span, result: Any, instance: Any = None, pre_call_state: Any = None) -> None:
         if result is not None:
             span.set_attribute(GEN_AI_TOOL_CALL_RESULT, self._serialize_to_json(result))
+
+
+class _NativeToolCallsWrapper(_BaseWrapper):
+    # tool execution for native tool calls which is a model's built-in capability to recognize when it needs external data or actions,
+    # returning structured data to invoke APIs or functions, rather than just generating text was introduced in
+    # CrewAI >= 1.9.0: https://github.com/crewAIInc/crewAI/releases/tag/1.9.0
+    # Currently supported for OpenAI, Gemini and Anthropic models
+
+    def _before_call(self, instance: Any, args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> int:
+        """Capture message count before execution."""
+        return len(getattr(instance, "messages", []))
+
+    def _on_success(self, span: trace.Span, result: Any, instance: Any = None, pre_call_state: Any = None) -> None:
+        """Extract tool result from messages added during execution."""
+        if instance is None or pre_call_state is None:
+            return
+        messages = getattr(instance, "messages", [])
+        for msg in messages[pre_call_state:]:
+            if isinstance(msg, dict) and msg.get("role") == "tool":
+                tool_result = msg.get("content")
+                if tool_result:
+                    span.set_attribute(GEN_AI_TOOL_CALL_RESULT, self._serialize_to_json(tool_result))
+                break
+
+    def _get_span_name(self, instance: Any, args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> str:
+        tool_calls = args[0] if args else kwargs.get("tool_calls", [])
+        tool_name, _ = self._extract_tool_info(tool_calls)
+        return f"{_OPERATION_EXECUTE_TOOL} {tool_name}" if tool_name else _OPERATION_EXECUTE_TOOL
+
+    def _get_attributes(self, instance: Any, args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> Dict[str, Any]:
+        tool_calls = args[0] if args else kwargs.get("tool_calls", [])
+        tool_name, tool_args = self._extract_tool_info(tool_calls)
+
+        attributes: Dict[str, Any] = {
+            GEN_AI_OPERATION_NAME: _OPERATION_EXECUTE_TOOL,
+            GEN_AI_TOOL_TYPE: "function",
+        }
+
+        if tool_name:
+            attributes[GEN_AI_TOOL_NAME] = tool_name
+
+        if tool_args:
+            attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = tool_args
+
+        tool_desc = self._find_tool_description(instance, tool_name)
+        if tool_desc:
+            attributes[GEN_AI_TOOL_DESCRIPTION] = tool_desc
+
+        self._set_agent_llm_attributes(attributes, getattr(instance, "agent", None))
+
+        return attributes
+
+    def _extract_tool_info(self, tool_calls: list) -> Tuple[Optional[str], Optional[str]]:
+        if not tool_calls:
+            return None, None
+
+        from crewai.utilities.agent_utils import extract_tool_call_info
+
+        result = extract_tool_call_info(tool_calls[0])
+        if not result:
+            return None, None
+
+        _, func_name, func_args = result
+        if isinstance(func_args, str):
+            return func_name, func_args
+        return func_name, self._serialize_to_json(func_args) if func_args else None
+
+    def _find_tool_description(self, instance: Any, tool_name: Optional[str]) -> Optional[str]:
+        if not tool_name:
+            return None
+
+        from crewai.utilities.string_utils import sanitize_tool_name
+
+        # tool_name is already sanitized by extract_tool_call_info, but we need to sanitize
+        # the tool names from the tool lists for comparison
+        for tools_attr in ("original_tools", "tools"):
+            for tool in getattr(instance, tools_attr, None) or []:
+                if sanitize_tool_name(getattr(tool, "name", "") or "") == tool_name:
+                    return getattr(tool, "description", None)
+
+        agent = getattr(instance, "agent", None)
+        if agent:
+            for tool in getattr(agent, "tools", None) or []:
+                if sanitize_tool_name(getattr(tool, "name", "") or "") == tool_name:
+                    return getattr(tool, "description", None)
+
+        return None

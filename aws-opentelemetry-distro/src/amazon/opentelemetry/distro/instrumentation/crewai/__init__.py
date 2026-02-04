@@ -6,6 +6,7 @@ from wrapt import wrap_function_wrapper
 
 from amazon.opentelemetry.distro.instrumentation.crewai._wrappers import (
     _CrewKickoffWrapper,
+    _NativeToolCallsWrapper,
     _TaskExecuteCoreWrapper,
     _ToolUseWrapper,
 )
@@ -25,9 +26,8 @@ class CrewAIInstrumentor(BaseInstrumentor):
     """
 
     def instrumentation_dependencies(self) -> Collection[str]:  # pylint: disable=no-self-use
-        return ("crewai >= 0.41.0",)
+        return ("crewai >= 1.9.0",)
 
-    # disabling these linters rules as these are instance methods from BaseInstrumentor
     def _instrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
@@ -35,12 +35,19 @@ class CrewAIInstrumentor(BaseInstrumentor):
         wrap_function_wrapper("crewai", "Crew.kickoff", _CrewKickoffWrapper(tracer))
         wrap_function_wrapper("crewai", "Task._execute_core", _TaskExecuteCoreWrapper(tracer))
         wrap_function_wrapper("crewai.tools.tool_usage", "ToolUsage._use", _ToolUseWrapper(tracer))
+        wrap_function_wrapper(
+            "crewai.agents.crew_agent_executor",
+            "CrewAgentExecutor._handle_native_tool_calls",
+            _NativeToolCallsWrapper(tracer),
+        )
 
     def _uninstrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
         # pylint: disable=import-outside-toplevel
         import crewai
+        from crewai.agents import crew_agent_executor
         from crewai.tools import tool_usage
 
         unwrap(crewai.Crew, "kickoff")
         unwrap(crewai.Task, "_execute_core")
         unwrap(tool_usage.ToolUsage, "_use")
+        unwrap(crew_agent_executor.CrewAgentExecutor, "_handle_native_tool_calls")
