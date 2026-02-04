@@ -118,7 +118,6 @@ jobs:
         with:
           aws-region: ${{ env.AWS_DEFAULT_REGION }}
           snapshot-ecr-role: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
-          python_version: "3.12"
           layer_directory: lambda-layer
           staging_s3_bucket: ${{ secrets.STAGING_BUCKET_NAME }}
           os: ubuntu-latest
@@ -147,6 +146,7 @@ jobs:
 
       - name: Set up and run contract tests
         run: |
+          pip install build
           bash scripts/set-up-contract-tests.sh
           pytest contract-tests/tests
 
