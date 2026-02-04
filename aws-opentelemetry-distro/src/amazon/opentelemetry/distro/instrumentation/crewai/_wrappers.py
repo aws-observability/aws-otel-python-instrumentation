@@ -307,9 +307,10 @@ class _ToolUseWrapper(_BaseWrapper):
 
 
 class _NativeToolCallsWrapper(_BaseWrapper):
-    # tool execution for native tool calls which is a model's built-in capability to recognize when it needs external data or actions,
-    # returning structured data to invoke APIs or functions, rather than just generating text was introduced in
-    # CrewAI >= 1.9.0: https://github.com/crewAIInc/crewAI/releases/tag/1.9.0
+    # Tool execution for native tool calls which is a model's built-in capability to recognize
+    # when it needs external data or actions, returning structured data to invoke APIs or functions,
+    # rather than just generating text was introduced in CrewAI >= 1.9.0:
+    # https://github.com/crewAIInc/crewAI/releases/tag/1.9.0
     # Currently supported for OpenAI, Gemini and Anthropic models
 
     def _before_call(self, instance: Any, args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> int:
