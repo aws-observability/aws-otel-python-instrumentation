@@ -9,8 +9,6 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_AGENT_ID,
     AWS_BEDROCK_DATA_SOURCE_ID,
     AWS_BEDROCK_GUARDRAIL_ARN,
-    AWS_BEDROCK_GUARDRAIL_ID,
-    AWS_BEDROCK_KNOWLEDGE_BASE_ID,
 )
 from opentelemetry.instrumentation.botocore.extensions.types import (
     _AttributeMapT,
@@ -18,6 +16,10 @@ from opentelemetry.instrumentation.botocore.extensions.types import (
     _AwsSdkExtension,
     _BotocoreInstrumentorContext,
     _BotoResultT,
+)
+from opentelemetry.semconv._incubating.attributes.aws_attributes import (
+    AWS_BEDROCK_GUARDRAIL_ID,
+    AWS_BEDROCK_KNOWLEDGE_BASE_ID,
 )
 from opentelemetry.trace.span import Span
 

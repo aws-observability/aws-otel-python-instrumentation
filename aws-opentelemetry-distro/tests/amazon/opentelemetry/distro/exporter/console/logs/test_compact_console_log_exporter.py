@@ -3,14 +3,16 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import CompactConsoleLogExporter
-from opentelemetry.sdk._logs.export import LogExportResult
+from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import (
+    CompactConsoleLogRecordExporter,
+)
+from opentelemetry.sdk._logs.export import LogRecordExportResult
 
 
-class TestCompactConsoleLogExporter(unittest.TestCase):
+class TestCompactConsoleLogRecordExporter(unittest.TestCase):
 
     def setUp(self):
-        self.exporter = CompactConsoleLogExporter()
+        self.exporter = CompactConsoleLogRecordExporter()
 
     @patch("builtins.print")
     def test_export_compresses_json(self, mock_print):
@@ -27,7 +29,7 @@ class TestCompactConsoleLogExporter(unittest.TestCase):
         result = self.exporter.export([mock_log_data])
 
         # Verify result
-        self.assertEqual(result, LogExportResult.SUCCESS)
+        self.assertEqual(result, LogRecordExportResult.SUCCESS)
 
         # Verify print calls
         self.assertEqual(mock_print.call_count, 1)
@@ -50,7 +52,7 @@ class TestCompactConsoleLogExporter(unittest.TestCase):
         result = self.exporter.export([mock_log_data1, mock_log_data2])
 
         # Verify result
-        self.assertEqual(result, LogExportResult.SUCCESS)
+        self.assertEqual(result, LogRecordExportResult.SUCCESS)
 
         # Verify print calls
         self.assertEqual(mock_print.call_count, 2)  # 2 records
@@ -64,7 +66,7 @@ class TestCompactConsoleLogExporter(unittest.TestCase):
         result = self.exporter.export([])
 
         # Verify result
-        self.assertEqual(result, LogExportResult.SUCCESS)
+        self.assertEqual(result, LogRecordExportResult.SUCCESS)
 
         # Verify print calls
         mock_print.assert_not_called()  # No records, no prints
