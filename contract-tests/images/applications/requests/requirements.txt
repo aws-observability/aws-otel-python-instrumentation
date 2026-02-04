@@ -1,2 +1,2 @@
-typing-extensions==4.12.2
+typing-extensions==4.15.0
 requests~=2.0
