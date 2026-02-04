@@ -1380,7 +1380,6 @@ class BotocoreTest(ContractTestBase):
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
             if resource_scope_span.span.kind == expected_span_kind:
-                if expected_span_name is None or resource_scope_span.span.name == expected_span_name:
                     target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
@@ -1456,7 +1455,6 @@ class BotocoreTest(ContractTestBase):
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
             if resource_scope_span.span.kind == expected_span_kind:
-                if expected_span_name is None or resource_scope_span.span.name == expected_span_name:
                     target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
