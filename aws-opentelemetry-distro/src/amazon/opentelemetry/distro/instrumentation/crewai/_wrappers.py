@@ -309,9 +309,7 @@ class _ToolRunWrapper(_BaseWrapper):
         tool_name = getattr(instance, "name", None)
         return f"{_OPERATION_EXECUTE_TOOL} {tool_name}" if tool_name else _OPERATION_EXECUTE_TOOL
 
-    def _get_attributes(
-        self, instance: "BaseTool", args: Tuple[Any, ...], kwargs: Mapping[str, Any]
-    ) -> Dict[str, Any]:
+    def _get_attributes(self, instance: "BaseTool", args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> Dict[str, Any]:
         attributes: Dict[str, Any] = {
             GEN_AI_OPERATION_NAME: _OPERATION_EXECUTE_TOOL,
             GEN_AI_TOOL_TYPE: "function",
