@@ -14,12 +14,6 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 - Add native CrewAI instrumentation support
   ([#586](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/586))
-- fix: Pin protobuf version to prevent Any recursion depth bypass (CVE-2026-0994)
-  ([#602](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/602))
-- fix: Ensure AlwaysRecordSampler respects root sampling result attributes
-  ([#594](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/594))
-- Adaptive Sampling support
-  ([#576](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/576))
 - Fix: Support new fields in X-Ray API responses
   ([#577](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/577))
 - Sign Lambda layer by AWS Signer
@@ -43,23 +37,6 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   ([#572](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/572))
 - Add cloud.platform attribute to resource attributes in lambda
   ([#561](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/561))
-- Bump OTel dependencies to 1.39.1/0.60b1
-  ([#596](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/596))
-
-## v0.14.2 - 2026-01-15
-- Fix: Support new fields in X-Ray API responses
-  ([#577](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/577))
-- Fix CVE-2025-66471 and CVE-2026-21441. No associated PR since `urllib3` dependency will auto-bump to the latest `2.6.x` version upon release.
-- Add cloud.platform attribute to resource attributes in lambda
-  ([#561](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/561))
-- Sign Lambda layer by AWS Signer
-  ([#573](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/573))
-- Update opentelemetry-sdk-extension-aws to version 2.1.0, and remove unneeded Resource Detector patches
-  ([#572](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/572))
-- Support PyPI Signature
-  ([#571](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/571))
-- Remove redundant environment variable configuration in Lambda layer
-  ([#570](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/570))
 
 ## v0.14.1 - 2025-12-15
 - Add custom ADOT UserAgent for OTLP Spans Exporter
@@ -84,8 +61,6 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
     ([#497](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/497))
 - Fix timeout handling for exceeded deadline in retry logic in OTLPAwsLogsExporter
   ([#501](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/501))
-- Fix: Unable to run ADOT Python unit tests with latest Tox release
-  ([#521](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/521))
 - Fix Gevent patch regression with correct import order
   ([#522](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/522))
 - Support credentials provider name for BedrockAgentCore Identity

@@ -8,15 +8,10 @@ import requests
 from requests.structures import CaseInsensitiveDict
 
 from amazon.opentelemetry.distro._utils import get_aws_session
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import (
-    _MAX_RETRYS,
-    OTLPAwsLogRecordExporter,
-)
-from opentelemetry._logs._internal import LogRecord
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import _MAX_RETRYS, OTLPAwsLogExporter
 from opentelemetry._logs.severity import SeverityNumber
-from opentelemetry.sdk._logs import ReadableLogRecord
-from opentelemetry.sdk._logs.export import LogRecordExportResult
-from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk._logs import LogData, LogRecord
+from opentelemetry.sdk._logs.export import LogExportResult
 from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 from opentelemetry.trace import TraceFlags
 
@@ -26,9 +21,7 @@ class TestOTLPAwsLogsExporter(TestCase):
 
     def setUp(self):
         self.logs = self.generate_test_log_data()
-        self.exporter = OTLPAwsLogRecordExporter(
-            session=get_aws_session(), aws_region="us-east-1", endpoint=self._ENDPOINT
-        )
+        self.exporter = OTLPAwsLogExporter(session=get_aws_session(), aws_region="us-east-1", endpoint=self._ENDPOINT)
 
         self.good_response = requests.Response()
         self.good_response.status_code = 200
@@ -58,7 +51,7 @@ class TestOTLPAwsLogsExporter(TestCase):
         _, kwargs = mock_request.call_args
         data = kwargs.get("data", None)
 
-        self.assertEqual(result, LogRecordExportResult.SUCCESS)
+        self.assertEqual(result, LogExportResult.SUCCESS)
 
         # Gzip first 10 bytes are reserved for metadata headers:
         # https://www.loc.gov/preservation/digital/formats/fdd/fdd000599.shtml?loclr=blogsig
@@ -74,7 +67,7 @@ class TestOTLPAwsLogsExporter(TestCase):
         result = self.exporter.export(self.logs)
 
         mock_request.assert_not_called()
-        self.assertEqual(result, LogRecordExportResult.FAILURE)
+        self.assertEqual(result, LogExportResult.FAILURE)
 
     @patch("requests.Session.post")
     def test_should_not_export_again_if_not_retryable(self, mock_request):
@@ -83,7 +76,7 @@ class TestOTLPAwsLogsExporter(TestCase):
         result = self.exporter.export(self.logs)
         mock_request.assert_called_once()
 
-        self.assertEqual(result, LogRecordExportResult.FAILURE)
+        self.assertEqual(result, LogExportResult.FAILURE)
 
     @patch(
         "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter.Event.wait",
@@ -112,7 +105,7 @@ class TestOTLPAwsLogsExporter(TestCase):
             self.assertLessEqual(actual_delay, expected_base * 1.2)
 
         self.assertEqual(mock_request.call_count, _MAX_RETRYS)
-        self.assertEqual(result, LogRecordExportResult.FAILURE)
+        self.assertEqual(result, LogExportResult.FAILURE)
 
     @patch(
         "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter.Event.wait",
@@ -141,7 +134,7 @@ class TestOTLPAwsLogsExporter(TestCase):
 
         self.assertEqual(mock_wait.call_count, 3)
         self.assertEqual(mock_request.call_count, 4)
-        self.assertEqual(result, LogRecordExportResult.SUCCESS)
+        self.assertEqual(result, LogExportResult.SUCCESS)
 
     @patch(
         "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter.Event.wait",
@@ -176,7 +169,7 @@ class TestOTLPAwsLogsExporter(TestCase):
 
         self.assertEqual(mock_wait.call_count, 3)
         self.assertEqual(mock_request.call_count, 4)
-        self.assertEqual(result, LogRecordExportResult.SUCCESS)
+        self.assertEqual(result, LogExportResult.SUCCESS)
 
     @patch("requests.Session.post")
     def test_export_connection_error_retry(self, mock_request):
@@ -185,7 +178,7 @@ class TestOTLPAwsLogsExporter(TestCase):
         result = self.exporter.export(self.logs)
 
         self.assertEqual(mock_request.call_count, 2)
-        self.assertEqual(result, LogRecordExportResult.SUCCESS)
+        self.assertEqual(result, LogExportResult.SUCCESS)
 
     @patch(
         "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter.Event.wait",
@@ -206,7 +199,7 @@ class TestOTLPAwsLogsExporter(TestCase):
             # Should stop before max retries due to deadline
             self.assertLess(mock_wait.call_count, _MAX_RETRYS)
             self.assertLess(mock_request.call_count, _MAX_RETRYS + 1)
-            self.assertEqual(result, LogRecordExportResult.FAILURE)
+            self.assertEqual(result, LogExportResult.FAILURE)
 
             # Verify total time passed is at the timeout limit
             self.assertGreaterEqual(5, self.exporter._timeout)
@@ -227,7 +220,7 @@ class TestOTLPAwsLogsExporter(TestCase):
 
         # Should make one request, then get interrupted during retry wait
         self.assertEqual(mock_request.call_count, 1)
-        self.assertEqual(result, LogRecordExportResult.FAILURE)
+        self.assertEqual(result, LogExportResult.FAILURE)
 
     @patch("requests.Session.post")
     def test_export_with_log_group_and_stream_headers(self, mock_request):
@@ -236,7 +229,7 @@ class TestOTLPAwsLogsExporter(TestCase):
         log_group = "test-log-group"
         log_stream = "test-log-stream"
 
-        exporter = OTLPAwsLogRecordExporter(
+        exporter = OTLPAwsLogExporter(
             session=get_aws_session(),
             aws_region="us-east-1",
             endpoint=self._ENDPOINT,
@@ -247,7 +240,7 @@ class TestOTLPAwsLogsExporter(TestCase):
         result = exporter.export(self.logs)
 
         mock_request.assert_called_once()
-        self.assertEqual(result, LogRecordExportResult.SUCCESS)
+        self.assertEqual(result, LogExportResult.SUCCESS)
 
         # Verify headers contain log group and stream
         session_headers = exporter._session.headers
@@ -265,7 +258,7 @@ class TestOTLPAwsLogsExporter(TestCase):
 
         # Should not make any HTTP requests
         mock_request.assert_not_called()
-        self.assertEqual(result, LogRecordExportResult.FAILURE)
+        self.assertEqual(result, LogExportResult.FAILURE)
 
     @staticmethod
     def generate_test_log_data(count=5):
@@ -282,11 +275,7 @@ class TestOTLPAwsLogsExporter(TestCase):
                 attributes={"test.attribute": f"value-{index + 1}"},
             )
 
-            log_data = ReadableLogRecord(
-                log_record=record,
-                resource=Resource.create(),
-                instrumentation_scope=InstrumentationScope("test-scope", "1.0.0"),
-            )
+            log_data = LogData(log_record=record, instrumentation_scope=InstrumentationScope("test-scope", "1.0.0"))
 
             logs.append(log_data)
 

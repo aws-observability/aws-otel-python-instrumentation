@@ -18,16 +18,15 @@ from requests.structures import CaseInsensitiveDict
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 from opentelemetry.exporter.otlp.proto.common._log_encoder import encode_logs
 from opentelemetry.exporter.otlp.proto.http import Compression
-from opentelemetry.exporter.otlp.proto.http._common import _is_retryable
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
-from opentelemetry.sdk._logs import ReadableLogRecord
-from opentelemetry.sdk._logs.export import LogRecordExportResult
+from opentelemetry.sdk._logs import LogData
+from opentelemetry.sdk._logs.export import LogExportResult
 
 _logger = logging.getLogger(__name__)
 _MAX_RETRYS = 6
 
 
-class OTLPAwsLogRecordExporter(OTLPLogExporter):
+class OTLPAwsLogExporter(OTLPLogExporter):
     """
     This exporter extends the functionality of the OTLPLogExporter to allow logs to be exported
     to the CloudWatch Logs OTLP endpoint https://logs.[AWSRegion].amazonaws.com/v1/logs. Utilizes the aws-sdk
@@ -73,7 +72,7 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
         )
         self._shutdown_event = Event()
 
-    def export(self, batch: Sequence[ReadableLogRecord]) -> LogRecordExportResult:
+    def export(self, batch: Sequence[LogData]) -> LogExportResult:
         """
         Exports log batch with AWS-specific enhancements over the base OTLPLogExporter.
 
@@ -88,7 +87,7 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
 
         if self._shutdown:
             _logger.warning("Exporter already shutdown, ignoring batch")
-            return LogRecordExportResult.FAILURE
+            return LogExportResult.FAILURE
 
         serialized_data = encode_logs(batch).SerializeToString()
         gzip_data = BytesIO()
@@ -110,12 +109,12 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
             remaining_time = deadline_sec - time()
             if remaining_time <= 0:
                 _logger.error("Timeout deadline exceeded before attempt.")
-                return LogRecordExportResult.FAILURE
+                return LogExportResult.FAILURE
 
             resp = self._send(data, remaining_time)
 
             if resp.ok:
-                return LogRecordExportResult.SUCCESS
+                return LogExportResult.SUCCESS
 
             backoff_seconds = self._get_retry_delay_sec(resp.headers, retry_num)
             is_retryable = self._retryable(resp)
@@ -126,7 +125,7 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
                     resp.status_code,
                     resp.text,
                 )
-                return LogRecordExportResult.FAILURE
+                return LogExportResult.FAILURE
 
             _logger.warning(
                 "Transient error %s encountered while exporting logs batch, retrying in %.2fs.",
@@ -136,7 +135,7 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
             # Use interruptible sleep that can be interrupted by shutdown
             if self._shutdown_event.wait(backoff_seconds):
                 _logger.info("Export interrupted by shutdown")
-                return LogRecordExportResult.FAILURE
+                return LogExportResult.FAILURE
 
             retry_num += 1
 
@@ -172,7 +171,7 @@ class OTLPAwsLogRecordExporter(OTLPLogExporter):
         """
         # See: https://opentelemetry.io/docs/specs/otlp/#otlphttp-throttling
 
-        return resp.status_code in (429, 503) or _is_retryable(resp)
+        return resp.status_code in (429, 503) or OTLPLogExporter._retryable(resp)
 
     def _get_retry_delay_sec(self, headers: CaseInsensitiveDict, retry_num: int) -> float:
         """

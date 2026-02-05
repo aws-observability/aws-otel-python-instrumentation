@@ -9,14 +9,13 @@ from amazon.opentelemetry.distro.sampler._matcher import _Matcher, cloud_platfor
 from amazon.opentelemetry.distro.sampler._rate_limiting_sampler import _RateLimitingSampler
 from amazon.opentelemetry.distro.sampler._sampling_rule import _SamplingRule
 from amazon.opentelemetry.distro.sampler._sampling_statistics_document import _SamplingStatisticsDocument
-from amazon.opentelemetry.distro.sampler._sampling_target import _SamplingBoost, _SamplingTarget
+from amazon.opentelemetry.distro.sampler._sampling_target import _SamplingTarget
 from opentelemetry.context import Context
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import ReadableSpan
-from opentelemetry.sdk.trace.sampling import Decision, ParentBased, Sampler, SamplingResult, TraceIdRatioBased
+from opentelemetry.sdk.trace.sampling import Decision, Sampler, SamplingResult, TraceIdRatioBased
 from opentelemetry.semconv.resource import CloudPlatformValues, ResourceAttributes
 from opentelemetry.semconv.trace import SpanAttributes
-from opentelemetry.trace import Link, SpanKind, get_current_span
+from opentelemetry.trace import Link, SpanKind
 from opentelemetry.trace.span import TraceState
 from opentelemetry.util.types import Attributes
 
@@ -25,40 +24,25 @@ class _SamplingRuleApplier:
     def __init__(
         self,
         sampling_rule: _SamplingRule,
-        service_name: str,
         client_id: str,
         clock: _Clock,
-        last_boost: Optional[_SamplingBoost] = None,
-        statistics: Optional[_SamplingStatisticsDocument] = None,
-        target: Optional[_SamplingTarget] = None,
+        statistics: _SamplingStatisticsDocument = None,
+        target: _SamplingTarget = None,
     ):
         self.__client_id = client_id
         self._clock = clock
         self.sampling_rule = sampling_rule
-        self.service_name = service_name
 
         if statistics is None:
-            self.__statistics = _SamplingStatisticsDocument(
-                self.__client_id, self.sampling_rule.RuleName, self.service_name
-            )
+            self.__statistics = _SamplingStatisticsDocument(self.__client_id, self.sampling_rule.RuleName)
         else:
             self.__statistics = statistics
         self.__statistics_lock = Lock()
 
         self.__borrowing = False
 
-        # Initialize boost attributes based on previous boost
-        self.__has_boost: bool = self.sampling_rule.SamplingRateBoost is not None
-        self.__last_boost: Optional[_SamplingBoost] = last_boost
-        if self.__last_boost is not None:
-            self.__boosted_fixed_rate_sampler = ParentBased(TraceIdRatioBased(self.__last_boost.BoostRate))
-            self.__boost_end_time = self._clock.from_timestamp(self.__last_boost.BoostRateTTL)
-        else:
-            self.__boosted_fixed_rate_sampler: Sampler = ParentBased(TraceIdRatioBased(self.sampling_rule.FixedRate))
-            self.__boost_end_time = self._clock.now()  # Start without boost
-
         if target is None:
-            self.__fixed_rate_sampler = ParentBased(TraceIdRatioBased(self.sampling_rule.FixedRate))
+            self.__fixed_rate_sampler = TraceIdRatioBased(self.sampling_rule.FixedRate)
             # Until targets are fetched, initialize as borrowing=True if there will be a quota > 0
             if self.sampling_rule.ReservoirSize > 0:
                 self.__reservoir_sampler = self.__create_reservoir_sampler(quota=1)
@@ -71,15 +55,12 @@ class _SamplingRuleApplier:
             new_quota = target.ReservoirQuota if target.ReservoirQuota is not None else 0
             new_fixed_rate = target.FixedRate if target.FixedRate is not None else 0
             self.__reservoir_sampler = self.__create_reservoir_sampler(quota=new_quota)
-            self.__fixed_rate_sampler = ParentBased(TraceIdRatioBased(new_fixed_rate))
+            self.__fixed_rate_sampler = TraceIdRatioBased(new_fixed_rate)
             if target.ReservoirQuotaTTL is not None:
                 self.__reservoir_expiry = self._clock.from_timestamp(target.ReservoirQuotaTTL)
             else:
                 # assume expired if no TTL
                 self.__reservoir_expiry = self._clock.now()
-            if target.SamplingBoost is not None:
-                self.__boosted_fixed_rate_sampler = ParentBased(TraceIdRatioBased(target.SamplingBoost.BoostRate))
-                self.__boost_end_time = self._clock.from_timestamp(target.SamplingBoost.BoostRateTTL)
 
     def should_sample(
         self,
@@ -105,72 +86,28 @@ class _SamplingRuleApplier:
             has_borrowed = self.__borrowing
             has_sampled = True
         else:
-            if self._clock.now() < self.__boost_end_time:
-                sampling_result = self.__boosted_fixed_rate_sampler.should_sample(
-                    parent_context,
-                    trace_id,
-                    name,
-                    kind=kind,
-                    attributes=attributes,
-                    links=links,
-                    trace_state=trace_state,
-                )
-            else:
-                sampling_result = self.__fixed_rate_sampler.should_sample(
-                    parent_context,
-                    trace_id,
-                    name,
-                    kind=kind,
-                    attributes=attributes,
-                    links=links,
-                    trace_state=trace_state,
-                )
+            sampling_result = self.__fixed_rate_sampler.should_sample(
+                parent_context, trace_id, name, kind=kind, attributes=attributes, links=links, trace_state=trace_state
+            )
             if sampling_result.decision is not Decision.DROP:
                 has_sampled = True
 
-        # Only emit statistics for spans for which a sampling decision is being made actively
-        # i.e. the root span of a call chain
-        if not get_current_span(parent_context).get_span_context().is_valid:
-            with self.__statistics_lock:
-                self.__statistics.RequestCount += 1
-                self.__statistics.BorrowCount += 1 if has_borrowed else 0
-                self.__statistics.SampleCount += 1 if has_sampled else 0
+        with self.__statistics_lock:
+            self.__statistics.RequestCount += 1
+            self.__statistics.BorrowCount += 1 if has_borrowed else 0
+            self.__statistics.SampleCount += 1 if has_sampled else 0
 
         return sampling_result
 
-    def has_boost(self) -> bool:
-        return self.__has_boost
-
-    def count_trace(self) -> None:
-        with self.__statistics_lock:
-            self.__statistics.TotalCount += 1
-
-    def count_anomaly_trace(self, span: ReadableSpan) -> None:
-        with self.__statistics_lock:
-            self.__statistics.AnomalyCount += 1
-
-            if span.context.trace_flags.sampled:
-                self.__statistics.SampledAnomalyCount += 1
-
-    def get_then_reset_statistics(self) -> tuple[dict, dict]:
+    def get_then_reset_statistics(self) -> dict:
         with self.__statistics_lock:
             old_stats = self.__statistics
-            self.__statistics = _SamplingStatisticsDocument(
-                self.__client_id, self.sampling_rule.RuleName, self.service_name
-            )
+            self.__statistics = _SamplingStatisticsDocument(self.__client_id, self.sampling_rule.RuleName)
 
         return old_stats.snapshot(self._clock)
 
     def with_target(self, target: _SamplingTarget) -> "_SamplingRuleApplier":
-        new_applier = _SamplingRuleApplier(
-            self.sampling_rule,
-            self.service_name,
-            self.__client_id,
-            self._clock,
-            self.__last_boost,
-            self.__statistics,
-            target,
-        )
+        new_applier = _SamplingRuleApplier(self.sampling_rule, self.__client_id, self._clock, self.__statistics, target)
         return new_applier
 
     def matches(self, resource: Resource, attributes: Attributes) -> bool:
@@ -222,7 +159,7 @@ class _SamplingRuleApplier:
         )
 
     def __create_reservoir_sampler(self, quota: int) -> Sampler:
-        return ParentBased(_RateLimitingSampler(quota, self._clock))
+        return _RateLimitingSampler(quota, self._clock)
 
     # pylint: disable=no-self-use
     def __get_service_type(self, resource: Resource) -> str:

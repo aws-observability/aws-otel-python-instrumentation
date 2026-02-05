@@ -1,2 +1,2 @@
-typing-extensions==4.15.0
+typing-extensions==4.12.2
 mysqlclient==2.2.4

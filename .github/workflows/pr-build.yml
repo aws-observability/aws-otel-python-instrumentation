@@ -119,8 +119,6 @@ jobs:
           python_version: ${{ matrix.python-version }}
           package_name: aws-opentelemetry-distro
           os: ubuntu-latest
-          trivyignore-file: .github/trivy/pr-build.trivyignore.yaml
-          platforms: linux/amd64
 
       - name: Set up and run contract tests with pytest
         run: |

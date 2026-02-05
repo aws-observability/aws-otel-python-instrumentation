@@ -81,10 +81,3 @@ class TestRateLimitingSampler(TestCase):
             if sampler.should_sample(None, 1234, "name").decision != Decision.DROP:
                 sampled += 1
         self.assertEqual(sampled, 1)
-
-    def test_get_description(self):
-        sampler = _RateLimitingSampler(1, MockClock())
-        self.assertEqual(
-            sampler.get_description(),
-            "RateLimitingSampler{rate limiting sampling with sampling config of 1 req/s and 0% of additional requests}",
-        )

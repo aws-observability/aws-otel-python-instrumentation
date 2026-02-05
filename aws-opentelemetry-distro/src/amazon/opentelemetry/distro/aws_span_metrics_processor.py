@@ -6,12 +6,10 @@ from typing_extensions import override
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_REMOTE_SERVICE
 from amazon.opentelemetry.distro.metric_attribute_generator import MetricAttributeGenerator
-from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from opentelemetry.context import Context
 from opentelemetry.metrics import Histogram
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import BoundedAttributes, ReadableSpan, Span, SpanProcessor, StatusCode
-from opentelemetry.sdk.trace.sampling import Sampler
 from opentelemetry.semconv.trace import SpanAttributes
 
 _HTTP_STATUS_CODE = SpanAttributes.HTTP_STATUS_CODE
@@ -68,7 +66,6 @@ class AwsSpanMetricsProcessor(SpanProcessor):
         latency_histogram: Histogram,
         generator: MetricAttributeGenerator,
         resource: Resource,
-        sampler: Optional[Sampler],
         force_flush_function: Callable = _no_op_function,
     ):
         self._error_histogram = error_histogram
@@ -76,7 +73,6 @@ class AwsSpanMetricsProcessor(SpanProcessor):
         self._latency_histogram = latency_histogram
         self._generator = generator
         self._resource = resource
-        self._sampler = sampler
         self._force_flush_function = force_flush_function
 
     # pylint: disable=no-self-use
@@ -92,9 +88,6 @@ class AwsSpanMetricsProcessor(SpanProcessor):
 
         for attributes in attribute_dict.values():
             self._record_metrics(span, attributes)
-
-        if self._sampler and isinstance(self._sampler, AwsXRayRemoteSampler):
-            self._sampler.adapt_sampling(span)
 
     @override
     def shutdown(self) -> None:

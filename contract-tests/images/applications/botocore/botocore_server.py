@@ -60,8 +60,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._handle_stepfunctions_request()
         if self.in_path("sns"):
             self._handle_sns_request()
-        if self.in_path("lambda"):
-            self._handle_lambda_request()
         if self.in_path("cross-account"):
             self._handle_cross_account_request()
 
@@ -556,7 +554,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif self.in_path("consumequeue/some-queue"):
             set_main_status(200)
             sqs_client.receive_message(
-                QueueUrl="http://localstack:4566/000000000000/test_receive_queue", MaxNumberOfMessages=1
+                QueueUrl="http://localstack:4566/000000000000/test_put_get_queue", MaxNumberOfMessages=1
             )
         else:
             set_main_status(404)
@@ -763,24 +761,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             sns_client.get_topic_attributes(
                 TopicArn="arn:aws:sns:us-west-2:000000000000:test-topic",
             )
-        elif self.in_path("publish/test-topic"):
-            set_main_status(200)
-            sns_client.publish(
-                TopicArn="arn:aws:sns:us-west-2:000000000000:test-topic",
-                Message="test message",
-            )
-        else:
-            set_main_status(404)
-
-    def _handle_lambda_request(self) -> None:
-        lambda_client = boto3.client("lambda", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
-        if self.in_path("invoke/test-function"):
-            set_main_status(200)
-            lambda_client.meta.events.register(
-                "before-call.lambda.Invoke",
-                inject_200_success,
-            )
-            lambda_client.invoke(FunctionName="test-function")
         else:
             set_main_status(404)
 
@@ -948,10 +928,6 @@ def prepare_aws_server() -> None:
         # Set up SQS so tests can access a queue.
         sqs_client: BaseClient = boto3.client("sqs", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)
         sqs_client.create_queue(QueueName="test_put_get_queue")
-        sqs_client.create_queue(QueueName="test_receive_queue")
-        sqs_client.send_message(
-            QueueUrl="http://localstack:4566/000000000000/test_receive_queue", MessageBody="test_message"
-        )
 
         # Set up Kinesis so tests can access a stream.
         kinesis_client: BaseClient = boto3.client("kinesis", endpoint_url=_AWS_SDK_ENDPOINT, region_name=_AWS_REGION)

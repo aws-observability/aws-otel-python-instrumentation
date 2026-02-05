@@ -60,20 +60,9 @@ class AlwaysRecordSampler(Sampler):
         return "AlwaysRecordSampler{" + self._root_sampler.get_description() + "}"
 
 
-def _wrap_result_with_record_only_result(result: SamplingResult, original_attributes: Attributes) -> SamplingResult:
-    """
-    Wraps a DROP decision result as RECORD_ONLY, merging input and root sampler attributes.
-    Sampler attributes take precedence over original attributes.
-
-    OTel instrumentation adds HTTP related to all spans, but samplers like the
-    TraceIdRatioBasedSampler replace attributes with {} when a DROP decision is made.
-    These HTTP attributes (eg. `http.method`) are important for generating metrics
-    from spans that receive the RECORD_ONLY or RECORD_AND_SAMPLE sampling decision, so this
-    method ensures they are retained.
-
-    Root samplers, like the AwsXRayRemoteSampler, may add attributes as well. In such case,
-    both the original attributes and the ones added by the sampler should be held, even if
-    the sampling decision is DROP.
-    """
-    merged = {**(original_attributes or {}), **(result.attributes or {})}
-    return SamplingResult(Decision.RECORD_ONLY, merged, result.trace_state)
+def _wrap_result_with_record_only_result(result: SamplingResult, attributes: Attributes) -> SamplingResult:
+    return SamplingResult(
+        Decision.RECORD_ONLY,
+        attributes,
+        result.trace_state,
+    )

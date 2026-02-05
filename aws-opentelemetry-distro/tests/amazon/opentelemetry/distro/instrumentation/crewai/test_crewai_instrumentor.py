@@ -9,11 +9,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumentor
-from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
-from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
+from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_DESCRIPTION,
     GEN_AI_AGENT_ID,
     GEN_AI_AGENT_NAME,
@@ -30,6 +26,10 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
 )
+from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
 
 
 # https://pypi.org/project/crewai/
@@ -86,6 +86,7 @@ class TestCrewAIInstrumentor(TestCase):
         self._run_crew_kickoff_test("anthropic/claude-3-sonnet-20240229", "anthropic", "claude-3-sonnet-20240229")
 
     def test_crew_kickoff_error_handling(self):
+        """Test that errors during crew execution are properly recorded in spans."""
         mock_llm = MagicMock()
         mock_llm.provider = "openai"
         mock_llm.model = "gpt-4"
@@ -103,59 +104,15 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertIsNotNone(error_span, "Expected at least one span with ERROR status")
         self.assertEqual(error_span.attributes.get(ERROR_TYPE), "RuntimeError")
 
-    def test_text_based_tool_calling(self):
-        mock_llm = MagicMock()
-        mock_llm.provider = "openai"
-        mock_llm.model = "gpt-4"
-        mock_llm.temperature = 0.7
-        mock_llm.max_tokens = 1024
-        # Disable native function calling
-        mock_llm.supports_function_calling.return_value = False
-        mock_llm.supports_stop_words.return_value = True
-        mock_llm.call.side_effect = [
-            'Thought: I should greet the user.\nAction: get_greeting\nAction Input: {"name": "World"}',
-            "Thought: I now know the final answer\nFinal Answer: Hello! Welcome!",
-        ]
-
-        with patch.object(self.LLM, "__new__", return_value=mock_llm):
-            crew = self._create_test_crew("openai/gpt-4")
-            crew.kickoff()
-
-        spans = self.span_exporter.get_finished_spans()
-        tool_span = next((s for s in spans if s.name == "execute_tool get_greeting"), None)
-        self.assertIsNotNone(tool_span)
-        self.assertIsNotNone(tool_span.attributes)
-        self._assert_span_attributes(
-            self,
-            spans,
-            "execute_tool get_greeting",
-            {
-                GEN_AI_OPERATION_NAME: "execute_tool",
-                GEN_AI_TOOL_NAME: "get_greeting",
-                GEN_AI_TOOL_TYPE: "function",
-                GEN_AI_PROVIDER_NAME: "openai",
-                GEN_AI_REQUEST_MODEL: "gpt-4",
-            },
-        )
-        self.assertIn(GEN_AI_TOOL_DESCRIPTION, tool_span.attributes)
-        self.assertIn(GEN_AI_TOOL_CALL_ARGUMENTS, tool_span.attributes)
-        self.assertIn(GEN_AI_TOOL_CALL_RESULT, tool_span.attributes)
-
     def _run_crew_kickoff_test(self, model: str, provider: str, model_id: str):
         """Helper to test crew kickoff with different model providers."""
-        mock_tool_call = MagicMock()
-        mock_tool_call.id = "call_123"
-        mock_tool_call.function = MagicMock()
-        mock_tool_call.function.name = "get_greeting"
-        mock_tool_call.function.arguments = '{"name": "World"}'
-
         mock_llm = MagicMock()
         mock_llm.provider = model.split("/")[0] if "/" in model else None
         mock_llm.model = model_id
         mock_llm.temperature = 0.7
         mock_llm.max_tokens = 1024
         mock_llm.call.side_effect = [
-            [mock_tool_call],
+            'Thought: I should use the get_greeting tool.\nAction: get_greeting\nAction Input: {"name": "World"}',
             "Thought: I now know the final answer\nFinal Answer: Hello! Welcome!",
         ]
 
@@ -206,11 +163,13 @@ class TestCrewAIInstrumentor(TestCase):
                 GEN_AI_OPERATION_NAME: "execute_tool",
                 GEN_AI_TOOL_NAME: "get_greeting",
                 GEN_AI_TOOL_TYPE: "function",
+                GEN_AI_PROVIDER_NAME: provider,
+                GEN_AI_REQUEST_MODEL: model_id,
             },
         )
         tool_span = next((s for s in spans if s.name == "execute_tool get_greeting"), None)
         self.assertIsNotNone(tool_span)
-        self.assertIsNotNone(tool_span.attributes)
+        assert tool_span is not None and tool_span.attributes is not None
         self.assertIn("get_greeting", tool_span.attributes[GEN_AI_TOOL_DESCRIPTION])
         self.assertIn(GEN_AI_TOOL_CALL_ARGUMENTS, tool_span.attributes)
         self.assertEqual('"Hello, World!"', tool_span.attributes[GEN_AI_TOOL_CALL_RESULT])
@@ -254,8 +213,10 @@ class TestCrewAIInstrumentor(TestCase):
     ) -> None:
         span: ReadableSpan | None = next((s for s in spans if s.name == expected_name), None)
         test.assertIsNotNone(span, f"Span '{expected_name}' not found")
-        test.assertIsNotNone(span.attributes)  # type: ignore[union-attr]
+        assert span is not None
+        test.assertIsNotNone(span.attributes)
+        assert span.attributes is not None
 
         for key, value in expected_attrs.items():
             test.assertIn(key, span.attributes, f"Attribute '{key}' missing from span '{expected_name}'")
-            test.assertEqual(span.attributes.get(key), value)  # type: ignore[union-attr]
+            test.assertEqual(span.attributes.get(key), value)

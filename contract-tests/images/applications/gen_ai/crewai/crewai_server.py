@@ -27,31 +27,26 @@ class MockLLMHandler(BaseHTTPRequestHandler):
         _llm_call_count += 1
 
         if _llm_call_count % 2 == 1:
-            message = {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [
-                    {
-                        "id": f"call_{_llm_call_count}",
-                        "type": "function",
-                        "function": {
-                            "name": "get_greeting",
-                            "arguments": json.dumps({"name": "World"}),
-                        },
-                    }
-                ],
-            }
-            finish_reason = "tool_calls"
+            content = (
+                "Thought: I should use the get_greeting tool.\n"
+                "Action: get_greeting\n"
+                'Action Input: {"name": "World"}'
+            )
         else:
-            message = {"role": "assistant", "content": "Hello, World!"}
-            finish_reason = "stop"
+            content = "Thought: I now know the final answer\nFinal Answer: Hello, World!"
 
         response = {
             "id": "chatcmpl-mock",
             "object": "chat.completion",
             "created": 1234567890,
             "model": "gpt-4",
-            "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": content},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
         }
 
