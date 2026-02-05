@@ -41,6 +41,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   ([#572](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/572))
 - Add cloud.platform attribute to resource attributes in lambda
   ([#561](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/561))
+- Bump OTel dependencies to 1.39.1/0.60b1
+  ([#596](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/596))
 
 ## v0.14.2 - 2026-01-15
 - Fix: Support new fields in X-Ray API responses
@@ -84,7 +86,5 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   ([#521](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/521))
 - Fix Gevent patch regression with correct import order
   ([#522](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/522))
-- Bump ADOT Python version to 0.13.0 and OTel dependencies to 1.37.0/0.58b0
-  ([#524](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/524))
 - Support credentials provider name for BedrockAgentCore Identity
   ([#534](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/534))
