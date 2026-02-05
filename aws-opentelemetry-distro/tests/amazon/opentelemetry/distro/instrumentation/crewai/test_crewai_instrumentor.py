@@ -9,13 +9,6 @@ from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumentor
-from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attributes import (
-    GEN_AI_PROVIDER_NAME,
-    GEN_AI_SYSTEM_INSTRUCTIONS,
-    GEN_AI_TOOL_CALL_ARGUMENTS,
-    GEN_AI_TOOL_CALL_RESULT,
-    GEN_AI_TOOL_DEFINITIONS,
-)
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -25,9 +18,14 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_ID,
     GEN_AI_AGENT_NAME,
     GEN_AI_OPERATION_NAME,
+    GEN_AI_PROVIDER_NAME,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
     GEN_AI_REQUEST_TEMPERATURE,
+    GEN_AI_SYSTEM_INSTRUCTIONS,
+    GEN_AI_TOOL_CALL_ARGUMENTS,
+    GEN_AI_TOOL_CALL_RESULT,
+    GEN_AI_TOOL_DEFINITIONS,
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
@@ -171,8 +169,6 @@ class TestCrewAIInstrumentor(TestCase):
                 GEN_AI_OPERATION_NAME: "execute_tool",
                 GEN_AI_TOOL_NAME: "get_greeting",
                 GEN_AI_TOOL_TYPE: "function",
-                GEN_AI_PROVIDER_NAME: provider,
-                GEN_AI_REQUEST_MODEL: model_id,
             },
         )
         tool_span = next((s for s in spans if s.name == "execute_tool get_greeting"), None)

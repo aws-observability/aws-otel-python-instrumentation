@@ -5,13 +5,6 @@ import json
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Callable, Dict, Mapping, Optional, Tuple
 
-from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attributes import (
-    GEN_AI_PROVIDER_NAME,
-    GEN_AI_SYSTEM_INSTRUCTIONS,
-    GEN_AI_TOOL_CALL_ARGUMENTS,
-    GEN_AI_TOOL_CALL_RESULT,
-    GEN_AI_TOOL_DEFINITIONS,
-)
 from opentelemetry import context, trace
 from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
@@ -19,9 +12,14 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_ID,
     GEN_AI_AGENT_NAME,
     GEN_AI_OPERATION_NAME,
+    GEN_AI_PROVIDER_NAME,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
     GEN_AI_REQUEST_TEMPERATURE,
+    GEN_AI_SYSTEM_INSTRUCTIONS,
+    GEN_AI_TOOL_CALL_ARGUMENTS,
+    GEN_AI_TOOL_CALL_RESULT,
+    GEN_AI_TOOL_DEFINITIONS,
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
@@ -34,6 +32,9 @@ if TYPE_CHECKING:
     from crewai.llm import LLM
     from crewai.task import Task
     from crewai.tools.base_tool import BaseTool
+    from crewai.tools.structured_tool import CrewStructuredTool
+    from crewai.tools.tool_calling import ToolCalling
+    from crewai.tools.tool_usage import ToolUsage
     from pydantic import BaseModel
 
 _OPERATION_INVOKE_AGENT = "invoke_agent"
@@ -75,8 +76,6 @@ class _BaseWrapper(ABC):
         if context.get_value(context._SUPPRESS_INSTRUMENTATION_KEY):
             return wrapped(*args, **kwargs)
 
-        pre_call_state = self._before_call(instance, args, kwargs)  # pylint: disable=assignment-from-no-return
-
         with self._tracer.start_as_current_span(
             self._get_span_name(instance, args, kwargs),
             kind=SpanKind.INTERNAL,
@@ -84,7 +83,7 @@ class _BaseWrapper(ABC):
         ) as span:
             try:
                 result = wrapped(*args, **kwargs)
-                self._on_success(span, result, instance, pre_call_state)
+                self._on_success(span, result)
                 span.set_status(Status(StatusCode.OK))
                 return result
             except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -149,12 +148,7 @@ class _BaseWrapper(ABC):
     def _get_attributes(self, instance: Any, args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> Dict[str, Any]:
         pass
 
-    def _before_call(  # pylint: disable=no-self-use
-        self, instance: Any, args: Tuple[Any, ...], kwargs: Mapping[str, Any]
-    ) -> Any:
-        """Hook called before wrapped function execution. Returns state to pass to _on_success."""
-
-    def _on_success(self, span: trace.Span, result: Any, instance: Any = None, pre_call_state: Any = None) -> None:
+    def _on_success(self, span: trace.Span, result: Any) -> None:
         """Hook called on successful execution."""
 
 
@@ -263,10 +257,53 @@ class _TaskExecuteCoreWrapper(_BaseWrapper):
         return attributes
 
 
-class _BaseToolRunWrapper(_BaseWrapper):
-    # Wraps BaseTool.run which is the base execution point for all tool calls.
+class _ToolUseWrapper(_BaseWrapper):
+    # Wraps ToolUsage._use which executes a tool call during text-based tool calling.
     # see:
-    # https://github.com/crewAIInc/crewAI/blob/6bb1b178a10139160575cccc4ce1be62800b28c0/lib/crewai/src/crewai/tools/base_tool.py#L157
+    # https://github.com/crewAIInc/crewAI/blob/main/lib/crewai/src/crewai/tools/tool_usage.py
+
+    def _get_span_name(self, instance: "ToolUsage", args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> str:
+        tool: Optional[CrewStructuredTool] = args[1] if len(args) > 1 else kwargs.get("tool")
+        tool_name = getattr(tool, "name", None) if tool else None
+        return f"{_OPERATION_EXECUTE_TOOL} {tool_name}" if tool_name else _OPERATION_EXECUTE_TOOL
+
+    def _get_attributes(
+        self, instance: "ToolUsage", args: Tuple[Any, ...], kwargs: Mapping[str, Any]
+    ) -> Dict[str, Any]:
+        tool: Optional[CrewStructuredTool] = args[1] if len(args) > 1 else kwargs.get("tool")
+        calling: Optional[ToolCalling] = args[2] if len(args) > 2 else kwargs.get("calling")
+        attributes: Dict[str, Any] = {
+            GEN_AI_OPERATION_NAME: _OPERATION_EXECUTE_TOOL,
+            GEN_AI_TOOL_TYPE: "function",
+        }
+
+        if tool:
+            tool_name = getattr(tool, "name", None)
+            if tool_name:
+                attributes[GEN_AI_TOOL_NAME] = tool_name
+            tool_desc = getattr(tool, "description", None)
+            if tool_desc:
+                attributes[GEN_AI_TOOL_DESCRIPTION] = tool_desc
+
+        if calling:
+            call_args = getattr(calling, "arguments", None)
+            if call_args:
+                attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = self._serialize_to_json(call_args)
+
+        self._set_agent_llm_attributes(attributes, getattr(instance, "agent", None))
+
+        return attributes
+
+    def _on_success(self, span: trace.Span, result: Any) -> None:
+        if result is not None:
+            span.set_attribute(GEN_AI_TOOL_CALL_RESULT, self._serialize_to_json(result))
+
+
+class _ToolRunWrapper(_BaseWrapper):
+    # Wraps BaseTool.run and Tool.run for native tool calls.
+    # Tool class (from @tool decorator) overrides BaseTool.run, so both must be wrapped separately.
+    # see:
+    # https://github.com/crewAIInc/crewAI/blob/main/lib/crewai/src/crewai/tools/base_tool.py
 
     def _get_span_name(self, instance: "BaseTool", args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> str:
         tool_name = getattr(instance, "name", None)
@@ -295,6 +332,6 @@ class _BaseToolRunWrapper(_BaseWrapper):
 
         return attributes
 
-    def _on_success(self, span: trace.Span, result: Any, instance: Any = None, pre_call_state: Any = None) -> None:
+    def _on_success(self, span: trace.Span, result: Any) -> None:
         if result is not None:
             span.set_attribute(GEN_AI_TOOL_CALL_RESULT, self._serialize_to_json(result))
