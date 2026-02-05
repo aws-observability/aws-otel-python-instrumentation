@@ -300,8 +300,9 @@ class _ToolUseWrapper(_BaseWrapper):
 
 
 class _ToolRunWrapper(_BaseWrapper):
-    # Wraps BaseTool.run and Tool.run for native tool calls.
-    # Tool class (from @tool decorator) overrides BaseTool.run, so both must be wrapped separately.
+    # Wraps BaseTool.run and Tool.run for tool calls. As of 1.9.0 these need
+    # to be instrumented to handle LLM native tool calling.
+    # Tool class (@tool decorator) overrides BaseTool.run, so both must be wrapped separately.
     # see:
     # https://github.com/crewAIInc/crewAI/blob/main/lib/crewai/src/crewai/tools/base_tool.py
 
@@ -323,7 +324,6 @@ class _ToolRunWrapper(_BaseWrapper):
         if tool_desc:
             attributes[GEN_AI_TOOL_DESCRIPTION] = tool_desc
 
-        # Capture tool arguments from args/kwargs
         tool_args = args[0] if args else kwargs
         if tool_args:
             attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = self._serialize_to_json(tool_args)
