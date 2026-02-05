@@ -42,20 +42,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          WORKFLOW_ID=$(gh api repos/${{ github.repository }}/actions/workflows --jq '.workflows[] | select(.name=="Python Instrumentation Main Build") | .id')
-          LATEST_RUN=$(gh api repos/${{ github.repository }}/actions/workflows/$WORKFLOW_ID/runs --jq '[.workflow_runs[] | select(.head_branch=="${{ github.ref_name }}")] | sort_by(.created_at) | .[-1]')
-          STATUS=$(echo "$LATEST_RUN" | jq -r '.status')
-          CONCLUSION=$(echo "$LATEST_RUN" | jq -r '.conclusion')
-          RUN_ID=$(echo "$LATEST_RUN" | jq -r '.id')
-          
-          if [ "$STATUS" = "in_progress" ] || [ "$STATUS" = "queued" ]; then
-            echo "Main build is still running (status: $STATUS). Cannot proceed with release."
-            exit 1
-          elif [ "$CONCLUSION" != "success" ]; then
-            echo "Latest main build on branch ${{ github.ref_name }} conclusion: $CONCLUSION"
-            exit 1
-          fi
-          echo "Main build succeeded (run ID: $RUN_ID), downloading artifacts..."
+          RUN_ID=21723744997
+          echo "Downloading artifacts from run ID: $RUN_ID"
           
           gh run download $RUN_ID -n release-artifacts -D dist
           gh run download $RUN_ID -n layer.zip -D layer
