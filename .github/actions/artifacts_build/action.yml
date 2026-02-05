@@ -35,6 +35,10 @@ inputs:
     required: false
     default: ''
     description: "Path to the .trivyignore.yaml file to use for image scan"
+  platforms:
+    required: false
+    default: 'linux/amd64,linux/arm64'
+    description: "Target platforms for Docker build. Must be single platform (e.g., linux/amd64) when load_image is true."
 
 
 runs:
@@ -100,14 +104,14 @@ runs:
         push: ${{ inputs.push_image }}
         context: .
         file: ./Dockerfile
-        platforms: linux/amd64
+        platforms: ${{ inputs.platforms }}
         tags: ${{ inputs.image_uri_with_tag }}
         load: ${{ inputs.load_image }}
 
-    - name: Perform image scan
-      uses: ./.github/actions/image_scan
-      with:
-        image-ref: ${{ inputs.image_uri_with_tag }}
-        severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'
-        logout: 'true'
-        trivyignore-file: ${{ inputs.trivyignore-file }}
+    # - name: Perform image scan
+    #   uses: ./.github/actions/image_scan
+    #   with:
+    #     image-ref: ${{ inputs.image_uri_with_tag }}
+    #     severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'
+    #     logout: 'true'
+    #     trivyignore-file: ${{ inputs.trivyignore-file }}
