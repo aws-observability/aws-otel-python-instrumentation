@@ -5,10 +5,9 @@ from typing import Any, Collection
 from wrapt import wrap_function_wrapper
 
 from amazon.opentelemetry.distro.instrumentation.crewai._wrappers import (
+    _BaseToolRunWrapper,
     _CrewKickoffWrapper,
-    _NativeToolCallsWrapper,
     _TaskExecuteCoreWrapper,
-    _ToolUseWrapper,
 )
 from amazon.opentelemetry.distro.version import __version__
 from opentelemetry import trace
@@ -34,20 +33,13 @@ class CrewAIInstrumentor(BaseInstrumentor):
 
         wrap_function_wrapper("crewai", "Crew.kickoff", _CrewKickoffWrapper(tracer))
         wrap_function_wrapper("crewai", "Task._execute_core", _TaskExecuteCoreWrapper(tracer))
-        wrap_function_wrapper("crewai.tools.tool_usage", "ToolUsage._use", _ToolUseWrapper(tracer))
-        wrap_function_wrapper(
-            "crewai.agents.crew_agent_executor",
-            "CrewAgentExecutor._handle_native_tool_calls",
-            _NativeToolCallsWrapper(tracer),
-        )
+        wrap_function_wrapper("crewai.tools.base_tool", "BaseTool.run", _BaseToolRunWrapper(tracer))
 
     def _uninstrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
         # pylint: disable=import-outside-toplevel
         import crewai
-        from crewai.agents import crew_agent_executor
-        from crewai.tools import tool_usage
+        from crewai.tools import base_tool
 
         unwrap(crewai.Crew, "kickoff")
         unwrap(crewai.Task, "_execute_core")
-        unwrap(tool_usage.ToolUsage, "_use")
-        unwrap(crew_agent_executor.CrewAgentExecutor, "_handle_native_tool_calls")
+        unwrap(base_tool.BaseTool, "run")

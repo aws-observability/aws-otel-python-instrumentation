@@ -33,9 +33,7 @@ if TYPE_CHECKING:
     from crewai.crew import Crew
     from crewai.llm import LLM
     from crewai.task import Task
-    from crewai.tools.structured_tool import CrewStructuredTool
-    from crewai.tools.tool_calling import ToolCalling
-    from crewai.tools.tool_usage import ToolUsage
+    from crewai.tools.base_tool import BaseTool
     from pydantic import BaseModel
 
 _OPERATION_INVOKE_AGENT = "invoke_agent"
@@ -265,134 +263,38 @@ class _TaskExecuteCoreWrapper(_BaseWrapper):
         return attributes
 
 
-class _ToolUseWrapper(_BaseWrapper):
-    # Wraps ToolUsage._use which executes a tool call during agent task execution.
+class _BaseToolRunWrapper(_BaseWrapper):
+    # Wraps BaseTool.run which is the base execution point for all tool calls.
     # see:
-    # https://github.com/crewAIInc/crewAI/blob/06d953bf46c636ff9f2d64f45574493d05fb7771/lib/crewai/src/crewai/tools/tool_usage.py#L423-L427
+    # https://github.com/crewAIInc/crewAI/blob/6bb1b178a10139160575cccc4ce1be62800b28c0/lib/crewai/src/crewai/tools/base_tool.py#L157
 
-    def _get_span_name(self, instance: "ToolUsage", args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> str:
-        tool: Optional[CrewStructuredTool] = args[1] if len(args) > 1 else kwargs.get("tool")
-        tool_name = getattr(tool, "name", None) if tool else None
+    def _get_span_name(self, instance: "BaseTool", args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> str:
+        tool_name = getattr(instance, "name", None)
         return f"{_OPERATION_EXECUTE_TOOL} {tool_name}" if tool_name else _OPERATION_EXECUTE_TOOL
 
     def _get_attributes(
-        self, instance: "ToolUsage", args: Tuple[Any, ...], kwargs: Mapping[str, Any]
+        self, instance: "BaseTool", args: Tuple[Any, ...], kwargs: Mapping[str, Any]
     ) -> Dict[str, Any]:
-        tool: Optional[CrewStructuredTool] = args[1] if len(args) > 1 else kwargs.get("tool")
-        calling: Optional[ToolCalling] = args[2] if len(args) > 2 else kwargs.get("calling")
         attributes: Dict[str, Any] = {
             GEN_AI_OPERATION_NAME: _OPERATION_EXECUTE_TOOL,
             GEN_AI_TOOL_TYPE: "function",
         }
 
-        if tool:
-            tool_name = getattr(tool, "name", None)
-            if tool_name:
-                attributes[GEN_AI_TOOL_NAME] = tool_name
-            tool_desc = getattr(tool, "description", None)
-            if tool_desc:
-                attributes[GEN_AI_TOOL_DESCRIPTION] = tool_desc
+        tool_name = getattr(instance, "name", None)
+        if tool_name:
+            attributes[GEN_AI_TOOL_NAME] = tool_name
 
-        if calling:
-            call_args = getattr(calling, "arguments", None)
-            if call_args:
-                attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = self._serialize_to_json(call_args)
+        tool_desc = getattr(instance, "description", None)
+        if tool_desc:
+            attributes[GEN_AI_TOOL_DESCRIPTION] = tool_desc
 
-        self._set_agent_llm_attributes(attributes, getattr(instance, "agent", None))
+        # Capture tool arguments from args/kwargs
+        tool_args = args[0] if args else kwargs
+        if tool_args:
+            attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = self._serialize_to_json(tool_args)
 
         return attributes
 
     def _on_success(self, span: trace.Span, result: Any, instance: Any = None, pre_call_state: Any = None) -> None:
         if result is not None:
             span.set_attribute(GEN_AI_TOOL_CALL_RESULT, self._serialize_to_json(result))
-
-
-class _NativeToolCallsWrapper(_BaseWrapper):
-    # Tool execution for native tool calls which is a model's built-in capability to recognize
-    # when it needs external data or actions, returning structured data to invoke APIs or functions,
-    # rather than just generating text was introduced in CrewAI >= 1.9.0:
-    # https://github.com/crewAIInc/crewAI/releases/tag/1.9.0
-    # Currently supported for OpenAI, Gemini and Anthropic models
-
-    def _before_call(self, instance: Any, args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> int:
-        """Capture message count before execution."""
-        return len(getattr(instance, "messages", []))
-
-    def _on_success(self, span: trace.Span, result: Any, instance: Any = None, pre_call_state: Any = None) -> None:
-        """Extract tool result from messages added during execution."""
-        if instance is None or pre_call_state is None:
-            return
-        messages = getattr(instance, "messages", [])
-        for msg in messages[pre_call_state:]:
-            if isinstance(msg, dict) and msg.get("role") == "tool":
-                tool_result = msg.get("content")
-                if tool_result:
-                    span.set_attribute(GEN_AI_TOOL_CALL_RESULT, self._serialize_to_json(tool_result))
-                break
-
-    def _get_span_name(self, instance: Any, args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> str:
-        tool_calls = args[0] if args else kwargs.get("tool_calls", [])
-        tool_name, _ = self._extract_tool_info(tool_calls)
-        return f"{_OPERATION_EXECUTE_TOOL} {tool_name}" if tool_name else _OPERATION_EXECUTE_TOOL
-
-    def _get_attributes(self, instance: Any, args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> Dict[str, Any]:
-        tool_calls = args[0] if args else kwargs.get("tool_calls", [])
-        tool_name, tool_args = self._extract_tool_info(tool_calls)
-
-        attributes: Dict[str, Any] = {
-            GEN_AI_OPERATION_NAME: _OPERATION_EXECUTE_TOOL,
-            GEN_AI_TOOL_TYPE: "function",
-        }
-
-        if tool_name:
-            attributes[GEN_AI_TOOL_NAME] = tool_name
-
-        if tool_args:
-            attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = tool_args
-
-        tool_desc = self._find_tool_description(instance, tool_name)
-        if tool_desc:
-            attributes[GEN_AI_TOOL_DESCRIPTION] = tool_desc
-
-        self._set_agent_llm_attributes(attributes, getattr(instance, "agent", None))
-
-        return attributes
-
-    def _extract_tool_info(self, tool_calls: list) -> Tuple[Optional[str], Optional[str]]:
-        if not tool_calls:
-            return None, None
-
-        # pylint: disable=import-outside-toplevel
-        from crewai.utilities.agent_utils import extract_tool_call_info
-
-        result = extract_tool_call_info(tool_calls[0])
-        if not result:
-            return None, None
-
-        _, func_name, func_args = result
-        if isinstance(func_args, str):
-            return func_name, func_args
-        return func_name, self._serialize_to_json(func_args) if func_args else None
-
-    @staticmethod
-    def _find_tool_description(instance: Any, tool_name: Optional[str]) -> Optional[str]:
-        if not tool_name:
-            return None
-
-        # pylint: disable=import-outside-toplevel
-        from crewai.utilities.string_utils import sanitize_tool_name
-
-        # tool_name is already sanitized by extract_tool_call_info, but we need to sanitize
-        # the tool names from the tool lists for comparison
-        for tools_attr in ("original_tools", "tools"):
-            for tool in getattr(instance, tools_attr, None) or []:
-                if sanitize_tool_name(getattr(tool, "name", "") or "") == tool_name:
-                    return getattr(tool, "description", None)
-
-        agent = getattr(instance, "agent", None)
-        if agent:
-            for tool in getattr(agent, "tools", None) or []:
-                if sanitize_tool_name(getattr(tool, "name", "") or "") == tool_name:
-                    return getattr(tool, "description", None)
-
-        return None
