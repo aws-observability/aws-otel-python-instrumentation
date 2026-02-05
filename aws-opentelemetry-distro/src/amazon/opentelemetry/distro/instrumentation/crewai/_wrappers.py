@@ -54,7 +54,7 @@ class _BaseWrapper(ABC):
         "claude": "anthropic",
         "azure": "azure.ai.openai",
         "azure_openai": "azure.ai.openai",
-        "google": "gcp.vertex_ai",
+        "google": "gcp.gen_ai",
         "gemini": "gcp.gemini",
         "cohere": "cohere",
         "mistral": "mistral_ai",
