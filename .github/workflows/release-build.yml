@@ -29,21 +29,24 @@ permissions:
   contents: write
 
 jobs:
-  build-sdk:
+  download-artifacts:
     environment: Release
     runs-on: ubuntu-latest
+    outputs:
+      aws_regions_json: ${{ steps.set-matrix.outputs.aws_regions_json }}
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
 
-      - name: Check main build status
+      - name: Get main build run ID and download artifacts
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           WORKFLOW_ID=$(gh api repos/${{ github.repository }}/actions/workflows --jq '.workflows[] | select(.name=="Python Instrumentation Main Build") | .id')
-          LATEST_RUN=$(gh api repos/${{ github.repository }}/actions/workflows/$WORKFLOW_ID/runs --jq '[.workflow_runs[] | select(.head_branch=="${{ github.ref_name }}")] | sort_by(.created_at) | .[-1] | {conclusion, status}')
+          LATEST_RUN=$(gh api repos/${{ github.repository }}/actions/workflows/$WORKFLOW_ID/runs --jq '[.workflow_runs[] | select(.head_branch=="${{ github.ref_name }}")] | sort_by(.created_at) | .[-1]')
           STATUS=$(echo "$LATEST_RUN" | jq -r '.status')
           CONCLUSION=$(echo "$LATEST_RUN" | jq -r '.conclusion')
+          RUN_ID=$(echo "$LATEST_RUN" | jq -r '.id')
           
           if [ "$STATUS" = "in_progress" ] || [ "$STATUS" = "queued" ]; then
             echo "Main build is still running (status: $STATUS). Cannot proceed with release."
@@ -52,21 +55,10 @@ jobs:
             echo "Latest main build on branch ${{ github.ref_name }} conclusion: $CONCLUSION"
             exit 1
           fi
-          echo "Main build succeeded, proceeding with release"
-
-      - name: Build Wheel and Image Files
-        uses: ./.github/actions/artifacts_build
-        with:
-          image_uri_with_tag: "adot-autoinstrumentation-python:test"
-          push_image: false
-          load_image: true
-          python_version: "3.10"
-          package_name: aws-opentelemetry-distro
-          os: ubuntu-latest
-
-      # TODO: Add some sort of smoke/integration testing before we go
-      # release the artifacts. adot java for reference:
-      # https://github.com/aws-observability/aws-otel-java-instrumentation/tree/93870a550ac30988fbdd5d3bf1e8f9f1b37916f5/smoke-tests
+          echo "Main build succeeded (run ID: $RUN_ID), downloading artifacts..."
+          
+          gh run download $RUN_ID -n release-artifacts -D dist
+          gh run download $RUN_ID -n layer.zip -D layer
 
       - name: Upload SDK wheel artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
@@ -79,13 +71,13 @@ jobs:
         with:
           name: ${{ env.SOURCE_ARTIFACT_NAME }}
           path: dist/${{ env.SOURCE_ARTIFACT_NAME }}
-  
-  build-layer:
-    needs: build-sdk
-    runs-on: ubuntu-latest
-    outputs:
-      aws_regions_json: ${{ steps.set-matrix.outputs.aws_regions_json }}
-    steps:
+
+      - name: Upload layer artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: layer.zip
+          path: layer/aws-opentelemetry-python-layer.zip
+
       - name: Set up regions matrix
         id: set-matrix
         env:
@@ -100,25 +92,9 @@ jobs:
           MATRIX="${MATRIX%,}]"
           echo ${MATRIX}
           echo "aws_regions_json=${MATRIX}" >> $GITHUB_OUTPUT
-      - name: Checkout Repo @ SHA - ${{ github.sha }}
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
-      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c #v6.0.0
-        with:
-          python-version: '3.x'
-      - name: Build layers
-        working-directory: lambda-layer/src
-        run: |
-          ./build-lambda-layer.sh
-          pip install tox
-          tox
-      - name: upload layer
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
-        with:
-          name: layer.zip
-          path: lambda-layer/src/build/aws-opentelemetry-python-layer.zip
 
   publish-sdk:
-    needs: [build-sdk, build-layer]
+    needs: download-artifacts
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
@@ -203,10 +179,10 @@ jobs:
   
   publish-layer-prod:
     runs-on: ubuntu-latest
-    needs: [build-layer, publish-sdk]
+    needs: [download-artifacts, publish-sdk]
     strategy:
       matrix:
-        aws_region: ${{ fromJson(needs.build-layer.outputs.aws_regions_json) }}
+        aws_region: ${{ fromJson(needs.download-artifacts.outputs.aws_regions_json) }}
     steps:
       - name: role arn
         env:
