@@ -4,23 +4,23 @@
 import json
 from typing import Any
 
-# see: https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/
-# under gen_ai.provider.name
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import GenAiProviderNameValues
+
 PROVIDER_MAP = {
-    "bedrock": "aws.bedrock",
-    "aws": "aws.bedrock",
-    "openai": "openai",
-    "anthropic": "anthropic",
-    "claude": "anthropic",
-    "azure": "azure.ai.openai",
-    "azure_openai": "azure.ai.openai",
-    "google": "gcp.vertex_ai",
-    "gemini": "gcp.gemini",
-    "cohere": "cohere",
-    "mistral": "mistral_ai",
-    "groq": "groq",
-    "deepseek": "deepseek",
-    "perplexity": "perplexity",
+    "bedrock": GenAiProviderNameValues.AWS_BEDROCK.value,
+    "aws": GenAiProviderNameValues.AWS_BEDROCK.value,
+    "openai": GenAiProviderNameValues.OPENAI.value,
+    "anthropic": GenAiProviderNameValues.ANTHROPIC.value,
+    "claude": GenAiProviderNameValues.ANTHROPIC.value,
+    "azure": GenAiProviderNameValues.AZURE_AI_OPENAI.value,
+    "azure_openai": GenAiProviderNameValues.AZURE_AI_OPENAI.value,
+    "google": GenAiProviderNameValues.GCP_VERTEX_AI.value,
+    "gemini": GenAiProviderNameValues.GCP_GEMINI.value,
+    "cohere": GenAiProviderNameValues.COHERE.value,
+    "mistral": GenAiProviderNameValues.MISTRAL_AI.value,
+    "groq": GenAiProviderNameValues.GROQ.value,
+    "deepseek": GenAiProviderNameValues.DEEPSEEK.value,
+    "perplexity": GenAiProviderNameValues.PERPLEXITY.value,
 }
 
 
