@@ -333,3 +333,39 @@ class _ToolRunWrapper(_BaseWrapper):
     def _on_success(self, span: trace.Span, result: Any) -> None:
         if result is not None:
             span.set_attribute(GEN_AI_TOOL_CALL_RESULT, self._serialize_to_json(result))
+
+
+class _ToolRunWrapper(_BaseWrapper):
+    # Wraps BaseTool.run and Tool.run for tool calls. As of 1.9.0 these need
+    # to be instrumented to handle LLM native tool calling.
+    # Tool class (@tool decorator) overrides BaseTool.run, so both must be wrapped separately.
+    # see:
+    # https://github.com/crewAIInc/crewAI/blob/main/lib/crewai/src/crewai/tools/base_tool.py
+
+    def _get_span_name(self, instance: "BaseTool", args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> str:
+        tool_name = getattr(instance, "name", None)
+        return f"{_OPERATION_EXECUTE_TOOL} {tool_name}" if tool_name else _OPERATION_EXECUTE_TOOL
+
+    def _get_attributes(self, instance: "BaseTool", args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> Dict[str, Any]:
+        attributes: Dict[str, Any] = {
+            GEN_AI_OPERATION_NAME: _OPERATION_EXECUTE_TOOL,
+            GEN_AI_TOOL_TYPE: "function",
+        }
+
+        tool_name = getattr(instance, "name", None)
+        if tool_name:
+            attributes[GEN_AI_TOOL_NAME] = tool_name
+
+        tool_desc = getattr(instance, "description", None)
+        if tool_desc:
+            attributes[GEN_AI_TOOL_DESCRIPTION] = tool_desc
+
+        tool_args = args[0] if args else kwargs
+        if tool_args:
+            attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = self._serialize_to_json(tool_args)
+
+        return attributes
+
+    def _on_success(self, span: trace.Span, result: Any) -> None:
+        if result is not None:
+            span.set_attribute(GEN_AI_TOOL_CALL_RESULT, self._serialize_to_json(result))
