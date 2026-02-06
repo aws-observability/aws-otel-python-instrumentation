@@ -5,11 +5,11 @@
 import logging
 from typing import Mapping, Optional, Sequence, cast
 
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogExporter
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogRecordExporter
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY, attach, detach, set_value
-from opentelemetry.sdk._logs import LogData
-from opentelemetry.sdk._logs._internal.export import BatchLogExportStrategy
+from opentelemetry.sdk._logs import ReadableLogRecord
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+from opentelemetry.sdk._shared_internal import BatchExportStrategy
 from opentelemetry.util.types import AnyValue
 
 _logger = logging.getLogger(__name__)
@@ -72,7 +72,7 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
 
     def __init__(
         self,
-        exporter: OTLPAwsLogExporter,
+        exporter: OTLPAwsLogRecordExporter,
         schedule_delay_millis: Optional[float] = None,
         max_export_batch_size: Optional[int] = None,
         export_timeout_millis: Optional[float] = None,
@@ -89,7 +89,7 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
 
         self._exporter = exporter
 
-    def _export(self, batch_strategy: BatchLogExportStrategy) -> None:
+    def _export(self, batch_strategy: BatchExportStrategy) -> None:
         """
         Explicitly overrides upstream _export method to add AWS CloudWatch size-based batching
         See:
@@ -102,20 +102,20 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
         - Estimated data size of exported batches will typically be <= 1 MB except for the case below:
         - If the estimated data size of an exported batch is ever > 1 MB then the batch size is guaranteed to be 1
         """
-        with self._export_lock:
+        with self._batch_processor._export_lock:
             iteration = 0
             # We could see concurrent export calls from worker and force_flush. We call _should_export_batch
             # once the lock is obtained to see if we still need to make the requested export.
-            while self._should_export_batch(batch_strategy, iteration):
+            while self._batch_processor._should_export_batch(batch_strategy, iteration):
                 iteration += 1
                 token = attach(set_value(_SUPPRESS_INSTRUMENTATION_KEY, True))
                 try:
-                    batch_length = min(self._max_export_batch_size, len(self._queue))
+                    batch_length = min(self._batch_processor._max_export_batch_size, len(self._batch_processor._queue))
                     batch_data_size = 0
                     batch = []
 
                     for _ in range(batch_length):
-                        log_data: LogData = self._queue.pop()
+                        log_data: ReadableLogRecord = self._batch_processor._queue.pop()
                         log_size = self._estimate_log_size(log_data)
 
                         if batch and (batch_data_size + log_size > self._MAX_LOG_REQUEST_BYTE_SIZE):
@@ -132,7 +132,7 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
                     _logger.exception("Exception while exporting logs: %s", exception)
                 detach(token)
 
-    def _estimate_log_size(self, log: LogData, depth: int = 3) -> int:  # pylint: disable=too-many-branches
+    def _estimate_log_size(self, log: ReadableLogRecord, depth: int = 3) -> int:  # pylint: disable=too-many-branches
         """
         Estimates the size in bytes of a log by calculating the size of its body and its attributes
         and adding a buffer amount to account for other log metadata information.
@@ -252,7 +252,7 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
     # https://github.com/open-telemetry/opentelemetry-python/issues/3193
     # https://github.com/open-telemetry/opentelemetry-python/blob/main/opentelemetry-sdk/src/opentelemetry/sdk/_shared_internal/__init__.py#L199
     def force_flush(self, timeout_millis: Optional[int] = None) -> bool:
-        if self._shutdown:
+        if self._batch_processor._shutdown:
             return False
-        self._export(BatchLogExportStrategy.EXPORT_AT_LEAST_ONE_BATCH)
+        self._export(BatchExportStrategy.EXPORT_AT_LEAST_ONE_BATCH)
         return True
