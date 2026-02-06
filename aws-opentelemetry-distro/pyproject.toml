@@ -102,6 +102,9 @@ aws_configurator = "amazon.opentelemetry.distro.aws_opentelemetry_configurator:A
 [project.entry-points.opentelemetry_distro]
 aws_distro = "amazon.opentelemetry.distro.aws_opentelemetry_distro:AwsOpenTelemetryDistro"
 
+[project.entry-points.opentelemetry_instrumentor]
+crewai = "amazon.opentelemetry.distro.instrumentation.crewai:CrewAIInstrumentor"
+
 [project.urls]
 Homepage = "https://github.com/aws-observability/aws-otel-python-instrumentation/tree/main/aws-opentelemetry-distro"
 
