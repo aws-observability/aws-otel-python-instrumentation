@@ -5,7 +5,7 @@ import sys
 import unittest
 from unittest import TestCase
 
-from langgraph.prebuilt import create_react_agent as create_agent
+from langchain.agents import create_agent
 from langchain_core.language_models.fake import FakeListLLM
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
@@ -164,7 +164,7 @@ class TestLangChainInstrumentor(TestCase):
         self.assertGreater(len(agent_spans), 0)
         agent_span = agent_spans[0]
         self.assertEqual(agent_span.attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.INVOKE_AGENT.value)
-        self.assertEqual(agent_span.attributes[GEN_AI_AGENT_NAME], "agent")
+        self.assertEqual(agent_span.attributes[GEN_AI_AGENT_NAME], "TestAgent")
 
     def test_tool_execution_creates_span(self):
         def add_numbers(a: int, b: int) -> int:
