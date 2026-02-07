@@ -122,6 +122,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         #   https://github.com/langchain-ai/langchain/blob/80e09feec/libs/core/langchain_core/output_parsers
         skippable_namespaces = {"runnable", "prompts", "output_parser"}
 
+        # legacy agent for supporting langchain >= 0.3.21, < 1.0.0
         if name and (name.startswith("Runnable") or name.endswith("OutputParser") or name.endswith("PromptTemplate")):
             return "AgentExecutor" not in name
 
