@@ -16,14 +16,12 @@ from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_core.tools import StructuredTool, tool
 
 try:
-    from langchain.agents import AgentExecutor, AgentType, initialize_agent
-    from langchain.chains import LLMChain
+    from langchain.agents import AgentType, initialize_agent
 
     HAS_LEGACY_LANGCHAIN = True
 except ImportError:
     try:
-        from langchain_classic.agents import AgentExecutor, AgentType, initialize_agent
-        from langchain_classic.chains import LLMChain
+        from langchain_classic.agents import AgentType, initialize_agent
 
         HAS_LEGACY_LANGCHAIN = True
     except ImportError:
