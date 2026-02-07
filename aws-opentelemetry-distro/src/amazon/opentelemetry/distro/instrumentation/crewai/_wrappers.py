@@ -81,7 +81,8 @@ class _BaseWrapper(ABC):
         if model:
             attributes[GEN_AI_REQUEST_MODEL] = model
 
-    def _extract_provider_and_model(self, llm: Optional["LLM"]) -> Tuple[Optional[str], Optional[str]]:
+    @staticmethod
+    def _extract_provider_and_model(llm: Optional["LLM"]) -> Tuple[Optional[str], Optional[str]]:
         if not llm:
             return None, None
 
