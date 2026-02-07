@@ -114,12 +114,12 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         # on_chain_start/end callbacks will contain internal chain types showing the
         # internal agent orchestration workflow which can cause a lot of noisy spans
         # except for chains with "AgentExecutor" in the name as those are used for invoke_agent spans:
-        # - "runnable": internal orchestration
-        #   see: https://github.com/langchain-ai/langchain/blob/80e09feec1a07b505fa1a919a6b4e2792fb6e1f6/libs/core/langchain_core/runnables/base.py#L1
-        # - "prompts": string formatting
-        #   see: https://github.com/langchain-ai/langchain/blob/80e09feec1a07b505fa1a919a6b4e2792fb6e1f6/libs/core/langchain_core/prompts
-        # - "output_parser": text parsing
-        #   see: https://github.com/langchain-ai/langchain/blob/80e09feec1a07b505fa1a919a6b4e2792fb6e1f6/libs/core/langchain_core/output_parsers
+        # - "runnable": internal orchestration, see:
+        #   https://github.com/langchain-ai/langchain/blob/80e09feec/libs/core/langchain_core/runnables/base.py
+        # - "prompts": string formatting, see:
+        #   https://github.com/langchain-ai/langchain/blob/80e09feec/libs/core/langchain_core/prompts
+        # - "output_parser": text parsing, see:
+        #   https://github.com/langchain-ai/langchain/blob/80e09feec/libs/core/langchain_core/output_parsers
         skippable_namespaces = {"runnable", "prompts", "output_parser"}
 
         if name and (name.startswith("Runnable") or name.endswith("OutputParser") or name.endswith("PromptTemplate")):
