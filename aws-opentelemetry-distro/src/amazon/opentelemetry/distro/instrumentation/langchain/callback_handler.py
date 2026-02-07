@@ -40,66 +40,6 @@ from opentelemetry.trace.span import Span
 from opentelemetry.trace.status import Status, StatusCode
 from opentelemetry.util.types import AttributeValue
 
-# on_chain_start/end callbacks will contain internal chain types showing the
-# internal agent orchestration workflow which can cause a lot of noisy spans.
-_SKIP_CHAIN_TYPES = {
-    # suppress runnables chains which represent a unit of work in LangChain.
-    # see:
-    # https://github.com/langchain-ai/langchain/blob/80e09feec1a07b505fa1a919a6b4e2792fb6e1f6/libs/core/langchain_core/runnables/base.py#L1
-    "RunnableParallel",
-    "RunnableSequence",
-    "RunnableAssign",
-    "RunnableLambda",
-    "RunnablePassthrough",
-    "RunnablePick",
-    "RunnableBranch",
-    "RunnableRetry",
-    "RunnableWithFallbacks",
-    "RunnableGenerator",
-    "RunnableEach",
-    "RunnableBinding",
-    "RunnableWithMessageHistory",
-    "RunnableConfigurableFields",
-    "RunnableConfigurableAlternatives",
-    "RouterRunnable",
-    "DynamicRunnable",
-    # suppress prompt templates chains which are used for string formatting
-    # see:
-    # https://github.com/langchain-ai/langchain/blob/80e09feec1a07b505fa1a919a6b4e2792fb6e1f6/libs/core/langchain_core/prompts
-    "ChatPromptTemplate",
-    "PromptTemplate",
-    "FewShotPromptTemplate",
-    "FewShotChatMessagePromptTemplate",
-    "MessagesPlaceholder",
-    "HumanMessagePromptTemplate",
-    "AIMessagePromptTemplate",
-    "SystemMessagePromptTemplate",
-    "StructuredPrompt",
-    "FewShotPromptWithTemplates",
-    "DictPromptTemplate",
-    # suppress output parsers chains which are used to parse different types of LLM text output
-    # see:
-    # https://github.com/langchain-ai/langchain/blob/80e09feec1a07b505fa1a919a6b4e2792fb6e1f6/libs/core/langchain_core/output_parsers
-    "ToolsAgentOutputParser",
-    "StrOutputParser",
-    "JsonOutputParser",
-    "PydanticOutputParser",
-    "XMLOutputParser",
-    "ListOutputParser",
-    "CommaSeparatedListOutputParser",
-    "NumberedListOutputParser",
-    "MarkdownListOutputParser",
-    "JsonOutputToolsParser",
-    "JsonOutputKeyToolsParser",
-    "PydanticToolsParser",
-    "OutputFunctionsParser",
-    "JsonOutputFunctionsParser",
-    "JsonKeyOutputFunctionsParser",
-    "PydanticOutputFunctionsParser",
-    "PydanticAttrOutputFunctionsParser",
-    # TODO: consider suppressing LangGraph internal node names as well
-}
-
 
 @dataclass
 class SpanHolder:
@@ -165,11 +105,37 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             return parent_run_id
         return None
 
-    def _should_skip_chain(self, name: Optional[str]) -> bool:
-        # technically we don't need to wrap the output in bool() but otherwise pylance will complain
-        return bool(
-            self.should_suppress_internal_chains and name and any(name.startswith(skip) for skip in _SKIP_CHAIN_TYPES)
-        )
+    def _should_skip_chain(
+        self, serialized: dict[str, Any], name: Optional[str], metadata: Optional[dict] = None
+    ) -> bool:
+        if not self.should_suppress_internal_chains:
+            return False
+
+        # on_chain_start/end callbacks will contain internal chain types showing the
+        # internal agent orchestration workflow which can cause a lot of noisy spans
+        # except for chains with "AgentExecutor" in the name as those are used for invoke_agent spans:
+        # - "runnable": internal orchestration
+        #   see: https://github.com/langchain-ai/langchain/blob/80e09feec1a07b505fa1a919a6b4e2792fb6e1f6/libs/core/langchain_core/runnables/base.py#L1
+        # - "prompts": string formatting
+        #   see: https://github.com/langchain-ai/langchain/blob/80e09feec1a07b505fa1a919a6b4e2792fb6e1f6/libs/core/langchain_core/prompts
+        # - "output_parser": text parsing
+        #   see: https://github.com/langchain-ai/langchain/blob/80e09feec1a07b505fa1a919a6b4e2792fb6e1f6/libs/core/langchain_core/output_parsers
+        skippable_namespaces = {"runnable", "prompts", "output_parser"}
+
+        if name and (name.startswith("Runnable") or name.endswith("OutputParser") or name.endswith("PromptTemplate")):
+            return "AgentExecutor" not in name
+
+        # fallback to namespace as another check
+        if serialized and (ids := serialized.get("id")):
+            if any(ns in ids for ns in skippable_namespaces):
+                return True
+
+        # In langchain >= 1.0.0, the agent creation logic changed to depend on langgraph.
+        # We suppress internal nodes that have langgraph metadata, except for nodes with
+        # "agent" in the name as those are used for invoke_agent spans.
+        if metadata and any(k.startswith("langgraph_") for k in metadata):
+            return not (name and "agent" in name.lower())
+        return False
 
     def _end_span(self, run_id: UUID) -> None:
         state = self.span_mapping.get(run_id)
@@ -305,12 +271,27 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         if context.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
             return
         name = self._get_name_from_callback(serialized, **kwargs)
-        if self._should_skip_chain(name):
+        if self._should_skip_chain(serialized, name, metadata):
             self.skipped_runs[run_id] = self._resolve_parent_span(parent_run_id)
             return
-        span_name = f"chain {name}" if name else "chain"
+
+        is_agent = name and "agent" in name.lower()
+        if is_agent:
+            span_name = (
+                f"{GenAiOperationNameValues.INVOKE_AGENT.value} {name}"
+                if name
+                else GenAiOperationNameValues.INVOKE_AGENT.value
+            )
+        else:
+            span_name = f"chain {name}" if name else "chain"
+
         span = self._create_span(run_id, parent_run_id, span_name)
         self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, self._extract_provider(serialized, kwargs))
+
+        if is_agent:
+            self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
+            if name:
+                self._set_span_attribute(span, GEN_AI_AGENT_NAME, name)
         if metadata and metadata.get("agent_name"):
             self._set_span_attribute(span, GEN_AI_AGENT_NAME, metadata["agent_name"])
 

@@ -24,7 +24,7 @@ class LangChainInstrumentor(BaseInstrumentor):
     """
 
     def instrumentation_dependencies(self) -> Collection[str]:  # pylint: disable=no-self-use
-        return ("langchain >= 0.1.0",)
+        return ("langchain >= 0.3.21",)
 
     # disabling these linters rules as these are instance methods from BaseInstrumentor
     def _instrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
