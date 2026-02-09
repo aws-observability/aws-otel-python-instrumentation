@@ -30,6 +30,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
+    GEN_AI_TOOL_TYPE,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
     GenAiOperationNameValues,
@@ -77,7 +78,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
 
     def _set_request_params(self, span: Span, kwargs: dict):
         model = None
-        for model_tag in ("model_id", "base_model_id"):
+        for model_tag in ("model", "model_name", "model_id", "base_model_id"):
             if (model := kwargs.get(model_tag)) is not None:
                 break
             if (model := (kwargs.get("invocation_params") or {}).get(model_tag)) is not None:
@@ -192,6 +193,16 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         span.set_attribute(ERROR_TYPE, type(error).__qualname__)
         self._end_span(run_id)
 
+    def _propagate_to_parent_agent(self, parent_run_id: Optional[UUID], attrs: dict[str, Any]) -> None:
+        resolved = self._resolve_parent_span(parent_run_id)
+        if not resolved or resolved not in self.span_mapping:
+            return
+        parent_span = self.span_mapping[resolved].span
+        if "invoke_agent" not in parent_span.name:
+            return
+        for name, value in attrs.items():
+            self._set_span_attribute(parent_span, name, value)
+
     def on_chat_model_start(
         self,
         serialized: dict[str, Any],
@@ -208,10 +219,21 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         name = model_id or self._get_name_from_callback(serialized, **kwargs)
         span_name = f"{GenAiOperationNameValues.CHAT.value} {name}" if name else GenAiOperationNameValues.CHAT.value
         span = self._create_span(run_id, parent_run_id, span_name)
-        self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, self._extract_provider(serialized, kwargs))
+        provider = self._extract_provider(serialized, kwargs)
+        self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
         self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         if "kwargs" in serialized:
             self._set_request_params(span, serialized["kwargs"])
+        model = (serialized.get("kwargs") or {}).get("model") or (serialized.get("kwargs") or {}).get("model_name")
+        temperature = (serialized.get("kwargs") or {}).get("temperature")
+        self._propagate_to_parent_agent(
+            parent_run_id,
+            {
+                GEN_AI_PROVIDER_NAME: provider,
+                GEN_AI_REQUEST_MODEL: model or name,
+                GEN_AI_REQUEST_TEMPERATURE: temperature,
+            },
+        )
 
     def on_llm_start(
         self,
@@ -331,6 +353,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             self._set_span_attribute(span, GEN_AI_TOOL_DESCRIPTION, serialized["description"])
         if name:
             self._set_span_attribute(span, GEN_AI_TOOL_NAME, name)
+        self._set_span_attribute(span, GEN_AI_TOOL_TYPE, "function")
         self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.EXECUTE_TOOL.value)
 
     def on_tool_end(self, output: Any, *, run_id: UUID, **kwargs: Any) -> None:
