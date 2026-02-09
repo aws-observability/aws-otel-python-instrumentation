@@ -84,6 +84,7 @@ class GenAITestBase(ContractTestBase):
             self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, "chat")
             self.assertIn(GEN_AI_PROVIDER_NAME, attrs)
             self.assertIn(GEN_AI_REQUEST_MODEL, attrs)
+            self.assertIn(GEN_AI_REQUEST_TEMPERATURE, attrs)
             self.assertIn(GEN_AI_RESPONSE_MODEL, attrs)
             self.assertIn(GEN_AI_USAGE_INPUT_TOKENS, attrs)
             self.assertIn(GEN_AI_USAGE_OUTPUT_TOKENS, attrs)
