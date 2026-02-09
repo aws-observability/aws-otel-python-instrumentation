@@ -1,16 +1,14 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# pylint: disable=no-self-use
+from __future__ import annotations
 
 from contextvars import Token
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
-from langchain_core.agents import AgentAction, AgentFinish
 from langchain_core.callbacks import BaseCallbackHandler
-from langchain_core.outputs import LLMResult
 
 from amazon.opentelemetry.distro.instrumentation.common.utils import PROVIDER_MAP, serialize_to_json
 from opentelemetry import context
@@ -40,6 +38,10 @@ from opentelemetry.trace import SpanKind, set_span_in_context
 from opentelemetry.trace.span import Span
 from opentelemetry.trace.status import Status, StatusCode
 from opentelemetry.util.types import AttributeValue
+
+if TYPE_CHECKING:
+    from langchain_core.agents import AgentAction, AgentFinish
+    from langchain_core.outputs import LLMResult
 
 
 @dataclass
@@ -196,9 +198,9 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
 
     def _find_ancestor_agent_span(self, run_id: Optional[UUID]) -> Optional[Span]:
         # OTel semantic conventions recommend gen_ai.request.model, gen_ai.request.temperature, and
-        # gen_ai.provider.name on invoke_agent spans. However on_chain_start callback doesn't have access to the underlying
-        # LLM configuration. We propagate these attributes when the child LLM span callback fires and
-        # set these attributes on the parent agent span since it is still open during the callback.
+        # gen_ai.provider.name on invoke_agent spans. However on_chain_start callback doesn't have
+        # access to the underlying LLM configuration. We propagate these attributes when the child
+        # LLM span callback fires and set them on the parent agent span since it is still open.
         # We have to walk up the span hierarchy to find the nearest invoke_agent ancestor.
         # In practice, the depth is typically 1-2 levels, so this is not a costly operation.
         visited = set()

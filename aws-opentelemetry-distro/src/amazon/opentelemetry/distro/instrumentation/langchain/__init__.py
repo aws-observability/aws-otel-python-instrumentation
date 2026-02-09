@@ -4,10 +4,6 @@ from typing import Any, Collection
 
 from wrapt import wrap_function_wrapper
 
-from amazon.opentelemetry.distro.instrumentation.langchain.callback_handler import (
-    OpenTelemetryCallbackHandler,
-    _BaseCallbackManagerInitWrapper,
-)
 from amazon.opentelemetry.distro.version import __version__
 from opentelemetry import trace
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
@@ -28,6 +24,12 @@ class LangChainInstrumentor(BaseInstrumentor):
 
     # disabling these linters rules as these are instance methods from BaseInstrumentor
     def _instrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
+        # pylint: disable=import-outside-toplevel
+        from amazon.opentelemetry.distro.instrumentation.langchain.callback_handler import (
+            OpenTelemetryCallbackHandler,
+            _BaseCallbackManagerInitWrapper,
+        )
+
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
 

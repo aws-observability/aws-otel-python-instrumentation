@@ -5,7 +5,6 @@ import sys
 import unittest
 from unittest import TestCase
 
-from amazon.opentelemetry.distro.instrumentation.langchain import LangChainInstrumentor
 from opentelemetry import context
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
 from opentelemetry.sdk.trace import TracerProvider
@@ -46,6 +45,8 @@ class TestLangChainInstrumentor(TestCase):
         from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
         from langchain_core.runnables import RunnableLambda, RunnablePassthrough
         from langchain_core.tools import StructuredTool, tool
+
+        from amazon.opentelemetry.distro.instrumentation.langchain import LangChainInstrumentor
 
         self.create_agent = create_agent
         self.FakeListLLM = FakeListLLM
