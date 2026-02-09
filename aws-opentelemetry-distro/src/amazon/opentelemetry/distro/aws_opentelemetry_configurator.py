@@ -906,7 +906,9 @@ def _create_aws_otlp_exporter(endpoint: str, service: str, region: str):
             return None
 
         # pylint: disable=import-outside-toplevel
-        from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogRecordExporter
+        from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter import (
+            OTLPAwsLogRecordExporter,
+        )
         from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 
         if service == XRAY_SERVICE:

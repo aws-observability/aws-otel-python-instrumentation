@@ -59,7 +59,7 @@ from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session impor
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor import (
     AwsCloudWatchOtlpBatchLogRecordProcessor,
 )
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogRecordExporter
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter import OTLPAwsLogRecordExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler._aws_xray_sampling_client import _AwsXRaySamplingClient
@@ -1340,7 +1340,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         # Test logs service
         with patch(
-            "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter.OTLPAwsLogRecordExporter"
+            "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter.OTLPAwsLogRecordExporter"
         ) as mock_log_exporter_class:
             mock_exporter_instance = MagicMock()
             mock_log_exporter_class.return_value = mock_exporter_instance
