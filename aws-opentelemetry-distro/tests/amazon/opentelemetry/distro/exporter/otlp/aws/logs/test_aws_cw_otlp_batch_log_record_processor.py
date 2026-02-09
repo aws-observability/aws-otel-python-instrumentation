@@ -368,7 +368,7 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         for log in test_logs:
             processor._batch_processor.emit(log)
 
-        time.sleep(0.2)
+        processor.force_flush()
 
         self.assertEqual(self.mock_exporter.export.call_count, 2)
         for call in self.mock_exporter.export.call_args_list:

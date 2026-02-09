@@ -149,10 +149,14 @@ class TestOTLPAwsLogsExporter(TestCase):
         "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter.Event.wait",
         side_effect=lambda x: False,
     )
+    @patch(
+        "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter.random.uniform",
+        return_value=1.0,
+    )
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter.time", return_value=0)
     @patch("requests.Session.post")
     def test_should_export_again_with_backoff_delay_if_retryable_and_bad_retry_after_header(
-        self, mock_request, mock_time, mock_wait
+        self, mock_request, mock_time, mock_random, mock_wait
     ):
         mock_request.side_effect = [
             self.retryable_response_bad_header,
@@ -169,11 +173,9 @@ class TestOTLPAwsLogsExporter(TestCase):
         delays = mock_wait.call_args_list
 
         for index, delay in enumerate(delays):
-            expected_base = 2**index
+            expected_delay = 2**index  # No jitter since random.uniform returns 1.0
             actual_delay = delay[0][0]
-            # Assert delay is within jitter range: base * [0.8, 1.2]
-            self.assertGreaterEqual(actual_delay, expected_base * 0.8)
-            self.assertLessEqual(actual_delay, expected_base * 1.2)
+            self.assertEqual(actual_delay, expected_delay)
 
         self.assertEqual(mock_wait.call_count, 3)
         self.assertEqual(mock_request.call_count, 4)
