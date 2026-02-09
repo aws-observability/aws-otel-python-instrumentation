@@ -72,7 +72,7 @@ class TestLangChainInstrumentor(TestCase):
 
             @classmethod
             def get_lc_namespace(cls):
-                return ["langchain", "chat_models", "fake"]
+                return ["langchain", "chat_models", "openai"]
 
             def bind_tools(self, tools, **kwargs):
                 return self
@@ -434,6 +434,45 @@ class TestLangChainInstrumentor(TestCase):
         spans = self.span_exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
         self.assertIn("custom-model-from-params", spans[0].name)
+
+    def test_chat_model_propagates_to_parent_agent(self):
+        @self.tool
+        def dummy_tool() -> str:
+            """Dummy tool."""
+            return "done"
+
+        llm = self.FakeChatModel(messages=iter([self.AIMessage(content="Done.")]))
+        agent = self.create_agent(llm, [dummy_tool], name="TestAgent")
+        agent.invoke({"messages": [("human", "test")]})
+
+        spans = self.span_exporter.get_finished_spans()
+        agent_span = next((s for s in spans if "invoke_agent" in s.name), None)
+        self.assertIsNotNone(agent_span)
+        self.assertIn(GEN_AI_REQUEST_MODEL, agent_span.attributes)
+        self.assertIn(GEN_AI_REQUEST_TEMPERATURE, agent_span.attributes)
+        self.assertIn(GEN_AI_PROVIDER_NAME, agent_span.attributes)
+
+    def test_text_completion_propagates_to_parent_agent(self):
+        if not self.HAS_LEGACY_LANGCHAIN:
+            self.skipTest("langchain_classic not available")
+
+        @self.tool
+        def search(query: str) -> str:
+            """Search."""
+            return "result"
+
+        llm = self.FakeListLLM(responses=["Final Answer: done"])
+        agent = self.initialize_agent([search], llm, agent=self.AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=False)
+        try:
+            agent.run("test")
+        except Exception:
+            pass
+
+        spans = self.span_exporter.get_finished_spans()
+        agent_span = next((s for s in spans if "invoke_agent" in s.name), None)
+        self.assertIsNotNone(agent_span)
+        # Verify propagation from text_completion to agent span
+        self.assertIn(GEN_AI_REQUEST_MODEL, agent_span.attributes)
 
 
 if __name__ == "__main__":

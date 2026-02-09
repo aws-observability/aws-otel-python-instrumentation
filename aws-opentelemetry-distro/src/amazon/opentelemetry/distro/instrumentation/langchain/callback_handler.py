@@ -47,6 +47,7 @@ class SpanHolder:
     span: Span
     token: Token
     children: list[UUID]
+    parent_run_id: Optional[UUID] = None
 
 
 class _BaseCallbackManagerInitWrapper:
@@ -169,7 +170,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             span = self.tracer.start_span(span_name, kind=kind)
 
         token = context.attach(set_span_in_context(span))
-        self.span_mapping[run_id] = SpanHolder(span, token, [])
+        self.span_mapping[run_id] = SpanHolder(span, token, [], parent)
         return span
 
     @staticmethod
@@ -193,15 +194,31 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         span.set_attribute(ERROR_TYPE, type(error).__qualname__)
         self._end_span(run_id)
 
-    def _propagate_to_parent_agent(self, parent_run_id: Optional[UUID], attrs: dict[str, Any]) -> None:
-        resolved = self._resolve_parent_span(parent_run_id)
-        if not resolved or resolved not in self.span_mapping:
-            return
-        parent_span = self.span_mapping[resolved].span
-        if "invoke_agent" not in parent_span.name:
+    def _find_ancestor_agent_span(self, run_id: Optional[UUID]) -> Optional[Span]:
+        # OTel semantic conventions recommend gen_ai.request.model, gen_ai.request.temperature, and
+        # gen_ai.provider.name on invoke_agent spans. However on_chain_start callback doesn't have access to the underlying
+        # LLM configuration. We propagate these attributes when the child LLM span callback fires and
+        # set these attributes on the parent agent span since it is still open during the callback.
+        # We have to walk up the span hierarchy to find the nearest invoke_agent ancestor.
+        # In practice, the depth is typically 1-2 levels, so this is not a costly operation.
+        visited = set()
+        current = self._resolve_parent_span(run_id)
+        while current and current not in visited:
+            visited.add(current)
+            if current not in self.span_mapping:
+                break
+            holder = self.span_mapping[current]
+            if "invoke_agent" in holder.span.name:
+                return holder.span
+            current = holder.parent_run_id
+        return None
+
+    def _propagate_to_parent_agent_span(self, parent_run_id: Optional[UUID], attrs: dict[str, Any]) -> None:
+        agent_span = self._find_ancestor_agent_span(parent_run_id)
+        if not agent_span:
             return
         for name, value in attrs.items():
-            self._set_span_attribute(parent_span, name, value)
+            self._set_span_attribute(agent_span, name, value)
 
     def on_chat_model_start(
         self,
@@ -226,7 +243,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             self._set_request_params(span, serialized["kwargs"])
         model = (serialized.get("kwargs") or {}).get("model") or (serialized.get("kwargs") or {}).get("model_name")
         temperature = (serialized.get("kwargs") or {}).get("temperature")
-        self._propagate_to_parent_agent(
+        self._propagate_to_parent_agent_span(
             parent_run_id,
             {
                 GEN_AI_PROVIDER_NAME: provider,
@@ -255,9 +272,15 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             else GenAiOperationNameValues.TEXT_COMPLETION.value
         )
         span = self._create_span(run_id, parent_run_id, span_name)
-        self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, self._extract_provider(serialized, kwargs))
+        provider = self._extract_provider(serialized, kwargs)
+        self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
         self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.TEXT_COMPLETION.value)
         self._set_request_params(span, kwargs)
+        temperature = kwargs.get("invocation_params", {}).get("temperature")
+        self._propagate_to_parent_agent_span(
+            parent_run_id,
+            {GEN_AI_PROVIDER_NAME: provider, GEN_AI_REQUEST_MODEL: name, GEN_AI_REQUEST_TEMPERATURE: temperature},
+        )
 
     def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: Any) -> None:
         if context.get_value(_SUPPRESS_INSTRUMENTATION_KEY) or run_id not in self.span_mapping:
@@ -321,9 +344,11 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
     def on_chain_end(self, outputs: dict[str, Any], *, run_id: UUID, **kwargs: Any) -> None:
         if context.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
             return
+        self.skipped_runs.pop(run_id, None)
         self._end_span(run_id)
 
     def on_chain_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
+        self.skipped_runs.pop(run_id, None)
         self._handle_error(error, run_id, **kwargs)
 
     def on_tool_start(
