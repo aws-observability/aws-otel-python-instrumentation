@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- Fix AwsCloudWatchOtlpBatchLogRecordProcessor custom _export not being invoked; rename otlp_aws_logs_exporter to otlp_aws_log_record_exporter
+  ([#611](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/611))
 - Add native CrewAI instrumentation support
   ([#586](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/586))
 - fix: Pin protobuf version to prevent Any recursion depth bypass (CVE-2026-0994)
