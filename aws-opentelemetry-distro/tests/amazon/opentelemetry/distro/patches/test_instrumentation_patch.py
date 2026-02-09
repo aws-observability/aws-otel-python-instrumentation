@@ -26,7 +26,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_SQS_QUEUE_NAME,
 )
 from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_instrumentation_patches
-from amazon.opentelemetry.distro.patches.semconv._incubating.attributes.gen_ai_attributes import (
+from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_BROWSER_ID,
     GEN_AI_CODE_INTERPRETER_ID,
     GEN_AI_GATEWAY_ID,
