@@ -136,10 +136,10 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                 return True
 
         # In langchain >= 1.0.0, the agent creation logic changed to depend on langgraph.
-        # We suppress internal nodes that have langgraph metadata, except for nodes with
-        # "agent" in the name as those are used for invoke_agent spans.
+        # We suppress internal nodes that have langgraph metadata, except for nodes that
+        # contain the agent name metadata as those are used for invoke_agent spans.
         if metadata and any(k.startswith("langgraph_") for k in metadata):
-            return not (name and "agent" in name.lower())
+            return "lc_agent_name" not in metadata
         return False
 
     def _end_span(self, run_id: UUID) -> None:
@@ -323,7 +323,13 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             self.skipped_runs[run_id] = self._resolve_parent_span(parent_run_id)
             return
 
-        is_agent = name and "agent" in name.lower()
+        # AgentExecutor is the legacy LangChain agent node, lc_agent_name metadata was added in
+        # langchain >= 1.2.4 this is only set when a custom name is given to the agent,
+        # otherwise if no name is given it defaults to "LangGraph" but lc_agent_name is not set.
+        # langgraph_node check ensures we only match top-level agent, not internal nodes.
+        is_agent = (name and ("AgentExecutor" in name or name == "LangGraph")) or (
+            metadata and "lc_agent_name" in metadata and "langgraph_node" not in metadata
+        )
         if is_agent:
             span_name = (
                 f"{GenAiOperationNameValues.INVOKE_AGENT.value} {name}"

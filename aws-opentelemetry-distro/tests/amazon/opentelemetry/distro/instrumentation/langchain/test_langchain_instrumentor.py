@@ -475,6 +475,36 @@ class TestLangChainInstrumentor(TestCase):
         # Verify propagation from text_completion to agent span
         self.assertIn(GEN_AI_REQUEST_MODEL, agent_span.attributes)
 
+    def test_create_agent_detects_agent_with_and_without_name(self):
+        cases = [
+            (None, "LangGraph"),
+            ("CustomAgentName", "CustomAgentName"),
+        ]
+        for agent_name, expected_name in cases:
+            with self.subTest(agent_name=agent_name):
+                self.span_exporter.clear()
+
+                @self.tool
+                def dummy_tool() -> str:
+                    """Dummy tool."""
+                    return "done"
+
+                llm = self.FakeChatModel(messages=iter([self.AIMessage(content="Done.")]))
+                agent = (
+                    self.create_agent(llm, [dummy_tool], name=agent_name)
+                    if agent_name
+                    else self.create_agent(llm, [dummy_tool])
+                )
+                agent.invoke({"messages": [("human", "test")]})
+
+                spans = self.span_exporter.get_finished_spans()
+                agent_spans = [s for s in spans if "invoke_agent" in s.name]
+                self.assertGreater(len(agent_spans), 0)
+                self.assertEqual(
+                    agent_spans[0].attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.INVOKE_AGENT.value
+                )
+                self.assertEqual(agent_spans[0].attributes[GEN_AI_AGENT_NAME], expected_name)
+
 
 if __name__ == "__main__":
     unittest.main()
