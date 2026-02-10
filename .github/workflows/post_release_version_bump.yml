@@ -8,8 +8,7 @@ on:
         required: true
 
 env:
-  VERSION: ${{ env.VERSION }}
-
+  VERSION: ${{ github.event.inputs.version }}
   AWS_DEFAULT_REGION: us-east-1
 
 permissions:

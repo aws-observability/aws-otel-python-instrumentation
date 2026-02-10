@@ -12,9 +12,8 @@ on:
         default: 'false'
 
 env:
-  VERSION: ${{ env.VERSION }}
+  VERSION: ${{ github.event.inputs.version }}
   IS_PATCH: ${{ github.event.inputs.is_patch }}
-
   AWS_DEFAULT_REGION: us-east-1
 
 permissions:
