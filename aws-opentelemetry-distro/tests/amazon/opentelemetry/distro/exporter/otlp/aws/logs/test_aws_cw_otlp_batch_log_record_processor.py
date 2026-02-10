@@ -358,6 +358,25 @@ class TestAwsBatchLogRecordProcessor(unittest.TestCase):
         # Verify parameters are passed to parent constructor
         self.assertEqual(custom_processor._batch_processor._max_export_batch_size, 100)
 
+    @patch.dict("os.environ", {"OTEL_BLRP_SCHEDULE_DELAY": "50"})
+    def test_batch_processor_uses_custom_export_method(self):
+        processor = AwsCloudWatchOtlpBatchLogRecordProcessor(exporter=self.mock_exporter)
+
+        large_log_body = "X" * (processor._MAX_LOG_REQUEST_BYTE_SIZE + 1)
+        test_logs = self.generate_test_log_data(log_body=large_log_body, count=2)
+
+        for log in test_logs:
+            processor._batch_processor.emit(log)
+
+        processor.force_flush()
+
+        self.assertEqual(self.mock_exporter.export.call_count, 2)
+        for call in self.mock_exporter.export.call_args_list:
+            batch = call[0][0]
+            self.assertEqual(len(batch), 1)
+
+        processor.shutdown()
+
     @staticmethod
     def generate_test_log_data(
         log_body,
