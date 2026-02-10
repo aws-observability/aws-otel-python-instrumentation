@@ -7,6 +7,7 @@ on:
         required: true
 
 env:
+  VERSION: ${{ github.event.inputs.version }}
   AWS_DEFAULT_REGION: us-east-1
   AWS_PUBLIC_ECR_REGION: us-east-1
   AWS_PRIVATE_ECR_REGION: us-west-2
@@ -88,7 +89,7 @@ jobs:
           TWINE_USERNAME: '__token__'
           TWINE_PASSWORD: ${{ env.TEST_PYPI_TOKEN_API_TOKEN }}
         run: |
-          twine upload --repository testpypi --skip-existing --verbose dist/aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
+          twine upload --repository testpypi --skip-existing --verbose dist/aws_opentelemetry_distro-${{ env.VERSION }}-py3-none-any.whl
 
       # Publish to prod PyPI
       - name: Publish to PyPI
@@ -96,7 +97,7 @@ jobs:
           TWINE_USERNAME: '__token__'
           TWINE_PASSWORD: ${{ env.PROD_PYPI_TOKEN_API_TOKEN }}
         run: |
-          twine upload --skip-existing --verbose dist/aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
+          twine upload --skip-existing --verbose dist/aws_opentelemetry_distro-${{ env.VERSION }}-py3-none-any.whl
 
       # Publish to public ECR
       - name: Build and push public ECR image
@@ -107,7 +108,7 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           tags: |
-            ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ github.event.inputs.version }}
+            ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}
 
       # Publish to private ECR
       - name: Build and push private ECR image
@@ -118,7 +119,7 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           tags: |
-            ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ github.event.inputs.version }}
+            ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ env.VERSION }}
 
       # Publish to GitHub releases
       - name: Create GH release
@@ -127,7 +128,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
         run: |
           gh release create --target "$GITHUB_REF_NAME" \
-             --title "Release v${{ github.event.inputs.version }}" \
+             --title "Release v${{ env.VERSION }}" \
              --draft \
-             "v${{ github.event.inputs.version }}" \
-             dist/aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
+             "v${{ env.VERSION }}" \
+             dist/aws_opentelemetry_distro-${{ env.VERSION }}-py3-none-any.whl
