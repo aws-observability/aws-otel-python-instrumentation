@@ -10,25 +10,21 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry import trace
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
-    GEN_AI_OPERATION_NAME,
-    GEN_AI_REQUEST_MODEL,
-    GEN_AI_USAGE_INPUT_TOKENS,
-    GEN_AI_USAGE_OUTPUT_TOKENS,
-    GEN_AI_TOOL_DESCRIPTION,
-    GEN_AI_TOOL_NAME,
-)
-
-llama_index_module = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama-index")
-LlamaIndexInstrumentor = llama_index_module.LlamaIndexInstrumentor
-
-from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_EMBEDDINGS_DIMENSION_COUNT,
     GEN_AI_INPUT_MESSAGES,
+    GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_MODEL,
     GEN_AI_TOOL_DEFINITIONS,
+    GEN_AI_TOOL_DESCRIPTION,
+    GEN_AI_TOOL_NAME,
+    GEN_AI_USAGE_INPUT_TOKENS,
+    GEN_AI_USAGE_OUTPUT_TOKENS,
 )
 from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
+
+from amazon.opentelemetry.distro.instrumentation.llama_index import LlamaIndexInstrumentor
 
 from llama_index.core.base.llms.types import ChatMessage, ChatResponse, CompletionResponse, MessageRole
 from llama_index.core.tools import FunctionTool
@@ -42,7 +38,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self.tracer_provider.add_span_processor(SimpleSpanProcessor(self.span_exporter))
         self.instrumentor = LlamaIndexInstrumentor()
         self.instrumentor.instrument(tracer_provider=self.tracer_provider)
-        handler_module = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama-index._handler")
+        handler_module = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._handler")
         self._Span = handler_module._Span
         self.tracer = trace.get_tracer(__name__, tracer_provider=self.tracer_provider)
 
@@ -467,7 +463,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         otel_span.end()
 
     def test_provider_fallback_constant(self):
-        handler_module = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama-index._handler")
+        handler_module = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._handler")
         _PROVIDER_LLAMA_INDEX = getattr(handler_module, "_PROVIDER_LLAMA_INDEX")
         self.assertEqual(_PROVIDER_LLAMA_INDEX, "llama_index")
 

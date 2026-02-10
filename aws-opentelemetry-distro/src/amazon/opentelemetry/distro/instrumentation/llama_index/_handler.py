@@ -32,32 +32,30 @@ from typing import (
     Union,
 )
 
-from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attributes import (
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
+    GEN_AI_AGENT_DESCRIPTION,
+    GEN_AI_AGENT_ID,
+    GEN_AI_AGENT_NAME,
     GEN_AI_EMBEDDINGS_DIMENSION_COUNT,
     GEN_AI_INPUT_MESSAGES,
+    GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_MAX_TOKENS,
+    GEN_AI_REQUEST_MODEL,
+    GEN_AI_REQUEST_TEMPERATURE,
     GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_CALL_ID,
     GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_DEFINITIONS,
-)
-from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
-from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
-    GEN_AI_AGENT_DESCRIPTION,
-    GEN_AI_AGENT_ID,
-    GEN_AI_AGENT_NAME,
-    GEN_AI_OPERATION_NAME,
-    GEN_AI_REQUEST_MAX_TOKENS,
-    GEN_AI_REQUEST_MODEL,
-    GEN_AI_REQUEST_TEMPERATURE,
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
     GEN_AI_USAGE_INPUT_TOKENS,
-    GEN_AI_USAGE_OUTPUT_TOKENS
+    GEN_AI_USAGE_OUTPUT_TOKENS,
 )
+from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
 from opentelemetry import context as context_api
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
 from opentelemetry.trace import Span, SpanKind, Status, StatusCode, Tracer, set_span_in_context
