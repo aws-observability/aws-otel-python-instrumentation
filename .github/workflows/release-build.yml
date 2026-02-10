@@ -18,6 +18,8 @@ env:
   RELEASE_PRIVATE_REPOSITORY: 020628701572.dkr.ecr.us-west-2.amazonaws.com/adot-autoinstrumentation-python
   RELEASE_PRIVATE_REGISTRY: 020628701572.dkr.ecr.us-west-2.amazonaws.com
   PACKAGE_NAME: aws-opentelemetry-distro
+  VERSION: ${{ github.event.inputs.version }}
+  AWS_REGIONS: ${{ github.event.inputs.aws_region }}
   WHEEL_ARTIFACT_NAME: aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
   SOURCE_ARTIFACT_NAME: aws_opentelemetry_distro-${{ github.event.inputs.version }}.tar.gz
   # Legacy list of commercial regions to deploy to. New regions should NOT be added here, and instead should be added to the `aws_region` default input to the workflow.
@@ -81,10 +83,8 @@ jobs:
 
       - name: Set up regions matrix
         id: set-matrix
-        env:
-          AWS_REGIONS: ${{ github.event.inputs.aws_region }}
         run: |
-          IFS=',' read -ra REGIONS <<< "$AWS_REGIONS"
+          IFS=',' read -ra REGIONS <<< "${{ env.AWS_REGIONS }}"
           MATRIX="["
           for region in "${REGIONS[@]}"; do
             trimmed_region=$(echo "$region" | xargs)
@@ -165,7 +165,7 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           tags: |
-            ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ github.event.inputs.version }}
+            ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}
 
       # Publish to private ECR
       - name: Build and push private ECR image
@@ -176,7 +176,7 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           tags: |
-            ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ github.event.inputs.version }}
+            ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ env.VERSION }}
   
   publish-layer-prod:
     runs-on: ubuntu-latest
@@ -418,7 +418,6 @@ jobs:
         id: create_release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ github.event.inputs.version }}
         run: |
           # Extract all dependencies from pyproject.toml
           DEPS=$(python3 -c "
