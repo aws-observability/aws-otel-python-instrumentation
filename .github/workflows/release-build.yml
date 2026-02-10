@@ -7,7 +7,7 @@ on:
         required: true
 
 env:
-  VERSION: ${{ github.event.inputs.version }}
+  VERSION: ${{ env.VERSION }}
   AWS_DEFAULT_REGION: us-east-1
   AWS_PUBLIC_ECR_REGION: us-east-1
   AWS_PRIVATE_ECR_REGION: us-west-2
