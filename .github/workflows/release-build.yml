@@ -382,7 +382,6 @@ jobs:
         id: create_release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ github.event.inputs.version }}
         run: |
           # Extract all dependencies from pyproject.toml
           DEPS=$(python3 -c "
