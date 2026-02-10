@@ -7,6 +7,7 @@ on:
         required: true
 
 env:
+  VERSION: ${{ github.event.inputs.version }}
   AWS_DEFAULT_REGION: us-east-1
   AWS_PUBLIC_ECR_REGION: us-east-1
   AWS_PRIVATE_ECR_REGION: us-west-2
@@ -14,7 +15,7 @@ env:
   RELEASE_PRIVATE_REPOSITORY: 020628701572.dkr.ecr.us-west-2.amazonaws.com/adot-autoinstrumentation-python
   RELEASE_PRIVATE_REGISTRY: 020628701572.dkr.ecr.us-west-2.amazonaws.com
   PACKAGE_NAME: aws-opentelemetry-distro
-  ARTIFACT_NAME: aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
+  ARTIFACT_NAME: aws_opentelemetry_distro-${{ env.VERSION }}-py3-none-any.whl
 
 permissions:
   id-token: write
@@ -108,7 +109,7 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           tags: |
-            ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ github.event.inputs.version }}
+            ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}
 
       # Publish to private ECR
       - name: Build and push private ECR image
@@ -119,7 +120,7 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           tags: |
-            ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ github.event.inputs.version }}
+            ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ env.VERSION }}
 
       - name: Get SHA256 checksum of wheel file
         id: get_sha256
@@ -139,9 +140,9 @@ jobs:
           shasum -a 256 layer_artifact/layer.zip > layer_artifact/layer.zip.sha256
 
           gh release create --target "$GITHUB_REF_NAME" \
-             --title "Release v${{ github.event.inputs.version }}" \
+             --title "Release v${{ env.VERSION }}" \
              --draft \
-             "v${{ github.event.inputs.version }}" \
+             "v${{ env.VERSION }}" \
              dist/${{ env.ARTIFACT_NAME }} \
              ${{ env.ARTIFACT_NAME }}.sha256 \
              layer_artifact/layer.zip \
