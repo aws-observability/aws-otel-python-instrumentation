@@ -25,7 +25,7 @@ env:
   LAYER_NAME: AWSOpenTelemetryDistroPython
   LAYER_ARTIFACT_NAME: aws-opentelemetry-python-layer.zip
   VERSION: ${{ github.event.inputs.version }}
-
+  AWS_REGIONS: ${{ github.event.inputs.aws_region }}
 permissions:
   id-token: write
   contents: write
@@ -91,7 +91,7 @@ jobs:
       - name: Set up regions matrix
         id: set-matrix
         env:
-          AWS_REGIONS: ${{ github.event.inputs.aws_region }}
+          AWS_REGIONS: ${{ env.AWS_REGIONS }}
         run: |
           IFS=',' read -ra REGIONS <<< "$AWS_REGIONS"
           MATRIX="["
@@ -190,7 +190,7 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           tags: |
-            ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ github.event.inputs.version }}
+            ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}
 
       # Publish to private ECR
       - name: Build and push private ECR image
@@ -201,7 +201,7 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           tags: |
-            ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ github.event.inputs.version }}
+            ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ env.VERSION }}
   
   publish-layer-prod:
     runs-on: ubuntu-latest
