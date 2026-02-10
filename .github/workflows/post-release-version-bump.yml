@@ -12,6 +12,8 @@ on:
         default: 'false'
 
 env:
+  VERSION: ${{ github.event.inputs.version }}
+
   AWS_DEFAULT_REGION: us-east-1
 
 permissions:
@@ -100,13 +102,13 @@ jobs:
 
       - name: Update version to next development version in main
         run: |
-          DEV_VERSION="${{ github.event.inputs.version }}.dev0"
+          DEV_VERSION="${{ env.VERSION }}.dev0"
           sed -i 's/__version__ = ".*"/__version__ = "'$DEV_VERSION'"/' aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py
-          VERSION="${{ github.event.inputs.version }}"
+          VERSION="${{ env.VERSION }}"
           sed -i 's/python:v.*"/python:v'$VERSION'"/' .github/workflows/daily-scan.yml
           
           # for patch releases, avoid merge conflict by manually resolving CHANGELOG with main
-          if [[ "${{ github.event.inputs.is_patch }}" == "true" ]]; then
+          if [[ "${{ env.IS_PATCH }}" == "true" ]]; then
             # Copy the patch release entries
             sed -n "/^## v${VERSION}/,/^## v[0-9]/p" CHANGELOG.md | sed '$d' > /tmp/patch_release_section.txt
 
@@ -127,7 +129,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ env.BOT_TOKEN_GITHUB_RW_PATOKEN }}
         run: |
-          DEV_VERSION="${{ github.event.inputs.version }}.dev0"
+          DEV_VERSION="${{ env.VERSION }}.dev0"
           gh pr create --title "Post release $VERSION: Update version to $DEV_VERSION" \
                        --body "This PR prepares the main branch for the next development cycle by updating the version to $DEV_VERSION and updating the image version to be scanned to the latest released.
           
