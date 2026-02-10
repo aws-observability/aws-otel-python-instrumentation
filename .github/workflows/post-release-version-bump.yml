@@ -91,6 +91,8 @@ jobs:
       - name: Extract Major.Minor Version and setup Env variable
         run: |
           echo "MAJOR_MINOR=$(echo ${{ env.VERSION }} | sed -E 's/([0-9]+\.[0-9]+)\.[0-9]+/\1/')" >> $GITHUB_ENV
+
+      - name: Determine release branch and checkout
         run: |
           RELEASE_BRANCH="release/v${MAJOR_MINOR}.x"
           git fetch origin $RELEASE_BRANCH
