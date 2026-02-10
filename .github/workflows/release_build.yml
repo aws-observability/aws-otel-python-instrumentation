@@ -14,6 +14,7 @@ env:
   RELEASE_PRIVATE_REPOSITORY: 020628701572.dkr.ecr.us-west-2.amazonaws.com/adot-autoinstrumentation-python
   RELEASE_PRIVATE_REGISTRY: 020628701572.dkr.ecr.us-west-2.amazonaws.com
   PACKAGE_NAME: aws-opentelemetry-distro
+  VERSION: ${{ github.event.inputs.version }}
 
 permissions:
   id-token: write
@@ -95,7 +96,7 @@ jobs:
           TWINE_USERNAME: '__token__'
           TWINE_PASSWORD: ${{ env.TEST_PYPI_TOKEN_API_TOKEN }}
         run: |
-          twine upload --repository testpypi --skip-existing --verbose dist/aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
+          twine upload --repository testpypi --skip-existing --verbose dist/aws_opentelemetry_distro-${{ env.VERSION }}-py3-none-any.whl
 
       # The following step publish to ECR
       - name: Build and push images
@@ -106,8 +107,8 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           tags: |
-            ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ github.event.inputs.version }}
-            ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ github.event.inputs.version }}
+            ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ env.VERSION }}
+            ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}
 
       # Publish to prod PyPI
       - name: Publish to PyPI
@@ -115,7 +116,7 @@ jobs:
           TWINE_USERNAME: '__token__'
           TWINE_PASSWORD: ${{ env.PROD_PYPI_TOKEN_API_TOKEN }}
         run: |
-          twine upload --skip-existing --verbose dist/aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
+          twine upload --skip-existing --verbose dist/aws_opentelemetry_distro-${{ env.VERSION }}-py3-none-any.whl
 
       - name: Create GH release
         id: create_release
@@ -123,7 +124,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
         run: |
           gh release create --target "$GITHUB_REF_NAME" \
-             --title "Release v${{ github.event.inputs.version }}" \
+             --title "Release v${{ env.VERSION }}" \
              --draft \
-             "v${{ github.event.inputs.version }}" \
-             dist/aws_opentelemetry_distro-${{ github.event.inputs.version }}-py3-none-any.whl
+             "v${{ env.VERSION }}" \
+             dist/aws_opentelemetry_distro-${{ env.VERSION }}-py3-none-any.whl
