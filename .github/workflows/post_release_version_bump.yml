@@ -11,6 +11,9 @@ permissions:
   contents: write
   pull-requests: write
 
+env:
+  VERSION: ${{ github.event.inputs.version }}
+
 jobs:
   check-version:
     runs-on: ubuntu-latest
@@ -77,9 +80,9 @@ jobs:
 
       - name: Update version to next development version in main
         run: |
-          DEV_VERSION="${{ github.event.inputs.version }}.dev0"
+          DEV_VERSION="${{ env.VERSION }}.dev0"
           sed -i 's/__version__ = ".*"/__version__ = "'$DEV_VERSION'"/' aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py
-          VERSION="${{ github.event.inputs.version }}"
+          VERSION="${{ env.VERSION }}"
           sed -i 's/python:v.*"/python:v'$VERSION'"/' .github/workflows/released_image_scan.yml
           git add aws-opentelemetry-distro/src/amazon/opentelemetry/distro/version.py
           git add .github/workflows/released_image_scan.yml
@@ -90,7 +93,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          DEV_VERSION="${{ github.event.inputs.version }}.dev0"
+          DEV_VERSION="${{ env.VERSION }}.dev0"
           gh pr create --title "Post release $VERSION: Update version to $DEV_VERSION" \
                        --body "This PR prepares the main branch for the next development cycle by updating the version to $DEV_VERSION and updating the image version to be scanned to the latest released.
           
