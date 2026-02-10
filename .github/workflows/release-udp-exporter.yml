@@ -8,8 +8,11 @@ on:
         required: true
         type: string
 env:
+  VERSION: ${{ github.event.inputs.version }}
+
+
   AWS_DEFAULT_REGION: us-east-1
-  ARTIFACT_NAME: aws_otel_otlp_udp_exporter-${{ github.event.inputs.version }}-py3-none-any.whl
+  ARTIFACT_NAME: aws_otel_otlp_udp_exporter-${{ env.VERSION }}-py3-none-any.whl
 
 permissions:
   id-token: write
