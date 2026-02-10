@@ -5,7 +5,9 @@ import json
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Callable, Dict, Mapping, Optional, Tuple
 
-from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attributes import (
+from opentelemetry import context, trace
+from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_DESCRIPTION,
     GEN_AI_AGENT_ID,
     GEN_AI_AGENT_NAME,
@@ -22,8 +24,6 @@ from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attribute
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
 )
-from opentelemetry import context, trace
-from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
 if TYPE_CHECKING:
@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from crewai.crew import Crew
     from crewai.llm import LLM
     from crewai.task import Task
+    from crewai.tools.base_tool import BaseTool
     from crewai.tools.structured_tool import CrewStructuredTool
     from crewai.tools.tool_calling import ToolCalling
     from crewai.tools.tool_usage import ToolUsage
@@ -38,11 +39,6 @@ if TYPE_CHECKING:
 
 _OPERATION_INVOKE_AGENT = "invoke_agent"
 _OPERATION_EXECUTE_TOOL = "execute_tool"
-# default value for gen_ai.provider.name, a required attribute per OpenTelemetry
-# semantic conventions.
-# "crewai" is not a standard provider name in semconv v1.39, but serves as a fallback when the
-# underlying LLM provider cannot be determined.
-_PROVIDER_CREWAI = "crewai"
 
 
 class _BaseWrapper(ABC):
@@ -58,7 +54,7 @@ class _BaseWrapper(ABC):
         "claude": "anthropic",
         "azure": "azure.ai.openai",
         "azure_openai": "azure.ai.openai",
-        "google": "gcp.vertex_ai",
+        "google": "gcp.gen_ai",
         "gemini": "gcp.gemini",
         "cohere": "cohere",
         "mistral": "mistral_ai",
@@ -96,8 +92,17 @@ class _BaseWrapper(ABC):
                 span.record_exception(exc)
                 raise
 
+    def _set_agent_llm_attributes(self, attributes: Dict[str, Any], agent: Any) -> None:
+        if not agent:
+            return
+        llm = getattr(agent, "llm", None)
+        provider, model = self._extract_provider_and_model(llm)
+        if provider:
+            attributes[GEN_AI_PROVIDER_NAME] = provider
+        if model:
+            attributes[GEN_AI_REQUEST_MODEL] = model
+
     def _extract_provider_and_model(self, llm: Optional["LLM"]) -> Tuple[Optional[str], Optional[str]]:
-        # extracts provider name and model from CrewAI LLM object
         if not llm:
             return None, None
 
@@ -221,7 +226,6 @@ class _TaskExecuteCoreWrapper(_BaseWrapper):
         agent: Optional[Agent] = args[0] if args else kwargs.get("agent")
         attributes: Dict[str, Any] = {
             GEN_AI_OPERATION_NAME: _OPERATION_INVOKE_AGENT,
-            GEN_AI_PROVIDER_NAME: _PROVIDER_CREWAI,
         }
 
         if agent:
@@ -235,13 +239,9 @@ class _TaskExecuteCoreWrapper(_BaseWrapper):
             if goal:
                 attributes[GEN_AI_AGENT_DESCRIPTION] = goal
 
-            llm: Optional[LLM] = getattr(agent, "llm", None)
-            provider, model = self._extract_provider_and_model(llm)
-            if provider:
-                attributes[GEN_AI_PROVIDER_NAME] = provider
-            if model:
-                attributes[GEN_AI_REQUEST_MODEL] = model
+            self._set_agent_llm_attributes(attributes, agent)
 
+            llm = getattr(agent, "llm", None)
             if llm:
                 temperature = getattr(llm, "temperature", None)
                 if temperature is not None:
@@ -258,9 +258,9 @@ class _TaskExecuteCoreWrapper(_BaseWrapper):
 
 
 class _ToolUseWrapper(_BaseWrapper):
-    # Wraps ToolUsage._use which executes a tool call during agent task execution.
+    # Wraps ToolUsage._use which executes a tool call during text-based tool calling.
     # see:
-    # https://github.com/crewAIInc/crewAI/blob/06d953bf46c636ff9f2d64f45574493d05fb7771/lib/crewai/src/crewai/tools/tool_usage.py#L423-L427
+    # https://github.com/crewAIInc/crewAI/blob/main/lib/crewai/src/crewai/tools/tool_usage.py
 
     def _get_span_name(self, instance: "ToolUsage", args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> str:
         tool: Optional[CrewStructuredTool] = args[1] if len(args) > 1 else kwargs.get("tool")
@@ -274,7 +274,6 @@ class _ToolUseWrapper(_BaseWrapper):
         calling: Optional[ToolCalling] = args[2] if len(args) > 2 else kwargs.get("calling")
         attributes: Dict[str, Any] = {
             GEN_AI_OPERATION_NAME: _OPERATION_EXECUTE_TOOL,
-            GEN_AI_PROVIDER_NAME: _PROVIDER_CREWAI,
             GEN_AI_TOOL_TYPE: "function",
         }
 
@@ -291,14 +290,43 @@ class _ToolUseWrapper(_BaseWrapper):
             if call_args:
                 attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = self._serialize_to_json(call_args)
 
-        agent: Optional[Agent] = getattr(instance, "agent", None)
-        if agent:
-            llm: Optional[LLM] = getattr(agent, "llm", None)
-            provider, model = self._extract_provider_and_model(llm)
-            if provider:
-                attributes[GEN_AI_PROVIDER_NAME] = provider
-            if model:
-                attributes[GEN_AI_REQUEST_MODEL] = model
+        self._set_agent_llm_attributes(attributes, getattr(instance, "agent", None))
+
+        return attributes
+
+    def _on_success(self, span: trace.Span, result: Any) -> None:
+        if result is not None:
+            span.set_attribute(GEN_AI_TOOL_CALL_RESULT, self._serialize_to_json(result))
+
+
+class _ToolRunWrapper(_BaseWrapper):
+    # Wraps BaseTool.run and Tool.run for tool calls. As of 1.9.0 these need
+    # to be instrumented to handle LLM native tool calling.
+    # Tool class (@tool decorator) overrides BaseTool.run, so both must be wrapped separately.
+    # see:
+    # https://github.com/crewAIInc/crewAI/blob/main/lib/crewai/src/crewai/tools/base_tool.py
+
+    def _get_span_name(self, instance: "BaseTool", args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> str:
+        tool_name = getattr(instance, "name", None)
+        return f"{_OPERATION_EXECUTE_TOOL} {tool_name}" if tool_name else _OPERATION_EXECUTE_TOOL
+
+    def _get_attributes(self, instance: "BaseTool", args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> Dict[str, Any]:
+        attributes: Dict[str, Any] = {
+            GEN_AI_OPERATION_NAME: _OPERATION_EXECUTE_TOOL,
+            GEN_AI_TOOL_TYPE: "function",
+        }
+
+        tool_name = getattr(instance, "name", None)
+        if tool_name:
+            attributes[GEN_AI_TOOL_NAME] = tool_name
+
+        tool_desc = getattr(instance, "description", None)
+        if tool_desc:
+            attributes[GEN_AI_TOOL_DESCRIPTION] = tool_desc
+
+        tool_args = args[0] if args else kwargs
+        if tool_args:
+            attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = self._serialize_to_json(tool_args)
 
         return attributes
 

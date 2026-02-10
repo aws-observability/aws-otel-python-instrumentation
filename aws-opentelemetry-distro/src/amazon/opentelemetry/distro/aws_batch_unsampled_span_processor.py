@@ -12,6 +12,9 @@ logger = logging.getLogger(__name__)
 
 
 class BatchUnsampledSpanProcessor(BaseBatchSpanProcessor):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._spans_dropped = False
 
     # pylint: disable=no-self-use
     def on_start(self, span: Span, parent_context: Optional[Context] = None) -> None:
@@ -22,19 +25,18 @@ class BatchUnsampledSpanProcessor(BaseBatchSpanProcessor):
         if span.context.trace_flags.sampled:
             return
 
-        if self.done:
+        if self._batch_processor._shutdown:
             logger.warning("Already shutdown, dropping span.")
             return
 
-        if len(self.queue) == self.max_queue_size:
+        if len(self._batch_processor._queue) == self._batch_processor._max_queue_size:
             # pylint: disable=access-member-before-definition
             if not self._spans_dropped:
                 logger.warning("Queue is full, likely spans will be dropped.")
                 # pylint: disable=attribute-defined-outside-init
                 self._spans_dropped = True
 
-        self.queue.appendleft(span)
+        self._batch_processor._queue.appendleft(span)
 
-        if len(self.queue) >= self.max_export_batch_size:
-            with self.condition:
-                self.condition.notify()
+        if len(self._batch_processor._queue) >= self._batch_processor._max_export_batch_size:
+            self._batch_processor._worker_awaken.set()
