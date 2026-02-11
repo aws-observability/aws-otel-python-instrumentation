@@ -1,0 +1,13 @@
+[
+{{#each crates}}
+  {
+    "Name": "{{package.name}}",
+    "Version": "{{package.version}}",
+    "Author": "{{#if package.authors}}{{package.authors}}{{else}}UNKNOWN{{/if}}",
+    "License": "{{license}}",
+    "URL": "{{#if package.repository}}{{package.repository}}{{else}}UNKNOWN{{/if}}",
+    "LicenseText": "{{{license_text}}}",
+    "NoticeText": "{{#if notice_text}}{{{notice_text}}}{{else}}UNKNOWN{{/if}}"
+  }{{#unless @last}},{{/unless}}
+{{/each}}
+]
