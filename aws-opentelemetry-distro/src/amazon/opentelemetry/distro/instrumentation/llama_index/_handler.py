@@ -67,19 +67,12 @@ from typing_extensions import assert_never
 
 from llama_index.core import QueryBundle
 
-# Conditionally import agent base classes (they may not exist in all versions)
 try:
     from llama_index.core.agent import BaseAgent, BaseAgentWorker  # type: ignore[attr-defined]
 except ImportError:
-    # Fallback for older versions
-    try:
-        from llama_index.core.base.agent.types import (  # type: ignore[import-not-found]
-            BaseAgent,
-            BaseAgentWorker,
-        )
-    except ImportError:
-        BaseAgent = None  # type: ignore[misc,assignment]
-        BaseAgentWorker = None  # type: ignore[misc,assignment]
+    # Fallback for newer versions where BaseAgent/BaseAgentWorker don't exist
+    from llama_index.core.agent.workflow import BaseWorkflowAgent as BaseAgent  # type: ignore[attr-defined]
+    BaseAgentWorker = None  # type: ignore[assignment,misc]
 try:
     from llama_index.core.base.llms.types import ToolCallBlock  # type: ignore
 except ImportError:
@@ -157,6 +150,9 @@ from llama_index.core.schema import BaseNode, NodeWithScore, QueryType
 from llama_index.core.tools import BaseTool
 from llama_index.core.types import RESPONSE_TEXT_TYPE
 from llama_index.core.workflow.errors import WorkflowDone  # type: ignore[attr-defined]
+
+from llama_index.core.tools import FunctionTool  # type: ignore[attr-defined]
+from llama_index.core.agent.workflow import FunctionAgent  # type: ignore[attr-defined]
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
@@ -273,6 +269,7 @@ class _Span(BaseSpan):
     _active: bool = PrivateAttr()
     _parent: Optional["_Span"] = PrivateAttr()
     _first_token_timestamp: Optional[int] = PrivateAttr()
+    _context_token: Optional[object] = PrivateAttr()
 
     _end_time: Optional[int] = PrivateAttr()
     _last_updated_at: float = PrivateAttr()
@@ -281,6 +278,7 @@ class _Span(BaseSpan):
         self,
         otel_span: Span,
         parent: Optional["_Span"] = None,
+        context_token: Optional[object] = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -292,6 +290,7 @@ class _Span(BaseSpan):
         self._end_time = None
         self._last_updated_at = time()
         self._list_attr_len: DefaultDict[str, int] = defaultdict(int)
+        self._context_token = context_token
 
     def __setitem__(self, key: str, value: AttributeValue) -> None:
         self._attributes[key] = value
@@ -321,6 +320,15 @@ class _Span(BaseSpan):
         if not self._active:
             return
         self._active = False
+        
+        if self._context_token is not None:
+            try:
+                context_api.detach(self._context_token)
+            except Exception:
+                pass
+            finally:
+                self._context_token = None
+        
         if exception is None:
             status = Status(status_code=StatusCode.OK)
         else:
@@ -374,7 +382,20 @@ class _Span(BaseSpan):
                 self[GEN_AI_TOOL_DEFINITIONS] = json.dumps(tool_defs, default=str, ensure_ascii=False)
 
     @singledispatchmethod
-    def process_instance(self, instance: Any) -> None: ...
+    def process_instance(self, instance: Any) -> None:
+        # Default handler - check class name for agent types
+        if instance is None:
+            return
+            
+        class_name = instance.__class__.__name__
+        
+        # Always set operation name for agents in default handler as fallback
+        if 'Agent' in class_name and class_name not in ('UserAgent',):
+            self[GEN_AI_OPERATION_NAME] = _OPERATION_INVOKE_AGENT
+            if hasattr(instance, 'name') and instance.name:
+                self[GEN_AI_AGENT_NAME] = instance.name
+            else:
+                self[GEN_AI_AGENT_NAME] = class_name
 
     @process_instance.register(BaseLLM)
     @process_instance.register(MultiModalLLM)
@@ -401,6 +422,7 @@ class _Span(BaseSpan):
 
     @process_instance.register
     def _(self, instance: BaseTool) -> None:
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_EXECUTE_TOOL
         metadata = instance.metadata
         self[GEN_AI_TOOL_DESCRIPTION] = metadata.description
         try:
@@ -637,6 +659,32 @@ class _Span(BaseSpan):
             self[prefix] = json.dumps(list(messages), default=str, ensure_ascii=False)
 
 
+    @process_instance.register(FunctionTool)
+    def _(self, instance: FunctionTool) -> None:
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_EXECUTE_TOOL
+        metadata = instance.metadata
+        self[GEN_AI_TOOL_DESCRIPTION] = metadata.description
+        try:
+            self[GEN_AI_TOOL_NAME] = metadata.get_name()
+        except BaseException:
+            pass
+
+    @process_instance.register(FunctionAgent)
+    def _(self, instance: FunctionAgent) -> None:
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_INVOKE_AGENT
+        if hasattr(instance, 'name') and instance.name:
+            self[GEN_AI_AGENT_NAME] = instance.name
+        else:
+            self[GEN_AI_AGENT_NAME] = instance.__class__.__name__
+
+    @process_instance.register(BaseAgent)
+    def _(self, instance: BaseAgent) -> None:
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_INVOKE_AGENT
+        if hasattr(instance, 'name') and instance.name:
+            self[GEN_AI_AGENT_NAME] = instance.name
+        else:
+            self[GEN_AI_AGENT_NAME] = instance.__class__.__name__
+
 END_OF_QUEUE = None
 
 
@@ -729,8 +777,16 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
     ) -> Optional[_Span]:
         if context_api.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
             return None
+        
         with self.lock:
             parent = self.open_spans.get(parent_span_id) if parent_span_id else None
+
+        if instance is None:
+            return None
+
+        if type(instance).__name__ in ("TokenTextSplitter", "DefaultRefineProgram"):
+            return None
+        
         otel_span = self._otel_tracer.start_span(
             name="llama_index.operation",  # generic operation name, updated in span.end()
             start_time=time_ns(),
@@ -742,14 +798,19 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
                 else (context_api.Context() if self._separate_trace_from_runtime_context else None)
             ),
         )
+        
+        token = context_api.attach(set_span_in_context(otel_span, parent.context if parent else None))
+        
         span = _Span(
             otel_span=otel_span,
             parent=parent,
+            context_token=token,
             id_=id_,
             parent_id=parent_span_id,
         )
         span.process_instance(instance)
         span.process_input(instance, bound_args)
+
         return span
 
     def prepare_to_exit_span(
@@ -765,15 +826,6 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         with self.lock:
             span = self.open_spans.get(id_)
         if span:
-            if isinstance(instance, (BaseLLM, MultiModalLLM)) and (
-                isinstance(result, Generator)
-                and result.gi_frame is not None
-                or isinstance(result, AsyncGenerator)
-                and result.ag_frame is not None
-            ):
-                span._end_time = time_ns()
-                self._export_queue.put(span)
-                return span
             span.end()
         else:
             logger.warning(f"Open span is missing for {id_=}")
