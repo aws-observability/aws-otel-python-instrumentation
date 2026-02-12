@@ -394,8 +394,6 @@ class _Span(BaseSpan):
             self[GEN_AI_OPERATION_NAME] = _OPERATION_INVOKE_AGENT
             if hasattr(instance, 'name') and instance.name:
                 self[GEN_AI_AGENT_NAME] = instance.name
-            else:
-                self[GEN_AI_AGENT_NAME] = class_name
 
     @process_instance.register(BaseLLM)
     @process_instance.register(MultiModalLLM)
@@ -674,16 +672,12 @@ class _Span(BaseSpan):
         self[GEN_AI_OPERATION_NAME] = _OPERATION_INVOKE_AGENT
         if hasattr(instance, 'name') and instance.name:
             self[GEN_AI_AGENT_NAME] = instance.name
-        else:
-            self[GEN_AI_AGENT_NAME] = instance.__class__.__name__
 
     @process_instance.register(BaseAgent)
     def _(self, instance: BaseAgent) -> None:
         self[GEN_AI_OPERATION_NAME] = _OPERATION_INVOKE_AGENT
         if hasattr(instance, 'name') and instance.name:
             self[GEN_AI_AGENT_NAME] = instance.name
-        else:
-            self[GEN_AI_AGENT_NAME] = instance.__class__.__name__
 
 END_OF_QUEUE = None
 
@@ -784,7 +778,27 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         if instance is None:
             return None
 
-        if type(instance).__name__ in ("TokenTextSplitter", "DefaultRefineProgram"):
+        span_method = id_.partition("-")[0]
+
+        if type(instance).__name__ in ("TokenTextSplitter", "DefaultRefineProgram", "SentenceSplitter", "CompactAndRefine"):
+            return None
+
+        # Suppress internal workflow coordination steps that add noise without semantic value
+        _SUPPRESSED_METHODS = {
+            "parse_agent_output",
+            "aggregate_tool_results",
+            "setup_agent",
+            "init_run",
+            "_prepare_chat_with_tools",
+            "_get_text_embedding",
+            "_query",
+            "_retrieve",
+            "_get_query_embedding",
+            "predict_and_call",
+            "__call__",
+        }
+        method_suffix = span_method.rpartition(".")[-1]
+        if method_suffix in _SUPPRESSED_METHODS:
             return None
         
         otel_span = self._otel_tracer.start_span(
@@ -826,6 +840,15 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         with self.lock:
             span = self.open_spans.get(id_)
         if span:
+            if isinstance(instance, (BaseLLM, MultiModalLLM)) and (
+                isinstance(result, Generator)
+                and result.gi_frame is not None
+                or isinstance(result, AsyncGenerator)
+                and result.ag_frame is not None
+            ):
+                span._end_time = time_ns()
+                self._export_queue.put(span)
+                return span
             span.end()
         else:
             logger.warning(f"Open span is missing for {id_=}")
