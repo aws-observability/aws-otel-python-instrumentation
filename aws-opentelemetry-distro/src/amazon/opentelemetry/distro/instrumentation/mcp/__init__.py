@@ -2,15 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
-from typing import Any, Callable, Collection
+from typing import Any, Collection
 
-from wrapt import register_post_import_hook, wrap_function_wrapper  # type: ignore[import-untyped]
-
+from amazon.opentelemetry.distro.instrumentation.common.utils import try_unwrap, try_wrap
 from amazon.opentelemetry.distro.instrumentation.mcp._wrappers import ClientWrapper, ServerWrapper
 from amazon.opentelemetry.distro.version import __version__
 from opentelemetry import trace
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
-from opentelemetry.instrumentation.utils import unwrap
 
 _LOG = logging.getLogger(__name__)
 
@@ -34,23 +32,26 @@ class McpInstrumentor(BaseInstrumentor):
     def __init__(self, **kwargs: Any) -> None:
         _LOG.info("Initializing MCP instrumentor.")
         super().__init__()
-        tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
-        tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
-        self._client_wrapper = ClientWrapper(tracer=tracer, **kwargs)
-        self._server_wrapper = ServerWrapper(tracer=tracer, **kwargs)
+        self._client_wrapper: ClientWrapper | None = None
+        self._server_wrapper: ServerWrapper | None = None
 
     def instrumentation_dependencies(self) -> Collection[str]:
         return ("mcp >= 1.8.1",)
 
     def _instrument(self, **kwargs: Any) -> None:
+        tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
+        tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
+        self._client_wrapper = ClientWrapper(tracer=tracer, **kwargs)
+        self._server_wrapper = ServerWrapper(tracer=tracer, **kwargs)
+
         _LOG.debug("Instrument MCP client-side session methods.")
 
-        McpInstrumentor._register_hook(
+        try_wrap(
             self._SESSION_MODULE,
             "BaseSession.send_request",
             self._client_wrapper.wrap_session_send,
         )
-        McpInstrumentor._register_hook(
+        try_wrap(
             self._SESSION_MODULE,
             "BaseSession.send_notification",
             self._client_wrapper.wrap_session_send,
@@ -58,12 +59,12 @@ class McpInstrumentor(BaseInstrumentor):
 
         _LOG.debug("Instrument MCP server-side session methods.")
 
-        McpInstrumentor._register_hook(
+        try_wrap(
             self._SERVER_MODULE,
             "Server._handle_request",
             self._server_wrapper._wrap_server_handle_request,
         )
-        McpInstrumentor._register_hook(
+        try_wrap(
             self._SERVER_MODULE,
             "Server._handle_notification",
             self._server_wrapper._wrap_server_handle_notification,
@@ -71,32 +72,28 @@ class McpInstrumentor(BaseInstrumentor):
 
         _LOG.debug("Instrument MCP transport layer.")
 
-        McpInstrumentor._register_hook(self._STDIO_MODULE, "stdio_client", self._client_wrapper.wrap_stdio_client)
-        McpInstrumentor._register_hook(
-            self._HTTP_MODULE, "streamablehttp_client", self._client_wrapper.wrap_http_client
-        )
-        McpInstrumentor._register_hook(self._SSE_MODULE, "sse_client", self._client_wrapper.wrap_http_client)
-        McpInstrumentor._register_hook(
+        try_wrap(self._STDIO_MODULE, "stdio_client", self._client_wrapper.wrap_stdio_client)
+        try_wrap(self._HTTP_MODULE, "streamablehttp_client", self._client_wrapper.wrap_http_client)  # deprecated
+        try_wrap(self._HTTP_MODULE, "streamable_http_client", self._client_wrapper.wrap_http_client)
+        try_wrap(self._SSE_MODULE, "sse_client", self._client_wrapper.wrap_http_client)
+        try_wrap(
             self._HTTP_MODULE,
             "StreamableHTTPTransport._maybe_extract_session_id_from_response",
             ClientWrapper.wrap_extract_session_id,
         )
 
     def _uninstrument(self, **kwargs: Any) -> None:
-        unwrap(self._SESSION_MODULE, "BaseSession.send_request")
-        unwrap(self._SESSION_MODULE, "BaseSession.send_notification")
-        unwrap(self._SERVER_MODULE, "Server._handle_request")
-        unwrap(self._SERVER_MODULE, "Server._handle_notification")
-        unwrap(self._STDIO_MODULE, "stdio_client")
-        unwrap(self._HTTP_MODULE, "streamablehttp_client")
-        unwrap(self._SSE_MODULE, "sse_client")
-        unwrap(self._HTTP_MODULE, "StreamableHTTPTransport._maybe_extract_session_id_from_response")
+        # pylint: disable=import-outside-toplevel
+        from mcp.client import sse, stdio, streamable_http
+        from mcp.server.lowlevel import server
+        from mcp.shared import session
 
-    @staticmethod
-    def _register_hook(module: str, target: str, wrapper: Callable[..., Any]) -> None:
-        """Register a post-import hook for wrapping a function."""
-
-        def hook(_module: Any) -> None:
-            wrap_function_wrapper(module, target, wrapper)
-
-        register_post_import_hook(hook, module)
+        try_unwrap(session.BaseSession, "send_request")
+        try_unwrap(session.BaseSession, "send_notification")
+        try_unwrap(server.Server, "_handle_request")
+        try_unwrap(server.Server, "_handle_notification")
+        try_unwrap(stdio, "stdio_client")
+        try_unwrap(streamable_http, "streamablehttp_client")
+        try_unwrap(streamable_http, "streamable_http_client")
+        try_unwrap(sse, "sse_client")
+        try_unwrap(streamable_http.StreamableHTTPTransport, "_maybe_extract_session_id_from_response")

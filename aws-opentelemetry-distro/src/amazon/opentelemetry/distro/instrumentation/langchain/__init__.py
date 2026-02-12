@@ -2,12 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 from typing import Any, Collection
 
-from wrapt import wrap_function_wrapper
-
+from amazon.opentelemetry.distro.instrumentation.common.utils import try_unwrap, try_wrap
 from amazon.opentelemetry.distro.version import __version__
 from opentelemetry import trace
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
-from opentelemetry.instrumentation.utils import unwrap
 
 
 class LangChainInstrumentor(BaseInstrumentor):
@@ -33,7 +31,7 @@ class LangChainInstrumentor(BaseInstrumentor):
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
 
-        wrap_function_wrapper(
+        try_wrap(
             "langchain_core.callbacks",
             "BaseCallbackManager.__init__",
             _BaseCallbackManagerInitWrapper(OpenTelemetryCallbackHandler(tracer)),
@@ -43,4 +41,4 @@ class LangChainInstrumentor(BaseInstrumentor):
         # pylint: disable=import-outside-toplevel
         from langchain_core.callbacks import BaseCallbackManager
 
-        unwrap(BaseCallbackManager, "__init__")
+        try_unwrap(BaseCallbackManager, "__init__")

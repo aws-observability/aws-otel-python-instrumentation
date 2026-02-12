@@ -126,6 +126,9 @@ class McpWrapper:
         if isinstance(message, types.CallToolRequest) and result is not None:
             try:
                 span.set_attribute(GEN_AI_TOOL_CALL_RESULT, serialize_to_json(result))
+                if hasattr(result, "isError") and result.isError:
+                    span.set_attribute(ERROR_TYPE, "tool_error")
+                    span.set_status(Status(StatusCode.ERROR))
             except Exception:  # pylint: disable=broad-exception-caught
                 pass
 
@@ -213,8 +216,9 @@ class ClientWrapper(McpWrapper):
 
                 try:
                     result = await wrapped(*new_args, **kwargs)
-                    span.set_status(Status(StatusCode.OK))
                     self._set_tool_result(span, message, result)
+                    if span.status.status_code != StatusCode.ERROR:
+                        span.set_status(Status(StatusCode.OK))
                     return result
                 except Exception as exc:
                     self._set_error_attrs(span, exc)
@@ -368,24 +372,27 @@ class ServerWrapper(McpWrapper):
             kind=SpanKind.SERVER,
             context=parent_ctx,
         ) as span:
-            is_http, session_id, client_address, client_port = self._extract_server_transport_info(args)
-            if is_http:
-                span.set_attribute(NETWORK_TRANSPORT, NetworkTransportValues.TCP.value)
-                if session_id:
-                    span.set_attribute(MCP_SESSION_ID, session_id)
-                if client_address:
-                    span.set_attribute(CLIENT_ADDRESS, client_address)
-                if client_port:
-                    span.set_attribute(CLIENT_PORT, client_port)
-            else:
-                span.set_attribute(NETWORK_TRANSPORT, NetworkTransportValues.PIPE.value)
+            # Note: Notifications do not have request_context, so network.transport is only set for requests
+            is_request, is_http, session_id, client_address, client_port = self._extract_server_transport_info(args)
+            if is_request:
+                if is_http:
+                    span.set_attribute(NETWORK_TRANSPORT, NetworkTransportValues.TCP.value)
+                    if session_id:
+                        span.set_attribute(MCP_SESSION_ID, session_id)
+                    if client_address:
+                        span.set_attribute(CLIENT_ADDRESS, client_address)
+                    if client_port:
+                        span.set_attribute(CLIENT_PORT, client_port)
+                else:
+                    span.set_attribute(NETWORK_TRANSPORT, NetworkTransportValues.PIPE.value)
 
             self._generate_mcp_message_attrs(span, incoming_msg, request_id)
 
             try:
                 result = await wrapped(*args, **kwargs)
-                span.set_status(Status(StatusCode.OK))
                 self._set_tool_result(span, incoming_msg, result)
+                if span.status.status_code != StatusCode.ERROR:
+                    span.set_status(Status(StatusCode.OK))
                 return result
             except Exception as exc:
                 self._set_error_attrs(span, exc)
@@ -410,7 +417,7 @@ class ServerWrapper(McpWrapper):
 
     def _extract_server_transport_info(
         self, args: Tuple[Any, ...]
-    ) -> Tuple[bool, Optional[str], Optional[str], Optional[int]]:  # pylint: disable=no-self-use
+    ) -> Tuple[bool, bool, Optional[str], Optional[str], Optional[int]]:  # pylint: disable=no-self-use
         """
         Extract transport info from the incoming request on the server side.
         Unlike the client which stores transport metadata in ContextVar, the server
@@ -420,7 +427,7 @@ class ServerWrapper(McpWrapper):
             args: Server method arguments
 
         Returns:
-            Tuple of (is_http, session_id, client_address, client_port)
+            Tuple of (is_request, is_http, session_id, client_address, client_port)
         """
         try:
             # pylint: disable=import-outside-toplevel
@@ -428,34 +435,43 @@ class ServerWrapper(McpWrapper):
             from mcp.shared.session import RequestResponder
 
             if not args:
-                return False, None, None, None
+                return False, False, None, None, None
 
             message: RequestResponder = args[0]
             if not isinstance(message, RequestResponder):
-                return False, None, None, None
+                return False, False, None, None, None
 
             metadata = message.message_metadata
             if not isinstance(metadata, ServerMessageMetadata):
-                return False, None, None, None
+                return True, False, None, None, None  # is_request but no metadata
 
             request_context = metadata.request_context
+            if not request_context:
+                return True, False, None, None, None  # is_request but stdio
+
             session_id = None
             client_address = None
             client_port = None
 
-            if request_context:
-                headers = getattr(request_context, "headers", None)
-                if headers:
-                    session_id = headers.get(self._SESSION_ID_HEADER)
+            # streamable HTTP has session_id in headers
+            headers = getattr(request_context, "headers", None)
+            if headers:
+                session_id = headers.get(self._SESSION_ID_HEADER)
 
-                client = getattr(request_context, "client", None)
-                if client:
-                    client_address = client[0] if len(client) > 0 else None
-                    client_port = client[1] if len(client) > 1 else None
+            # HTTP with SSE has session_id in query parameters
+            if not session_id:
+                query_params = getattr(request_context, "query_params", None)
+                if query_params:
+                    session_id = query_params.get("session_id")
 
-            return True, session_id, client_address, client_port
+            client = getattr(request_context, "client", None)
+            if client:
+                client_address = client[0] if len(client) > 0 else None
+                client_port = client[1] if len(client) > 1 else None
+
+            return True, True, session_id, client_address, client_port
 
         except Exception as exc:  # pylint: disable=broad-exception-caught
             _LOG.debug("Failed to extract transport info: %s", exc)
 
-        return False, None, None, None
+        return False, False, None, None, None
