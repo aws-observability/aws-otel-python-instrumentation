@@ -12,6 +12,12 @@ from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 
 _LOG = logging.getLogger(__name__)
 
+_SESSION_MODULE = "mcp.shared.session"
+_SERVER_MODULE = "mcp.server.lowlevel.server"
+_STDIO_MODULE = "mcp.client.stdio"
+_HTTP_MODULE = "mcp.client.streamable_http"
+_SSE_MODULE = "mcp.client.sse"
+
 
 class McpInstrumentor(BaseInstrumentor):
     """
@@ -22,12 +28,6 @@ class McpInstrumentor(BaseInstrumentor):
 
     See: https://modelcontextprotocol.io/overview
     """
-
-    _SESSION_MODULE = "mcp.shared.session"
-    _SERVER_MODULE = "mcp.server.lowlevel.server"
-    _STDIO_MODULE = "mcp.client.stdio"
-    _HTTP_MODULE = "mcp.client.streamable_http"
-    _SSE_MODULE = "mcp.client.sse"
 
     def __init__(self, **kwargs: Any) -> None:
         _LOG.info("Initializing MCP instrumentor.")
@@ -46,38 +46,27 @@ class McpInstrumentor(BaseInstrumentor):
 
         _LOG.debug("Instrument MCP client-side session methods.")
 
-        try_wrap(
-            self._SESSION_MODULE,
-            "BaseSession.send_request",
-            self._client_wrapper.wrap_session_send,
-        )
-        try_wrap(
-            self._SESSION_MODULE,
-            "BaseSession.send_notification",
-            self._client_wrapper.wrap_session_send,
-        )
+        try_wrap(_SESSION_MODULE, "BaseSession.send_request", self._client_wrapper.wrap_session_send)
+        try_wrap(_SESSION_MODULE, "BaseSession.send_notification", self._client_wrapper.wrap_session_send)
 
         _LOG.debug("Instrument MCP server-side session methods.")
 
-        try_wrap(
-            self._SERVER_MODULE,
-            "Server._handle_request",
-            self._server_wrapper._wrap_server_handle_request,
-        )
-        try_wrap(
-            self._SERVER_MODULE,
-            "Server._handle_notification",
-            self._server_wrapper._wrap_server_handle_notification,
-        )
+        try_wrap(_SERVER_MODULE, "Server._handle_request", self._server_wrapper._wrap_server_handle_request)
+        try_wrap(_SERVER_MODULE, "Server._handle_notification", self._server_wrapper._wrap_server_handle_notification)
 
         _LOG.debug("Instrument MCP transport layer.")
 
-        try_wrap(self._STDIO_MODULE, "stdio_client", self._client_wrapper.wrap_stdio_client)
-        try_wrap(self._HTTP_MODULE, "streamablehttp_client", self._client_wrapper.wrap_http_client)  # deprecated
-        try_wrap(self._HTTP_MODULE, "streamable_http_client", self._client_wrapper.wrap_http_client)
-        try_wrap(self._SSE_MODULE, "sse_client", self._client_wrapper.wrap_http_client)
+        try_wrap(_STDIO_MODULE, "stdio_client", self._client_wrapper.wrap_stdio_client)
         try_wrap(
-            self._HTTP_MODULE,
+            _HTTP_MODULE,
+            "streamablehttp_client",
+            self._client_wrapper.wrap_http_client,
+            should_wrap=lambda: not hasattr(__import__(_HTTP_MODULE, fromlist=[""]), "streamable_http_client"),
+        )
+        try_wrap(_HTTP_MODULE, "streamable_http_client", self._client_wrapper.wrap_http_client)
+        try_wrap(_SSE_MODULE, "sse_client", self._client_wrapper.wrap_http_client)
+        try_wrap(
+            _HTTP_MODULE,
             "StreamableHTTPTransport._maybe_extract_session_id_from_response",
             ClientWrapper.wrap_extract_session_id,
         )
