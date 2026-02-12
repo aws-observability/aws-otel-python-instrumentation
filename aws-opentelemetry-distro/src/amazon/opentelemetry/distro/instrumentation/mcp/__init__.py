@@ -1,15 +1,14 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-
-"""OpenTelemetry MCP (Model Context Protocol) instrumentation."""
-
 import logging
 from typing import Any, Callable, Collection
 
 from wrapt import register_post_import_hook, wrap_function_wrapper  # type: ignore[import-untyped]
 
 from amazon.opentelemetry.distro.instrumentation.mcp._wrappers import ClientWrapper, ServerWrapper
+from amazon.opentelemetry.distro.version import __version__
+from opentelemetry import trace
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
 from opentelemetry.instrumentation.utils import unwrap
 
@@ -35,14 +34,17 @@ class McpInstrumentor(BaseInstrumentor):
     def __init__(self, **kwargs: Any) -> None:
         _LOG.info("Initializing MCP instrumentor.")
         super().__init__()
-        self._client_wrapper = ClientWrapper(**kwargs)
-        self._server_wrapper = ServerWrapper(**kwargs)
+        tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
+        tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
+        self._client_wrapper = ClientWrapper(tracer=tracer, **kwargs)
+        self._server_wrapper = ServerWrapper(tracer=tracer, **kwargs)
 
     def instrumentation_dependencies(self) -> Collection[str]:
         return ("mcp >= 1.8.1",)
 
     def _instrument(self, **kwargs: Any) -> None:
         _LOG.debug("Instrument MCP client-side session methods.")
+
         McpInstrumentor._register_hook(
             self._SESSION_MODULE,
             "BaseSession.send_request",
@@ -55,6 +57,7 @@ class McpInstrumentor(BaseInstrumentor):
         )
 
         _LOG.debug("Instrument MCP server-side session methods.")
+
         McpInstrumentor._register_hook(
             self._SERVER_MODULE,
             "Server._handle_request",
@@ -67,6 +70,7 @@ class McpInstrumentor(BaseInstrumentor):
         )
 
         _LOG.debug("Instrument MCP transport layer.")
+
         McpInstrumentor._register_hook(self._STDIO_MODULE, "stdio_client", self._client_wrapper.wrap_stdio_client)
         McpInstrumentor._register_hook(
             self._HTTP_MODULE, "streamablehttp_client", self._client_wrapper.wrap_http_client

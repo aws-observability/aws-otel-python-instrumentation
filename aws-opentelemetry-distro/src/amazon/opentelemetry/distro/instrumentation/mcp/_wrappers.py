@@ -8,8 +8,7 @@ from urllib.parse import urlparse
 
 from amazon.opentelemetry.distro.instrumentation.common.utils import serialize_to_json
 from amazon.opentelemetry.distro.instrumentation.mcp._transport import (
-    TransportInfo,
-    TransportType,
+    ClientTransportMetadata,
     clear_parent_context,
     clear_transport_info,
     get_parent_context,
@@ -26,7 +25,6 @@ from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attribute
     RPC_RESPONSE_STATUS_CODE,
     MCPMethodValue,
 )
-from amazon.opentelemetry.distro.version import __version__
 from opentelemetry import trace
 from opentelemetry.propagate import get_global_textmap
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
@@ -39,7 +37,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
 )
 from opentelemetry.semconv.attributes.client_attributes import CLIENT_ADDRESS, CLIENT_PORT
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
-from opentelemetry.semconv.attributes.network_attributes import NETWORK_TRANSPORT
+from opentelemetry.semconv.attributes.network_attributes import NETWORK_TRANSPORT, NetworkTransportValues
 from opentelemetry.semconv.attributes.server_attributes import SERVER_ADDRESS, SERVER_PORT
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
@@ -49,17 +47,17 @@ _LOG = logging.getLogger(__name__)
 class McpWrapper:
     """Base wrapper class for MCP operations."""
 
+    # Temporary placeholder client and server span names.
+    # These are set initially but updated once we know the actual MCP operation.
     _CLIENT_SPAN_NAME = "mcp.client"
     _SERVER_SPAN_NAME = "mcp.server"
+
+    _SESSION_SPAN_NAME = "mcp.session"
     _SESSION_ID_HEADER = "mcp-session-id"
 
-    def __init__(self, **kwargs: Any) -> None:
-        self.propagators = kwargs.get("propagators") or get_global_textmap()
-        self.tracer = trace.get_tracer(
-            __name__,
-            __version__,
-            tracer_provider=kwargs.get("tracer_provider"),
-        )
+    def __init__(self, tracer: trace.Tracer, **kwargs: Any) -> None:
+        self._tracer = tracer
+        self._propagators = kwargs.get("propagators") or get_global_textmap()
 
     @staticmethod
     def _generate_mcp_message_attrs(span: trace.Span, message: Any, request_id: Optional[int]) -> None:
@@ -160,12 +158,8 @@ class ClientWrapper(McpWrapper):
         kwargs: Dict[str, Any],
     ) -> Coroutine[Any, Any, Any]:
         """
-        Wrap BaseSession.send_request and send_notification methods.
-
-        Instruments outgoing MCP messages by:
-        1. Creating a span for the operation
-        2. Injecting trace context into the message
-        3. Recording message attributes
+        Wrap BaseSession.send_request and send_notification methods. Which is responsible for
+        both requests/notifications sent by both the client and server.
         """
 
         async def async_wrapper() -> Any:
@@ -181,14 +175,29 @@ class ClientWrapper(McpWrapper):
 
             message_json.setdefault("params", {}).setdefault("_meta", {})
 
-            # Use stored parent context
             parent_ctx = get_parent_context()
-            with self.tracer.start_as_current_span(
+            with self._tracer.start_as_current_span(
                 name=self._CLIENT_SPAN_NAME, kind=SpanKind.CLIENT, context=parent_ctx
             ) as span:
                 ctx = trace.set_span_in_context(span)
                 carrier: Dict[str, Any] = {}
-                self.propagators.inject(carrier=carrier, context=ctx)
+
+                # as defined by OTel semantic conventions: trace context between
+                # client and server must be injected in the _meta field of the
+                # JSON RPC call:
+                # {
+                #   "jsonrpc": "2.0",
+                #   "method": "tools/call",
+                #   "params": {
+                #     "name": "get-weather",
+                #     "_meta": {
+                #       "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+                #       "tracestate": "rojo=00f067aa0ba902b7,congo=t61rcWkgMzE"
+                #     }
+                #   },
+                #   "id": 1,
+                # }
+                self._propagators.inject(carrier=carrier, context=ctx)
                 message_json["params"]["_meta"].update(carrier)
 
                 request_id = getattr(instance, "_request_id", None)
@@ -214,13 +223,15 @@ class ClientWrapper(McpWrapper):
         return async_wrapper()
 
     def wrap_stdio_client(self, wrapped: Callable[..., Any], _instance: Any, args: Any, kwargs: Any) -> Any:
-        """Wrap stdio_client to set transport context and capture parent context."""
 
         @asynccontextmanager
         async def wrapper():
-            set_transport_info(TransportInfo(transport=TransportType.PIPE))
-            # Create a parent span and store its context for child spans
-            with self.tracer.start_as_current_span("mcp.session", kind=SpanKind.INTERNAL) as span:
+            set_transport_info(ClientTransportMetadata(transport=NetworkTransportValues.PIPE))
+
+            # a bit strange and does not follow any existing OTel semantic conventions,
+            # but we need an overarching parent span to capture the the MCP session lifetime, all server and client MCP operations
+            # happen within this session context. Otherwise we get a bunch of disjointed traces without a common ancestor.
+            with self._tracer.start_as_current_span(self._SESSION_SPAN_NAME, kind=SpanKind.INTERNAL) as span:
                 set_parent_context(trace.set_span_in_context(span))
                 try:
                     async with wrapped(*args, **kwargs) as streams:
@@ -232,21 +243,20 @@ class ClientWrapper(McpWrapper):
         return wrapper()
 
     def wrap_http_client(self, wrapped: Callable[..., Any], _instance: Any, args: Any, kwargs: Any) -> Any:
-        """Wrap streamable_http_client/sse_client to set transport context and capture parent context."""
 
         @asynccontextmanager
         async def wrapper():
             url = args[0] if args else kwargs.get("url", "")
             parsed = urlparse(url)
             set_transport_info(
-                TransportInfo(
-                    transport=TransportType.TCP,
+                ClientTransportMetadata(
+                    transport=NetworkTransportValues.TCP,
                     server_address=parsed.hostname,
                     server_port=parsed.port or (443 if parsed.scheme == "https" else 80),
                 )
             )
-            # Create a parent span and store its context for child spans
-            with self.tracer.start_as_current_span("mcp.session", kind=SpanKind.INTERNAL) as span:
+            # see wrap_stdio_client
+            with self._tracer.start_as_current_span(self._SESSION_SPAN_NAME, kind=SpanKind.INTERNAL) as span:
                 set_parent_context(trace.set_span_in_context(span))
                 try:
                     async with wrapped(*args, **kwargs) as streams:
@@ -268,7 +278,6 @@ class ClientWrapper(McpWrapper):
 
     @staticmethod
     def _set_client_transport_attrs(span: trace.Span) -> None:
-        """Set transport attributes from context."""
         transport_info = get_transport_info()
         if transport_info:
             span.set_attribute(NETWORK_TRANSPORT, transport_info.transport.value)
@@ -336,11 +345,6 @@ class ServerWrapper(McpWrapper):
         """
         Common handler for server-side request and notification processing.
 
-        Instruments incoming MCP messages by:
-        1. Extracting trace context from the message
-        2. Creating a linked server span
-        3. Recording message attributes
-
         Args:
             wrapped: Original method
             instance: Server instance
@@ -357,16 +361,16 @@ class ServerWrapper(McpWrapper):
         request_id = getattr(incoming_msg, "id", None)
 
         carrier = self._extract_trace_context(incoming_msg)
-        parent_ctx = self.propagators.extract(carrier=carrier)
+        parent_ctx = self._propagators.extract(carrier=carrier)
 
-        with self.tracer.start_as_current_span(
+        with self._tracer.start_as_current_span(
             self._SERVER_SPAN_NAME,
             kind=SpanKind.SERVER,
             context=parent_ctx,
         ) as span:
-            is_http, session_id, client_address, client_port = self._extract_transport_info(args)
+            is_http, session_id, client_address, client_port = self._extract_server_transport_info(args)
             if is_http:
-                span.set_attribute(NETWORK_TRANSPORT, "tcp")
+                span.set_attribute(NETWORK_TRANSPORT, NetworkTransportValues.TCP.value)
                 if session_id:
                     span.set_attribute(MCP_SESSION_ID, session_id)
                 if client_address:
@@ -374,7 +378,7 @@ class ServerWrapper(McpWrapper):
                 if client_port:
                     span.set_attribute(CLIENT_PORT, client_port)
             else:
-                span.set_attribute(NETWORK_TRANSPORT, "pipe")
+                span.set_attribute(NETWORK_TRANSPORT, NetworkTransportValues.PIPE.value)
 
             self._generate_mcp_message_attrs(span, incoming_msg, request_id)
 
@@ -404,11 +408,13 @@ class ServerWrapper(McpWrapper):
             _LOG.debug("Failed to extract trace context: %s", exc)
         return {}
 
-    def _extract_transport_info(
+    def _extract_server_transport_info(
         self, args: Tuple[Any, ...]
     ) -> Tuple[bool, Optional[str], Optional[str], Optional[int]]:  # pylint: disable=no-self-use
         """
-        Extract transport info from HTTP request context.
+        Extract transport info from the incoming request on the server side.
+        Unlike the client which stores transport metadata in ContextVar, the server
+        must inspect each incoming request to determine transport type.
 
         Args:
             args: Server method arguments
@@ -424,7 +430,7 @@ class ServerWrapper(McpWrapper):
             if not args:
                 return False, None, None, None
 
-            message = args[0]
+            message: RequestResponder = args[0]
             if not isinstance(message, RequestResponder):
                 return False, None, None, None
 

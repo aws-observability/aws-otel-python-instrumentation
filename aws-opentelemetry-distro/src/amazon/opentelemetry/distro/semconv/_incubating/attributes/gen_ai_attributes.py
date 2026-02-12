@@ -11,7 +11,7 @@ GEN_AI_CODE_INTERPRETER_ID = "gen_ai.code_interpreter.id"
 GEN_AI_MEMORY_ID = "gen_ai.memory.id"
 GEN_AI_GATEWAY_ID = "gen_ai.gateway.id"
 
-# MCP (Model Context Protocol) Semantic Conventions v1.39.0
+# MCP Semantic Conventions v1.39.0
 # https://opentelemetry.io/docs/specs/semconv/gen-ai/mcp/
 MCP_METHOD_NAME = "mcp.method.name"
 MCP_PROTOCOL_VERSION = "mcp.protocol.version"
