@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import dataclasses
 import inspect
@@ -150,6 +151,7 @@ from llama_index.core.schema import BaseNode, NodeWithScore, QueryType
 from llama_index.core.tools import BaseTool
 from llama_index.core.types import RESPONSE_TEXT_TYPE
 from llama_index.core.workflow.errors import WorkflowDone  # type: ignore[attr-defined]
+from llama_index.core.workflow.handler import WorkflowHandler  # type: ignore[attr-defined]
 
 from llama_index.core.tools import FunctionTool  # type: ignore[attr-defined]
 from llama_index.core.agent.workflow import FunctionAgent  # type: ignore[attr-defined]
@@ -272,6 +274,7 @@ class _Span(BaseSpan):
     _context_token: Optional[object] = PrivateAttr()
 
     _end_time: Optional[int] = PrivateAttr()
+    _waiting_for_streaming: bool = PrivateAttr()
     _last_updated_at: float = PrivateAttr()
 
     def __init__(
@@ -288,6 +291,7 @@ class _Span(BaseSpan):
         self._first_token_timestamp = None
         self._attributes = {}
         self._end_time = None
+        self._waiting_for_streaming = False
         self._last_updated_at = time()
         self._list_attr_len: DefaultDict[str, int] = defaultdict(int)
         self._context_token = context_token
@@ -350,7 +354,7 @@ class _Span(BaseSpan):
 
     @property
     def waiting_for_streaming(self) -> bool:
-        return self._active and bool(self._end_time)
+        return self._active and self._waiting_for_streaming
 
     @property
     def active(self) -> bool:
@@ -789,6 +793,8 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             "aggregate_tool_results",
             "setup_agent",
             "init_run",
+            "run_agent_step",
+            "call_tool",
             "_prepare_chat_with_tools",
             "_get_text_embedding",
             "_query",
@@ -846,8 +852,21 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
                 or isinstance(result, AsyncGenerator)
                 and result.ag_frame is not None
             ):
-                span._end_time = time_ns()
+                span._waiting_for_streaming = True
                 self._export_queue.put(span)
+                return span
+            # For WorkflowHandler results (e.g. FunctionAgent.run), attach a
+            # done callback to the handler's result task so the span closes
+            # when the workflow actually completes, not when run() returns.
+            if isinstance(result, WorkflowHandler):
+                def _on_workflow_done(task: "asyncio.Task[Any]", s: _Span = span) -> None:
+                    exc = None
+                    try:
+                        exc = task.exception()
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                    s.end(exception=exc)
+                result._result_task.add_done_callback(_on_workflow_done)
                 return span
             span.end()
         else:
