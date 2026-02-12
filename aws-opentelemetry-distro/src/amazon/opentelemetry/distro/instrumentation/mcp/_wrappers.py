@@ -129,8 +129,10 @@ class McpWrapper:
                 if hasattr(result, "isError") and result.isError:
                     span.set_attribute(ERROR_TYPE, "tool_error")
                     span.set_status(Status(StatusCode.ERROR))
+                    return
             except Exception:  # pylint: disable=broad-exception-caught
                 pass
+        span.set_status(Status(StatusCode.OK))
 
     @staticmethod
     def _set_error_attrs(span: trace.Span, exc: Exception) -> None:
@@ -217,8 +219,6 @@ class ClientWrapper(McpWrapper):
                 try:
                     result = await wrapped(*new_args, **kwargs)
                     self._set_tool_result(span, message, result)
-                    if span.status.status_code != StatusCode.ERROR:
-                        span.set_status(Status(StatusCode.OK))
                     return result
                 except Exception as exc:
                     self._set_error_attrs(span, exc)
@@ -391,8 +391,6 @@ class ServerWrapper(McpWrapper):
             try:
                 result = await wrapped(*args, **kwargs)
                 self._set_tool_result(span, incoming_msg, result)
-                if span.status.status_code != StatusCode.ERROR:
-                    span.set_status(Status(StatusCode.OK))
                 return result
             except Exception as exc:
                 self._set_error_attrs(span, exc)
