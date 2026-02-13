@@ -207,6 +207,14 @@ def _detect_llm_provider(instance: Any) -> Optional[str]:
     except ImportError:
         pass
 
+    try:
+        from llama_index.llms.bedrock_converse import BedrockConverse as LlamaIndexBedrockConverse
+
+        if isinstance(instance, LlamaIndexBedrockConverse):
+            return "aws.bedrock"
+    except ImportError:
+        pass
+
     # Fallback: check class name if imports fail
     class_name = instance.__class__.__name__.lower()
     if "openai" in class_name:
@@ -219,6 +227,8 @@ def _detect_llm_provider(instance: Any) -> Optional[str]:
         return "gcp.vertex_ai"
     elif "gemini" in class_name:
         return "gcp.gemini"
+    elif "bedrock" in class_name:
+        return "aws.bedrock"
 
     return None
 
