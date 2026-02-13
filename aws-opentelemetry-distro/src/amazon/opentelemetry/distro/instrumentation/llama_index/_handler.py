@@ -1,6 +1,4 @@
 import asyncio
-import copy
-import dataclasses
 import inspect
 import json
 import logging
@@ -8,9 +6,8 @@ import weakref
 from collections import defaultdict
 from dataclasses import dataclass
 from enum import Enum, auto
-from functools import singledispatch, singledispatchmethod
+from functools import singledispatchmethod
 from importlib.metadata import version
-from io import IOBase
 from queue import SimpleQueue
 from threading import RLock, Thread
 from time import sleep, time, time_ns
@@ -27,15 +24,11 @@ from typing import (
     List,
     Mapping,
     Optional,
-    SupportsFloat,
     Tuple,
-    TypeVar,
     Union,
 )
 
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
-    GEN_AI_AGENT_DESCRIPTION,
-    GEN_AI_AGENT_ID,
     GEN_AI_AGENT_NAME,
     GEN_AI_EMBEDDINGS_DIMENSION_COUNT,
     GEN_AI_INPUT_MESSAGES,
@@ -45,14 +38,10 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
     GEN_AI_REQUEST_TEMPERATURE,
-    GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
-    GEN_AI_TOOL_CALL_ID,
-    GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_DEFINITIONS,
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
-    GEN_AI_TOOL_TYPE,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
 )
@@ -61,12 +50,7 @@ from opentelemetry import context as context_api
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
 from opentelemetry.trace import Span, SpanKind, Status, StatusCode, Tracer, set_span_in_context
 from opentelemetry.util.types import AttributeValue
-from pydantic import BaseModel as PydanticBaseModel
 from pydantic import PrivateAttr
-from pydantic.v1.json import pydantic_encoder
-from typing_extensions import assert_never
-
-from llama_index.core import QueryBundle
 
 try:
     from llama_index.core.agent import BaseAgent, BaseAgentWorker  # type: ignore[attr-defined]
@@ -74,29 +58,13 @@ except ImportError:
     # Fallback for newer versions where BaseAgent/BaseAgentWorker don't exist
     from llama_index.core.agent.workflow import BaseWorkflowAgent as BaseAgent  # type: ignore[attr-defined]
     BaseAgentWorker = None  # type: ignore[assignment,misc]
-try:
-    from llama_index.core.base.llms.types import ToolCallBlock  # type: ignore
-except ImportError:
-    ToolCallBlock = None  # type: ignore
-from llama_index.core.base.base_retriever import BaseRetriever
 from llama_index.core.base.embeddings.base import BaseEmbedding
 from llama_index.core.base.llms.base import BaseLLM
 from llama_index.core.base.llms.types import (
     ChatMessage,
     ChatResponse,
     CompletionResponse,
-    ContentBlock,
-    ImageBlock,
-    TextBlock,
 )
-from llama_index.core.base.response.schema import (
-    RESPONSE_TYPE,
-    AsyncStreamingResponse,
-    PydanticResponse,
-    Response,
-    StreamingResponse,
-)
-from llama_index.core.bridge.pydantic import BaseModel
 from llama_index.core.instrumentation.event_handlers import BaseEventHandler
 from llama_index.core.instrumentation.events import BaseEvent
 from llama_index.core.instrumentation.events.agent import (
@@ -147,9 +115,7 @@ from llama_index.core.instrumentation.events.synthesis import (
 from llama_index.core.instrumentation.span import BaseSpan
 from llama_index.core.instrumentation.span_handlers import BaseSpanHandler
 from llama_index.core.multi_modal_llms import MultiModalLLM
-from llama_index.core.schema import BaseNode, NodeWithScore, QueryType
 from llama_index.core.tools import BaseTool
-from llama_index.core.types import RESPONSE_TEXT_TYPE
 from llama_index.core.workflow.errors import WorkflowDone  # type: ignore[attr-defined]
 from llama_index.core.workflow.handler import WorkflowHandler  # type: ignore[attr-defined]
 
@@ -384,6 +350,12 @@ class _Span(BaseSpan):
                     except Exception:
                         tool_defs.append(str(tool))
                 self[GEN_AI_TOOL_DEFINITIONS] = json.dumps(tool_defs, default=str, ensure_ascii=False)
+
+        # Capture tool call arguments for FunctionTool invocations
+        if isinstance(instance, (BaseTool, FunctionTool)):
+            kwargs = bound_args.kwargs
+            if kwargs:
+                self[GEN_AI_TOOL_CALL_ARGUMENTS] = json.dumps(kwargs, default=str, ensure_ascii=False)
 
     @singledispatchmethod
     def process_instance(self, instance: Any) -> None:
@@ -921,47 +893,6 @@ class EventHandler(BaseEventHandler, extra="allow"):
         return event
 
 
-def _get_tool_call(tool_call: object) -> Iterator[Tuple[str, Any]]:
-    if isinstance(tool_call, dict):
-        if tool_call_id := tool_call.get("id"):
-            yield GEN_AI_TOOL_CALL_ID, tool_call_id
-        if name := tool_call.get("name"):
-            yield GEN_AI_TOOL_NAME, name
-        if function := tool_call.get("function"):
-            yield GEN_AI_TOOL_NAME, function.get("name")
-            if isinstance(function.get("arguments"), str):
-                yield GEN_AI_TOOL_CALL_ARGUMENTS, function.get("arguments")
-            else:
-                yield GEN_AI_TOOL_CALL_ARGUMENTS, json.dumps(function.get("arguments"), default=str, ensure_ascii=False)
-        if arguments := tool_call.get("input"):
-            if isinstance(arguments, str):
-                yield GEN_AI_TOOL_CALL_ARGUMENTS, arguments
-            elif isinstance(arguments, dict):
-                yield GEN_AI_TOOL_CALL_ARGUMENTS, json.dumps(arguments, default=str, ensure_ascii=False)
-    elif ToolCallBlock is not None and isinstance(tool_call, ToolCallBlock):
-        if tool_call_id := getattr(tool_call, "tool_call_id", None):
-            yield GEN_AI_TOOL_CALL_ID, tool_call_id
-        if name := getattr(tool_call, "tool_name", None):
-            yield GEN_AI_TOOL_NAME, name
-        if isinstance(getattr(tool_call, "tool_kwargs", None), str):
-            yield GEN_AI_TOOL_CALL_ARGUMENTS, getattr(tool_call, "tool_kwargs", None)
-        else:
-            yield (
-                GEN_AI_TOOL_CALL_ARGUMENTS,
-                json.dumps(getattr(tool_call, "tool_kwargs", None), default=str, ensure_ascii=False),
-            )
-    elif function := getattr(tool_call, "function", None):
-        if tool_call_id := getattr(tool_call, "id", None):
-            yield GEN_AI_TOOL_CALL_ID, tool_call_id
-        if name := getattr(function, "name", None):
-            yield GEN_AI_TOOL_NAME, name
-        if arguments := getattr(function, "arguments", None):
-            if isinstance(arguments, str):
-                yield GEN_AI_TOOL_CALL_ARGUMENTS, arguments
-            else:
-                yield GEN_AI_TOOL_CALL_ARGUMENTS, json.dumps(arguments, default=str, ensure_ascii=False)
-
-
 def _get_token_counts(usage: Union[object, Mapping[str, Any]]) -> Iterator[Tuple[str, Any]]:
     if isinstance(usage, Mapping):
         return _get_token_counts_from_mapping(usage)
@@ -1025,99 +956,3 @@ def _get_token_counts_impl(
             pass
 
 
-class _Encoder(json.JSONEncoder):
-    def __init__(self, **kwargs: Any) -> None:
-        kwargs.pop("default", None)
-        super().__init__(**kwargs)
-
-    def default(self, obj: Any) -> Any:
-        return _encoder(obj)
-
-
-def _encoder(obj: Any) -> Any:
-    if repr_str := _show_repr_str(obj):
-        return repr_str
-    if isinstance(obj, QueryBundle):
-        d = obj.to_dict()
-        if obj.embedding:
-            d["embedding"] = f"<{len(obj.embedding)}-dimensional vector>"
-        return d
-    if dataclasses.is_dataclass(obj):
-        return _asdict(obj)
-    try:
-        return pydantic_encoder(obj)
-    except BaseException:
-        return repr(obj)
-
-
-def _show_repr_str(obj: Any) -> Optional[str]:
-    if isinstance(obj, (Generator, AsyncGenerator)):
-        return f"<{obj.__class__.__qualname__} object>"
-    if callable(obj):
-        try:
-            return f"<{obj.__qualname__}{str(inspect.signature(obj))}>"
-        except BaseException:
-            return f"<{obj.__class__.__qualname__} object>"
-    if isinstance(obj, BaseNode):
-        return f"<{obj.__class__.__qualname__}(id_={obj.id_})>"
-    if isinstance(obj, NodeWithScore):
-        return (
-            f"<{obj.__class__.__qualname__}(node={obj.node.__class__.__qualname__}"
-            f"(id_={obj.node.id_}), score={obj.score})>"
-        )
-    return None
-
-
-def _asdict(obj: Any) -> Any:
-    """
-    This is a copy of Python's `_asdict_inner` function (linked below) but modified primarily to
-    not throw exceptions for objects that cannot be deep-copied, e.g. Generators.
-    https://github.com/python/cpython/blob/b134f47574c36e842253266ecf0d144fb6f3b546/Lib/dataclasses.py#L1332
-    """  # noqa: E501
-    if dataclasses.is_dataclass(obj):
-        result = []
-        for f in dataclasses.fields(obj):
-            value = _asdict(getattr(obj, f.name))
-            result.append((f.name, value))
-        return dict(result)
-    elif isinstance(obj, tuple) and hasattr(obj, "_fields"):
-        return type(obj)(*[_asdict(v) for v in obj])
-    elif isinstance(obj, (list, tuple)):
-        return type(obj)(_asdict(v) for v in obj)
-    elif isinstance(obj, dict):
-        return type(obj)((_asdict(k), _asdict(v)) for k, v in obj.items())
-    else:
-        if repr_str := _show_repr_str(obj):
-            return repr_str
-        try:
-            return copy.deepcopy(obj)
-        except BaseException:
-            return repr(obj)
-
-
-def _ensure_result_model_is_serializable(result: BaseModel) -> None:
-    """
-    Some LlamaIndex result types have a `raw` attribute containing the original
-    result object, e.g., from the OpenAI Python SDK. OpenAI's Pydantic models
-    are configured to defer instantiating model serializers, which can cause
-    serialization of the LlamaIndex result object to fail. This method forces
-    the OpenAI model to instantiate its serializer to avoid this issue.
-
-    For reference, see:
-    - https://github.com/Arize-ai/phoenix/issues/4423
-    - https://github.com/openai/openai-python/issues/1306
-    - https://github.com/pydantic/pydantic/issues/7713
-    """
-    if isinstance(raw := getattr(result, "raw", None), PydanticBaseModel):
-        raw.model_rebuild()
-
-
-T = TypeVar("T", bound=type)
-
-
-def is_iterable_of(lst: Iterable[object], tp: T) -> bool:
-    return isinstance(lst, Iterable) and all(isinstance(x, tp) for x in lst)
-
-
-def is_base64_url(url: str) -> bool:
-    return url.startswith("data:image/") and "base64" in url
