@@ -70,18 +70,10 @@ from llama_index.core.base.llms.types import (
 )
 from llama_index.core.instrumentation.event_handlers import BaseEventHandler
 from llama_index.core.instrumentation.events import BaseEvent
-from llama_index.core.instrumentation.events.agent import (
-    AgentChatWithStepEndEvent,
-    AgentChatWithStepStartEvent,
-    AgentRunStepEndEvent,
-    AgentRunStepStartEvent,
-    AgentToolCallEvent,
-)
 from llama_index.core.instrumentation.events.chat_engine import (
     StreamChatDeltaReceivedEvent,
     StreamChatEndEvent,
     StreamChatErrorEvent,
-    StreamChatStartEvent,
 )
 from llama_index.core.instrumentation.events.embedding import (
     EmbeddingEndEvent,
@@ -93,26 +85,17 @@ from llama_index.core.instrumentation.events.llm import (
     LLMChatStartEvent,
     LLMCompletionEndEvent,
     LLMCompletionInProgressEvent,
-    LLMCompletionStartEvent,
-    LLMPredictEndEvent,
     LLMPredictStartEvent,
-    LLMStructuredPredictEndEvent,
-    LLMStructuredPredictStartEvent,
 )
-from llama_index.core.instrumentation.events.query import QueryEndEvent, QueryStartEvent
 from llama_index.core.instrumentation.events.rerank import (
-    ReRankEndEvent,
     ReRankStartEvent,
 )
+from llama_index.core.instrumentation.events.query import QueryStartEvent
 from llama_index.core.instrumentation.events.retrieval import (
-    RetrievalEndEvent,
     RetrievalStartEvent,
 )
-from llama_index.core.instrumentation.events.span import SpanDropEvent  # type: ignore[attr-defined]
 from llama_index.core.instrumentation.events.synthesis import (
-    GetResponseEndEvent,
     GetResponseStartEvent,
-    SynthesizeEndEvent,
     SynthesizeStartEvent,
 )
 from llama_index.core.instrumentation.span import BaseSpan
@@ -176,6 +159,14 @@ def _detect_llm_provider(instance: Any) -> Optional[str]:
     """
     # Try specific provider imports with lazy loading
     try:
+        from llama_index.llms.azure_openai import AzureOpenAI as LlamaIndexAzureOpenAI
+
+        if isinstance(instance, LlamaIndexAzureOpenAI):
+            return "azure.ai.openai"
+    except ImportError:
+        pass
+
+    try:
         from llama_index.llms.openai import OpenAI as LlamaIndexOpenAI
 
         if isinstance(instance, LlamaIndexOpenAI):
@@ -188,14 +179,6 @@ def _detect_llm_provider(instance: Any) -> Optional[str]:
 
         if isinstance(instance, LlamaIndexAnthropic):
             return "anthropic"
-    except ImportError:
-        pass
-
-    try:
-        from llama_index.llms.azure_openai import AzureOpenAI as LlamaIndexAzureOpenAI
-
-        if isinstance(instance, LlamaIndexAzureOpenAI):
-            return "azure.ai.openai"
     except ImportError:
         pass
 
@@ -425,38 +408,10 @@ class _Span(BaseSpan):
         parent.notify_parent(status)
 
     @singledispatchmethod
-    def _process_event(self, event: BaseEvent) -> None:
-        logger.warning(f"Unhandled event of type {event.__class__.__qualname__}")
+    def _process_event(self, event: BaseEvent) -> None: ...
 
     @_process_event.register
     def _(self, event: ExceptionEvent) -> None: ...
-
-    @_process_event.register
-    def _(self, event: AgentChatWithStepStartEvent) -> None:
-        self[GEN_AI_OPERATION_NAME] = _OPERATION_INVOKE_AGENT
-
-    @_process_event.register
-    def _(self, event: AgentChatWithStepEndEvent) -> None:
-        self[GEN_AI_OPERATION_NAME] = _OPERATION_INVOKE_AGENT
-
-    @_process_event.register
-    def _(self, event: AgentRunStepStartEvent) -> None:
-        self[GEN_AI_OPERATION_NAME] = _OPERATION_INVOKE_AGENT
-
-    @_process_event.register
-    def _(self, event: AgentRunStepEndEvent) -> None:
-        self[GEN_AI_OPERATION_NAME] = _OPERATION_INVOKE_AGENT
-        # FIXME: not sure what to do here with interim outputs since
-        # there is no corresponding semantic convention.
-        ...
-
-    @_process_event.register
-    def _(self, event: AgentToolCallEvent) -> None:
-        self[GEN_AI_OPERATION_NAME] = _OPERATION_EXECUTE_TOOL
-        tool = event.tool
-        if name := tool.name:
-            self[GEN_AI_TOOL_NAME] = name
-        self[GEN_AI_TOOL_DESCRIPTION] = tool.description
 
     @_process_event.register
     def _(self, event: EmbeddingStartEvent) -> None:
@@ -465,15 +420,10 @@ class _Span(BaseSpan):
     @_process_event.register
     def _(self, event: EmbeddingEndEvent) -> None:
         self[GEN_AI_OPERATION_NAME] = _OPERATION_EMBEDDINGS
-        # Capture embedding dimension count if available
         if event.embeddings and len(event.embeddings) > 0:
             first_embedding = event.embeddings[0]
             if hasattr(first_embedding, '__len__'):
                 self[GEN_AI_EMBEDDINGS_DIMENSION_COUNT] = len(first_embedding)
-
-    @_process_event.register
-    def _(self, event: StreamChatStartEvent) -> None:
-        self[GEN_AI_OPERATION_NAME] = _OPERATION_CHAT
 
     @_process_event.register
     def _(self, event: StreamChatDeltaReceivedEvent) -> None: ...
@@ -488,22 +438,6 @@ class _Span(BaseSpan):
 
     @_process_event.register
     def _(self, event: LLMPredictStartEvent) -> None:
-        self[GEN_AI_OPERATION_NAME] = _OPERATION_TEXT_COMPLETION
-
-    @_process_event.register
-    def _(self, event: LLMPredictEndEvent) -> None:
-        self[GEN_AI_OPERATION_NAME] = _OPERATION_TEXT_COMPLETION
-
-    @_process_event.register
-    def _(self, event: LLMStructuredPredictStartEvent) -> None:
-        self[GEN_AI_OPERATION_NAME] = _OPERATION_TEXT_COMPLETION
-
-    @_process_event.register
-    def _(self, event: LLMStructuredPredictEndEvent) -> None:
-        self[GEN_AI_OPERATION_NAME] = _OPERATION_TEXT_COMPLETION
-
-    @_process_event.register
-    def _(self, event: LLMCompletionStartEvent) -> None:
         self[GEN_AI_OPERATION_NAME] = _OPERATION_TEXT_COMPLETION
 
     @_process_event.register
@@ -537,49 +471,24 @@ class _Span(BaseSpan):
         )
 
     @_process_event.register
-    def _(self, event: QueryStartEvent) -> None:
-        self[GEN_AI_OPERATION_NAME] = _OPERATION_QUERY
-
-    @_process_event.register
-    def _(self, event: QueryEndEvent) -> None:
-        self[GEN_AI_OPERATION_NAME] = _OPERATION_QUERY
-
-    @_process_event.register
     def _(self, event: ReRankStartEvent) -> None:
         self[GEN_AI_OPERATION_NAME] = _OPERATION_RERANK
         self[GEN_AI_REQUEST_MODEL] = event.model_name
 
     @_process_event.register
-    def _(self, event: ReRankEndEvent) -> None:
-        self[GEN_AI_OPERATION_NAME] = _OPERATION_RERANK
+    def _(self, event: QueryStartEvent) -> None:
+        self[GEN_AI_OPERATION_NAME] = _OPERATION_QUERY
 
     @_process_event.register
     def _(self, event: RetrievalStartEvent) -> None:
         self[GEN_AI_OPERATION_NAME] = _OPERATION_RETRIEVE
 
     @_process_event.register
-    def _(self, event: RetrievalEndEvent) -> None:
-        self[GEN_AI_OPERATION_NAME] = _OPERATION_RETRIEVE
-
-    @_process_event.register
-    def _(self, event: SpanDropEvent) -> None:
-        # Not needed because `prepare_to_drop_span()` provides the same information.
-        ...
-
-    @_process_event.register
     def _(self, event: SynthesizeStartEvent) -> None:
         self[GEN_AI_OPERATION_NAME] = _OPERATION_SYNTHESIZE
 
     @_process_event.register
-    def _(self, event: SynthesizeEndEvent) -> None:
-        self[GEN_AI_OPERATION_NAME] = _OPERATION_SYNTHESIZE
-
-    @_process_event.register
     def _(self, event: GetResponseStartEvent) -> None:
-        self[GEN_AI_OPERATION_NAME] = _OPERATION_SYNTHESIZE
-
-    @_process_event.register
-    def _(self, event: GetResponseEndEvent) -> None:
         self[GEN_AI_OPERATION_NAME] = _OPERATION_SYNTHESIZE
 
     def _extract_token_counts(self, response: Union[ChatResponse, CompletionResponse]) -> None:
