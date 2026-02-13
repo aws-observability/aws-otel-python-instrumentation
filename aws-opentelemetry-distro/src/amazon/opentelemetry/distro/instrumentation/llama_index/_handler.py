@@ -143,12 +143,6 @@ _OPERATION_RETRIEVE = "retrieve"
 _OPERATION_SYNTHESIZE = "synthesize"
 _OPERATION_QUERY = "query"
 
-# Default value for gen_ai.provider.name, a required attribute per OpenTelemetry
-# semantic conventions.
-# "llama_index" is not a standard provider name in semconv v1.39, but serves as a fallback when the
-# underlying LLM provider cannot be determined.
-_PROVIDER_LLAMA_INDEX = "llama_index"
-
 STREAMING_FINISHED_EVENTS = (
     LLMChatEndEvent,
     LLMCompletionEndEvent,
@@ -311,9 +305,6 @@ class _Span(BaseSpan):
             # https://github.com/open-telemetry/opentelemetry-python/blob/2b9dcfc5d853d1c10176937a6bcaade54cda1a31/opentelemetry-api/src/opentelemetry/trace/__init__.py#L588  # noqa E501
             description = f"{type(exception).__name__}: {exception}"
             status = Status(status_code=StatusCode.ERROR, description=description)
-        
-        if GEN_AI_PROVIDER_NAME not in self._attributes:
-            self._attributes[GEN_AI_PROVIDER_NAME] = _PROVIDER_LLAMA_INDEX
         
         self._otel_span.update_name(self._get_span_name())
         
