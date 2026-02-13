@@ -29,6 +29,7 @@ from typing import (
 )
 
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
+    GEN_AI_AGENT_DESCRIPTION,
     GEN_AI_AGENT_NAME,
     GEN_AI_EMBEDDINGS_DIMENSION_COUNT,
     GEN_AI_INPUT_MESSAGES,
@@ -38,7 +39,9 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
     GEN_AI_REQUEST_TEMPERATURE,
+    GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
+    GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_DEFINITIONS,
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
@@ -116,11 +119,11 @@ from llama_index.core.instrumentation.span import BaseSpan
 from llama_index.core.instrumentation.span_handlers import BaseSpanHandler
 from llama_index.core.multi_modal_llms import MultiModalLLM
 from llama_index.core.tools import BaseTool
+from llama_index.core.tools.types import ToolOutput
 from llama_index.core.workflow.errors import WorkflowDone  # type: ignore[attr-defined]
 from llama_index.core.workflow.handler import WorkflowHandler  # type: ignore[attr-defined]
 
 from llama_index.core.tools import FunctionTool  # type: ignore[attr-defined]
-from llama_index.core.agent.workflow import FunctionAgent  # type: ignore[attr-defined]
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
@@ -358,18 +361,7 @@ class _Span(BaseSpan):
                 self[GEN_AI_TOOL_CALL_ARGUMENTS] = json.dumps(kwargs, default=str, ensure_ascii=False)
 
     @singledispatchmethod
-    def process_instance(self, instance: Any) -> None:
-        # Default handler - check class name for agent types
-        if instance is None:
-            return
-            
-        class_name = instance.__class__.__name__
-        
-        # Always set operation name for agents in default handler as fallback
-        if 'Agent' in class_name and class_name not in ('UserAgent',):
-            self[GEN_AI_OPERATION_NAME] = _OPERATION_INVOKE_AGENT
-            if hasattr(instance, 'name') and instance.name:
-                self[GEN_AI_AGENT_NAME] = instance.name
+    def process_instance(self, instance: Any) -> None: ...
 
     @process_instance.register(BaseLLM)
     @process_instance.register(MultiModalLLM)
@@ -643,17 +635,15 @@ class _Span(BaseSpan):
         except BaseException:
             pass
 
-    @process_instance.register(FunctionAgent)
-    def _(self, instance: FunctionAgent) -> None:
-        self[GEN_AI_OPERATION_NAME] = _OPERATION_INVOKE_AGENT
-        if hasattr(instance, 'name') and instance.name:
-            self[GEN_AI_AGENT_NAME] = instance.name
-
     @process_instance.register(BaseAgent)
     def _(self, instance: BaseAgent) -> None:
         self[GEN_AI_OPERATION_NAME] = _OPERATION_INVOKE_AGENT
         if hasattr(instance, 'name') and instance.name:
             self[GEN_AI_AGENT_NAME] = instance.name
+        if hasattr(instance, 'description') and instance.description:
+            self[GEN_AI_AGENT_DESCRIPTION] = instance.description
+        if hasattr(instance, 'system_prompt') and instance.system_prompt:
+            self[GEN_AI_SYSTEM_INSTRUCTIONS] = instance.system_prompt
 
 END_OF_QUEUE = None
 
@@ -840,6 +830,8 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
                     s.end(exception=exc)
                 result._result_task.add_done_callback(_on_workflow_done)
                 return span
+            if isinstance(result, ToolOutput):
+                span._attributes[GEN_AI_TOOL_CALL_RESULT] = result.content
             span.end()
         else:
             logger.warning(f"Open span is missing for {id_=}")
