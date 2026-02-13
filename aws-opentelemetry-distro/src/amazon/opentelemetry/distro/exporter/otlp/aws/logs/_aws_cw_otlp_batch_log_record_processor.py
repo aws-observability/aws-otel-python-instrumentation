@@ -5,7 +5,7 @@
 import logging
 from typing import Mapping, Optional, Sequence, cast
 
-from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_logs_exporter import OTLPAwsLogRecordExporter
+from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter import OTLPAwsLogRecordExporter
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY, attach, detach, set_value
 from opentelemetry.sdk._logs import ReadableLogRecord
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
@@ -88,6 +88,7 @@ class AwsCloudWatchOtlpBatchLogRecordProcessor(BatchLogRecordProcessor):
         )
 
         self._exporter = exporter
+        self._batch_processor._export = self._export
 
     def _export(self, batch_strategy: BatchExportStrategy) -> None:
         """
