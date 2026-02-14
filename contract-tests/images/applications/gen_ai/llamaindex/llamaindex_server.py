@@ -138,6 +138,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             agent = FunctionAgent(
                 tools=[multiply, get_greeting],
                 llm=llm,
+                name="TestAgent",
+                description="A test agent that greets and multiplies.",
                 system_prompt="You are a helpful assistant.",
             )
             
