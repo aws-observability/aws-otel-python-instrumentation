@@ -28,6 +28,11 @@ from typing import (
     Union,
 )
 
+from pydantic import PrivateAttr
+
+from opentelemetry import context as context_api
+from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
+from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_DESCRIPTION,
     GEN_AI_AGENT_NAME,
@@ -48,26 +53,19 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
 )
-from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
-from opentelemetry import context as context_api
-from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
 from opentelemetry.trace import Span, SpanKind, Status, StatusCode, Tracer, set_span_in_context
 from opentelemetry.util.types import AttributeValue
-from pydantic import PrivateAttr
 
 try:
     from llama_index.core.agent import BaseAgent, BaseAgentWorker  # type: ignore[attr-defined]
 except ImportError:
     # Fallback for newer versions where BaseAgent/BaseAgentWorker don't exist
     from llama_index.core.agent.workflow import BaseWorkflowAgent as BaseAgent  # type: ignore[attr-defined]
+
     BaseAgentWorker = None  # type: ignore[assignment,misc]
 from llama_index.core.base.embeddings.base import BaseEmbedding
 from llama_index.core.base.llms.base import BaseLLM
-from llama_index.core.base.llms.types import (
-    ChatMessage,
-    ChatResponse,
-    CompletionResponse,
-)
+from llama_index.core.base.llms.types import ChatMessage, ChatResponse, CompletionResponse
 from llama_index.core.instrumentation.event_handlers import BaseEventHandler
 from llama_index.core.instrumentation.events import BaseEvent
 from llama_index.core.instrumentation.events.chat_engine import (
@@ -75,10 +73,7 @@ from llama_index.core.instrumentation.events.chat_engine import (
     StreamChatEndEvent,
     StreamChatErrorEvent,
 )
-from llama_index.core.instrumentation.events.embedding import (
-    EmbeddingEndEvent,
-    EmbeddingStartEvent,
-)
+from llama_index.core.instrumentation.events.embedding import EmbeddingEndEvent, EmbeddingStartEvent
 from llama_index.core.instrumentation.events.llm import (
     LLMChatEndEvent,
     LLMChatInProgressEvent,
@@ -87,26 +82,18 @@ from llama_index.core.instrumentation.events.llm import (
     LLMCompletionInProgressEvent,
     LLMPredictStartEvent,
 )
-from llama_index.core.instrumentation.events.rerank import (
-    ReRankStartEvent,
-)
 from llama_index.core.instrumentation.events.query import QueryStartEvent
-from llama_index.core.instrumentation.events.retrieval import (
-    RetrievalStartEvent,
-)
-from llama_index.core.instrumentation.events.synthesis import (
-    GetResponseStartEvent,
-    SynthesizeStartEvent,
-)
+from llama_index.core.instrumentation.events.rerank import ReRankStartEvent
+from llama_index.core.instrumentation.events.retrieval import RetrievalStartEvent
+from llama_index.core.instrumentation.events.synthesis import GetResponseStartEvent, SynthesizeStartEvent
 from llama_index.core.instrumentation.span import BaseSpan
 from llama_index.core.instrumentation.span_handlers import BaseSpanHandler
 from llama_index.core.multi_modal_llms import MultiModalLLM
+from llama_index.core.tools import FunctionTool  # type: ignore[attr-defined]
 from llama_index.core.tools import BaseTool
 from llama_index.core.tools.types import ToolOutput
 from llama_index.core.workflow.errors import WorkflowDone  # type: ignore[attr-defined]
 from llama_index.core.workflow.handler import WorkflowHandler  # type: ignore[attr-defined]
-
-from llama_index.core.tools import FunctionTool  # type: ignore[attr-defined]
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
@@ -260,11 +247,11 @@ class _Span(BaseSpan):
 
     def _get_span_name(self) -> str:
         operation_name = self._attributes.get(GEN_AI_OPERATION_NAME)
-        
+
         # generic fallback if no operation name
         if not operation_name:
             return "llama_index.operation"
-        
+
         if operation_name == _OPERATION_INVOKE_AGENT:
             if agent_name := self._attributes.get(GEN_AI_AGENT_NAME):
                 return f"{operation_name} {agent_name}"
@@ -273,14 +260,14 @@ class _Span(BaseSpan):
                 return f"{operation_name} {tool_name}"
         elif model := self._attributes.get(GEN_AI_REQUEST_MODEL):
             return f"{operation_name} {model}"
-        
+
         return operation_name
 
     def end(self, exception: Optional[BaseException] = None) -> None:
         if not self._active:
             return
         self._active = False
-        
+
         if self._context_token is not None:
             try:
                 context_api.detach(self._context_token)
@@ -288,7 +275,7 @@ class _Span(BaseSpan):
                 pass
             finally:
                 self._context_token = None
-        
+
         if exception is None:
             status = Status(status_code=StatusCode.OK)
         else:
@@ -298,9 +285,9 @@ class _Span(BaseSpan):
             # https://github.com/open-telemetry/opentelemetry-python/blob/2b9dcfc5d853d1c10176937a6bcaade54cda1a31/opentelemetry-api/src/opentelemetry/trace/__init__.py#L588  # noqa E501
             description = f"{type(exception).__name__}: {exception}"
             status = Status(status_code=StatusCode.ERROR, description=description)
-        
+
         self._otel_span.update_name(self._get_span_name())
-        
+
         self._otel_span.set_status(status=status)
         self._otel_span.set_attributes(self._attributes)
         self._otel_span.end(end_time=self._end_time)
@@ -320,9 +307,7 @@ class _Span(BaseSpan):
     def process_input(self, instance: Any, bound_args: inspect.BoundArguments) -> None:
         from llama_index.core.llms.function_calling import FunctionCallingLLM
 
-        if isinstance(instance, FunctionCallingLLM) and isinstance(
-            (tools := bound_args.kwargs.get("tools")), Iterable
-        ):
+        if isinstance(instance, FunctionCallingLLM) and isinstance((tools := bound_args.kwargs.get("tools")), Iterable):
             tools_list = list(tools)
             if tools_list:
                 # Convert FunctionTool objects to OpenAI tool format
@@ -330,7 +315,7 @@ class _Span(BaseSpan):
                 for tool in tools_list:
                     try:
                         # Try to get the OpenAI tool format from metadata
-                        if hasattr(tool, 'metadata') and hasattr(tool.metadata, 'to_openai_tool'):
+                        if hasattr(tool, "metadata") and hasattr(tool.metadata, "to_openai_tool"):
                             tool_defs.append(tool.metadata.to_openai_tool())
                         else:
                             tool_defs.append(str(tool))
@@ -356,13 +341,13 @@ class _Span(BaseSpan):
         # Add LLM provider detection
         if provider := _detect_llm_provider(instance):
             self[GEN_AI_PROVIDER_NAME] = provider
-        
+
         # Capture temperature if available
-        if hasattr(instance, 'temperature') and instance.temperature is not None:
+        if hasattr(instance, "temperature") and instance.temperature is not None:
             self[GEN_AI_REQUEST_TEMPERATURE] = instance.temperature
-        
+
         # Capture max_tokens if available
-        if hasattr(instance, 'max_tokens') and instance.max_tokens is not None:
+        if hasattr(instance, "max_tokens") and instance.max_tokens is not None:
             self[GEN_AI_REQUEST_MAX_TOKENS] = instance.max_tokens
 
     @process_instance.register
@@ -422,7 +407,7 @@ class _Span(BaseSpan):
         self[GEN_AI_OPERATION_NAME] = _OPERATION_EMBEDDINGS
         if event.embeddings and len(event.embeddings) > 0:
             first_embedding = event.embeddings[0]
-            if hasattr(first_embedding, '__len__'):
+            if hasattr(first_embedding, "__len__"):
                 self[GEN_AI_EMBEDDINGS_DIMENSION_COUNT] = len(first_embedding)
 
     @_process_event.register
@@ -534,7 +519,6 @@ class _Span(BaseSpan):
         if messages:
             self[prefix] = json.dumps(list(messages), default=str, ensure_ascii=False)
 
-
     @process_instance.register(FunctionTool)
     def _(self, instance: FunctionTool) -> None:
         self[GEN_AI_OPERATION_NAME] = _OPERATION_EXECUTE_TOOL
@@ -548,12 +532,13 @@ class _Span(BaseSpan):
     @process_instance.register(BaseAgent)
     def _(self, instance: BaseAgent) -> None:
         self[GEN_AI_OPERATION_NAME] = _OPERATION_INVOKE_AGENT
-        if hasattr(instance, 'name') and instance.name:
+        if hasattr(instance, "name") and instance.name:
             self[GEN_AI_AGENT_NAME] = instance.name
-        if hasattr(instance, 'description') and instance.description:
+        if hasattr(instance, "description") and instance.description:
             self[GEN_AI_AGENT_DESCRIPTION] = instance.description
-        if hasattr(instance, 'system_prompt') and instance.system_prompt:
+        if hasattr(instance, "system_prompt") and instance.system_prompt:
             self[GEN_AI_SYSTEM_INSTRUCTIONS] = instance.system_prompt
+
 
 END_OF_QUEUE = None
 
@@ -647,7 +632,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
     ) -> Optional[_Span]:
         if context_api.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
             return None
-        
+
         with self.lock:
             parent = self.open_spans.get(parent_span_id) if parent_span_id else None
 
@@ -656,7 +641,12 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
 
         span_method = id_.partition("-")[0]
 
-        if type(instance).__name__ in ("TokenTextSplitter", "DefaultRefineProgram", "SentenceSplitter", "CompactAndRefine"):
+        if type(instance).__name__ in (
+            "TokenTextSplitter",
+            "DefaultRefineProgram",
+            "SentenceSplitter",
+            "CompactAndRefine",
+        ):
             return None
 
         # Suppress internal workflow coordination steps that add noise without semantic value
@@ -678,7 +668,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         method_suffix = span_method.rpartition(".")[-1]
         if method_suffix in _SUPPRESSED_METHODS:
             return None
-        
+
         otel_span = self._otel_tracer.start_span(
             name="llama_index.operation",  # generic operation name, updated in span.end()
             start_time=time_ns(),
@@ -690,9 +680,9 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
                 else (context_api.Context() if self._separate_trace_from_runtime_context else None)
             ),
         )
-        
+
         token = context_api.attach(set_span_in_context(otel_span, parent.context if parent else None))
-        
+
         span = _Span(
             otel_span=otel_span,
             parent=parent,
@@ -731,6 +721,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             # done callback to the handler's result task so the span closes
             # when the workflow actually completes, not when run() returns.
             if isinstance(result, WorkflowHandler):
+
                 def _on_workflow_done(task: "asyncio.Task[Any]", s: _Span = span) -> None:
                     exc = None
                     try:
@@ -738,6 +729,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
                     except (asyncio.CancelledError, Exception):
                         pass
                     s.end(exception=exc)
+
                 result._result_task.add_done_callback(_on_workflow_done)
                 return span
             if isinstance(result, ToolOutput):
@@ -856,5 +848,3 @@ def _get_token_counts_impl(
             yield GEN_AI_USAGE_OUTPUT_TOKENS, int(candidates_token_count)
         except BaseException:
             pass
-
-

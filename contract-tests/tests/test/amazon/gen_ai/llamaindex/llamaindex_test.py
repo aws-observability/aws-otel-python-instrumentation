@@ -136,17 +136,17 @@ class LlamaIndexTest(ContractTestBase):
         for resource_scope_span in resource_scope_spans:
             span = resource_scope_span.span
             attrs = self._get_attributes_dict(span.attributes)
-            
+
             if attrs.get(_GEN_AI_OPERATION_NAME):
                 op_name = attrs[_GEN_AI_OPERATION_NAME].string_value
-                
+
                 if op_name == _OPERATION_INVOKE_AGENT:
                     invoke_agent_spans.append(span)
                 elif op_name == _OPERATION_EXECUTE_TOOL:
                     execute_tool_spans.append(span)
                 elif op_name == _OPERATION_CHAT:
                     chat_spans.append(span)
-        
+
         self.assertGreater(len(invoke_agent_spans), 0, "Expected at least one invoke_agent span")
         for span in invoke_agent_spans:
             attrs = self._get_attributes_dict(span.attributes)
@@ -160,13 +160,12 @@ class LlamaIndexTest(ContractTestBase):
             for span in execute_tool_spans:
                 attrs = self._get_attributes_dict(span.attributes)
                 self._assert_str_attribute(attrs, _GEN_AI_OPERATION_NAME, _OPERATION_EXECUTE_TOOL)
-                
+
                 self.assertIn(_GEN_AI_TOOL_NAME, attrs)
                 tool_name = attrs[_GEN_AI_TOOL_NAME].string_value
                 tool_names.add(tool_name)
-                self.assertIn(tool_name, ["get_greeting", "multiply"], 
-                             f"Unexpected tool name: {tool_name}")
-                
+                self.assertIn(tool_name, ["get_greeting", "multiply"], f"Unexpected tool name: {tool_name}")
+
                 self.assertIn(_GEN_AI_TOOL_DESCRIPTION, attrs)
                 description = attrs[_GEN_AI_TOOL_DESCRIPTION].string_value
                 self.assertTrue(len(description) > 0, "Expected non-empty tool description")
@@ -184,7 +183,7 @@ class LlamaIndexTest(ContractTestBase):
         for resource_scope_span in resource_scope_spans:
             span = resource_scope_span.span
             attrs = self._get_attributes_dict(span.attributes)
-            
+
             if attrs.get(_GEN_AI_OPERATION_NAME):
                 op_name = attrs[_GEN_AI_OPERATION_NAME].string_value
                 if op_name == _OPERATION_CHAT:
@@ -195,37 +194,38 @@ class LlamaIndexTest(ContractTestBase):
         for span in chat_spans:
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, _GEN_AI_OPERATION_NAME, _OPERATION_CHAT)
-            
+
             self._assert_str_attribute(attrs, _GEN_AI_PROVIDER_NAME, "openai")
-            
+
             self._assert_str_attribute(attrs, _GEN_AI_REQUEST_MODEL, "gpt-4")
-            
+
             self.assertIn(_GEN_AI_REQUEST_TEMPERATURE, attrs)
             temp = attrs[_GEN_AI_REQUEST_TEMPERATURE].double_value
             self.assertEqual(temp, 0.7, "Expected temperature to be 0.7")
-            
+
             self.assertIn(_GEN_AI_REQUEST_MAX_TOKENS, attrs)
             max_tokens = attrs[_GEN_AI_REQUEST_MAX_TOKENS].int_value
             self.assertEqual(max_tokens, 100, "Expected max_tokens to be 100")
-            
+
             self.assertIn(_GEN_AI_INPUT_MESSAGES, attrs)
             input_messages = attrs[_GEN_AI_INPUT_MESSAGES].string_value
             self.assertIsNotNone(input_messages)
             import json
+
             messages = json.loads(input_messages)
             self.assertIsInstance(messages, list)
             self.assertGreater(len(messages), 0, "Expected at least one message")
-            
+
             self.assertIn(_GEN_AI_OUTPUT_MESSAGES, attrs)
             output_messages = attrs[_GEN_AI_OUTPUT_MESSAGES].string_value
             self.assertIsNotNone(output_messages)
             output_msgs = json.loads(output_messages)
             self.assertIsInstance(output_msgs, list)
-            
+
             self.assertIn(_GEN_AI_USAGE_INPUT_TOKENS, attrs)
             input_tokens = attrs[_GEN_AI_USAGE_INPUT_TOKENS].int_value
             self.assertEqual(input_tokens, 25, "Expected 25 input tokens")
-            
+
             self.assertIn(_GEN_AI_USAGE_OUTPUT_TOKENS, attrs)
             output_tokens = attrs[_GEN_AI_USAGE_OUTPUT_TOKENS].int_value
             self.assertEqual(output_tokens, 50, "Expected 50 output tokens")
@@ -238,10 +238,10 @@ class LlamaIndexTest(ContractTestBase):
         for resource_scope_span in resource_scope_spans:
             span = resource_scope_span.span
             attrs = self._get_attributes_dict(span.attributes)
-            
+
             if attrs.get(_GEN_AI_OPERATION_NAME):
                 op_name = attrs[_GEN_AI_OPERATION_NAME].string_value
-                
+
                 if op_name == _OPERATION_QUERY:
                     query_spans.append(span)
                 elif op_name == _OPERATION_RETRIEVE:
@@ -273,7 +273,7 @@ class LlamaIndexTest(ContractTestBase):
         for resource_scope_span in resource_scope_spans:
             span = resource_scope_span.span
             attrs = self._get_attributes_dict(span.attributes)
-            
+
             if attrs.get(_GEN_AI_OPERATION_NAME):
                 op_name = attrs[_GEN_AI_OPERATION_NAME].string_value
                 if op_name == _OPERATION_EMBEDDINGS:
@@ -285,11 +285,11 @@ class LlamaIndexTest(ContractTestBase):
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, _GEN_AI_OPERATION_NAME, _OPERATION_EMBEDDINGS)
             self.assertNotIn(_GEN_AI_PROVIDER_NAME, attrs)
-            
+
             self.assertIn(_GEN_AI_REQUEST_MODEL, attrs)
             model = attrs[_GEN_AI_REQUEST_MODEL].string_value
             self.assertTrue(len(model) > 0, "Expected non-empty model name for embedding")
-            
+
             self.assertIn(_GEN_AI_EMBEDDINGS_DIMENSION_COUNT, attrs)
             dim_count = attrs[_GEN_AI_EMBEDDINGS_DIMENSION_COUNT].int_value
             self.assertEqual(dim_count, 384, "Expected embedding dimension count to be 384")
@@ -300,26 +300,27 @@ class LlamaIndexTest(ContractTestBase):
         for resource_scope_span in resource_scope_spans:
             span = resource_scope_span.span
             attrs = self._get_attributes_dict(span.attributes)
-            
+
             if attrs.get(_GEN_AI_OPERATION_NAME):
                 op_name = attrs[_GEN_AI_OPERATION_NAME].string_value
-                
+
                 if op_name == _OPERATION_CHAT:
                     chat_spans.append(span)
 
         self.assertGreater(len(chat_spans), 0, "Expected at least one chat span with tool definitions")
-        
+
         for span in chat_spans:
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, _GEN_AI_OPERATION_NAME, _OPERATION_CHAT)
-            
+
             self._assert_str_attribute(attrs, _GEN_AI_PROVIDER_NAME, "openai")
             self._assert_str_attribute(attrs, _GEN_AI_REQUEST_MODEL, "gpt-4")
-            
+
             self.assertIn(_GEN_AI_TOOL_DEFINITIONS, attrs)
             tool_defs = attrs[_GEN_AI_TOOL_DEFINITIONS].string_value
             self.assertIsNotNone(tool_defs)
             import json
+
             tools = json.loads(tool_defs)
             self.assertIsInstance(tools, list)
             self.assertEqual(len(tools), 2, "Expected exactly two tool definitions (calculate_sum, multiply)")
@@ -328,10 +329,10 @@ class LlamaIndexTest(ContractTestBase):
                 self.assertEqual(tool_names, {"calculate_sum", "multiply"})
             else:
                 self.assertEqual(len(tools), 2)
-            
+
             self.assertIn(_GEN_AI_USAGE_INPUT_TOKENS, attrs)
             self.assertIn(_GEN_AI_USAGE_OUTPUT_TOKENS, attrs)
-            
+
             self.assertIn(_GEN_AI_INPUT_MESSAGES, attrs)
             self.assertIn(_GEN_AI_OUTPUT_MESSAGES, attrs)
 

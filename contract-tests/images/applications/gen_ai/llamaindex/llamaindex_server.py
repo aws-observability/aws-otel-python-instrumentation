@@ -24,18 +24,18 @@ _llm_call_count = 0
 
 
 class MockOpenAIHandler(BaseHTTPRequestHandler):
-    
+
     # pylint: disable=invalid-name
     def do_POST(self):
         global _llm_call_count  # pylint: disable=global-statement
         _llm_call_count += 1
-        
-        content_length = int(self.headers.get('Content-Length', 0))
-        request_body = self.rfile.read(content_length).decode('utf-8')
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        request_body = self.rfile.read(content_length).decode("utf-8")
         request_data = json.loads(request_body) if content_length > 0 else {}
-        
-        has_tools = 'tools' in request_data and len(request_data.get('tools', [])) > 0
-        
+
+        has_tools = "tools" in request_data and len(request_data.get("tools", [])) > 0
+
         if has_tools:
             if _llm_call_count % 2 == 1:
                 content = (
@@ -45,20 +45,19 @@ class MockOpenAIHandler(BaseHTTPRequestHandler):
                 )
             else:
                 content = "Thought: I now know the final answer.\nFinal Answer: The sum of 5 and 3 is 8."
-            
+
             response = {
                 "id": "chatcmpl-mock-tool",
                 "object": "chat.completion",
                 "created": 1234567890,
                 "model": "gpt-4",
-                "choices": [{
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": content
-                    },
-                    "finish_reason": "stop",
-                }],
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": content},
+                        "finish_reason": "stop",
+                    }
+                ],
                 "usage": {"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70},
             }
         else:
@@ -67,22 +66,24 @@ class MockOpenAIHandler(BaseHTTPRequestHandler):
                 "object": "chat.completion",
                 "created": 1234567890,
                 "model": "gpt-4",
-                "choices": [{
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": "This is a mock response from the fake OpenAI API."
-                    },
-                    "finish_reason": "stop",
-                }],
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": "This is a mock response from the fake OpenAI API.",
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
                 "usage": {"prompt_tokens": 25, "completion_tokens": 50, "total_tokens": 75},
             }
-        
+
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
         self.wfile.write(json.dumps(response).encode())
-    
+
     def log_message(self, format, *args):  # pylint: disable=redefined-builtin
         pass
 
@@ -121,7 +122,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         try:
             import asyncio
-            
+
             def get_greeting(name: str) -> str:
                 return f"Hello, {name}!"
 
@@ -134,7 +135,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 temperature=0.7,
                 max_tokens=100,
             )
-            
+
             agent = FunctionAgent(
                 tools=[multiply, get_greeting],
                 llm=llm,
@@ -142,17 +143,18 @@ class RequestHandler(BaseHTTPRequestHandler):
                 description="A test agent that greets and multiplies.",
                 system_prompt="You are a helpful assistant.",
             )
-            
+
             async def run_agent():
                 response = await agent.run("Please greet the world")
                 return response
-            
+
             response = asyncio.run(run_agent())
             print(f"Agent response: {response}")
-            
+
         except Exception as e:
             print(f"Error in _run_agent: {e}")
             import traceback
+
             traceback.print_exc()
 
     def _run_chat(self) -> None:  # pylint: disable=no-self-use
@@ -165,17 +167,18 @@ class RequestHandler(BaseHTTPRequestHandler):
                 temperature=0.7,
                 max_tokens=100,
             )
-            
+
             messages = [
                 ChatMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
                 ChatMessage(role=MessageRole.USER, content="Hello, how are you?"),
             ]
-            
+
             response = llm.chat(messages)
             print(f"Chat response: {response}")
         except Exception as e:
             print(f"Error in _run_chat: {e}")
             import traceback
+
             traceback.print_exc()
 
     def _run_query(self) -> None:  # pylint: disable=no-self-use
@@ -189,23 +192,24 @@ class RequestHandler(BaseHTTPRequestHandler):
                 max_tokens=100,
             )
             embed_model = MockEmbedding(embed_dim=384)
-            
+
             Settings.llm = llm
             Settings.embed_model = embed_model
-            
+
             documents = [
                 Document(text="The sky is blue."),
                 Document(text="The grass is green."),
             ]
-            
+
             index = VectorStoreIndex.from_documents(documents)
             query_engine = index.as_query_engine()
-            
+
             response = query_engine.query("What color is the sky?")
             print(f"Query response: {response}")
         except Exception as e:
             print(f"Error in _run_query: {e}")
             import traceback
+
             traceback.print_exc()
 
     def _run_embedding(self) -> None:  # pylint: disable=no-self-use
@@ -213,13 +217,14 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         try:
             embed_model = MockEmbedding(embed_dim=384)
-            
+
             texts = ["Hello world", "Test embedding"]
             embeddings = embed_model.get_text_embedding_batch(texts)
             print(f"Generated {len(embeddings)} embeddings")
         except Exception as e:
             print(f"Error in _run_embedding: {e}")
             import traceback
+
             traceback.print_exc()
 
     def _run_tool_call(self) -> None:  # pylint: disable=no-self-use
@@ -228,6 +233,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         set_main_status(200)
 
         try:
+
             def calculate_sum(a: int, b: int) -> int:
                 return a + b
 
@@ -236,24 +242,25 @@ class RequestHandler(BaseHTTPRequestHandler):
 
             sum_tool = FunctionTool.from_defaults(fn=calculate_sum)
             multiply_tool = FunctionTool.from_defaults(fn=multiply)
-            
+
             llm = OpenAI(
                 model="gpt-4",
                 api_base=f"http://localhost:{_MOCK_LLM_PORT}/v1",
                 temperature=0.7,
                 max_tokens=100,
             )
-            
+
             messages = [
                 ChatMessage(role=MessageRole.USER, content="What is 5 + 3?"),
             ]
-            
+
             response = llm.chat_with_tools(tools=[sum_tool, multiply_tool], messages=messages)
             print(f"Chat with tools response: {response}")
-            
+
         except Exception as e:
             print(f"Error in _run_tool_call: {e}")
             import traceback
+
             traceback.print_exc()
 
     def _end_request(self, status_code: int):

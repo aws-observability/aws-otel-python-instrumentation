@@ -6,17 +6,25 @@ import importlib.util
 import inspect
 import json
 import unittest
-from unittest.mock import Mock, MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
 
 def _has_module(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
 
+
+from llama_index.core.base.llms.types import ChatMessage, ChatResponse, CompletionResponse, MessageRole
+from llama_index.core.tools import BaseTool, FunctionTool
+from llama_index.core.tools.types import ToolOutput
+
+from amazon.opentelemetry.distro.instrumentation.llama_index import LlamaIndexInstrumentor
+from opentelemetry import context as context_api
+from opentelemetry import trace
+from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from opentelemetry import context as context_api, trace
-from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
+from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_DESCRIPTION,
     GEN_AI_AGENT_NAME,
@@ -37,13 +45,6 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
 )
-from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
-
-from amazon.opentelemetry.distro.instrumentation.llama_index import LlamaIndexInstrumentor
-
-from llama_index.core.base.llms.types import ChatMessage, ChatResponse, CompletionResponse, MessageRole
-from llama_index.core.tools import BaseTool, FunctionTool
-from llama_index.core.tools.types import ToolOutput
 
 
 class TestLlamaIndexInstrumentor(unittest.TestCase):
@@ -67,6 +68,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def test_llm_chat_start_event(self):
         from llama_index.core.instrumentation.events.llm import LLMChatStartEvent
+
         messages = [
             ChatMessage(role=MessageRole.USER, content="Hello"),
             ChatMessage(role=MessageRole.ASSISTANT, content="Hi"),
@@ -83,9 +85,10 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def test_llm_chat_end_event(self):
         from llama_index.core.instrumentation.events.llm import LLMChatEndEvent
+
         response = ChatResponse(
             message=ChatMessage(role=MessageRole.ASSISTANT, content="Response"),
-            raw={"usage": {"prompt_tokens": 10, "completion_tokens": 8}}
+            raw={"usage": {"prompt_tokens": 10, "completion_tokens": 8}},
         )
         event = LLMChatEndEvent(messages=[], response=response)
         otel_span = self.tracer.start_span("test")
@@ -99,9 +102,9 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def test_llm_completion_end_event(self):
         from llama_index.core.instrumentation.events.llm import LLMCompletionEndEvent
+
         response = CompletionResponse(
-            text="Response text",
-            raw={"usage": {"prompt_tokens": 15, "completion_tokens": 10}}
+            text="Response text", raw={"usage": {"prompt_tokens": 15, "completion_tokens": 10}}
         )
         event = LLMCompletionEndEvent(prompt="Test", response=response)
         otel_span = self.tracer.start_span("test")
@@ -115,6 +118,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
     def test_llm_predict_start_event(self):
         from llama_index.core.instrumentation.events.llm import LLMPredictStartEvent
         from llama_index.core.prompts import PromptTemplate
+
         template = PromptTemplate("Test {var}")
         event = LLMPredictStartEvent(template=template, template_args={"var": "value"})
         otel_span = self.tracer.start_span("test")
@@ -125,6 +129,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def test_stream_chat_end_event(self):
         from llama_index.core.instrumentation.events.chat_engine import StreamChatEndEvent
+
         response = ChatResponse(message=ChatMessage(role=MessageRole.ASSISTANT, content="Response"))
         event = StreamChatEndEvent(messages=[], response=response)
         otel_span = self.tracer.start_span("test")
@@ -135,6 +140,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def test_stream_chat_error_event(self):
         from llama_index.core.instrumentation.events.chat_engine import StreamChatErrorEvent
+
         exception = RuntimeError("Stream error")
         event = StreamChatErrorEvent(exception=exception)
         otel_span = self.tracer.start_span("test")
@@ -144,6 +150,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def test_embedding_start_event(self):
         from llama_index.core.instrumentation.events.embedding import EmbeddingStartEvent
+
         event = EmbeddingStartEvent(model_dict={})
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
@@ -153,6 +160,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def test_embedding_end_event(self):
         from llama_index.core.instrumentation.events.embedding import EmbeddingEndEvent
+
         embeddings = [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
         event = EmbeddingEndEvent(chunks=["text1", "text2"], embeddings=embeddings)
         otel_span = self.tracer.start_span("test")
@@ -163,8 +171,9 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         otel_span.end()
 
     def test_query_start_event(self):
-        from llama_index.core.instrumentation.events.query import QueryStartEvent
         from llama_index.core import QueryBundle
+        from llama_index.core.instrumentation.events.query import QueryStartEvent
+
         query = QueryBundle(query_str="Test query")
         event = QueryStartEvent(query=query)
         otel_span = self.tracer.start_span("test")
@@ -174,8 +183,9 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         otel_span.end()
 
     def test_retrieval_start_event(self):
-        from llama_index.core.instrumentation.events.retrieval import RetrievalStartEvent
         from llama_index.core import QueryBundle
+        from llama_index.core.instrumentation.events.retrieval import RetrievalStartEvent
+
         query = QueryBundle(query_str="Test query")
         event = RetrievalStartEvent(str_or_query_bundle=query)
         otel_span = self.tracer.start_span("test")
@@ -186,6 +196,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def test_rerank_start_event(self):
         from llama_index.core.instrumentation.events.rerank import ReRankStartEvent
+
         event = ReRankStartEvent(model_name="cohere-rerank-v3", query="Test", nodes=[], top_n=5)
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
@@ -195,8 +206,9 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         otel_span.end()
 
     def test_synthesize_start_event(self):
-        from llama_index.core.instrumentation.events.synthesis import SynthesizeStartEvent
         from llama_index.core import QueryBundle
+        from llama_index.core.instrumentation.events.synthesis import SynthesizeStartEvent
+
         query = QueryBundle(query_str="Test query")
         event = SynthesizeStartEvent(query=query)
         otel_span = self.tracer.start_span("test")
@@ -207,6 +219,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def test_get_response_start_event(self):
         from llama_index.core.instrumentation.events.synthesis import GetResponseStartEvent
+
         event = GetResponseStartEvent(query_str="Test query", text_chunks=[])
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
@@ -216,6 +229,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def test_llm_chat_in_progress_event(self):
         from llama_index.core.instrumentation.events.llm import LLMChatInProgressEvent
+
         response = ChatResponse(message=ChatMessage(role=MessageRole.ASSISTANT, content="partial"))
         event = LLMChatInProgressEvent(response=response, messages=[])
         otel_span = self.tracer.start_span("test")
@@ -225,6 +239,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def test_llm_completion_in_progress_event(self):
         from llama_index.core.instrumentation.events.llm import LLMCompletionInProgressEvent
+
         response = CompletionResponse(text="partial")
         event = LLMCompletionInProgressEvent(response=response, prompt="test")
         otel_span = self.tracer.start_span("test")
@@ -234,6 +249,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def test_stream_chat_delta_received_event(self):
         from llama_index.core.instrumentation.events.chat_engine import StreamChatDeltaReceivedEvent
+
         event = StreamChatDeltaReceivedEvent(delta="chunk")
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
@@ -242,6 +258,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def test_process_instance_openai_llm(self):
         from llama_index.llms.openai import OpenAI
+
         llm = OpenAI(model="gpt-3.5-turbo", api_key="fake-key")
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
@@ -253,6 +270,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
     def test_process_instance_llm_with_temperature_and_max_tokens(self):
         """Test that temperature and max_tokens are captured from LLM instances."""
         from llama_index.llms.openai import OpenAI
+
         llm = OpenAI(model="gpt-4", api_key="fake-key", temperature=0.7, max_tokens=100)
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
@@ -263,6 +281,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def test_process_instance_embedding(self):
         from llama_index.core.base.embeddings.base import BaseEmbedding
+
         embedding_model = Mock(spec=BaseEmbedding)
         embedding_model.model_name = "text-embedding-ada-002"
         otel_span = self.tracer.start_span("test")
@@ -273,9 +292,11 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def test_process_instance_function_tool(self):
         """Test FunctionTool registration sets execute_tool operation."""
+
         def calc(a: int, b: int) -> int:
             """Add two numbers."""
             return a + b
+
         tool = FunctionTool.from_defaults(fn=calc)
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
@@ -289,6 +310,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         """Test BaseAgent registration sets invoke_agent operation."""
         from llama_index.core.agent.workflow import FunctionAgent
         from llama_index.llms.openai import OpenAI
+
         llm = OpenAI(model="gpt-3.5-turbo", api_key="fake-key")
         agent = FunctionAgent(
             tools=[],
@@ -310,6 +332,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         """Test BaseAgent without a name uses class name."""
         from llama_index.core.agent.workflow import FunctionAgent
         from llama_index.llms.openai import OpenAI
+
         llm = OpenAI(model="gpt-3.5-turbo", api_key="fake-key")
         agent = FunctionAgent(tools=[], llm=llm)
         otel_span = self.tracer.start_span("test")
@@ -336,8 +359,10 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def test_process_input_with_tools(self):
         from llama_index.llms.openai import OpenAI
+
         def get_weather(location: str) -> str:
             return f"Weather in {location}"
+
         weather_tool = FunctionTool.from_defaults(fn=get_weather)
         llm = OpenAI(model="gpt-3.5-turbo", api_key="fake-key")
         bound_args = Mock()
@@ -354,9 +379,11 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def test_process_input_tool_call_arguments(self):
         """Test that tool call arguments are captured for BaseTool/FunctionTool."""
+
         def my_tool(x: int) -> int:
             """A tool."""
             return x
+
         tool = FunctionTool.from_defaults(fn=my_tool)
         bound_args = Mock()
         bound_args.kwargs = {"x": 42}
@@ -463,6 +490,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def test_token_count_extraction_openai_format(self):
         from llama_index.core.instrumentation.events.llm import LLMCompletionEndEvent
+
         response = CompletionResponse(text="Test response")
         response.raw = {"usage": {"prompt_tokens": 10, "completion_tokens": 20}}
         event = LLMCompletionEndEvent(prompt="Test", response=response)
@@ -475,6 +503,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def test_token_count_extraction_anthropic_format(self):
         from llama_index.core.instrumentation.events.llm import LLMCompletionEndEvent
+
         response = CompletionResponse(text="Test response")
         response.raw = {"usage": {"input_tokens": 15, "output_tokens": 25}}
         event = LLMCompletionEndEvent(prompt="Test", response=response)
@@ -487,15 +516,13 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def test_token_count_extraction_vertex_format(self):
         from llama_index.core.instrumentation.events.llm import LLMChatEndEvent
+
         mock_raw = Mock()
         mock_raw.usage = None
         mock_raw.usage_metadata = Mock()
         mock_raw.usage_metadata.prompt_token_count = 30
         mock_raw.usage_metadata.candidates_token_count = 20
-        response = ChatResponse(
-            message=ChatMessage(role=MessageRole.ASSISTANT, content="Test"),
-            raw=mock_raw
-        )
+        response = ChatResponse(message=ChatMessage(role=MessageRole.ASSISTANT, content="Test"), raw=mock_raw)
         event = LLMChatEndEvent(messages=[], response=response)
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
@@ -515,7 +542,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
                         "candidates_token_count": 30,
                     }
                 }
-            }
+            },
         )
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
@@ -531,8 +558,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         raw_response.usage_metadata.prompt_token_count = 50
         raw_response.usage_metadata.candidates_token_count = 35
         response = ChatResponse(
-            message=ChatMessage(role=MessageRole.ASSISTANT, content="Test"),
-            raw={"_raw_response": raw_response}
+            message=ChatMessage(role=MessageRole.ASSISTANT, content="Test"), raw={"_raw_response": raw_response}
         )
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
@@ -547,10 +573,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         mock_raw.usage = None
         mock_raw.usage_metadata = None
         mock_raw.model_extra = {"x_groq": {"usage": {"prompt_tokens": 12, "completion_tokens": 8}}}
-        response = ChatResponse(
-            message=ChatMessage(role=MessageRole.ASSISTANT, content="Test"),
-            raw=mock_raw
-        )
+        response = ChatResponse(message=ChatMessage(role=MessageRole.ASSISTANT, content="Test"), raw=mock_raw)
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
         span._extract_token_counts(response)
@@ -575,6 +598,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         """Test OpenAI provider detection via isinstance."""
         handler = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._handler")
         from llama_index.llms.openai import OpenAI
+
         llm = OpenAI(model="gpt-4", api_key="fake")
         self.assertEqual(handler._detect_llm_provider(llm), "openai")
 
@@ -583,6 +607,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         """Test Anthropic provider detection via isinstance."""
         handler = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._handler")
         from llama_index.llms.anthropic import Anthropic
+
         llm = Anthropic(model="claude-3-haiku-20240307", api_key="fake")
         self.assertEqual(handler._detect_llm_provider(llm), "anthropic")
 
@@ -591,6 +616,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         """Test Azure OpenAI provider detection via isinstance."""
         handler = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._handler")
         from llama_index.llms.azure_openai import AzureOpenAI
+
         llm = AzureOpenAI(
             model="gpt-4",
             engine="gpt-4",
@@ -605,14 +631,18 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         """Test Vertex provider detection via isinstance."""
         handler = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._handler")
         from llama_index.llms.vertex import Vertex
+
         llm = Vertex.__new__(Vertex)  # Skip __init__ to avoid credential setup
         self.assertEqual(handler._detect_llm_provider(llm), "gcp.vertex_ai")
 
-    @unittest.skipUnless(_has_module("llama_index.llms.bedrock_converse"), "llama-index-llms-bedrock-converse not installed")
+    @unittest.skipUnless(
+        _has_module("llama_index.llms.bedrock_converse"), "llama-index-llms-bedrock-converse not installed"
+    )
     def test_detect_provider_bedrock(self):
         """Test Bedrock provider detection via isinstance."""
         handler = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._handler")
         from llama_index.llms.bedrock_converse import BedrockConverse
+
         llm = BedrockConverse(model="anthropic.claude-3-haiku-20240307-v1:0", region_name="us-east-1")
         self.assertEqual(handler._detect_llm_provider(llm), "aws.bedrock")
 
@@ -696,17 +726,28 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         for cls_name in ("TokenTextSplitter", "DefaultRefineProgram", "SentenceSplitter", "CompactAndRefine"):
             cls = type(cls_name, (), {})
             instance = cls()
-            result = handler.new_span(id_=f"{cls_name}.do_thing-1", bound_args=self._make_bound_args(), instance=instance)
+            result = handler.new_span(
+                id_=f"{cls_name}.do_thing-1", bound_args=self._make_bound_args(), instance=instance
+            )
             self.assertIsNone(result, f"{cls_name} should be suppressed")
 
     def test_new_span_suppresses_internal_methods(self):
         """Test that internal workflow methods are suppressed."""
         handler = self._make_span_handler()
         suppressed_methods = [
-            "parse_agent_output", "aggregate_tool_results", "setup_agent",
-            "init_run", "run_agent_step", "call_tool", "_prepare_chat_with_tools",
-            "_get_text_embedding", "_query", "_retrieve", "_get_query_embedding",
-            "predict_and_call", "__call__",
+            "parse_agent_output",
+            "aggregate_tool_results",
+            "setup_agent",
+            "init_run",
+            "run_agent_step",
+            "call_tool",
+            "_prepare_chat_with_tools",
+            "_get_text_embedding",
+            "_query",
+            "_retrieve",
+            "_get_query_embedding",
+            "predict_and_call",
+            "__call__",
         ]
         for method in suppressed_methods:
             instance = Mock()
@@ -722,6 +763,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         """Test that new_span creates a span for a valid instance."""
         handler = self._make_span_handler()
         from llama_index.llms.openai import OpenAI
+
         llm = OpenAI(model="gpt-4", api_key="fake")
         bound_args = self._make_bound_args()
         span = handler.new_span(id_="OpenAI.chat-1", bound_args=bound_args, instance=llm)
@@ -734,6 +776,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         """Test that new_span correctly links to a parent span."""
         handler = self._make_span_handler()
         from llama_index.llms.openai import OpenAI
+
         llm = OpenAI(model="gpt-4", api_key="fake")
         bound_args = self._make_bound_args()
         parent_span = handler.new_span(id_="parent-1", bound_args=bound_args, instance=llm)
@@ -766,6 +809,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         """Test that prepare_to_exit_span ends the span."""
         handler = self._make_span_handler()
         from llama_index.llms.openai import OpenAI
+
         llm = OpenAI(model="gpt-4", api_key="fake")
         span = handler.new_span(id_="OpenAI.chat-1", bound_args=self._make_bound_args(), instance=llm)
         self.assertIsNotNone(span)
@@ -795,9 +839,11 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
     def test_prepare_to_exit_span_with_tool_output(self):
         """Test that ToolOutput result content is captured."""
         handler = self._make_span_handler()
+
         def my_tool(x: int) -> int:
             """A tool."""
             return x
+
         tool = FunctionTool.from_defaults(fn=my_tool)
         span = handler.new_span(id_="FunctionTool.call-1", bound_args=self._make_bound_args(), instance=tool)
         self.assertIsNotNone(span)
@@ -812,6 +858,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         """Test that streaming LLM results set waiting_for_streaming."""
         handler = self._make_span_handler()
         from llama_index.llms.openai import OpenAI
+
         llm = OpenAI(model="gpt-4", api_key="fake")
         span = handler.new_span(id_="OpenAI.stream_chat-1", bound_args=self._make_bound_args(), instance=llm)
         self.assertIsNotNone(span)
@@ -820,6 +867,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         # Create a real generator to pass isinstance checks
         def gen():
             yield "chunk"
+
         g = gen()
         result = handler.prepare_to_exit_span(
             id_="OpenAI.stream_chat-1", bound_args=self._make_bound_args(), instance=llm, result=g
@@ -855,6 +903,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
     def test_prepare_to_drop_span_with_workflow_done(self):
         """Test that WorkflowDone ends span without error."""
         from llama_index.core.workflow.errors import WorkflowDone
+
         handler = self._make_span_handler()
         instance = Mock()
         instance.__class__ = type("SomeClass", (), {})
@@ -897,15 +946,15 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
     def test_event_handler_dispatches_to_span(self):
         """Test that EventHandler dispatches events to the correct span."""
         from llama_index.core.instrumentation.events.embedding import EmbeddingStartEvent
+
         span_handler = self._make_span_handler()
         event_handler = self._EventHandler(span_handler=span_handler)
 
         from llama_index.core.base.embeddings.base import BaseEmbedding
+
         instance = Mock(spec=BaseEmbedding)
         instance.model_name = "test-model"
-        span = span_handler.new_span(
-            id_="BaseEmbedding.embed-1", bound_args=self._make_bound_args(), instance=instance
-        )
+        span = span_handler.new_span(id_="BaseEmbedding.embed-1", bound_args=self._make_bound_args(), instance=instance)
         self.assertIsNotNone(span)
         span_handler.open_spans["BaseEmbedding.embed-1"] = span
 
@@ -932,16 +981,16 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         event_handler = self._EventHandler(span_handler=span_handler)
 
         from llama_index.core.base.embeddings.base import BaseEmbedding
+
         instance = Mock(spec=BaseEmbedding)
         instance.model_name = "test-model"
-        span = span_handler.new_span(
-            id_="BaseEmbedding.embed-1", bound_args=self._make_bound_args(), instance=instance
-        )
+        span = span_handler.new_span(id_="BaseEmbedding.embed-1", bound_args=self._make_bound_args(), instance=instance)
         self.assertIsNotNone(span)
         # Put in export queue (not open_spans) to simulate streaming
         span_handler._export_queue.put(span)
 
         from llama_index.core.instrumentation.events.embedding import EmbeddingStartEvent
+
         event = EmbeddingStartEvent(model_dict={})
         event.span_id = "BaseEmbedding.embed-1"
         result = event_handler.handle(event)
@@ -952,12 +1001,13 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
     def test_process_event_streaming_finished(self):
         """Test that streaming finished events end the span."""
         from llama_index.core.instrumentation.events.llm import LLMChatEndEvent
+
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
         span._waiting_for_streaming = True
         response = ChatResponse(
             message=ChatMessage(role=MessageRole.ASSISTANT, content="done"),
-            raw={"usage": {"prompt_tokens": 1, "completion_tokens": 1}}
+            raw={"usage": {"prompt_tokens": 1, "completion_tokens": 1}},
         )
         event = LLMChatEndEvent(messages=[], response=response)
         span.process_event(event)
@@ -966,6 +1016,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
     def test_process_event_streaming_in_progress(self):
         """Test that streaming in-progress events update timestamps."""
         from llama_index.core.instrumentation.events.llm import LLMChatInProgressEvent
+
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
         span._waiting_for_streaming = True
@@ -979,11 +1030,12 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
     def test_process_event_not_streaming_does_not_end(self):
         """Test that non-streaming spans don't end on finished events."""
         from llama_index.core.instrumentation.events.llm import LLMChatEndEvent
+
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
         response = ChatResponse(
             message=ChatMessage(role=MessageRole.ASSISTANT, content="done"),
-            raw={"usage": {"prompt_tokens": 1, "completion_tokens": 1}}
+            raw={"usage": {"prompt_tokens": 1, "completion_tokens": 1}},
         )
         event = LLMChatEndEvent(messages=[], response=response)
         span.process_event(event)
@@ -1017,6 +1069,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
     def test_uninstrument_removes_handlers(self):
         """Test that uninstrument removes span and event handlers from dispatcher."""
         from llama_index.core.instrumentation import get_dispatcher
+
         dispatcher = get_dispatcher()
         handler_module = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._handler")
 
@@ -1032,6 +1085,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
     def test_instrument_idempotent(self):
         """Test that calling _instrument twice doesn't add duplicate handlers."""
         from llama_index.core.instrumentation import get_dispatcher
+
         dispatcher = get_dispatcher()
         handler_module = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._handler")
 
@@ -1044,6 +1098,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
     def test_get_current_span_returns_none_when_no_active_span(self):
         """Test get_current_span returns None when no span is active."""
         from amazon.opentelemetry.distro.instrumentation.llama_index import get_current_span
+
         result = get_current_span()
         self.assertIsNone(result)
 
@@ -1065,6 +1120,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
     def test_get_current_span_with_uninstrumented(self):
         """Test get_current_span returns None when instrumentor has no span_handler."""
         from amazon.opentelemetry.distro.instrumentation.llama_index import get_current_span
+
         self.instrumentor.uninstrument()
         result = get_current_span()
         self.assertIsNone(result)
@@ -1103,11 +1159,10 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         event_handler = self._EventHandler(span_handler=span_handler)
 
         from llama_index.core.base.embeddings.base import BaseEmbedding
+
         instance = Mock(spec=BaseEmbedding)
         instance.model_name = "test-model"
-        span = span_handler.new_span(
-            id_="BaseEmbedding.embed-1", bound_args=self._make_bound_args(), instance=instance
-        )
+        span = span_handler.new_span(id_="BaseEmbedding.embed-1", bound_args=self._make_bound_args(), instance=instance)
         self.assertIsNotNone(span)
         span_handler.open_spans["BaseEmbedding.embed-1"] = span
 
@@ -1117,10 +1172,10 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         event.id_ = "event-1"
         # Monkey-patch the span's process_event at the object level using object.__setattr__
         original = span.process_event
-        object.__setattr__(span, 'process_event', Mock(side_effect=RuntimeError("boom")))
+        object.__setattr__(span, "process_event", Mock(side_effect=RuntimeError("boom")))
         result = event_handler.handle(event)
         self.assertEqual(result, event)
-        object.__setattr__(span, 'process_event', original)
+        object.__setattr__(span, "process_event", original)
         span.end()
 
     def test_prepare_to_exit_span_workflow_handler(self):
@@ -1128,6 +1183,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         handler = self._make_span_handler()
         from llama_index.core.agent.workflow import FunctionAgent
         from llama_index.llms.openai import OpenAI
+
         llm = OpenAI(model="gpt-4", api_key="fake")
         agent = FunctionAgent(tools=[], llm=llm, name="TestAgent")
         span = handler.new_span(id_="FunctionAgent.run-1", bound_args=self._make_bound_args(), instance=agent)
@@ -1136,6 +1192,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
         # Mock a WorkflowHandler with a _result_task
         from llama_index.core.workflow.handler import WorkflowHandler
+
         mock_handler = Mock(spec=WorkflowHandler)
         mock_task = Mock()
         mock_handler._result_task = mock_task
@@ -1162,6 +1219,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         handler = self._make_span_handler()
         from llama_index.core.agent.workflow import FunctionAgent
         from llama_index.llms.openai import OpenAI
+
         llm = OpenAI(model="gpt-4", api_key="fake")
         agent = FunctionAgent(tools=[], llm=llm, name="TestAgent2")
         span = handler.new_span(id_="FunctionAgent.run-2", bound_args=self._make_bound_args(), instance=agent)
@@ -1169,6 +1227,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         handler.open_spans["FunctionAgent.run-2"] = span
 
         from llama_index.core.workflow.handler import WorkflowHandler
+
         mock_handler = Mock(spec=WorkflowHandler)
         mock_task = Mock()
         mock_handler._result_task = mock_task
@@ -1197,12 +1256,15 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         """Test BaseTool handler with a custom BaseTool subclass (not FunctionTool)."""
         from llama_index.core.tools import BaseTool
         from llama_index.core.tools.types import ToolMetadata
+
         class CustomTool(BaseTool):
             @property
             def metadata(self):
                 return ToolMetadata(name="custom_tool", description="A custom tool")
+
             def __call__(self, *args, **kwargs):
                 return "result"
+
         tool = CustomTool()
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
@@ -1218,8 +1280,10 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         span = self._Span(otel_span=otel_span)
         # Create a custom event type that isn't registered
         from llama_index.core.instrumentation.events import BaseEvent
+
         class CustomEvent(BaseEvent):
             pass
+
         event = CustomEvent()
         # Should not raise, just log a warning
         span._process_event(event)
@@ -1227,18 +1291,19 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def test_get_current_span_full_path(self):
         """Test get_current_span returns the otel span when a span is active."""
-        from amazon.opentelemetry.distro.instrumentation.llama_index import get_current_span
         from llama_index.core.instrumentation.span import active_span_id
+
+        from amazon.opentelemetry.distro.instrumentation.llama_index import get_current_span
+
         handler_module = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._handler")
 
         # Create a span via the span handler
         span_handler = self.instrumentor._span_handler
         from llama_index.core.base.embeddings.base import BaseEmbedding
+
         instance = Mock(spec=BaseEmbedding)
         instance.model_name = "test"
-        span = span_handler.new_span(
-            id_="test-span-1", bound_args=self._make_bound_args(), instance=instance
-        )
+        span = span_handler.new_span(id_="test-span-1", bound_args=self._make_bound_args(), instance=instance)
         self.assertIsNotNone(span)
         span_handler.open_spans["test-span-1"] = span
 
@@ -1255,6 +1320,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
     def test_process_input_tool_without_to_openai_tool(self):
         """Test process_input falls back to str() when tool has no to_openai_tool."""
         from llama_index.llms.openai import OpenAI
+
         tool = Mock()
         tool.metadata = Mock()
         del tool.metadata.to_openai_tool  # Ensure to_openai_tool doesn't exist
@@ -1279,8 +1345,10 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def test_get_current_span_no_matching_open_span(self):
         """Test get_current_span returns None when span_id doesn't match any open span."""
-        from amazon.opentelemetry.distro.instrumentation.llama_index import get_current_span
         from llama_index.core.instrumentation.span import active_span_id
+
+        from amazon.opentelemetry.distro.instrumentation.llama_index import get_current_span
+
         token = active_span_id.set("nonexistent-span-id")
         try:
             result = get_current_span()
@@ -1317,6 +1385,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         """Test BaseTool handler when get_name() raises."""
         from llama_index.core.tools import BaseTool
         from llama_index.core.tools.types import ToolMetadata
+
         class BrokenTool(BaseTool):
             @property
             def metadata(self):
@@ -1324,8 +1393,10 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
                 # Override get_name to raise
                 m.get_name = Mock(side_effect=RuntimeError("no name"))
                 return m
+
             def __call__(self, *args, **kwargs):
                 return "result"
+
         tool = BrokenTool()
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
@@ -1338,6 +1409,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
     def test_process_input_tool_exception_fallback(self):
         """Test process_input falls back to str() when tool.metadata.to_openai_tool raises."""
         from llama_index.llms.openai import OpenAI
+
         tool = Mock()
         tool.metadata = Mock()
         tool.metadata.to_openai_tool = Mock(side_effect=RuntimeError("fail"))

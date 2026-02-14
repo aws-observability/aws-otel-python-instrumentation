@@ -28,18 +28,14 @@ class LlamaIndexInstrumentor(BaseInstrumentor):  # type: ignore
     def _instrument(self, **kwargs: Any) -> None:
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
-        
-        from llama_index.core.instrumentation import (  # type: ignore[attr-defined]
-            get_dispatcher,
-        )
+
+        from llama_index.core.instrumentation import get_dispatcher  # type: ignore[attr-defined]
 
         from ._handler import EventHandler, _SpanHandler
 
         self._span_handler = _SpanHandler(
             tracer=tracer,
-            separate_trace_from_runtime_context=bool(
-                kwargs.get("separate_trace_from_runtime_context")
-            ),
+            separate_trace_from_runtime_context=bool(kwargs.get("separate_trace_from_runtime_context")),
         )
         self._event_handler = EventHandler(span_handler=self._span_handler)
         dispatcher = get_dispatcher()
@@ -57,9 +53,7 @@ class LlamaIndexInstrumentor(BaseInstrumentor):  # type: ignore
     def _uninstrument(self, **kwargs: Any) -> None:
         if self._event_handler is None:
             return
-        from llama_index.core.instrumentation import (  # type: ignore[attr-defined]
-            get_dispatcher,
-        )
+        from llama_index.core.instrumentation import get_dispatcher  # type: ignore[attr-defined]
 
         dispatcher = get_dispatcher()
         dispatcher.span_handlers[:] = filter(
@@ -75,6 +69,7 @@ class LlamaIndexInstrumentor(BaseInstrumentor):  # type: ignore
 
 def get_current_span() -> Optional[Span]:
     from llama_index.core.instrumentation.span import active_span_id
+
     from amazon.opentelemetry.distro.instrumentation.llama_index._handler import _SpanHandler
 
     if not isinstance(id_ := active_span_id.get(), str):
