@@ -21,7 +21,6 @@ from typing import (
     Generator,
     Iterable,
     Iterator,
-    List,
     Mapping,
     Optional,
     Tuple,
@@ -330,7 +329,7 @@ class _Span(BaseSpan):
                 self[GEN_AI_TOOL_CALL_ARGUMENTS] = json.dumps(kwargs, default=str, ensure_ascii=False)
 
     @singledispatchmethod
-    def process_instance(self, instance: Any) -> None: ...
+    def process_instance(self, instance: Any) -> None: ...  # noqa: E704
 
     @process_instance.register(BaseLLM)
     @process_instance.register(MultiModalLLM)
@@ -393,10 +392,10 @@ class _Span(BaseSpan):
         parent.notify_parent(status)
 
     @singledispatchmethod
-    def _process_event(self, event: BaseEvent) -> None: ...
+    def _process_event(self, event: BaseEvent) -> None: ...  # noqa: E704
 
     @_process_event.register
-    def _(self, event: ExceptionEvent) -> None: ...
+    def _(self, event: ExceptionEvent) -> None: ...  # noqa: E704
 
     @_process_event.register
     def _(self, event: EmbeddingStartEvent) -> None:
@@ -411,7 +410,7 @@ class _Span(BaseSpan):
                 self[GEN_AI_EMBEDDINGS_DIMENSION_COUNT] = len(first_embedding)
 
     @_process_event.register
-    def _(self, event: StreamChatDeltaReceivedEvent) -> None: ...
+    def _(self, event: StreamChatDeltaReceivedEvent) -> None: ...  # noqa: E704
 
     @_process_event.register
     def _(self, event: StreamChatErrorEvent) -> None:
@@ -426,7 +425,7 @@ class _Span(BaseSpan):
         self[GEN_AI_OPERATION_NAME] = _OPERATION_TEXT_COMPLETION
 
     @_process_event.register
-    def _(self, event: LLMCompletionInProgressEvent) -> None: ...
+    def _(self, event: LLMCompletionInProgressEvent) -> None: ...  # noqa: E704
 
     @_process_event.register
     def _(self, event: LLMCompletionEndEvent) -> None:
@@ -442,7 +441,7 @@ class _Span(BaseSpan):
         )
 
     @_process_event.register
-    def _(self, event: LLMChatInProgressEvent) -> None: ...
+    def _(self, event: LLMChatInProgressEvent) -> None: ...  # noqa: E704
 
     @_process_event.register
     def _(self, event: LLMChatEndEvent) -> None:

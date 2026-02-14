@@ -1,20 +1,14 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-import asyncio
 import importlib
 import importlib.util
 import inspect
 import json
 import unittest
-from unittest.mock import MagicMock, Mock, PropertyMock, patch
-
-
-def _has_module(name: str) -> bool:
-    return importlib.util.find_spec(name) is not None
-
+from unittest.mock import Mock
 
 from llama_index.core.base.llms.types import ChatMessage, ChatResponse, CompletionResponse, MessageRole
-from llama_index.core.tools import BaseTool, FunctionTool
+from llama_index.core.tools import FunctionTool
 from llama_index.core.tools.types import ToolOutput
 
 from amazon.opentelemetry.distro.instrumentation.llama_index import LlamaIndexInstrumentor
@@ -45,6 +39,10 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
 )
+
+
+def _has_module(name: str) -> bool:
+    return importlib.util.find_spec(name) is not None
 
 
 class TestLlamaIndexInstrumentor(unittest.TestCase):
@@ -1295,7 +1293,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
         from amazon.opentelemetry.distro.instrumentation.llama_index import get_current_span
 
-        handler_module = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._handler")
+        importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._handler")
 
         # Create a span via the span handler
         span_handler = self.instrumentor._span_handler
@@ -1374,7 +1372,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
         # Call the FunctionTool-specific handler directly
-        handler_module = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._handler")
+        importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._handler")
         # Use the registered handler for FunctionTool
         span.process_instance(tool)
         self.assertEqual(span._attributes[GEN_AI_OPERATION_NAME], "execute_tool")
