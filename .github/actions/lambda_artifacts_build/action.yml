@@ -6,21 +6,27 @@ description: |
 inputs:
   aws-region:
     required: false
+    type: string
     description: "AWS Region, required only if push_image is true"
   snapshot-ecr-role:
     required: false
+    type: string
     description: "IAM Role used for pushing to snapshot ecr, required only if push_image is true"
   python_version:
     required: true
+    type: string
     description: "The python version used in actions"
   layer_directory:
     required: true
+    type: string
     description: 'The role use to publish lambda layer'
   staging_s3_bucket:
     required: true
+    type: string
     description: 'S3 bucket holds SDK artifact tarball'
   os:
     required: true
+    type: string
     description: "The os"
 
 
