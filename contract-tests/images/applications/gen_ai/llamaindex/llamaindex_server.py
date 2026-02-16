@@ -1,8 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import asyncio
 import atexit
 import json
 import os
+import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from typing import Tuple
@@ -121,7 +123,6 @@ class RequestHandler(BaseHTTPRequestHandler):
         set_main_status(200)
 
         try:
-            import asyncio
 
             def get_greeting(name: str) -> str:
                 return f"Hello, {name}!"
@@ -151,10 +152,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             response = asyncio.run(run_agent())
             print(f"Agent response: {response}")
 
-        except Exception as e:
-            print(f"Error in _run_agent: {e}")
-            import traceback
-
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            print(f"Error in _run_agent: {exc}")
             traceback.print_exc()
 
     def _run_chat(self) -> None:  # pylint: disable=no-self-use
@@ -175,10 +174,8 @@ class RequestHandler(BaseHTTPRequestHandler):
 
             response = llm.chat(messages)
             print(f"Chat response: {response}")
-        except Exception as e:
-            print(f"Error in _run_chat: {e}")
-            import traceback
-
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            print(f"Error in _run_chat: {exc}")
             traceback.print_exc()
 
     def _run_query(self) -> None:  # pylint: disable=no-self-use
@@ -206,10 +203,8 @@ class RequestHandler(BaseHTTPRequestHandler):
 
             response = query_engine.query("What color is the sky?")
             print(f"Query response: {response}")
-        except Exception as e:
-            print(f"Error in _run_query: {e}")
-            import traceback
-
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            print(f"Error in _run_query: {exc}")
             traceback.print_exc()
 
     def _run_embedding(self) -> None:  # pylint: disable=no-self-use
@@ -221,10 +216,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             texts = ["Hello world", "Test embedding"]
             embeddings = embed_model.get_text_embedding_batch(texts)
             print(f"Generated {len(embeddings)} embeddings")
-        except Exception as e:
-            print(f"Error in _run_embedding: {e}")
-            import traceback
-
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            print(f"Error in _run_embedding: {exc}")
             traceback.print_exc()
 
     def _run_tool_call(self) -> None:  # pylint: disable=no-self-use
@@ -257,10 +250,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             response = llm.chat_with_tools(tools=[sum_tool, multiply_tool], messages=messages)
             print(f"Chat with tools response: {response}")
 
-        except Exception as e:
-            print(f"Error in _run_tool_call: {e}")
-            import traceback
-
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            print(f"Error in _run_tool_call: {exc}")
             traceback.print_exc()
 
     def _end_request(self, status_code: int):

@@ -17,21 +17,19 @@ class LlamaIndexInstrumentor(BaseInstrumentor):  # type: ignore
     An instrumentor for LlamaIndex
     """
 
-    __slots__ = (
-        "_span_handler",
-        "_event_handler",
-    )
+    _span_handler = None
+    _event_handler = None
 
-    def instrumentation_dependencies(self) -> Collection[str]:
+    def instrumentation_dependencies(self) -> Collection[str]:  # pylint: disable=no-self-use
         return ("llama-index-core >= 0.10.43",)
 
-    def _instrument(self, **kwargs: Any) -> None:
+    def _instrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
 
-        from llama_index.core.instrumentation import get_dispatcher  # type: ignore[attr-defined]
+        from llama_index.core.instrumentation import get_dispatcher  # pylint: disable=import-outside-toplevel
 
-        from ._handler import EventHandler, _SpanHandler
+        from ._handler import EventHandler, _SpanHandler  # pylint: disable=import-outside-toplevel
 
         self._span_handler = _SpanHandler(
             tracer=tracer,
@@ -53,7 +51,7 @@ class LlamaIndexInstrumentor(BaseInstrumentor):  # type: ignore
     def _uninstrument(self, **kwargs: Any) -> None:
         if self._event_handler is None:
             return
-        from llama_index.core.instrumentation import get_dispatcher  # type: ignore[attr-defined]
+        from llama_index.core.instrumentation import get_dispatcher  # pylint: disable=import-outside-toplevel
 
         dispatcher = get_dispatcher()
         dispatcher.span_handlers[:] = filter(
@@ -68,6 +66,7 @@ class LlamaIndexInstrumentor(BaseInstrumentor):  # type: ignore
 
 
 def get_current_span() -> Optional[Span]:
+    # pylint: disable=import-outside-toplevel
     from llama_index.core.instrumentation.span import active_span_id
 
     from amazon.opentelemetry.distro.instrumentation.llama_index._handler import _SpanHandler

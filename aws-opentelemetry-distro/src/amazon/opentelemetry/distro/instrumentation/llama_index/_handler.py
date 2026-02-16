@@ -1,3 +1,5 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
 import asyncio
 import inspect
 import json
@@ -56,12 +58,10 @@ from opentelemetry.trace import Span, SpanKind, Status, StatusCode, Tracer, set_
 from opentelemetry.util.types import AttributeValue
 
 try:
-    from llama_index.core.agent import BaseAgent, BaseAgentWorker  # type: ignore[attr-defined]
+    from llama_index.core.agent import BaseAgent  # type: ignore[attr-defined]
 except ImportError:
-    # Fallback for newer versions where BaseAgent/BaseAgentWorker don't exist
+    # Fallback for newer versions where BaseAgent doesn't exist
     from llama_index.core.agent.workflow import BaseWorkflowAgent as BaseAgent  # type: ignore[attr-defined]
-
-    BaseAgentWorker = None  # type: ignore[assignment,misc]
 from llama_index.core.base.embeddings.base import BaseEmbedding
 from llama_index.core.base.llms.base import BaseLLM
 from llama_index.core.base.llms.types import ChatMessage, ChatResponse, CompletionResponse
@@ -133,6 +133,7 @@ elif not TYPE_CHECKING:
 
 
 def _detect_llm_provider(instance: Any) -> Optional[str]:
+    # pylint: disable=too-many-return-statements,too-many-branches,import-outside-toplevel
     """
     Detect LLM provider using lazy imports to avoid import errors when
     optional LLM provider packages are not installed.
@@ -186,18 +187,20 @@ def _detect_llm_provider(instance: Any) -> Optional[str]:
 
     # Fallback: check class name if imports fail
     class_name = instance.__class__.__name__.lower()
-    if "openai" in class_name:
-        if "azure" in class_name:
-            return "azure.ai.openai"
-        return "openai"
-    elif "anthropic" in class_name:
-        return "anthropic"
-    elif "vertex" in class_name:
-        return "gcp.vertex_ai"
-    elif "gemini" in class_name:
-        return "gcp.gemini"
-    elif "bedrock" in class_name:
-        return "aws.bedrock"
+    provider_map = {
+        "azure": "azure.ai.openai",
+        "openai": "openai",
+        "anthropic": "anthropic",
+        "vertex": "gcp.vertex_ai",
+        "gemini": "gcp.gemini",
+        "bedrock": "aws.bedrock",
+    }
+    # Check azure before openai since AzureOpenAI contains both
+    if "azure" in class_name and "openai" in class_name:
+        return "azure.ai.openai"
+    for keyword, provider in provider_map.items():
+        if keyword in class_name:
+            return provider
 
     return None
 
@@ -270,7 +273,7 @@ class _Span(BaseSpan):
         if self._context_token is not None:
             try:
                 context_api.detach(self._context_token)
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 pass
             finally:
                 self._context_token = None
@@ -304,7 +307,7 @@ class _Span(BaseSpan):
         return set_span_in_context(self._otel_span)
 
     def process_input(self, instance: Any, bound_args: inspect.BoundArguments) -> None:
-        from llama_index.core.llms.function_calling import FunctionCallingLLM
+        from llama_index.core.llms.function_calling import FunctionCallingLLM  # pylint: disable=import-outside-toplevel
 
         if isinstance(instance, FunctionCallingLLM) and isinstance((tools := bound_args.kwargs.get("tools")), Iterable):
             tools_list = list(tools)
@@ -318,7 +321,7 @@ class _Span(BaseSpan):
                             tool_defs.append(tool.metadata.to_openai_tool())
                         else:
                             tool_defs.append(str(tool))
-                    except Exception:
+                    except Exception:  # pylint: disable=broad-exception-caught
                         tool_defs.append(str(tool))
                 self[GEN_AI_TOOL_DEFINITIONS] = json.dumps(tool_defs, default=str, ensure_ascii=False)
 
@@ -329,7 +332,7 @@ class _Span(BaseSpan):
                 self[GEN_AI_TOOL_CALL_ARGUMENTS] = json.dumps(kwargs, default=str, ensure_ascii=False)
 
     @singledispatchmethod
-    def process_instance(self, instance: Any) -> None: ...  # noqa: E704
+    def process_instance(self, instance: Any) -> None: ...  # noqa: E704  # pylint: disable=no-self-use
 
     @process_instance.register(BaseLLM)
     @process_instance.register(MultiModalLLM)
@@ -392,10 +395,10 @@ class _Span(BaseSpan):
         parent.notify_parent(status)
 
     @singledispatchmethod
-    def _process_event(self, event: BaseEvent) -> None: ...  # noqa: E704
+    def _process_event(self, event: BaseEvent) -> None: ...  # noqa: E704  # pylint: disable=no-self-use
 
     @_process_event.register
-    def _(self, event: ExceptionEvent) -> None: ...  # noqa: E704
+    def _(self, event: ExceptionEvent) -> None: ...  # noqa: E704  # pylint: disable=no-self-use
 
     @_process_event.register
     def _(self, event: EmbeddingStartEvent) -> None:
@@ -410,7 +413,7 @@ class _Span(BaseSpan):
                 self[GEN_AI_EMBEDDINGS_DIMENSION_COUNT] = len(first_embedding)
 
     @_process_event.register
-    def _(self, event: StreamChatDeltaReceivedEvent) -> None: ...  # noqa: E704
+    def _(self, event: StreamChatDeltaReceivedEvent) -> None: ...  # noqa: E704  # pylint: disable=no-self-use
 
     @_process_event.register
     def _(self, event: StreamChatErrorEvent) -> None:
@@ -425,7 +428,7 @@ class _Span(BaseSpan):
         self[GEN_AI_OPERATION_NAME] = _OPERATION_TEXT_COMPLETION
 
     @_process_event.register
-    def _(self, event: LLMCompletionInProgressEvent) -> None: ...  # noqa: E704
+    def _(self, event: LLMCompletionInProgressEvent) -> None: ...  # noqa: E704  # pylint: disable=no-self-use
 
     @_process_event.register
     def _(self, event: LLMCompletionEndEvent) -> None:
@@ -441,7 +444,7 @@ class _Span(BaseSpan):
         )
 
     @_process_event.register
-    def _(self, event: LLMChatInProgressEvent) -> None: ...  # noqa: E704
+    def _(self, event: LLMChatInProgressEvent) -> None: ...  # noqa: E704  # pylint: disable=no-self-use
 
     @_process_event.register
     def _(self, event: LLMChatEndEvent) -> None:
@@ -479,8 +482,8 @@ class _Span(BaseSpan):
         if raw := getattr(response, "raw", None):
             usage = raw.get("usage") if isinstance(raw, Mapping) else getattr(raw, "usage", None)
             if usage:
-                for k, v in _get_token_counts(usage):
-                    self[k] = v
+                for attr_key, attr_val in _get_token_counts(usage):
+                    self[attr_key] = attr_val
             if (
                 (model_extra := getattr(raw, "model_extra", None))
                 and hasattr(model_extra, "get")
@@ -488,8 +491,8 @@ class _Span(BaseSpan):
                 and hasattr(x_groq, "get")
                 and (usage := x_groq.get("usage"))
             ):
-                for k, v in _get_token_counts(usage):
-                    self[k] = v
+                for attr_key, attr_val in _get_token_counts(usage):
+                    self[attr_key] = attr_val
 
             # Check for VertexAI usage_metadata
             # VertexAI stores usage_metadata inside _raw_response
@@ -502,13 +505,13 @@ class _Span(BaseSpan):
             else:
                 usage_metadata = getattr(raw, "usage_metadata", None)
             if usage_metadata:
-                for k, v in _get_token_counts(usage_metadata):
-                    self[k] = v
+                for attr_key, attr_val in _get_token_counts(usage_metadata):
+                    self[attr_key] = attr_val
         # Look for token counts in additional_kwargs of the completion payload
         # This is needed for non-OpenAI models
         if additional_kwargs := getattr(response, "additional_kwargs", None):
-            for k, v in _get_token_counts(additional_kwargs):
-                self[k] = v
+            for attr_key, attr_val in _get_token_counts(additional_kwargs):
+                self[attr_key] = attr_val
 
     def _process_messages(
         self,
@@ -577,11 +580,11 @@ class _ExportQueue:
 
     def _sweep(self, q: "SimpleQueue[Optional[_QueueItem]]") -> None:
         while True:
-            t = time()
+            now = time()
             while not q.empty():
                 if (item := q.get()) is END_OF_QUEUE:
                     return
-                if t == item.last_touched_at:
+                if now == item.last_touched_at:
                     # we have gone through the whole list
                     q.put(item)
                     break
@@ -589,11 +592,11 @@ class _ExportQueue:
                 if not span.active:
                     self._del(item)
                     continue
-                if t - span._last_updated_at > 60:
+                if now - span._last_updated_at > 60:
                     span.end()
                     self._del(item)
                     continue
-                item.last_touched_at = t
+                item.last_touched_at = now
                 q.put(item)
             sleep(0.1)
 
@@ -649,7 +652,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             return None
 
         # Suppress internal workflow coordination steps that add noise without semantic value
-        _SUPPRESSED_METHODS = {
+        suppressed_methods = {
             "parse_agent_output",
             "aggregate_tool_results",
             "setup_agent",
@@ -665,7 +668,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             "__call__",
         }
         method_suffix = span_method.rpartition(".")[-1]
-        if method_suffix in _SUPPRESSED_METHODS:
+        if method_suffix in suppressed_methods:
             return None
 
         otel_span = self._otel_tracer.start_span(
@@ -725,7 +728,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
                     exc = None
                     try:
                         exc = task.exception()
-                    except (asyncio.CancelledError, Exception):
+                    except (asyncio.CancelledError, Exception):  # pylint: disable=broad-exception-caught
                         pass
                     s.end(exception=exc)
 
@@ -735,7 +738,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
                 span._attributes[GEN_AI_TOOL_CALL_RESULT] = result.content
             span.end()
         else:
-            logger.warning(f"Open span is missing for {id_=}")
+            logger.warning("Open span is missing for id_=%s", id_)
         return span
 
     def prepare_to_drop_span(
@@ -756,7 +759,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
                 return span
             span.end(err)
         else:
-            logger.warning(f"Open span is missing for {id_=}")
+            logger.warning("Open span is missing for id_=%s", id_)
         return span
 
 
@@ -776,21 +779,19 @@ class EventHandler(BaseEventHandler, extra="allow"):
         if span is None:
             span = self._span_handler._export_queue.find(event.span_id)
         if span is None:
-            logger.warning(f"Open span is missing for {event.span_id=}, {event.id_=}")
+            logger.warning("Open span is missing for span_id=%s, event_id=%s", event.span_id, event.id_)
         else:
             try:
                 span.process_event(event)
-            except Exception:
-                logger.exception(f"Error processing event of type {event.__class__.__qualname__}")
-                pass
+            except Exception:  # pylint: disable=broad-exception-caught
+                logger.exception("Error processing event of type %s", event.__class__.__qualname__)
         return event
 
 
 def _get_token_counts(usage: Union[object, Mapping[str, Any]]) -> Iterator[Tuple[str, Any]]:
     if isinstance(usage, Mapping):
         return _get_token_counts_from_mapping(usage)
-    if isinstance(usage, object):
-        return _get_token_counts_from_object(usage)
+    return _get_token_counts_from_object(usage)
 
 
 def _get_token_counts_from_object(usage: object) -> Iterator[Tuple[str, Any]]:
