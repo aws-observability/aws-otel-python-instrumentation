@@ -14,6 +14,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 - Fix AwsCloudWatchOtlpBatchLogRecordProcessor custom _export not being invoked; rename otlp_aws_logs_exporter to otlp_aws_log_record_exporter
   ([#611](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/611))
+- Add native LlamaIndex instrumentation support
+  ([#595](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/595))
 - Add native CrewAI instrumentation support
   ([#586](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/586))
 
