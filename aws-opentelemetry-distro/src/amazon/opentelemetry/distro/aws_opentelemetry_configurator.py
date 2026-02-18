@@ -315,8 +315,7 @@ def _add_baggage_key_span_processor(provider: TracerProvider) -> None:
     # weird to add here but session
     if _is_aws_otlp_endpoint(os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, ""), XRAY_SERVICE):
         keys.add("session.id")
-    if keys:
-        provider.add_span_processor(BaggageSpanProcessor(lambda key: key in keys))
+    provider.add_span_processor(BaggageSpanProcessor(lambda key: key in keys))
 
 
 def _export_unsampled_span_for_lambda(trace_provider: TracerProvider, resource: Resource = None):

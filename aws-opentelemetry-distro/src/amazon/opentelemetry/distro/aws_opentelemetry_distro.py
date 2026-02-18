@@ -170,3 +170,4 @@ def _configure_agent_observability_v2() -> None:
     os.environ.setdefault(OTEL_METRICS_EXPORTER, "otlp")
     os.environ.setdefault(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, "http://localhost:4318/v1/traces")
     os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, "http://localhost:4318/v1/logs")
+    os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, "http://localhost:4318/v1/metrics")

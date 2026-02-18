@@ -541,7 +541,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS", None)
 
     def test_baggage_span_processor_not_added_without_keys(self):
-        """Test that no BaggageSpanProcessor is added when no keys configured and endpoint is not XRay"""
+        """Test that BaggageSpanProcessor is always added for agent observability"""
         os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
         os.environ.pop("OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS", None)
         os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", None)
@@ -550,7 +550,10 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         _customize_span_processors(mock_tracer_provider, Resource.get_empty(), MagicMock())
 
         added = [c.args[0] for c in mock_tracer_provider.add_span_processor.call_args_list]
-        self.assertFalse(any(p.__class__.__name__ == "BaggageSpanProcessor" for p in added))
+        baggage_processors = [p for p in added if p.__class__.__name__ == "BaggageSpanProcessor"]
+        self.assertEqual(len(baggage_processors), 1)
+        predicate = baggage_processors[0]._baggage_key_predicate
+        self.assertFalse(predicate("any.key"))
 
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
 
