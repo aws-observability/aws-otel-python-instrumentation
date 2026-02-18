@@ -111,6 +111,8 @@ OTEL_EXPORTER_OTLP_LOGS_HEADERS = "OTEL_EXPORTER_OTLP_LOGS_HEADERS"
 OTEL_AWS_ENHANCED_CODE_ATTRIBUTES = "OTEL_AWS_EXPERIMENTAL_CODE_ATTRIBUTES"
 AWS_XRAY_ADAPTIVE_SAMPLING_CONFIG = "AWS_XRAY_ADAPTIVE_SAMPLING_CONFIG"
 
+OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS = "OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS"
+
 XRAY_SERVICE = "xray"
 LOGS_SERIVCE = "logs"
 AWS_TRACES_OTLP_ENDPOINT_PATTERN = r"https://xray\.([a-z0-9-]+)\.amazonaws\.com/v1/traces$"
@@ -303,6 +305,17 @@ def _init_metrics(
 
 
 # END The OpenTelemetry Authors code
+
+
+def _add_baggage_key_span_processor(provider: TracerProvider) -> None:
+    # propagates baggage entries matching OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS into span attributes
+    raw: str = os.environ.get(OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS, "").strip()
+    keys: set[str] = {k.strip() for k in raw.split(",") if k.strip()}
+
+    # weird to add here but session
+    if _is_aws_otlp_endpoint(os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, ""), XRAY_SERVICE):
+        keys.add("session.id")
+    provider.add_span_processor(BaggageSpanProcessor(lambda key: key in keys))
 
 
 def _export_unsampled_span_for_lambda(trace_provider: TracerProvider, resource: Resource = None):
@@ -524,11 +537,7 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource, sam
     # enabling session ID tracking in spans.
     if is_agent_observability_enabled():
         _export_unsampled_span_for_agent_observability(provider, resource)
-
-        def session_id_predicate(baggage_key: str) -> bool:
-            return baggage_key == "session.id"
-
-        provider.add_span_processor(BaggageSpanProcessor(session_id_predicate))
+        _add_baggage_key_span_processor(provider)
 
     if not _is_application_signals_enabled():
         return
