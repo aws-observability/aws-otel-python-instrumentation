@@ -244,6 +244,72 @@ class TestAwsOpenTelemetryDistro(TestCase):
         self.assertEqual(os.environ.get("OTEL_TRACES_EXPORTER"), "otlp")
         self.assertEqual(os.environ.get("OTEL_LOGS_EXPORTER"), "otlp")
 
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.get_aws_region")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_installed")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
+    def test_configure_agent_observability_defaults_to_v1_when_version_not_set(
+        self,
+        mock_super_configure,
+        mock_apply_patches,
+        mock_is_installed,
+        mock_is_agent_observability,
+        mock_get_aws_region,
+    ):
+        """Test that when AGENT_OBSERVABILITY_VERSION is not set, it defaults to v1 configuration"""
+        mock_is_agent_observability.return_value = True
+        mock_get_aws_region.return_value = "us-east-1"
+        mock_is_installed.return_value = False
+        os.environ.pop("AGENT_OBSERVABILITY_VERSION", None)
+
+        AwsOpenTelemetryDistro()._configure()
+
+        self.assertEqual(os.environ.get("OTEL_METRICS_EXPORTER"), "awsemf")
+        self.assertEqual(
+            os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"), "https://xray.us-east-1.amazonaws.com/v1/traces"
+        )
+        self.assertEqual(
+            os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"), "https://logs.us-east-1.amazonaws.com/v1/logs"
+        )
+        self.assertEqual(os.environ.get("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"), "true")
+        self.assertEqual(os.environ.get("OTEL_TRACES_SAMPLER"), "parentbased_always_on")
+        self.assertEqual(os.environ.get("OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED"), "true")
+        self.assertEqual(os.environ.get("OTEL_AWS_APPLICATION_SIGNALS_ENABLED"), "false")
+        self.assertEqual(os.environ.get("OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS"), "false")
+
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.get_aws_region")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_installed")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
+    def test_configure_agent_observability_v2(
+        self,
+        mock_super_configure,
+        mock_apply_patches,
+        mock_is_installed,
+        mock_is_agent_observability,
+        mock_get_aws_region,
+    ):
+        """Test that version 2 uses localhost collector endpoint and otlp metrics"""
+        mock_is_agent_observability.return_value = True
+        mock_get_aws_region.return_value = "us-east-1"
+        mock_is_installed.return_value = False
+        os.environ["AGENT_OBSERVABILITY_VERSION"] = "2"
+
+        AwsOpenTelemetryDistro()._configure()
+
+        self.assertEqual(os.environ.get("OTEL_METRICS_EXPORTER"), "otlp")
+        self.assertEqual(os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"), "http://localhost:4318/v1/traces")
+        self.assertEqual(os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"), "http://localhost:4318/v1/logs")
+        self.assertEqual(os.environ.get("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"), "true")
+        self.assertEqual(os.environ.get("OTEL_TRACES_SAMPLER"), "parentbased_always_on")
+        self.assertEqual(os.environ.get("OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED"), "true")
+        self.assertEqual(os.environ.get("OTEL_AWS_APPLICATION_SIGNALS_ENABLED"), "false")
+        self.assertEqual(os.environ.get("OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS"), "false")
+
+        os.environ.pop("AGENT_OBSERVABILITY_VERSION", None)
+
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure")
     def test_user_defined_propagators(self, mock_super_configure, mock_apply_patches):
