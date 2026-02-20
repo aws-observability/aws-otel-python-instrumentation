@@ -2,9 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
-from typing import Any
+import logging
+from typing import Any, Callable, Optional
 
+from wrapt import wrap_function_wrapper
+
+from opentelemetry.instrumentation.utils import unwrap
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import GenAiProviderNameValues
+
+_logger = logging.getLogger(__name__)
 
 PROVIDER_MAP = {
     "bedrock": GenAiProviderNameValues.AWS_BEDROCK.value,
@@ -41,3 +47,21 @@ def serialize_to_json(value: Any, max_depth: int = 3) -> str:
         return json.dumps(_truncate(value, max_depth))
     except (TypeError, ValueError):
         return str(value)
+
+
+def try_wrap(
+    module: str, name: str, wrapper: Callable[..., Any], should_wrap: Optional[Callable[..., bool]] = None
+) -> None:
+    if should_wrap is not None and not should_wrap():
+        return
+    try:
+        wrap_function_wrapper(module, name, wrapper)
+    except Exception:  # pylint: disable=broad-except
+        _logger.debug("Failed to wrap %s.%s, instrumentation may be incomplete", module, name)
+
+
+def try_unwrap(module: Any, name: str) -> None:
+    try:
+        unwrap(module, name)
+    except Exception:  # pylint: disable=broad-except
+        _logger.debug("Failed to unwrap %s.%s", module, name)
