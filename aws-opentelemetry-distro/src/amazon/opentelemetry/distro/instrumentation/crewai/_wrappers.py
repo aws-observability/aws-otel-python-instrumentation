@@ -1,10 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import json
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Callable, Dict, Mapping, Optional, Tuple
 
+from amazon.opentelemetry.distro.instrumentation.common.utils import PROVIDER_MAP, serialize_to_json
 from opentelemetry import context, trace
 from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
@@ -23,6 +23,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
+    GenAiOperationNameValues,
 )
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
@@ -37,31 +38,9 @@ if TYPE_CHECKING:
     from crewai.tools.tool_usage import ToolUsage
     from pydantic import BaseModel
 
-_OPERATION_INVOKE_AGENT = "invoke_agent"
-_OPERATION_EXECUTE_TOOL = "execute_tool"
-
 
 class _BaseWrapper(ABC):
     """Base wrapper class for CrewAI instrumentation."""
-
-    # see: https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/
-    # under gen_ai.provider.name
-    _PROVIDER_MAP = {
-        "bedrock": "aws.bedrock",
-        "aws": "aws.bedrock",
-        "openai": "openai",
-        "anthropic": "anthropic",
-        "claude": "anthropic",
-        "azure": "azure.ai.openai",
-        "azure_openai": "azure.ai.openai",
-        "google": "gcp.gen_ai",
-        "gemini": "gcp.gemini",
-        "cohere": "cohere",
-        "mistral": "mistral_ai",
-        "groq": "groq",
-        "deepseek": "deepseek",
-        "perplexity": "perplexity",
-    }
 
     def __init__(self, tracer: Optional[trace.Tracer] = None) -> None:
         self._tracer = tracer or trace.get_tracer(__name__)
@@ -102,7 +81,8 @@ class _BaseWrapper(ABC):
         if model:
             attributes[GEN_AI_REQUEST_MODEL] = model
 
-    def _extract_provider_and_model(self, llm: Optional["LLM"]) -> Tuple[Optional[str], Optional[str]]:
+    @staticmethod
+    def _extract_provider_and_model(llm: Optional["LLM"]) -> Tuple[Optional[str], Optional[str]]:
         if not llm:
             return None, None
 
@@ -112,33 +92,17 @@ class _BaseWrapper(ABC):
 
         provider = getattr(llm, "provider", None)
         if provider:
-            provider_name = self._PROVIDER_MAP.get(provider.lower(), provider)
+            provider_name = PROVIDER_MAP.get(provider.lower(), provider)
             return provider_name, model
 
         if "/" in model:
             prefix, _, model_part = model.partition("/")
-            provider_name = self._PROVIDER_MAP.get(prefix.lower())
+            provider_name = PROVIDER_MAP.get(prefix.lower())
             if provider_name:
                 return provider_name, model_part
             return prefix, model_part
 
         return None, model
-
-    @staticmethod
-    def _serialize_to_json(value: Any, max_depth: int = 10) -> str:
-        def _truncate(obj: Any, depth: int) -> Any:
-            if depth <= 0:
-                return "..."
-            if isinstance(obj, dict):
-                return {k: _truncate(v, depth - 1) for k, v in obj.items()}
-            if isinstance(obj, (list, tuple)):
-                return [_truncate(item, depth - 1) for item in obj]
-            return obj
-
-        try:
-            return json.dumps(_truncate(value, max_depth))
-        except (TypeError, ValueError):
-            return str(value)
 
     @abstractmethod
     def _get_span_name(self, instance: Any, args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> str:
@@ -171,7 +135,7 @@ class _CrewKickoffWrapper(_BaseWrapper):
         # providers/models. Per-agent provider/model info is captured in child invoke_agent spans.
         # TODO: Revisit span attributes when OTel semconv adds multi-agent system support.
         attributes: Dict[str, Any] = {
-            GEN_AI_OPERATION_NAME: _OPERATION_INVOKE_AGENT,
+            GEN_AI_OPERATION_NAME: GenAiOperationNameValues.INVOKE_AGENT.value,
         }
 
         crew_name = getattr(instance, "name", None)
@@ -188,7 +152,7 @@ class _CrewKickoffWrapper(_BaseWrapper):
             if all_tools:
                 tool_defs = self._extract_tool_definitions(all_tools)
                 if tool_defs:
-                    attributes[GEN_AI_TOOL_DEFINITIONS] = self._serialize_to_json(tool_defs)
+                    attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json(tool_defs)
 
         return attributes
 
@@ -220,12 +184,16 @@ class _TaskExecuteCoreWrapper(_BaseWrapper):
     def _get_span_name(self, instance: "Task", args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> str:
         agent: Optional[Agent] = args[0] if args else kwargs.get("agent")
         agent_role = getattr(agent, "role", None) if agent else None
-        return f"{_OPERATION_INVOKE_AGENT} {agent_role}" if agent_role else _OPERATION_INVOKE_AGENT
+        return (
+            f"{GenAiOperationNameValues.INVOKE_AGENT.value} {agent_role}"
+            if agent_role
+            else GenAiOperationNameValues.INVOKE_AGENT.value
+        )
 
     def _get_attributes(self, instance: "Task", args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> Dict[str, Any]:
         agent: Optional[Agent] = args[0] if args else kwargs.get("agent")
         attributes: Dict[str, Any] = {
-            GEN_AI_OPERATION_NAME: _OPERATION_INVOKE_AGENT,
+            GEN_AI_OPERATION_NAME: GenAiOperationNameValues.INVOKE_AGENT.value,
         }
 
         if agent:
@@ -265,7 +233,11 @@ class _ToolUseWrapper(_BaseWrapper):
     def _get_span_name(self, instance: "ToolUsage", args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> str:
         tool: Optional[CrewStructuredTool] = args[1] if len(args) > 1 else kwargs.get("tool")
         tool_name = getattr(tool, "name", None) if tool else None
-        return f"{_OPERATION_EXECUTE_TOOL} {tool_name}" if tool_name else _OPERATION_EXECUTE_TOOL
+        return (
+            f"{GenAiOperationNameValues.EXECUTE_TOOL.value} {tool_name}"
+            if tool_name
+            else GenAiOperationNameValues.EXECUTE_TOOL.value
+        )
 
     def _get_attributes(
         self, instance: "ToolUsage", args: Tuple[Any, ...], kwargs: Mapping[str, Any]
@@ -273,7 +245,7 @@ class _ToolUseWrapper(_BaseWrapper):
         tool: Optional[CrewStructuredTool] = args[1] if len(args) > 1 else kwargs.get("tool")
         calling: Optional[ToolCalling] = args[2] if len(args) > 2 else kwargs.get("calling")
         attributes: Dict[str, Any] = {
-            GEN_AI_OPERATION_NAME: _OPERATION_EXECUTE_TOOL,
+            GEN_AI_OPERATION_NAME: GenAiOperationNameValues.EXECUTE_TOOL.value,
             GEN_AI_TOOL_TYPE: "function",
         }
 
@@ -288,7 +260,7 @@ class _ToolUseWrapper(_BaseWrapper):
         if calling:
             call_args = getattr(calling, "arguments", None)
             if call_args:
-                attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = self._serialize_to_json(call_args)
+                attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = serialize_to_json(call_args)
 
         self._set_agent_llm_attributes(attributes, getattr(instance, "agent", None))
 
@@ -296,7 +268,7 @@ class _ToolUseWrapper(_BaseWrapper):
 
     def _on_success(self, span: trace.Span, result: Any) -> None:
         if result is not None:
-            span.set_attribute(GEN_AI_TOOL_CALL_RESULT, self._serialize_to_json(result))
+            span.set_attribute(GEN_AI_TOOL_CALL_RESULT, serialize_to_json(result))
 
 
 class _ToolRunWrapper(_BaseWrapper):
@@ -308,11 +280,15 @@ class _ToolRunWrapper(_BaseWrapper):
 
     def _get_span_name(self, instance: "BaseTool", args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> str:
         tool_name = getattr(instance, "name", None)
-        return f"{_OPERATION_EXECUTE_TOOL} {tool_name}" if tool_name else _OPERATION_EXECUTE_TOOL
+        return (
+            f"{GenAiOperationNameValues.EXECUTE_TOOL.value} {tool_name}"
+            if tool_name
+            else GenAiOperationNameValues.EXECUTE_TOOL.value
+        )
 
     def _get_attributes(self, instance: "BaseTool", args: Tuple[Any, ...], kwargs: Mapping[str, Any]) -> Dict[str, Any]:
         attributes: Dict[str, Any] = {
-            GEN_AI_OPERATION_NAME: _OPERATION_EXECUTE_TOOL,
+            GEN_AI_OPERATION_NAME: GenAiOperationNameValues.EXECUTE_TOOL.value,
             GEN_AI_TOOL_TYPE: "function",
         }
 
@@ -326,10 +302,10 @@ class _ToolRunWrapper(_BaseWrapper):
 
         tool_args = args[0] if args else kwargs
         if tool_args:
-            attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = self._serialize_to_json(tool_args)
+            attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = serialize_to_json(tool_args)
 
         return attributes
 
     def _on_success(self, span: trace.Span, result: Any) -> None:
         if result is not None:
-            span.set_attribute(GEN_AI_TOOL_CALL_RESULT, self._serialize_to_json(result))
+            span.set_attribute(GEN_AI_TOOL_CALL_RESULT, serialize_to_json(result))

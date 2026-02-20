@@ -2,14 +2,14 @@
 # Assumes existence of dist/aws_opentelemetry_distro-<pkg_version>-py3-none-any.whl.
 # Assumes filename of aws_opentelemetry_distro-<pkg_version>-py3-none-any.whl is passed in as "DISTRO" arg.
 FROM python:3.12
-WORKDIR /crewai
-COPY ./dist/$DISTRO /crewai
-COPY ./contract-tests/images/applications/gen_ai/crewai /crewai
-COPY ./contract-tests/images/applications/gen_ai/mock_llm.py /crewai
+WORKDIR /langchain
+COPY ./dist/$DISTRO /langchain
+COPY ./contract-tests/images/applications/gen_ai/langchain /langchain
+COPY ./contract-tests/images/applications/gen_ai/mock_llm.py /langchain
 
 ENV PIP_ROOT_USER_ACTION=ignore
 ARG DISTRO
 RUN pip install --upgrade pip && pip install -r requirements.txt && pip install ${DISTRO} --force-reinstall
 
 # Without `-u`, logs will be buffered and `wait_for_logs` will never return.
-CMD ["opentelemetry-instrument", "python", "-u", "./crewai_server.py"]
+CMD ["opentelemetry-instrument", "python", "-u", "./langchain_server.py"]
