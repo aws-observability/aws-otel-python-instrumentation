@@ -302,6 +302,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
         self.assertEqual(os.environ.get("OTEL_METRICS_EXPORTER"), "otlp")
         self.assertEqual(os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"), "http://localhost:4318/v1/traces")
         self.assertEqual(os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"), "http://localhost:4318/v1/logs")
+        self.assertEqual(os.environ.get("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"), "http://localhost:4318/v1/metrics")
         self.assertEqual(os.environ.get("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"), "true")
         self.assertEqual(os.environ.get("OTEL_TRACES_SAMPLER"), "parentbased_always_on")
         self.assertEqual(os.environ.get("OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED"), "true")
