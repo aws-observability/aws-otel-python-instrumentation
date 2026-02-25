@@ -25,6 +25,7 @@ from amazon.opentelemetry.distro._utils import (
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     APPLICATION_SIGNALS_ENABLED_CONFIG,
     OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
+    OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
     OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT,
     OTEL_LOGS_EXPORTER,
@@ -170,4 +171,4 @@ def _configure_agent_observability_v2() -> None:
     os.environ.setdefault(OTEL_METRICS_EXPORTER, "otlp")
     os.environ.setdefault(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, "http://localhost:4318/v1/traces")
     os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, "http://localhost:4318/v1/logs")
-    os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, "http://localhost:4318/v1/metrics")
+    os.environ.setdefault(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, "http://localhost:4318/v1/metrics")
