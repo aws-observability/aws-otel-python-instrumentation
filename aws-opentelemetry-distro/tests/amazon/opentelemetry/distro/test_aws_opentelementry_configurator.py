@@ -540,8 +540,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
         os.environ.pop("OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS", None)
 
-    def test_baggage_span_processor_not_added_without_keys(self):
-        """Test that BaggageSpanProcessor is always added for agent observability"""
+    def test_baggage_span_processor_rejects_keys_without_custom_config(self):
+        """Test that BaggageSpanProcessor is added but only allows session.id when no custom keys are configured"""
         os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
         os.environ.pop("OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS", None)
         os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", None)
