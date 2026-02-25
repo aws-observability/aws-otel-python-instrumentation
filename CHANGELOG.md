@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat: Allow disabling of default anomaly condition
+  ([#660](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/660))
 - Add baggage env variable span processor and agent observability version config
   ([#658](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/658))
 - Fix AwsCloudWatchOtlpBatchLogRecordProcessor custom _export not being invoked; rename otlp_aws_logs_exporter to otlp_aws_log_record_exporter
