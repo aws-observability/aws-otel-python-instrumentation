@@ -306,18 +306,6 @@ def _init_metrics(
 
 # END The OpenTelemetry Authors code
 
-
-def _add_baggage_key_span_processor(provider: TracerProvider) -> None:
-    # propagates baggage entries matching OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS into span attributes
-    raw: str = os.environ.get(OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS, "").strip()
-    keys: set[str] = {k.strip() for k in raw.split(",") if k.strip()}
-
-    # weird to add here but session
-    if _is_aws_otlp_endpoint(os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, ""), XRAY_SERVICE):
-        keys.add("session.id")
-    provider.add_span_processor(BaggageSpanProcessor(lambda key: key in keys))
-
-
 def _export_unsampled_span_for_lambda(trace_provider: TracerProvider, resource: Resource = None):
     if not _is_application_signals_enabled():
         return
@@ -537,7 +525,13 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource, sam
     # enabling session ID tracking in spans.
     if is_agent_observability_enabled():
         _export_unsampled_span_for_agent_observability(provider, resource)
-        _add_baggage_key_span_processor(provider)
+        # propagates baggage entries matching OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS into span attributes
+        raw: str = os.environ.get(OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS, "").strip()
+        keys: set[str] = {k.strip() for k in raw.split(",") if k.strip()}
+
+        # for agent observability we should always inject/override session.id for console
+        keys.add("session.id")
+        provider.add_span_processor(BaggageSpanProcessor(lambda key: key in keys))
 
     if not _is_application_signals_enabled():
         return
