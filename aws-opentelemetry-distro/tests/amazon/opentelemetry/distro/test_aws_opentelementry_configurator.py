@@ -535,7 +535,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         predicate = baggage_processors[0]._baggage_key_predicate
         self.assertTrue(predicate("user.id"))
         self.assertTrue(predicate("request.id"))
-        self.assertFalse(predicate("session.id"))
+        self.assertTrue(predicate("session.id"))
 
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
         os.environ.pop("OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS", None)
@@ -556,6 +556,33 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertFalse(predicate("any.key"))
 
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+
+    def test_session_id_always_added_when_agent_observability_enabled(self):
+        """Test that session.id is always injected into baggage predicate when agent observability is enabled,
+        regardless of whether OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS is set."""
+        os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
+
+        # Without any custom baggage keys, session.id should still be present
+        os.environ.pop("OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS", None)
+        tracer_provider = TracerProvider()
+        _customize_span_processors(tracer_provider, Resource.get_empty(), MagicMock())
+        processors = tracer_provider._active_span_processor._span_processors
+        baggage_processors = [p for p in processors if p.__class__.__name__ == "BaggageSpanProcessor"]
+        self.assertEqual(len(baggage_processors), 1)
+        self.assertTrue(baggage_processors[0]._baggage_key_predicate("session.id"))
+
+        # With custom baggage keys, session.id should still be present alongside them
+        os.environ["OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS"] = "custom.key"
+        tracer_provider2 = TracerProvider()
+        _customize_span_processors(tracer_provider2, Resource.get_empty(), MagicMock())
+        processors2 = tracer_provider2._active_span_processor._span_processors
+        baggage_processors2 = [p for p in processors2 if p.__class__.__name__ == "BaggageSpanProcessor"]
+        predicate2 = baggage_processors2[0]._baggage_key_predicate
+        self.assertTrue(predicate2("session.id"))
+        self.assertTrue(predicate2("custom.key"))
+
+        os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+        os.environ.pop("OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS", None)
 
     def test_customize_span_exporter_sigv4(self):
 

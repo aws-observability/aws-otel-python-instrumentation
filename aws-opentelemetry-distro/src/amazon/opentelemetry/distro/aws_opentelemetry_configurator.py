@@ -306,6 +306,7 @@ def _init_metrics(
 
 # END The OpenTelemetry Authors code
 
+
 def _export_unsampled_span_for_lambda(trace_provider: TracerProvider, resource: Resource = None):
     if not _is_application_signals_enabled():
         return
@@ -529,7 +530,6 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource, sam
         raw: str = os.environ.get(OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS, "").strip()
         keys: set[str] = {k.strip() for k in raw.split(",") if k.strip()}
 
-        # for agent observability we should always inject/override session.id for console
         keys.add("session.id")
         provider.add_span_processor(BaggageSpanProcessor(lambda key: key in keys))
 
