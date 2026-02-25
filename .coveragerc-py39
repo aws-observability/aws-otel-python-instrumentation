@@ -1,6 +1,7 @@
 [run]
 omit =
     */instrumentation/crewai/*
+    */instrumentation/llama_index/*
 
 [report]
 include_namespace_packages = true
