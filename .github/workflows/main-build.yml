@@ -134,15 +134,15 @@ jobs:
       staging-wheel-name: ${{ needs.build.outputs.staging_wheel_file }}
       adot-image-name: ${{ needs.build.outputs.staging_registry }}/aws-observability/adot-autoinstrumentation-python-staging:${{ needs.build.outputs.python_image_tag }}
 
-  build-agentcore-collector:
-    name: "Build AgentCore Runtime Collector"
-    needs: [ build ]
-    uses: ./.github/workflows/build-agentcore-collector.yml
-    secrets: inherit
-    permissions:
-      id-token: write
-      contents: read
-      actions: write
+  # build-agentcore-collector:
+  #   name: "Build AgentCore Runtime Collector"
+  #   needs: [ build ]
+  #   uses: ./.github/workflows/build-agentcore-collector.yml
+  #   secrets: inherit
+  #   permissions:
+  #     id-token: write
+  #     contents: read
+  #     actions: write
 
   publish-main-build-status:
     name: "Publish Main Build Status"

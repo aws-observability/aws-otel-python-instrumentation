@@ -15,6 +15,8 @@ jobs:
       should_build: ${{ steps.check.outputs.should_build }}
       latest_sha: ${{ steps.check.outputs.latest_sha }}
     steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
       - name: Check for new commits
         id: check
         env:
@@ -69,6 +71,10 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
           aws-region: us-east-1
 
-      - name: Upload collector binary to S3
+      - name: Package and upload collector to S3
         run: |
-          aws s3 cp bin/otelcol-agentcore_linux_arm64 s3://${{ secrets.STAGING_BUCKET_NAME }}/otelcol-agentcore_linux_arm64
+          mkdir -p collector-package
+          cp bin/otelcol-agentcore_linux_arm64 collector-package/otelcol-agentcore
+          cp cmd/otelcol-agentcore/config.yaml collector-package/config.yaml
+          cd collector-package && zip -r ../otelcol-agentcore.zip . && cd ..
+          aws s3 cp otelcol-agentcore.zip s3://${{ secrets.STAGING_BUCKET_NAME }}/otelcol-agentcore.zip
