@@ -29,7 +29,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          LATEST_SHA=$(gh api repos/wangzlei/opentelemetry-collector-contrib/commits/aws-cwa-dev --jq '.sha')
+          LATEST_SHA=$(gh api repos/wangzlei/opentelemetry-collector-contrib/commits/genai-adapter-connector --jq '.sha')
           LAST_SHA=$(cat .last-code-sha 2>/dev/null || echo "")
 
           echo "Latest SHA: $LATEST_SHA"
