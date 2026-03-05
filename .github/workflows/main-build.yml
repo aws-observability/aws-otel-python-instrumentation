@@ -142,8 +142,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-      actions: read
-      variables: write
+      actions: write
 
   publish-main-build-status:
     name: "Publish Main Build Status"

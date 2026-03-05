@@ -10,8 +10,7 @@ jobs:
   check-for-changes:
     runs-on: ubuntu-latest
     permissions:
-      actions: read
-      variables: write
+      actions: write
     outputs:
       should_build: ${{ steps.check.outputs.should_build }}
       latest_sha: ${{ steps.check.outputs.latest_sha }}
