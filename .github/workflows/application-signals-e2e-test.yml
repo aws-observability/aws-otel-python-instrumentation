@@ -246,6 +246,15 @@ jobs:
     with:
       caller-workflow-name: 'main-build'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
+
+  # AgentCore Collector Genesis v2 test on EC2
+  adot-genesis-v2:
+    needs: [ upload-main-build ]
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-genesis-v2-test.yml@main
+    secrets: inherit
+    with:
+      caller-workflow-name: 'main-build'
+      staging-wheel-name: ${{ inputs.staging-wheel-name }}
   
   # Stand-Alone ADOT/ADOT Genesis test on EC2
   adot-genesis:
