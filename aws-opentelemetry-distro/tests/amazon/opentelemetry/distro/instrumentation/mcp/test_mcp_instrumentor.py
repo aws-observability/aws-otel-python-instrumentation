@@ -36,7 +36,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
 from opentelemetry.semconv.attributes.client_attributes import CLIENT_ADDRESS, CLIENT_PORT
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.semconv.attributes.network_attributes import NETWORK_TRANSPORT, NetworkTransportValues
-from opentelemetry.trace import SpanKind, StatusCode
+from opentelemetry.trace import SpanKind, StatusCode, get_tracer
 
 from .collector import OTLPServer, Telemetry
 
@@ -426,6 +426,22 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
                         await callback(session)
             finally:
                 server.should_exit = True
+
+    def test_mcp_respects_active_parent_span(self):
+        tracer = get_tracer("test", tracer_provider=self.tracer_provider)
+
+        async def run(session):
+            with tracer.start_as_current_span("execute_tool get_weather"):
+                await session.call_tool("hello", {"name": "World"})
+
+        asyncio.run(self._run_inprocess(run))
+        spans = self.span_exporter.get_finished_spans()
+
+        tool_parent = next(s for s in spans if s.name == "execute_tool get_weather")
+        tool_call = next(s for s in spans if s.name == "tools/call hello" and s.kind == SpanKind.CLIENT)
+
+        tool_parent_id = format(tool_parent.context.span_id, "016x")
+        self.assertEqual(format(tool_call.parent.span_id, "016x"), tool_parent_id)
 
     @staticmethod
     def _create_server():

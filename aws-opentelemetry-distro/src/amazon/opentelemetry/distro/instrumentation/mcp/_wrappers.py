@@ -26,6 +26,7 @@ from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attribute
     MCPMethodValue,
 )
 from opentelemetry import trace
+from opentelemetry.instrumentation.utils import suppress_http_instrumentation
 from opentelemetry.propagate import get_global_textmap
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
@@ -217,7 +218,8 @@ class ClientWrapper(McpWrapper):
                 new_args = (modified_message,) + args[1:]
 
                 try:
-                    result = await wrapped(*new_args, **kwargs)
+                    with suppress_http_instrumentation():
+                        result = await wrapped(*new_args, **kwargs)
                     self._set_tool_result(span, message, result)
                     return result
                 except Exception as exc:
@@ -233,8 +235,10 @@ class ClientWrapper(McpWrapper):
             set_transport_info(ClientTransportMetadata(transport=NetworkTransportValues.PIPE))
 
             # a bit strange and does not follow any existing OTel semantic conventions,
-            # but we need an overarching parent span to capture the the MCP session lifetime, all server and client MCP operations
-            # happen within this session context. Otherwise we get a bunch of disjointed traces without a common ancestor.
+            # but we need an overarching parent span to capture the MCP session
+            # lifetime, all server and client MCP operations happen within this
+            # session context. Otherwise we get a bunch of disjointed traces
+            # without a common ancestor.
             with self._tracer.start_as_current_span(self._SESSION_SPAN_NAME, kind=SpanKind.INTERNAL) as span:
                 set_parent_context(trace.set_span_in_context(span))
                 try:
@@ -263,8 +267,9 @@ class ClientWrapper(McpWrapper):
             with self._tracer.start_as_current_span(self._SESSION_SPAN_NAME, kind=SpanKind.INTERNAL) as span:
                 set_parent_context(trace.set_span_in_context(span))
                 try:
-                    async with wrapped(*args, **kwargs) as streams:
-                        yield streams
+                    with suppress_http_instrumentation():
+                        async with wrapped(*args, **kwargs) as streams:
+                            yield streams
                 finally:
                     clear_transport_info()
                     clear_parent_context()

@@ -15,7 +15,10 @@ from opentelemetry import context
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_NAME,
+    GEN_AI_INPUT_MESSAGES,
     GEN_AI_OPERATION_NAME,
+    GEN_AI_OUTPUT_MESSAGES,
+    GEN_AI_PROMPT,
     GEN_AI_PROVIDER_NAME,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
@@ -41,7 +44,17 @@ from opentelemetry.util.types import AttributeValue
 
 if TYPE_CHECKING:
     from langchain_core.agents import AgentAction, AgentFinish
+    from langchain_core.messages import BaseMessage
     from langchain_core.outputs import LLMResult
+
+LANGGRAPH_STEP = "langgraph.step"
+LANGGRAPH_NODE = "langgraph.node"
+
+# We use "invoke_model" instead of the OTel semconv "chat" for span names because "chat" is
+# a bit ambiguous it could refer to the user's chat session or the agent's conversation. We feel
+# that "invoke_model" makes it clear the span represents the agent calling
+# the underlying model. The gen_ai.operation.name attribute still uses the semconv value.
+INVOKE_MODEL = "invoke_model"
 
 
 @dataclass
@@ -63,10 +76,13 @@ class _BaseCallbackManagerInitWrapper:
         for handler in instance.inheritable_handlers:
             if isinstance(handler, OpenTelemetryCallbackHandler):
                 return
-        instance.add_handler(self.callback_handler, True)
+        instance.inheritable_handlers.insert(0, self.callback_handler)
+        instance.handlers.insert(0, self.callback_handler)
 
 
 class OpenTelemetryCallbackHandler(BaseCallbackHandler):
+    run_inline = True
+
     def __init__(self, tracer, should_suppress_internal_chains: bool = True):
         super().__init__()
         self.tracer = tracer
@@ -78,6 +94,80 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
     def _set_span_attribute(span: Span, name: str, value: Optional[AttributeValue]):
         if value is not None and value != "":
             span.set_attribute(name, value)
+
+    def _set_langgraph_attributes(self, span: Span, metadata: Optional[dict]) -> None:
+        if not metadata:
+            return
+        self._set_span_attribute(span, LANGGRAPH_STEP, metadata.get("langgraph_step"))
+        self._set_span_attribute(span, LANGGRAPH_NODE, metadata.get("langgraph_node"))
+
+    @staticmethod
+    def _format_messages(messages: list[list[BaseMessage]]) -> list[dict]:
+        # converts langchain messages to OTel format
+        #
+        # example LangChain input:
+        #   [[
+        #     SystemMessage(type="system", content="You are a helpful assistant."),
+        #     HumanMessage(type="human", content="What is the weather in Paris?"),
+        #     AIMessage(type="ai", content="Let me check.", tool_calls=[
+        #         {"name": "get_weather", "args": {"city": "Paris"}, "id": "call_abc123", "type": "tool_call"}
+        #     ]),
+        #   ]]
+        #
+        # based on:
+        # https://github.com/langchain-ai/langchain/blob/7a4cc3ec321c4ded3681b57456df365936139333/libs/core/langchain_core/messages/human.py#L31
+        # https://github.com/langchain-ai/langchain/blob/7a4cc3ec321c4ded3681b57456df365936139333/libs/core/langchain_core/messages/system.py#L24
+        # https://github.com/langchain-ai/langchain/blob/7a4cc3ec321c4ded3681b57456df365936139333/libs/core/langchain_core/messages/tool.py#L53
+        #
+        # example OTel output based on https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/ :
+        #   [
+        #     {"role": "system", "parts": [{"type": "text", "content": "You are a helpful assistant."}]},
+        #     {"role": "user",   "parts": [{"type": "text", "content": "What is the weather in Paris?"}]},
+        #     {"role": "assistant", "parts": [
+        #         {"type": "text", "content": "Let me check."},
+        #         {"type": "tool_call", "id": "call_abc123", "name": "get_weather", "arguments": {"city": "Paris"}},
+        #     ]},
+        #   ]
+        ROLE_MAP: dict[str, str] = {"human": "user", "ai": "assistant", "system": "system", "tool": "tool"}
+        formatted: list[dict] = []
+        for batch in messages:
+            msg: BaseMessage
+            for msg in batch:
+                role: str = ROLE_MAP.get(msg.type, msg.type)
+                parts: list[dict] = []
+                content: str | list[str | dict] = msg.content
+                if content:
+                    parts.append({"type": "text", "content": str(content)})
+                tool_calls: list[dict] = getattr(msg, "tool_calls", None) or []
+                for tc in tool_calls:
+                    parts.append(
+                        {
+                            "type": "tool_call",
+                            "id": tc.get("id", ""),
+                            "name": tc.get("name", ""),
+                            "arguments": tc.get("args", {}),
+                        }
+                    )
+                formatted.append({"role": role, "parts": parts})
+        return formatted
+
+    @staticmethod
+    def _format_llm_output_result(generations: list) -> list[dict]:
+        # converts langchain's LLM output to OTel semantic convention format
+        #
+        # LLMResult.generations is list[list[Generation | ChatGeneration]]
+        # https://github.com/langchain-ai/langchain/blob/7a4cc3ec321c4ded3681b57456df365936139333/libs/core/langchain_core/outputs/llm_result.py#L19
+        formatted: list[dict] = []
+        for batch in generations:
+            for gen in batch:
+                msg: BaseMessage | None = getattr(gen, "message", None)
+                if msg is not None:
+                    formatted.extend(OpenTelemetryCallbackHandler._format_messages([[msg]]))
+                else:
+                    text: str = getattr(gen, "text", "")
+                    if text:
+                        formatted.append({"role": "assistant", "parts": [{"type": "text", "content": text}]})
+        return formatted
 
     def _set_request_params(self, span: Span, kwargs: dict):
         model = None
@@ -236,11 +326,13 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             return
         model_id = kwargs.get("invocation_params", {}).get("model_id")
         name = model_id or self._get_name_from_callback(serialized, **kwargs)
-        span_name = f"{GenAiOperationNameValues.CHAT.value} {name}" if name else GenAiOperationNameValues.CHAT.value
+        span_name = f"{INVOKE_MODEL} {name}" if name else INVOKE_MODEL
         span = self._create_span(run_id, parent_run_id, span_name)
         provider = self._extract_provider(serialized, kwargs)
         self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
         self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
+        self._set_langgraph_attributes(span, metadata)
+        self._set_span_attribute(span, GEN_AI_INPUT_MESSAGES, serialize_to_json(self._format_messages(messages)))
         if "kwargs" in serialized:
             self._set_request_params(span, serialized["kwargs"])
         model = (serialized.get("kwargs") or {}).get("model") or (serialized.get("kwargs") or {}).get("model_name")
@@ -277,6 +369,8 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         provider = self._extract_provider(serialized, kwargs)
         self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
         self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.TEXT_COMPLETION.value)
+        self._set_langgraph_attributes(span, metadata)
+        self._set_span_attribute(span, GEN_AI_PROMPT, serialize_to_json(prompts))
         self._set_request_params(span, kwargs)
         temperature = kwargs.get("invocation_params", {}).get("temperature")
         self._propagate_to_parent_agent_span(
@@ -288,6 +382,10 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         if context.get_value(_SUPPRESS_INSTRUMENTATION_KEY) or run_id not in self.span_mapping:
             return
         span = self.span_mapping[run_id].span
+        if response.generations:
+            self._set_span_attribute(
+                span, GEN_AI_OUTPUT_MESSAGES, serialize_to_json(self._format_llm_output_result(response.generations))
+            )
         if response.llm_output:
             model = response.llm_output.get("model_name") or response.llm_output.get("model_id")
             if model:
@@ -341,6 +439,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
 
         span = self._create_span(run_id, parent_run_id, span_name)
         self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, self._extract_provider(serialized, kwargs))
+        self._set_langgraph_attributes(span, metadata)
 
         if is_agent:
             self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
@@ -379,6 +478,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         )
         span = self._create_span(run_id, parent_run_id, span_name)
         self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, self._extract_provider(serialized, kwargs))
+        self._set_langgraph_attributes(span, metadata)
         self._set_span_attribute(span, GEN_AI_TOOL_CALL_ARGUMENTS, serialize_to_json(input_str))
         if serialized.get("id"):
             self._set_span_attribute(span, GEN_AI_TOOL_CALL_ID, serialized["id"])

@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
-from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans
 
 
 @dataclass

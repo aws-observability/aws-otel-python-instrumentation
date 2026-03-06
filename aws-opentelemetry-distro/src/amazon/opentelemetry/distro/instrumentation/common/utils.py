@@ -31,7 +31,7 @@ PROVIDER_MAP = {
 }
 
 
-def serialize_to_json(value: Any, max_depth: int = 3) -> str:
+def serialize_to_json(value: Any, max_depth: int = 10) -> str:
     """Serialize a value to JSON string with depth truncation."""
 
     def _truncate(obj: Any, depth: int) -> Any:
