@@ -75,7 +75,7 @@ class DatabaseContractTestBase(ContractTestBase):
                 target_spans.append(resource_scope_span.span)
 
         self.assertEqual(
-            len(target_spans), 1, f"target_spans is {str(target_spans)}, although only one walue was expected"
+            len(target_spans), 1, f"target_spans is {str(target_spans)}, although only one value was expected"
         )
         self._assert_aws_attributes(target_spans[0].attributes, **kwargs)
 
