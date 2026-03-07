@@ -75,10 +75,13 @@ class McpWrapper:
         """
         from mcp import types  # pylint: disable=import-outside-toplevel
 
+        is_notification = isinstance(message, (types.ClientNotification, types.ServerNotification))
         if hasattr(message, "root"):
             message = message.root
 
-        if request_id is not None:
+        # notifications do not have request id per:
+        # https://www.jsonrpc.org/specification#notification
+        if request_id is not None and not is_notification:
             span.set_attribute(JSONRPC_REQUEST_ID, str(request_id))
 
         span.set_attribute(MCP_METHOD_NAME, message.method)

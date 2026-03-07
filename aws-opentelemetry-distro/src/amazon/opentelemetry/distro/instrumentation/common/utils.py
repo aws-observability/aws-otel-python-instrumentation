@@ -3,10 +3,12 @@
 
 import json
 import logging
+from contextvars import Token
 from typing import Any, Callable, Optional
 
 from wrapt import wrap_function_wrapper
 
+from opentelemetry import context
 from opentelemetry.instrumentation.utils import unwrap
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import GenAiProviderNameValues
 
@@ -32,7 +34,6 @@ PROVIDER_MAP = {
 
 
 def serialize_to_json(value: Any, max_depth: int = 10) -> str:
-    """Serialize a value to JSON string with depth truncation."""
 
     def _truncate(obj: Any, depth: int) -> Any:
         if depth <= 0:
@@ -65,3 +66,15 @@ def try_unwrap(module: Any, name: str) -> None:
         unwrap(module, name)
     except Exception:  # pylint: disable=broad-except
         _logger.debug("Failed to unwrap %s.%s", module, name)
+
+
+def try_detach(token: Token) -> None:
+    # context.detach() fails when it run in different async
+    # contexts, if there's failure in detaching we should just pass
+    # the exception as there is no longer the active context where it's either already been
+    # garbage collected or will be when its async scope ends.
+    # https://github.com/open-telemetry/opentelemetry-python/issues/2606
+    try:
+        context._RUNTIME_CONTEXT.detach(token)  # pylint: disable=protected-access
+    except Exception:  # pylint: disable=broad-except
+        pass
