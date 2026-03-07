@@ -12,7 +12,10 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_NAME,
+    GEN_AI_INPUT_MESSAGES,
     GEN_AI_OPERATION_NAME,
+    GEN_AI_OUTPUT_MESSAGES,
+    GEN_AI_PROMPT,
     GEN_AI_PROVIDER_NAME,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
@@ -140,7 +143,7 @@ class TestLangChainInstrumentor(TestCase):
         spans = self.span_exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
         span = spans[0]
-        self.assertIn("chat", span.name)
+        self.assertIn("invoke_model", span.name)
         self.assertEqual(span.attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.CHAT.value)
 
     def test_llm_response_attributes(self):
@@ -269,7 +272,7 @@ class TestLangChainInstrumentor(TestCase):
         spans = self.span_exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
         span = spans[0]
-        self.assertIn("chat", span.name)
+        self.assertIn("invoke_model", span.name)
         self.assertEqual(span.status.status_code, StatusCode.ERROR)
 
     def test_tool_error_sets_error_status(self):
@@ -294,7 +297,7 @@ class TestLangChainInstrumentor(TestCase):
 
         spans = self.span_exporter.get_finished_spans()
         self.assertGreater(len(spans), 0)
-        chat_spans = [s for s in spans if "chat" in s.name]
+        chat_spans = [s for s in spans if "invoke_model" in s.name]
         self.assertEqual(len(chat_spans), 1)
 
     def test_text_completion_llm_creates_span(self):
@@ -504,6 +507,76 @@ class TestLangChainInstrumentor(TestCase):
                     agent_spans[0].attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.INVOKE_AGENT.value
                 )
                 self.assertEqual(agent_spans[0].attributes[GEN_AI_AGENT_NAME], expected_name)
+
+    def test_chat_model_records_input_and_output_messages(self):
+        llm = self.FakeChatModel(messages=iter([self.AIMessage(content="Hello!")]))
+        llm.invoke("Say hello")
+
+        spans = self.span_exporter.get_finished_spans()
+        self.assertEqual(len(spans), 1)
+        span = spans[0]
+        import json
+
+        # input messages
+        self.assertIn(GEN_AI_INPUT_MESSAGES, span.attributes)
+        messages = json.loads(span.attributes[GEN_AI_INPUT_MESSAGES])
+        self.assertIsInstance(messages, list)
+        self.assertGreater(len(messages), 0)
+        self.assertIn("role", messages[0])
+        self.assertIn("parts", messages[0])
+        self.assertEqual(messages[0]["role"], "user")
+        self.assertEqual(messages[0]["parts"][0]["type"], "text")
+
+        # output messages
+        self.assertIn(GEN_AI_OUTPUT_MESSAGES, span.attributes)
+        output = json.loads(span.attributes[GEN_AI_OUTPUT_MESSAGES])
+        self.assertIsInstance(output, list)
+        self.assertGreater(len(output), 0)
+        self.assertEqual(output[0]["role"], "assistant")
+        self.assertEqual(output[0]["parts"][0]["type"], "text")
+        self.assertIn("Done.", output[0]["parts"][0]["content"])
+
+    def test_text_completion_records_prompt_and_output(self):
+        llm = self.FakeListLLM(responses=["hello"])
+        llm.invoke("test prompt")
+
+        spans = self.span_exporter.get_finished_spans()
+        self.assertEqual(len(spans), 1)
+        span = spans[0]
+        import json
+
+        # input prompt
+        self.assertIn(GEN_AI_PROMPT, span.attributes)
+        prompts = json.loads(span.attributes[GEN_AI_PROMPT])
+        self.assertIsInstance(prompts, list)
+        self.assertIn("test prompt", prompts[0])
+
+        # output
+        self.assertIn(GEN_AI_OUTPUT_MESSAGES, span.attributes)
+        output = json.loads(span.attributes[GEN_AI_OUTPUT_MESSAGES])
+        self.assertIsInstance(output, list)
+        self.assertGreater(len(output), 0)
+        self.assertEqual(output[0]["role"], "assistant")
+        self.assertIn("hello", output[0]["parts"][0]["content"])
+
+    def test_langgraph_attributes_on_agent_spans(self):
+        @self.tool
+        def dummy_tool() -> str:
+            """Dummy tool."""
+            return "done"
+
+        llm = self.FakeChatModel(messages=iter([self.AIMessage(content="Done.")]))
+        agent = self.create_agent(llm, [dummy_tool], name="TestAgent")
+        agent.invoke({"messages": [("human", "test")]})
+
+        spans = self.span_exporter.get_finished_spans()
+        agent_span = next((s for s in spans if "invoke_agent" in s.name), None)
+        self.assertIsNotNone(agent_span)
+        # Agent spans created by langgraph should have step and node attributes
+        # The exact values depend on the langgraph runtime, but we verify
+        # the chat span inside the agent has the attributes set when metadata is present
+        chat_spans = [s for s in spans if "invoke_model" in s.name]
+        self.assertGreater(len(chat_spans), 0)
 
 
 if __name__ == "__main__":

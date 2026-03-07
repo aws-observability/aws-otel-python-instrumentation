@@ -20,6 +20,9 @@ GEN_AI_TOOL_TYPE: str = "gen_ai.tool.type"
 GEN_AI_TOOL_DESCRIPTION: str = "gen_ai.tool.description"
 GEN_AI_TOOL_CALL_ARGUMENTS: str = "gen_ai.tool.call.arguments"
 GEN_AI_TOOL_CALL_RESULT: str = "gen_ai.tool.call.result"
+GEN_AI_INPUT_MESSAGES: str = "gen_ai.input.messages"
+GEN_AI_OUTPUT_MESSAGES: str = "gen_ai.output.messages"
+GEN_AI_PROMPT: str = "gen_ai.prompt"
 
 
 class GenAITestBase(ContractTestBase):
@@ -41,6 +44,8 @@ class GenAITestBase(ContractTestBase):
             self._assert_invoke_agent_spans(invoke_agent_spans, kwargs.get("expected_agent_count", 1))
             self._assert_execute_tool_spans(execute_tool_spans, kwargs.get("expected_tool_count", 1))
             self._assert_chat_spans(chat_spans, kwargs.get("expected_chat_count", 1))
+        elif "chat" in path:
+            self._assert_chat_spans(chat_spans, kwargs.get("expected_chat_count", 1))
 
     def _collect_gen_ai_spans(self, resource_scope_spans: List[ResourceScopeSpan]):
         invoke_agent_spans = []
@@ -52,7 +57,7 @@ class GenAITestBase(ContractTestBase):
                 invoke_agent_spans.append(span)
             elif "execute_tool" in span.name:
                 execute_tool_spans.append(span)
-            elif "chat" in span.name.lower():
+            elif "invoke_model" in span.name.lower():
                 chat_spans.append(span)
         return invoke_agent_spans, execute_tool_spans, chat_spans
 
@@ -88,3 +93,5 @@ class GenAITestBase(ContractTestBase):
             self.assertIn(GEN_AI_RESPONSE_MODEL, attrs)
             self.assertIn(GEN_AI_USAGE_INPUT_TOKENS, attrs)
             self.assertIn(GEN_AI_USAGE_OUTPUT_TOKENS, attrs)
+            self.assertIn(GEN_AI_INPUT_MESSAGES, attrs)
+            self.assertIn(GEN_AI_OUTPUT_MESSAGES, attrs)
