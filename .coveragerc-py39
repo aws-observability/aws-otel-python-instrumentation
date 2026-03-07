@@ -1,6 +1,7 @@
 [run]
 omit =
     */instrumentation/crewai/*
+    */instrumentation/langchain/*
 
 [report]
 include_namespace_packages = true
