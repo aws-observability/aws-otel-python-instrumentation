@@ -223,10 +223,10 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         # AgentExecutor is the legacy LangChain agent node, lc_agent_name metadata was added in
         # langchain >= 1.2.4 this is only set when a custom name is given to the agent,
         # otherwise if no name is given it defaults to "LangGraph".
-        # langgraph_node check ensures we only match top-level agent, not internal nodes.
+        # langgraph_node check ensures we only match against agent nodes, not unwanted
+        # internal nodes.
         is_agent_chain: bool = bool(
-            (name and ("AgentExecutor" in name or name == "LangGraph"))
-            or (metadata and "lc_agent_name" in metadata and "langgraph_node" not in metadata)
+            (name and ("AgentExecutor" in name or name == "LangGraph")) or (metadata and "lc_agent_name" in metadata)
         )
 
         provider: str | None = self._extract_provider(serialized, kwargs)
@@ -525,7 +525,11 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         # We suppress internal nodes that have langgraph metadata, except for nodes that
         # contain the agent name metadata as those are used for invoke_agent spans.
         if metadata and any(k.startswith("langgraph_") for k in metadata):
-            return "lc_agent_name" not in metadata
+            if "lc_agent_name" in metadata:
+                return False
+            if name and ("LangGraph" == name or "AgentExecutor" in name):
+                return False
+            return True
         return False
 
     def _end_span(self, run_id: UUID) -> None:

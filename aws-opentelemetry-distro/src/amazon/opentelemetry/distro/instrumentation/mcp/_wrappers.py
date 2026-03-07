@@ -76,6 +76,7 @@ class McpWrapper:
         from mcp import types  # pylint: disable=import-outside-toplevel
 
         is_notification = isinstance(message, (types.ClientNotification, types.ServerNotification))
+
         if hasattr(message, "root"):
             message = message.root
 
