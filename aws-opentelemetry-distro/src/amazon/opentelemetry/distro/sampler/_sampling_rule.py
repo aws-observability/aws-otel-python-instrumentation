@@ -14,10 +14,12 @@ class _SamplingRateBoost:
         self,
         MaxRate: float = None,
         CooldownWindowMinutes: float = None,
+        DisableDefaultAnomalyDetection: Optional[bool] = None,
         **kwargs,
     ):
         self.MaxRate = MaxRate if MaxRate is not None else 0.0
         self.CooldownWindowMinutes = CooldownWindowMinutes if CooldownWindowMinutes is not None else 1
+        self.DisableDefaultAnomalyDetection = DisableDefaultAnomalyDetection
 
         # Log unknown fields for debugging/monitoring
         if kwargs:
@@ -26,7 +28,11 @@ class _SamplingRateBoost:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, _SamplingRateBoost):
             return False
-        return self.MaxRate == other.MaxRate and self.CooldownWindowMinutes == other.CooldownWindowMinutes
+        return (
+            self.MaxRate == other.MaxRate
+            and self.CooldownWindowMinutes == other.CooldownWindowMinutes
+            and self.DisableDefaultAnomalyDetection == other.DisableDefaultAnomalyDetection
+        )
 
 
 # Disable snake_case naming style so this class can match the sampling rules response from X-Ray
