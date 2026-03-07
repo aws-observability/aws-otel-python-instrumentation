@@ -307,6 +307,11 @@ class ServerWrapper(McpWrapper):
     Wrapper for MCP server-side operations.
     """
 
+    # TODO: Wrap ServerSession._received_request and _received_notification to capture server-side
+    # initialize and notifications/initialized spans, which are handled before Server._handle_request.
+    # Though we can opt out of doing so as well as believe those spans provide minimum value with added
+    # complexity.
+
     async def _wrap_server_handle_request(
         self,
         wrapped: Callable[..., Coroutine[Any, Any, Any]],
