@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 from contextvars import Token
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional
@@ -48,6 +49,8 @@ if TYPE_CHECKING:
     from langchain_core.messages import BaseMessage
     from langchain_core.outputs import LLMResult
 
+_logger = logging.getLogger(__name__)
+
 LANGGRAPH_STEP = "langgraph.step"
 LANGGRAPH_NODE = "langgraph.node"
 
@@ -74,6 +77,9 @@ class _BaseCallbackManagerInitWrapper:
 
     def __call__(self, wrapped, instance, args, kwargs) -> None:
         wrapped(*args, **kwargs)
+        if not hasattr(instance, "inheritable_handlers") or not hasattr(instance, "handlers"):
+            _logger.debug("Missing handler lists on %s, skipping OTel callback injection.", type(instance).__name__)
+            return
         for handler in instance.inheritable_handlers:
             if isinstance(handler, OpenTelemetryCallbackHandler):
                 return
@@ -84,6 +90,10 @@ class _BaseCallbackManagerInitWrapper:
 
 
 class OpenTelemetryCallbackHandler(BaseCallbackHandler):
+    # Ensures the OTel callback is executed synchronously and not in an async thread.
+    # This is to ensure that we are ALWAYS setting this instrumentation's spans as the current span in context to make sure we
+    # propagate the trace to downstream
+    # https://github.com/langchain-ai/langchain/blob/80e09feec/libs/core/langchain_core/callbacks/manager.py#L381-L390
     run_inline = True
 
     def __init__(self, tracer, should_suppress_internal_chains: bool = True):
@@ -123,11 +133,10 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
 
         if system_instructions:
             self._set_span_attribute(span, GEN_AI_SYSTEM_INSTRUCTIONS, serialize_to_json(system_instructions))
-
         if "kwargs" in serialized:
             self._set_request_params(span, serialized["kwargs"])
 
-        self._propagate_to_parent_agent_span(
+        self._propagate_attributes_to_parent_agent_span(
             parent_run_id,
             {
                 GEN_AI_PROVIDER_NAME: provider,
@@ -166,7 +175,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self._set_span_attribute(span, GEN_AI_PROMPT, serialize_to_json(prompts))
         self._set_request_params(span, kwargs)
 
-        self._propagate_to_parent_agent_span(
+        self._propagate_attributes_to_parent_agent_span(
             parent_run_id,
             {GEN_AI_PROVIDER_NAME: provider, GEN_AI_REQUEST_MODEL: name, GEN_AI_REQUEST_TEMPERATURE: temperature},
         )
@@ -230,22 +239,17 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         )
 
         provider: str | None = self._extract_provider(serialized, kwargs)
-        agent_name: str | None = (metadata.get("agent_name") if metadata else None) or (
+        agent_name: str | None = (metadata.get("lc_agent_name") if metadata else None) or (
             name if is_agent_chain else None
         )
-        span_name: str = (
-            f"{GenAiOperationNameValues.INVOKE_AGENT.value} {name}"
-            if is_agent_chain and name
-            else GenAiOperationNameValues.INVOKE_AGENT.value if is_agent_chain else f"chain {name}" if name else "chain"
-        )
+        operation: str = GenAiOperationNameValues.INVOKE_AGENT.value if is_agent_chain else "chain"
+        span_name: str = f"{operation} {name}" if name else operation
         span: Span = self._create_span(run_id, parent_run_id, span_name)
 
         self._set_langgraph_attributes(span, metadata)
         self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
-
         if is_agent_chain:
             self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
-
         self._set_span_attribute(span, GEN_AI_AGENT_NAME, agent_name)
 
     def on_chain_end(self, outputs: dict[str, Any], *, run_id: UUID, **kwargs: Any) -> None:
@@ -366,10 +370,10 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         #       {"role": "user", "parts": [{"type": "text", "content": "What is the weather in Paris?"}]},
         #       {"role": "assistant", "parts": [
         #           {"type": "text", "content": "Let me check."},
-        #           {"type": "tool_call_request", "id": "call_abc123", "name": "get_weather", "arguments": {...}},
+        #           {"type": "tool_call", "id": "call_abc123", "name": "get_weather", "arguments": {...}},
         #       ]},
         #       {"role": "tool", "parts": [
-        #           {"type": "tool_call_response", "id": "call_abc123", "output": "72°F and sunny"},
+        #           {"type": "tool_call_response", "id": "call_abc123", "response": "72°F and sunny"},
         #       ]},
         #     ]
         ROLE_MAP: dict[str, str] = {"human": "user", "ai": "assistant", "system": "system", "tool": "tool"}
@@ -389,7 +393,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                         {
                             "type": "tool_call_response",
                             "id": tool_call_id,
-                            "output": str(content) if content else "",
+                            "response": str(content) if content else "",
                         }
                     )
                 elif content:
@@ -398,7 +402,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                 for tc in tool_calls:
                     parts.append(
                         {
-                            "type": "tool_call_request",
+                            "type": "tool_call",
                             "id": tc.get("id", ""),
                             "name": tc.get("name", ""),
                             "arguments": tc.get("args", {}),
@@ -427,7 +431,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         #
         #   [{"role": "assistant", "parts": [
         #       {"type": "text", "content": "The weather is sunny."},
-        #       {"type": "tool_call_request", "id": "call_abc", "name": "get_weather", "arguments": {...}},
+        #       {"type": "tool_call", "id": "call_abc", "name": "get_weather", "arguments": {...}},
         #   ], "finish_reason": "stop"}]
         FINISH_REASON_MAP: dict[str, str] = {
             "stop": "stop",
@@ -586,15 +590,14 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         span.set_attribute(ERROR_TYPE, type(error).__qualname__)
         self._end_span(run_id)
 
-    def _find_ancestor_agent_span(self, run_id: Optional[UUID]) -> Optional[Span]:
+    def _propagate_attributes_to_parent_agent_span(self, parent_run_id: Optional[UUID], attrs: dict[str, Any]) -> None:
         # OTel semantic conventions recommend gen_ai.request.model, gen_ai.request.temperature, and
         # gen_ai.provider.name on invoke_agent spans. However on_chain_start callback doesn't have
         # access to the underlying LLM configuration. We propagate these attributes when the child
         # LLM span callback fires and set them on the parent agent span since it is still open.
-        # We have to walk up the span hierarchy to find the nearest invoke_agent ancestor.
         # In practice, the depth is typically 1-2 levels, so this is not a costly operation.
-        visited = set()
-        current = self._resolve_parent_span(run_id)
+        visited: set[UUID] = set()
+        current = self._resolve_parent_span(parent_run_id)
 
         while current and current not in visited:
             visited.add(current)
@@ -602,17 +605,10 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                 break
             holder = self.span_mapping[current]
             if "invoke_agent" in holder.span.name:
-                return holder.span
+                for name, value in attrs.items():
+                    self._set_span_attribute(holder.span, name, value)
+                return
             current = holder.parent_run_id
-
-        return None
-
-    def _propagate_to_parent_agent_span(self, parent_run_id: Optional[UUID], attrs: dict[str, Any]) -> None:
-        agent_span = self._find_ancestor_agent_span(parent_run_id)
-        if not agent_span:
-            return
-        for name, value in attrs.items():
-            self._set_span_attribute(agent_span, name, value)
 
     @staticmethod
     def _extract_provider(serialized: dict[str, Any], kwargs: dict[str, Any]) -> Optional[str]:

@@ -1,9 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 import sys
 import unittest
+import urllib.request
 from unittest import TestCase
+
+import jsonschema
 
 from opentelemetry import context
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
@@ -32,6 +36,17 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GenAiOperationNameValues,
 )
 from opentelemetry.trace.status import StatusCode
+
+_OTEL_SCHEMA_BASE = "https://opentelemetry.io/docs/specs/semconv/gen-ai"
+_SCHEMA_CACHE: dict = {}
+
+
+def _fetch_otel_schema(name: str) -> dict:
+    if name not in _SCHEMA_CACHE:
+        url = f"{_OTEL_SCHEMA_BASE}/{name}.json"
+        with urllib.request.urlopen(url) as resp:
+            _SCHEMA_CACHE[name] = json.loads(resp.read())
+    return _SCHEMA_CACHE[name]
 
 
 # https://pypi.org/project/langchain/
@@ -515,23 +530,16 @@ class TestLangChainInstrumentor(TestCase):
         spans = self.span_exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
         span = spans[0]
-        import json
 
-        # input messages
         self.assertIn(GEN_AI_INPUT_MESSAGES, span.attributes)
         messages = json.loads(span.attributes[GEN_AI_INPUT_MESSAGES])
-        self.assertIsInstance(messages, list)
-        self.assertGreater(len(messages), 0)
-        self.assertIn("role", messages[0])
-        self.assertIn("parts", messages[0])
+        jsonschema.validate(messages, _fetch_otel_schema("gen-ai-input-messages"))
         self.assertEqual(messages[0]["role"], "user")
         self.assertEqual(messages[0]["parts"][0]["type"], "text")
 
-        # output messages
         self.assertIn(GEN_AI_OUTPUT_MESSAGES, span.attributes)
         output = json.loads(span.attributes[GEN_AI_OUTPUT_MESSAGES])
-        self.assertIsInstance(output, list)
-        self.assertGreater(len(output), 0)
+        jsonschema.validate(output, _fetch_otel_schema("gen-ai-output-messages"))
         self.assertEqual(output[0]["role"], "assistant")
         self.assertEqual(output[0]["parts"][0]["type"], "text")
         self.assertIn("Done.", output[0]["parts"][0]["content"])
@@ -543,15 +551,12 @@ class TestLangChainInstrumentor(TestCase):
         spans = self.span_exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
         span = spans[0]
-        import json
 
-        # input prompt
         self.assertIn(GEN_AI_PROMPT, span.attributes)
         prompts = json.loads(span.attributes[GEN_AI_PROMPT])
         self.assertIsInstance(prompts, list)
         self.assertIn("test prompt", prompts[0])
 
-        # output
         self.assertIn(GEN_AI_OUTPUT_MESSAGES, span.attributes)
         output = json.loads(span.attributes[GEN_AI_OUTPUT_MESSAGES])
         self.assertIsInstance(output, list)
