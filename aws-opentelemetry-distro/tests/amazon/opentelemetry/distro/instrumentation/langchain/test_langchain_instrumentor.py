@@ -27,6 +27,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_REQUEST_TOP_P,
     GEN_AI_RESPONSE_ID,
     GEN_AI_RESPONSE_MODEL,
+    GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_DESCRIPTION,
@@ -57,7 +58,7 @@ class TestLangChainInstrumentor(TestCase):
         from langchain.agents import create_agent
         from langchain_core.language_models.fake import FakeListLLM
         from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-        from langchain_core.messages import AIMessage
+        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
         from langchain_core.output_parsers import StrOutputParser
         from langchain_core.outputs import ChatGeneration, ChatResult
         from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
@@ -69,6 +70,8 @@ class TestLangChainInstrumentor(TestCase):
         self.create_agent = create_agent
         self.FakeListLLM = FakeListLLM
         self.AIMessage = AIMessage
+        self.HumanMessage = HumanMessage
+        self.SystemMessage = SystemMessage
         self.StrOutputParser = StrOutputParser
         self.ChatGeneration = ChatGeneration
         self.ChatResult = ChatResult
@@ -543,6 +546,20 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(output[0]["role"], "assistant")
         self.assertEqual(output[0]["parts"][0]["type"], "text")
         self.assertIn("Done.", output[0]["parts"][0]["content"])
+
+    def test_system_instructions_schema_validation(self):
+        llm = self.FakeChatModel(messages=iter([self.AIMessage(content="Hi!")]))
+        llm.invoke([self.SystemMessage(content="You are a helpful assistant."), self.HumanMessage(content="Hello")])
+
+        spans = self.span_exporter.get_finished_spans()
+        self.assertEqual(len(spans), 1)
+        span = spans[0]
+
+        self.assertIn(GEN_AI_SYSTEM_INSTRUCTIONS, span.attributes)
+        instructions = json.loads(span.attributes[GEN_AI_SYSTEM_INSTRUCTIONS])
+        jsonschema.validate(instructions, _fetch_otel_schema("gen-ai-system-instructions"))
+        self.assertEqual(instructions[0]["type"], "text")
+        self.assertIn("helpful assistant", instructions[0]["content"])
 
     def test_text_completion_records_prompt_and_output(self):
         llm = self.FakeListLLM(responses=["hello"])
