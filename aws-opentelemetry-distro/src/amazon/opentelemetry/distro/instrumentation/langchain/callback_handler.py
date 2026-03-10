@@ -92,7 +92,6 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self.tracer = tracer
         self.should_suppress_internal_chains = should_suppress_internal_chains
         self.run_id_to_span_map: dict[UUID, tuple[Span, Token]] = {}
-        self.skipped_run_id_to_parent_id: dict[UUID, Optional[UUID]] = {}
 
     def on_chat_model_start(
         self,
@@ -199,7 +198,6 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
 
         name: str | None = self._get_name_from_callback(serialized, **kwargs)
         if self._should_skip_chain(serialized, name, metadata):
-            self.skipped_run_id_to_parent_id[run_id] = self._resolve_parent_span(parent_run_id)
             return
 
         # AgentExecutor is the legacy LangChain agent node, lc_agent_name metadata was added in
@@ -229,11 +227,11 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
     def on_chain_end(self, outputs: dict[str, Any], *, run_id: UUID, **kwargs: Any) -> None:
         if context.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
             return
-        self.skipped_run_id_to_parent_id.pop(run_id, None)
+
         self._end_span(run_id)
 
     def on_chain_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
-        self.skipped_run_id_to_parent_id.pop(run_id, None)
+
         self._handle_error(error, run_id, **kwargs)
 
     def on_tool_start(
@@ -465,15 +463,6 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self._set_span_attribute(span, GEN_AI_REQUEST_TEMPERATURE, params.get("temperature"))
         self._set_span_attribute(span, GEN_AI_REQUEST_TOP_P, params.get("top_p"))
 
-    # map of skipped chain's id to its actual parent span. When a chain is skipped, its children
-    # still need to find the correct parent span, so we store the already-resolved parent here.
-    def _resolve_parent_span(self, parent_run_id: Optional[UUID]) -> Optional[UUID]:
-        if parent_run_id and parent_run_id in self.skipped_run_id_to_parent_id:
-            return self.skipped_run_id_to_parent_id[parent_run_id]
-        if parent_run_id and parent_run_id in self.run_id_to_span_map:
-            return parent_run_id
-        return None
-
     def _should_skip_chain(
         self, serialized: dict[str, Any], name: Optional[str], metadata: Optional[dict] = None
     ) -> bool:
@@ -525,10 +514,8 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         span_name: str,
         kind: SpanKind = SpanKind.INTERNAL,
     ) -> Span:
-        parent = self._resolve_parent_span(parent_run_id)
-
-        if parent and parent in self.run_id_to_span_map:
-            parent_span, _ = self.run_id_to_span_map[parent]
+        if parent_run_id and parent_run_id in self.run_id_to_span_map:
+            parent_span, _ = self.run_id_to_span_map[parent_run_id]
             span = self.tracer.start_span(span_name, context=set_span_in_context(parent_span), kind=kind)
         else:
             span = self.tracer.start_span(span_name, kind=kind)
