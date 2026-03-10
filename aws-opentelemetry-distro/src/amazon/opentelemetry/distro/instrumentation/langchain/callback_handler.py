@@ -227,11 +227,9 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
     def on_chain_end(self, outputs: dict[str, Any], *, run_id: UUID, **kwargs: Any) -> None:
         if context.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
             return
-
         self._end_span(run_id)
 
     def on_chain_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
-
         self._handle_error(error, run_id, **kwargs)
 
     def on_tool_start(
