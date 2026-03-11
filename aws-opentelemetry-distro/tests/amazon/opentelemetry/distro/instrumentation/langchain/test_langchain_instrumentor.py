@@ -90,6 +90,15 @@ class TestLangChainInstrumentor(TestCase):
             top_p: float = 0.9
             max_tokens: int = 100
 
+            @property
+            def _default_params(self) -> dict:
+                return {
+                    "model_id": self.model_id,
+                    "temperature": self.temperature,
+                    "top_p": self.top_p,
+                    "max_tokens": self.max_tokens,
+                }
+
             @classmethod
             def is_lc_serializable(cls) -> bool:
                 return True

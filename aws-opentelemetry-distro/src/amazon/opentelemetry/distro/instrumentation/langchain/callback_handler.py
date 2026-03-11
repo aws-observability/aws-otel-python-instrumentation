@@ -125,7 +125,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
 
         if system_instructions:
             self._set_span_attribute(span, GEN_AI_SYSTEM_INSTRUCTIONS, serialize_to_json_string(system_instructions))
-        self._set_llm_request_span_attributes(span, kwargs, serialized=serialized.get("kwargs", {}))
+        self._set_llm_request_span_attributes(span, kwargs, serialized=serialized.get("kwargs", {}), class_name=name)
 
     def on_llm_start(
         self,
@@ -154,7 +154,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
         self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.TEXT_COMPLETION.value)
         self._set_span_attribute(span, GEN_AI_PROMPT, serialize_to_json_string(prompts))
-        self._set_llm_request_span_attributes(span, kwargs, serialized=serialized.get("kwargs", {}))
+        self._set_llm_request_span_attributes(span, kwargs, serialized=serialized.get("kwargs", {}), class_name=name)
 
     def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: Any) -> None:
         if context.get_value(_SUPPRESS_INSTRUMENTATION_KEY) or run_id not in self.run_id_to_span_map:
@@ -438,7 +438,9 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         OpenTelemetryCallbackHandler._set_span_attribute(span, LANGGRAPH_STEP_SPAN_ATTR, metadata.get("langgraph_step"))
         OpenTelemetryCallbackHandler._set_span_attribute(span, LANGGRAPH_NODE_SPAN_ATTR, metadata.get("langgraph_node"))
 
-    def _set_llm_request_span_attributes(self, span: Span, kwargs: dict, serialized: Optional[dict] = None):
+    def _set_llm_request_span_attributes(
+        self, span: Span, kwargs: dict, serialized: Optional[dict] = None, class_name: Optional[str] = None
+    ):
         config = serialized or {}
         model = None
         for model_tag in ("model", "model_name", "model_id", "base_model_id"):
@@ -449,6 +451,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             if (model := config.get(model_tag)) is not None:
                 break
 
+        model = model or class_name
         if model:
             self._set_span_attribute(span, GEN_AI_REQUEST_MODEL, model)
             self._set_span_attribute(span, GEN_AI_RESPONSE_MODEL, model)
