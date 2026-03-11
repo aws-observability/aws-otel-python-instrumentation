@@ -4,10 +4,7 @@
 import json
 import sys
 import unittest
-import urllib.request
 from unittest import TestCase
-
-import jsonschema
 
 from opentelemetry import context
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
