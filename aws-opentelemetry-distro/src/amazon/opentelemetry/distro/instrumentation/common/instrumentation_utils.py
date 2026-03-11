@@ -4,11 +4,13 @@
 import json
 import logging
 from contextvars import Token
+from functools import wraps
 from typing import Any, Callable, Optional
 
 from wrapt import wrap_function_wrapper
 
 from opentelemetry import context
+from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
 from opentelemetry.instrumentation.utils import unwrap
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import GenAiProviderNameValues
 
@@ -66,6 +68,19 @@ def try_unwrap(module: Any, name: str) -> None:
         unwrap(module, name)
     except Exception:  # pylint: disable=broad-except
         _logger.debug("Failed to unwrap %s.%s", module, name)
+
+
+def skip_instrumentation_if_suppressed(fn: Callable) -> Callable:
+    if not callable(fn):
+        return fn
+
+    @wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        if context.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
+            return None
+        return fn(*args, **kwargs)
+
+    return wrapper
 
 
 def try_detach(token: Token) -> None:

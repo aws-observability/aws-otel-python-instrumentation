@@ -3,11 +3,13 @@ from unittest import TestCase
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     serialize_to_json_string,
+    skip_instrumentation_if_suppressed,
     try_detach,
     try_unwrap,
     try_wrap,
 )
 from opentelemetry import context
+from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
 from opentelemetry.trace import set_span_in_context
 
 
@@ -60,3 +62,28 @@ class TestInstrumentationUtils(TestCase):
         token = context.attach(set_span_in_context(None))
         context.detach(token)
         try_detach(token)
+
+    def test_skip_instrumentation_if_suppressed_allows_when_not_suppressed(self):
+        call_count = [0]
+
+        @skip_instrumentation_if_suppressed
+        def my_callback(self):
+            call_count[0] += 1
+
+        my_callback(None)
+        self.assertEqual(call_count[0], 1)
+
+    def test_skip_instrumentation_if_suppressed_blocks_when_suppressed(self):
+        call_count = [0]
+
+        @skip_instrumentation_if_suppressed
+        def my_callback(self):
+            call_count[0] += 1
+
+        token = context.attach(context.set_value(_SUPPRESS_INSTRUMENTATION_KEY, True))
+        try:
+            result = my_callback(None)
+            self.assertIsNone(result)
+            self.assertEqual(call_count[0], 0)
+        finally:
+            context.detach(token)

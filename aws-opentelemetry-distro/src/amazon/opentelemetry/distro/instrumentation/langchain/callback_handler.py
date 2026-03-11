@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 from contextvars import Token
+from threading import Lock
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
@@ -13,10 +14,10 @@ from langchain_core.callbacks import BaseCallbackHandler
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     PROVIDER_MAP,
     serialize_to_json_string,
+    skip_instrumentation_if_suppressed,
     try_detach,
 )
 from opentelemetry import context
-from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_NAME,
     GEN_AI_INPUT_MESSAGES,
@@ -95,8 +96,10 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         super().__init__()
         self.tracer = tracer
         self.should_suppress_internal_chains = should_suppress_internal_chains
+        self._lock = Lock()
         self.run_id_to_span_map: dict[UUID, tuple[Span, Token]] = {}
 
+    @skip_instrumentation_if_suppressed
     def on_chat_model_start(
         self,
         serialized: dict[str, Any],
@@ -107,8 +110,6 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         metadata: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
-        if context.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
-            return
 
         model_id: str | None = kwargs.get("invocation_params", {}).get("model_id")
         model_name: str | None = model_id or self._get_name_from_callback(serialized, **kwargs)
@@ -129,6 +130,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             span, kwargs, serialized=serialized.get("kwargs", {}), model_name=model_name
         )
 
+    @skip_instrumentation_if_suppressed
     def on_llm_start(
         self,
         serialized: dict[str, Any],
@@ -139,8 +141,6 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         metadata: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
-        if context.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
-            return
 
         model_id: str | None = kwargs.get("invocation_params", {}).get("model_id")
         model_name: str | None = model_id or self._get_name_from_callback(serialized, **kwargs)
@@ -160,11 +160,13 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             span, kwargs, serialized=serialized.get("kwargs", {}), model_name=model_name
         )
 
+    @skip_instrumentation_if_suppressed
     def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: Any) -> None:
-        if context.get_value(_SUPPRESS_INSTRUMENTATION_KEY) or run_id not in self.run_id_to_span_map:
-            return
 
-        span, _ = self.run_id_to_span_map[run_id]
+        entry = self._safe_get_span(run_id)
+        if not entry:
+            return
+        span, _ = entry
         llm_output: dict | None = response.llm_output
         usage: dict = (llm_output.get("token_usage") or llm_output.get("usage") or {}) if llm_output else {}
         model: str | None = (llm_output.get("model_name") or llm_output.get("model_id")) if llm_output else None
@@ -191,6 +193,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
     def on_llm_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
         self._handle_error(error, run_id, **kwargs)
 
+    @skip_instrumentation_if_suppressed
     def on_chain_start(
         self,
         serialized: dict[str, Any],
@@ -201,8 +204,6 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         metadata: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
-        if context.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
-            return
 
         name: str | None = self._get_name_from_callback(serialized, **kwargs)
         if self._should_skip_chain(serialized, name, metadata):
@@ -232,14 +233,14 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
         self._set_span_attribute(span, GEN_AI_AGENT_NAME, agent_name)
 
+    @skip_instrumentation_if_suppressed
     def on_chain_end(self, outputs: dict[str, Any], *, run_id: UUID, **kwargs: Any) -> None:
-        if context.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
-            return
         self._end_span(run_id)
 
     def on_chain_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
         self._handle_error(error, run_id, **kwargs)
 
+    @skip_instrumentation_if_suppressed
     def on_tool_start(
         self,
         serialized: dict[str, Any],
@@ -250,8 +251,6 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         metadata: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
-        if context.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
-            return
 
         name: str | None = self._get_name_from_callback(serialized, **kwargs)
         provider: str | None = self._extract_llm_provider(serialized, kwargs)
@@ -273,34 +272,44 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self._set_span_attribute(span, GEN_AI_TOOL_CALL_ID, tool_call_id)
         self._set_span_attribute(span, GEN_AI_TOOL_CALL_ARGUMENTS, serialize_to_json_string(input_str))
 
+    @skip_instrumentation_if_suppressed
     def on_tool_end(self, output: Any, *, run_id: UUID, **kwargs: Any) -> None:
-        if context.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
+
+        entry = self._safe_get_span(run_id)
+        if not entry:
             return
-        span, _ = self.run_id_to_span_map[run_id]
+        span, _ = entry
         self._set_span_attribute(span, GEN_AI_TOOL_CALL_RESULT, serialize_to_json_string(output))
         self._end_span(run_id)
 
     def on_tool_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
         self._handle_error(error, run_id, **kwargs)
 
+    @skip_instrumentation_if_suppressed
     def on_agent_action(self, action: AgentAction, *, run_id: UUID, **kwargs: Any) -> None:
-        if run_id in self.run_id_to_span_map:
-            span, _ = self.run_id_to_span_map[run_id]
 
-            self._set_span_attribute(
-                span, GEN_AI_TOOL_CALL_ARGUMENTS, serialize_to_json_string(getattr(action, "tool_input", None))
-            )
-            self._set_span_attribute(span, GEN_AI_TOOL_NAME, getattr(action, "tool", None))
-            self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
+        entry = self._safe_get_span(run_id)
+        if not entry:
+            return
+        span, _ = entry
+        self._set_span_attribute(
+            span, GEN_AI_TOOL_CALL_ARGUMENTS, serialize_to_json_string(getattr(action, "tool_input", None))
+        )
+        self._set_span_attribute(span, GEN_AI_TOOL_NAME, getattr(action, "tool", None))
+        self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
 
+    @skip_instrumentation_if_suppressed
     def on_agent_finish(self, finish: AgentFinish, *, run_id: UUID, **kwargs: Any) -> None:
-        if run_id in self.run_id_to_span_map:
-            span, _ = self.run_id_to_span_map[run_id]
-            self._set_span_attribute(
-                span,
-                GEN_AI_TOOL_CALL_RESULT,
-                serialize_to_json_string(finish.return_values.get("output")),
-            )
+
+        entry = self._safe_get_span(run_id)
+        if not entry:
+            return
+        span, _ = entry
+        self._set_span_attribute(
+            span,
+            GEN_AI_TOOL_CALL_RESULT,
+            serialize_to_json_string(finish.return_values.get("output")),
+        )
 
     def on_agent_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
         self._handle_error(error, run_id, **kwargs)
@@ -507,12 +516,13 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             return not is_agent
         return False
 
+    @skip_instrumentation_if_suppressed
     def _handle_error(self, error: BaseException, run_id: UUID, **kwargs: Any) -> None:
-        if context.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
+
+        entry = self._safe_get_span(run_id)
+        if not entry:
             return
-        if run_id not in self.run_id_to_span_map:
-            return
-        span, _ = self.run_id_to_span_map[run_id]
+        span, _ = entry
         span.set_status(Status(StatusCode.ERROR, str(error)))
         span.set_attribute(ERROR_TYPE, type(error).__qualname__)
         self._end_span(run_id)
@@ -524,20 +534,23 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         span_name: str,
         kind: SpanKind = SpanKind.INTERNAL,
     ) -> Span:
-        if parent_run_id and parent_run_id in self.run_id_to_span_map:
-            parent_span, _ = self.run_id_to_span_map[parent_run_id]
-            span = self.tracer.start_span(span_name, context=set_span_in_context(parent_span), kind=kind)
-        else:
-            span = self.tracer.start_span(span_name, kind=kind)
+        with self._lock:
+            if parent_run_id and parent_run_id in self.run_id_to_span_map:
+                parent_span, _ = self.run_id_to_span_map[parent_run_id]
+                span = self.tracer.start_span(span_name, context=set_span_in_context(parent_span), kind=kind)
+            else:
+                span = self.tracer.start_span(span_name, kind=kind)
 
-        token = context.attach(set_span_in_context(span))
-        self.run_id_to_span_map[run_id] = (span, token)
+            token = context.attach(set_span_in_context(span))
+            self.run_id_to_span_map[run_id] = (span, token)
         return span
 
     def _end_span(self, run_id: UUID) -> None:
-        if run_id not in self.run_id_to_span_map:
+        with self._lock:
+            entry = self.run_id_to_span_map.pop(run_id, None)
+        if not entry:
             return
-        span, token = self.run_id_to_span_map.pop(run_id)
+        span, token = entry
         try_detach(token)
         span.end()
 
@@ -572,6 +585,10 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                     return provider
 
         return None
+
+    def _safe_get_span(self, run_id: UUID) -> Optional[tuple[Span, Token]]:
+        with self._lock:
+            return self.run_id_to_span_map.get(run_id)
 
     @staticmethod
     def _set_span_attribute(span: Span, name: str, value: Optional[AttributeValue]):

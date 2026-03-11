@@ -37,16 +37,16 @@ class TestLangChainSpanProcessor(TestCase):
             pass
         spans = self.exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
-        self.assertEqual(len(self.processor._nearest_agent_span), 0)
+        self.assertEqual(len(self.processor._span_id_to_nearest_invoke_agent_span_map), 0)
 
     def test_shutdown_clears_state(self):
         span = self.tracer.start_span("invoke_agent test")
         assert isinstance(span, Span)
-        self.processor._nearest_agent_span[12345] = span
+        self.processor._span_id_to_nearest_invoke_agent_span_map[12345] = span
         span.end()
-        self.assertEqual(len(self.processor._nearest_agent_span), 1)
+        self.assertEqual(len(self.processor._span_id_to_nearest_invoke_agent_span_map), 1)
         self.processor.shutdown()
-        self.assertEqual(len(self.processor._nearest_agent_span), 0)
+        self.assertEqual(len(self.processor._span_id_to_nearest_invoke_agent_span_map), 0)
 
     def test_force_flush_returns_true(self):
         self.assertTrue(self.processor.force_flush())
@@ -82,7 +82,7 @@ class TestLangChainSpanProcessor(TestCase):
         chat_span.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         chat_span.set_attribute(GEN_AI_REQUEST_MODEL, "gpt-4")
         assert chat_span.context is not None
-        self.processor._nearest_agent_span[chat_span.context.span_id] = agent_span
+        self.processor._span_id_to_nearest_invoke_agent_span_map[chat_span.context.span_id] = agent_span
         chat_span.end()
 
         spans = self.exporter.get_finished_spans()
@@ -96,7 +96,7 @@ class TestLangChainSpanProcessor(TestCase):
         span = ReadableSpan("no-context")
         self.assertIsNone(span.context)
         self.processor.on_end(span)
-        self.assertEqual(len(self.processor._nearest_agent_span), 0)
+        self.assertEqual(len(self.processor._span_id_to_nearest_invoke_agent_span_map), 0)
 
     def test_non_agent_child_does_not_propagate(self):
         with self.tracer.start_as_current_span("chat openai") as chat_span:
