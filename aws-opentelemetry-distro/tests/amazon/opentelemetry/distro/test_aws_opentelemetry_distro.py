@@ -46,7 +46,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
             OTEL_TRACES_EXPORTER,
             OTEL_LOGS_EXPORTER,
             OTEL_METRICS_EXPORTER,
-            OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT,
+            "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT",
             OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
             OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
             OTEL_TRACES_SAMPLER,
@@ -149,7 +149,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
         self.assertEqual(os.environ.get(OTEL_TRACES_EXPORTER), "otlp")
         self.assertEqual(os.environ.get(OTEL_LOGS_EXPORTER), "otlp")
         self.assertEqual(os.environ.get(OTEL_METRICS_EXPORTER), "awsemf")
-        self.assertEqual(os.environ.get(OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT), "true")
+        self.assertEqual(os.environ.get("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"), "true")
         self.assertEqual(
             os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT), "https://xray.us-west-2.amazonaws.com/v1/traces"
         )
@@ -205,7 +205,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
         self.assertNotIn(OTEL_TRACES_EXPORTER, os.environ)
         self.assertNotIn(OTEL_LOGS_EXPORTER, os.environ)
         self.assertNotIn(OTEL_METRICS_EXPORTER, os.environ)
-        self.assertNotIn(OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT, os.environ)
+        self.assertNotIn("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", os.environ)
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.get_aws_region")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_agent_observability_enabled")
@@ -296,7 +296,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
         self.assertEqual(
             os.environ.get(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT), "https://logs.us-east-1.amazonaws.com/v1/logs"
         )
-        self.assertEqual(os.environ.get(OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT), "true")
+        self.assertEqual(os.environ.get("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"), "true")
         self.assertEqual(os.environ.get(OTEL_TRACES_SAMPLER), "parentbased_always_on")
         self.assertEqual(os.environ.get(OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED), "true")
         self.assertEqual(os.environ.get(APPLICATION_SIGNALS_ENABLED_CONFIG), "false")
@@ -327,7 +327,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
         self.assertEqual(os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT), "http://localhost:4318/v1/traces")
         self.assertEqual(os.environ.get(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT), "http://localhost:4318/v1/logs")
         self.assertEqual(os.environ.get(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT), "http://localhost:4318/v1/metrics")
-        self.assertEqual(os.environ.get(OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT), "true")
+        self.assertEqual(os.environ.get("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"), "true")
         self.assertEqual(os.environ.get(OTEL_TRACES_SAMPLER), "parentbased_always_on")
         self.assertEqual(os.environ.get(OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED), "true")
         self.assertEqual(os.environ.get(APPLICATION_SIGNALS_ENABLED_CONFIG), "false")
