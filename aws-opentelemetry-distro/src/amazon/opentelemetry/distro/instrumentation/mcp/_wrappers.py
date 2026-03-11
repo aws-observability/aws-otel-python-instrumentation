@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Callable, Coroutine, Dict, Optional, Tuple
 from urllib.parse import urlparse
 
-from amazon.opentelemetry.distro.instrumentation.common.utils import serialize_to_json
+from amazon.opentelemetry.distro.instrumentation.common.utils import serialize_to_json_string
 from amazon.opentelemetry.distro.instrumentation.mcp._transport import (
     ClientTransportMetadata,
     clear_parent_context,
@@ -97,7 +97,7 @@ class McpWrapper:
             if message.params.arguments:
                 span.set_attribute(
                     GEN_AI_TOOL_CALL_ARGUMENTS,
-                    serialize_to_json(message.params.arguments),
+                    serialize_to_json_string(message.params.arguments),
                 )
 
         elif isinstance(message, types.GetPromptRequest):
@@ -130,7 +130,7 @@ class McpWrapper:
 
         if isinstance(message, types.CallToolRequest) and result is not None:
             try:
-                span.set_attribute(GEN_AI_TOOL_CALL_RESULT, serialize_to_json(result))
+                span.set_attribute(GEN_AI_TOOL_CALL_RESULT, serialize_to_json_string(result))
                 if hasattr(result, "isError") and result.isError:
                     span.set_attribute(ERROR_TYPE, "tool_error")
                     span.set_status(Status(StatusCode.ERROR))

@@ -14,7 +14,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
 )
 
 # these are otel attributes that the invoke_agent span SHOULD have
-_REQUIRED_AGENT_ATTRS = (GEN_AI_PROVIDER_NAME, GEN_AI_REQUEST_MODEL, GEN_AI_REQUEST_TEMPERATURE)
+_REQUIRED_AGENT_SPAN_ATTRIBUTES = (GEN_AI_PROVIDER_NAME, GEN_AI_REQUEST_MODEL, GEN_AI_REQUEST_TEMPERATURE)
 
 
 class LangChainSpanProcessor(SpanProcessor):
@@ -43,7 +43,7 @@ class LangChainSpanProcessor(SpanProcessor):
         if op in (GenAiOperationNameValues.CHAT.value, GenAiOperationNameValues.TEXT_COMPLETION.value):
             agent_span = self._nearest_agent_span.get(span_id)
             if agent_span:
-                for attr in _REQUIRED_AGENT_ATTRS:
+                for attr in _REQUIRED_AGENT_SPAN_ATTRIBUTES:
                     val = span.attributes.get(attr) if span.attributes else None
                     if val is not None:
                         agent_span.set_attribute(attr, val)
