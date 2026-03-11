@@ -347,7 +347,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         #           {"type": "tool_call_response", "id": "call_abc123", "response": "72°F and sunny"},
         #       ]},
         #     ]
-        ROLE_MAP: dict[str, str] = {"human": "user", "ai": "assistant", "system": "system", "tool": "tool"}
+        role_map: dict[str, str] = {"human": "user", "ai": "assistant", "system": "system", "tool": "tool"}
         system_instructions: list[dict] = []
         conversation: list[dict] = []
         batch: list[BaseMessage]
@@ -355,7 +355,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         for batch in messages:
             msg: BaseMessage
             for msg in batch:
-                role: str = ROLE_MAP.get(msg.type, msg.type)
+                role: str = role_map.get(msg.type, msg.type)
                 parts: list[dict] = []
                 content: str | list[str | dict] = msg.content
                 tool_call_id: str | None = getattr(msg, "tool_call_id", None)
@@ -404,7 +404,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         #       {"type": "text", "content": "The weather is sunny."},
         #       {"type": "tool_call", "id": "call_abc", "name": "get_weather", "arguments": {...}},
         #   ], "finish_reason": "stop"}]
-        FINISH_REASON_MAP: dict[str, str] = {
+        finish_reason_map: dict[str, str] = {
             "stop": "stop",
             "end_turn": "stop",
             "tool_use": "tool_call",
@@ -423,10 +423,9 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                     raw_reason: str | None = (getattr(gen, "generation_info", None) or {}).get("finish_reason") or (
                         getattr(msg, "response_metadata", None) or {}
                     ).get("stop_reason")
-                    finish_reason: str = FINISH_REASON_MAP.get(raw_reason, raw_reason) if raw_reason else "stop"
-                    m: dict
-                    for m in msgs:
-                        m["finish_reason"] = finish_reason
+                    finish_reason: str = finish_reason_map.get(raw_reason, raw_reason) if raw_reason else "stop"
+                    for msg_dict in msgs:
+                        msg_dict["finish_reason"] = finish_reason
                     formatted.extend(msgs)
                 else:
                     text: str = getattr(gen, "text", "")
@@ -491,11 +490,8 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         # We suppress internal nodes that have langgraph metadata, except for nodes that
         # contain the agent name metadata as those are used for invoke_agent spans.
         if metadata and any(k.startswith("langgraph_") for k in metadata):
-            if "lc_agent_name" in metadata:
-                return False
-            if name and ("LangGraph" == name or "AgentExecutor" in name):
-                return False
-            return True
+            is_agent = "lc_agent_name" in metadata or (name and ("LangGraph" == name or "AgentExecutor" in name))
+            return not is_agent
         return False
 
     def _end_span(self, run_id: UUID) -> None:
