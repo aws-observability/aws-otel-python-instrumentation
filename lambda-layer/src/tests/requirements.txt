@@ -1,3 +1,2 @@
 # Dependencies used in tests only
 opentelemetry-test-utils==0.61b0
-opentelemetry-instrumentation-aws-lambda==0.61b0
