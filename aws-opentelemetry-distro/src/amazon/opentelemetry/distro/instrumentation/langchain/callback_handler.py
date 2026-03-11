@@ -154,7 +154,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
         self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.TEXT_COMPLETION.value)
         self._set_span_attribute(span, GEN_AI_PROMPT, serialize_to_json_string(prompts))
-        self._set_llm_request_span_attributes(span, kwargs)
+        self._set_llm_request_span_attributes(span, kwargs, serialized=serialized.get("kwargs", {}))
 
     def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: Any) -> None:
         if context.get_value(_SUPPRESS_INSTRUMENTATION_KEY) or run_id not in self.run_id_to_span_map:
