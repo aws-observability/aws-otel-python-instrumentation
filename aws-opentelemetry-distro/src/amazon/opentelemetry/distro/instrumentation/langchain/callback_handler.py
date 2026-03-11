@@ -125,7 +125,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
 
         if system_instructions:
             self._set_span_attribute(span, GEN_AI_SYSTEM_INSTRUCTIONS, serialize_to_json_string(system_instructions))
-        self._set_llm_request_span_attributes(span, serialized.get("kwargs", {}), fallback_model=name)
+        self._set_llm_request_span_attributes(span, kwargs, fallback_model=name)
 
     def on_llm_start(
         self,

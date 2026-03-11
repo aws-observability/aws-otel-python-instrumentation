@@ -11,8 +11,8 @@ class LangChainTest(GenAITestBase):
     def get_application_image_name() -> str:
         return "aws-application-signals-tests-langchain-app"
 
-    def test_langchain_agent(self):
+    def test_langchain_single_agent(self):
         self.do_test_requests("langchain/agent", "GET", 200, 0, 0)
 
-    def test_langchain_chat(self):
-        self.do_test_requests("langchain/chat", "GET", 200, 0, 0)
+    def test_langchain_multi_agent(self):
+        self.do_test_requests("langchain/multiagent", "GET", 200, 0, 0, expected_agent_count=2)
