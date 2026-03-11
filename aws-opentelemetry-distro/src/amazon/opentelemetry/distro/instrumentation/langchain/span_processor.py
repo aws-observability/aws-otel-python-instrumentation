@@ -23,9 +23,6 @@ class LangChainSpanProcessor(SpanProcessor):
         self._scope_name = scope_name
         self._nearest_agent_span: dict[int, Span] = {}
 
-    def _is_langchain_span(self, span: Span | ReadableSpan) -> bool:
-        return span.instrumentation_scope is not None and span.instrumentation_scope.name == self._scope_name
-
     def on_start(self, span: Span, parent_context: Context | None = None) -> None:
         if not span.context or not self._is_langchain_span(span):
             return
@@ -58,3 +55,6 @@ class LangChainSpanProcessor(SpanProcessor):
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:
         return True
+
+    def _is_langchain_span(self, span: Span | ReadableSpan) -> bool:  # pylint: disable=no-self-use
+        return span.instrumentation_scope is not None and span.instrumentation_scope.name == self._scope_name
