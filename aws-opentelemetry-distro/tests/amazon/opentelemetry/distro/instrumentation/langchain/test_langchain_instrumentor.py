@@ -29,6 +29,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
+    GEN_AI_TOOL_TYPE,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
     GenAiOperationNameValues,
@@ -155,39 +156,41 @@ class TestLangChainInstrumentor(TestCase):
 
         self.assertEqual(len(self.span_exporter.get_finished_spans()), 0)
 
-    def test_chat_model_invoke_creates_span(self):
+    def test_chat_model_span_has_all_attributes(self):
         llm = self.FakeChatModel(messages=iter([self.AIMessage(content="Hello!")]))
         llm.invoke("Say hello")
 
         spans = self.span_exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
         span = spans[0]
+
         self.assertIn("invoke_model", span.name)
         self.assertEqual(span.attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.CHAT.value)
+        self.assertEqual(span.attributes[GEN_AI_PROVIDER_NAME], "openai")
 
-    def test_llm_response_attributes(self):
-        llm = self.FakeChatModel(messages=iter([self.AIMessage(content="Hello!")]))
-        llm.invoke("Say hello")
-
-        spans = self.span_exporter.get_finished_spans()
-        self.assertEqual(len(spans), 1)
-        span = spans[0]
-        self.assertEqual(span.attributes[GEN_AI_RESPONSE_MODEL], "test-model")
-        self.assertEqual(span.attributes[GEN_AI_RESPONSE_ID], "test-response-id")
-        self.assertEqual(span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 10)
-        self.assertEqual(span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 20)
-
-    def test_llm_request_params(self):
-        llm = self.FakeChatModel(messages=iter([self.AIMessage(content="Done.")]))
-        llm.invoke("test")
-
-        spans = self.span_exporter.get_finished_spans()
-        self.assertEqual(len(spans), 1)
-        span = spans[0]
         self.assertEqual(span.attributes[GEN_AI_REQUEST_MODEL], "test-model-id")
         self.assertEqual(span.attributes[GEN_AI_REQUEST_TEMPERATURE], 0.7)
         self.assertEqual(span.attributes[GEN_AI_REQUEST_TOP_P], 0.9)
         self.assertEqual(span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
+
+        self.assertIn(GEN_AI_INPUT_MESSAGES, span.attributes)
+        input_messages = json.loads(span.attributes[GEN_AI_INPUT_MESSAGES])
+        self.assertIsInstance(input_messages, list)
+        self.assertGreater(len(input_messages), 0)
+        self.assertIn("role", input_messages[0])
+        self.assertIn("parts", input_messages[0])
+
+        self.assertIn(GEN_AI_OUTPUT_MESSAGES, span.attributes)
+        output_messages = json.loads(span.attributes[GEN_AI_OUTPUT_MESSAGES])
+        self.assertIsInstance(output_messages, list)
+        self.assertGreater(len(output_messages), 0)
+        self.assertEqual(output_messages[0]["role"], "assistant")
+        self.assertIn("parts", output_messages[0])
+
+        self.assertEqual(span.attributes[GEN_AI_RESPONSE_MODEL], "test-model")
+        self.assertEqual(span.attributes[GEN_AI_RESPONSE_ID], "test-response-id")
+        self.assertEqual(span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 10)
+        self.assertEqual(span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 20)
 
     def test_create_agent_creates_invoke_agent_span(self):
         @self.tool
@@ -208,7 +211,7 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(agent_span.attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.INVOKE_AGENT.value)
         self.assertEqual(agent_span.attributes[GEN_AI_AGENT_NAME], "TestAgent")
 
-    def test_tool_execution_creates_span(self):
+    def test_tool_span_has_all_attributes(self):
         def add_numbers(a: int, b: int) -> int:
             return a + b
 
@@ -220,10 +223,12 @@ class TestLangChainInstrumentor(TestCase):
         spans = self.span_exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
         span = spans[0]
+
         self.assertIn("execute_tool", span.name)
         self.assertEqual(span.attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.EXECUTE_TOOL.value)
         self.assertEqual(span.attributes[GEN_AI_TOOL_NAME], "add_numbers")
         self.assertEqual(span.attributes[GEN_AI_TOOL_DESCRIPTION], "Add two numbers")
+        self.assertEqual(span.attributes[GEN_AI_TOOL_TYPE], "function")
         self.assertIn(GEN_AI_TOOL_CALL_ARGUMENTS, span.attributes)
         self.assertEqual(span.attributes[GEN_AI_TOOL_CALL_RESULT], str(result))
 
