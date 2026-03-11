@@ -4,7 +4,10 @@
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Callable, Dict, Mapping, Optional, Tuple
 
-from amazon.opentelemetry.distro.instrumentation.common.utils import PROVIDER_MAP, serialize_to_json
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
+    PROVIDER_MAP,
+    serialize_to_json_string,
+)
 from opentelemetry import context, trace
 from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
@@ -152,7 +155,7 @@ class _CrewKickoffWrapper(_BaseWrapper):
             if all_tools:
                 tool_defs = self._extract_tool_definitions(all_tools)
                 if tool_defs:
-                    attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json(tool_defs)
+                    attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs)
 
         return attributes
 
@@ -260,7 +263,7 @@ class _ToolUseWrapper(_BaseWrapper):
         if calling:
             call_args = getattr(calling, "arguments", None)
             if call_args:
-                attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = serialize_to_json(call_args)
+                attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = serialize_to_json_string(call_args)
 
         self._set_agent_llm_attributes(attributes, getattr(instance, "agent", None))
 
@@ -268,7 +271,7 @@ class _ToolUseWrapper(_BaseWrapper):
 
     def _on_success(self, span: trace.Span, result: Any) -> None:
         if result is not None:
-            span.set_attribute(GEN_AI_TOOL_CALL_RESULT, serialize_to_json(result))
+            span.set_attribute(GEN_AI_TOOL_CALL_RESULT, serialize_to_json_string(result))
 
 
 class _ToolRunWrapper(_BaseWrapper):
@@ -302,10 +305,10 @@ class _ToolRunWrapper(_BaseWrapper):
 
         tool_args = args[0] if args else kwargs
         if tool_args:
-            attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = serialize_to_json(tool_args)
+            attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = serialize_to_json_string(tool_args)
 
         return attributes
 
     def _on_success(self, span: trace.Span, result: Any) -> None:
         if result is not None:
-            span.set_attribute(GEN_AI_TOOL_CALL_RESULT, serialize_to_json(result))
+            span.set_attribute(GEN_AI_TOOL_CALL_RESULT, serialize_to_json_string(result))
