@@ -182,14 +182,14 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(span.attributes[GEN_AI_REQUEST_TOP_P], 0.9)
         self.assertEqual(span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
 
-        self.assertIn(GEN_AI_INPUT_MESSAGES, span.attributes)
+        self.assertIsNotNone(span.attributes.get(GEN_AI_INPUT_MESSAGES))
         input_messages = json.loads(span.attributes[GEN_AI_INPUT_MESSAGES])
         self.assertIsInstance(input_messages, list)
         self.assertGreater(len(input_messages), 0)
         self.assertIn("role", input_messages[0])
         self.assertIn("parts", input_messages[0])
 
-        self.assertIn(GEN_AI_OUTPUT_MESSAGES, span.attributes)
+        self.assertIsNotNone(span.attributes.get(GEN_AI_OUTPUT_MESSAGES))
         output_messages = json.loads(span.attributes[GEN_AI_OUTPUT_MESSAGES])
         self.assertIsInstance(output_messages, list)
         self.assertGreater(len(output_messages), 0)
@@ -238,7 +238,7 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(span.attributes[GEN_AI_TOOL_NAME], "add_numbers")
         self.assertEqual(span.attributes[GEN_AI_TOOL_DESCRIPTION], "Add two numbers")
         self.assertEqual(span.attributes[GEN_AI_TOOL_TYPE], "function")
-        self.assertIn(GEN_AI_TOOL_CALL_ARGUMENTS, span.attributes)
+        self.assertIsNotNone(span.attributes.get(GEN_AI_TOOL_CALL_ARGUMENTS))
         self.assertEqual(span.attributes[GEN_AI_TOOL_CALL_RESULT], str(result))
 
     def test_internal_chains_suppressed(self):
@@ -485,9 +485,9 @@ class TestLangChainInstrumentor(TestCase):
         spans = self.span_exporter.get_finished_spans()
         agent_span = next((s for s in spans if "invoke_agent" in s.name), None)
         self.assertIsNotNone(agent_span)
-        self.assertIn(GEN_AI_REQUEST_MODEL, agent_span.attributes)
-        self.assertIn(GEN_AI_REQUEST_TEMPERATURE, agent_span.attributes)
-        self.assertIn(GEN_AI_PROVIDER_NAME, agent_span.attributes)
+        self.assertEqual(agent_span.attributes[GEN_AI_REQUEST_MODEL], "test-model-id")
+        self.assertEqual(agent_span.attributes[GEN_AI_REQUEST_TEMPERATURE], 0.7)
+        self.assertEqual(agent_span.attributes[GEN_AI_PROVIDER_NAME], "openai")
 
     def test_text_completion_propagates_to_parent_agent(self):
         if not self.HAS_LEGACY_LANGCHAIN:
@@ -508,8 +508,7 @@ class TestLangChainInstrumentor(TestCase):
         spans = self.span_exporter.get_finished_spans()
         agent_span = next((s for s in spans if "invoke_agent" in s.name), None)
         self.assertIsNotNone(agent_span)
-        # Verify propagation from text_completion to agent span
-        self.assertIn(GEN_AI_REQUEST_MODEL, agent_span.attributes)
+        self.assertIsNotNone(agent_span.attributes.get(GEN_AI_REQUEST_MODEL))
 
     def test_create_agent_detects_agent_with_and_without_name(self):
         cases = [
@@ -549,13 +548,13 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(len(spans), 1)
         span = spans[0]
 
-        self.assertIn(GEN_AI_INPUT_MESSAGES, span.attributes)
+        self.assertIsNotNone(span.attributes.get(GEN_AI_INPUT_MESSAGES))
         messages = json.loads(span.attributes[GEN_AI_INPUT_MESSAGES])
         _validate_otel_schema(messages, "gen-ai-input-messages")
         self.assertEqual(messages[0]["role"], "user")
         self.assertEqual(messages[0]["parts"][0]["type"], "text")
 
-        self.assertIn(GEN_AI_OUTPUT_MESSAGES, span.attributes)
+        self.assertIsNotNone(span.attributes.get(GEN_AI_OUTPUT_MESSAGES))
         output = json.loads(span.attributes[GEN_AI_OUTPUT_MESSAGES])
         _validate_otel_schema(output, "gen-ai-output-messages")
         self.assertEqual(output[0]["role"], "assistant")
@@ -570,7 +569,7 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(len(spans), 1)
         span = spans[0]
 
-        self.assertIn(GEN_AI_SYSTEM_INSTRUCTIONS, span.attributes)
+        self.assertIsNotNone(span.attributes.get(GEN_AI_SYSTEM_INSTRUCTIONS))
         instructions = json.loads(span.attributes[GEN_AI_SYSTEM_INSTRUCTIONS])
         _validate_otel_schema(instructions, "gen-ai-system-instructions")
         self.assertEqual(instructions[0]["type"], "text")
@@ -584,17 +583,17 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(len(spans), 1)
         span = spans[0]
 
-        self.assertIn(GEN_AI_PROMPT, span.attributes)
+        self.assertIsNotNone(span.attributes.get(GEN_AI_PROMPT))
         prompts = json.loads(span.attributes[GEN_AI_PROMPT])
         self.assertIsInstance(prompts, list)
         self.assertIn("test prompt", prompts[0])
 
-        self.assertIn(GEN_AI_OUTPUT_MESSAGES, span.attributes)
+        self.assertIsNotNone(span.attributes.get(GEN_AI_OUTPUT_MESSAGES))
         output = json.loads(span.attributes[GEN_AI_OUTPUT_MESSAGES])
         self.assertIsInstance(output, list)
         self.assertGreater(len(output), 0)
         self.assertEqual(output[0]["role"], "assistant")
-        self.assertIn("hello", output[0]["parts"][0]["content"])
+        self.assertEqual(output[0]["parts"][0]["content"], "hello")
 
     def test_langgraph_attributes_on_agent_spans(self):
         @self.tool

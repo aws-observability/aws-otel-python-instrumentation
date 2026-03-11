@@ -446,15 +446,16 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self, span: Span, kwargs: dict, serialized: Optional[dict] = None, model_name: Optional[str] = None
     ):
         config = serialized or {}
-        model = model_name
-        if not model:
-            for model_tag in ("model", "model_name", "model_id", "base_model_id"):
-                if (model := kwargs.get(model_tag)) is not None:
-                    break
-                if (model := (kwargs.get("invocation_params") or {}).get(model_tag)) is not None:
-                    break
-                if (model := config.get(model_tag)) is not None:
-                    break
+        model = None
+        for model_tag in ("model", "model_name", "model_id", "base_model_id"):
+            if (model := kwargs.get(model_tag)) is not None:
+                break
+            if (model := (kwargs.get("invocation_params") or {}).get(model_tag)) is not None:
+                break
+            if (model := config.get(model_tag)) is not None:
+                break
+
+        model = model or model_name
         if model:
             self._set_span_attribute(span, GEN_AI_REQUEST_MODEL, model)
             self._set_span_attribute(span, GEN_AI_RESPONSE_MODEL, model)
