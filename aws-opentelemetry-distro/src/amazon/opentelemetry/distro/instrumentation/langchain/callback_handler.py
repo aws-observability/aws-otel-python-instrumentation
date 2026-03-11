@@ -82,8 +82,8 @@ class _BaseCallbackManagerInitWrapper:
 
 class OpenTelemetryCallbackHandler(BaseCallbackHandler):
     # Ensures the OTel callback is executed synchronously and not in an async thread.
-    # This is to ensure that we are ALWAYS setting this instrumentation's spans as the current span in context to make sure we
-    # propagate the trace to downstream
+    # This is to ensure that we are ALWAYS setting this instrumentation's spans as the current span in context to make
+    # sure we propagate the trace to downstream
     # https://github.com/langchain-ai/langchain/blob/80e09feec/libs/core/langchain_core/callbacks/manager.py#L381-L390
     run_inline = True
 
