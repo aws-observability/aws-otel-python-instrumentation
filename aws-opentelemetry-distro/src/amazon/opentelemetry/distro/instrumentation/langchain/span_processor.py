@@ -53,7 +53,7 @@ class LangChainSpanProcessor(SpanProcessor):
     def shutdown(self) -> None:
         self._nearest_agent_span.clear()
 
-    def force_flush(self, timeout_millis: int = 30000) -> bool:
+    def force_flush(self, timeout_millis: int = 30000) -> bool:  # pylint: disable=no-self-use
         return True
 
     def _is_langchain_span(self, span: Span | ReadableSpan) -> bool:  # pylint: disable=no-self-use
