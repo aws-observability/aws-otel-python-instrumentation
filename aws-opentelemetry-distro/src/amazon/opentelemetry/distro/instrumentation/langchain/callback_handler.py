@@ -111,10 +111,10 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             return
 
         model_id: str | None = kwargs.get("invocation_params", {}).get("model_id")
-        name: str | None = model_id or self._get_name_from_callback(serialized, **kwargs)
+        model_name: str | None = model_id or self._get_name_from_callback(serialized, **kwargs)
         provider: str | None = self._extract_llm_provider(serialized, kwargs)
         system_instructions, conversation = self._format_lc_messages(messages)
-        span_name: str = f"{INVOKE_MODEL} {name}" if name else INVOKE_MODEL
+        span_name: str = f"{INVOKE_MODEL} {model_name}" if model_name else INVOKE_MODEL
 
         span: Span = self._start_span(run_id, parent_run_id, span_name)
 
@@ -125,7 +125,9 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
 
         if system_instructions:
             self._set_span_attribute(span, GEN_AI_SYSTEM_INSTRUCTIONS, serialize_to_json_string(system_instructions))
-        self._set_llm_request_span_attributes(span, kwargs, serialized=serialized.get("kwargs", {}), class_name=name)
+        self._set_llm_request_span_attributes(
+            span, kwargs, serialized=serialized.get("kwargs", {}), model_name=model_name
+        )
 
     def on_llm_start(
         self,
@@ -141,11 +143,11 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             return
 
         model_id: str | None = kwargs.get("invocation_params", {}).get("model_id")
-        name: str | None = model_id or self._get_name_from_callback(serialized, **kwargs)
+        model_name: str | None = model_id or self._get_name_from_callback(serialized, **kwargs)
         provider: str | None = self._extract_llm_provider(serialized, kwargs)
         span_name: str = (
-            f"{GenAiOperationNameValues.TEXT_COMPLETION.value} {name}"
-            if name
+            f"{GenAiOperationNameValues.TEXT_COMPLETION.value} {model_name}"
+            if model_name
             else GenAiOperationNameValues.TEXT_COMPLETION.value
         )
         span: Span = self._start_span(run_id, parent_run_id, span_name)
@@ -154,7 +156,9 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
         self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.TEXT_COMPLETION.value)
         self._set_span_attribute(span, GEN_AI_PROMPT, serialize_to_json_string(prompts))
-        self._set_llm_request_span_attributes(span, kwargs, serialized=serialized.get("kwargs", {}), class_name=name)
+        self._set_llm_request_span_attributes(
+            span, kwargs, serialized=serialized.get("kwargs", {}), model_name=model_name
+        )
 
     def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: Any) -> None:
         if context.get_value(_SUPPRESS_INSTRUMENTATION_KEY) or run_id not in self.run_id_to_span_map:
@@ -439,19 +443,18 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         OpenTelemetryCallbackHandler._set_span_attribute(span, LANGGRAPH_NODE_SPAN_ATTR, metadata.get("langgraph_node"))
 
     def _set_llm_request_span_attributes(
-        self, span: Span, kwargs: dict, serialized: Optional[dict] = None, class_name: Optional[str] = None
+        self, span: Span, kwargs: dict, serialized: Optional[dict] = None, model_name: Optional[str] = None
     ):
         config = serialized or {}
-        model = None
-        for model_tag in ("model", "model_name", "model_id", "base_model_id"):
-            if (model := kwargs.get(model_tag)) is not None:
-                break
-            if (model := (kwargs.get("invocation_params") or {}).get(model_tag)) is not None:
-                break
-            if (model := config.get(model_tag)) is not None:
-                break
-
-        model = model or class_name
+        model = model_name
+        if not model:
+            for model_tag in ("model", "model_name", "model_id", "base_model_id"):
+                if (model := kwargs.get(model_tag)) is not None:
+                    break
+                if (model := (kwargs.get("invocation_params") or {}).get(model_tag)) is not None:
+                    break
+                if (model := config.get(model_tag)) is not None:
+                    break
         if model:
             self._set_span_attribute(span, GEN_AI_REQUEST_MODEL, model)
             self._set_span_attribute(span, GEN_AI_RESPONSE_MODEL, model)
