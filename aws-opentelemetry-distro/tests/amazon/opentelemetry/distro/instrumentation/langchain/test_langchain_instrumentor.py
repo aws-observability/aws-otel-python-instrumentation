@@ -475,7 +475,6 @@ class TestLangChainInstrumentor(TestCase):
         self.assertIn(GEN_AI_REQUEST_TEMPERATURE, agent_span.attributes)
         self.assertIn(GEN_AI_PROVIDER_NAME, agent_span.attributes)
 
-    @unittest.skip("Legacy AgentExecutor propagation not supported with LangChainSpanProcessor")
     def test_text_completion_propagates_to_parent_agent(self):
         if not self.HAS_LEGACY_LANGCHAIN:
             self.skipTest("langchain_classic not available")
