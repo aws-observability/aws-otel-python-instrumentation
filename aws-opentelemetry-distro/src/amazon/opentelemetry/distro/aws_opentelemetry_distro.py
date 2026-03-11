@@ -131,7 +131,7 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             os.environ.setdefault(
                 OTEL_PYTHON_DISABLED_INSTRUMENTATIONS,
                 "http,sqlalchemy,psycopg2,pymysql,sqlite3,aiopg,asyncpg,mysql_connector,"
-                "urllib3,requests,system_metrics,google-genai",
+                "urllib3,requests,system_metrics,google-genai,crewai,langchain",
             )
             os.environ.setdefault(OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED, "true")
             os.environ.setdefault(APPLICATION_SIGNALS_ENABLED_CONFIG, "false")
@@ -155,20 +155,22 @@ def _configure_agent_observability_v1(region: str) -> None:
     os.environ.setdefault(OTEL_TRACES_EXPORTER, "otlp")
     os.environ.setdefault(OTEL_LOGS_EXPORTER, "otlp")
     os.environ.setdefault(OTEL_METRICS_EXPORTER, "awsemf")
-    if region:
-        os.environ.setdefault(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, f"https://xray.{region}.amazonaws.com/v1/traces")
-        os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, f"https://logs.{region}.amazonaws.com/v1/logs")
-    else:
-        _logger.warning(
-            "AWS region could not be determined. OTLP endpoints will not be automatically configured. "
-            "Please set AWS_REGION environment variable or configure OTLP endpoints manually."
-        )
+    if not os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
+        if region:
+            os.environ.setdefault(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, f"https://xray.{region}.amazonaws.com/v1/traces")
+            os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, f"https://logs.{region}.amazonaws.com/v1/logs")
+        else:
+            _logger.warning(
+                "AWS region could not be determined. OTLP endpoints will not be automatically configured. "
+                "Please set AWS_REGION environment variable or configure OTLP endpoints manually."
+            )
 
 
 def _configure_agent_observability_v2() -> None:
     os.environ.setdefault(OTEL_TRACES_EXPORTER, "otlp")
     os.environ.setdefault(OTEL_LOGS_EXPORTER, "otlp")
     os.environ.setdefault(OTEL_METRICS_EXPORTER, "otlp")
-    os.environ.setdefault(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, "http://localhost:4318/v1/traces")
-    os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, "http://localhost:4318/v1/logs")
-    os.environ.setdefault(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, "http://localhost:4318/v1/metrics")
+    if not os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
+        os.environ.setdefault(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, "http://localhost:4318/v1/traces")
+        os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, "http://localhost:4318/v1/logs")
+        os.environ.setdefault(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, "http://localhost:4318/v1/metrics")

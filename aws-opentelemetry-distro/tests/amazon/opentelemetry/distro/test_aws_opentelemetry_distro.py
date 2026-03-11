@@ -34,6 +34,9 @@ class TestAwsOpenTelemetryDistro(TestCase):
             "OTEL_AWS_APPLICATION_SIGNALS_ENABLED",
             "OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS",
             "DJANGO_SETTINGS_MODULE",
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+            "AGENT_OBSERVABILITY_VERSION",
         ]
 
         # First, save all current values
@@ -136,7 +139,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
         self.assertEqual(
             os.environ.get("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS"),
             "http,sqlalchemy,psycopg2,pymysql,sqlite3,aiopg,asyncpg,mysql_connector,"
-            "urllib3,requests,system_metrics,google-genai",
+            "urllib3,requests,system_metrics,google-genai,crewai,langchain",
         )
         self.assertEqual(os.environ.get("OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED"), "true")
         self.assertEqual(os.environ.get("OTEL_AWS_APPLICATION_SIGNALS_ENABLED"), "false")
@@ -490,3 +493,38 @@ class TestAwsOpenTelemetryDistro(TestCase):
         distro._configure()
 
         self.assertEqual(os.environ.get("OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS"), "false")
+
+    def test_agent_observability_disables_upstream_crewai_langchain(self):
+        self._configure_with_agent_observability()
+        disabled = os.environ.get("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", "")
+        self.assertIn("crewai", disabled)
+        self.assertIn("langchain", disabled)
+
+    def test_agent_observability_respects_custom_disabled_instrumentations(self):
+        os.environ["OTEL_PYTHON_DISABLED_INSTRUMENTATIONS"] = "custom_lib"
+        self._configure_with_agent_observability()
+        self.assertEqual(os.environ.get("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS"), "custom_lib")
+
+    def test_base_otlp_endpoint_prevents_specific_endpoints_v1(self):
+        os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://my-collector:4318"
+        self._configure_with_agent_observability()
+        self.assertNotIn("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", os.environ)
+        self.assertNotIn("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", os.environ)
+
+    def test_base_otlp_endpoint_prevents_specific_endpoints_v2(self):
+        os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://my-collector:4318"
+        os.environ["AGENT_OBSERVABILITY_VERSION"] = "2"
+        self._configure_with_agent_observability()
+        self.assertNotIn("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", os.environ)
+        self.assertNotIn("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", os.environ)
+        self.assertNotIn("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", os.environ)
+
+    def _configure_with_agent_observability(self, region="us-west-2"):
+        with patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure"), patch(
+            "amazon.opentelemetry.distro.aws_opentelemetry_distro.apply_instrumentation_patches"
+        ), patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.is_installed", return_value=False), patch(
+            "amazon.opentelemetry.distro.aws_opentelemetry_distro.is_agent_observability_enabled", return_value=True
+        ), patch(
+            "amazon.opentelemetry.distro.aws_opentelemetry_distro.get_aws_region", return_value=region
+        ):
+            AwsOpenTelemetryDistro()._configure()
