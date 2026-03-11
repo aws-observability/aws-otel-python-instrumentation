@@ -205,9 +205,8 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         # otherwise if no name is given it defaults to "LangGraph".
         # langgraph_node check ensures we only match against agent nodes, not unwanted
         # internal nodes.
-        is_agent_chain: bool = bool(
-            (name and ("AgentExecutor" in name or name == "LangGraph"))
-            or (name and name == (metadata or {}).get("lc_agent_name"))
+        is_agent_chain: bool = bool(name) and (
+            "AgentExecutor" in name or name == "LangGraph" or name == (metadata or {}).get("lc_agent_name")
         )
 
         provider: str | None = self._extract_provider(serialized, kwargs)
