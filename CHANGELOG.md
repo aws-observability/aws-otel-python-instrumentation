@@ -12,6 +12,10 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat: [BREAKING CHANGE] Disable upstream crewai/langchain instrumentations and respect OTLP base endpoint for Agent observability
+  ([#668](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/668))
+- Add native LangChain instrumentation support
+  ([#589](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/589))
 - feat: Allow disabling of default anomaly condition
   ([#660](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/660))
 - Add baggage env variable span processor and agent observability version config
