@@ -14,6 +14,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 - feat: [BREAKING CHANGE] Disable upstream crewai/langchain instrumentations and respect OTLP base endpoint for Agent observability
   ([#668](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/668))
+- feat: Add native MCP instrumentation support
+  ([#655](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/655))
 - Add native LangChain instrumentation support
   ([#589](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/589))
 - feat: Allow disabling of default anomaly condition

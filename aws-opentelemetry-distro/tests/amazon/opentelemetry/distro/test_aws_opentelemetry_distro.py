@@ -160,7 +160,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
         self.assertEqual(
             os.environ.get(OTEL_PYTHON_DISABLED_INSTRUMENTATIONS),
             "http,sqlalchemy,psycopg2,pymysql,sqlite3,aiopg,asyncpg,mysql_connector,"
-            "urllib3,requests,system_metrics,google-genai,crewai,langchain",
+            "urllib3,requests,system_metrics,google-genai,crewai,langchain,mcp",
         )
         self.assertEqual(os.environ.get(OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED), "true")
         self.assertEqual(os.environ.get(APPLICATION_SIGNALS_ENABLED_CONFIG), "false")

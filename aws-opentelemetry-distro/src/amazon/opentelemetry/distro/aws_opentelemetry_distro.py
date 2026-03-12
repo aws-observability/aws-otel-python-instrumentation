@@ -134,7 +134,7 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             os.environ.setdefault(
                 OTEL_PYTHON_DISABLED_INSTRUMENTATIONS,
                 "http,sqlalchemy,psycopg2,pymysql,sqlite3,aiopg,asyncpg,mysql_connector,"
-                "urllib3,requests,system_metrics,google-genai,crewai,langchain",
+                "urllib3,requests,system_metrics,google-genai,crewai,langchain,mcp",
             )
             os.environ.setdefault(OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED, "true")
             os.environ.setdefault(APPLICATION_SIGNALS_ENABLED_CONFIG, "false")
