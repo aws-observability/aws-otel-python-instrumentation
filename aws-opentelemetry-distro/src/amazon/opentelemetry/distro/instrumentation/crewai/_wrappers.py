@@ -4,7 +4,10 @@
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Callable, Dict, Mapping, Optional, Tuple
 
-from amazon.opentelemetry.distro.instrumentation.common.utils import PROVIDER_MAP, serialize_to_json_string
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
+    PROVIDER_MAP,
+    serialize_to_json_string,
+)
 from opentelemetry import context, trace
 from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (

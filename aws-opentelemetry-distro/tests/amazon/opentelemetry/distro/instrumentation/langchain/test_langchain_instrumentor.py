@@ -29,6 +29,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
+    GEN_AI_TOOL_TYPE,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
     GenAiOperationNameValues,
@@ -88,6 +89,15 @@ class TestLangChainInstrumentor(TestCase):
             temperature: float = 0.7
             top_p: float = 0.9
             max_tokens: int = 100
+
+            @property
+            def _default_params(self) -> dict:
+                return {
+                    "model_id": self.model_id,
+                    "temperature": self.temperature,
+                    "top_p": self.top_p,
+                    "max_tokens": self.max_tokens,
+                }
 
             @classmethod
             def is_lc_serializable(cls) -> bool:
@@ -155,39 +165,41 @@ class TestLangChainInstrumentor(TestCase):
 
         self.assertEqual(len(self.span_exporter.get_finished_spans()), 0)
 
-    def test_chat_model_invoke_creates_span(self):
+    def test_chat_model_span_has_all_attributes(self):
         llm = self.FakeChatModel(messages=iter([self.AIMessage(content="Hello!")]))
         llm.invoke("Say hello")
 
         spans = self.span_exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
         span = spans[0]
+
         self.assertIn("invoke_model", span.name)
         self.assertEqual(span.attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.CHAT.value)
+        self.assertEqual(span.attributes[GEN_AI_PROVIDER_NAME], "openai")
 
-    def test_llm_response_attributes(self):
-        llm = self.FakeChatModel(messages=iter([self.AIMessage(content="Hello!")]))
-        llm.invoke("Say hello")
-
-        spans = self.span_exporter.get_finished_spans()
-        self.assertEqual(len(spans), 1)
-        span = spans[0]
-        self.assertEqual(span.attributes[GEN_AI_RESPONSE_MODEL], "test-model")
-        self.assertEqual(span.attributes[GEN_AI_RESPONSE_ID], "test-response-id")
-        self.assertEqual(span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 10)
-        self.assertEqual(span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 20)
-
-    def test_llm_request_params(self):
-        llm = self.FakeChatModel(messages=iter([self.AIMessage(content="Done.")]))
-        llm.invoke("test")
-
-        spans = self.span_exporter.get_finished_spans()
-        self.assertEqual(len(spans), 1)
-        span = spans[0]
         self.assertEqual(span.attributes[GEN_AI_REQUEST_MODEL], "test-model-id")
         self.assertEqual(span.attributes[GEN_AI_REQUEST_TEMPERATURE], 0.7)
         self.assertEqual(span.attributes[GEN_AI_REQUEST_TOP_P], 0.9)
         self.assertEqual(span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
+
+        self.assertIsNotNone(span.attributes.get(GEN_AI_INPUT_MESSAGES))
+        input_messages = json.loads(span.attributes[GEN_AI_INPUT_MESSAGES])
+        self.assertIsInstance(input_messages, list)
+        self.assertGreater(len(input_messages), 0)
+        self.assertIn("role", input_messages[0])
+        self.assertIn("parts", input_messages[0])
+
+        self.assertIsNotNone(span.attributes.get(GEN_AI_OUTPUT_MESSAGES))
+        output_messages = json.loads(span.attributes[GEN_AI_OUTPUT_MESSAGES])
+        self.assertIsInstance(output_messages, list)
+        self.assertGreater(len(output_messages), 0)
+        self.assertEqual(output_messages[0]["role"], "assistant")
+        self.assertIn("parts", output_messages[0])
+
+        self.assertEqual(span.attributes[GEN_AI_RESPONSE_MODEL], "test-model")
+        self.assertEqual(span.attributes[GEN_AI_RESPONSE_ID], "test-response-id")
+        self.assertEqual(span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 10)
+        self.assertEqual(span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 20)
 
     def test_create_agent_creates_invoke_agent_span(self):
         @self.tool
@@ -208,7 +220,7 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(agent_span.attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.INVOKE_AGENT.value)
         self.assertEqual(agent_span.attributes[GEN_AI_AGENT_NAME], "TestAgent")
 
-    def test_tool_execution_creates_span(self):
+    def test_tool_span_has_all_attributes(self):
         def add_numbers(a: int, b: int) -> int:
             return a + b
 
@@ -220,11 +232,13 @@ class TestLangChainInstrumentor(TestCase):
         spans = self.span_exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
         span = spans[0]
+
         self.assertIn("execute_tool", span.name)
         self.assertEqual(span.attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.EXECUTE_TOOL.value)
         self.assertEqual(span.attributes[GEN_AI_TOOL_NAME], "add_numbers")
         self.assertEqual(span.attributes[GEN_AI_TOOL_DESCRIPTION], "Add two numbers")
-        self.assertIn(GEN_AI_TOOL_CALL_ARGUMENTS, span.attributes)
+        self.assertEqual(span.attributes[GEN_AI_TOOL_TYPE], "function")
+        self.assertIsNotNone(span.attributes.get(GEN_AI_TOOL_CALL_ARGUMENTS))
         self.assertEqual(span.attributes[GEN_AI_TOOL_CALL_RESULT], str(result))
 
     def test_internal_chains_suppressed(self):
@@ -471,9 +485,9 @@ class TestLangChainInstrumentor(TestCase):
         spans = self.span_exporter.get_finished_spans()
         agent_span = next((s for s in spans if "invoke_agent" in s.name), None)
         self.assertIsNotNone(agent_span)
-        self.assertIn(GEN_AI_REQUEST_MODEL, agent_span.attributes)
-        self.assertIn(GEN_AI_REQUEST_TEMPERATURE, agent_span.attributes)
-        self.assertIn(GEN_AI_PROVIDER_NAME, agent_span.attributes)
+        self.assertEqual(agent_span.attributes[GEN_AI_REQUEST_MODEL], "test-model-id")
+        self.assertEqual(agent_span.attributes[GEN_AI_REQUEST_TEMPERATURE], 0.7)
+        self.assertEqual(agent_span.attributes[GEN_AI_PROVIDER_NAME], "openai")
 
     def test_text_completion_propagates_to_parent_agent(self):
         if not self.HAS_LEGACY_LANGCHAIN:
@@ -494,8 +508,7 @@ class TestLangChainInstrumentor(TestCase):
         spans = self.span_exporter.get_finished_spans()
         agent_span = next((s for s in spans if "invoke_agent" in s.name), None)
         self.assertIsNotNone(agent_span)
-        # Verify propagation from text_completion to agent span
-        self.assertIn(GEN_AI_REQUEST_MODEL, agent_span.attributes)
+        self.assertIsNotNone(agent_span.attributes.get(GEN_AI_REQUEST_MODEL))
 
     def test_create_agent_detects_agent_with_and_without_name(self):
         cases = [
@@ -535,13 +548,13 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(len(spans), 1)
         span = spans[0]
 
-        self.assertIn(GEN_AI_INPUT_MESSAGES, span.attributes)
+        self.assertIsNotNone(span.attributes.get(GEN_AI_INPUT_MESSAGES))
         messages = json.loads(span.attributes[GEN_AI_INPUT_MESSAGES])
         _validate_otel_schema(messages, "gen-ai-input-messages")
         self.assertEqual(messages[0]["role"], "user")
         self.assertEqual(messages[0]["parts"][0]["type"], "text")
 
-        self.assertIn(GEN_AI_OUTPUT_MESSAGES, span.attributes)
+        self.assertIsNotNone(span.attributes.get(GEN_AI_OUTPUT_MESSAGES))
         output = json.loads(span.attributes[GEN_AI_OUTPUT_MESSAGES])
         _validate_otel_schema(output, "gen-ai-output-messages")
         self.assertEqual(output[0]["role"], "assistant")
@@ -556,7 +569,7 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(len(spans), 1)
         span = spans[0]
 
-        self.assertIn(GEN_AI_SYSTEM_INSTRUCTIONS, span.attributes)
+        self.assertIsNotNone(span.attributes.get(GEN_AI_SYSTEM_INSTRUCTIONS))
         instructions = json.loads(span.attributes[GEN_AI_SYSTEM_INSTRUCTIONS])
         _validate_otel_schema(instructions, "gen-ai-system-instructions")
         self.assertEqual(instructions[0]["type"], "text")
@@ -570,17 +583,17 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(len(spans), 1)
         span = spans[0]
 
-        self.assertIn(GEN_AI_PROMPT, span.attributes)
+        self.assertIsNotNone(span.attributes.get(GEN_AI_PROMPT))
         prompts = json.loads(span.attributes[GEN_AI_PROMPT])
         self.assertIsInstance(prompts, list)
         self.assertIn("test prompt", prompts[0])
 
-        self.assertIn(GEN_AI_OUTPUT_MESSAGES, span.attributes)
+        self.assertIsNotNone(span.attributes.get(GEN_AI_OUTPUT_MESSAGES))
         output = json.loads(span.attributes[GEN_AI_OUTPUT_MESSAGES])
         self.assertIsInstance(output, list)
         self.assertGreater(len(output), 0)
         self.assertEqual(output[0]["role"], "assistant")
-        self.assertIn("hello", output[0]["parts"][0]["content"])
+        self.assertEqual(output[0]["parts"][0]["content"], "hello")
 
     def test_langgraph_attributes_on_agent_spans(self):
         @self.tool
