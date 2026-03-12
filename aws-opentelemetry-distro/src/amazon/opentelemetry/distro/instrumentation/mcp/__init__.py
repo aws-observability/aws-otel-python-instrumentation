@@ -72,17 +72,21 @@ class McpInstrumentor(BaseInstrumentor):
         )
 
     def _uninstrument(self, **kwargs: Any) -> None:
-        # pylint: disable=import-outside-toplevel
-        from mcp.client import sse, stdio, streamable_http
-        from mcp.server.lowlevel import server
-        from mcp.shared import session
+        try:
+            # pylint: disable=import-outside-toplevel
+            from mcp.client import sse, stdio, streamable_http
+            from mcp.server.lowlevel import server
+            from mcp.shared import session
 
-        try_unwrap(session.BaseSession, "send_request")
-        try_unwrap(session.BaseSession, "send_notification")
-        try_unwrap(server.Server, "_handle_request")
-        try_unwrap(server.Server, "_handle_notification")
-        try_unwrap(stdio, "stdio_client")
-        try_unwrap(streamable_http, "streamablehttp_client")
-        try_unwrap(streamable_http, "streamable_http_client")
-        try_unwrap(sse, "sse_client")
-        try_unwrap(streamable_http.StreamableHTTPTransport, "_maybe_extract_session_id_from_response")
+            try_unwrap(session.BaseSession, "send_request")
+            try_unwrap(session.BaseSession, "send_notification")
+            try_unwrap(server.Server, "_handle_request")
+            try_unwrap(server.Server, "_handle_notification")
+            try_unwrap(stdio, "stdio_client")
+            try_unwrap(streamable_http, "streamablehttp_client")
+            try_unwrap(streamable_http, "streamable_http_client")
+            try_unwrap(sse, "sse_client")
+            if hasattr(streamable_http, "StreamableHTTPTransport"):
+                try_unwrap(streamable_http.StreamableHTTPTransport, "_maybe_extract_session_id_from_response")
+        except ImportError:
+            _LOG.debug("MCP SDK not available, nothing to uninstrument")

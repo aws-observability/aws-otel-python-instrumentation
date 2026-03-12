@@ -12,6 +12,8 @@ from pathlib import Path
 from threading import Thread
 from unittest import TestCase
 
+from collector import OTLPServer, Telemetry
+
 from amazon.opentelemetry.distro.instrumentation.mcp import McpInstrumentor
 from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attributes import (
     MCP_METHOD_NAME,
@@ -37,8 +39,6 @@ from opentelemetry.semconv.attributes.client_attributes import CLIENT_ADDRESS, C
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.semconv.attributes.network_attributes import NETWORK_TRANSPORT, NetworkTransportValues
 from opentelemetry.trace import SpanKind, StatusCode, get_tracer
-
-from .collector import OTLPServer, Telemetry
 
 
 class McpInstrumentorTestBase(TestCase):
