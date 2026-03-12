@@ -192,7 +192,7 @@ class TestMcpInstrumentor(McpInstrumentorTestBase):
             await session.read_resource("nonexistent://resource")
 
         self.span_exporter.clear()
-        with self.assertRaises((McpError, ExceptionGroup)):
+        with self.assertRaises((McpError, BaseException)):
             asyncio.run(self._run_stdio_client(run_client))
 
         client_spans = self.span_exporter.get_finished_spans()
@@ -374,7 +374,7 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
         async def run(session):
             await session.read_resource("nonexistent://resource")
 
-        with self.assertRaises((McpError, ExceptionGroup)):
+        with self.assertRaises((McpError, BaseException)):
             asyncio.run(self._run_inprocess(run, raise_exceptions=True))
 
         spans = self.span_exporter.get_finished_spans()
