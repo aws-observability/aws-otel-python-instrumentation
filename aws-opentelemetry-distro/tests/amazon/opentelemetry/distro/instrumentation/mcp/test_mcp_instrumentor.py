@@ -38,7 +38,11 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
 from opentelemetry.semconv.attributes.client_attributes import CLIENT_ADDRESS, CLIENT_PORT
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.semconv.attributes.network_attributes import NETWORK_TRANSPORT, NetworkTransportValues
+from opentelemetry.baggage.propagation import W3CBaggagePropagator
+from opentelemetry.propagators.aws import AwsXRayPropagator
+from opentelemetry.propagators.composite import CompositePropagator
 from opentelemetry.trace import SpanKind, StatusCode, get_tracer
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 
 class McpInstrumentorTestBase(TestCase):
@@ -47,8 +51,9 @@ class McpInstrumentorTestBase(TestCase):
         self.tracer_provider = TracerProvider()
         self.span_exporter = InMemorySpanExporter()
         self.tracer_provider.add_span_processor(SimpleSpanProcessor(self.span_exporter))
+        self.propagator = CompositePropagator([W3CBaggagePropagator(), AwsXRayPropagator(), TraceContextTextMapPropagator()])
         self.instrumentor = McpInstrumentor()
-        self.instrumentor.instrument(tracer_provider=self.tracer_provider)
+        self.instrumentor.instrument(tracer_provider=self.tracer_provider, propagators=self.propagator)
 
     def tearDown(self):
         self.instrumentor.uninstrument()

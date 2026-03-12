@@ -4,9 +4,13 @@
 import sys
 
 from amazon.opentelemetry.distro.instrumentation.mcp import McpInstrumentor
+from opentelemetry.baggage.propagation import W3CBaggagePropagator
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.propagators.aws import AwsXRayPropagator
+from opentelemetry.propagators.composite import CompositePropagator
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 tracer_provider = TracerProvider()
 if len(sys.argv) > 1:
@@ -14,7 +18,10 @@ if len(sys.argv) > 1:
     span_exporter = OTLPSpanExporter(f"http://localhost:{otlp_port}/v1/traces")
     tracer_provider.add_span_processor(SimpleSpanProcessor(span_exporter))
 
-McpInstrumentor().instrument(tracer_provider=tracer_provider)
+McpInstrumentor().instrument(
+    tracer_provider=tracer_provider,
+    propagators=CompositePropagator([W3CBaggagePropagator(), AwsXRayPropagator(), TraceContextTextMapPropagator()]),
+)
 
 from mcp.server.fastmcp import FastMCP  # noqa: E402
 
