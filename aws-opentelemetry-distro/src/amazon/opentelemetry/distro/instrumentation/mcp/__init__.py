@@ -4,7 +4,7 @@
 import logging
 from typing import Any, Collection
 
-from amazon.opentelemetry.distro.instrumentation.common.utils import try_unwrap, try_wrap
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import try_unwrap, try_wrap
 from amazon.opentelemetry.distro.instrumentation.mcp._wrappers import ClientWrapper, ServerWrapper
 from amazon.opentelemetry.distro.version import __version__
 from opentelemetry import trace

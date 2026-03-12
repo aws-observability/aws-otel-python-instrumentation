@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Callable, Coroutine, Dict, Optional, Tuple
 from urllib.parse import urlparse
 
-from amazon.opentelemetry.distro.instrumentation.common.utils import serialize_to_json_string
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import serialize_to_json_string
 from amazon.opentelemetry.distro.instrumentation.mcp._transport import (
     ClientTransportMetadata,
     clear_parent_context,

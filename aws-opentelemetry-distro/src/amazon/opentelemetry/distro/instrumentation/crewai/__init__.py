@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from typing import Any, Collection
 
-from amazon.opentelemetry.distro.instrumentation.common.utils import try_unwrap, try_wrap
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import try_unwrap, try_wrap
 from amazon.opentelemetry.distro.instrumentation.crewai._wrappers import (
     _CrewKickoffWrapper,
     _TaskExecuteCoreWrapper,
