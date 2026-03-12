@@ -20,7 +20,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: '${{ github.workflow }} @ ${{ inputs.aws-region }}'
+  group: '${{ github.workflow }}'
   cancel-in-progress: false
 
 
@@ -247,10 +247,19 @@ jobs:
       caller-workflow-name: 'main-build'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
   
-  # Stand-Alone ADOT/ADOT Genesis test on EC2
-  adot-genesis:
+  # Stand-Alone ADOT GenAI v1 test on EC2 for collector-less setup
+  adot-genai-v1:
     needs: [ upload-main-build ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-genesis-test.yml@main
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-genai-v1-test.yml@main
+    secrets: inherit
+    with:
+      caller-workflow-name: 'main-build'
+      staging-wheel-name: ${{ inputs.staging-wheel-name }}
+
+  # AgentCore Collector GenAI v2 test on EC2 for collector setup
+  adot-genai-v2:
+    needs: [ upload-main-build ]
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-genai-v2-test.yml@main
     secrets: inherit
     with:
       caller-workflow-name: 'main-build'

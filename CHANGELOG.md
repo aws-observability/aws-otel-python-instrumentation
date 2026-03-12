@@ -12,6 +12,14 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat: [BREAKING CHANGE] Disable upstream crewai/langchain instrumentations and respect OTLP base endpoint for Agent observability
+  ([#668](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/668))
+- Add native LangChain instrumentation support
+  ([#589](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/589))
+- feat: Allow disabling of default anomaly condition
+  ([#660](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/660))
+- Add baggage env variable span processor and agent observability version config
+  ([#658](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/658))
 - Fix AwsCloudWatchOtlpBatchLogRecordProcessor custom _export not being invoked; rename otlp_aws_logs_exporter to otlp_aws_log_record_exporter
   ([#611](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/611))
 - Add native LlamaIndex instrumentation support

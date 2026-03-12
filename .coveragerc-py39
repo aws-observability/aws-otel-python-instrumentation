@@ -2,6 +2,8 @@
 omit =
     */instrumentation/crewai/*
     */instrumentation/llama_index/*
+    */instrumentation/langchain/*
+    */instrumentation/mcp/*
 
 [report]
 include_namespace_packages = true

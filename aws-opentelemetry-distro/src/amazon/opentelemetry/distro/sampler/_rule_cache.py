@@ -147,7 +147,9 @@ class _RuleCache:
         if not self._adaptive_sampling_rule_exists and self._adaptive_sampling_config is None:
             return
 
-        result: _AnomalyDetectionResult = self.__is_anomaly(span)
+        effective_rule = self.__get_effective_sampling_rule_applier(span)
+
+        result: _AnomalyDetectionResult = self.__is_anomaly(span, effective_rule)
         should_boost_sampling = result.should_boost_sampling
         should_capture_anomaly_span = result.should_capture_anomaly_span
 
@@ -173,47 +175,48 @@ class _RuleCache:
         # Sampling Boost
         is_counted_as_anomaly_for_boost = False
         if should_boost_sampling or is_new_trace:
-            trace_state_value = span.context.trace_state.get(_AwsSamplingResult.AWS_XRAY_SAMPLING_RULE_TRACE_STATE_KEY)
-            upstream_rule_name = (
-                self._hash_to_rule_map.get(trace_state_value, trace_state_value) if trace_state_value else None
-            )
-
-            rule_to_report_to: Optional[_SamplingRuleApplier] = None
-            matched_rule: Optional[_SamplingRuleApplier] = None
-            for applier in self.__rule_appliers:
-                # Rule propagated from when sampling decision was made, otherwise the matched rule
-                if applier.sampling_rule.RuleName == upstream_rule_name:
-                    rule_to_report_to = applier
-                    break
-                # spanData.getAttributes() -> span.attributes, spanData.getResource() -> self.__resource
-                if matched_rule is None and applier.matches(self.__resource, span.attributes):
-                    matched_rule = applier
-
-            if rule_to_report_to is None:
-                if matched_rule is None:
-                    _logger.debug(
-                        "No sampling rule matched the request. This is a bug in either the OpenTelemetry SDK or X-Ray."
-                    )
-                elif not span.parent.is_valid:
-                    # Span is not from an upstream service, so we should boost the matched rule
-                    rule_to_report_to = matched_rule
+            if effective_rule is None:
+                _logger.debug(
+                    "No sampling rule matched the request. This is a bug in either the OpenTelemetry SDK or X-Ray."
+                )
 
             if (
                 should_boost_sampling
-                and rule_to_report_to is not None
-                and rule_to_report_to.has_boost()
+                and effective_rule is not None
+                and effective_rule.has_boost()
                 and not _UsageType.is_used_for_boost(existing_usage)
             ):
-                rule_to_report_to.count_anomaly_trace(span)
+                effective_rule.count_anomaly_trace(span)
                 is_counted_as_anomaly_for_boost = True
 
-            if is_new_trace and rule_to_report_to is not None and rule_to_report_to.has_boost():
-                rule_to_report_to.count_trace()
+            if is_new_trace and effective_rule is not None and effective_rule.has_boost():
+                effective_rule.count_trace()
 
         self.__update_trace_usage_cache(trace_id, is_span_captured, is_counted_as_anomaly_for_boost)
 
+    def __get_effective_sampling_rule_applier(self, span: ReadableSpan) -> Optional[_SamplingRuleApplier]:
+        trace_state_value = span.context.trace_state.get(_AwsSamplingResult.AWS_XRAY_SAMPLING_RULE_TRACE_STATE_KEY)
+        upstream_rule_name = (
+            self._hash_to_rule_map.get(trace_state_value, trace_state_value) if trace_state_value else None
+        )
+
+        matched_rule: Optional[_SamplingRuleApplier] = None
+        for applier in self.__rule_appliers:
+            if applier.sampling_rule.RuleName == upstream_rule_name:
+                return applier
+            if matched_rule is None and applier.matches(self.__resource, span.attributes):
+                matched_rule = applier
+
+        # No upstream rule found, use matched rule for root spans
+        if matched_rule is not None and not span.parent.is_valid:
+            return matched_rule
+
+        return None
+
     # pylint: disable=too-many-branches
-    def __is_anomaly(self, span: ReadableSpan) -> "_AnomalyDetectionResult":
+    def __is_anomaly(
+        self, span: ReadableSpan, effective_rule: Optional[_SamplingRuleApplier] = None
+    ) -> "_AnomalyDetectionResult":
         should_boost_sampling: bool = False
         should_capture_anomaly_span: bool = False
         status_code: int = span.attributes.get(HTTP_STATUS_CODE)
@@ -272,8 +275,13 @@ class _RuleCache:
         elif (status_code is not None and status_code > 499) or (
             status_code is None and span.status is not None and span.status.status_code == StatusCode.ERROR
         ):
-            should_boost_sampling = True
-            should_capture_anomaly_span = True
+            # Default anomaly detection - check if disabled for the effective rule
+            default_anomaly_detection_disabled = (
+                effective_rule is not None and effective_rule.is_default_anomaly_detection_disabled()
+            )
+            if not default_anomaly_detection_disabled:
+                should_boost_sampling = True
+                should_capture_anomaly_span = True
 
         return _AnomalyDetectionResult(should_boost_sampling, should_capture_anomaly_span)
 
