@@ -23,6 +23,9 @@ from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attribute
     RPC_RESPONSE_STATUS_CODE,
     MCPMethodValue,
 )
+from opentelemetry.baggage.propagation import W3CBaggagePropagator
+from opentelemetry.propagators.aws import AwsXRayPropagator
+from opentelemetry.propagators.composite import CompositePropagator
 from opentelemetry.proto.trace.v1.trace_pb2 import Span as ProtoSpan
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -38,9 +41,6 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
 from opentelemetry.semconv.attributes.client_attributes import CLIENT_ADDRESS, CLIENT_PORT
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.semconv.attributes.network_attributes import NETWORK_TRANSPORT, NetworkTransportValues
-from opentelemetry.baggage.propagation import W3CBaggagePropagator
-from opentelemetry.propagators.aws import AwsXRayPropagator
-from opentelemetry.propagators.composite import CompositePropagator
 from opentelemetry.trace import SpanKind, StatusCode, get_tracer
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
@@ -51,7 +51,9 @@ class McpInstrumentorTestBase(TestCase):
         self.tracer_provider = TracerProvider()
         self.span_exporter = InMemorySpanExporter()
         self.tracer_provider.add_span_processor(SimpleSpanProcessor(self.span_exporter))
-        self.propagator = CompositePropagator([W3CBaggagePropagator(), AwsXRayPropagator(), TraceContextTextMapPropagator()])
+        self.propagator = CompositePropagator(
+            [W3CBaggagePropagator(), AwsXRayPropagator(), TraceContextTextMapPropagator()]
+        )
         self.instrumentor = McpInstrumentor()
         self.instrumentor.instrument(tracer_provider=self.tracer_provider, propagators=self.propagator)
 
@@ -62,8 +64,19 @@ class McpInstrumentorTestBase(TestCase):
     @staticmethod
     def _get_free_port():
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(("", 0))
+            s.bind(("127.0.0.1", 0))
             return s.getsockname()[1]
+
+    @staticmethod
+    def _wait_for_server(port, timeout=10):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=1):
+                    return
+            except OSError:
+                time.sleep(0.2)
+        raise TimeoutError(f"Server on port {port} not ready after {timeout}s")
 
     def _get_attr(self, span, key):
         if hasattr(span.attributes, "get"):
@@ -262,7 +275,7 @@ class TestMcpInstrumentor(McpInstrumentorTestBase):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        time.sleep(2)
+        self._wait_for_server(http_port)
 
         try:
             async with client(f"http://127.0.0.1:{http_port}{path}") as streams:
@@ -400,6 +413,22 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
         self.assertIsNotNone(server_span.attributes.get(CLIENT_ADDRESS))
         self.assertIsNotNone(server_span.attributes.get(CLIENT_PORT))
 
+    def test_mcp_respects_active_parent_span(self):
+        tracer = get_tracer("test", tracer_provider=self.tracer_provider)
+
+        async def run(session):
+            with tracer.start_as_current_span("execute_tool get_weather"):
+                await session.call_tool("hello", {"name": "World"})
+
+        asyncio.run(self._run_inprocess(run))
+        spans = self.span_exporter.get_finished_spans()
+
+        tool_parent = next(s for s in spans if s.name == "execute_tool get_weather")
+        tool_call = next(s for s in spans if s.name == "tools/call hello" and s.kind == SpanKind.CLIENT)
+
+        tool_parent_id = format(tool_parent.context.span_id, "016x")
+        self.assertEqual(format(tool_call.parent.span_id, "016x"), tool_parent_id)
+
     async def _run_inprocess(self, callback, raise_exceptions=False):
         from mcp.shared.memory import (  # pylint: disable=import-outside-toplevel
             create_connected_server_and_client_session,
@@ -431,22 +460,6 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
                         await callback(session)
             finally:
                 server.should_exit = True
-
-    def test_mcp_respects_active_parent_span(self):
-        tracer = get_tracer("test", tracer_provider=self.tracer_provider)
-
-        async def run(session):
-            with tracer.start_as_current_span("execute_tool get_weather"):
-                await session.call_tool("hello", {"name": "World"})
-
-        asyncio.run(self._run_inprocess(run))
-        spans = self.span_exporter.get_finished_spans()
-
-        tool_parent = next(s for s in spans if s.name == "execute_tool get_weather")
-        tool_call = next(s for s in spans if s.name == "tools/call hello" and s.kind == SpanKind.CLIENT)
-
-        tool_parent_id = format(tool_parent.context.span_id, "016x")
-        self.assertEqual(format(tool_call.parent.span_id, "016x"), tool_parent_id)
 
     @staticmethod
     def _create_server():
