@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import time
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import requests
 from requests.structures import CaseInsensitiveDict
@@ -85,25 +85,22 @@ class TestOTLPAwsLogsExporter(TestCase):
 
         self.assertEqual(result, LogRecordExportResult.FAILURE)
 
-    @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter.Event.wait",
-        side_effect=lambda x: False,
-    )
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter.time", return_value=0)
     @patch("requests.Session.post")
-    def test_should_export_again_with_backoff_if_retryable_and_no_retry_after_header(
-        self, mock_request, mock_time, mock_wait
-    ):
+    def test_should_export_again_with_backoff_if_retryable_and_no_retry_after_header(self, mock_request, mock_time):
         mock_request.return_value = self.retryable_response_no_header
         """Tests that multiple export requests are made with exponential delay if the response status code is retryable.
         But there is no Retry-After header."""
         self.exporter._timeout = 10000  # Large timeout to avoid early exit
+        mock_event = MagicMock()
+        mock_event.wait.side_effect = lambda x: False
+        self.exporter._shutdown_event = mock_event
 
         result = self.exporter.export(self.logs)
 
-        self.assertEqual(mock_wait.call_count, _MAX_RETRYS - 1)
+        self.assertEqual(mock_event.wait.call_count, _MAX_RETRYS - 1)
 
-        delays = mock_wait.call_args_list
+        delays = mock_event.wait.call_args_list
 
         for index, delay in enumerate(delays):
             expected_base = 2**index
@@ -115,15 +112,9 @@ class TestOTLPAwsLogsExporter(TestCase):
         self.assertEqual(mock_request.call_count, _MAX_RETRYS)
         self.assertEqual(result, LogRecordExportResult.FAILURE)
 
-    @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter.Event.wait",
-        side_effect=lambda x: False,
-    )
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter.time", return_value=0)
     @patch("requests.Session.post")
-    def test_should_export_again_with_server_delay_if_retryable_and_retry_after_header(
-        self, mock_request, mock_time, mock_wait
-    ):
+    def test_should_export_again_with_server_delay_if_retryable_and_retry_after_header(self, mock_request, mock_time):
         mock_request.side_effect = [
             self.retryable_response_header,
             self.retryable_response_header,
@@ -133,22 +124,21 @@ class TestOTLPAwsLogsExporter(TestCase):
         """Tests that multiple export requests are made with the server's suggested
         delay if the response status code is retryable and there is a Retry-After header."""
         self.exporter._timeout = 10000  # Large timeout to avoid early exit
+        mock_event = MagicMock()
+        mock_event.wait.side_effect = lambda x: False
+        self.exporter._shutdown_event = mock_event
 
         result = self.exporter.export(self.logs)
 
-        delays = mock_wait.call_args_list
+        delays = mock_event.wait.call_args_list
 
         for delay in delays:
             self.assertEqual(delay[0][0], 10)
 
-        self.assertEqual(mock_wait.call_count, 3)
+        self.assertEqual(mock_event.wait.call_count, 3)
         self.assertEqual(mock_request.call_count, 4)
         self.assertEqual(result, LogRecordExportResult.SUCCESS)
 
-    @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter.Event.wait",
-        side_effect=lambda x: False,
-    )
     @patch(
         "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter.random.uniform",
         return_value=1.0,
@@ -156,7 +146,7 @@ class TestOTLPAwsLogsExporter(TestCase):
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter.time", return_value=0)
     @patch("requests.Session.post")
     def test_should_export_again_with_backoff_delay_if_retryable_and_bad_retry_after_header(
-        self, mock_request, mock_time, mock_random, mock_wait
+        self, mock_request, mock_time, mock_random
     ):
         mock_request.side_effect = [
             self.retryable_response_bad_header,
@@ -167,17 +157,20 @@ class TestOTLPAwsLogsExporter(TestCase):
         """Tests that multiple export requests are made with exponential delay if the response status code is retryable.
         but the Retry-After header is invalid or malformed."""
         self.exporter._timeout = 10000  # Large timeout to avoid early exit
+        mock_event = MagicMock()
+        mock_event.wait.side_effect = lambda x: False
+        self.exporter._shutdown_event = mock_event
 
         result = self.exporter.export(self.logs)
 
-        delays = mock_wait.call_args_list
+        delays = mock_event.wait.call_args_list
 
         for index, delay in enumerate(delays):
             expected_delay = 2**index  # No jitter since random.uniform returns 1.0
             actual_delay = delay[0][0]
             self.assertEqual(actual_delay, expected_delay)
 
-        self.assertEqual(mock_wait.call_count, 3)
+        self.assertEqual(mock_event.wait.call_count, 3)
         self.assertEqual(mock_request.call_count, 4)
         self.assertEqual(result, LogRecordExportResult.SUCCESS)
 
@@ -190,15 +183,14 @@ class TestOTLPAwsLogsExporter(TestCase):
         self.assertEqual(mock_request.call_count, 2)
         self.assertEqual(result, LogRecordExportResult.SUCCESS)
 
-    @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter.Event.wait",
-        side_effect=lambda x: False,
-    )
     @patch("requests.Session.post")
-    def test_should_stop_retrying_when_deadline_exceeded(self, mock_request, mock_wait):
+    def test_should_stop_retrying_when_deadline_exceeded(self, mock_request):
         mock_request.return_value = self.retryable_response_no_header
         """Tests that the exporter stops retrying when the deadline is exceeded."""
         self.exporter._timeout = 5  # Short timeout to trigger deadline check
+        mock_event = MagicMock()
+        mock_event.wait.side_effect = lambda x: False
+        self.exporter._shutdown_event = mock_event
 
         with patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter.time") as mock_time:
             # First call returns start time, subsequent calls simulate time passing
@@ -207,23 +199,22 @@ class TestOTLPAwsLogsExporter(TestCase):
             result = self.exporter.export(self.logs)
 
             # Should stop before max retries due to deadline
-            self.assertLess(mock_wait.call_count, _MAX_RETRYS)
+            self.assertLess(mock_event.wait.call_count, _MAX_RETRYS)
             self.assertLess(mock_request.call_count, _MAX_RETRYS + 1)
             self.assertEqual(result, LogRecordExportResult.FAILURE)
 
             # Verify total time passed is at the timeout limit
             self.assertGreaterEqual(5, self.exporter._timeout)
 
-    @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter.Event.wait",
-        side_effect=lambda x: True,
-    )
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter.time", return_value=0)
     @patch("requests.Session.post")
-    def test_export_interrupted_by_shutdown(self, mock_request, mock_time, mock_wait):
+    def test_export_interrupted_by_shutdown(self, mock_request, mock_time):
         mock_request.return_value = self.retryable_response_no_header
         """Tests that export can be interrupted by shutdown during retry wait."""
         self.exporter._timeout = 10000
+        mock_event = MagicMock()
+        mock_event.wait.side_effect = lambda x: True
+        self.exporter._shutdown_event = mock_event
 
         result = self.exporter.export(self.logs)
 
