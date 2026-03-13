@@ -9,7 +9,11 @@ from langchain_openai import ChatOpenAI
 from mock_llm import MOCK_LLM_PORT, reset_llm_call_count, start_servers
 from typing_extensions import override
 
+from amazon.opentelemetry.distro.instrumentation.langchain import LangChainInstrumentor
+
 os.environ["OPENAI_API_KEY"] = "fake-key"
+
+LangChainInstrumentor().instrument()
 
 
 class RequestHandler(BaseHTTPRequestHandler):
