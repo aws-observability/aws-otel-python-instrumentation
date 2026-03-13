@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- Tests and Doc Updates for Adding Python 3.14 Support
+  ([#670](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/670))
 - feat: [BREAKING CHANGE] Disable upstream crewai/langchain instrumentations and respect OTLP base endpoint for Agent observability
   ([#668](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/668))
 - Add native LangChain instrumentation support
