@@ -35,7 +35,7 @@ class McpInstrumentor(BaseInstrumentor):
         self._client_wrapper: ClientWrapper | None = None
         self._server_wrapper: ServerWrapper | None = None
 
-    def instrumentation_dependencies(self) -> Collection[str]:
+    def instrumentation_dependencies(self) -> Collection[str]:  # pylint: disable=no-self-use
         return ("mcp >= 1.8.1",)
 
     def _instrument(self, **kwargs: Any) -> None:
@@ -71,7 +71,7 @@ class McpInstrumentor(BaseInstrumentor):
             ClientWrapper.wrap_extract_session_id,
         )
 
-    def _uninstrument(self, **kwargs: Any) -> None:
+    def _uninstrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
         try:
             # pylint: disable=import-outside-toplevel
             from mcp.client import sse, stdio, streamable_http
