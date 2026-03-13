@@ -55,9 +55,9 @@ def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:
 def try_wrap(
     module: str, name: str, wrapper: Callable[..., Any], should_wrap: Optional[Callable[..., bool]] = None
 ) -> None:
-    if should_wrap is not None and not should_wrap():
-        return
     try:
+        if should_wrap is not None and not should_wrap():
+            return
         wrap_function_wrapper(module, name, wrapper)
     except Exception:  # pylint: disable=broad-except
         _logger.debug("Failed to wrap %s.%s, instrumentation may be incomplete", module, name)
