@@ -16,15 +16,6 @@ from amazon.opentelemetry.distro.instrumentation.mcp._transport import (
     set_parent_context,
     set_transport_info,
 )
-from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attributes import (
-    JSONRPC_REQUEST_ID,
-    MCP_METHOD_NAME,
-    MCP_PROTOCOL_VERSION,
-    MCP_RESOURCE_URI,
-    MCP_SESSION_ID,
-    RPC_RESPONSE_STATUS_CODE,
-    MCPMethodValue,
-)
 from opentelemetry import trace
 from opentelemetry.instrumentation.utils import suppress_http_instrumentation
 from opentelemetry.propagate import get_global_textmap
@@ -36,6 +27,15 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_NAME,
     GenAiOperationNameValues,
 )
+from opentelemetry.semconv._incubating.attributes.jsonrpc_attributes import JSONRPC_REQUEST_ID
+from opentelemetry.semconv._incubating.attributes.mcp_attributes import (
+    MCP_METHOD_NAME,
+    MCP_PROTOCOL_VERSION,
+    MCP_RESOURCE_URI,
+    MCP_SESSION_ID,
+    McpMethodNameValues,
+)
+from opentelemetry.semconv._incubating.attributes.rpc_attributes import RPC_RESPONSE_STATUS_CODE
 from opentelemetry.semconv.attributes.client_attributes import CLIENT_ADDRESS, CLIENT_PORT
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.semconv.attributes.network_attributes import NETWORK_TRANSPORT, NetworkTransportValues
@@ -90,7 +90,7 @@ class McpWrapper:
 
         if isinstance(message, types.CallToolRequest):
             tool_name = message.params.name
-            span.update_name(f"{MCPMethodValue.TOOLS_CALL} {tool_name}")
+            span.update_name(f"{McpMethodNameValues.TOOLS_CALL.value} {tool_name}")
             span.set_attribute(GEN_AI_TOOL_NAME, tool_name)
             span.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.EXECUTE_TOOL.value)
 
@@ -102,7 +102,7 @@ class McpWrapper:
 
         elif isinstance(message, types.GetPromptRequest):
             prompt_name = message.params.name
-            span.update_name(f"{MCPMethodValue.PROMPTS_GET} {prompt_name}")
+            span.update_name(f"{McpMethodNameValues.PROMPTS_GET.value} {prompt_name}")
             span.set_attribute(GEN_AI_PROMPT, prompt_name)
 
         elif isinstance(

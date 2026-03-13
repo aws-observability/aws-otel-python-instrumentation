@@ -15,14 +15,6 @@ from unittest import TestCase
 from collector import OTLPServer, Telemetry
 
 from amazon.opentelemetry.distro.instrumentation.mcp import McpInstrumentor
-from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attributes import (
-    MCP_METHOD_NAME,
-    MCP_PROTOCOL_VERSION,
-    MCP_RESOURCE_URI,
-    MCP_SESSION_ID,
-    RPC_RESPONSE_STATUS_CODE,
-    MCPMethodValue,
-)
 from opentelemetry.baggage.propagation import W3CBaggagePropagator
 from opentelemetry.propagators.aws import AwsXRayPropagator
 from opentelemetry.propagators.composite import CompositePropagator
@@ -38,6 +30,14 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_NAME,
     GenAiOperationNameValues,
 )
+from opentelemetry.semconv._incubating.attributes.mcp_attributes import (
+    MCP_METHOD_NAME,
+    MCP_PROTOCOL_VERSION,
+    MCP_RESOURCE_URI,
+    MCP_SESSION_ID,
+    McpMethodNameValues,
+)
+from opentelemetry.semconv._incubating.attributes.rpc_attributes import RPC_RESPONSE_STATUS_CODE
 from opentelemetry.semconv.attributes.client_attributes import CLIENT_ADDRESS, CLIENT_PORT
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.semconv.attributes.network_attributes import NETWORK_TRANSPORT, NetworkTransportValues
@@ -142,7 +142,7 @@ class TestMcpInstrumentor(McpInstrumentorTestBase):
                 self._assert_span_attrs(
                     tool_span,
                     {
-                        MCP_METHOD_NAME: MCPMethodValue.TOOLS_CALL,
+                        MCP_METHOD_NAME: McpMethodNameValues.TOOLS_CALL.value,
                         GEN_AI_TOOL_NAME: "hello",
                         GEN_AI_OPERATION_NAME: GenAiOperationNameValues.EXECUTE_TOOL.value,
                         GEN_AI_TOOL_CALL_ARGUMENTS: json.dumps({"name": "World"}),
@@ -164,7 +164,7 @@ class TestMcpInstrumentor(McpInstrumentorTestBase):
                 self._assert_span_attrs(
                     tool_span,
                     {
-                        MCP_METHOD_NAME: MCPMethodValue.TOOLS_CALL,
+                        MCP_METHOD_NAME: McpMethodNameValues.TOOLS_CALL.value,
                         GEN_AI_TOOL_NAME: "failing_tool",
                         GEN_AI_OPERATION_NAME: GenAiOperationNameValues.EXECUTE_TOOL.value,
                     },
@@ -292,25 +292,30 @@ class TestMcpInstrumentor(McpInstrumentorTestBase):
         session_span = self._get_span(client_spans, "mcp.session")
         self.assertEqual(session_span.kind, SpanKind.INTERNAL)
 
-        init_span = self._get_span(client_spans, MCPMethodValue.INITIALIZE)
+        init_span = self._get_span(client_spans, McpMethodNameValues.INITIALIZE.value)
         self.assertIsNotNone(init_span.attributes.get(MCP_PROTOCOL_VERSION))
 
-        client_notif_init_span = self._get_span(client_spans, MCPMethodValue.NOTIFICATIONS_INITIALIZED)
+        client_notif_init_span = self._get_span(client_spans, McpMethodNameValues.NOTIFICATIONS_INITIALIZED.value)
 
         self.assertEqual(init_span.kind, SpanKind.CLIENT)
         self._assert_span_attrs(
-            init_span, {MCP_METHOD_NAME: MCPMethodValue.INITIALIZE, NETWORK_TRANSPORT: expected_transport}
+            init_span, {MCP_METHOD_NAME: McpMethodNameValues.INITIALIZE.value, NETWORK_TRANSPORT: expected_transport}
         )
 
         self.assertEqual(client_notif_init_span.kind, SpanKind.CLIENT)
         self._assert_span_attrs(
             client_notif_init_span,
-            {MCP_METHOD_NAME: MCPMethodValue.NOTIFICATIONS_INITIALIZED, NETWORK_TRANSPORT: expected_transport},
+            {
+                MCP_METHOD_NAME: McpMethodNameValues.NOTIFICATIONS_INITIALIZED.value,
+                NETWORK_TRANSPORT: expected_transport,
+            },
         )
 
-        server_init_span = self._get_span(server_spans, MCPMethodValue.NOTIFICATIONS_INITIALIZED)
+        server_init_span = self._get_span(server_spans, McpMethodNameValues.NOTIFICATIONS_INITIALIZED.value)
         self.assertEqual(server_init_span.kind, ProtoSpan.SpanKind.SPAN_KIND_SERVER)
-        self._assert_span_attrs(server_init_span, {MCP_METHOD_NAME: MCPMethodValue.NOTIFICATIONS_INITIALIZED})
+        self._assert_span_attrs(
+            server_init_span, {MCP_METHOD_NAME: McpMethodNameValues.NOTIFICATIONS_INITIALIZED.value}
+        )
         self._assert_no_attr(server_init_span, NETWORK_TRANSPORT)
         self._assert_context_propagation(client_notif_init_span, server_init_span)
 
@@ -374,7 +379,7 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
 
         server_span = self._get_server_span(spans, "tools/call hello")
         self.assertEqual(server_span.attributes.get(NETWORK_TRANSPORT), NetworkTransportValues.PIPE.value)
-        self.assertEqual(server_span.attributes.get(MCP_METHOD_NAME), MCPMethodValue.TOOLS_CALL)
+        self.assertEqual(server_span.attributes.get(MCP_METHOD_NAME), McpMethodNameValues.TOOLS_CALL.value)
 
     def test_server_resource_span(self):
         async def run(session):
