@@ -87,9 +87,7 @@ class TestOTLPAwsLogsExporter(TestCase):
 
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter.time", return_value=0)
     @patch("requests.Session.post")
-    def test_should_export_again_with_backoff_if_retryable_and_no_retry_after_header(
-        self, mock_request, mock_time
-    ):
+    def test_should_export_again_with_backoff_if_retryable_and_no_retry_after_header(self, mock_request, mock_time):
         mock_request.return_value = self.retryable_response_no_header
         """Tests that multiple export requests are made with exponential delay if the response status code is retryable.
         But there is no Retry-After header."""
@@ -116,9 +114,7 @@ class TestOTLPAwsLogsExporter(TestCase):
 
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter.time", return_value=0)
     @patch("requests.Session.post")
-    def test_should_export_again_with_server_delay_if_retryable_and_retry_after_header(
-        self, mock_request, mock_time
-    ):
+    def test_should_export_again_with_server_delay_if_retryable_and_retry_after_header(self, mock_request, mock_time):
         mock_request.side_effect = [
             self.retryable_response_header,
             self.retryable_response_header,
