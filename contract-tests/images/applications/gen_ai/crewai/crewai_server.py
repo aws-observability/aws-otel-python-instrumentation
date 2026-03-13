@@ -8,12 +8,8 @@ from crewai.tools import tool
 from mock_llm import MOCK_LLM_PORT, reset_llm_call_count, start_servers
 from typing_extensions import override
 
-from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumentor
-
 os.environ["OPENAI_API_KEY"] = "fake-key"
 os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
-
-CrewAIInstrumentor().instrument()
 
 
 class RequestHandler(BaseHTTPRequestHandler):
