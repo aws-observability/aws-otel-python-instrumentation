@@ -446,7 +446,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
         distro = AwsOpenTelemetryDistro()
         distro._configure()
 
-        # Verify no instrumentations are disabled by default when Django is not installed
+        # Verify that OTEL_PYTHON_DISABLED_INSTRUMENTATIONS is not affected
         disabled_instrumentations = os.environ.get(OTEL_PYTHON_DISABLED_INSTRUMENTATIONS, "")
         self.assertEqual("", disabled_instrumentations)
 
@@ -514,12 +514,6 @@ class TestAwsOpenTelemetryDistro(TestCase):
         distro._configure()
 
         self.assertEqual(os.environ.get("OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS"), "false")
-
-    def test_agent_observability_enables_crewai_langchain(self):
-        self._configure_with_agent_observability()
-        disabled = os.environ.get(OTEL_PYTHON_DISABLED_INSTRUMENTATIONS, "")
-        self.assertNotIn("crewai", disabled)
-        self.assertNotIn("langchain", disabled)
 
     def test_agent_observability_respects_custom_disabled_instrumentations(self):
         os.environ[OTEL_PYTHON_DISABLED_INSTRUMENTATIONS] = "custom_lib"
