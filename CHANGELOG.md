@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+## v0.16.0 - 2026-03-13
+
 - Tests and Doc Updates for Adding Python 3.14 Support
   ([#670](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/670))
 - Respect OTLP base endpoint for Agent observability
