@@ -55,6 +55,12 @@ _logger: Logger = getLogger(__name__)
 _load._logger.setLevel(LEVELS.get(os.environ.get(OTEL_PYTHON_LOG_LEVEL, "error").lower(), ERROR))
 
 
+AGENT_OBSERVABILITY_DISABLED_INSTRUMENTATIONS = (
+    "http,sqlalchemy,psycopg2,pymysql,sqlite3,aiopg,asyncpg,mysql_connector,"
+    "urllib3,requests,system_metrics,google-genai,crewai,langchain,mcp"
+)
+
+
 class AwsOpenTelemetryDistro(OpenTelemetryDistro):
     def _configure(self, **kwargs):
         """Sets up default environment variables and apply patches
@@ -133,8 +139,7 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             os.environ.setdefault(OTEL_TRACES_SAMPLER, "parentbased_always_on")
             os.environ.setdefault(
                 OTEL_PYTHON_DISABLED_INSTRUMENTATIONS,
-                "http,sqlalchemy,psycopg2,pymysql,sqlite3,aiopg,asyncpg,mysql_connector,"
-                "urllib3,requests,system_metrics,google-genai,crewai,langchain,mcp",
+                AGENT_OBSERVABILITY_DISABLED_INSTRUMENTATIONS,
             )
             os.environ.setdefault(OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED, "true")
             os.environ.setdefault(APPLICATION_SIGNALS_ENABLED_CONFIG, "false")
