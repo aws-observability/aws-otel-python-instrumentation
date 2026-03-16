@@ -9,14 +9,11 @@ from urllib.parse import urlparse
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import serialize_to_json_string
 from amazon.opentelemetry.distro.instrumentation.mcp._transport import (
     ClientTransportMetadata,
-    clear_parent_context,
     clear_transport_info,
-    get_parent_context,
     get_transport_info,
-    set_parent_context,
     set_transport_info,
 )
-from opentelemetry import trace
+from opentelemetry import context, trace
 from opentelemetry.instrumentation.utils import suppress_http_instrumentation
 from opentelemetry.propagate import get_global_textmap
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
@@ -177,21 +174,15 @@ class ClientWrapper(McpWrapper):
             if not message:
                 return await wrapped(*args, **kwargs)
 
+            span = self._tracer.start_span(name=self._CLIENT_SPAN_NAME, kind=SpanKind.CLIENT)
+            ctx = trace.set_span_in_context(span)
+            token = context.attach(ctx)
+
             try:
                 message_json = message.model_dump(by_alias=True, mode="json", exclude_none=True)
-            except Exception as exc:  # pylint: disable=broad-exception-caught
-                _LOG.warning("Failed to serialize message for tracing: %s", exc)
-                return await wrapped(*args, **kwargs)
+                message_json.setdefault("params", {}).setdefault("_meta", {})
 
-            message_json.setdefault("params", {}).setdefault("_meta", {})
-
-            parent_ctx = get_parent_context()
-            with self._tracer.start_as_current_span(
-                name=self._CLIENT_SPAN_NAME, kind=SpanKind.CLIENT, context=parent_ctx
-            ) as span:
-                ctx = trace.set_span_in_context(span)
                 carrier: Dict[str, Any] = {}
-
                 # as defined by OTel semantic conventions: trace context between
                 # client and server must be injected in the _meta field of the
                 # JSON RPC call:
@@ -214,21 +205,19 @@ class ClientWrapper(McpWrapper):
                 self._generate_mcp_message_attrs(span, message, request_id)
                 self._set_client_transport_attrs(span)
 
-                try:
-                    modified_message = message.model_validate(message_json)
-                except Exception as exc:  # pylint: disable=broad-exception-caught
-                    _LOG.warning("Failed to reconstruct message for tracing: %s", exc)
-                    return await wrapped(*args, **kwargs)
+                modified_message = message.model_validate(message_json)
                 new_args = (modified_message,) + args[1:]
 
-                try:
-                    with suppress_http_instrumentation():
-                        result = await wrapped(*new_args, **kwargs)
-                    self._set_tool_result(span, message, result)
-                    return result
-                except Exception as exc:
-                    self._set_error_attrs(span, exc)
-                    raise
+                with suppress_http_instrumentation():
+                    result = await wrapped(*new_args, **kwargs)
+                self._set_tool_result(span, message, result)
+                return result
+            except Exception as exc:
+                self._set_error_attrs(span, exc)
+                raise
+            finally:
+                span.end()
+                context.detach(token)
 
         return async_wrapper()
 
@@ -243,14 +232,12 @@ class ClientWrapper(McpWrapper):
             # lifetime, all server and client MCP operations happen within this
             # session context. Otherwise we get a bunch of disjointed traces
             # without a common ancestor.
-            with self._tracer.start_as_current_span(self._SESSION_SPAN_NAME, kind=SpanKind.INTERNAL) as span:
-                set_parent_context(trace.set_span_in_context(span))
+            with self._tracer.start_as_current_span(self._SESSION_SPAN_NAME, kind=SpanKind.INTERNAL):
                 try:
                     async with wrapped(*args, **kwargs) as streams:
                         yield streams
                 finally:
                     clear_transport_info()
-                    clear_parent_context()
 
         return wrapper()
 
@@ -268,15 +255,13 @@ class ClientWrapper(McpWrapper):
                 )
             )
             # see wrap_stdio_client
-            with self._tracer.start_as_current_span(self._SESSION_SPAN_NAME, kind=SpanKind.INTERNAL) as span:
-                set_parent_context(trace.set_span_in_context(span))
+            with self._tracer.start_as_current_span(self._SESSION_SPAN_NAME, kind=SpanKind.INTERNAL):
                 try:
                     with suppress_http_instrumentation():
                         async with wrapped(*args, **kwargs) as streams:
                             yield streams
                 finally:
                     clear_transport_info()
-                    clear_parent_context()
 
         return wrapper()
 
