@@ -3,6 +3,7 @@
 
 import asyncio
 import json
+import signal
 import socket
 import subprocess
 import sys
@@ -283,7 +284,7 @@ class TestMcpInstrumentor(McpInstrumentorTestBase):
                 async with ClientSession(read, write) as session:
                     await callback(session)
         finally:
-            server_proc.terminate()
+            server_proc.send_signal(signal.SIGINT)
             server_proc.wait(timeout=5)
 
     def _assert_client_and_server_spans(

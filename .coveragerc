@@ -1,3 +1,6 @@
+[run]
+parallel = true
+
 [report]
 include_namespace_packages = true
 fail_under = 95.00
