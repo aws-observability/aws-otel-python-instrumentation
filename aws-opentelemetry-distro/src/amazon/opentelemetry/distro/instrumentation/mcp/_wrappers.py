@@ -3,11 +3,11 @@
 
 import logging
 from contextlib import asynccontextmanager
+from contextvars import Token
 from typing import Any, Callable, Coroutine, Dict, Optional, Tuple
 from urllib.parse import urlparse
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import serialize_to_json_string
-from amazon.opentelemetry.distro.instrumentation.mcp._transport import McpClientTransportMetadata
 from opentelemetry import context, trace
 from opentelemetry.instrumentation.utils import suppress_http_instrumentation
 from opentelemetry.propagate import get_global_textmap
@@ -36,6 +36,9 @@ from opentelemetry.trace import SpanKind, Status, StatusCode
 
 _LOG = logging.getLogger(__name__)
 
+# Context key for storing client transport metadata alongside the session span.
+_TRANSPORT_KEY = context.create_key("mcp_client_transport")
+
 
 class McpWrapper:
     """Base wrapper class for MCP operations."""
@@ -53,7 +56,7 @@ class McpWrapper:
         self._propagators = kwargs.get("propagators") or get_global_textmap()
 
     @staticmethod
-    def _generate_mcp_message_attrs(span: trace.Span, message: Any, request_id: Optional[int]) -> None:
+    def _set_mcp_attributes(span: trace.Span, message: Any, request_id: Optional[int]) -> None:
         """
         Populate span with MCP semantic convention attributes.
 
@@ -112,6 +115,11 @@ class McpWrapper:
 
         else:
             span.update_name(message.method)
+
+        transport_info = context.get_value(_TRANSPORT_KEY)
+        if isinstance(transport_info, dict):
+            for key, value in transport_info.items():
+                span.set_attribute(key, value)
 
     @staticmethod
     def _set_tool_result(span: trace.Span, message: Any, result: Any) -> None:
@@ -197,8 +205,7 @@ class ClientWrapper(McpWrapper):
                 message_json["params"]["_meta"].update(carrier)
 
                 request_id = getattr(instance, "_request_id", None)
-                self._generate_mcp_message_attrs(span, message, request_id)
-                self._set_client_transport_attrs(span)
+                self._set_mcp_attributes(span, message, request_id)
 
                 modified_message = message.model_validate(message_json)
                 new_args = (modified_message,) + args[1:]
@@ -220,19 +227,13 @@ class ClientWrapper(McpWrapper):
 
         @asynccontextmanager
         async def wrapper():
-            McpClientTransportMetadata.set(McpClientTransportMetadata(transport=NetworkTransportValues.PIPE))
-
-            # a bit strange and does not follow any existing OTel semantic conventions,
-            # but we need an overarching parent span to capture the MCP session
-            # lifetime, all server and client MCP operations happen within this
-            # session context. Otherwise we get a bunch of disjointed traces
-            # without a common ancestor.
-            with self._tracer.start_as_current_span(self._SESSION_SPAN_NAME, kind=SpanKind.INTERNAL):
-                try:
-                    async with wrapped(*args, **kwargs) as streams:
-                        yield streams
-                finally:
-                    McpClientTransportMetadata.clear()
+            span, token = self._start_mcp_session({NETWORK_TRANSPORT: NetworkTransportValues.PIPE.value})
+            try:
+                async with wrapped(*args, **kwargs) as streams:
+                    yield streams
+            finally:
+                span.end()
+                context.detach(token)
 
         return wrapper()
 
@@ -242,21 +243,20 @@ class ClientWrapper(McpWrapper):
         async def wrapper():
             url = args[0] if args else kwargs.get("url", "")
             parsed = urlparse(url)
-            McpClientTransportMetadata.set(
-                McpClientTransportMetadata(
-                    transport=NetworkTransportValues.TCP,
-                    server_address=parsed.hostname,
-                    server_port=parsed.port or (443 if parsed.scheme == "https" else 80),
-                )
+            span, token = self._start_mcp_session(
+                {
+                    NETWORK_TRANSPORT: NetworkTransportValues.TCP.value,
+                    SERVER_ADDRESS: parsed.hostname,
+                    SERVER_PORT: parsed.port or (443 if parsed.scheme == "https" else 80),
+                }
             )
-            # see wrap_stdio_client
-            with self._tracer.start_as_current_span(self._SESSION_SPAN_NAME, kind=SpanKind.INTERNAL):
-                try:
-                    with suppress_http_instrumentation():
-                        async with wrapped(*args, **kwargs) as streams:
-                            yield streams
-                finally:
-                    McpClientTransportMetadata.clear()
+            try:
+                with suppress_http_instrumentation():
+                    async with wrapped(*args, **kwargs) as streams:
+                        yield streams
+            finally:
+                span.end()
+                context.detach(token)
 
         return wrapper()
 
@@ -264,22 +264,22 @@ class ClientWrapper(McpWrapper):
     def wrap_extract_session_id(wrapped: Callable[..., Any], instance: Any, args: Any, kwargs: Any) -> Any:
         result = wrapped(*args, **kwargs)
         if instance.session_id:
-            transport_info = McpClientTransportMetadata.get()
-            if transport_info:
-                transport_info.session_id = instance.session_id
+            transport_info = context.get_value(_TRANSPORT_KEY)
+            if isinstance(transport_info, dict):
+                transport_info[MCP_SESSION_ID] = instance.session_id
         return result
 
-    @staticmethod
-    def _set_client_transport_attrs(span: trace.Span) -> None:
-        transport_info = McpClientTransportMetadata.get()
-        if transport_info:
-            span.set_attribute(NETWORK_TRANSPORT, transport_info.transport.value)
-            if transport_info.server_address:
-                span.set_attribute(SERVER_ADDRESS, transport_info.server_address)
-            if transport_info.server_port:
-                span.set_attribute(SERVER_PORT, transport_info.server_port)
-            if transport_info.session_id:
-                span.set_attribute(MCP_SESSION_ID, transport_info.session_id)
+    def _start_mcp_session(self, transport_info: Dict[str, Any]) -> Tuple[trace.Span, Token]:
+        # a bit strange and does not follow any existing OTel semantic conventions,
+        # but we need an overarching parent span to capture the MCP session
+        # lifetime, all server and client MCP operations happen within this
+        # session context. Otherwise we get a bunch of disjointed traces
+        # without a common ancestor.
+        span = self._tracer.start_span(self._SESSION_SPAN_NAME, kind=SpanKind.INTERNAL)
+        ctx = trace.set_span_in_context(span)
+        ctx = context.set_value(_TRANSPORT_KEY, transport_info, ctx)
+
+        return span, context.attach(ctx)
 
 
 class ServerWrapper(McpWrapper):
@@ -380,7 +380,7 @@ class ServerWrapper(McpWrapper):
                 else:
                     span.set_attribute(NETWORK_TRANSPORT, NetworkTransportValues.PIPE.value)
 
-            self._generate_mcp_message_attrs(span, incoming_msg, request_id)
+            self._set_mcp_attributes(span, incoming_msg, request_id)
 
             try:
                 result = await wrapped(*args, **kwargs)
@@ -412,7 +412,7 @@ class ServerWrapper(McpWrapper):
     ) -> Tuple[bool, bool, Optional[str], Optional[str], Optional[int]]:  # pylint: disable=no-self-use
         """
         Extract transport info from the incoming request on the server side.
-        Unlike the client which stores transport metadata in ContextVar, the server
+        Unlike the client which stores transport metadata in the OTel context, the server
         must inspect each incoming request to determine transport type.
 
         Args:
