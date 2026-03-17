@@ -1,4 +1,7 @@
 [run]
+; This flag writes per-process coverage data files so subprocess coverage
+; can be combined with the main test process by pytest-cov. Works with COVERAGE_PROCESS_START in 
+; tox.ini env variable
 parallel = true
 
 [report]
