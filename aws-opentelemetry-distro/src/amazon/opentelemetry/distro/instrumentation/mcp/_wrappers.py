@@ -7,12 +7,7 @@ from typing import Any, Callable, Coroutine, Dict, Optional, Tuple
 from urllib.parse import urlparse
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import serialize_to_json_string
-from amazon.opentelemetry.distro.instrumentation.mcp._transport import (
-    ClientTransportMetadata,
-    clear_transport_info,
-    get_transport_info,
-    set_transport_info,
-)
+from amazon.opentelemetry.distro.instrumentation.mcp._transport import McpClientTransportMetadata
 from opentelemetry import context, trace
 from opentelemetry.instrumentation.utils import suppress_http_instrumentation
 from opentelemetry.propagate import get_global_textmap
@@ -225,7 +220,7 @@ class ClientWrapper(McpWrapper):
 
         @asynccontextmanager
         async def wrapper():
-            set_transport_info(ClientTransportMetadata(transport=NetworkTransportValues.PIPE))
+            McpClientTransportMetadata.set(McpClientTransportMetadata(transport=NetworkTransportValues.PIPE))
 
             # a bit strange and does not follow any existing OTel semantic conventions,
             # but we need an overarching parent span to capture the MCP session
@@ -237,7 +232,7 @@ class ClientWrapper(McpWrapper):
                     async with wrapped(*args, **kwargs) as streams:
                         yield streams
                 finally:
-                    clear_transport_info()
+                    McpClientTransportMetadata.clear()
 
         return wrapper()
 
@@ -247,8 +242,8 @@ class ClientWrapper(McpWrapper):
         async def wrapper():
             url = args[0] if args else kwargs.get("url", "")
             parsed = urlparse(url)
-            set_transport_info(
-                ClientTransportMetadata(
+            McpClientTransportMetadata.set(
+                McpClientTransportMetadata(
                     transport=NetworkTransportValues.TCP,
                     server_address=parsed.hostname,
                     server_port=parsed.port or (443 if parsed.scheme == "https" else 80),
@@ -261,7 +256,7 @@ class ClientWrapper(McpWrapper):
                         async with wrapped(*args, **kwargs) as streams:
                             yield streams
                 finally:
-                    clear_transport_info()
+                    McpClientTransportMetadata.clear()
 
         return wrapper()
 
@@ -269,14 +264,14 @@ class ClientWrapper(McpWrapper):
     def wrap_extract_session_id(wrapped: Callable[..., Any], instance: Any, args: Any, kwargs: Any) -> Any:
         result = wrapped(*args, **kwargs)
         if instance.session_id:
-            transport_info = get_transport_info()
+            transport_info = McpClientTransportMetadata.get()
             if transport_info:
                 transport_info.session_id = instance.session_id
         return result
 
     @staticmethod
     def _set_client_transport_attrs(span: trace.Span) -> None:
-        transport_info = get_transport_info()
+        transport_info = McpClientTransportMetadata.get()
         if transport_info:
             span.set_attribute(NETWORK_TRANSPORT, transport_info.transport.value)
             if transport_info.server_address:
