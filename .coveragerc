@@ -2,6 +2,7 @@
 ; This flag writes per-process coverage data files so subprocess coverage
 ; can be combined with the main test process by pytest-cov. Works with COVERAGE_PROCESS_START in 
 ; tox.ini env variable
+; see: https://coverage.readthedocs.io/en/6.5.0/cmd.html#combining-data-files-coverage-combine
 parallel = true
 
 [report]
