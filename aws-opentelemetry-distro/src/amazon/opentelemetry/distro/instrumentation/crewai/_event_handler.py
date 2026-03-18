@@ -145,7 +145,7 @@ class OpenTelemetryEventHandler:
         self._tracer = tracer
         # a map of every event's id to its span. If the event does not
         # create a span, then it's mapped to the span created by its nearest ancestor event
-        self._spans = LockedDict()
+        self._event_id_to_span = LockedDict()
         self._event_type_handlers: Dict[type, Any] = {
             CrewKickoffStartedEvent: self._on_crew_start,
             CrewKickoffCompletedEvent: self._on_crew_completed,
@@ -168,9 +168,9 @@ class OpenTelemetryEventHandler:
             event_id = getattr(event, "event_id", None)
             parent_event_id = getattr(event, "parent_event_id", None)
             if event_id and parent_event_id:
-                parent_entry = self._spans.get(parent_event_id)
+                parent_entry = self._event_id_to_span.get(parent_event_id)
                 if parent_entry:
-                    self._spans.put(event_id, parent_entry)
+                    self._event_id_to_span.put(event_id, parent_entry)
 
     def _on_crew_start(self, source: "Crew", event: "CrewKickoffStartedEvent") -> None:
         crew_name = getattr(source, "name", None)
@@ -312,6 +312,9 @@ class OpenTelemetryEventHandler:
             attributes[GEN_AI_PROVIDER_NAME] = provider
         if model_name:
             attributes[GEN_AI_REQUEST_MODEL] = model_name
+        temperature = getattr(source, "temperature", None)
+        if temperature is not None:
+            attributes[GEN_AI_REQUEST_TEMPERATURE] = temperature
 
         span_name = (
             f"{GenAiOperationNameValues.CHAT.value} {model_name}" if model_name else GenAiOperationNameValues.CHAT.value
@@ -375,18 +378,18 @@ class OpenTelemetryEventHandler:
     ) -> None:
         parent_ctx = None
         if parent_event_id:
-            parent_entry = self._spans.get(parent_event_id)
+            parent_entry = self._event_id_to_span.get(parent_event_id)
             if parent_entry:
                 parent_ctx = trace.set_span_in_context(parent_entry.span)
 
         span = self._tracer.start_span(name, kind=SpanKind.INTERNAL, attributes=attributes, context=parent_ctx)
         token = context.attach(trace.set_span_in_context(span))
-        self._spans.put(event_id, _SpanEntry(span=span, token=token))
+        self._event_id_to_span.put(event_id, _SpanEntry(span=span, token=token))
 
     def _end_span(self, started_event_id: Optional[str], set_attrs: Optional[Dict[str, Any]] = None) -> None:
         if not started_event_id:
             return
-        entry = self._spans.pop(started_event_id)
+        entry = self._event_id_to_span.pop(started_event_id)
         if not entry:
             return
         if set_attrs:
@@ -400,7 +403,7 @@ class OpenTelemetryEventHandler:
     def _on_error_span(self, started_event_id: Optional[str], error: Optional[str] = None) -> None:
         if not started_event_id:
             return
-        entry = self._spans.pop(started_event_id)
+        entry = self._event_id_to_span.pop(started_event_id)
         if not entry:
             return
         entry.span.set_status(Status(StatusCode.ERROR, error))
