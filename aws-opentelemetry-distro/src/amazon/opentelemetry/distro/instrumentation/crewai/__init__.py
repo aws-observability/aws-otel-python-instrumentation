@@ -3,7 +3,10 @@
 from typing import Any, Collection
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import try_unwrap, try_wrap
-from amazon.opentelemetry.distro.instrumentation.crewai._wrappers import OpenTelemetryEventHandler, _EventBusEmitWrapper
+from amazon.opentelemetry.distro.instrumentation.crewai._event_handler import (
+    OpenTelemetryEventHandler,
+    _EventBusEmitWrapper,
+)
 from amazon.opentelemetry.distro.version import __version__
 from opentelemetry import trace
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
