@@ -25,7 +25,7 @@ class CrewAIInstrumentor(BaseInstrumentor):
     def instrumentation_dependencies(self) -> Collection[str]:  # pylint: disable=no-self-use
         return ("crewai >= 1.9.0",)
 
-    def _instrument(self, **kwargs: Any) -> None:
+    def _instrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
         llm_patch = _LLMToolCallCompletedEventPatch()

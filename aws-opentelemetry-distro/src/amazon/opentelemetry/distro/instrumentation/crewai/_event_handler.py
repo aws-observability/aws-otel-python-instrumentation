@@ -194,10 +194,14 @@ class OpenTelemetryEventHandler:
     ) -> None:
         self._end_span(event.started_event_id)
 
-    def _on_crew_failed(self, source: "Crew", event: "CrewKickoffFailedEvent") -> None:
+    def _on_crew_failed(
+        self, source: "Crew", event: "CrewKickoffFailedEvent"
+    ) -> None:  # pylint: disable=unused-argument
         self._on_error_span(event.started_event_id, getattr(event, "error", None))
 
-    def _on_agent_start(self, source: "BaseAgent", event: "AgentExecutionStartedEvent") -> None:
+    def _on_agent_start(
+        self, source: "BaseAgent", event: "AgentExecutionStartedEvent"
+    ) -> None:  # pylint: disable=unused-argument
         agent = getattr(event, "agent", None)
         agent_role = getattr(agent, "role", None) if agent else None
         span_name = (
@@ -236,10 +240,14 @@ class OpenTelemetryEventHandler:
 
         self._start_span(span_name, event.event_id, attributes, event.parent_event_id)
 
-    def _on_agent_completed(self, source: "BaseAgent", event: "AgentExecutionCompletedEvent") -> None:
+    def _on_agent_completed(
+        self, source: "BaseAgent", event: "AgentExecutionCompletedEvent"
+    ) -> None:  # pylint: disable=unused-argument
         self._end_span(event.started_event_id)
 
-    def _on_agent_failed(self, source: "BaseAgent", event: "AgentExecutionErrorEvent") -> None:
+    def _on_agent_failed(
+        self, source: "BaseAgent", event: "AgentExecutionErrorEvent"
+    ) -> None:  # pylint: disable=unused-argument
         self._on_error_span(event.started_event_id, getattr(event, "error", None))
 
     def _on_tool_start(self, source: "ToolUsage", event: "ToolUsageStartedEvent") -> None:
@@ -279,7 +287,9 @@ class OpenTelemetryEventHandler:
 
         self._start_span(span_name, event.event_id, attributes, event.parent_event_id)
 
-    def _on_tool_finished(self, source: "ToolUsage", event: "ToolUsageFinishedEvent") -> None:
+    def _on_tool_finished(
+        self, source: "ToolUsage", event: "ToolUsageFinishedEvent"
+    ) -> None:  # pylint: disable=unused-argument
         attrs: Dict[str, Any] = {}
         output = getattr(event, "output", None)
         if output is not None:
@@ -363,7 +373,7 @@ class OpenTelemetryEventHandler:
 
         self._end_span(event.started_event_id, attrs)
 
-    def _on_llm_failed(self, source: Any, event: "LLMCallFailedEvent") -> None:
+    def _on_llm_failed(self, source: Any, event: "LLMCallFailedEvent") -> None:  # pylint: disable=unused-argument
         self._on_error_span(event.started_event_id, getattr(event, "error", None))
 
     def _get_entry(self, event_id: Optional[str]) -> Optional[_SpanEntry]:
@@ -389,17 +399,17 @@ class OpenTelemetryEventHandler:
         with self._lock:
             self._event_id_to_span_entry_map[event_id] = _SpanEntry(span=span, token=token)
 
-    def _end_span(self, started_event_id: Optional[str], set_attrs: Optional[Dict[str, Any]] = None) -> None:
+    def _end_span(self, started_event_id: Optional[str], attributes: Optional[Dict[str, Any]] = None) -> None:
         if not started_event_id:
             return
         with self._lock:
             entry = self._event_id_to_span_entry_map.pop(started_event_id, None)
         if not entry:
             return
-        if set_attrs:
-            for k, value in set_attrs.items():
+        if attributes:
+            for key, value in attributes.items():
                 if value is not None:
-                    entry.span.set_attribute(k, value)
+                    entry.span.set_attribute(key, value)
         entry.span.set_status(Status(StatusCode.OK))
         entry.span.end()
         context.detach(entry.token)
