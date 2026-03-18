@@ -36,7 +36,7 @@ PROVIDER_MAP = {
 }
 
 
-class LockedDict:
+class DictWithLock:
     def __init__(self):
         self._lock = threading.Lock()
         self._data: Dict[Any, Any] = {}

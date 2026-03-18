@@ -12,6 +12,9 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat: Rewrite CrewAI instrumentation using Event based approach
+  ([#681](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/681))
+
 ## v0.16.0 - 2026-03-13
 
 - Tests and Doc Updates for Adding Python 3.14 Support

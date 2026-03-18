@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     PROVIDER_MAP,
-    LockedDict,
+    DictWithLock,
     serialize_to_json_string,
 )
 from opentelemetry import context, trace
@@ -74,7 +74,7 @@ class _EventBusEmitWrapper:
     def __init__(self, event_handler: "OpenTelemetryEventHandler"):
         self._event_handler = event_handler
         # for async agents to keep track of pending llm events
-        self._llm_source_to_unfinished_llm_event = LockedDict()
+        self._llm_source_to_unfinished_llm_event = DictWithLock()
 
     def __call__(self, wrapped, instance, args, kwargs) -> Any:
         # pylint: disable=import-outside-toplevel
@@ -145,7 +145,7 @@ class OpenTelemetryEventHandler:
         self._tracer = tracer
         # a map of every event's id to its span. If the event does not
         # create a span, then it's mapped to the span created by its nearest ancestor event
-        self._event_id_to_span = LockedDict()
+        self._event_id_to_span = DictWithLock()
         self._event_type_handlers: Dict[type, Any] = {
             CrewKickoffStartedEvent: self._on_crew_start,
             CrewKickoffCompletedEvent: self._on_crew_completed,
