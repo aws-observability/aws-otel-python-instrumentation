@@ -16,12 +16,9 @@ class CrewAIInstrumentor(BaseInstrumentor):
     """
     OpenTelemetry instrumentor for CrewAI.
 
-    Wraps CrewAI's event bus emit() to create spans synchronously in the calling thread.
-    Event metadata (started_event_id, parent_event_id) is populated by emit() first,
-    then our handler runs inline — no thread pool race conditions.
-
-    Instrumentation follows OpenTelemetry semantic conventions for gen_ai attributes.
+    Instrumentation currently follows OpenTelemetry semantic conventions v1.39 for gen_ai attributes.
     See: https://opentelemetry.io/docs/specs/semconv/registry/attributes/gen-ai/
+    Note: Semantic conventions may change in future versions.
     """
 
     def instrumentation_dependencies(self) -> Collection[str]:  # pylint: disable=no-self-use
