@@ -6,6 +6,7 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
 from amazon.opentelemetry.distro.instrumentation.crewai._event_handler import (
     OpenTelemetryEventHandler,
     _EventBusEmitWrapper,
+    _LLMToolCallCompletedEventPatch,
 )
 from amazon.opentelemetry.distro.version import __version__
 from opentelemetry import trace
@@ -27,11 +28,17 @@ class CrewAIInstrumentor(BaseInstrumentor):
     def _instrument(self, **kwargs: Any) -> None:
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
-
+        llm_patch = _LLMToolCallCompletedEventPatch()
         handler = OpenTelemetryEventHandler(tracer)
+
+        try_wrap("crewai.llm", "LLM._handle_non_streaming_response", llm_patch)
+        try_wrap("crewai.llm", "LLM._ahandle_non_streaming_response", llm_patch)
         try_wrap("crewai.events", "crewai_event_bus.emit", _EventBusEmitWrapper(handler))
 
     def _uninstrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
         from crewai.events import crewai_event_bus  # pylint: disable=import-outside-toplevel
+        from crewai.llm import LLM  # pylint: disable=import-outside-toplevel
 
         try_unwrap(crewai_event_bus, "emit")
+        try_unwrap(LLM, "_handle_non_streaming_response")
+        try_unwrap(LLM, "_ahandle_non_streaming_response")

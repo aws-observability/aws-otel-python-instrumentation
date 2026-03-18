@@ -196,11 +196,14 @@ class TestCrewAIInstrumentor(TestCase):
         task = self.Task(description="Use tools.", expected_output="Results.", agent=agent)
         crew = self.Crew(name="MultiToolCrew", agents=[agent], tasks=[task])
 
-        with patch("litellm.completion", side_effect=[
-            self._mock_response(tool_calls=[self._mock_tool_call("c1", "tool_a", '{"value": "1"}')]),
-            self._mock_response(tool_calls=[self._mock_tool_call("c2", "tool_b", '{"value": "2"}')]),
-            self._mock_response("Final Answer: Done!"),
-        ]):
+        with patch(
+            "litellm.completion",
+            side_effect=[
+                self._mock_response(tool_calls=[self._mock_tool_call("c1", "tool_a", '{"value": "1"}')]),
+                self._mock_response(tool_calls=[self._mock_tool_call("c2", "tool_b", '{"value": "2"}')]),
+                self._mock_response("Final Answer: Done!"),
+            ],
+        ):
             crew.kickoff()
 
         self.assertIsNotNone(self._find_span("execute_tool tool_a"))
@@ -232,12 +235,15 @@ class TestCrewAIInstrumentor(TestCase):
         task2 = self.Task(description="Do task2.", expected_output="R2.", agent=a2)
         crew = self.Crew(name="MultiAgent", agents=[a1, a2], tasks=[task1, task2])
 
-        with patch("litellm.completion", side_effect=[
-            self._mock_response(tool_calls=[self._mock_tool_call("c1", "t1", '{"v":"x"}')]),
-            self._mock_response("Final Answer: R1"),
-            self._mock_response(tool_calls=[self._mock_tool_call("c2", "t2", '{"v":"y"}')]),
-            self._mock_response("Final Answer: R2"),
-        ]):
+        with patch(
+            "litellm.completion",
+            side_effect=[
+                self._mock_response(tool_calls=[self._mock_tool_call("c1", "t1", '{"v":"x"}')]),
+                self._mock_response("Final Answer: R1"),
+                self._mock_response(tool_calls=[self._mock_tool_call("c2", "t2", '{"v":"y"}')]),
+                self._mock_response("Final Answer: R2"),
+            ],
+        ):
             crew.kickoff()
 
         crew_span = self._find_span("crew_kickoff MultiAgent")
@@ -260,10 +266,13 @@ class TestCrewAIInstrumentor(TestCase):
         task2 = self.Task(description="T2.", expected_output="R2.", agent=a2)
         crew = self.Crew(name="SharedLLM", agents=[a1, a2], tasks=[task1, task2])
 
-        with patch("litellm.completion", side_effect=[
-            self._mock_response("Final Answer: R1"),
-            self._mock_response("Final Answer: R2"),
-        ]):
+        with patch(
+            "litellm.completion",
+            side_effect=[
+                self._mock_response("Final Answer: R1"),
+                self._mock_response("Final Answer: R2"),
+            ],
+        ):
             crew.kickoff()
 
         self.assertIsNotNone(self._find_span("invoke_agent Shared1"))
@@ -300,10 +309,13 @@ class TestCrewAIInstrumentor(TestCase):
         task = self.Task(description="Use bad tool.", expected_output="Result.", agent=agent)
         crew = self.Crew(name="ToolErrCrew", agents=[agent], tasks=[task])
 
-        with patch("litellm.completion", side_effect=[
-            self._mock_response(tool_calls=[self._mock_tool_call("c1", "bad_tool", '{"value": "x"}')]),
-            self._mock_response("Final Answer: Handled error."),
-        ]):
+        with patch(
+            "litellm.completion",
+            side_effect=[
+                self._mock_response(tool_calls=[self._mock_tool_call("c1", "bad_tool", '{"value": "x"}')]),
+                self._mock_response("Final Answer: Handled error."),
+            ],
+        ):
             crew.kickoff()
 
         self.assertIsNotNone(self._find_span("crew_kickoff ToolErrCrew"))
@@ -323,10 +335,13 @@ class TestCrewAIInstrumentor(TestCase):
         task = self.Task(description="Big data.", expected_output="Result.", agent=agent)
         crew = self.Crew(name="BigCrew", agents=[agent], tasks=[task])
 
-        with patch("litellm.completion", side_effect=[
-            self._mock_response(tool_calls=[self._mock_tool_call("c1", "big_tool", large_args)]),
-            self._mock_response("Final Answer: " + "Z" * 5000),
-        ]):
+        with patch(
+            "litellm.completion",
+            side_effect=[
+                self._mock_response(tool_calls=[self._mock_tool_call("c1", "big_tool", large_args)]),
+                self._mock_response("Final Answer: " + "Z" * 5000),
+            ],
+        ):
             crew.kickoff()
 
         tool_span = self._find_span("execute_tool big_tool")
@@ -347,12 +362,15 @@ class TestCrewAIInstrumentor(TestCase):
         task = self.Task(description="Sequential.", expected_output="Result.", agent=agent)
         crew = self.Crew(name="SeqCrew", agents=[agent], tasks=[task])
 
-        with patch("litellm.completion", side_effect=[
-            self._mock_response(tool_calls=[self._mock_tool_call("c1", "seq_tool", '{"v":"1"}')]),
-            self._mock_response("Final Answer: Run 1"),
-            self._mock_response(tool_calls=[self._mock_tool_call("c2", "seq_tool", '{"v":"2"}')]),
-            self._mock_response("Final Answer: Run 2"),
-        ]):
+        with patch(
+            "litellm.completion",
+            side_effect=[
+                self._mock_response(tool_calls=[self._mock_tool_call("c1", "seq_tool", '{"v":"1"}')]),
+                self._mock_response("Final Answer: Run 1"),
+                self._mock_response(tool_calls=[self._mock_tool_call("c2", "seq_tool", '{"v":"2"}')]),
+                self._mock_response("Final Answer: Run 2"),
+            ],
+        ):
             crew.kickoff()
             first_count = len(self.span_exporter.get_finished_spans())
             crew.kickoff()
@@ -377,10 +395,12 @@ class TestCrewAIInstrumentor(TestCase):
         task = self.Task(description="Greet.", expected_output="Greeting.", agent=agent)
         crew = self.Crew(name="AsyncCrew", agents=[agent], tasks=[task])
 
-        responses = iter([
-            self._mock_response(tool_calls=[self._mock_tool_call("c1", "async_tool", '{"name":"World"}')]),
-            self._mock_response("Final Answer: Hi!"),
-        ])
+        responses = iter(
+            [
+                self._mock_response(tool_calls=[self._mock_tool_call("c1", "async_tool", '{"name":"World"}')]),
+                self._mock_response("Final Answer: Hi!"),
+            ]
+        )
 
         async def mock_acompletion(*args, **kwargs):
             return next(responses)
@@ -412,10 +432,12 @@ class TestCrewAIInstrumentor(TestCase):
         t2 = self.Task(description="T2.", expected_output="R2.", agent=a2)
         crew = self.Crew(name="AsyncMulti", agents=[a1, a2], tasks=[t1, t2])
 
-        responses = iter([
-            self._mock_response("Final Answer: R1"),
-            self._mock_response("Final Answer: R2"),
-        ])
+        responses = iter(
+            [
+                self._mock_response("Final Answer: R1"),
+                self._mock_response("Final Answer: R2"),
+            ]
+        )
 
         async def mock_acompletion(*args, **kwargs):
             return next(responses)
@@ -448,16 +470,23 @@ class TestCrewAIInstrumentor(TestCase):
         llm = self.LLM(model=model, is_litellm=True, temperature=0.7, max_tokens=1024)
         llm.supports_function_calling = lambda: True
         agent = self.Agent(
-            role="Greeter", goal="Greet the user", backstory="You are a friendly greeter.",
-            llm=llm, tools=[get_greeting], verbose=True,
+            role="Greeter",
+            goal="Greet the user",
+            backstory="You are a friendly greeter.",
+            llm=llm,
+            tools=[get_greeting],
+            verbose=True,
         )
         task = self.Task(description="Greet the user warmly.", expected_output="A friendly greeting.", agent=agent)
         crew = self.Crew(name="GreetingCrew", agents=[agent], tasks=[task], verbose=True)
 
-        with patch("litellm.completion", side_effect=[
-            self._mock_response(content="", tool_calls=[tc]),
-            self._mock_response(content="Thought: I now know the final answer\nFinal Answer: Hello! Welcome!"),
-        ]):
+        with patch(
+            "litellm.completion",
+            side_effect=[
+                self._mock_response(content="", tool_calls=[tc]),
+                self._mock_response(content="Thought: I now know the final answer\nFinal Answer: Hello! Welcome!"),
+            ],
+        ):
             crew.kickoff()
 
         spans = self.span_exporter.get_finished_spans()
@@ -465,33 +494,45 @@ class TestCrewAIInstrumentor(TestCase):
         agent_span = next((s for s in spans if s.name == "invoke_agent Greeter"), None)
         tool_span = next((s for s in spans if s.name == "execute_tool get_greeting"), None)
 
-        self._assert_span_attributes(spans, "crew_kickoff GreetingCrew", {
-            GEN_AI_OPERATION_NAME: "invoke_agent",
-            GEN_AI_AGENT_NAME: "GreetingCrew",
-            GEN_AI_AGENT_ID: str(crew.id),
-        })
+        self._assert_span_attributes(
+            spans,
+            "crew_kickoff GreetingCrew",
+            {
+                GEN_AI_OPERATION_NAME: "invoke_agent",
+                GEN_AI_AGENT_NAME: "GreetingCrew",
+                GEN_AI_AGENT_ID: str(crew.id),
+            },
+        )
         self.assertNotIn(GEN_AI_PROVIDER_NAME, crew_span.attributes)
         self.assertNotIn(GEN_AI_REQUEST_MODEL, crew_span.attributes)
         self.assertIn(GEN_AI_TOOL_DEFINITIONS, crew_span.attributes)
         self.assertIn("get_greeting", crew_span.attributes[GEN_AI_TOOL_DEFINITIONS])
 
-        self._assert_span_attributes(spans, "invoke_agent Greeter", {
-            GEN_AI_OPERATION_NAME: "invoke_agent",
-            GEN_AI_AGENT_NAME: "Greeter",
-            GEN_AI_PROVIDER_NAME: provider,
-            GEN_AI_REQUEST_MODEL: model_id,
-            GEN_AI_AGENT_ID: str(crew.agents[0].id),
-            GEN_AI_AGENT_DESCRIPTION: "Greet the user",
-            GEN_AI_REQUEST_TEMPERATURE: 0.7,
-            GEN_AI_REQUEST_MAX_TOKENS: 1024,
-            GEN_AI_SYSTEM_INSTRUCTIONS: "You are a friendly greeter.",
-        })
+        self._assert_span_attributes(
+            spans,
+            "invoke_agent Greeter",
+            {
+                GEN_AI_OPERATION_NAME: "invoke_agent",
+                GEN_AI_AGENT_NAME: "Greeter",
+                GEN_AI_PROVIDER_NAME: provider,
+                GEN_AI_REQUEST_MODEL: model_id,
+                GEN_AI_AGENT_ID: str(crew.agents[0].id),
+                GEN_AI_AGENT_DESCRIPTION: "Greet the user",
+                GEN_AI_REQUEST_TEMPERATURE: 0.7,
+                GEN_AI_REQUEST_MAX_TOKENS: 1024,
+                GEN_AI_SYSTEM_INSTRUCTIONS: "You are a friendly greeter.",
+            },
+        )
 
-        self._assert_span_attributes(spans, "execute_tool get_greeting", {
-            GEN_AI_OPERATION_NAME: "execute_tool",
-            GEN_AI_TOOL_NAME: "get_greeting",
-            GEN_AI_TOOL_TYPE: "function",
-        })
+        self._assert_span_attributes(
+            spans,
+            "execute_tool get_greeting",
+            {
+                GEN_AI_OPERATION_NAME: "execute_tool",
+                GEN_AI_TOOL_NAME: "get_greeting",
+                GEN_AI_TOOL_TYPE: "function",
+            },
+        )
         self.assertIsNotNone(tool_span)
         self.assertIsNotNone(tool_span.attributes)
         self.assertIn("get_greeting", tool_span.attributes[GEN_AI_TOOL_DESCRIPTION])
@@ -506,7 +547,8 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_span_parent(custom_span, tool_span)
 
         chat_span = next(
-            (s for s in spans if s.name == f"chat {model_id}" and s.attributes.get(GEN_AI_OUTPUT_MESSAGES)), None,
+            (s for s in spans if s.name == f"chat {model_id}" and s.attributes.get(GEN_AI_OUTPUT_MESSAGES)),
+            None,
         )
         self.assertIsNotNone(chat_span, f"chat {model_id} span with output not found")
         input_messages = json.loads(chat_span.attributes[GEN_AI_INPUT_MESSAGES])
@@ -530,8 +572,12 @@ class TestCrewAIInstrumentor(TestCase):
 
         llm = self.LLM(model=model, temperature=0.7)
         agent = self.Agent(
-            role="Greeter", goal="Greet the user", backstory="You are a friendly greeter.",
-            llm=llm, tools=[get_greeting], verbose=True,
+            role="Greeter",
+            goal="Greet the user",
+            backstory="You are a friendly greeter.",
+            llm=llm,
+            tools=[get_greeting],
+            verbose=True,
         )
         task = self.Task(description="Greet the user warmly.", expected_output="A friendly greeting.", agent=agent)
         return self.Crew(name="GreetingCrew", agents=[agent], tasks=[task], verbose=True)
@@ -549,7 +595,6 @@ class TestCrewAIInstrumentor(TestCase):
         for key, value in expected_attrs.items():
             self.assertIn(key, span.attributes, f"Attribute '{key}' missing from span '{expected_name}'")
             self.assertEqual(span.attributes.get(key), value)  # type: ignore[union-attr]
-
 
     def _assert_span_parent(self, child: ReadableSpan, parent: ReadableSpan):
         self.assertIsNotNone(child.parent)

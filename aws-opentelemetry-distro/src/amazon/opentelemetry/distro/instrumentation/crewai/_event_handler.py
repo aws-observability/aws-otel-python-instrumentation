@@ -1,10 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import inspect
 import logging
 import threading
 from dataclasses import dataclass
-from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
@@ -61,27 +61,10 @@ if TYPE_CHECKING:
 _LOG = logging.getLogger(__name__)
 
 
-class _EventKind(str, Enum):
-    CREW = "crew"
-    AGENT = "agent"
-    TOOL = "tool"
-    LLM = "llm"
-
-
-@dataclass(frozen=True)
-class _CorrelationKey:
-    event_kind: _EventKind
-    source_id: int
-    secondary_id: Optional[str] = None
-
-
 @dataclass
 class _SpanEntry:
     span: trace.Span
     token: Any
-    event_id: str
-    correlation_key: Optional[_CorrelationKey] = None
-    call_id: Optional[str] = None
 
 
 class _EventBusEmitWrapper:
@@ -91,12 +74,49 @@ class _EventBusEmitWrapper:
         self._event_handler = event_handler
 
     def __call__(self, wrapped, instance, args, kwargs) -> Any:
+        from crewai.events.base_events import BaseEvent  # pylint: disable=import-outside-toplevel
+
         result = wrapped(*args, **kwargs)
         event = args[1] if len(args) > 1 else kwargs.get("event")
-        if event:
+        if isinstance(event, BaseEvent):
             source = args[0] if args else kwargs.get("source")
             self._event_handler._handle_event(source, event)
         return result
+
+
+class _LLMToolCallCompletedEventPatch:
+    # ports fix from: https://github.com/crewAIInc/crewAI/pull/4880
+    # tldr:
+    # LLMCallCompletedEvent is not emitted when tool_calls are returned.
+    # CrewAI's _handle_non_streaming_response returns tool_calls without emitting
+    # LLMCallCompletedEvent, corrupting the event scope stack and breaking started_event_id.
+
+    def __call__(self, wrapped, instance, args, kwargs) -> Any:
+        if inspect.iscoroutinefunction(wrapped):
+            return self._async_call(wrapped, instance, args, kwargs)
+        result = wrapped(*args, **kwargs)
+        self._emit_if_tool_calls(instance, result, args, kwargs)
+        return result
+
+    async def _async_call(self, wrapped, instance, args, kwargs) -> Any:
+        result = await wrapped(*args, **kwargs)
+        self._emit_if_tool_calls(instance, result, args, kwargs)
+        return result
+
+    @staticmethod
+    def _emit_if_tool_calls(instance, result, args, kwargs):
+        if isinstance(result, list) and result and hasattr(result[0], "function"):
+            try:
+                from crewai.events.types.llm_events import LLMCallType  # pylint: disable=import-outside-toplevel
+
+                instance._handle_emit_call_events(  # pylint: disable=protected-access
+                    response=result,
+                    call_type=LLMCallType.TOOL_CALL,
+                    from_task=kwargs.get("from_task") or (args[3] if len(args) > 3 else None),
+                    from_agent=kwargs.get("from_agent") or (args[4] if len(args) > 4 else None),
+                )
+            except Exception:  # pylint: disable=broad-exception-caught
+                _LOG.debug("Failed to emit LLMCallCompletedEvent for tool_calls")
 
 
 class OpenTelemetryEventHandler:
@@ -118,7 +138,7 @@ class OpenTelemetryEventHandler:
 
         self._tracer = tracer
         self._lock = threading.Lock()
-        self._spans: Dict[Any, _SpanEntry] = {}  # keyed by _CorrelationKey or event_id str
+        self._event_id_to_span_entry_map: Dict[str, _SpanEntry] = {}
         self._event_type_handlers: Dict[type, Any] = {
             CrewKickoffStartedEvent: self._on_crew_start,
             CrewKickoffCompletedEvent: self._on_crew_completed,
@@ -141,10 +161,10 @@ class OpenTelemetryEventHandler:
             event_id = getattr(event, "event_id", None)
             parent_event_id = getattr(event, "parent_event_id", None)
             if event_id and parent_event_id:
-                with self._lock:
-                    parent_entry = self._spans.get(parent_event_id)
-                    if parent_entry:
-                        self._spans[event_id] = parent_entry
+                parent_entry = self._get_entry(parent_event_id)
+                if parent_entry:
+                    with self._lock:
+                        self._event_id_to_span_entry_map[event_id] = parent_entry
 
     def _on_crew_start(self, source: "Crew", event: "CrewKickoffStartedEvent") -> None:
         crew_name = getattr(source, "name", None)
@@ -167,16 +187,15 @@ class OpenTelemetryEventHandler:
                 if tool_defs:
                     attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs)
 
-        key = _CorrelationKey(_EventKind.CREW, id(source))
-        self._start_span(span_name, event.event_id, key, attributes, event.parent_event_id)
+        self._start_span(span_name, event.event_id, attributes, event.parent_event_id)
 
     def _on_crew_completed(
         self, source: "Crew", event: "CrewKickoffCompletedEvent"  # pylint: disable=unused-argument
     ) -> None:
-        self._end_span(_CorrelationKey(_EventKind.CREW, id(source)))
+        self._end_span(event.started_event_id)
 
     def _on_crew_failed(self, source: "Crew", event: "CrewKickoffFailedEvent") -> None:
-        self._fail_span(_CorrelationKey(_EventKind.CREW, id(source)), getattr(event, "error", None))
+        self._on_error_span(event.started_event_id, getattr(event, "error", None))
 
     def _on_agent_start(self, source: "BaseAgent", event: "AgentExecutionStartedEvent") -> None:
         agent = getattr(event, "agent", None)
@@ -215,28 +234,15 @@ class OpenTelemetryEventHandler:
                 if max_tokens is not None:
                     attributes[GEN_AI_REQUEST_MAX_TOKENS] = max_tokens
 
-        task = getattr(event, "task", None)
-        task_id = str(task.id) if task and hasattr(task, "id") else None
-        key = _CorrelationKey(_EventKind.AGENT, id(source), task_id)
-        self._start_span(span_name, event.event_id, key, attributes, event.parent_event_id)
+        self._start_span(span_name, event.event_id, attributes, event.parent_event_id)
 
     def _on_agent_completed(self, source: "BaseAgent", event: "AgentExecutionCompletedEvent") -> None:
-        task = getattr(event, "task", None)
-        task_id = str(task.id) if task and hasattr(task, "id") else None
-        self._end_span(_CorrelationKey(_EventKind.AGENT, id(source), task_id))
+        self._end_span(event.started_event_id)
 
     def _on_agent_failed(self, source: "BaseAgent", event: "AgentExecutionErrorEvent") -> None:
-        task = getattr(event, "task", None)
-        task_id = str(task.id) if task and hasattr(task, "id") else None
-        self._fail_span(_CorrelationKey(_EventKind.AGENT, id(source), task_id), getattr(event, "error", None))
+        self._on_error_span(event.started_event_id, getattr(event, "error", None))
 
     def _on_tool_start(self, source: "ToolUsage", event: "ToolUsageStartedEvent") -> None:
-        agent = getattr(source, "agent", None)
-        if agent:
-            llm = getattr(agent, "llm", None)
-            if llm:
-                self._end_span(_CorrelationKey(_EventKind.LLM, id(llm)))
-
         tool_name = event.tool_name
         span_name = (
             f"{GenAiOperationNameValues.EXECUTE_TOOL.value} {tool_name}"
@@ -259,6 +265,7 @@ class OpenTelemetryEventHandler:
                         attributes[GEN_AI_TOOL_DESCRIPTION] = desc
                     break
 
+        agent = getattr(source, "agent", None)
         if agent:
             llm = getattr(agent, "llm", None)
             provider, model = self._extract_provider_and_model(llm)
@@ -270,20 +277,16 @@ class OpenTelemetryEventHandler:
         if event.tool_args:
             attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = serialize_to_json_string(event.tool_args)
 
-        key = _CorrelationKey(_EventKind.TOOL, id(source), tool_name)
-        self._start_span(span_name, event.event_id, key, attributes, event.parent_event_id)
+        self._start_span(span_name, event.event_id, attributes, event.parent_event_id)
 
     def _on_tool_finished(self, source: "ToolUsage", event: "ToolUsageFinishedEvent") -> None:
         attrs: Dict[str, Any] = {}
         output = getattr(event, "output", None)
         if output is not None:
             attrs[GEN_AI_TOOL_CALL_RESULT] = serialize_to_json_string(output)
-        self._end_span(_CorrelationKey(_EventKind.TOOL, id(source), event.tool_name), attrs)
+        self._end_span(event.started_event_id, attrs)
 
     def _on_llm_start(self, source: "LLM", event: "LLMCallStartedEvent") -> None:
-        key = _CorrelationKey(_EventKind.LLM, id(source))
-        self._end_span(key)
-
         attributes: Dict[str, Any] = {
             GEN_AI_OPERATION_NAME: GenAiOperationNameValues.CHAT.value,
         }
@@ -312,7 +315,7 @@ class OpenTelemetryEventHandler:
                     [self._to_chat_message(m) for m in non_system_messages]
                 )
 
-        self._start_span(span_name, event.event_id, key, attributes, event.parent_event_id, call_id=event.call_id)
+        self._start_span(span_name, event.event_id, attributes, event.parent_event_id)
 
     def _on_llm_completed(self, source: "LLM", event: "LLMCallCompletedEvent") -> None:
         attrs: Dict[str, Any] = {}
@@ -327,9 +330,25 @@ class OpenTelemetryEventHandler:
                 attrs[GEN_AI_OUTPUT_MESSAGES] = serialize_to_json_string(
                     [self._to_output_message({"role": "assistant", "content": response}, finish_reason)]
                 )
-            elif isinstance(response, list):
+            elif isinstance(response, list) and response and isinstance(response[0], dict):
                 attrs[GEN_AI_OUTPUT_MESSAGES] = serialize_to_json_string(
                     [self._to_output_message(m, finish_reason) for m in response]
+                )
+            elif isinstance(response, list) and response and hasattr(response[0], "function"):
+                tool_calls = []
+                for tc in response:
+                    tool_calls.append(
+                        {
+                            "id": getattr(tc, "id", None),
+                            "type": "function",
+                            "function": {
+                                "name": getattr(tc.function, "name", None),
+                                "arguments": getattr(tc.function, "arguments", None),
+                            },
+                        }
+                    )
+                attrs[GEN_AI_OUTPUT_MESSAGES] = serialize_to_json_string(
+                    [{"role": "assistant", "parts": tool_calls, "finish_reason": finish_reason}]
                 )
 
         _, model_name = self._extract_provider_and_model(source)
@@ -342,51 +361,41 @@ class OpenTelemetryEventHandler:
         if usage.completion_tokens > 0:
             attrs[GEN_AI_USAGE_OUTPUT_TOKENS] = usage.completion_tokens
 
-        key = _CorrelationKey(_EventKind.LLM, id(source))
-        with self._lock:
-            entry = self._spans.get(key)
-        if entry and entry.call_id == event.call_id:
-            self._end_span(key, attrs)
+        self._end_span(event.started_event_id, attrs)
 
     def _on_llm_failed(self, source: Any, event: "LLMCallFailedEvent") -> None:
-        key = _CorrelationKey(_EventKind.LLM, id(source))
+        self._on_error_span(event.started_event_id, getattr(event, "error", None))
+
+    def _get_entry(self, event_id: Optional[str]) -> Optional[_SpanEntry]:
+        if not event_id:
+            return None
         with self._lock:
-            entry = self._spans.get(key)
-        if entry and entry.call_id == event.call_id:
-            self._fail_span(key, getattr(event, "error", None))
+            return self._event_id_to_span_entry_map.get(event_id)
 
     def _start_span(
         self,
         name: str,
         event_id: str,
-        key: _CorrelationKey,
         attributes: Optional[Dict[str, Any]] = None,
         parent_event_id: Optional[str] = None,
-        call_id: Optional[str] = None,
     ) -> None:
         parent_ctx = None
-        if parent_event_id:
-            with self._lock:
-                parent_entry = self._spans.get(parent_event_id)
-            if parent_entry:
-                parent_ctx = trace.set_span_in_context(parent_entry.span)
+        parent_entry = self._get_entry(parent_event_id)
+        if parent_entry:
+            parent_ctx = trace.set_span_in_context(parent_entry.span)
 
         span = self._tracer.start_span(name, kind=SpanKind.INTERNAL, attributes=attributes, context=parent_ctx)
         token = context.attach(trace.set_span_in_context(span))
-        entry = _SpanEntry(span=span, token=token, event_id=event_id, correlation_key=key, call_id=call_id)
         with self._lock:
-            self._spans[event_id] = entry
-            self._spans[key] = entry
+            self._event_id_to_span_entry_map[event_id] = _SpanEntry(span=span, token=token)
 
-    def _end_span(self, key: Any, set_attrs: Optional[Dict[str, Any]] = None) -> None:
+    def _end_span(self, started_event_id: Optional[str], set_attrs: Optional[Dict[str, Any]] = None) -> None:
+        if not started_event_id:
+            return
         with self._lock:
-            entry = self._spans.pop(key, None)
-            if not entry:
-                return
-            if key != entry.event_id:
-                self._spans.pop(entry.event_id, None)
-            if key != entry.correlation_key:
-                self._spans.pop(entry.correlation_key, None)
+            entry = self._event_id_to_span_entry_map.pop(started_event_id, None)
+        if not entry:
+            return
         if set_attrs:
             for k, value in set_attrs.items():
                 if value is not None:
@@ -395,15 +404,13 @@ class OpenTelemetryEventHandler:
         entry.span.end()
         context.detach(entry.token)
 
-    def _fail_span(self, key: Any, error: Optional[str] = None) -> None:
+    def _on_error_span(self, started_event_id: Optional[str], error: Optional[str] = None) -> None:
+        if not started_event_id:
+            return
         with self._lock:
-            entry = self._spans.pop(key, None)
-            if not entry:
-                return
-            if key != entry.event_id:
-                self._spans.pop(entry.event_id, None)
-            if key != entry.correlation_key:
-                self._spans.pop(entry.correlation_key, None)
+            entry = self._event_id_to_span_entry_map.pop(started_event_id, None)
+        if not entry:
+            return
         entry.span.set_status(Status(StatusCode.ERROR, error))
         if error:
             entry.span.set_attribute(ERROR_MESSAGE, error)
