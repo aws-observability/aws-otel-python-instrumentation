@@ -111,6 +111,10 @@ class OpenTelemetryEventHandler:
             handler(source, event)
 
     def _on_crew_start(self, source: "Crew", event: "CrewKickoffStartedEvent") -> None:
+        # The span name "crew_kickoff {crew_name}" does not conform to any current OTel semantic
+        # conventions. This is because CrewAI's workflow can contain multiple agents but there currently
+        # does not exist any semantic convention naming schema to capture this system.
+
         crew_name = getattr(source, "name", None)
         span_name = f"crew_kickoff {crew_name}" if crew_name else "crew_kickoff"
         attributes: Dict[str, Any] = {
@@ -121,6 +125,11 @@ class OpenTelemetryEventHandler:
         if hasattr(source, "id"):
             attributes[GEN_AI_AGENT_ID] = str(source.id)
 
+        # As of OTel semconv v1.39.0, there are no semantic conventions that support
+        # multi-agent systems. We intentionally do not set gen_ai.provider.name or
+        # gen_ai.request.model here because a Crew can contain multiple agents with different
+        # providers/models. Per-agent provider/model info is captured in child invoke_agent spans.
+        # TODO: Revisit span attributes when OTel semconv adds multi-agent system support.
         agents = getattr(source, "agents", [])
         if agents:
             all_tools = []
