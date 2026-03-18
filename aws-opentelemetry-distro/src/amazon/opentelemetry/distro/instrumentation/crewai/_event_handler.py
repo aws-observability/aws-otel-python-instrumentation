@@ -138,6 +138,8 @@ class OpenTelemetryEventHandler:
 
         self._tracer = tracer
         self._lock = threading.Lock()
+        # a map of every event's id to its span. If the event does not 
+        # create a span, then it's mapped to the span created by its nearest ancestor event
         self._event_id_to_span_entry_map: Dict[str, _SpanEntry] = {}
         self._event_type_handlers: Dict[type, Any] = {
             CrewKickoffStartedEvent: self._on_crew_start,
