@@ -12,7 +12,7 @@ from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumento
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
+from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_MESSAGE
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_DESCRIPTION,
     GEN_AI_AGENT_ID,
@@ -101,7 +101,7 @@ class TestCrewAIInstrumentor(TestCase):
         spans = self.span_exporter.get_finished_spans()
         error_span = next((s for s in spans if s.status.status_code.name == "ERROR"), None)
         self.assertIsNotNone(error_span, "Expected at least one span with ERROR status")
-        self.assertEqual(error_span.attributes.get(ERROR_TYPE), "RuntimeError")
+        self.assertIn("LLM call failed", error_span.attributes.get(ERROR_MESSAGE, ""))
 
     def test_text_based_tool_calling(self):
         mock_llm = MagicMock()
@@ -215,11 +215,32 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertIn(GEN_AI_TOOL_CALL_ARGUMENTS, tool_span.attributes)
         self.assertEqual('"Hello, World!"', tool_span.attributes[GEN_AI_TOOL_CALL_RESULT])
 
+        # validates context propagation
+        agent_span = next((s for s in spans if s.name == "invoke_agent Greeter"), None)
+        self.assertEqual(
+            format(agent_span.parent.span_id, "016x"),
+            format(crew_span.context.span_id, "016x"),
+        )
+        self.assertEqual(
+            format(tool_span.parent.span_id, "016x"),
+            format(agent_span.context.span_id, "016x"),
+        )
+
+        custom_span = next((s for s in spans if s.name == "custom_downstream_span"), None)
+        self.assertIsNotNone(custom_span, "custom_downstream_span not found")
+        self.assertEqual(
+            format(custom_span.parent.span_id, "016x"),
+            format(tool_span.context.span_id, "016x"),
+        )
+
     def _create_test_crew(self, model: str):
+        test_tracer = self.tracer_provider.get_tracer("test")
+
         @self.tool
         def get_greeting(name: str) -> str:
             """Get a greeting message for the given name."""
-            return f"Hello, {name}!"
+            with test_tracer.start_as_current_span("custom_downstream_span"):
+                return f"Hello, {name}!"
 
         llm = self.LLM(model=model, temperature=0.7)
 
