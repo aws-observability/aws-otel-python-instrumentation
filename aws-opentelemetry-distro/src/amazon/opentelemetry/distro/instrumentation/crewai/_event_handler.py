@@ -1,14 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import inspect
 import logging
-import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     PROVIDER_MAP,
+    LockedDict,
     serialize_to_json_string,
 )
 from opentelemetry import context, trace
@@ -68,55 +67,62 @@ class _SpanEntry:
 
 
 class _EventBusEmitWrapper:
-    """Wrapper for crewai_event_bus.emit to run our event handler synchronously."""
+    """Wrapper for crewai_event_bus.emit that runs our event handler synchronously
+    and patches a CrewAI bug where LLMCallCompletedEvent is missing for tool_calls.
+    """
 
     def __init__(self, event_handler: "OpenTelemetryEventHandler"):
         self._event_handler = event_handler
+        # for async agents to keep track of pending llm events
+        self._llm_source_to_unfinished_llm_event = LockedDict()
 
     def __call__(self, wrapped, instance, args, kwargs) -> Any:
-        from crewai.events.base_events import BaseEvent  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from crewai.events.base_events import BaseEvent
+        from crewai.events.types.llm_events import LLMCallCompletedEvent, LLMCallStartedEvent, LLMCallType
+        from crewai.events.types.tool_usage_events import ToolUsageStartedEvent
+        from crewai.llms.base_llm import get_current_call_id
 
-        result = wrapped(*args, **kwargs)
         event = args[1] if len(args) > 1 else kwargs.get("event")
-        if isinstance(event, BaseEvent):
-            source = args[0] if args else kwargs.get("source")
-            self._event_handler._handle_event(source, event)
-        return result
+        source = args[0] if args else kwargs.get("source")
 
+        if isinstance(event, ToolUsageStartedEvent):
+            agent = getattr(source, "agent", None)
+            llm = getattr(agent, "llm", None) if agent else None
+            if llm and id(llm) in self._llm_source_to_unfinished_llm_event:
+                llm_source = self._llm_source_to_unfinished_llm_event.pop(id(llm))
+                # We must emit a synthetic LLMCallCompletedEvent to fix CrewAI's event stack.
+                # This (almost) replicates the same fix that would be applied inside
+                # _handle_non_streaming_response before returning tool_calls.
+                # It is safe because events are essentially fire-and-forget operations.
+                # emit() only uses the event type to pop it from the stack and does not
+                # read any event payload fields.
+                # See: https://github.com/crewAIInc/crewAI/pull/4880
+                # TODO: remove this once this bug is fixed in upstream
+                try:
+                    wrapped(
+                        llm_source,
+                        LLMCallCompletedEvent(
+                            response=None,
+                            call_type=LLMCallType.TOOL_CALL,
+                            call_id=get_current_call_id(),
+                            model=getattr(llm_source, "model", None),
+                        ),
+                    )
+                except Exception:  # pylint: disable=broad-exception-caught
+                    _LOG.debug("Failed to emit missing LLMCallCompletedEvent for tool_calls")
 
-class _LLMToolCallCompletedEventPatch:
-    # ports fix from: https://github.com/crewAIInc/crewAI/pull/4880
-    # tldr:
-    # LLMCallCompletedEvent is not emitted when tool_calls are returned.
-    # CrewAI's _handle_non_streaming_response returns tool_calls without emitting
-    # LLMCallCompletedEvent, corrupting the event scope stack and breaking started_event_id.
-
-    def __call__(self, wrapped, instance, args, kwargs) -> Any:
-        if inspect.iscoroutinefunction(wrapped):
-            return self._async_call(wrapped, instance, args, kwargs)
         result = wrapped(*args, **kwargs)
-        self._emit_if_tool_calls(instance, result, args, kwargs)
+        if not isinstance(event, BaseEvent):
+            return result
+
+        if isinstance(event, LLMCallStartedEvent):
+            self._llm_source_to_unfinished_llm_event.put(id(source), source)
+        elif isinstance(event, LLMCallCompletedEvent):
+            self._llm_source_to_unfinished_llm_event.pop(id(source))
+
+        self._event_handler._handle_event(source, event)
         return result
-
-    async def _async_call(self, wrapped, instance, args, kwargs) -> Any:
-        result = await wrapped(*args, **kwargs)
-        self._emit_if_tool_calls(instance, result, args, kwargs)
-        return result
-
-    @staticmethod
-    def _emit_if_tool_calls(instance, result, args, kwargs):
-        if isinstance(result, list) and result and hasattr(result[0], "function"):
-            try:
-                from crewai.events.types.llm_events import LLMCallType  # pylint: disable=import-outside-toplevel
-
-                instance._handle_emit_call_events(  # pylint: disable=protected-access
-                    response=result,
-                    call_type=LLMCallType.TOOL_CALL,
-                    from_task=kwargs.get("from_task") or (args[3] if len(args) > 3 else None),
-                    from_agent=kwargs.get("from_agent") or (args[4] if len(args) > 4 else None),
-                )
-            except Exception:  # pylint: disable=broad-exception-caught
-                _LOG.debug("Failed to emit LLMCallCompletedEvent for tool_calls")
 
 
 class OpenTelemetryEventHandler:
@@ -137,10 +143,9 @@ class OpenTelemetryEventHandler:
         from crewai.events.types.tool_usage_events import ToolUsageFinishedEvent, ToolUsageStartedEvent
 
         self._tracer = tracer
-        self._lock = threading.Lock()
-        # a map of every event's id to its span. If the event does not 
+        # a map of every event's id to its span. If the event does not
         # create a span, then it's mapped to the span created by its nearest ancestor event
-        self._event_id_to_span_entry_map: Dict[str, _SpanEntry] = {}
+        self._spans = LockedDict()
         self._event_type_handlers: Dict[type, Any] = {
             CrewKickoffStartedEvent: self._on_crew_start,
             CrewKickoffCompletedEvent: self._on_crew_completed,
@@ -163,10 +168,9 @@ class OpenTelemetryEventHandler:
             event_id = getattr(event, "event_id", None)
             parent_event_id = getattr(event, "parent_event_id", None)
             if event_id and parent_event_id:
-                parent_entry = self._get_entry(parent_event_id)
+                parent_entry = self._spans.get(parent_event_id)
                 if parent_entry:
-                    with self._lock:
-                        self._event_id_to_span_entry_map[event_id] = parent_entry
+                    self._spans.put(event_id, parent_entry)
 
     def _on_crew_start(self, source: "Crew", event: "CrewKickoffStartedEvent") -> None:
         crew_name = getattr(source, "name", None)
@@ -197,13 +201,13 @@ class OpenTelemetryEventHandler:
         self._end_span(event.started_event_id)
 
     def _on_crew_failed(
-        self, source: "Crew", event: "CrewKickoffFailedEvent"
-    ) -> None:  # pylint: disable=unused-argument
+        self, source: "Crew", event: "CrewKickoffFailedEvent"  # pylint: disable=unused-argument
+    ) -> None:
         self._on_error_span(event.started_event_id, getattr(event, "error", None))
 
     def _on_agent_start(
-        self, source: "BaseAgent", event: "AgentExecutionStartedEvent"
-    ) -> None:  # pylint: disable=unused-argument
+        self, source: "BaseAgent", event: "AgentExecutionStartedEvent"  # pylint: disable=unused-argument
+    ) -> None:
         agent = getattr(event, "agent", None)
         agent_role = getattr(agent, "role", None) if agent else None
         span_name = (
@@ -243,13 +247,13 @@ class OpenTelemetryEventHandler:
         self._start_span(span_name, event.event_id, attributes, event.parent_event_id)
 
     def _on_agent_completed(
-        self, source: "BaseAgent", event: "AgentExecutionCompletedEvent"
-    ) -> None:  # pylint: disable=unused-argument
+        self, source: "BaseAgent", event: "AgentExecutionCompletedEvent"  # pylint: disable=unused-argument
+    ) -> None:
         self._end_span(event.started_event_id)
 
     def _on_agent_failed(
-        self, source: "BaseAgent", event: "AgentExecutionErrorEvent"
-    ) -> None:  # pylint: disable=unused-argument
+        self, source: "BaseAgent", event: "AgentExecutionErrorEvent"  # pylint: disable=unused-argument
+    ) -> None:
         self._on_error_span(event.started_event_id, getattr(event, "error", None))
 
     def _on_tool_start(self, source: "ToolUsage", event: "ToolUsageStartedEvent") -> None:
@@ -290,8 +294,8 @@ class OpenTelemetryEventHandler:
         self._start_span(span_name, event.event_id, attributes, event.parent_event_id)
 
     def _on_tool_finished(
-        self, source: "ToolUsage", event: "ToolUsageFinishedEvent"
-    ) -> None:  # pylint: disable=unused-argument
+        self, source: "ToolUsage", event: "ToolUsageFinishedEvent"  # pylint: disable=unused-argument
+    ) -> None:
         attrs: Dict[str, Any] = {}
         output = getattr(event, "output", None)
         if output is not None:
@@ -346,22 +350,6 @@ class OpenTelemetryEventHandler:
                 attrs[GEN_AI_OUTPUT_MESSAGES] = serialize_to_json_string(
                     [self._to_output_message(m, finish_reason) for m in response]
                 )
-            elif isinstance(response, list) and response and hasattr(response[0], "function"):
-                tool_calls = []
-                for tc in response:
-                    tool_calls.append(
-                        {
-                            "id": getattr(tc, "id", None),
-                            "type": "function",
-                            "function": {
-                                "name": getattr(tc.function, "name", None),
-                                "arguments": getattr(tc.function, "arguments", None),
-                            },
-                        }
-                    )
-                attrs[GEN_AI_OUTPUT_MESSAGES] = serialize_to_json_string(
-                    [{"role": "assistant", "parts": tool_calls, "finish_reason": finish_reason}]
-                )
 
         _, model_name = self._extract_provider_and_model(source)
         if model_name:
@@ -378,12 +366,6 @@ class OpenTelemetryEventHandler:
     def _on_llm_failed(self, source: Any, event: "LLMCallFailedEvent") -> None:  # pylint: disable=unused-argument
         self._on_error_span(event.started_event_id, getattr(event, "error", None))
 
-    def _get_entry(self, event_id: Optional[str]) -> Optional[_SpanEntry]:
-        if not event_id:
-            return None
-        with self._lock:
-            return self._event_id_to_span_entry_map.get(event_id)
-
     def _start_span(
         self,
         name: str,
@@ -392,24 +374,23 @@ class OpenTelemetryEventHandler:
         parent_event_id: Optional[str] = None,
     ) -> None:
         parent_ctx = None
-        parent_entry = self._get_entry(parent_event_id)
-        if parent_entry:
-            parent_ctx = trace.set_span_in_context(parent_entry.span)
+        if parent_event_id:
+            parent_entry = self._spans.get(parent_event_id)
+            if parent_entry:
+                parent_ctx = trace.set_span_in_context(parent_entry.span)
 
         span = self._tracer.start_span(name, kind=SpanKind.INTERNAL, attributes=attributes, context=parent_ctx)
         token = context.attach(trace.set_span_in_context(span))
-        with self._lock:
-            self._event_id_to_span_entry_map[event_id] = _SpanEntry(span=span, token=token)
+        self._spans.put(event_id, _SpanEntry(span=span, token=token))
 
-    def _end_span(self, started_event_id: Optional[str], attributes: Optional[Dict[str, Any]] = None) -> None:
+    def _end_span(self, started_event_id: Optional[str], set_attrs: Optional[Dict[str, Any]] = None) -> None:
         if not started_event_id:
             return
-        with self._lock:
-            entry = self._event_id_to_span_entry_map.pop(started_event_id, None)
+        entry = self._spans.pop(started_event_id)
         if not entry:
             return
-        if attributes:
-            for key, value in attributes.items():
+        if set_attrs:
+            for key, value in set_attrs.items():
                 if value is not None:
                     entry.span.set_attribute(key, value)
         entry.span.set_status(Status(StatusCode.OK))
@@ -419,8 +400,7 @@ class OpenTelemetryEventHandler:
     def _on_error_span(self, started_event_id: Optional[str], error: Optional[str] = None) -> None:
         if not started_event_id:
             return
-        with self._lock:
-            entry = self._event_id_to_span_entry_map.pop(started_event_id, None)
+        entry = self._spans.pop(started_event_id)
         if not entry:
             return
         entry.span.set_status(Status(StatusCode.ERROR, error))

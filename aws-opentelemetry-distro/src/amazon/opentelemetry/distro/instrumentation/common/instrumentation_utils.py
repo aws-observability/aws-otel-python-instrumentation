@@ -3,9 +3,10 @@
 
 import json
 import logging
+import threading
 from contextvars import Token
 from functools import wraps
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Dict, Optional
 
 from wrapt import wrap_function_wrapper
 
@@ -33,6 +34,28 @@ PROVIDER_MAP = {
     "deepseek": GenAiProviderNameValues.DEEPSEEK.value,
     "perplexity": GenAiProviderNameValues.PERPLEXITY.value,
 }
+
+
+class LockedDict:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._data: Dict[Any, Any] = {}
+
+    def get(self, key: Any) -> Any:
+        with self._lock:
+            return self._data.get(key)
+
+    def put(self, key: Any, value: Any) -> None:
+        with self._lock:
+            self._data[key] = value
+
+    def pop(self, key: Any) -> Any:
+        with self._lock:
+            return self._data.pop(key, None)
+
+    def __contains__(self, key: Any) -> bool:
+        with self._lock:
+            return key in self._data
 
 
 def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:
