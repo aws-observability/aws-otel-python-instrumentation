@@ -12,6 +12,13 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat: propagate HTTP context for MCP requests and prefix all span names with mcp
+  ([#683](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/683))
+- feat: add openai-agents-v2 and threading instrumentation dependencies
+  ([#684](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/684))
+- feat: Rewrite CrewAI instrumentation using Event based approach
+  ([#681](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/681))
+
 ## v0.16.0 - 2026-03-13
 
 - Tests and Doc Updates for Adding Python 3.14 Support

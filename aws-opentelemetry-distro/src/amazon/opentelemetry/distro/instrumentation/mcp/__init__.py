@@ -70,6 +70,11 @@ class McpInstrumentor(BaseInstrumentor):
             "StreamableHTTPTransport._maybe_extract_session_id_from_response",
             ClientWrapper.wrap_extract_session_id,
         )
+        try_wrap(
+            _HTTP_MODULE,
+            "StreamableHTTPTransport._handle_post_request",
+            self._client_wrapper.wrap_handle_post_request,
+        )
 
     def _uninstrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
         try:
@@ -87,6 +92,13 @@ class McpInstrumentor(BaseInstrumentor):
             try_unwrap(streamable_http, "streamable_http_client")
             try_unwrap(sse, "sse_client")
             if hasattr(streamable_http, "StreamableHTTPTransport"):
-                try_unwrap(streamable_http.StreamableHTTPTransport, "_maybe_extract_session_id_from_response")
+                try_unwrap(
+                    streamable_http.StreamableHTTPTransport,
+                    "_maybe_extract_session_id_from_response",
+                )
+                try_unwrap(
+                    streamable_http.StreamableHTTPTransport,
+                    "_handle_post_request",
+                )
         except ImportError:
             _LOG.debug("MCP SDK not available, nothing to uninstrument")

@@ -9,7 +9,6 @@ from urllib.parse import urlparse
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import serialize_to_json_string
 from opentelemetry import context, trace
-from opentelemetry.instrumentation.utils import suppress_http_instrumentation
 from opentelemetry.propagate import get_global_textmap
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
@@ -70,6 +69,9 @@ class McpWrapper:
         """
         from mcp import types  # pylint: disable=import-outside-toplevel
 
+        def create_mcp_span_name(method, target=None):
+            return f"mcp {method} {target}" if target else f"mcp {method}"
+
         is_notification = isinstance(message, (types.ClientNotification, types.ServerNotification))
 
         if hasattr(message, "root"):
@@ -85,7 +87,7 @@ class McpWrapper:
 
         if isinstance(message, types.CallToolRequest):
             tool_name = message.params.name
-            span.update_name(f"{McpMethodNameValues.TOOLS_CALL.value} {tool_name}")
+            span.update_name(create_mcp_span_name(str(McpMethodNameValues.TOOLS_CALL.value), str(tool_name)))
             span.set_attribute(GEN_AI_TOOL_NAME, tool_name)
             span.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.EXECUTE_TOOL.value)
 
@@ -97,7 +99,7 @@ class McpWrapper:
 
         elif isinstance(message, types.GetPromptRequest):
             prompt_name = message.params.name
-            span.update_name(f"{McpMethodNameValues.PROMPTS_GET.value} {prompt_name}")
+            span.update_name(create_mcp_span_name(str(McpMethodNameValues.PROMPTS_GET.value), str(prompt_name)))
             span.set_attribute(GEN_AI_PROMPT, prompt_name)
 
         elif isinstance(
@@ -110,11 +112,11 @@ class McpWrapper:
             ),
         ):
             resource_uri = str(message.params.uri)
-            span.update_name(f"{message.method} {resource_uri}")
+            span.update_name(create_mcp_span_name(str(message.method), resource_uri))
             span.set_attribute(MCP_RESOURCE_URI, resource_uri)
 
         else:
-            span.update_name(message.method)
+            span.update_name(create_mcp_span_name(str(message.method)))
 
         transport_info = context.get_value(_TRANSPORT_KEY)
         if isinstance(transport_info, dict):
@@ -210,8 +212,7 @@ class ClientWrapper(McpWrapper):
                 modified_message = message.model_validate(message_json)
                 new_args = (modified_message,) + args[1:]
 
-                with suppress_http_instrumentation():
-                    result = await wrapped(*new_args, **kwargs)
+                result = await wrapped(*new_args, **kwargs)
                 self._set_tool_result(span, message, result)
                 return result
             except Exception as exc:
@@ -227,12 +228,12 @@ class ClientWrapper(McpWrapper):
 
         @asynccontextmanager
         async def wrapper():
-            span, token = self._start_mcp_session({NETWORK_TRANSPORT: NetworkTransportValues.PIPE.value})
+            session_span, token = self._start_mcp_session_span({NETWORK_TRANSPORT: NetworkTransportValues.PIPE.value})
             try:
                 async with wrapped(*args, **kwargs) as streams:
                     yield streams
             finally:
-                span.end()
+                session_span.end()
                 context.detach(token)
 
         return wrapper()
@@ -243,7 +244,7 @@ class ClientWrapper(McpWrapper):
         async def wrapper():
             url = args[0] if args else kwargs.get("url", "")
             parsed = urlparse(url)
-            span, token = self._start_mcp_session(
+            session_span, token = self._start_mcp_session_span(
                 {
                     NETWORK_TRANSPORT: NetworkTransportValues.TCP.value,
                     SERVER_ADDRESS: parsed.hostname,
@@ -251,14 +252,53 @@ class ClientWrapper(McpWrapper):
                 }
             )
             try:
-                with suppress_http_instrumentation():
-                    async with wrapped(*args, **kwargs) as streams:
-                        yield streams
+                async with wrapped(*args, **kwargs) as streams:
+                    yield streams
             finally:
-                span.end()
+                session_span.end()
                 context.detach(token)
 
         return wrapper()
+
+    def wrap_handle_post_request(
+        self,
+        wrapped: Callable[..., Any],
+        instance: Any,
+        args: Any,
+        kwargs: Any,
+    ) -> Any:
+        """
+        Wrap StreamableHTTPTransport._handle_post_request to restore
+        trace context. Extracts the trace context sent to MCP server
+        via JSON RPC so existing HTTP spans are correctly parented
+        under the MCP request span.
+        """
+
+        async def async_wrapper():
+            ctx = None
+            try:
+                from mcp.client.streamable_http import RequestContext  # pylint: disable=import-outside-toplevel
+
+                request_ctx = args[0] if args else None
+                if isinstance(request_ctx, RequestContext):
+                    message = request_ctx.session_message.message
+                    message_dict = message.model_dump(by_alias=True, mode="json", exclude_none=True)
+                    meta = message_dict.get("params", {}).get("_meta", {})
+                    if meta:
+                        ctx = self._propagators.extract(carrier=meta)
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
+
+            if ctx:
+                token = context.attach(ctx)
+                try:
+                    return await wrapped(*args, **kwargs)
+                finally:
+                    context.detach(token)
+            else:
+                return await wrapped(*args, **kwargs)
+
+        return async_wrapper()
 
     @staticmethod
     def wrap_extract_session_id(wrapped: Callable[..., Any], instance: Any, args: Any, kwargs: Any) -> Any:
@@ -269,12 +309,12 @@ class ClientWrapper(McpWrapper):
                 transport_info[MCP_SESSION_ID] = instance.session_id
         return result
 
-    def _start_mcp_session(self, transport_info: Dict[str, Any]) -> Tuple[trace.Span, Token]:
-        # a bit strange and does not follow any existing OTel semantic conventions,
-        # but we need an overarching parent span to capture the MCP session
-        # lifetime, all server and client MCP operations happen within this
-        # session context. Otherwise we get a bunch of disjointed traces
-        # without a common ancestor.
+    def _start_mcp_session_span(self, transport_info: Dict[str, Any]) -> Tuple[trace.Span, Token]:
+        # A bit strange and does not follow any existing OTel semantic
+        # conventions, but we need an overarching parent span to capture
+        # the MCP session lifetime. All server and client MCP operations
+        # happen within this session context. Otherwise we get a bunch
+        # of disjointed traces without a common ancestor.
         span = self._tracer.start_span(self._SESSION_SPAN_NAME, kind=SpanKind.INTERNAL)
         ctx = trace.set_span_in_context(span)
         ctx = context.set_value(_TRANSPORT_KEY, transport_info, ctx)
