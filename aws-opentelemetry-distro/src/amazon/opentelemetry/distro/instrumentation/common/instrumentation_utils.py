@@ -53,6 +53,10 @@ class DictWithLock:
         with self._lock:
             return self._data.pop(key, None)
 
+    def clear(self) -> None:
+        with self._lock:
+            self._data.clear()
+
     def __contains__(self, key: Any) -> bool:
         with self._lock:
             return key in self._data

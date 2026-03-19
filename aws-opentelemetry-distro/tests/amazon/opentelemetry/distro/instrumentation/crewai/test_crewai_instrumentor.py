@@ -606,6 +606,9 @@ class TestCrewAIInstrumentor(TestCase):
     def _assert_spans_all_ended(self):
         for span in self.span_exporter.get_finished_spans():
             self.assertIsNotNone(span.end_time, f"Span {span.name} was not ended")
+        self.assertEqual(
+            len(self.instrumentor._handler._event_id_to_span._data), 0, "Leaked entries in event_id_to_span map"
+        )
 
     def _find_span(self, name_contains: str) -> Optional[ReadableSpan]:
         return next((s for s in self.span_exporter.get_finished_spans() if name_contains in s.name), None)

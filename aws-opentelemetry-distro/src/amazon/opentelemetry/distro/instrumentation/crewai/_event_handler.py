@@ -9,6 +9,7 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     PROVIDER_MAP,
     DictWithLock,
     serialize_to_json_string,
+    skip_instrumentation_if_suppressed,
 )
 from opentelemetry import context, trace
 from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_MESSAGE
@@ -76,7 +77,7 @@ class _EventBusEmitWrapper:
         # for async agents to keep track of pending llm events
         self._llm_source_to_unfinished_llm_event = DictWithLock()
 
-    def __call__(self, wrapped, instance, args, kwargs) -> Any:
+    def __call__(self, wrapped, instance, args, kwargs) -> Any:  # pylint: disable=too-many-locals
         # pylint: disable=import-outside-toplevel
         from crewai.events.base_events import BaseEvent
         from crewai.events.types.llm_events import LLMCallCompletedEvent, LLMCallStartedEvent, LLMCallType
@@ -98,17 +99,18 @@ class _EventBusEmitWrapper:
                 # emit() only uses the event type to pop it from the stack and does not
                 # read any event payload fields.
                 # See: https://github.com/crewAIInc/crewAI/pull/4880
-                # TODO: remove this once this bug is fixed in upstream
+                # TODO: remove this once this bug is fixed upstream
                 try:
-                    wrapped(
-                        llm_source,
-                        LLMCallCompletedEvent(
-                            response=None,
-                            call_type=LLMCallType.TOOL_CALL,
-                            call_id=get_current_call_id(),
-                            model=getattr(llm_source, "model", None),
-                        ),
+                    synthetic_event = LLMCallCompletedEvent(
+                        response=[{"name": event.tool_name, "input": event.tool_args}],
+                        call_type=LLMCallType.TOOL_CALL,
+                        call_id=get_current_call_id(),
+                        model=getattr(llm_source, "model", None),
+                        from_agent=getattr(event, "from_agent", None),
+                        from_task=getattr(event, "from_task", None),
                     )
+                    wrapped(llm_source, synthetic_event)
+                    self._event_handler._handle_event(llm_source, synthetic_event)
                 except Exception:  # pylint: disable=broad-exception-caught
                     _LOG.debug("Failed to emit missing LLMCallCompletedEvent for tool_calls")
 
@@ -160,6 +162,7 @@ class OpenTelemetryEventHandler:
             LLMCallFailedEvent: self._on_llm_failed,
         }
 
+    @skip_instrumentation_if_suppressed
     def _handle_event(self, source: Any, event: "BaseEvent") -> None:
         handler = self._event_type_handlers.get(type(event))
         if handler:
@@ -199,11 +202,13 @@ class OpenTelemetryEventHandler:
         self, source: "Crew", event: "CrewKickoffCompletedEvent"  # pylint: disable=unused-argument
     ) -> None:
         self._end_span(event.started_event_id)
+        self._event_id_to_span.clear()
 
     def _on_crew_failed(
         self, source: "Crew", event: "CrewKickoffFailedEvent"  # pylint: disable=unused-argument
     ) -> None:
-        self._on_error_span(event.started_event_id, getattr(event, "error", None))
+        self._end_span(event.started_event_id, error=getattr(event, "error", None))
+        self._event_id_to_span.clear()
 
     def _on_agent_start(
         self, source: "BaseAgent", event: "AgentExecutionStartedEvent"  # pylint: disable=unused-argument
@@ -254,7 +259,7 @@ class OpenTelemetryEventHandler:
     def _on_agent_failed(
         self, source: "BaseAgent", event: "AgentExecutionErrorEvent"  # pylint: disable=unused-argument
     ) -> None:
-        self._on_error_span(event.started_event_id, getattr(event, "error", None))
+        self._end_span(event.started_event_id, error=getattr(event, "error", None))
 
     def _on_tool_start(self, source: "ToolUsage", event: "ToolUsageStartedEvent") -> None:
         tool_name = event.tool_name
@@ -270,14 +275,9 @@ class OpenTelemetryEventHandler:
         if tool_name:
             attributes[GEN_AI_TOOL_NAME] = tool_name
 
-        tools = getattr(source, "tools", None)
-        if tools and tool_name:
-            for tool in tools:
-                if getattr(tool, "name", None) == tool_name:
-                    desc = getattr(tool, "description", None)
-                    if desc:
-                        attributes[GEN_AI_TOOL_DESCRIPTION] = desc
-                    break
+        desc = self._find_tool_description(source, event, tool_name)
+        if desc:
+            attributes[GEN_AI_TOOL_DESCRIPTION] = desc
 
         agent = getattr(source, "agent", None)
         if agent:
@@ -327,11 +327,11 @@ class OpenTelemetryEventHandler:
             system_instructions = [m for m in messages if m.get("role") == "system"]
             non_system_messages = [m for m in messages if m.get("role") != "system"]
             if system_instructions:
-                parts = [self._to_text_part(m.get("content", "")) for m in system_instructions]
+                parts = [{"type": "text", "content": m.get("content", "")} for m in system_instructions]
                 attributes[GEN_AI_SYSTEM_INSTRUCTIONS] = serialize_to_json_string(parts)
             if non_system_messages:
                 attributes[GEN_AI_INPUT_MESSAGES] = serialize_to_json_string(
-                    [self._to_chat_message(m) for m in non_system_messages]
+                    [self._to_input_message(m) for m in non_system_messages]
                 )
 
         self._start_span(span_name, event.event_id, attributes, event.parent_event_id)
@@ -341,18 +341,25 @@ class OpenTelemetryEventHandler:
 
         from crewai.events.types.llm_events import LLMCallType  # pylint: disable=import-outside-toplevel
 
-        finish_reason = "tool_calls" if event.call_type == LLMCallType.TOOL_CALL else "stop"
+        finish_reason = "tool_call" if event.call_type == LLMCallType.TOOL_CALL else "stop"
 
         response = event.response
-        if response is not None:
+        if response:
             if isinstance(response, str):
                 attrs[GEN_AI_OUTPUT_MESSAGES] = serialize_to_json_string(
                     [self._to_output_message({"role": "assistant", "content": response}, finish_reason)]
                 )
-            elif isinstance(response, list) and response and isinstance(response[0], dict):
-                attrs[GEN_AI_OUTPUT_MESSAGES] = serialize_to_json_string(
-                    [self._to_output_message(m, finish_reason) for m in response]
-                )
+            elif isinstance(response, list) and response:
+                if isinstance(response[0], dict) and "role" in response[0]:
+                    attrs[GEN_AI_OUTPUT_MESSAGES] = serialize_to_json_string(
+                        [self._to_output_message(m, finish_reason) for m in response]
+                    )
+                else:
+                    parts = self._to_tool_call_parts(response)
+                    if parts:
+                        attrs[GEN_AI_OUTPUT_MESSAGES] = serialize_to_json_string(
+                            [{"role": "assistant", "parts": parts, "finish_reason": finish_reason}]
+                        )
 
         _, model_name = self._extract_provider_and_model(source)
         if model_name:
@@ -367,7 +374,7 @@ class OpenTelemetryEventHandler:
         self._end_span(event.started_event_id, attrs)
 
     def _on_llm_failed(self, source: Any, event: "LLMCallFailedEvent") -> None:  # pylint: disable=unused-argument
-        self._on_error_span(event.started_event_id, getattr(event, "error", None))
+        self._end_span(event.started_event_id, error=getattr(event, "error", None))
 
     def _start_span(
         self,
@@ -386,31 +393,27 @@ class OpenTelemetryEventHandler:
         token = context.attach(trace.set_span_in_context(span))
         self._event_id_to_span.put(event_id, _SpanEntry(span=span, token=token))
 
-    def _end_span(self, started_event_id: Optional[str], set_attrs: Optional[Dict[str, Any]] = None) -> None:
+    def _end_span(
+        self,
+        started_event_id: Optional[str],
+        set_attrs: Optional[Dict[str, Any]] = None,
+        error: Optional[str] = None,
+    ) -> None:
         if not started_event_id:
             return
         entry = self._event_id_to_span.pop(started_event_id)
-        if not entry:
-            return
-        if set_attrs:
-            for key, value in set_attrs.items():
-                if value is not None:
-                    entry.span.set_attribute(key, value)
-        entry.span.set_status(Status(StatusCode.OK))
-        entry.span.end()
-        context.detach(entry.token)
-
-    def _on_error_span(self, started_event_id: Optional[str], error: Optional[str] = None) -> None:
-        if not started_event_id:
-            return
-        entry = self._event_id_to_span.pop(started_event_id)
-        if not entry:
-            return
-        entry.span.set_status(Status(StatusCode.ERROR, error))
-        if error:
-            entry.span.set_attribute(ERROR_MESSAGE, error)
-        entry.span.end()
-        context.detach(entry.token)
+        if entry:
+            if set_attrs:
+                for key, value in set_attrs.items():
+                    if value is not None:
+                        entry.span.set_attribute(key, value)
+            if error:
+                entry.span.set_status(Status(StatusCode.ERROR, error))
+                entry.span.set_attribute(ERROR_MESSAGE, error)
+            else:
+                entry.span.set_status(Status(StatusCode.OK))
+            entry.span.end()
+            context.detach(entry.token)
 
     @staticmethod
     def _extract_provider_and_model(llm: Any) -> Tuple[Optional[str], Optional[str]]:
@@ -429,23 +432,87 @@ class OpenTelemetryEventHandler:
         return None, model
 
     @staticmethod
-    def _to_text_part(content: str) -> Dict[str, str]:
-        return {"type": "text", "content": content}
-
-    @staticmethod
-    def _to_chat_message(msg: Dict[str, Any]) -> Dict[str, Any]:
-        return {
-            "role": msg.get("role", "user"),
-            "parts": [{"type": "text", "content": msg.get("content", "")}],
-        }
+    def _to_input_message(msg: Dict[str, Any]) -> Dict[str, Any]:
+        role = msg.get("role", "user")
+        if role == "tool":
+            part: Dict[str, Any] = {"type": "tool_call_response"}
+            if msg.get("tool_call_id"):
+                part["id"] = msg["tool_call_id"]
+            part["response"] = msg.get("content", "")
+            return {"role": role, "parts": [part]}
+        parts = []
+        content = msg.get("content")
+        if content:
+            parts.append({"type": "text", "content": content})
+        tool_calls = msg.get("tool_calls")
+        if tool_calls:
+            parts.extend(OpenTelemetryEventHandler._to_tool_call_parts(tool_calls))
+        if not parts:
+            parts.append({"type": "text", "content": ""})
+        return {"role": role, "parts": parts}
 
     @staticmethod
     def _to_output_message(msg: Dict[str, Any], finish_reason: str = "stop") -> Dict[str, Any]:
+        parts = []
+        content = msg.get("content")
+        if content:
+            parts.append({"type": "text", "content": content})
+        tool_calls = msg.get("tool_calls")
+        if tool_calls:
+            parts.extend(OpenTelemetryEventHandler._to_tool_call_parts(tool_calls))
+        if not parts:
+            parts.append({"type": "text", "content": ""})
         return {
             "role": msg.get("role", "assistant"),
-            "parts": [{"type": "text", "content": msg.get("content", "")}],
+            "parts": parts,
             "finish_reason": finish_reason,
         }
+
+    @staticmethod
+    def _to_tool_call_parts(tool_calls: list) -> list:
+        parts = []
+        for tc in tool_calls:
+            part: Dict[str, Any] = {"type": "tool_call"}
+            if isinstance(tc, dict):
+                if tc.get("name"):
+                    part["name"] = tc["name"]
+                if tc.get("input"):
+                    part["arguments"] = tc["input"]
+                tc_id = tc.get("toolUseId") or tc.get("id")
+                if tc_id:
+                    part["id"] = tc_id
+            elif hasattr(tc, "function"):
+                func = tc.function
+                if getattr(func, "name", None):
+                    part["name"] = func.name
+                if getattr(func, "arguments", None):
+                    part["arguments"] = func.arguments
+                if getattr(tc, "id", None):
+                    part["id"] = tc.id
+            else:
+                continue
+            parts.append(part)
+        return parts
+
+    @staticmethod
+    def _find_tool_description(source: Any, event: Any, tool_name: Optional[str]) -> Optional[str]:
+        if not tool_name:
+            return None
+        tool_class = getattr(event, "tool_class", None)
+        if tool_class:
+            desc = getattr(tool_class, "description", None)
+            if desc:
+                return desc
+        for tools_holder in [source, getattr(source, "agent", None), getattr(event, "agent", None)]:
+            tools = getattr(tools_holder, "tools", None) if tools_holder else None
+            if not tools:
+                continue
+            for tool in tools:
+                if getattr(tool, "name", None) == tool_name:
+                    desc = getattr(tool, "description", None)
+                    if desc:
+                        return desc
+        return None
 
     @staticmethod
     def _extract_tool_definitions(tools: Any) -> list:

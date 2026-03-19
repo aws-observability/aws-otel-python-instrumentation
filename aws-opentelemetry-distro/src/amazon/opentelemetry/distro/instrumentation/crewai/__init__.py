@@ -21,14 +21,19 @@ class CrewAIInstrumentor(BaseInstrumentor):
     Note: Semantic conventions may change in future versions.
     """
 
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._handler: OpenTelemetryEventHandler | None = None
+
     def instrumentation_dependencies(self) -> Collection[str]:  # pylint: disable=no-self-use
         return ("crewai >= 1.9.0",)
 
     def _instrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
-        handler = OpenTelemetryEventHandler(tracer)
-        try_wrap("crewai.events", "crewai_event_bus.emit", _EventBusEmitWrapper(handler))
+        self._handler = OpenTelemetryEventHandler(tracer)
+
+        try_wrap("crewai.events", "crewai_event_bus.emit", _EventBusEmitWrapper(self._handler))
 
     def _uninstrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
         from crewai.events import crewai_event_bus  # pylint: disable=import-outside-toplevel
