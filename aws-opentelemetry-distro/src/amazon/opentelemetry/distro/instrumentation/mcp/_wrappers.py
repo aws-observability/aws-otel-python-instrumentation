@@ -87,9 +87,7 @@ class McpWrapper:
 
         if isinstance(message, types.CallToolRequest):
             tool_name = message.params.name
-            span.update_name(create_mcp_span_name(
-                str(McpMethodNameValues.TOOLS_CALL.value), str(tool_name)
-            ))
+            span.update_name(create_mcp_span_name(str(McpMethodNameValues.TOOLS_CALL.value), str(tool_name)))
             span.set_attribute(GEN_AI_TOOL_NAME, tool_name)
             span.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.EXECUTE_TOOL.value)
 
@@ -101,9 +99,7 @@ class McpWrapper:
 
         elif isinstance(message, types.GetPromptRequest):
             prompt_name = message.params.name
-            span.update_name(create_mcp_span_name(
-                str(McpMethodNameValues.PROMPTS_GET.value), str(prompt_name)
-            ))
+            span.update_name(create_mcp_span_name(str(McpMethodNameValues.PROMPTS_GET.value), str(prompt_name)))
             span.set_attribute(GEN_AI_PROMPT, prompt_name)
 
         elif isinstance(
@@ -317,9 +313,7 @@ class ClientWrapper(McpWrapper):
                 transport_info[MCP_SESSION_ID] = instance.session_id
         return result
 
-    def _maybe_start_mcp_session_span(
-        self, transport_info: Dict[str, Any]
-    ) -> Tuple[Optional[trace.Span], Token]:
+    def _maybe_start_mcp_session_span(self, transport_info: Dict[str, Any]) -> Tuple[Optional[trace.Span], Token]:
         # A bit strange and does not follow any existing OTel semantic
         # conventions, but we need an overarching parent span to capture
         # the MCP session lifetime in case an existing parent span does

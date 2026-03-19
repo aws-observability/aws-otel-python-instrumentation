@@ -17,6 +17,7 @@ from collector import OTLPServer, Telemetry
 
 from amazon.opentelemetry.distro.instrumentation.mcp import McpInstrumentor
 from opentelemetry.baggage.propagation import W3CBaggagePropagator
+
 try:
     from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 except ImportError:
@@ -431,23 +432,20 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
 
         HTTPXClientInstrumentor().instrument(tracer_provider=self.tracer_provider)
         try:
+
             async def run(session):
                 await session.call_tool("hello", {"name": "World"})
 
             asyncio.run(self._run_http_inprocess(run))
             spans = self.span_exporter.get_finished_spans()
 
-            tool_span = next(
-                s for s in spans if s.name == "mcp tools/call hello" and s.kind == SpanKind.CLIENT
-            )
+            tool_span = next(s for s in spans if s.name == "mcp tools/call hello" and s.kind == SpanKind.CLIENT)
             post_spans = [s for s in spans if s.name == "POST" and s.kind == SpanKind.CLIENT]
 
             self.assertTrue(len(post_spans) > 0, "Expected at least one httpx POST span")
 
             tool_span_id = format(tool_span.context.span_id, "016x")
-            parented_posts = [
-                s for s in post_spans if format(s.parent.span_id, "016x") == tool_span_id
-            ]
+            parented_posts = [s for s in post_spans if format(s.parent.span_id, "016x") == tool_span_id]
             self.assertTrue(
                 len(parented_posts) > 0,
                 "httpx POST span should be parented under MCP tool call span",
