@@ -17,7 +17,10 @@ from collector import OTLPServer, Telemetry
 
 from amazon.opentelemetry.distro.instrumentation.mcp import McpInstrumentor
 from opentelemetry.baggage.propagation import W3CBaggagePropagator
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+try:
+    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+except ImportError:
+    HTTPXClientInstrumentor = None
 from opentelemetry.propagators.aws import AwsXRayPropagator
 from opentelemetry.propagators.composite import CompositePropagator
 from opentelemetry.proto.trace.v1.trace_pb2 import Span as ProtoSpan
@@ -160,7 +163,9 @@ class TestMcpInstrumentor(McpInstrumentorTestBase):
                     await session.initialize()
                     await session.call_tool("failing_tool", {})
 
-                client_spans, server_spans = self._run_transport_test(run_client, transport, "mcp tools/call failing_tool")
+                client_spans, server_spans = self._run_transport_test(
+                    run_client, transport, "mcp tools/call failing_tool"
+                )
 
                 tool_span = self._get_span(client_spans, "mcp tools/call failing_tool")
                 self._assert_span_attrs(
@@ -297,7 +302,9 @@ class TestMcpInstrumentor(McpInstrumentorTestBase):
         init_span = self._get_span(client_spans, f"mcp {McpMethodNameValues.INITIALIZE.value}")
         self.assertIsNotNone(init_span.attributes.get(MCP_PROTOCOL_VERSION))
 
-        client_notif_init_span = self._get_span(client_spans, f"mcp {McpMethodNameValues.NOTIFICATIONS_INITIALIZED.value}")
+        client_notif_init_span = self._get_span(
+            client_spans, f"mcp {McpMethodNameValues.NOTIFICATIONS_INITIALIZED.value}"
+        )
 
         self.assertEqual(init_span.kind, SpanKind.CLIENT)
         self._assert_span_attrs(
@@ -421,6 +428,7 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
         self.assertIsNotNone(server_span.attributes.get(CLIENT_PORT))
 
     def test_http_span_parented_under_mcp_request(self):
+
         HTTPXClientInstrumentor().instrument(tracer_provider=self.tracer_provider)
         try:
             async def run(session):
@@ -429,14 +437,21 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
             asyncio.run(self._run_http_inprocess(run))
             spans = self.span_exporter.get_finished_spans()
 
-            tool_span = next(s for s in spans if s.name == "mcp tools/call hello" and s.kind == SpanKind.CLIENT)
+            tool_span = next(
+                s for s in spans if s.name == "mcp tools/call hello" and s.kind == SpanKind.CLIENT
+            )
             post_spans = [s for s in spans if s.name == "POST" and s.kind == SpanKind.CLIENT]
 
             self.assertTrue(len(post_spans) > 0, "Expected at least one httpx POST span")
 
             tool_span_id = format(tool_span.context.span_id, "016x")
-            parented_posts = [s for s in post_spans if format(s.parent.span_id, "016x") == tool_span_id]
-            self.assertTrue(len(parented_posts) > 0, "httpx POST span should be parented under MCP tool call span")
+            parented_posts = [
+                s for s in post_spans if format(s.parent.span_id, "016x") == tool_span_id
+            ]
+            self.assertTrue(
+                len(parented_posts) > 0,
+                "httpx POST span should be parented under MCP tool call span",
+            )
         finally:
             HTTPXClientInstrumentor().uninstrument()
 
