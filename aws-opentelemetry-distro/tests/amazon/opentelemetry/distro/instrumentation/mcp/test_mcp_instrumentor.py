@@ -453,33 +453,6 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
         finally:
             HTTPXClientInstrumentor().uninstrument()
 
-    def test_no_mcp_session_when_parent_exists(self):
-        tracer = get_tracer("test", tracer_provider=self.tracer_provider)
-
-        async def run(session):
-            await session.call_tool("hello", {"name": "World"})
-
-        async def run_with_parent():
-            with tracer.start_as_current_span("parent_operation"):
-                await self._run_http_inprocess(run)
-
-        asyncio.run(run_with_parent())
-        spans = self.span_exporter.get_finished_spans()
-
-        session_spans = [s for s in spans if s.name == "mcp.session"]
-        self.assertEqual(len(session_spans), 0, "mcp.session should not be created when parent span exists")
-
-        parent_span = next(s for s in spans if s.name == "parent_operation")
-        tool_span = next(s for s in spans if s.name == "mcp tools/call hello" and s.kind == SpanKind.CLIENT)
-        init_spans = [s for s in spans if "mcp initialize" in s.name or "mcp notifications" in s.name]
-        parent_span_id = format(parent_span.context.span_id, "016x")
-
-        # Tool call and init spans should all be children of parent_operation, not mcp.session
-        self.assertEqual(format(tool_span.parent.span_id, "016x"), parent_span_id)
-        for init_span in init_spans:
-            if init_span.kind == SpanKind.CLIENT:
-                self.assertEqual(format(init_span.parent.span_id, "016x"), parent_span_id)
-
     def test_mcp_respects_active_parent_span(self):
         tracer = get_tracer("test", tracer_provider=self.tracer_provider)
 
