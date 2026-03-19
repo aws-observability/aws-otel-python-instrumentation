@@ -1,8 +1,5 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import List
-
-from mock_collector_client import ResourceScopeSpan
 from typing_extensions import override
 
 from amazon.gen_ai.gen_ai_test_base import GEN_AI_RESPONSE_ID, GenAITestBase
