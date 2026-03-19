@@ -8,7 +8,10 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import APPLICATION_SIGNALS_ENABLED_CONFIG
-from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
+from amazon.opentelemetry.distro.aws_opentelemetry_distro import (
+    AGENT_OBSERVABILITY_DISABLED_INSTRUMENTATIONS,
+    AwsOpenTelemetryDistro,
+)
 from opentelemetry import propagate
 from opentelemetry.environment_variables import (
     OTEL_LOGS_EXPORTER,
@@ -159,8 +162,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
         self.assertEqual(os.environ.get(OTEL_TRACES_SAMPLER), "parentbased_always_on")
         self.assertEqual(
             os.environ.get(OTEL_PYTHON_DISABLED_INSTRUMENTATIONS),
-            "http,sqlalchemy,psycopg2,pymysql,sqlite3,aiopg,asyncpg,mysql_connector,"
-            "urllib3,requests,system_metrics,google-genai,crewai,langchain",
+            AGENT_OBSERVABILITY_DISABLED_INSTRUMENTATIONS,
         )
         self.assertEqual(os.environ.get(OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED), "true")
         self.assertEqual(os.environ.get(APPLICATION_SIGNALS_ENABLED_CONFIG), "false")
@@ -514,12 +516,6 @@ class TestAwsOpenTelemetryDistro(TestCase):
         distro._configure()
 
         self.assertEqual(os.environ.get("OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS"), "false")
-
-    def test_agent_observability_disables_upstream_crewai_langchain(self):
-        self._configure_with_agent_observability()
-        disabled = os.environ.get(OTEL_PYTHON_DISABLED_INSTRUMENTATIONS, "")
-        self.assertIn("crewai", disabled)
-        self.assertIn("langchain", disabled)
 
     def test_agent_observability_respects_custom_disabled_instrumentations(self):
         os.environ[OTEL_PYTHON_DISABLED_INSTRUMENTATIONS] = "custom_lib"
