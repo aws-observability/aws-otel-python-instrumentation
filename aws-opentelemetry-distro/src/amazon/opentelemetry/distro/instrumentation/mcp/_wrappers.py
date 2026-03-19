@@ -69,6 +69,9 @@ class McpWrapper:
         """
         from mcp import types  # pylint: disable=import-outside-toplevel
 
+        def create_mcp_span_name(method, target=None):
+            return f"mcp {method} {target}" if target else f"mcp {method}"
+
         is_notification = isinstance(message, (types.ClientNotification, types.ServerNotification))
 
         if hasattr(message, "root"):
@@ -81,9 +84,6 @@ class McpWrapper:
 
         span.set_attribute(MCP_METHOD_NAME, message.method)
         span.set_attribute(MCP_PROTOCOL_VERSION, types.LATEST_PROTOCOL_VERSION)
-
-        def create_mcp_span_name(method, target=None):
-            return f"mcp {method} {target}" if target else f"mcp {method}"
 
         if isinstance(message, types.CallToolRequest):
             tool_name = message.params.name
@@ -228,15 +228,12 @@ class ClientWrapper(McpWrapper):
 
         @asynccontextmanager
         async def wrapper():
-            maybe_mcp_session_span, token = self._maybe_start_mcp_session_span(
-                {NETWORK_TRANSPORT: NetworkTransportValues.PIPE.value}
-            )
+            session_span, token = self._start_mcp_session_span({NETWORK_TRANSPORT: NetworkTransportValues.PIPE.value})
             try:
                 async with wrapped(*args, **kwargs) as streams:
                     yield streams
             finally:
-                if maybe_mcp_session_span:
-                    maybe_mcp_session_span.end()
+                session_span.end()
                 context.detach(token)
 
         return wrapper()
@@ -247,7 +244,7 @@ class ClientWrapper(McpWrapper):
         async def wrapper():
             url = args[0] if args else kwargs.get("url", "")
             parsed = urlparse(url)
-            maybe_mcp_session_span, token = self._maybe_start_mcp_session_span(
+            session_span, token = self._start_mcp_session_span(
                 {
                     NETWORK_TRANSPORT: NetworkTransportValues.TCP.value,
                     SERVER_ADDRESS: parsed.hostname,
@@ -258,8 +255,7 @@ class ClientWrapper(McpWrapper):
                 async with wrapped(*args, **kwargs) as streams:
                     yield streams
             finally:
-                if maybe_mcp_session_span:
-                    maybe_mcp_session_span.end()
+                session_span.end()
                 context.detach(token)
 
         return wrapper()
@@ -313,23 +309,17 @@ class ClientWrapper(McpWrapper):
                 transport_info[MCP_SESSION_ID] = instance.session_id
         return result
 
-    def _maybe_start_mcp_session_span(self, transport_info: Dict[str, Any]) -> Tuple[Optional[trace.Span], Token]:
+    def _start_mcp_session_span(self, transport_info: Dict[str, Any]) -> Tuple[trace.Span, Token]:
         # A bit strange and does not follow any existing OTel semantic
         # conventions, but we need an overarching parent span to capture
-        # the MCP session lifetime in case an existing parent span does
-        # not exist. All server and client MCP operations happen within
-        # this session context. Otherwise we get a bunch of disjointed
-        # traces without a common ancestor.
-        current_span = trace.get_current_span()
-        if current_span.get_span_context().is_valid and current_span.is_recording():
-            ctx = context.set_value(_TRANSPORT_KEY, transport_info)
-            return None, context.attach(ctx)
-
-        mcp_session_span = self._tracer.start_span(self._SESSION_SPAN_NAME, kind=SpanKind.INTERNAL)
-        ctx = trace.set_span_in_context(mcp_session_span)
+        # the MCP session lifetime. All server and client MCP operations
+        # happen within this session context. Otherwise we get a bunch
+        # of disjointed traces without a common ancestor.
+        span = self._tracer.start_span(self._SESSION_SPAN_NAME, kind=SpanKind.INTERNAL)
+        ctx = trace.set_span_in_context(span)
         ctx = context.set_value(_TRANSPORT_KEY, transport_info, ctx)
 
-        return mcp_session_span, context.attach(ctx)
+        return span, context.attach(ctx)
 
 
 class ServerWrapper(McpWrapper):
