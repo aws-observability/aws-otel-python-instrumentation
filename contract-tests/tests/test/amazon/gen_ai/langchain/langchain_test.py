@@ -5,10 +5,7 @@ from typing import List
 from mock_collector_client import ResourceScopeSpan
 from typing_extensions import override
 
-from amazon.gen_ai.gen_ai_test_base import (
-    GEN_AI_RESPONSE_ID,
-    GenAITestBase,
-)
+from amazon.gen_ai.gen_ai_test_base import GEN_AI_RESPONSE_ID, GenAITestBase
 
 
 class LangChainTest(GenAITestBase):
