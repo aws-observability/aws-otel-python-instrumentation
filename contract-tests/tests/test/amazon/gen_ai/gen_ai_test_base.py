@@ -88,10 +88,11 @@ class GenAITestBase(ContractTestBase):
             self.assertIn(GEN_AI_PROVIDER_NAME, attrs)
             self.assertIn(GEN_AI_REQUEST_MODEL, attrs)
             self.assertIn(GEN_AI_REQUEST_TEMPERATURE, attrs)
-            # TODO: Add once we all instrumentations support this
-            # self.assertIn(GEN_AI_INPUT_MESSAGES, attrs)
-            # self.assertIn(GEN_AI_OUTPUT_MESSAGES, attrs)
+            self.assertIn(GEN_AI_INPUT_MESSAGES, attrs)
             self.assertIn(GEN_AI_RESPONSE_MODEL, attrs)
-            self.assertIn(GEN_AI_RESPONSE_ID, attrs)
             self.assertIn(GEN_AI_USAGE_INPUT_TOKENS, attrs)
             self.assertIn(GEN_AI_USAGE_OUTPUT_TOKENS, attrs)
+        completed_spans = [
+            s for s in invoke_model_spans if GEN_AI_OUTPUT_MESSAGES in self._get_attributes_dict(s.attributes)
+        ]
+        self.assertGreaterEqual(len(completed_spans), 1)

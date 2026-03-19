@@ -3,11 +3,9 @@
 from typing import Any, Collection
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import try_unwrap, try_wrap
-from amazon.opentelemetry.distro.instrumentation.crewai._wrappers import (
-    _CrewKickoffWrapper,
-    _TaskExecuteCoreWrapper,
-    _ToolRunWrapper,
-    _ToolUseWrapper,
+from amazon.opentelemetry.distro.instrumentation.crewai._event_handler import (
+    OpenTelemetryEventHandler,
+    _EventBusEmitWrapper,
 )
 from amazon.opentelemetry.distro.version import __version__
 from opentelemetry import trace
@@ -23,27 +21,21 @@ class CrewAIInstrumentor(BaseInstrumentor):
     Note: Semantic conventions may change in future versions.
     """
 
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._handler: OpenTelemetryEventHandler | None = None
+
     def instrumentation_dependencies(self) -> Collection[str]:  # pylint: disable=no-self-use
         return ("crewai >= 1.9.0",)
 
-    # disabling these linters rules as these are instance methods from BaseInstrumentor
     def _instrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
+        self._handler = OpenTelemetryEventHandler(tracer)
 
-        try_wrap("crewai", "Crew.kickoff", _CrewKickoffWrapper(tracer))
-        try_wrap("crewai", "Task._execute_core", _TaskExecuteCoreWrapper(tracer))
-        try_wrap("crewai.tools.tool_usage", "ToolUsage._use", _ToolUseWrapper(tracer))
-        try_wrap("crewai.tools.base_tool", "BaseTool.run", _ToolRunWrapper(tracer))
-        try_wrap("crewai.tools.base_tool", "Tool.run", _ToolRunWrapper(tracer))
+        try_wrap("crewai.events", "crewai_event_bus.emit", _EventBusEmitWrapper(self._handler))
 
     def _uninstrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
-        # pylint: disable=import-outside-toplevel
-        import crewai
-        from crewai.tools import base_tool, tool_usage
+        from crewai.events import crewai_event_bus  # pylint: disable=import-outside-toplevel
 
-        try_unwrap(crewai.Crew, "kickoff")
-        try_unwrap(crewai.Task, "_execute_core")
-        try_unwrap(tool_usage.ToolUsage, "_use")
-        try_unwrap(base_tool.BaseTool, "run")
-        try_unwrap(base_tool.Tool, "run")
+        try_unwrap(crewai_event_bus, "emit")
