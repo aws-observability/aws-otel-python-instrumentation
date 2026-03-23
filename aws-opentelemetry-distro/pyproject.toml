@@ -84,6 +84,7 @@ dependencies = [
   "opentelemetry-instrumentation-urllib3 == 0.61b0",
   "opentelemetry-instrumentation-wsgi == 0.61b0",
   "opentelemetry-instrumentation-cassandra == 0.61b0",
+  "opentelemetry-instrumentation-openai-agents-v2 == 0.1.0",
   "cachetools == 6.2.4",
   "protobuf == 6.33.5",
   "pyyaml == 6.0.3",
