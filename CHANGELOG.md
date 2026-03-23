@@ -16,8 +16,6 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   ([#683](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/683))
 - feat: add threading instrumentation dependency
   ([#685](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/685))
-- feat: add openai-agents-v2 instrumentation dependency
-  ([#686](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/686))
 - feat: Rewrite CrewAI instrumentation using Event based approach
   ([#681](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/681))
 
