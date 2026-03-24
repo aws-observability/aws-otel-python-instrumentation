@@ -106,7 +106,7 @@ class TestCrewAIInstrumentor(TestCase):
         self._run_crew_kickoff_test("anthropic/claude-3-sonnet-20240229", "anthropic", "claude-3-sonnet-20240229")
 
     def test_crew_kickoff_error_handling(self):
-        mock_llm = MagicMock()
+        mock_llm = MagicMock(spec=self.LLM)
         mock_llm.provider = "openai"
         mock_llm.model = "gpt-4"
         mock_llm.temperature = 0.7
@@ -124,7 +124,7 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertIn("LLM call failed", error_span.attributes.get(ERROR_MESSAGE, ""))
 
     def test_text_based_tool_calling(self):
-        mock_llm = MagicMock()
+        mock_llm = MagicMock(spec=self.LLM)
         mock_llm.provider = "openai"
         mock_llm.model = "gpt-4"
         mock_llm.temperature = 0.7
