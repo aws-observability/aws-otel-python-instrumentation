@@ -108,6 +108,9 @@ aws_distro = "amazon.opentelemetry.distro.aws_opentelemetry_distro:AwsOpenTeleme
 aws_crewai = "amazon.opentelemetry.distro.instrumentation.crewai:CrewAIInstrumentor"
 aws_langchain = "amazon.opentelemetry.distro.instrumentation.langchain:LangChainInstrumentor"
 aws_mcp = "amazon.opentelemetry.distro.instrumentation.mcp:McpInstrumentor"
+# Wraps the upstream OTel OpenAI Agents instrumentor under a unique entry point name.
+# This allows us to disable 3rd party "openai_agents" entry points in the opt-in path
+# while keeping OpenAI Agents instrumentation active via this alias.
 aws_openai_agents = "opentelemetry.instrumentation.openai_agents:OpenAIAgentsInstrumentor"
 
 [project.urls]
