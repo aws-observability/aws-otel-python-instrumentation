@@ -959,27 +959,6 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
             _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
 
-<<<<<<< HEAD
-            # Should have 4 processors: CodeAttributesSpanProcessor, BaggageSpanProcessor,
-            # AttributePropagatingSpanProcessor, and AwsSpanMetricsProcessor
-            self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 4)
-
-            # First should be CodeAttributesSpanProcessor
-            first_call_args = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
-            self.assertEqual(first_call_args, mock_code_processor_instance)
-
-            # Second should be BaggageSpanProcessor
-            second_call_args = mock_tracer_provider.add_span_processor.call_args_list[1].args[0]
-            self.assertIsInstance(second_call_args, BaggageSpanProcessor)
-
-            # Third should be AttributePropagatingSpanProcessor
-            third_call_args = mock_tracer_provider.add_span_processor.call_args_list[2].args[0]
-            self.assertIsInstance(third_call_args, AttributePropagatingSpanProcessor)
-
-            # Fourth should be AwsSpanMetricsProcessor
-            fourth_call_args = mock_tracer_provider.add_span_processor.call_args_list[3].args[0]
-            self.assertIsInstance(fourth_call_args, AwsSpanMetricsProcessor)
-=======
             self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 4)
 
             processors = [c.args[0] for c in mock_tracer_provider.add_span_processor.call_args_list]
@@ -987,7 +966,6 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             self.assertIsInstance(processors[1], BaggageSpanProcessor)
             self.assertIsInstance(processors[2], AttributePropagatingSpanProcessor)
             self.assertIsInstance(processors[3], AwsSpanMetricsProcessor)
->>>>>>> 41aaf6c51a6b2ca8bb5bdd5c31d64146a44c540f
 
         # Clean up
         os.environ.pop(OTEL_AWS_ENHANCED_CODE_ATTRIBUTES, None)
