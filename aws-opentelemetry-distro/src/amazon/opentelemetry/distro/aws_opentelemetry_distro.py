@@ -15,6 +15,7 @@ import importlib
 import os
 import sys
 from logging import ERROR, Logger, getLogger
+from opentelemetry.util._importlib_metadata import EntryPoint
 
 
 from amazon.opentelemetry.distro._utils import (
@@ -166,6 +167,27 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
 
         if kwargs.get("apply_patches", True):
             apply_instrumentation_patches()
+
+    def load_instrumentor(self, entry_point: EntryPoint, **kwargs):
+        if self._should_skip_instrumentor(entry_point):
+            return
+        super().load_instrumentor(entry_point, **kwargs)
+
+    @staticmethod
+    def _should_skip_instrumentor(entry_point: EntryPoint) -> bool:
+        # Some third-party SDKs register the same entry point name as the upstream
+        # OTel packages that we depend on. For Agentic Observability legacy mode, skip our bundled
+        # OTel instrumentation so that existing third-party setups are not brokens.
+        if (
+            is_agent_observability_enabled()
+            and not is_aws_agentic_observability_opt_in()
+            and entry_point.dist
+            and entry_point.name == "openai_agents"
+            and entry_point.dist.name == "opentelemetry-instrumentation-openai-agents-v2"
+        ):
+            return True
+        # TODO: add additional skip conditions here as needed
+        return False
 
     @staticmethod
     def _configure_common_agent_observability(disabled_instrumentations: str) -> None:

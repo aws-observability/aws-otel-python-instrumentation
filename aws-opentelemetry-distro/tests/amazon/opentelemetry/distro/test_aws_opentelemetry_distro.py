@@ -5,9 +5,10 @@ import os
 import sys
 from importlib.metadata import PackageNotFoundError, version
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import APPLICATION_SIGNALS_ENABLED_CONFIG
+from opentelemetry.distro import OpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import (
     AGENT_OBSERVABILITY_DISABLED_INSTRUMENTATIONS,
     AwsOpenTelemetryDistro,
@@ -538,6 +539,39 @@ class TestAwsOpenTelemetryDistro(TestCase):
         self._configure_with_agent_observability()
         self.assertNotIn(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, os.environ)
         self.assertNotIn(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, os.environ)
+
+    def test_load_instrumentor_skips_otel_openai_agents_in_legacy(self):
+        mock_entry_point = MagicMock()
+        mock_entry_point.name = "openai_agents"
+        mock_entry_point.dist.name = "opentelemetry-instrumentation-openai-agents-v2"
+
+        distro = AwsOpenTelemetryDistro()
+        with patch.dict(os.environ, {"AGENT_OBSERVABILITY_ENABLED": "true"}):
+            with patch.object(OpenTelemetryDistro, "load_instrumentor") as mock_super:
+                distro.load_instrumentor(mock_entry_point)
+                mock_super.assert_not_called()
+
+    def test_load_instrumentor_allows_third_party_openai_agents_in_legacy(self):
+        mock_entry_point = MagicMock()
+        mock_entry_point.name = "openai_agents"
+        mock_entry_point.dist.name = "openinference-instrumentation-openai-agents"
+
+        distro = AwsOpenTelemetryDistro()
+        with patch.dict(os.environ, {"AGENT_OBSERVABILITY_ENABLED": "true"}):
+            with patch.object(OpenTelemetryDistro, "load_instrumentor") as mock_super:
+                distro.load_instrumentor(mock_entry_point)
+                mock_super.assert_called_once_with(mock_entry_point)
+
+    def test_load_instrumentor_allows_otel_openai_agents_in_opt_in(self):
+        mock_entry_point = MagicMock()
+        mock_entry_point.name = "openai_agents"
+        mock_entry_point.dist.name = "opentelemetry-instrumentation-openai-agents-v2"
+
+        distro = AwsOpenTelemetryDistro()
+        with patch.dict(os.environ, {"AWS_AGENTIC_OBSERVABILITY_OPT_IN": "true"}):
+            with patch.object(OpenTelemetryDistro, "load_instrumentor") as mock_super:
+                distro.load_instrumentor(mock_entry_point)
+                mock_super.assert_called_once_with(mock_entry_point)
 
     def _configure_with_agent_observability(self, region="us-west-2"):
         with patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure"), patch(
