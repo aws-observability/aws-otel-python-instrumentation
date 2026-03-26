@@ -1,13 +1,19 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import unittest
 from importlib.metadata import entry_points
-from unittest import TestCase
 
-from opentelemetry.instrumentation.openai_agents import OpenAIAgentsInstrumentor
+try:
+    from opentelemetry.instrumentation.openai_agents import OpenAIAgentsInstrumentor
+
+    _AGENTS_AVAILABLE = True
+except ImportError:
+    _AGENTS_AVAILABLE = False
 
 
-class TestOpenAIAgentsInstrumentation(TestCase):
+@unittest.skipUnless(_AGENTS_AVAILABLE, "openai-agents SDK not installed")
+class TestOpenAIAgentsInstrumentation(unittest.TestCase):
 
     def test_aws_openai_agents_entry_point_resolves(self):
         eps = entry_points(group="opentelemetry_instrumentor", name="aws_openai_agents")
