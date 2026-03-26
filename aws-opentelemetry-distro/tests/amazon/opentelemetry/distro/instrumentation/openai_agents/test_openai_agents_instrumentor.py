@@ -5,7 +5,7 @@ import unittest
 from importlib.metadata import entry_points
 
 try:
-    from opentelemetry.instrumentation.openai_agents import OpenAIAgentsInstrumentor
+    import agents  # noqa: F401
 
     _AGENTS_AVAILABLE = True
 except ImportError:
@@ -16,6 +16,8 @@ except ImportError:
 class TestOpenAIAgentsInstrumentation(unittest.TestCase):
 
     def test_aws_openai_agents_entry_point_resolves(self):
+        from opentelemetry.instrumentation.openai_agents import OpenAIAgentsInstrumentor
+
         eps = entry_points(group="opentelemetry_instrumentor", name="aws_openai_agents")
         self.assertEqual(len(list(eps)), 1)
 
@@ -24,6 +26,8 @@ class TestOpenAIAgentsInstrumentation(unittest.TestCase):
         self.assertIs(instrumentor_class, OpenAIAgentsInstrumentor)
 
     def test_aws_entry_point_survives_when_openai_agents_disabled(self):
+        from opentelemetry.instrumentation.openai_agents import OpenAIAgentsInstrumentor
+
         disabled = {"openai_agents"}
 
         aws_eps = entry_points(group="opentelemetry_instrumentor", name="aws_openai_agents")
@@ -37,6 +41,8 @@ class TestOpenAIAgentsInstrumentation(unittest.TestCase):
         self.assertIs(instrumentor_class, OpenAIAgentsInstrumentor)
 
     def test_instrument_called_twice_only_sets_processor_once(self):
+        from opentelemetry.instrumentation.openai_agents import OpenAIAgentsInstrumentor
+
         instrumentor = OpenAIAgentsInstrumentor()
         if instrumentor.is_instrumented_by_opentelemetry:
             instrumentor.uninstrument()
