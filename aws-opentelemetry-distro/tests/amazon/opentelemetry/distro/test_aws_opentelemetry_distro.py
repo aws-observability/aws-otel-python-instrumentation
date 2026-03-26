@@ -8,12 +8,12 @@ from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import APPLICATION_SIGNALS_ENABLED_CONFIG
-from opentelemetry.distro import OpenTelemetryDistro
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import (
     AGENT_OBSERVABILITY_DISABLED_INSTRUMENTATIONS,
     AwsOpenTelemetryDistro,
 )
 from opentelemetry import propagate
+from opentelemetry.distro import OpenTelemetryDistro
 from opentelemetry.environment_variables import (
     OTEL_LOGS_EXPORTER,
     OTEL_METRICS_EXPORTER,

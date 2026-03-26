@@ -15,8 +15,6 @@ import importlib
 import os
 import sys
 from logging import ERROR, Logger, getLogger
-from opentelemetry.util._importlib_metadata import EntryPoint
-
 
 from amazon.opentelemetry.distro._utils import (
     OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS,
@@ -53,6 +51,7 @@ from opentelemetry.sdk.environment_variables import (
     OTEL_EXPORTER_OTLP_PROTOCOL,
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
 )
+from opentelemetry.util._importlib_metadata import EntryPoint
 
 _logger: Logger = getLogger(__name__)
 # Suppress configurator warnings from auto-instrumentation
