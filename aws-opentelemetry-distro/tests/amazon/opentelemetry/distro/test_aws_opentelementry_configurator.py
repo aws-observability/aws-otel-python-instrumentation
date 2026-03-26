@@ -1298,7 +1298,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         _clear_logs_header_cache()
 
     @patch(
-        "amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agent_observability_enabled", return_value=False
+        "amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agentic_observability_enabled",
+        return_value=False,
     )
     def test_customize_log_record_processor_without_agent_observability(self, _):
         """Test that BatchLogRecordProcessor is used when agent observability is not enabled"""
@@ -1312,7 +1313,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertIsInstance(added_processor, BatchLogRecordProcessor)
 
     @patch(
-        "amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agent_observability_enabled", return_value=True
+        "amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agentic_observability_enabled", return_value=True
     )
     def test_customize_log_record_processor_with_agent_observability(self, _):
         """Test that AwsCloudWatchOtlpBatchLogRecordProcessor is used when agent observability is enabled"""
@@ -1326,7 +1327,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertIsInstance(added_processor, AwsCloudWatchOtlpBatchLogRecordProcessor)
 
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_logger_provider")
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agentic_observability_enabled")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_aws_session")
     def test_create_aws_otlp_exporter(self, mock_get_session, mock_is_agent_enabled, mock_get_logger_provider):
         # Test when botocore is not installed
@@ -1391,7 +1392,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         result = _create_aws_otlp_exporter("https://xray.us-east-1.amazonaws.com/v1/traces", "xray", "us-east-1")
         self.assertIsNone(result)
 
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agentic_observability_enabled")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_service_attribute")
     def test_customize_resource_without_agent_observability(self, mock_get_service_attribute, mock_is_agent_enabled):
         """Test _customize_resource when agent observability is disabled"""
@@ -1405,7 +1406,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(result.attributes[AWS_LOCAL_SERVICE], "test-service")
         self.assertNotIn(AWS_SERVICE_TYPE, result.attributes)
 
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agentic_observability_enabled")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_service_attribute")
     def test_customize_resource_with_agent_observability_default(
         self, mock_get_service_attribute, mock_is_agent_enabled
@@ -1421,7 +1422,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(result.attributes[AWS_LOCAL_SERVICE], "test-service")
         self.assertEqual(result.attributes[AWS_SERVICE_TYPE], "gen_ai_agent")
 
-    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.is_agentic_observability_enabled")
     @patch("amazon.opentelemetry.distro.aws_opentelemetry_configurator.get_service_attribute")
     def test_customize_resource_with_existing_agent_type(self, mock_get_service_attribute, mock_is_agent_enabled):
         """Test _customize_resource when agent type already exists in resource"""

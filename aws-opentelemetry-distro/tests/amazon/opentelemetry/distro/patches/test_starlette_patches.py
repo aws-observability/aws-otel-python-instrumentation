@@ -15,12 +15,18 @@ class TestStarlettePatch(TestCase):
     @patch("amazon.opentelemetry.distro.patches._starlette_patches._logger")
     def test_starlette_patch_applied_successfully(self, mock_logger):
         """Test that the Starlette ASGI middleware patch is applied successfully."""
-        for agent_enabled in [True, False]:
-            with self.subTest(agent_enabled=agent_enabled):
-                # Reset mock for each sub-test
+        env_configs = [
+            {"AGENT_OBSERVABILITY_ENABLED": "true"},
+            {"AWS_AGENTIC_OBSERVABILITY_OPT_IN": "true"},
+            {"AGENT_OBSERVABILITY_ENABLED": "false"},
+            {"AWS_AGENTIC_OBSERVABILITY_OPT_IN": "false"},
+        ]
+        for env_vars in env_configs:
+            agent_enabled = any(v == "true" for v in env_vars.values())
+            with self.subTest(env_vars=env_vars):
                 mock_logger.reset_mock()
 
-                with patch.dict("os.environ", {"AGENT_OBSERVABILITY_ENABLED": "true" if agent_enabled else "false"}):
+                with patch.dict("os.environ", env_vars, clear=False):
 
                     def create_middleware_class():
                         class MockMiddleware:

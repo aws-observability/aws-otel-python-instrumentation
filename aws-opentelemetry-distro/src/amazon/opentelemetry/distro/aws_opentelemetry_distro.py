@@ -16,10 +16,12 @@ import os
 import sys
 from logging import ERROR, Logger, getLogger
 
+
 from amazon.opentelemetry.distro._utils import (
     OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS,
     get_aws_region,
     is_agent_observability_enabled,
+    is_aws_agentic_observability_opt_in,
     is_installed,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import APPLICATION_SIGNALS_ENABLED_CONFIG
@@ -36,7 +38,7 @@ from opentelemetry.environment_variables import (
 from opentelemetry.instrumentation.auto_instrumentation import _load
 from opentelemetry.instrumentation.environment_variables import OTEL_PYTHON_DISABLED_INSTRUMENTATIONS
 from opentelemetry.instrumentation.logging import LEVELS
-from opentelemetry.instrumentation.logging.environment_variables import OTEL_PYTHON_LOG_LEVEL
+from opentelemetry.instrumentation.logging.environment_variables import OTEL_PYTHON_LOG_CORRELATION, OTEL_PYTHON_LOG_LEVEL
 from opentelemetry.sdk.environment_variables import (
     _OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED as OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED,
 )
@@ -44,10 +46,8 @@ from opentelemetry.sdk.environment_variables import (
     OTEL_EXPORTER_OTLP_ENDPOINT,
     OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
     OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION,
-    OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
     OTEL_EXPORTER_OTLP_PROTOCOL,
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
-    OTEL_TRACES_SAMPLER,
 )
 
 _logger: Logger = getLogger(__name__)
@@ -57,7 +57,12 @@ _load._logger.setLevel(LEVELS.get(os.environ.get(OTEL_PYTHON_LOG_LEVEL, "error")
 
 AGENT_OBSERVABILITY_DISABLED_INSTRUMENTATIONS = (
     "http,sqlalchemy,psycopg2,pymysql,sqlite3,aiopg,asyncpg,mysql_connector,"
-    "urllib3,requests,system_metrics,google-genai,crewai,langchain,mcp"
+    "urllib3,requests,system_metrics,google-genai,aws_crewai,aws_langchain,aws_mcp"
+)
+
+AWS_AGENTIC_OBSERVABILITY_DISABLED_INSTRUMENTATIONS = (
+    "sqlalchemy,psycopg2,pymysql,sqlite3,aiopg,asyncpg,mysql_connector,"
+    "system_metrics,google-genai,crewai,langchain,mcp"
 )
 
 
@@ -134,51 +139,41 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION, "base2_exponential_bucket_histogram"
         )
 
-        if is_agent_observability_enabled():
-            os.environ.setdefault("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "true")
-            os.environ.setdefault(OTEL_TRACES_SAMPLER, "parentbased_always_on")
-            os.environ.setdefault(
-                OTEL_PYTHON_DISABLED_INSTRUMENTATIONS,
-                AGENT_OBSERVABILITY_DISABLED_INSTRUMENTATIONS,
+        if is_aws_agentic_observability_opt_in():
+            _logger.info("AWS Agentic Observability enabled.")
+            self._configure_common_agent_observability(AWS_AGENTIC_OBSERVABILITY_DISABLED_INSTRUMENTATIONS)
+            os.environ.setdefault(OTEL_METRICS_EXPORTER, "otlp")
+            os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
+        elif is_agent_observability_enabled():
+             # Maintained for backwards compatibility. New users should use AWS_AGENTIC_OBSERVABILITY_OPT_IN instead.
+            _logger.info(
+                "AGENT_OBSERVABILITY_ENABLED is set. Consider using AWS_AGENTIC_OBSERVABILITY_OPT_IN for ADOT Agentic Observability."
             )
-            os.environ.setdefault(OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED, "true")
-            os.environ.setdefault(APPLICATION_SIGNALS_ENABLED_CONFIG, "false")
-            os.environ.setdefault(OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS, "false")
-
-            version = os.environ.get("AGENT_OBSERVABILITY_VERSION", "1")
-            if version == "1":
-                _configure_agent_observability_v1(get_aws_region())
-            else:
-                _configure_agent_observability_v2()
+            self._configure_common_agent_observability(AGENT_OBSERVABILITY_DISABLED_INSTRUMENTATIONS)
+            os.environ.setdefault(OTEL_METRICS_EXPORTER, "awsemf")
+            region = get_aws_region()
+            if not os.environ.get(OTEL_EXPORTER_OTLP_ENDPOINT):
+                if region:
+                    os.environ.setdefault(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, f"https://xray.{region}.amazonaws.com/v1/traces")
+                    os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, f"https://logs.{region}.amazonaws.com/v1/logs")
+                else:
+                    _logger.warning(
+                        "AWS region could not be determined. OTLP endpoints will not be automatically configured. "
+                        "Please set AWS_REGION environment variable or configure OTLP endpoints manually."
+                    )
 
         super(AwsOpenTelemetryDistro, self)._configure()
 
         if kwargs.get("apply_patches", True):
             apply_instrumentation_patches()
 
-
-def _configure_agent_observability_v1(region: str) -> None:
-    # "otlp" is already native OTel default, but we set them here to be explicit
-    # about intended configuration for agent observability
-    os.environ.setdefault(OTEL_TRACES_EXPORTER, "otlp")
-    os.environ.setdefault(OTEL_LOGS_EXPORTER, "otlp")
-    os.environ.setdefault(OTEL_METRICS_EXPORTER, "awsemf")
-    if not os.environ.get(OTEL_EXPORTER_OTLP_ENDPOINT):
-        if region:
-            os.environ.setdefault(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, f"https://xray.{region}.amazonaws.com/v1/traces")
-            os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, f"https://logs.{region}.amazonaws.com/v1/logs")
-        else:
-            _logger.warning(
-                "AWS region could not be determined. OTLP endpoints will not be automatically configured. "
-                "Please set AWS_REGION environment variable or configure OTLP endpoints manually."
-            )
-
-
-def _configure_agent_observability_v2() -> None:
-    os.environ.setdefault(OTEL_TRACES_EXPORTER, "otlp")
-    os.environ.setdefault(OTEL_LOGS_EXPORTER, "otlp")
-    os.environ.setdefault(OTEL_METRICS_EXPORTER, "otlp")
-    if not os.environ.get(OTEL_EXPORTER_OTLP_ENDPOINT):
-        os.environ.setdefault(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, "http://localhost:4318/v1/traces")
-        os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, "http://localhost:4318/v1/logs")
-        os.environ.setdefault(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, "http://localhost:4318/v1/metrics")
+    @staticmethod
+    def _configure_common_agent_observability(disabled_instrumentations: str) -> None:
+        os.environ.setdefault("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "true")
+        os.environ.setdefault(OTEL_PYTHON_DISABLED_INSTRUMENTATIONS, disabled_instrumentations)
+        os.environ.setdefault(OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED, "true")
+        os.environ.setdefault(OTEL_PYTHON_LOG_CORRELATION, "true")
+        os.environ.setdefault(APPLICATION_SIGNALS_ENABLED_CONFIG, "false")
+        os.environ.setdefault(OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS, "false")
+        os.environ.setdefault(OTEL_TRACES_EXPORTER, "otlp")
+        os.environ.setdefault(OTEL_LOGS_EXPORTER, "otlp")

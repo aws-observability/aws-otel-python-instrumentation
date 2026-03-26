@@ -17,7 +17,7 @@ from typing_extensions import override
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE, AWS_SERVICE_TYPE
 from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
-from amazon.opentelemetry.distro._utils import get_aws_session, is_agent_observability_enabled
+from amazon.opentelemetry.distro._utils import get_aws_session, is_agentic_observability_enabled
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor_builder import (
     AttributePropagatingSpanProcessorBuilder,
@@ -204,7 +204,7 @@ def _initialize_components():
             AwsEksResourceDetector(),
             AwsEcsResourceDetector(),
         ]
-        if not (_is_lambda_environment() or is_agent_observability_enabled())
+        if not (_is_lambda_environment() or is_agentic_observability_enabled())
         else []
     )
 
@@ -326,7 +326,7 @@ def _export_unsampled_span_for_lambda(trace_provider: TracerProvider, resource: 
 
 
 def _export_unsampled_span_for_agent_observability(trace_provider: TracerProvider, resource: Resource = None):
-    if not is_agent_observability_enabled():
+    if not is_agentic_observability_enabled():
         return
 
     traces_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
@@ -467,7 +467,7 @@ def _customize_log_record_processor(logger_provider: LoggerProvider, log_exporte
     if not log_exporter:
         return
 
-    if is_agent_observability_enabled():
+    if is_agentic_observability_enabled():
         # pylint: disable=import-outside-toplevel
         from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor import (
             AwsCloudWatchOtlpBatchLogRecordProcessor,
@@ -525,7 +525,7 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource, sam
     # and quality degradation that sampling could miss.
     # Add session.id baggage attribute to span attributes to support AI Agent use cases
     # enabling session ID tracking in spans.
-    if is_agent_observability_enabled():
+    if is_agentic_observability_enabled():
         _export_unsampled_span_for_agent_observability(provider, resource)
         # propagates baggage entries matching OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS into span attributes
         raw: str = os.environ.get(OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS, "").strip()
@@ -635,7 +635,7 @@ def _customize_resource(resource: Resource) -> Resource:
 
     custom_attributes = {AWS_LOCAL_SERVICE: service_name}
 
-    if is_agent_observability_enabled():
+    if is_agentic_observability_enabled():
         # Add aws.service.type if it doesn't exist in the resource
         if resource and resource.attributes.get(AWS_SERVICE_TYPE) is None:
             # Set a default agent type for AI agent observability
@@ -916,7 +916,7 @@ def _create_aws_otlp_exporter(endpoint: str, service: str, region: str):
         from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 
         if service == XRAY_SERVICE:
-            if is_agent_observability_enabled():
+            if is_agentic_observability_enabled():
                 # Span exporter needs an instance of logger provider in ai agent
                 # observability case because we need to split input/output prompts
                 # from span attributes and send them to the logs pipeline per
