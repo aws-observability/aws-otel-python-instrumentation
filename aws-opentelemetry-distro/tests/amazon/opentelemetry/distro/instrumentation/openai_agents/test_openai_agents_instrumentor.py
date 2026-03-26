@@ -5,19 +5,17 @@ import unittest
 from importlib.metadata import entry_points
 
 try:
-    import agents  # noqa: F401
+    from opentelemetry.instrumentation.openai_agents import OpenAIAgentsInstrumentor
 
-    _AGENTS_AVAILABLE = True
+    _AVAILABLE = True
 except ImportError:
-    _AGENTS_AVAILABLE = False
+    _AVAILABLE = False
 
 
-@unittest.skipUnless(_AGENTS_AVAILABLE, "openai-agents SDK not installed")
+@unittest.skipUnless(_AVAILABLE, "opentelemetry-instrumentation-openai-agents-v2 not available")
 class TestOpenAIAgentsInstrumentation(unittest.TestCase):
 
     def test_aws_openai_agents_entry_point_resolves(self):
-        from opentelemetry.instrumentation.openai_agents import OpenAIAgentsInstrumentor
-
         eps = entry_points(group="opentelemetry_instrumentor", name="aws_openai_agents")
         self.assertEqual(len(list(eps)), 1)
 
@@ -26,8 +24,6 @@ class TestOpenAIAgentsInstrumentation(unittest.TestCase):
         self.assertIs(instrumentor_class, OpenAIAgentsInstrumentor)
 
     def test_aws_entry_point_survives_when_openai_agents_disabled(self):
-        from opentelemetry.instrumentation.openai_agents import OpenAIAgentsInstrumentor
-
         disabled = {"openai_agents"}
 
         aws_eps = entry_points(group="opentelemetry_instrumentor", name="aws_openai_agents")
@@ -41,8 +37,6 @@ class TestOpenAIAgentsInstrumentation(unittest.TestCase):
         self.assertIs(instrumentor_class, OpenAIAgentsInstrumentor)
 
     def test_instrument_called_twice_only_sets_processor_once(self):
-        from opentelemetry.instrumentation.openai_agents import OpenAIAgentsInstrumentor
-
         instrumentor = OpenAIAgentsInstrumentor()
         if instrumentor.is_instrumented_by_opentelemetry:
             instrumentor.uninstrument()

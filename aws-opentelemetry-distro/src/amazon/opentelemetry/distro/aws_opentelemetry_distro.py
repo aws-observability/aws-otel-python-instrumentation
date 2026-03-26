@@ -39,7 +39,10 @@ from opentelemetry.environment_variables import (
 from opentelemetry.instrumentation.auto_instrumentation import _load
 from opentelemetry.instrumentation.environment_variables import OTEL_PYTHON_DISABLED_INSTRUMENTATIONS
 from opentelemetry.instrumentation.logging import LEVELS
-from opentelemetry.instrumentation.logging.environment_variables import OTEL_PYTHON_LOG_CORRELATION, OTEL_PYTHON_LOG_LEVEL
+from opentelemetry.instrumentation.logging.environment_variables import (
+    OTEL_PYTHON_LOG_CORRELATION,
+    OTEL_PYTHON_LOG_LEVEL,
+)
 from opentelemetry.sdk.environment_variables import (
     _OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED as OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED,
 )
@@ -146,7 +149,7 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             os.environ.setdefault(OTEL_METRICS_EXPORTER, "otlp")
             os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
         elif is_agent_observability_enabled():
-             # Maintained for backwards compatibility. New users should use AWS_AGENTIC_OBSERVABILITY_OPT_IN instead.
+            # Maintained for backwards compatibility. New users should use AWS_AGENTIC_OBSERVABILITY_OPT_IN instead.
             _logger.info(
                 "AGENT_OBSERVABILITY_ENABLED is set. Consider using AWS_AGENTIC_OBSERVABILITY_OPT_IN for ADOT Agentic Observability."
             )
@@ -155,8 +158,12 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             region = get_aws_region()
             if not os.environ.get(OTEL_EXPORTER_OTLP_ENDPOINT):
                 if region:
-                    os.environ.setdefault(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, f"https://xray.{region}.amazonaws.com/v1/traces")
-                    os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, f"https://logs.{region}.amazonaws.com/v1/logs")
+                    os.environ.setdefault(
+                        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, f"https://xray.{region}.amazonaws.com/v1/traces"
+                    )
+                    os.environ.setdefault(
+                        OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, f"https://logs.{region}.amazonaws.com/v1/logs"
+                    )
                 else:
                     _logger.warning(
                         "AWS region could not be determined. OTLP endpoints will not be automatically configured. "

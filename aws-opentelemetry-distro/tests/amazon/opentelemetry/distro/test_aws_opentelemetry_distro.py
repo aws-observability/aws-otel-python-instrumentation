@@ -575,14 +575,10 @@ class TestAwsOpenTelemetryDistro(TestCase):
 
                 distro = AwsOpenTelemetryDistro()
                 with patch.dict(os.environ, case["env"], clear=False):
-                    with patch.object(
-                        OpenTelemetryDistro, "load_instrumentor"
-                    ) as mock_super:
+                    with patch.object(OpenTelemetryDistro, "load_instrumentor") as mock_super:
                         distro.load_instrumentor(mock_entry_point)
                         if case["should_load"]:
-                            mock_super.assert_called_once_with(
-                                mock_entry_point
-                            )
+                            mock_super.assert_called_once_with(mock_entry_point)
                         else:
                             mock_super.assert_not_called()
 
