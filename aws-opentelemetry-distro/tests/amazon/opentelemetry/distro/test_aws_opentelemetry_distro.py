@@ -540,38 +540,51 @@ class TestAwsOpenTelemetryDistro(TestCase):
         self.assertNotIn(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, os.environ)
         self.assertNotIn(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, os.environ)
 
-    def test_load_instrumentor_skips_otel_openai_agents_in_legacy(self):
-        mock_entry_point = MagicMock()
-        mock_entry_point.name = "openai_agents"
-        mock_entry_point.dist.name = "opentelemetry-instrumentation-openai-agents-v2"
+    def test_load_instrumentor_skip_behavior(self):
+        cases = [
+            {
+                "env": {"AGENT_OBSERVABILITY_ENABLED": "true"},
+                "entry_name": "openai_agents",
+                "dist_name": "opentelemetry-instrumentation-openai-agents-v2",
+                "should_load": False,
+            },
+            {
+                "env": {"AGENT_OBSERVABILITY_ENABLED": "true"},
+                "entry_name": "openai_agents",
+                "dist_name": "openinference-instrumentation-openai-agents",
+                "should_load": True,
+            },
+            {
+                "env": {"AWS_AGENTIC_OBSERVABILITY_OPT_IN": "true"},
+                "entry_name": "openai_agents",
+                "dist_name": "opentelemetry-instrumentation-openai-agents-v2",
+                "should_load": True,
+            },
+            {
+                "env": {},
+                "entry_name": "openai_agents",
+                "dist_name": "opentelemetry-instrumentation-openai-agents-v2",
+                "should_load": True,
+            },
+        ]
+        for case in cases:
+            with self.subTest(case=case):
+                mock_entry_point = MagicMock()
+                mock_entry_point.name = case["entry_name"]
+                mock_entry_point.dist.name = case["dist_name"]
 
-        distro = AwsOpenTelemetryDistro()
-        with patch.dict(os.environ, {"AGENT_OBSERVABILITY_ENABLED": "true"}):
-            with patch.object(OpenTelemetryDistro, "load_instrumentor") as mock_super:
-                distro.load_instrumentor(mock_entry_point)
-                mock_super.assert_not_called()
-
-    def test_load_instrumentor_allows_third_party_openai_agents_in_legacy(self):
-        mock_entry_point = MagicMock()
-        mock_entry_point.name = "openai_agents"
-        mock_entry_point.dist.name = "openinference-instrumentation-openai-agents"
-
-        distro = AwsOpenTelemetryDistro()
-        with patch.dict(os.environ, {"AGENT_OBSERVABILITY_ENABLED": "true"}):
-            with patch.object(OpenTelemetryDistro, "load_instrumentor") as mock_super:
-                distro.load_instrumentor(mock_entry_point)
-                mock_super.assert_called_once_with(mock_entry_point)
-
-    def test_load_instrumentor_allows_otel_openai_agents_in_opt_in(self):
-        mock_entry_point = MagicMock()
-        mock_entry_point.name = "openai_agents"
-        mock_entry_point.dist.name = "opentelemetry-instrumentation-openai-agents-v2"
-
-        distro = AwsOpenTelemetryDistro()
-        with patch.dict(os.environ, {"AWS_AGENTIC_OBSERVABILITY_OPT_IN": "true"}):
-            with patch.object(OpenTelemetryDistro, "load_instrumentor") as mock_super:
-                distro.load_instrumentor(mock_entry_point)
-                mock_super.assert_called_once_with(mock_entry_point)
+                distro = AwsOpenTelemetryDistro()
+                with patch.dict(os.environ, case["env"], clear=False):
+                    with patch.object(
+                        OpenTelemetryDistro, "load_instrumentor"
+                    ) as mock_super:
+                        distro.load_instrumentor(mock_entry_point)
+                        if case["should_load"]:
+                            mock_super.assert_called_once_with(
+                                mock_entry_point
+                            )
+                        else:
+                            mock_super.assert_not_called()
 
     def _configure_with_agent_observability(self, region="us-west-2"):
         with patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure"), patch(
