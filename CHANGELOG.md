@@ -12,7 +12,7 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
-- feat: introduce AWS_AGENTIC_OBSERVABILITY_OPT_IN and refactor agent observability config
+- feat: [BREAKING CHANGE] introduce AWS_AGENTIC_OBSERVABILITY_OPT_IN and refactor agent observability config
   ([#691](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/691))
 - feat: propagate HTTP context for MCP requests and prefix all span names with mcp
   ([#683](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/683))
