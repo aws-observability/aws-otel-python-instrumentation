@@ -6,7 +6,7 @@ from unittest import TestCase
 from opentelemetry.instrumentation.openai_agents import OpenAIAgentsInstrumentor
 
 
-class TestOpenAIAgentsInstrumentation(TestCase):
+class TestOpenAIAgentsInstrumentor(TestCase):
 
     def test_aws_openai_agents_entry_point_resolves(self):
         from importlib.metadata import entry_points
