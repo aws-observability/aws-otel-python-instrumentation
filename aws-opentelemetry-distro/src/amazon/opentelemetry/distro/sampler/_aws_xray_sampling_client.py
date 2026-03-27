@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import json
 from logging import getLogger
-from typing import Dict, List
 
 import requests
 
@@ -25,7 +24,7 @@ class _AwsXRaySamplingClient:
 
         self.__session = requests.Session()
 
-    def get_sampling_rules(self) -> List[_SamplingRule]:
+    def get_sampling_rules(self) -> [_SamplingRule]:
         sampling_rules = []
         headers = {"content-type": "application/json"}
 
@@ -57,14 +56,9 @@ class _AwsXRaySamplingClient:
 
         return sampling_rules
 
-    def get_sampling_targets(
-        self, statistics: List[Dict], boost_statistics: List[Dict] = None
-    ) -> _SamplingTargetResponse:
+    def get_sampling_targets(self, statistics: [dict]) -> _SamplingTargetResponse:
         sampling_targets_response = _SamplingTargetResponse(
-            LastRuleModification=None,
-            SamplingTargetDocuments=None,
-            UnprocessedStatistics=None,
-            UnprocessedBoostStatistics=None,
+            LastRuleModification=None, SamplingTargetDocuments=None, UnprocessedStatistics=None
         )
         headers = {"content-type": "application/json"}
         try:
@@ -72,10 +66,7 @@ class _AwsXRaySamplingClient:
                 url=self.__get_sampling_targets_endpoint,
                 headers=headers,
                 timeout=20,
-                json={
-                    "SamplingStatisticsDocuments": statistics,
-                    "SamplingBoostStatisticsDocuments": boost_statistics,
-                },
+                json={"SamplingStatisticsDocuments": statistics},
             )
             if xray_response is None:
                 _logger.debug("GetSamplingTargets response is None. Unable to update targets.")

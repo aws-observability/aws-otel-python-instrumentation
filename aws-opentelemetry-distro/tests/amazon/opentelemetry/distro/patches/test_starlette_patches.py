@@ -14,13 +14,16 @@ class TestStarlettePatch(TestCase):
 
     @patch("amazon.opentelemetry.distro.patches._starlette_patches._logger")
     def test_starlette_patch_applied_successfully(self, mock_logger):
-        """Test that the Starlette ASGI middleware patch is applied successfully."""
+        """Test that the Starlette instrumentation patch is applied successfully."""
         for agent_enabled in [True, False]:
             with self.subTest(agent_enabled=agent_enabled):
                 # Reset mock for each sub-test
                 mock_logger.reset_mock()
 
                 with patch.dict("os.environ", {"AGENT_OBSERVABILITY_ENABLED": "true" if agent_enabled else "false"}):
+                    # Create a mock StarletteInstrumentor class
+                    mock_instrumentor_class = MagicMock()
+                    mock_instrumentor_class.__name__ = "StarletteInstrumentor"
 
                     def create_middleware_class():
                         class MockMiddleware:
@@ -31,17 +34,29 @@ class TestStarlettePatch(TestCase):
 
                     mock_middleware_class = create_middleware_class()
 
+                    mock_starlette_module = MagicMock()
+                    mock_starlette_module.StarletteInstrumentor = mock_instrumentor_class
+
                     mock_asgi_module = MagicMock()
                     mock_asgi_module.OpenTelemetryMiddleware = mock_middleware_class
 
                     with patch.dict(
                         "sys.modules",
                         {
+                            "opentelemetry.instrumentation.starlette": mock_starlette_module,
                             "opentelemetry.instrumentation.asgi": mock_asgi_module,
                         },
                     ):
                         # Apply the patch
                         _apply_starlette_instrumentation_patches()
+
+                        # Verify the instrumentation_dependencies method was replaced
+                        self.assertTrue(hasattr(mock_instrumentor_class, "instrumentation_dependencies"))
+
+                        # Test the patched method returns the expected value
+                        mock_instance = MagicMock()
+                        result = mock_instrumentor_class.instrumentation_dependencies(mock_instance)
+                        self.assertEqual(result, ("starlette >= 0.13",))
 
                         mock_middleware_instance = MagicMock()
                         mock_middleware_instance.exclude_receive_span = False
@@ -56,21 +71,31 @@ class TestStarlettePatch(TestCase):
                             self.assertFalse(mock_middleware_instance.exclude_receive_span)
                             self.assertFalse(mock_middleware_instance.exclude_send_span)
 
-                        # Verify logging
-                        mock_logger.debug.assert_called_with("Successfully patched Starlette ASGI middleware")
+                        # Verify logging - expect two debug calls from both patch functions
+                        self.assertEqual(mock_logger.debug.call_count, 2)
+
+                        # Check that both expected debug messages were logged
+                        debug_calls = [call[0][0] for call in mock_logger.debug.call_args_list]
+                        self.assertIn("Successfully patched Starlette instrumentation_dependencies method", debug_calls)
+                        self.assertIn(
+                            "Starlette instrumentation code attributes patch applied successfully", debug_calls
+                        )
 
     @patch("amazon.opentelemetry.distro.patches._starlette_patches._logger")
     def test_starlette_patch_handles_import_error(self, mock_logger):
         """Test that the patch handles import errors gracefully."""
         # Mock the import to fail by removing the module
-        with patch.dict("sys.modules", {"opentelemetry.instrumentation.asgi": None}):
+        with patch.dict("sys.modules", {"opentelemetry.instrumentation.starlette": None}):
             # This should not raise an exception
             _apply_starlette_instrumentation_patches()
 
-            # Verify warning was logged
-            mock_logger.warning.assert_called_once()
-            args = mock_logger.warning.call_args[0]
-            self.assertIn("Failed to apply Starlette instrumentation patches", args[0])
+            # Verify warning was logged - expect two warnings from both sub-functions
+            self.assertEqual(mock_logger.warning.call_count, 2)
+
+            # Check that both expected warning messages were logged
+            warning_calls = [call[0][0] for call in mock_logger.warning.call_args_list]
+            self.assertIn("Failed to apply Starlette instrumentation patches", warning_calls[0])
+            self.assertIn("Failed to apply Starlette code attributes patch", warning_calls[1])
 
 
 class TestStarletteCodeAttributesPatch(TestCase):

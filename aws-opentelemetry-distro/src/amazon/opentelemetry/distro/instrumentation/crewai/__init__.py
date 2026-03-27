@@ -2,14 +2,17 @@
 # SPDX-License-Identifier: Apache-2.0
 from typing import Any, Collection
 
-from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import try_unwrap, try_wrap
-from amazon.opentelemetry.distro.instrumentation.crewai._event_handler import (
-    OpenTelemetryEventHandler,
-    _EventBusEmitWrapper,
+from wrapt import wrap_function_wrapper
+
+from amazon.opentelemetry.distro.instrumentation.crewai._wrappers import (
+    _CrewKickoffWrapper,
+    _TaskExecuteCoreWrapper,
+    _ToolUseWrapper,
 )
 from amazon.opentelemetry.distro.version import __version__
 from opentelemetry import trace
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
+from opentelemetry.instrumentation.utils import unwrap
 
 
 class CrewAIInstrumentor(BaseInstrumentor):
@@ -21,21 +24,23 @@ class CrewAIInstrumentor(BaseInstrumentor):
     Note: Semantic conventions may change in future versions.
     """
 
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self._handler: OpenTelemetryEventHandler | None = None
-
     def instrumentation_dependencies(self) -> Collection[str]:  # pylint: disable=no-self-use
-        return ("crewai >= 1.9.0",)
+        return ("crewai >= 0.41.0",)
 
+    # disabling these linters rules as these are instance methods from BaseInstrumentor
     def _instrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
-        self._handler = OpenTelemetryEventHandler(tracer)
 
-        try_wrap("crewai.events", "crewai_event_bus.emit", _EventBusEmitWrapper(self._handler))
+        wrap_function_wrapper("crewai", "Crew.kickoff", _CrewKickoffWrapper(tracer))
+        wrap_function_wrapper("crewai", "Task._execute_core", _TaskExecuteCoreWrapper(tracer))
+        wrap_function_wrapper("crewai.tools.tool_usage", "ToolUsage._use", _ToolUseWrapper(tracer))
 
     def _uninstrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
-        from crewai.events import crewai_event_bus  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        import crewai
+        from crewai.tools import tool_usage
 
-        try_unwrap(crewai_event_bus, "emit")
+        unwrap(crewai.Crew, "kickoff")
+        unwrap(crewai.Task, "_execute_core")
+        unwrap(tool_usage.ToolUsage, "_use")

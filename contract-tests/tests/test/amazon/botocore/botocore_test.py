@@ -34,13 +34,7 @@ _logger.setLevel(INFO)
 
 _AWS_SQS_QUEUE_URL: str = "aws.sqs.queue.url"
 _AWS_SQS_QUEUE_NAME: str = "aws.sqs.queue.name"
-_DB_SYSTEM: str = "db.system"
-_DB_OPERATION: str = "db.operation"
-_FAAS_INVOKED_PROVIDER: str = "faas.invoked_provider"
-_FAAS_INVOKED_NAME: str = "faas.invoked_name"
-_FAAS_INVOKED_REGION: str = "faas.invoked_region"
-_AWS_KINESIS_STREAM_NAME: str = "aws.kinesis.stream_name"
-_AWS_LAMBDA_FUNCTION_NAME: str = "aws.lambda.function.name"
+_AWS_KINESIS_STREAM_NAME: str = "aws.kinesis.stream.name"
 _AWS_BEDROCK_AGENT_ID: str = "aws.bedrock.agent.id"
 _AWS_BEDROCK_GUARDRAIL_ID: str = "aws.bedrock.guardrail.id"
 _AWS_BEDROCK_KNOWLEDGE_BASE_ID: str = "aws.bedrock.knowledge_base.id"
@@ -68,8 +62,8 @@ _GEN_AI_GATEWAY_ID: str = "gen_ai.gateway.id"
 _AWS_GATEWAY_TARGET_ID: str = "aws.gateway.target.id"
 _AWS_AUTH_CREDENTIAL_PROVIDER: str = "aws.auth.credential_provider"
 _AWS_SECRET_ARN: str = "aws.secretsmanager.secret.arn"
-_AWS_STATE_MACHINE_ARN: str = "aws.step_functions.state_machine.arn"
-_AWS_ACTIVITY_ARN: str = "aws.step_functions.activity.arn"
+_AWS_STATE_MACHINE_ARN: str = "aws.stepfunctions.state_machine.arn"
+_AWS_ACTIVITY_ARN: str = "aws.stepfunctions.activity.arn"
 _AWS_SNS_TOPIC_ARN: str = "aws.sns.topic.arn"
 _AWS_DYNAMODB_TABLE_ARN: str = "aws.dynamodb.table.arn"
 _AWS_KINESIS_STREAM_ARN: str = "aws.kinesis.stream.arn"
@@ -231,8 +225,6 @@ class BotocoreTest(ContractTestBase):
             cloudformation_primary_identifier="test_table",
             request_specific_attributes={
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["test_table"],
-                _DB_SYSTEM: "dynamodb",
-                _DB_OPERATION: "CreateTable",
             },
             span_name="DynamoDB.CreateTable",
         )
@@ -253,8 +245,6 @@ class BotocoreTest(ContractTestBase):
             cloudformation_primary_identifier="put_test_table",
             request_specific_attributes={
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["put_test_table"],
-                _DB_SYSTEM: "dynamodb",
-                _DB_OPERATION: "DescribeTable",
             },
             response_specific_attributes={
                 _AWS_DYNAMODB_TABLE_ARN: r"arn:aws:dynamodb:us-west-2:000000000000:table/put_test_table",
@@ -276,8 +266,6 @@ class BotocoreTest(ContractTestBase):
             cloudformation_primary_identifier="put_test_table",
             request_specific_attributes={
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["put_test_table"],
-                _DB_SYSTEM: "dynamodb",
-                _DB_OPERATION: "PutItem",
             },
             span_name="DynamoDB.PutItem",
         )
@@ -296,8 +284,6 @@ class BotocoreTest(ContractTestBase):
             cloudformation_primary_identifier="invalid_table",
             request_specific_attributes={
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["invalid_table"],
-                _DB_SYSTEM: "dynamodb",
-                _DB_OPERATION: "PutItem",
             },
             span_name="DynamoDB.PutItem",
         )
@@ -316,8 +302,6 @@ class BotocoreTest(ContractTestBase):
             cloudformation_primary_identifier="invalid_table",
             request_specific_attributes={
                 SpanAttributes.AWS_DYNAMODB_TABLE_NAMES: ["invalid_table"],
-                _DB_SYSTEM: "dynamodb",
-                _DB_OPERATION: "PutItem",
             },
             span_name="DynamoDB.PutItem",
         )
@@ -373,10 +357,10 @@ class BotocoreTest(ContractTestBase):
             remote_service="AWS::SQS",
             remote_operation="ReceiveMessage",
             remote_resource_type="AWS::SQS::Queue",
-            remote_resource_identifier="test_receive_queue",
-            cloudformation_primary_identifier="http://localstack:4566/000000000000/test_receive_queue",
+            remote_resource_identifier="test_put_get_queue",
+            cloudformation_primary_identifier="http://localstack:4566/000000000000/test_put_get_queue",
             request_specific_attributes={
-                _AWS_SQS_QUEUE_URL: "http://localstack:4566/000000000000/test_receive_queue",
+                _AWS_SQS_QUEUE_URL: "http://localstack:4566/000000000000/test_put_get_queue",
             },
             span_name="SQS.ReceiveMessage",
         )
@@ -1205,9 +1189,7 @@ class BotocoreTest(ContractTestBase):
             remote_resource_type="AWS::SNS::Topic",
             remote_resource_identifier="test-topic",
             cloudformation_primary_identifier="arn:aws:sns:us-west-2:000000000000:test-topic",
-            request_specific_attributes={
-                _AWS_SNS_TOPIC_ARN: "arn:aws:sns:us-west-2:000000000000:test-topic",
-            },
+            request_specific_attributes={_AWS_SNS_TOPIC_ARN: "arn:aws:sns:us-west-2:000000000000:test-topic"},
             span_name="SNS.GetTopicAttributes",
         )
 
@@ -1231,45 +1213,6 @@ class BotocoreTest(ContractTestBase):
                 _AWS_SNS_TOPIC_ARN: "arn:aws:sns:us-west-2:000000000000:invalid-topic",
             },
             span_name="SNS.GetTopicAttributes",
-        )
-
-    def test_sns_publish(self):
-        self.do_test_requests(
-            "sns/publish/test-topic",
-            "GET",
-            200,
-            0,
-            0,
-            rpc_service="SNS",
-            remote_service="AWS::SNS",
-            remote_operation="Publish",
-            remote_resource_type="AWS::SNS::Topic",
-            remote_resource_identifier="test-topic",
-            cloudformation_primary_identifier="arn:aws:sns:us-west-2:000000000000:test-topic",
-            request_specific_attributes={
-                _AWS_SNS_TOPIC_ARN: "arn:aws:sns:us-west-2:000000000000:test-topic",
-            },
-            span_name="test-topic send",
-            span_kind=Span.SPAN_KIND_PRODUCER,
-        )
-
-    def test_lambda_invoke(self):
-        self.do_test_requests(
-            "lambda/invoke/test-function",
-            "GET",
-            200,
-            0,
-            0,
-            rpc_service="Lambda",
-            remote_service="test-function",
-            remote_operation="Invoke",
-            request_specific_attributes={
-                _FAAS_INVOKED_PROVIDER: "aws",
-                _FAAS_INVOKED_NAME: "test-function",
-                _FAAS_INVOKED_REGION: "us-west-2",
-                _AWS_LAMBDA_FUNCTION_NAME: "test-function",
-            },
-            span_name="Lambda.Invoke",
         )
 
     def test_stepfunctions_describe_state_machine(self):
@@ -1375,10 +1318,9 @@ class BotocoreTest(ContractTestBase):
     @override
     def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs) -> None:
         target_spans: List[Span] = []
-        expected_span_kind = kwargs.get("span_kind", Span.SPAN_KIND_CLIENT)
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
-            if resource_scope_span.span.kind == expected_span_kind:
+            if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
                 target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
@@ -1449,10 +1391,9 @@ class BotocoreTest(ContractTestBase):
         self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str, status_code: int, **kwargs
     ) -> None:
         target_spans: List[Span] = []
-        expected_span_kind = kwargs.get("span_kind", Span.SPAN_KIND_CLIENT)
         for resource_scope_span in resource_scope_spans:
             # pylint: disable=no-member
-            if resource_scope_span.span.kind == expected_span_kind:
+            if resource_scope_span.span.kind == Span.SPAN_KIND_CLIENT:
                 target_spans.append(resource_scope_span.span)
 
         self.assertEqual(len(target_spans), 1)
@@ -1529,8 +1470,7 @@ class BotocoreTest(ContractTestBase):
         self._assert_str_attribute(attribute_dict, AWS_LOCAL_OPERATION, "InternalOperation")
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_SERVICE, kwargs.get("remote_service"))
         self._assert_str_attribute(attribute_dict, AWS_REMOTE_OPERATION, kwargs.get("remote_operation"))
-        expected_span_kind = "PRODUCER" if kwargs.get("span_kind") == Span.SPAN_KIND_PRODUCER else "CLIENT"
-        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, expected_span_kind)
+        self._assert_str_attribute(attribute_dict, AWS_SPAN_KIND, "CLIENT")
         remote_resource_type = kwargs.get("remote_resource_type", "None")
         remote_resource_identifier = kwargs.get("remote_resource_identifier", "None")
         remote_resource_account_id = kwargs.get("remote_resource_account_id", "None")

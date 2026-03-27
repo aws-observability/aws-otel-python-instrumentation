@@ -3,34 +3,7 @@
 from unittest import TestCase
 from unittest.mock import patch
 
-from amazon.opentelemetry.distro.sampler._sampling_rule import _SamplingRateBoost, _SamplingRule
-
-
-class TestSamplingRateBoost(TestCase):
-    def test_sampling_rate_boost_with_extra_fields(self):
-        input = {
-            "MaxRate": 0.5,
-            "CooldownWindowMinutes": 2,
-            "ExtraField1": "cat",
-            "ExtraField2": 123,
-        }
-        with patch("amazon.opentelemetry.distro.sampler._sampling_rule._logger") as mock_logger:
-            _SamplingRateBoost(**input)
-            mock_logger.debug.assert_called_once_with(
-                "Ignoring unknown fields in _SamplingRateBoost: %s", ["ExtraField1", "ExtraField2"]
-            )
-
-    def test_sampling_rate_boost_equality(self):
-        boost1 = _SamplingRateBoost(MaxRate=0.5, CooldownWindowMinutes=2)
-        boost2 = _SamplingRateBoost(MaxRate=0.5, CooldownWindowMinutes=2)
-        self.assertEqual(boost1, boost2)
-
-        boost1 = _SamplingRateBoost(MaxRate=0.5, CooldownWindowMinutes=2)
-        boost2 = _SamplingRateBoost(MaxRate=0.5, CooldownWindowMinutes=3)
-        self.assertNotEqual(boost1, boost2)
-
-        boost2 = {"other": "object"}
-        self.assertNotEqual(boost1, boost2)
+from amazon.opentelemetry.distro.sampler._sampling_rule import _SamplingRule
 
 
 class TestSamplingRule(TestCase):
@@ -59,7 +32,6 @@ class TestSamplingRule(TestCase):
             "ServiceType": "AWS::EKS::Container",
             "URLPath": "/helloworld",
             "Version": 1,
-            "SamplingRateBoost": {"MaxRate": 0.5, "CooldownWindowMinutes": 2},
             "ExtraField1": "cat",
             "ExtraField2": 123,
         }
@@ -144,48 +116,3 @@ class TestSamplingRule(TestCase):
 
         self.assertFalse(sampling_rule == sampling_rule_updated)
         self.assertFalse(sampling_rule == sampling_rule_updated_2)
-
-        sampling_rule_with_boost_1 = _SamplingRule(
-            Attributes={},
-            FixedRate=0,
-            HTTPMethod="*",
-            Host="*",
-            Priority=20,
-            ReservoirSize=1,
-            ResourceARN="*",
-            RuleARN="arn:aws:xray:us-east-1:999999999999:sampling-rule/test",
-            RuleName="test",
-            ServiceName="*",
-            ServiceType="*",
-            URLPath="*",
-            Version=1,
-            SamplingRateBoost={
-                "MaxRate": 0.2,
-                "CooldownWindowMinutes": 2,
-            },
-        )
-
-        sampling_rule_with_boost_2 = _SamplingRule(
-            Attributes={},
-            FixedRate=0,
-            HTTPMethod="*",
-            Host="*",
-            Priority=20,
-            ReservoirSize=1,
-            ResourceARN="*",
-            RuleARN="arn:aws:xray:us-east-1:999999999999:sampling-rule/test",
-            RuleName="test",
-            ServiceName="*",
-            ServiceType="*",
-            URLPath="*",
-            Version=1,
-            SamplingRateBoost={
-                "MaxRate": 0.1,
-                "CooldownWindowMinutes": 1,
-            },
-        )
-
-        self.assertFalse(sampling_rule_with_boost_1 == sampling_rule_with_boost_2)
-
-        # Simple inequality check between sampling rule and object of another type
-        self.assertNotEqual(sampling_rule, {"other": "object"})

@@ -4,11 +4,7 @@ from typing import Callable, Optional, Tuple
 
 from typing_extensions import override
 
-from amazon.opentelemetry.distro._aws_attribute_keys import (
-    AWS_CONSUMER_PARENT_SPAN_KIND,
-    AWS_SDK_DESCENDANT,
-    AWS_TRACE_FLAG_SAMPLED,
-)
+from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND, AWS_SDK_DESCENDANT
 from amazon.opentelemetry.distro._aws_span_processing_util import is_aws_sdk_span, is_local_root
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
@@ -84,7 +80,6 @@ class AttributePropagatingSpanProcessor(SpanProcessor):
 
         if propagation_data is not None:
             span.set_attribute(self._propagation_data_key, propagation_data)
-        span.set_attribute(AWS_TRACE_FLAG_SAMPLED, span.get_span_context().trace_flags.sampled)
 
     # pylint: disable=no-self-use
     @override

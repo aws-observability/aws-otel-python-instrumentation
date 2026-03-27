@@ -20,7 +20,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: '${{ github.workflow }}'
+  group: '${{ github.workflow }} @ ${{ inputs.aws-region }}'
   cancel-in-progress: false
 
 
@@ -90,14 +90,6 @@ jobs:
       cpu-architecture: 'x86_64'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
-  python-ec2-adaptive-sampling-test:
-    needs: [ upload-main-build ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-adaptive-sampling-test.yml@main
-    secrets: inherit
-    with:
-      caller-workflow-name: 'main-build'
-      staging-wheel-name: ${{ inputs.staging-wheel-name }}
-
   default-py313-amd64:
     needs: [ upload-main-build ]
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
@@ -106,17 +98,6 @@ jobs:
       aws-region: us-east-1
       caller-workflow-name: 'main-build'
       python-version: '3.13'
-      cpu-architecture: 'x86_64'
-      staging-wheel-name: ${{ inputs.staging-wheel-name }}
-
-  default-py314-amd64:
-    needs: [ upload-main-build ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
-    secrets: inherit
-    with:
-      aws-region: us-east-1
-      caller-workflow-name: 'main-build'
-      python-version: '3.14'
       cpu-architecture: 'x86_64'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
@@ -183,18 +164,6 @@ jobs:
       adot-image-name: ${{ inputs.adot-image-name }}
       caller-workflow-name: 'main-build'
       python-version: '3.13'
-
-  eks-py314-amd64:
-    if: ${{ always() }}
-    needs: eks-py313-amd64
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
-    secrets: inherit
-    with:
-      aws-region: us-east-1
-      test-cluster-name: 'e2e-python-adot-test'
-      adot-image-name: ${{ inputs.adot-image-name }}
-      caller-workflow-name: 'main-build'
-      python-version: '3.14'
 
   #
   # PACKAGED DISTRIBUTION PLATFORM COVERAGE
@@ -270,19 +239,10 @@ jobs:
       caller-workflow-name: 'main-build'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
   
-  # Stand-Alone ADOT GenAI v1 test on EC2 for collector-less setup
-  adot-genai-v1:
+  # Stand-Alone ADOT/ADOT Genesis test on EC2
+  adot-genesis:
     needs: [ upload-main-build ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-genai-v1-test.yml@main
-    secrets: inherit
-    with:
-      caller-workflow-name: 'main-build'
-      staging-wheel-name: ${{ inputs.staging-wheel-name }}
-
-  # AgentCore Collector GenAI v2 test on EC2 for collector setup
-  adot-genai-v2:
-    needs: [ upload-main-build ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-genai-v2-test.yml@main
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-genesis-test.yml@main
     secrets: inherit
     with:
       caller-workflow-name: 'main-build'

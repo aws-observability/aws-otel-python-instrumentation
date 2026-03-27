@@ -1,13 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-from typing import Optional
-
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
 from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
 from amazon.opentelemetry.distro.metric_attribute_generator import MetricAttributeGenerator
 from opentelemetry.sdk.metrics import Histogram, Meter, MeterProvider
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace.sampling import Sampler
 
 # Metric instrument configuration constants
 _ERROR: str = "Error"
@@ -29,7 +26,6 @@ class AwsSpanMetricsProcessorBuilder:
 
     # Optional builder elements
     _generator: MetricAttributeGenerator = _DEFAULT_GENERATOR
-    _sampler: Optional[Sampler] = None
     _scope_name: str = _DEFAULT_SCOPE_NAME
 
     def __init__(self, meter_provider: MeterProvider, resource: Resource):
@@ -56,16 +52,6 @@ class AwsSpanMetricsProcessorBuilder:
         self._scope_name = scope_name
         return self
 
-    def set_sampler(self, sampler: Sampler) -> "AwsSpanMetricsProcessorBuilder":
-        """
-        Sets the sampler used to determine if the spans should be sampled This will be used
-        to increase sampling rate in the case of errors.
-        """
-        if sampler is None:
-            raise ValueError("sampler must not be None")
-        self._sampler = sampler
-        return self
-
     def build(self) -> AwsSpanMetricsProcessor:
         meter: Meter = self._meter_provider.get_meter(self._scope_name)
         error_histogram: Histogram = meter.create_histogram(_ERROR)
@@ -82,6 +68,5 @@ class AwsSpanMetricsProcessorBuilder:
             latency_histogram,
             self._generator,
             self._resource,
-            self._sampler,
             self._meter_provider.force_flush,
         )

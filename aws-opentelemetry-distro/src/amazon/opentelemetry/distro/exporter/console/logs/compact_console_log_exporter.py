@@ -3,14 +3,14 @@
 import re
 from typing import Sequence
 
-from opentelemetry.sdk._logs import ReadableLogRecord
-from opentelemetry.sdk._logs.export import ConsoleLogRecordExporter, LogRecordExportResult
+from opentelemetry.sdk._logs import LogData
+from opentelemetry.sdk._logs.export import ConsoleLogExporter, LogExportResult
 
 
-class CompactConsoleLogRecordExporter(ConsoleLogRecordExporter):
-    def export(self, batch: Sequence[ReadableLogRecord]):
+class CompactConsoleLogExporter(ConsoleLogExporter):
+    def export(self, batch: Sequence[LogData]):
         for data in batch:
             formatted_json = self.formatter(data.log_record)
             print(re.sub(r"\s*([{}[\]:,])\s*", r"\1", formatted_json), flush=True)
 
-        return LogRecordExportResult.SUCCESS
+        return LogExportResult.SUCCESS

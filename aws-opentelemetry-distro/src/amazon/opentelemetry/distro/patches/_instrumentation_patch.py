@@ -28,10 +28,12 @@ def apply_instrumentation_patches() -> None:  # pylint: disable=too-many-branche
     if is_installed("starlette"):
         # pylint: disable=import-outside-toplevel
         # Delay import to only occur if patches is safe to apply (e.g. the instrumented library is installed).
-        from amazon.opentelemetry.distro.patches._starlette_patches import _apply_starlette_instrumentation_patches
+        from amazon.opentelemetry.distro.patches._starlette_patches import _apply_starlette_version_patches
 
-        # Patch to exclude http receive/send ASGI event spans from Bedrock AgentCore
-        _apply_starlette_instrumentation_patches()
+        # Starlette auto-instrumentation v0.54b includes a strict dependency version check
+        # This restriction was removed in v1.34.0/0.55b0. Applying temporary patch for Bedrock AgentCore launch
+        # TODO: Remove patch after syncing with upstream v1.34.0 or later
+        _apply_starlette_version_patches()
 
     if is_enhanced_code_attributes() is True:
         if is_installed("starlette"):

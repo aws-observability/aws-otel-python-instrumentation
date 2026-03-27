@@ -5,7 +5,6 @@ FROM python:3.12
 WORKDIR /crewai
 COPY ./dist/$DISTRO /crewai
 COPY ./contract-tests/images/applications/gen_ai/crewai /crewai
-COPY ./contract-tests/images/applications/gen_ai/mock_llm.py /crewai
 
 ENV PIP_ROOT_USER_ACTION=ignore
 ARG DISTRO
