@@ -8,9 +8,12 @@ from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro._utils import (
     AGENT_OBSERVABILITY_ENABLED,
+    AWS_AGENTIC_OBSERVABILITY_OPT_IN,
     get_aws_region,
     get_aws_session,
     is_agent_observability_enabled,
+    is_agentic_observability_enabled,
+    is_aws_agentic_observability_opt_in,
     is_installed,
 )
 
@@ -104,6 +107,41 @@ class TestUtils(TestCase):
         if AGENT_OBSERVABILITY_ENABLED in os.environ:
             del os.environ[AGENT_OBSERVABILITY_ENABLED]
         self.assertFalse(is_agent_observability_enabled())
+
+    def test_is_aws_agentic_observability_opt_in_various_values(self):
+        """Test is_aws_agentic_observability_opt_in with various environment variable values"""
+        os.environ[AWS_AGENTIC_OBSERVABILITY_OPT_IN] = "true"
+        self.assertTrue(is_aws_agentic_observability_opt_in())
+
+        os.environ[AWS_AGENTIC_OBSERVABILITY_OPT_IN] = "True"
+        self.assertTrue(is_aws_agentic_observability_opt_in())
+
+        os.environ[AWS_AGENTIC_OBSERVABILITY_OPT_IN] = "false"
+        self.assertFalse(is_aws_agentic_observability_opt_in())
+
+        if AWS_AGENTIC_OBSERVABILITY_OPT_IN in os.environ:
+            del os.environ[AWS_AGENTIC_OBSERVABILITY_OPT_IN]
+        self.assertFalse(is_aws_agentic_observability_opt_in())
+
+    def test_is_agentic_observability_enabled_combined(self):
+        """Test is_agentic_observability_enabled returns True if either env var is set"""
+        os.environ.pop(AGENT_OBSERVABILITY_ENABLED, None)
+        os.environ.pop(AWS_AGENTIC_OBSERVABILITY_OPT_IN, None)
+        self.assertFalse(is_agentic_observability_enabled())
+
+        os.environ[AGENT_OBSERVABILITY_ENABLED] = "true"
+        self.assertTrue(is_agentic_observability_enabled())
+        os.environ.pop(AGENT_OBSERVABILITY_ENABLED, None)
+
+        os.environ[AWS_AGENTIC_OBSERVABILITY_OPT_IN] = "true"
+        self.assertTrue(is_agentic_observability_enabled())
+        os.environ.pop(AWS_AGENTIC_OBSERVABILITY_OPT_IN, None)
+
+        os.environ[AGENT_OBSERVABILITY_ENABLED] = "true"
+        os.environ[AWS_AGENTIC_OBSERVABILITY_OPT_IN] = "true"
+        self.assertTrue(is_agentic_observability_enabled())
+        os.environ.pop(AGENT_OBSERVABILITY_ENABLED, None)
+        os.environ.pop(AWS_AGENTIC_OBSERVABILITY_OPT_IN, None)
 
     def test_get_aws_session_with_botocore(self):
         """Test get_aws_session when botocore is installed"""
