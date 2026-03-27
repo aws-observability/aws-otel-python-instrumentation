@@ -2,13 +2,37 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from logging import getLogger
+from typing import Optional
 
 _logger = getLogger(__name__)
 
 
 # Disable snake_case naming style so this class can match the sampling rules response from X-Ray
 # pylint: disable=invalid-name
+class _SamplingRateBoost:
+    def __init__(
+        self,
+        MaxRate: float = None,
+        CooldownWindowMinutes: float = None,
+        **kwargs,
+    ):
+        self.MaxRate = MaxRate if MaxRate is not None else 0.0
+        self.CooldownWindowMinutes = CooldownWindowMinutes if CooldownWindowMinutes is not None else 1
+
+        # Log unknown fields for debugging/monitoring
+        if kwargs:
+            _logger.debug("Ignoring unknown fields in _SamplingRateBoost: %s", list(kwargs.keys()))
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _SamplingRateBoost):
+            return False
+        return self.MaxRate == other.MaxRate and self.CooldownWindowMinutes == other.CooldownWindowMinutes
+
+
+# Disable snake_case naming style so this class can match the sampling rules response from X-Ray
+# pylint: disable=invalid-name
 class _SamplingRule:
+    # pylint: disable=too-many-locals
     def __init__(
         self,
         Attributes: dict = None,
@@ -24,6 +48,7 @@ class _SamplingRule:
         ServiceType: str = None,
         URLPath: str = None,
         Version: int = None,
+        SamplingRateBoost: Optional[dict] = None,
         **kwargs,
     ):
         self.Attributes = Attributes if Attributes is not None else {}
@@ -40,6 +65,9 @@ class _SamplingRule:
         self.ServiceType = ServiceType if ServiceType is not None else ""
         self.URLPath = URLPath if URLPath is not None else ""
         self.Version = Version if Version is not None else 0
+        self.SamplingRateBoost: _SamplingRateBoost = (
+            _SamplingRateBoost(**SamplingRateBoost) if SamplingRateBoost is not None else None
+        )
 
         # Log unknown fields for debugging/monitoring
         if kwargs:
@@ -69,4 +97,5 @@ class _SamplingRule:
             and self.URLPath == other.URLPath
             and self.Version == other.Version
             and self.Attributes == other.Attributes
+            and self.SamplingRateBoost == other.SamplingRateBoost
         )

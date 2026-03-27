@@ -1,0 +1,14 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# See: https://aquasecurity.github.io/trivy/latest/docs/configuration/filtering/
+
+# Format:
+#  - id: <CVE-###>
+#    statement: "<Why are we excluding?> <link to CVE where we can we status>"
+#    expired_at: <required - YYYY-MM-DD>
+
+vulnerabilities:
+  - id: CVE-2026-0994
+    statement: "Excluding to unblock PR build as the CVE is not yet fixed: https://nvd.nist.gov/vuln/detail/CVE-2026-0994"
+    expired_at: 2026-02-23

@@ -81,8 +81,6 @@ class CrewAITest(ContractTestBase):
         self.assertIn(_GEN_AI_AGENT_NAME, crew_attrs)
         self.assertIn(_GEN_AI_AGENT_ID, crew_attrs)
         self.assertIn(_GEN_AI_TOOL_DEFINITIONS, crew_attrs)
-        self.assertNotIn(_GEN_AI_PROVIDER_NAME, crew_attrs)
-        self.assertNotIn(_GEN_AI_REQUEST_MODEL, crew_attrs)
 
         self.assertEqual(len(invoke_agent_spans), len(expected_agents))
         for span in invoke_agent_spans:

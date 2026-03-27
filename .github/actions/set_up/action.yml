@@ -27,7 +27,8 @@ runs:
 
     - name: Install tox
       shell: bash
-      run: pip install tox==3.27.1 tox-factor
+      run: |
+        pip install tox==4.30.3
 
     - name: Cache tox environment
       # Preserves .tox directory between runs for faster installs
@@ -41,4 +42,7 @@ runs:
     - name: Run unit tests/benchmarks with tox
       if: ${{ inputs.run_unit_tests == 'true' }}
       shell: bash
-      run: tox -f ${{ inputs.python_version }}-${{ inputs.package_name }} -- -ra
+      run: |
+        ENV_NAME="${{ inputs.python_version }}-test-${{ inputs.package_name }}"
+        echo "Running tox env: $ENV_NAME"
+        tox -e "$ENV_NAME" -- -ra

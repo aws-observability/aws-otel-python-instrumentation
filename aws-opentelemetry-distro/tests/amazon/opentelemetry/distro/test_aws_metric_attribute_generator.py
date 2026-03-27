@@ -21,17 +21,13 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_AGENTCORE_RUNTIME_ENDPOINT_ARN,
     AWS_BEDROCK_DATA_SOURCE_ID,
     AWS_BEDROCK_GUARDRAIL_ARN,
-    AWS_BEDROCK_GUARDRAIL_ID,
-    AWS_BEDROCK_KNOWLEDGE_BASE_ID,
     AWS_CLOUDFORMATION_PRIMARY_IDENTIFIER,
     AWS_CONSUMER_PARENT_SPAN_KIND,
     AWS_DYNAMODB_TABLE_ARN,
     AWS_GATEWAY_TARGET_ID,
     AWS_KINESIS_STREAM_ARN,
-    AWS_KINESIS_STREAM_NAME,
     AWS_LAMBDA_FUNCTION_ARN,
     AWS_LAMBDA_FUNCTION_NAME,
-    AWS_LAMBDA_RESOURCEMAPPING_ID,
     AWS_LOCAL_OPERATION,
     AWS_LOCAL_SERVICE,
     AWS_REMOTE_DB_USER,
@@ -43,13 +39,8 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_REMOTE_RESOURCE_REGION,
     AWS_REMOTE_RESOURCE_TYPE,
     AWS_REMOTE_SERVICE,
-    AWS_SECRETSMANAGER_SECRET_ARN,
-    AWS_SNS_TOPIC_ARN,
     AWS_SPAN_KIND,
     AWS_SQS_QUEUE_NAME,
-    AWS_SQS_QUEUE_URL,
-    AWS_STEPFUNCTIONS_ACTIVITY_ARN,
-    AWS_STEPFUNCTIONS_STATEMACHINE_ARN,
 )
 from amazon.opentelemetry.distro._aws_metric_attribute_generator import _AwsMetricAttributeGenerator
 from amazon.opentelemetry.distro.metric_attribute_generator import DEPENDENCY_METRIC, SERVICE_METRIC
@@ -64,6 +55,17 @@ from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.sdk.resources import _DEFAULT_RESOURCE, SERVICE_NAME
 from opentelemetry.sdk.trace import ReadableSpan, Resource
 from opentelemetry.sdk.util.instrumentation import InstrumentationScope
+from opentelemetry.semconv._incubating.attributes.aws_attributes import (
+    AWS_BEDROCK_GUARDRAIL_ID,
+    AWS_BEDROCK_KNOWLEDGE_BASE_ID,
+    AWS_KINESIS_STREAM_NAME,
+    AWS_LAMBDA_RESOURCE_MAPPING_ID,
+    AWS_SECRETSMANAGER_SECRET_ARN,
+    AWS_SNS_TOPIC_ARN,
+    AWS_SQS_QUEUE_URL,
+    AWS_STEP_FUNCTIONS_ACTIVITY_ARN,
+    AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN,
+)
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import GEN_AI_REQUEST_MODEL
 from opentelemetry.semconv.trace import MessagingOperationValues, SpanAttributes
 from opentelemetry.trace import SpanContext, SpanKind
@@ -1446,9 +1448,9 @@ class TestAwsMetricAttributeGenerator(TestUtil):
         )
         self._mock_attribute([AWS_SNS_TOPIC_ARN], [None])
 
-        # Validate behaviour of AWS_STEPFUNCTIONS_STATEMACHINE_ARN attribute, then remove it.
+        # Validate behaviour of AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN attribute, then remove it.
         self._mock_attribute(
-            [AWS_STEPFUNCTIONS_STATEMACHINE_ARN],
+            [AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN],
             ["arn:aws:states:us-east-1:123456789012:stateMachine:test_state_machine"],
             keys,
             values,
@@ -1461,11 +1463,11 @@ class TestAwsMetricAttributeGenerator(TestUtil):
             "123456789012",
             None,
         )
-        self._mock_attribute([AWS_STEPFUNCTIONS_STATEMACHINE_ARN], [None])
+        self._mock_attribute([AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN], [None])
 
-        # Validate behaviour of AWS_STEPFUNCTIONS_ACTIVITY_ARN attribute, then remove it.
+        # Validate behaviour of AWS_STEP_FUNCTIONS_ACTIVITY_ARN attribute, then remove it.
         self._mock_attribute(
-            [AWS_STEPFUNCTIONS_ACTIVITY_ARN],
+            [AWS_STEP_FUNCTIONS_ACTIVITY_ARN],
             ["arn:aws:states:us-east-1:123456789012:activity:testActivity"],
             keys,
             values,
@@ -1478,10 +1480,10 @@ class TestAwsMetricAttributeGenerator(TestUtil):
             "123456789012",
             None,
         )
-        self._mock_attribute([AWS_STEPFUNCTIONS_ACTIVITY_ARN], [None])
+        self._mock_attribute([AWS_STEP_FUNCTIONS_ACTIVITY_ARN], [None])
 
-        # Validate behaviour of AWS_LAMBDA_RESOURCEMAPPING_ID attribute, then remove it.
-        self._mock_attribute([AWS_LAMBDA_RESOURCEMAPPING_ID], ["aws_event_source_mapping_id"], keys, values)
+        # Validate behaviour of AWS_LAMBDA_RESOURCE_MAPPING_ID attribute, then remove it.
+        self._mock_attribute([AWS_LAMBDA_RESOURCE_MAPPING_ID], ["aws_event_source_mapping_id"], keys, values)
         self._validate_remote_resource_attributes(
             "AWS::Lambda::EventSourceMapping",
             "aws_event_source_mapping_id",
@@ -1490,12 +1492,12 @@ class TestAwsMetricAttributeGenerator(TestUtil):
             None,
             _AWS_REMOTE_RESOURCE_ACCESS_KEY,
         )
-        self._mock_attribute([AWS_LAMBDA_RESOURCEMAPPING_ID], [None])
+        self._mock_attribute([AWS_LAMBDA_RESOURCE_MAPPING_ID], [None])
 
         # Validate behaviour of AWS_LAMBDA_RESOURCE_MAPPING_ID,
         # then remove it.
         self._mock_attribute(
-            [AWS_LAMBDA_RESOURCEMAPPING_ID],
+            [AWS_LAMBDA_RESOURCE_MAPPING_ID],
             ["aws_event_source_mapping_id"],
             keys,
             values,
@@ -1508,7 +1510,7 @@ class TestAwsMetricAttributeGenerator(TestUtil):
             None,
             _AWS_REMOTE_RESOURCE_ACCESS_KEY,
         )
-        self._mock_attribute([AWS_LAMBDA_RESOURCEMAPPING_ID], [None])
+        self._mock_attribute([AWS_LAMBDA_RESOURCE_MAPPING_ID], [None])
 
         # Test AWS Lambda Invoke scenario with default lambda remote environment
         self.span_mock.kind = SpanKind.CLIENT
@@ -1632,20 +1634,20 @@ class TestAwsMetricAttributeGenerator(TestUtil):
         # Cross account support
         # Invalid arn but account access key is available
         self._mock_attribute(
-            [AWS_STEPFUNCTIONS_STATEMACHINE_ARN],
+            [AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN],
             ["invalid_arn"],
             keys,
             values,
         )
         self._validate_remote_resource_attributes(None, None, None)
-        self._mock_attribute([AWS_STEPFUNCTIONS_STATEMACHINE_ARN], [None])
+        self._mock_attribute([AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN], [None])
 
         # Invalid arn and no account access key
         self._mock_attribute(
-            [AWS_STEPFUNCTIONS_STATEMACHINE_ARN, SpanAttributes.RPC_SYSTEM], ["invalid_arn", "aws-api"]
+            [AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN, SpanAttributes.RPC_SYSTEM], ["invalid_arn", "aws-api"]
         )
         self._validate_remote_resource_attributes(None, None, None)
-        self._mock_attribute([AWS_STEPFUNCTIONS_STATEMACHINE_ARN], [None])
+        self._mock_attribute([AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN], [None])
 
         # Both account access key and account id are not available
         self._mock_attribute(
@@ -1656,7 +1658,7 @@ class TestAwsMetricAttributeGenerator(TestUtil):
 
         # Account access key is not available
         self._mock_attribute(
-            [AWS_STEPFUNCTIONS_STATEMACHINE_ARN, SpanAttributes.RPC_SYSTEM],
+            [AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN, SpanAttributes.RPC_SYSTEM],
             ["arn:aws:states:us-east-1:123456789123:stateMachine:testStateMachine", "aws-api"],
         )
         self._validate_remote_resource_attributes(
@@ -1667,19 +1669,19 @@ class TestAwsMetricAttributeGenerator(TestUtil):
             "123456789123",
             None,
         )
-        self._mock_attribute([AWS_STEPFUNCTIONS_STATEMACHINE_ARN], [None])
+        self._mock_attribute([AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN], [None])
 
         # Arn with invalid account id
         self._mock_attribute(
-            [AWS_STEPFUNCTIONS_STATEMACHINE_ARN, SpanAttributes.RPC_SYSTEM],
+            [AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN, SpanAttributes.RPC_SYSTEM],
             ["arn:aws:states:us-east-1:invalid_account_id:stateMachine:testStateMachine", "aws-api"],
         )
         self._validate_remote_resource_attributes(None, None, None)
-        self._mock_attribute([AWS_STEPFUNCTIONS_STATEMACHINE_ARN], [None])
+        self._mock_attribute([AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN], [None])
 
         # Arn with invalid region
         self._mock_attribute(
-            [AWS_STEPFUNCTIONS_STATEMACHINE_ARN, SpanAttributes.RPC_SYSTEM],
+            [AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN, SpanAttributes.RPC_SYSTEM],
             ["arn:aws:states:invalid_region:123456789123:stateMachine:testStateMachine", "aws-api"],
         )
         self._validate_remote_resource_attributes(
@@ -1690,7 +1692,7 @@ class TestAwsMetricAttributeGenerator(TestUtil):
             "123456789123",
             None,
         )
-        self._mock_attribute([AWS_STEPFUNCTIONS_STATEMACHINE_ARN], [None])
+        self._mock_attribute([AWS_STEP_FUNCTIONS_STATE_MACHINE_ARN], [None])
 
         self._mock_attribute([SpanAttributes.RPC_SYSTEM], [None])
 

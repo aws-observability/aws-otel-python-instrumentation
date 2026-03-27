@@ -52,6 +52,7 @@ class TestAwsSpanMetricsProcessor(TestCase):
             fault_histogram=self.fault_histogram_mock,
             latency_histogram=self.latency_histogram_mock,
             generator=self.generator_mock,
+            sampler=None,
             resource=self.test_resource,
         )
 
