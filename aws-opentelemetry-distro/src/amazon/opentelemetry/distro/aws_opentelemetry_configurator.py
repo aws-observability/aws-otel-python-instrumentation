@@ -519,20 +519,18 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource, sam
     if _is_lambda_environment():
         provider.add_span_processor(AwsLambdaSpanProcessor())
 
-    # We always send 100% spans to Genesis platform for agent observability because
+    # Propagates baggage entries matching OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS into span attributes.
+    baggage_keys: set[str] = _parse_otel_baggage_keys_env_var()
+
+    # We always send 100% spans to AgentCore Runtime platform for agent observability because
     # AI applications typically have low throughput traffic patterns and require
     # comprehensive monitoring to catch subtle failure modes like hallucinations
     # and quality degradation that sampling could miss.
-    # Add session.id baggage attribute to span attributes to support AI Agent use cases
-    # enabling session ID tracking in spans.
     if is_agent_observability_enabled():
         _export_unsampled_span_for_agent_observability(provider, resource)
-        # propagates baggage entries matching OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS into span attributes
-        raw: str = os.environ.get(OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS, "").strip()
-        keys: set[str] = {k.strip() for k in raw.split(",") if k.strip()}
+        baggage_keys.add("session.id")
 
-        keys.add("session.id")
-        provider.add_span_processor(BaggageSpanProcessor(lambda key: key in keys))
+    provider.add_span_processor(BaggageSpanProcessor(lambda key: key in baggage_keys))
 
     if not _is_application_signals_enabled():
         return
@@ -735,6 +733,11 @@ def _fetch_logs_header() -> OtlpLogHeaderSetting:
 
     _otlp_log_header_setting_cache = OtlpLogHeaderSetting(log_group, log_stream, namespace)
     return _otlp_log_header_setting_cache
+
+
+def _parse_otel_baggage_keys_env_var() -> set[str]:
+    raw: str = os.environ.get(OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS, "").strip()
+    return {k.strip() for k in raw.split(",") if k.strip()}
 
 
 def _clear_logs_header_cache():
