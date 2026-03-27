@@ -123,6 +123,47 @@ def update_file_dependencies(file_path, otel_python_version, otel_contrib_versio
         return False
 
 
+def update_tox_repo_branches(file_path, otel_python_version, otel_contrib_version):
+    """Update CORE_REPO and CONTRIB_REPO branch references in tox.ini"""
+    try:
+        with open(file_path, "r", encoding="utf-8") as input_file:
+            content = input_file.read()
+
+        # Extract major.minor from versions (e.g. "1.40.0" -> "1.40", "0.61b0" -> "0.61b")
+        core_match = re.match(r"(\d+\.\d+)", otel_python_version)
+        contrib_match = re.match(r"(\d+\.\d+b?)", otel_contrib_version)
+        if not core_match or not contrib_match:
+            print(f"Could not parse versions for tox branch update: {otel_python_version}/{otel_contrib_version}")
+            return False
+
+        core_minor = core_match.group(1)
+        contrib_minor = contrib_match.group(1)
+        new_branch = f"release/v{core_minor}.x-{contrib_minor}x"
+
+        core_pattern = (
+            r"(CORE_REPO=git\+https://github\.com/open-telemetry/"
+            r"opentelemetry-python\.git@)release/v[\d.]+x-[\d.b]+x"
+        )
+        content, core_count = re.subn(core_pattern, rf"\g<1>{new_branch}", content)
+
+        contrib_pattern = (
+            r"(CONTRIB_REPO=git\+https://github\.com/open-telemetry/"
+            r"opentelemetry-python-contrib\.git@)release/v[\d.]+x-[\d.b]+x"
+        )
+        content, contrib_count = re.subn(contrib_pattern, rf"\g<1>{new_branch}", content)
+
+        if core_count or contrib_count:
+            with open(file_path, "w", encoding="utf-8") as output_file:
+                output_file.write(content)
+            print(f"Updated {file_path} repo branches to {new_branch}")
+            return True
+
+        return False
+    except (OSError, IOError) as file_error:
+        print(f"Error updating {file_path}: {file_error}")
+        return False
+
+
 def main():
     otel_python_version = os.environ.get("OTEL_PYTHON_VERSION")
     otel_contrib_version = os.environ.get("OTEL_CONTRIB_VERSION")
@@ -155,6 +196,9 @@ def main():
     for file_path in files_to_update:
         if update_file_dependencies(file_path, otel_python_version, otel_contrib_version, aws_versions):
             any_updated = True
+
+    if update_tox_repo_branches("tox.ini", otel_python_version, otel_contrib_version):
+        any_updated = True
 
     if any_updated:
         print(f"Dependencies updated to Python {otel_python_version} / Contrib {otel_contrib_version}")
