@@ -135,6 +135,7 @@ coverage
 azure-core
 gitpython
 opentelemetry-util-http
+opentelemetry-util-genai
 msal
 asn1crypto
 wcwidth
@@ -4670,6 +4671,7 @@ curatorbin
 ocspbuilder
 apache-airflow-providers-apache-livy
 opentelemetry-instrumentation-openai-agents
+opentelemetry-instrumentation-openai-agents-v2
 pyserde
 mypy-boto3-ssm-guiconnect
 evergreen-lint
