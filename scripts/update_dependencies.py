@@ -78,6 +78,33 @@ AWS_DEPS = [
 ]
 
 
+def _replace_dep_versions(content, deps, version):
+    """Replace version pins for a list of dependencies in content."""
+    updated = False
+    for dep in deps:
+        pattern = rf'"?{re.escape(dep)}\s*==\s*[^\s,\]"]*"?'
+        replacement = f'"{dep} == {version}"' if '"' in content else f"{dep}=={version}"
+        if re.search(pattern, content):
+            content = re.sub(pattern, replacement, content)
+            updated = True
+    return content, updated
+
+
+def _replace_tox_repo_branches(content, otel_python_version, otel_contrib_version):
+    """Replace tox CORE_REPO/CONTRIB_REPO branch references."""
+    core_match = re.match(r"(\d+\.\d+)", otel_python_version)
+    contrib_match = re.match(r"(\d+\.\d+b?)", otel_contrib_version)
+    if not (core_match and contrib_match):
+        return content, False
+    new_branch = f"release/v{core_match.group(1)}.x-{contrib_match.group(1)}x"
+    pattern = (
+        r"((?:CORE|CONTRIB)_REPO=git\+https://github\.com/open-telemetry/"
+        r"opentelemetry-python(?:-contrib)?\.git@)release/v[\d.]+x-[\d.b]+x"
+    )
+    content, count = re.subn(pattern, rf"\g<1>{new_branch}", content)
+    return content, bool(count)
+
+
 def update_file_dependencies(file_path, otel_python_version, otel_contrib_version, aws_versions):
     """Update all Otel dependencies in a given file"""
     try:
@@ -86,44 +113,19 @@ def update_file_dependencies(file_path, otel_python_version, otel_contrib_versio
 
         updated = False
 
-        # Update opentelemetry-python dependencies
-        for dep in PYTHON_CORE_DEPS:
-            # Handle both "package == version" and package==version formats
-            pattern = rf'"?{re.escape(dep)}\s*==\s*[^\s,\]"]*"?'
-            replacement = f'"{dep} == {otel_python_version}"' if '"' in content else f"{dep}=={otel_python_version}"
-            if re.search(pattern, content):
-                content = re.sub(pattern, replacement, content)
-                updated = True
+        content, changed = _replace_dep_versions(content, PYTHON_CORE_DEPS, otel_python_version)
+        updated = updated or changed
 
-        # Update opentelemetry-python-contrib dependencies
-        for dep in CONTRIB_DEPS:
-            pattern = rf'"?{re.escape(dep)}\s*==\s*[^\s,\]"]*"?'
-            replacement = f'"{dep} == {otel_contrib_version}"' if '"' in content else f"{dep}=={otel_contrib_version}"
-            if re.search(pattern, content):
-                content = re.sub(pattern, replacement, content)
-                updated = True
+        content, changed = _replace_dep_versions(content, CONTRIB_DEPS, otel_contrib_version)
+        updated = updated or changed
 
-        # Update independently versioned AWS dependencies
         for dep, version in aws_versions.items():
             if version:
-                pattern = rf'"?{re.escape(dep)}\s*==\s*[^\s,\]"]*"?'
-                replacement = f'"{dep} == {version}"' if '"' in content else f"{dep}=={version}"
-                if re.search(pattern, content):
-                    content = re.sub(pattern, replacement, content)
-                    updated = True
+                content, changed = _replace_dep_versions(content, [dep], version)
+                updated = updated or changed
 
-        # Update tox repo branch references (e.g. release/v1.40.x-0.61bx)
-        core_match = re.match(r"(\d+\.\d+)", otel_python_version)
-        contrib_match = re.match(r"(\d+\.\d+b?)", otel_contrib_version)
-        if core_match and contrib_match:
-            new_branch = f"release/v{core_match.group(1)}.x-{contrib_match.group(1)}x"
-            pattern = (
-                r"((?:CORE|CONTRIB)_REPO=git\+https://github\.com/open-telemetry/"
-                r"opentelemetry-python(?:-contrib)?\.git@)release/v[\d.]+x-[\d.b]+x"
-            )
-            content, count = re.subn(pattern, rf"\g<1>{new_branch}", content)
-            if count:
-                updated = True
+        content, changed = _replace_tox_repo_branches(content, otel_python_version, otel_contrib_version)
+        updated = updated or changed
 
         if updated:
             with open(file_path, "w", encoding="utf-8") as output_file:
