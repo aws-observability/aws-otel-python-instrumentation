@@ -486,7 +486,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
         _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
-        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 0)
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 1)
+        self.assertIsInstance(mock_tracer_provider.add_span_processor.call_args_list[0].args[0], BaggageSpanProcessor)
 
         mock_tracer_provider.reset_mock()
 
@@ -562,7 +563,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         regardless of whether OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS is set."""
         os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
 
-        # Without any custom baggage keys, session.id should still be present
+        # Without any custom baggage keys, session.id should be present
         os.environ.pop("OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS", None)
         tracer_provider = TracerProvider()
         _customize_span_processors(tracer_provider, Resource.get_empty(), MagicMock())
@@ -880,18 +881,21 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", None)
 
         _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
-        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 0)
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 1)
+        self.assertIsInstance(mock_tracer_provider.add_span_processor.call_args_list[0].args[0], BaggageSpanProcessor)
 
         mock_tracer_provider.reset_mock()
 
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", "False")
         _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
-        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 2)
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 3)
         first_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
-        self.assertIsInstance(first_processor, AttributePropagatingSpanProcessor)
+        self.assertIsInstance(first_processor, BaggageSpanProcessor)
         second_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[1].args[0]
-        self.assertIsInstance(second_processor, AwsSpanMetricsProcessor)
+        self.assertIsInstance(second_processor, AttributePropagatingSpanProcessor)
+        third_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[2].args[0]
+        self.assertIsInstance(third_processor, AwsSpanMetricsProcessor)
 
         mock_tracer_provider.reset_mock()
 
@@ -918,9 +922,10 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
         os.environ.pop(OTEL_AWS_ENHANCED_CODE_ATTRIBUTES, None)
 
-        # Test without code correlation enabled - should not add CodeAttributesSpanProcessor
+        # Test without code correlation enabled - should only add BaggageSpanProcessor
         _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
-        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 0)
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 1)
+        self.assertIsInstance(mock_tracer_provider.add_span_processor.call_args_list[0].args[0], BaggageSpanProcessor)
 
         mock_tracer_provider.reset_mock()
 
@@ -937,7 +942,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
             # Verify CodeAttributesSpanProcessor was created and added
             mock_code_processor_class.assert_called_once()
-            mock_tracer_provider.add_span_processor.assert_called_once_with(mock_code_processor_instance)
+            mock_tracer_provider.add_span_processor.assert_any_call(mock_code_processor_instance)
 
         mock_tracer_provider.reset_mock()
 
@@ -954,21 +959,13 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
             _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
 
-            # Should have 3 processors: CodeAttributesSpanProcessor, AttributePropagatingSpanProcessor,
-            # and AwsSpanMetricsProcessor
-            self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 3)
+            self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 4)
 
-            # First should be CodeAttributesSpanProcessor
-            first_call_args = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
-            self.assertEqual(first_call_args, mock_code_processor_instance)
-
-            # Second should be AttributePropagatingSpanProcessor
-            second_call_args = mock_tracer_provider.add_span_processor.call_args_list[1].args[0]
-            self.assertIsInstance(second_call_args, AttributePropagatingSpanProcessor)
-
-            # Third should be AwsSpanMetricsProcessor
-            third_call_args = mock_tracer_provider.add_span_processor.call_args_list[2].args[0]
-            self.assertIsInstance(third_call_args, AwsSpanMetricsProcessor)
+            processors = [c.args[0] for c in mock_tracer_provider.add_span_processor.call_args_list]
+            self.assertEqual(processors[0], mock_code_processor_instance)
+            self.assertIsInstance(processors[1], BaggageSpanProcessor)
+            self.assertIsInstance(processors[2], AttributePropagatingSpanProcessor)
+            self.assertIsInstance(processors[3], AwsSpanMetricsProcessor)
 
         # Clean up
         os.environ.pop(OTEL_AWS_ENHANCED_CODE_ATTRIBUTES, None)
@@ -984,19 +981,24 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
 
         _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
-        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 0)
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 1)
+        self.assertIsInstance(mock_tracer_provider.add_span_processor.call_args_list[0].args[0], BaggageSpanProcessor)
+
+        mock_tracer_provider.reset_mock()
 
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
         os.environ.setdefault("AWS_LAMBDA_FUNCTION_NAME", "myLambdaFunc")
         _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
-        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 3)
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 4)
         first_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
         self.assertIsInstance(first_processor, AwsLambdaSpanProcessor)
         second_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[1].args[0]
-        self.assertIsInstance(second_processor, AttributePropagatingSpanProcessor)
+        self.assertIsInstance(second_processor, BaggageSpanProcessor)
         third_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[2].args[0]
-        self.assertIsInstance(third_processor, BatchUnsampledSpanProcessor)
-        self.assertEqual(third_processor._batch_processor._max_export_batch_size, LAMBDA_SPAN_EXPORT_BATCH_SIZE)
+        self.assertIsInstance(third_processor, AttributePropagatingSpanProcessor)
+        fourth_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[3].args[0]
+        self.assertIsInstance(fourth_processor, BatchUnsampledSpanProcessor)
+        self.assertEqual(fourth_processor._batch_processor._max_export_batch_size, LAMBDA_SPAN_EXPORT_BATCH_SIZE)
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
         os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
 

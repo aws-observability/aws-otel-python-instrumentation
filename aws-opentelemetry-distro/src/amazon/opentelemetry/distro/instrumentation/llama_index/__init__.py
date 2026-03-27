@@ -1,15 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import logging
-from typing import Any, Collection, Optional
+from typing import Any, Collection
 
 from amazon.opentelemetry.distro.version import __version__
 from opentelemetry import trace
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor  # type: ignore
-from opentelemetry.trace import Span
 
 logger = logging.getLogger(__name__)
-logger.addHandler(logging.NullHandler())
 
 
 class LlamaIndexInstrumentor(BaseInstrumentor):  # type: ignore
@@ -21,7 +19,7 @@ class LlamaIndexInstrumentor(BaseInstrumentor):  # type: ignore
     _event_handler = None
 
     def instrumentation_dependencies(self) -> Collection[str]:  # pylint: disable=no-self-use
-        return ("llama-index-core >= 0.10.43",)
+        return ("llama-index-core >= 0.10.44",)
 
     def _instrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
@@ -63,23 +61,3 @@ class LlamaIndexInstrumentor(BaseInstrumentor):  # type: ignore
             dispatcher.event_handlers,
         )
         self._event_handler = None
-
-
-def get_current_span() -> Optional[Span]:
-    # pylint: disable=import-outside-toplevel
-    from llama_index.core.instrumentation.span import active_span_id
-
-    from amazon.opentelemetry.distro.instrumentation.llama_index._handler import _SpanHandler
-
-    if not isinstance(id_ := active_span_id.get(), str):
-        return None
-    instrumentor = LlamaIndexInstrumentor()
-    try:
-        span_handler = instrumentor._span_handler
-    except AttributeError:
-        return None
-    if not isinstance(span_handler, _SpanHandler):
-        return None
-    if (span := span_handler.open_spans.get(id_)) is None:
-        return None
-    return span._otel_span

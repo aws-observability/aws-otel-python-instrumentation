@@ -45,6 +45,23 @@ def _has_module(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
 
 
+_OTEL_SCHEMA_BASE = "https://opentelemetry.io/docs/specs/semconv/gen-ai"
+_SCHEMA_CACHE: dict = {}
+
+
+def _validate_otel_schema(data: list, schema_name: str) -> None:
+    """Validate data against OTel GenAI JSON Schema fetched from opentelemetry.io."""
+    import urllib.request
+
+    import jsonschema
+
+    if schema_name not in _SCHEMA_CACHE:
+        url = f"{_OTEL_SCHEMA_BASE}/{schema_name}.json"
+        with urllib.request.urlopen(url) as resp:
+            _SCHEMA_CACHE[schema_name] = json.loads(resp.read())
+    jsonschema.validate(data, _SCHEMA_CACHE[schema_name])
+
+
 class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     def setUp(self):
@@ -57,7 +74,6 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self._Span = handler_module._Span
         self._SpanHandler = handler_module._SpanHandler
         self._EventHandler = handler_module.EventHandler
-        self._ExportQueue = handler_module._ExportQueue
         self.tracer = trace.get_tracer(__name__, tracer_provider=self.tracer_provider)
 
     def tearDown(self):
@@ -451,7 +467,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self.assertIsNotNone(span._context_token)
         span.end()
         self.assertIsNone(span._context_token)
-        self.assertFalse(span._active)
+        self.assertFalse(span.active)
 
     def test_span_end_idempotent(self):
         """Test that calling end() twice is safe."""
@@ -459,21 +475,17 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         span = self._Span(otel_span=otel_span)
         span.end()
         span.end()  # should not raise
-        self.assertFalse(span._active)
+        self.assertFalse(span.active)
 
     def test_span_properties(self):
-        """Test active, waiting_for_streaming, and context properties."""
+        """Test active and context properties."""
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
         self.assertTrue(span.active)
-        self.assertFalse(span.waiting_for_streaming)
         ctx = span.context
         self.assertIsNotNone(ctx)
-        span._waiting_for_streaming = True
-        self.assertTrue(span.waiting_for_streaming)
         span.end()
         self.assertFalse(span.active)
-        self.assertFalse(span.waiting_for_streaming)
 
     def test_error_handling(self):
         exception = ValueError("API error")
@@ -712,11 +724,12 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         finally:
             context_api.detach(token)
 
-    def test_new_span_returns_none_for_none_instance(self):
-        """Test that new_span returns None when instance is None."""
+    def test_new_span_returns_passthrough_for_none_instance(self):
+        """Test that new_span returns a passthrough span when instance is None."""
         handler = self._make_span_handler()
         result = handler.new_span(id_="test-1", bound_args=self._make_bound_args(), instance=None)
-        self.assertIsNone(result)
+        self.assertIsNotNone(result)
+        self.assertTrue(result.is_passthrough)
 
     def test_new_span_suppresses_utility_classes(self):
         """Test that utility classes like TokenTextSplitter are suppressed."""
@@ -727,7 +740,8 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
             result = handler.new_span(
                 id_=f"{cls_name}.do_thing-1", bound_args=self._make_bound_args(), instance=instance
             )
-            self.assertIsNone(result, f"{cls_name} should be suppressed")
+            self.assertIsNotNone(result, f"{cls_name} should return passthrough span")
+            self.assertTrue(result.is_passthrough, f"{cls_name} should be a passthrough span")
 
     def test_new_span_suppresses_internal_methods(self):
         """Test that internal workflow methods are suppressed."""
@@ -755,7 +769,100 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
                 bound_args=self._make_bound_args(),
                 instance=instance,
             )
-            self.assertIsNone(result, f"Method {method} should be suppressed")
+            self.assertIsNotNone(result, f"Method {method} should return passthrough span")
+            self.assertTrue(result.is_passthrough, f"Method {method} should be a passthrough span")
+
+    def test_passthrough_span_context_delegates_to_parent(self):
+        """Test that passthrough span's context property returns parent's context."""
+        span_module = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._span")
+        parent_otel = self.tracer.start_span("parent")
+        parent_span = self._Span(otel_span=parent_otel, id_="parent-1")
+        child_span = span_module._PassthroughSpan(parent=parent_span, id_="child-1")
+        self.assertTrue(child_span.is_passthrough)
+        self.assertEqual(child_span.context, parent_span.context)
+
+    def test_passthrough_span_end_is_noop(self):
+        """Test that passthrough span's end() does nothing."""
+        span_module = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._span")
+        span = span_module._PassthroughSpan(id_="test-1")
+        self.assertTrue(span.is_passthrough)
+        span.end()
+        span.end(exception=RuntimeError("test"))
+
+    def test_passthrough_span_setitem_is_noop(self):
+        """Test that passthrough span ignores attribute writes."""
+        span_module = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._span")
+        span = span_module._PassthroughSpan(id_="test-1")
+        self.assertTrue(span.is_passthrough)
+        span["key"] = "value"
+        span.record_exception(RuntimeError("test"))
+
+    def test_passthrough_span_process_methods_are_noop(self):
+        """Test that passthrough span's process methods do nothing."""
+        span_module = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._span")
+        span = span_module._PassthroughSpan(id_="test-1")
+        self.assertTrue(span.is_passthrough)
+        span.process_input(Mock(), self._make_bound_args())
+        span.process_instance(Mock())
+        span.process_event(Mock())
+
+    def test_passthrough_span_prepare_to_exit_returns_span(self):
+        """Test that prepare_to_exit_span handles passthrough spans without warnings."""
+        handler = self._make_span_handler()
+        instance = Mock()
+        instance.__class__ = type("CompactAndRefine", (), {})
+        span = handler.new_span(
+            id_="CompactAndRefine.get_response-1", bound_args=self._make_bound_args(), instance=instance
+        )
+        handler.open_spans["CompactAndRefine.get_response-1"] = span
+        result = handler.prepare_to_exit_span(
+            id_="CompactAndRefine.get_response-1", bound_args=self._make_bound_args(), instance=instance
+        )
+        self.assertIs(result, span)
+
+    def test_passthrough_span_prepare_to_drop_returns_span(self):
+        """Test that prepare_to_drop_span handles passthrough spans without warnings."""
+        handler = self._make_span_handler()
+        instance = Mock()
+        instance.__class__ = type("SentenceSplitter", (), {})
+        span = handler.new_span(id_="SentenceSplitter.split-1", bound_args=self._make_bound_args(), instance=instance)
+        handler.open_spans["SentenceSplitter.split-1"] = span
+        result = handler.prepare_to_drop_span(
+            id_="SentenceSplitter.split-1",
+            bound_args=self._make_bound_args(),
+            instance=instance,
+            err=RuntimeError("test"),
+        )
+        self.assertIs(result, span)
+
+    def test_passthrough_span_context_without_parent(self):
+        """Test that passthrough span without parent returns current context."""
+        span_module = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._span")
+        span = span_module._PassthroughSpan(id_="orphan-1")
+        self.assertTrue(span.is_passthrough)
+        # Should return current context without error
+        ctx = span.context
+        self.assertIsNotNone(ctx)
+
+    def test_prepare_to_exit_span_missing_span_logs_warning(self):
+        """Test that prepare_to_exit_span logs warning for missing span id."""
+        handler = self._make_span_handler()
+        result = handler.prepare_to_exit_span(id_="nonexistent-1", bound_args=self._make_bound_args(), instance=Mock())
+        self.assertIsNone(result)
+
+    def test_prepare_to_drop_span_missing_span_logs_warning(self):
+        """Test that prepare_to_drop_span logs warning for missing span id."""
+        handler = self._make_span_handler()
+        result = handler.prepare_to_drop_span(
+            id_="nonexistent-1", bound_args=self._make_bound_args(), instance=Mock(), err=RuntimeError("test")
+        )
+        self.assertIsNone(result)
+
+    def test_span_name_fallback_without_operation_name(self):
+        """Test that _get_span_name returns fallback when no operation name is set."""
+        otel_span = self.tracer.start_span("test")
+        span = self._Span(otel_span=otel_span, id_="test-1")
+        self.assertEqual(span._get_span_name(), "llama_index.operation")
 
     def test_new_span_creates_span_for_valid_instance(self):
         """Test that new_span creates a span for a valid instance."""
@@ -852,28 +959,6 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         )
         self.assertEqual(span._attributes.get(GEN_AI_TOOL_CALL_RESULT), "42")
 
-    def test_prepare_to_exit_span_streaming_llm(self):
-        """Test that streaming LLM results set waiting_for_streaming."""
-        handler = self._make_span_handler()
-        from llama_index.llms.openai import OpenAI
-
-        llm = OpenAI(model="gpt-4", api_key="fake")
-        span = handler.new_span(id_="OpenAI.stream_chat-1", bound_args=self._make_bound_args(), instance=llm)
-        self.assertIsNotNone(span)
-        handler.open_spans["OpenAI.stream_chat-1"] = span
-
-        # Create a real generator to pass isinstance checks
-        def gen():
-            yield "chunk"
-
-        g = gen()
-        result = handler.prepare_to_exit_span(
-            id_="OpenAI.stream_chat-1", bound_args=self._make_bound_args(), instance=llm, result=g
-        )
-        self.assertIsNotNone(result)
-        self.assertTrue(span._waiting_for_streaming)
-        span.end()
-
     def test_prepare_to_drop_span_returns_none_when_suppressed(self):
         """Test that prepare_to_drop_span returns None when suppressed."""
         handler = self._make_span_handler()
@@ -895,21 +980,6 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         err = RuntimeError("something failed")
         handler.prepare_to_drop_span(
             id_="SomeClass.method-1", bound_args=self._make_bound_args(), instance=instance, err=err
-        )
-        self.assertFalse(span.active)
-
-    def test_prepare_to_drop_span_with_workflow_done(self):
-        """Test that WorkflowDone ends span without error."""
-        from llama_index.core.workflow.errors import WorkflowDone
-
-        handler = self._make_span_handler()
-        instance = Mock()
-        instance.__class__ = type("SomeClass", (), {})
-        span = handler.new_span(id_="SomeClass.method-1", bound_args=self._make_bound_args(), instance=instance)
-        self.assertIsNotNone(span)
-        handler.open_spans["SomeClass.method-1"] = span
-        handler.prepare_to_drop_span(
-            id_="SomeClass.method-1", bound_args=self._make_bound_args(), instance=instance, err=WorkflowDone()
         )
         self.assertFalse(span.active)
 
@@ -952,12 +1022,15 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
         instance = Mock(spec=BaseEmbedding)
         instance.model_name = "test-model"
-        span = span_handler.new_span(id_="BaseEmbedding.embed-1", bound_args=self._make_bound_args(), instance=instance)
+        span = span_handler.new_span(
+            id_="BaseEmbedding.get_query_embedding-1", bound_args=self._make_bound_args(), instance=instance
+        )
         self.assertIsNotNone(span)
-        span_handler.open_spans["BaseEmbedding.embed-1"] = span
+        self.assertFalse(span.is_passthrough)
+        span_handler.open_spans["BaseEmbedding.get_query_embedding-1"] = span
 
         event = EmbeddingStartEvent(model_dict={})
-        event.span_id = "BaseEmbedding.embed-1"
+        event.span_id = "BaseEmbedding.get_query_embedding-1"
         result = event_handler.handle(event)
         self.assertEqual(result, event)
         self.assertEqual(span._attributes[GEN_AI_OPERATION_NAME], "embeddings")
@@ -972,90 +1045,6 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         event.id_ = "event-1"
         result = event_handler.handle(event)
         self.assertEqual(result, event)
-
-    def test_event_handler_finds_span_in_export_queue(self):
-        """Test that EventHandler checks export queue for streaming spans."""
-        span_handler = self._make_span_handler()
-        event_handler = self._EventHandler(span_handler=span_handler)
-
-        from llama_index.core.base.embeddings.base import BaseEmbedding
-
-        instance = Mock(spec=BaseEmbedding)
-        instance.model_name = "test-model"
-        span = span_handler.new_span(id_="BaseEmbedding.embed-1", bound_args=self._make_bound_args(), instance=instance)
-        self.assertIsNotNone(span)
-        # Put in export queue (not open_spans) to simulate streaming
-        span_handler._export_queue.put(span)
-
-        from llama_index.core.instrumentation.events.embedding import EmbeddingStartEvent
-
-        event = EmbeddingStartEvent(model_dict={})
-        event.span_id = "BaseEmbedding.embed-1"
-        result = event_handler.handle(event)
-        self.assertEqual(result, event)
-        self.assertEqual(span._attributes[GEN_AI_OPERATION_NAME], "embeddings")
-        span.end()
-
-    def test_process_event_streaming_finished(self):
-        """Test that streaming finished events end the span."""
-        from llama_index.core.instrumentation.events.llm import LLMChatEndEvent
-
-        otel_span = self.tracer.start_span("test")
-        span = self._Span(otel_span=otel_span)
-        span._waiting_for_streaming = True
-        response = ChatResponse(
-            message=ChatMessage(role=MessageRole.ASSISTANT, content="done"),
-            raw={"usage": {"prompt_tokens": 1, "completion_tokens": 1}},
-        )
-        event = LLMChatEndEvent(messages=[], response=response)
-        span.process_event(event)
-        self.assertFalse(span.active)
-
-    def test_process_event_streaming_in_progress(self):
-        """Test that streaming in-progress events update timestamps."""
-        from llama_index.core.instrumentation.events.llm import LLMChatInProgressEvent
-
-        otel_span = self.tracer.start_span("test")
-        span = self._Span(otel_span=otel_span)
-        span._waiting_for_streaming = True
-        response = ChatResponse(message=ChatMessage(role=MessageRole.ASSISTANT, content="partial"))
-        event = LLMChatInProgressEvent(response=response, messages=[])
-        span.process_event(event)
-        self.assertTrue(span.active)
-        self.assertIsNotNone(span._first_token_timestamp)
-        otel_span.end()
-
-    def test_process_event_not_streaming_does_not_end(self):
-        """Test that non-streaming spans don't end on finished events."""
-        from llama_index.core.instrumentation.events.llm import LLMChatEndEvent
-
-        otel_span = self.tracer.start_span("test")
-        span = self._Span(otel_span=otel_span)
-        response = ChatResponse(
-            message=ChatMessage(role=MessageRole.ASSISTANT, content="done"),
-            raw={"usage": {"prompt_tokens": 1, "completion_tokens": 1}},
-        )
-        event = LLMChatEndEvent(messages=[], response=response)
-        span.process_event(event)
-        self.assertTrue(span.active)
-        otel_span.end()
-
-    def test_notify_parent_streaming(self):
-        """Test that notify_parent propagates streaming status to parent."""
-        parent_otel = self.tracer.start_span("parent")
-        parent_span = self._Span(otel_span=parent_otel)
-        parent_span._waiting_for_streaming = True
-
-        child_otel = self.tracer.start_span("child")
-        child_span = self._Span(otel_span=child_otel, parent=parent_span)
-        child_span._waiting_for_streaming = True
-
-        handler = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._handler")
-        child_span.notify_parent(handler._StreamingStatus.IN_PROGRESS)
-        self.assertTrue(parent_span.active)
-
-        child_span.notify_parent(handler._StreamingStatus.FINISHED)
-        self.assertFalse(parent_span.active)
 
     def test_instrumentation_lifecycle(self):
         self.assertTrue(self.instrumentor.is_instrumented_by_opentelemetry)
@@ -1093,13 +1082,6 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         count_after = sum(1 for h in dispatcher.span_handlers if isinstance(h, handler_module._SpanHandler))
         self.assertEqual(count_before, count_after)
 
-    def test_get_current_span_returns_none_when_no_active_span(self):
-        """Test get_current_span returns None when no span is active."""
-        from amazon.opentelemetry.distro.instrumentation.llama_index import get_current_span
-
-        result = get_current_span()
-        self.assertIsNone(result)
-
     def test_uninstrument_cleans_up(self):
         """Test that _uninstrument removes handlers and sets event_handler to None."""
         self.instrumentor.uninstrument()
@@ -1113,15 +1095,6 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         # Calling again should not raise
         self.instrumentor._uninstrument()
         # Re-instrument for tearDown
-        self.instrumentor.instrument(tracer_provider=self.tracer_provider)
-
-    def test_get_current_span_with_uninstrumented(self):
-        """Test get_current_span returns None when instrumentor has no span_handler."""
-        from amazon.opentelemetry.distro.instrumentation.llama_index import get_current_span
-
-        self.instrumentor.uninstrument()
-        result = get_current_span()
-        self.assertIsNone(result)
         self.instrumentor.instrument(tracer_provider=self.tracer_provider)
 
     def test_span_get_span_name_agent_no_name(self):
@@ -1140,17 +1113,6 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self.assertEqual(span._get_span_name(), "execute_tool")
         otel_span.end()
 
-    def test_process_event_streaming_exception(self):
-        """Test that ExceptionEvent during streaming ends the span with error."""
-        handler = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._handler")
-        otel_span = self.tracer.start_span("test")
-        span = self._Span(otel_span=otel_span)
-        span._waiting_for_streaming = True
-        exc = RuntimeError("stream failed")
-        event = handler.ExceptionEvent(exception=exc)
-        span.process_event(event)
-        self.assertFalse(span.active)
-
     def test_event_handler_exception_in_process_event(self):
         """Test that EventHandler catches exceptions from process_event."""
         span_handler = self._make_span_handler()
@@ -1160,13 +1122,16 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
         instance = Mock(spec=BaseEmbedding)
         instance.model_name = "test-model"
-        span = span_handler.new_span(id_="BaseEmbedding.embed-1", bound_args=self._make_bound_args(), instance=instance)
+        span = span_handler.new_span(
+            id_="BaseEmbedding.get_query_embedding-1", bound_args=self._make_bound_args(), instance=instance
+        )
         self.assertIsNotNone(span)
-        span_handler.open_spans["BaseEmbedding.embed-1"] = span
+        self.assertFalse(span.is_passthrough)
+        span_handler.open_spans["BaseEmbedding.get_query_embedding-1"] = span
 
         # Create an event that will cause process_event to raise via a bad attribute access
         event = Mock()
-        event.span_id = "BaseEmbedding.embed-1"
+        event.span_id = "BaseEmbedding.get_query_embedding-1"
         event.id_ = "event-1"
         # Monkey-patch the span's process_event at the object level using object.__setattr__
         original = span.process_event
@@ -1175,70 +1140,6 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self.assertEqual(result, event)
         object.__setattr__(span, "process_event", original)
         span.end()
-
-    def test_prepare_to_exit_span_workflow_handler(self):
-        """Test that WorkflowHandler results attach a done callback."""
-        handler = self._make_span_handler()
-        from llama_index.core.agent.workflow import FunctionAgent
-        from llama_index.llms.openai import OpenAI
-
-        llm = OpenAI(model="gpt-4", api_key="fake")
-        agent = FunctionAgent(tools=[], llm=llm, name="TestAgent")
-        span = handler.new_span(id_="FunctionAgent.run-1", bound_args=self._make_bound_args(), instance=agent)
-        self.assertIsNotNone(span)
-        handler.open_spans["FunctionAgent.run-1"] = span
-
-        # Mock a WorkflowHandler with a _result_task
-        from llama_index.core.workflow.handler import WorkflowHandler
-
-        mock_handler = Mock(spec=WorkflowHandler)
-        mock_task = Mock()
-        mock_handler._result_task = mock_task
-
-        result = handler.prepare_to_exit_span(
-            id_="FunctionAgent.run-1", bound_args=self._make_bound_args(), instance=agent, result=mock_handler
-        )
-        self.assertIsNotNone(result)
-        # The span should still be active (waiting for callback)
-        self.assertTrue(span.active)
-        # Verify add_done_callback was called
-        mock_task.add_done_callback.assert_called_once()
-
-        # Now simulate the callback being invoked (covers lines 826-831)
-        callback = mock_task.add_done_callback.call_args[0][0]
-        # Simulate a completed task with no exception
-        mock_completed_task = Mock()
-        mock_completed_task.exception.return_value = None
-        callback(mock_completed_task)
-        self.assertFalse(span.active)
-
-    def test_prepare_to_exit_span_workflow_handler_with_exception(self):
-        """Test WorkflowHandler callback with task exception."""
-        handler = self._make_span_handler()
-        from llama_index.core.agent.workflow import FunctionAgent
-        from llama_index.llms.openai import OpenAI
-
-        llm = OpenAI(model="gpt-4", api_key="fake")
-        agent = FunctionAgent(tools=[], llm=llm, name="TestAgent2")
-        span = handler.new_span(id_="FunctionAgent.run-2", bound_args=self._make_bound_args(), instance=agent)
-        self.assertIsNotNone(span)
-        handler.open_spans["FunctionAgent.run-2"] = span
-
-        from llama_index.core.workflow.handler import WorkflowHandler
-
-        mock_handler = Mock(spec=WorkflowHandler)
-        mock_task = Mock()
-        mock_handler._result_task = mock_task
-
-        handler.prepare_to_exit_span(
-            id_="FunctionAgent.run-2", bound_args=self._make_bound_args(), instance=agent, result=mock_handler
-        )
-        callback = mock_task.add_done_callback.call_args[0][0]
-        # Simulate a task that raised an exception
-        mock_failed_task = Mock()
-        mock_failed_task.exception.return_value = RuntimeError("workflow failed")
-        callback(mock_failed_task)
-        self.assertFalse(span.active)
 
     def test_process_instance_default_handler_does_nothing_for_non_agent(self):
         """Test that default process_instance does nothing for non-agent, non-None types."""
@@ -1287,34 +1188,6 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         span._process_event(event)
         otel_span.end()
 
-    def test_get_current_span_full_path(self):
-        """Test get_current_span returns the otel span when a span is active."""
-        from llama_index.core.instrumentation.span import active_span_id
-
-        from amazon.opentelemetry.distro.instrumentation.llama_index import get_current_span
-
-        importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._handler")
-
-        # Create a span via the span handler
-        span_handler = self.instrumentor._span_handler
-        from llama_index.core.base.embeddings.base import BaseEmbedding
-
-        instance = Mock(spec=BaseEmbedding)
-        instance.model_name = "test"
-        span = span_handler.new_span(id_="test-span-1", bound_args=self._make_bound_args(), instance=instance)
-        self.assertIsNotNone(span)
-        span_handler.open_spans["test-span-1"] = span
-
-        # Set the active span id
-        token = active_span_id.set("test-span-1")
-        try:
-            result = get_current_span()
-            self.assertIsNotNone(result)
-            self.assertEqual(result, span._otel_span)
-        finally:
-            active_span_id.reset(token)
-            span.end()
-
     def test_process_input_tool_without_to_openai_tool(self):
         """Test process_input falls back to str() when tool has no to_openai_tool."""
         from llama_index.llms.openai import OpenAI
@@ -1339,28 +1212,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         # Should not raise
         span.end()
         self.assertIsNone(span._context_token)
-        self.assertFalse(span._active)
-
-    def test_get_current_span_no_matching_open_span(self):
-        """Test get_current_span returns None when span_id doesn't match any open span."""
-        from llama_index.core.instrumentation.span import active_span_id
-
-        from amazon.opentelemetry.distro.instrumentation.llama_index import get_current_span
-
-        token = active_span_id.set("nonexistent-span-id")
-        try:
-            result = get_current_span()
-            self.assertIsNone(result)
-        finally:
-            active_span_id.reset(token)
-
-    def test_process_messages_empty(self):
-        """Test _process_messages with no messages does nothing."""
-        otel_span = self.tracer.start_span("test")
-        span = self._Span(otel_span=otel_span)
-        span._process_messages("gen_ai.input.messages")
-        self.assertNotIn("gen_ai.input.messages", span._attributes)
-        otel_span.end()
+        self.assertFalse(span.active)
 
     def test_function_tool_get_name_exception(self):
         """Test FunctionTool handler when get_name() raises."""
@@ -1419,6 +1271,100 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         span.process_input(llm, bound_args)
         self.assertIn(GEN_AI_TOOL_DEFINITIONS, span._attributes)
         otel_span.end()
+
+    # ---- OTel GenAI Schema Validation Tests ----
+
+    def test_input_messages_conform_to_otel_schema(self):
+        """Validate gen_ai.input.messages against OTel GenAI JSON Schema."""
+        from llama_index.core.instrumentation.events.llm import LLMChatStartEvent
+
+        handler = self._make_span_handler()
+        from llama_index.llms.openai import OpenAI
+
+        llm = OpenAI(model="gpt-4", api_key="fake")
+        span = handler.new_span(id_="OpenAI.chat-1", bound_args=self._make_bound_args(), instance=llm)
+        self.assertFalse(span.is_passthrough)
+
+        event = LLMChatStartEvent(
+            messages=[
+                ChatMessage(role="user", content="What is the weather?"),
+            ],
+            additional_kwargs={},
+            model_dict={},
+        )
+        span.process_event(event)
+
+        raw = span._attributes.get(GEN_AI_INPUT_MESSAGES)
+        self.assertIsNotNone(raw)
+        messages = json.loads(raw)
+        _validate_otel_schema(messages, "gen-ai-input-messages")
+        self.assertEqual(messages[0]["role"], "user")
+        self.assertEqual(messages[0]["parts"][0]["type"], "text")
+        self.assertIn("weather", messages[0]["parts"][0]["content"])
+        span.end()
+
+    def test_output_messages_conform_to_otel_schema(self):
+        """Validate gen_ai.output.messages against OTel GenAI JSON Schema."""
+        from llama_index.core.instrumentation.events.llm import LLMChatEndEvent
+
+        handler = self._make_span_handler()
+        from llama_index.llms.openai import OpenAI
+
+        llm = OpenAI(model="gpt-4", api_key="fake")
+        span = handler.new_span(id_="OpenAI.chat-1", bound_args=self._make_bound_args(), instance=llm)
+
+        response = Mock(spec=ChatResponse)
+        response.message = ChatMessage(role="assistant", content="It is sunny today.")
+        response.raw = None
+        response.additional_kwargs = {}
+        event = LLMChatEndEvent(response=response, messages=[], model_dict={})
+        span.process_event(event)
+
+        raw = span._attributes.get(GEN_AI_OUTPUT_MESSAGES)
+        self.assertIsNotNone(raw)
+        output = json.loads(raw)
+        _validate_otel_schema(output, "gen-ai-output-messages")
+        self.assertEqual(output[0]["role"], "assistant")
+        self.assertEqual(output[0]["parts"][0]["type"], "text")
+        self.assertIn("sunny", output[0]["parts"][0]["content"])
+        span.end()
+
+    def test_system_instructions_conform_to_otel_schema(self):
+        """Validate gen_ai.system_instructions against OTel GenAI JSON Schema."""
+        from llama_index.core.instrumentation.events.llm import LLMChatStartEvent
+
+        handler = self._make_span_handler()
+        from llama_index.llms.openai import OpenAI
+
+        llm = OpenAI(model="gpt-4", api_key="fake")
+        span = handler.new_span(id_="OpenAI.chat-1", bound_args=self._make_bound_args(), instance=llm)
+
+        event = LLMChatStartEvent(
+            messages=[
+                ChatMessage(role="system", content="You are a helpful assistant."),
+                ChatMessage(role="user", content="Hello"),
+            ],
+            additional_kwargs={},
+            model_dict={},
+        )
+        span.process_event(event)
+
+        # System instructions should be separated
+        raw_instructions = span._attributes.get(GEN_AI_SYSTEM_INSTRUCTIONS)
+        self.assertIsNotNone(raw_instructions)
+        instructions = json.loads(raw_instructions)
+        _validate_otel_schema(instructions, "gen-ai-system-instructions")
+        self.assertEqual(instructions[0]["type"], "text")
+        self.assertIn("helpful assistant", instructions[0]["content"])
+
+        # Input messages should only contain non-system messages
+        raw_input = span._attributes.get(GEN_AI_INPUT_MESSAGES)
+        self.assertIsNotNone(raw_input)
+        input_msgs = json.loads(raw_input)
+        _validate_otel_schema(input_msgs, "gen-ai-input-messages")
+        self.assertEqual(len(input_msgs), 1)
+        self.assertEqual(input_msgs[0]["role"], "user")
+        span.end()
 
 
 if __name__ == "__main__":

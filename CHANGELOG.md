@@ -12,10 +12,25 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat: propagate HTTP context for MCP requests and prefix all span names with mcp
+  ([#683](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/683))
+- feat: add threading instrumentation dependency
+  ([#685](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/685))
+- feat: add openai-agents-v2 instrumentation dependency
+  ([#684](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/684))
+- feat: add BaggageSpanProcessor by default in ADOT
+  ([#687](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/687))
+- feat: Rewrite CrewAI instrumentation using Event based approach
+  ([#681](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/681))
+
+## v0.16.0 - 2026-03-13
+
 - Tests and Doc Updates for Adding Python 3.14 Support
   ([#670](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/670))
 - feat: [BREAKING CHANGE] Disable upstream crewai/langchain instrumentations and respect OTLP base endpoint for Agent observability
   ([#668](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/668))
+- feat: Add native MCP instrumentation support
+  ([#655](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/655))
 - Add native LangChain instrumentation support
   ([#589](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/589))
 - feat: Allow disabling of default anomaly condition

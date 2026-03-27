@@ -3,9 +3,10 @@
 
 import json
 import logging
+import threading
 from contextvars import Token
 from functools import wraps
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Dict, Optional
 
 from wrapt import wrap_function_wrapper
 
@@ -35,6 +36,32 @@ PROVIDER_MAP = {
 }
 
 
+class DictWithLock:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._data: Dict[Any, Any] = {}
+
+    def get(self, key: Any) -> Any:
+        with self._lock:
+            return self._data.get(key)
+
+    def put(self, key: Any, value: Any) -> None:
+        with self._lock:
+            self._data[key] = value
+
+    def pop(self, key: Any) -> Any:
+        with self._lock:
+            return self._data.pop(key, None)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._data.clear()
+
+    def __contains__(self, key: Any) -> bool:
+        with self._lock:
+            return key in self._data
+
+
 def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:
 
     def _truncate(obj: Any, depth: int) -> Any:
@@ -55,9 +82,9 @@ def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:
 def try_wrap(
     module: str, name: str, wrapper: Callable[..., Any], should_wrap: Optional[Callable[..., bool]] = None
 ) -> None:
-    if should_wrap is not None and not should_wrap():
-        return
     try:
+        if should_wrap is not None and not should_wrap():
+            return
         wrap_function_wrapper(module, name, wrapper)
     except Exception:  # pylint: disable=broad-except
         _logger.debug("Failed to wrap %s.%s, instrumentation may be incomplete", module, name)

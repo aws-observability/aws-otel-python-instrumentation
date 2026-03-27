@@ -1,0 +1,533 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+import logging
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
+
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
+    PROVIDER_MAP,
+    DictWithLock,
+    serialize_to_json_string,
+    skip_instrumentation_if_suppressed,
+)
+from opentelemetry import context, trace
+from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_MESSAGE
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
+    GEN_AI_AGENT_DESCRIPTION,
+    GEN_AI_AGENT_ID,
+    GEN_AI_AGENT_NAME,
+    GEN_AI_INPUT_MESSAGES,
+    GEN_AI_OPERATION_NAME,
+    GEN_AI_OUTPUT_MESSAGES,
+    GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_MAX_TOKENS,
+    GEN_AI_REQUEST_MODEL,
+    GEN_AI_REQUEST_TEMPERATURE,
+    GEN_AI_RESPONSE_MODEL,
+    GEN_AI_SYSTEM_INSTRUCTIONS,
+    GEN_AI_TOOL_CALL_ARGUMENTS,
+    GEN_AI_TOOL_CALL_RESULT,
+    GEN_AI_TOOL_DEFINITIONS,
+    GEN_AI_TOOL_DESCRIPTION,
+    GEN_AI_TOOL_NAME,
+    GEN_AI_TOOL_TYPE,
+    GEN_AI_USAGE_INPUT_TOKENS,
+    GEN_AI_USAGE_OUTPUT_TOKENS,
+    GenAiOperationNameValues,
+)
+from opentelemetry.trace import SpanKind, Status, StatusCode
+
+if TYPE_CHECKING:
+    from crewai.agents.agent_builder.base_agent import BaseAgent
+    from crewai.crew import Crew
+    from crewai.events.base_events import BaseEvent
+    from crewai.events.types.agent_events import (
+        AgentExecutionCompletedEvent,
+        AgentExecutionErrorEvent,
+        AgentExecutionStartedEvent,
+    )
+    from crewai.events.types.crew_events import (
+        CrewKickoffCompletedEvent,
+        CrewKickoffFailedEvent,
+        CrewKickoffStartedEvent,
+    )
+    from crewai.events.types.llm_events import LLMCallCompletedEvent, LLMCallFailedEvent, LLMCallStartedEvent
+    from crewai.events.types.tool_usage_events import ToolUsageFinishedEvent, ToolUsageStartedEvent
+    from crewai.llm import LLM
+    from crewai.tools.tool_usage import ToolUsage
+    from crewai.types.usage_metrics import UsageMetrics
+
+_LOG = logging.getLogger(__name__)
+
+
+@dataclass
+class _SpanEntry:
+    span: trace.Span
+    token: Any
+
+
+class _EventBusEmitWrapper:
+    """Wrapper for crewai_event_bus.emit that runs our event handler synchronously
+    and patches a CrewAI bug where LLMCallCompletedEvent is missing for tool_calls.
+    """
+
+    def __init__(self, event_handler: "OpenTelemetryEventHandler"):
+        self._event_handler = event_handler
+        # for async agents to keep track of pending llm events
+        self._llm_source_to_unfinished_llm_event = DictWithLock()
+
+    def __call__(self, wrapped, instance, args, kwargs) -> Any:  # pylint: disable=too-many-locals
+        # pylint: disable=import-outside-toplevel
+        from crewai.events.base_events import BaseEvent
+        from crewai.events.types.llm_events import LLMCallCompletedEvent, LLMCallStartedEvent, LLMCallType
+        from crewai.events.types.tool_usage_events import ToolUsageStartedEvent
+        from crewai.llms.base_llm import get_current_call_id
+
+        event = args[1] if len(args) > 1 else kwargs.get("event")
+        source = args[0] if args else kwargs.get("source")
+
+        if isinstance(event, ToolUsageStartedEvent):
+            agent = getattr(source, "agent", None)
+            llm = getattr(agent, "llm", None) if agent else None
+            if llm and id(llm) in self._llm_source_to_unfinished_llm_event:
+                llm_source = self._llm_source_to_unfinished_llm_event.pop(id(llm))
+                # We must emit a synthetic LLMCallCompletedEvent to fix CrewAI's event stack.
+                # This (almost) replicates the same fix that would be applied inside
+                # _handle_non_streaming_response before returning tool_calls.
+                # It is safe because events are essentially fire-and-forget operations.
+                # emit() only uses the event type to pop it from the stack and does not
+                # read any event payload fields.
+                # See: https://github.com/crewAIInc/crewAI/pull/4880
+                # TODO: remove this once this bug is fixed upstream
+                try:
+                    synthetic_event = LLMCallCompletedEvent(
+                        response=[{"name": event.tool_name, "input": event.tool_args}],
+                        call_type=LLMCallType.TOOL_CALL,
+                        call_id=get_current_call_id(),
+                        model=getattr(llm_source, "model", None),
+                        from_agent=getattr(event, "from_agent", None),
+                        from_task=getattr(event, "from_task", None),
+                    )
+                    wrapped(llm_source, synthetic_event)
+                    self._event_handler._handle_event(llm_source, synthetic_event)
+                except Exception:  # pylint: disable=broad-exception-caught
+                    _LOG.debug("Failed to emit missing LLMCallCompletedEvent for tool_calls")
+
+        result = wrapped(*args, **kwargs)
+        if not isinstance(event, BaseEvent):
+            return result
+
+        if isinstance(event, LLMCallStartedEvent):
+            self._llm_source_to_unfinished_llm_event.put(id(source), source)
+        elif isinstance(event, LLMCallCompletedEvent):
+            self._llm_source_to_unfinished_llm_event.pop(id(source))
+
+        self._event_handler._handle_event(source, event)
+        return result
+
+
+class OpenTelemetryEventHandler:
+
+    def __init__(self, tracer: trace.Tracer) -> None:
+        # pylint: disable=import-outside-toplevel
+        from crewai.events.types.agent_events import (
+            AgentExecutionCompletedEvent,
+            AgentExecutionErrorEvent,
+            AgentExecutionStartedEvent,
+        )
+        from crewai.events.types.crew_events import (
+            CrewKickoffCompletedEvent,
+            CrewKickoffFailedEvent,
+            CrewKickoffStartedEvent,
+        )
+        from crewai.events.types.llm_events import LLMCallCompletedEvent, LLMCallFailedEvent, LLMCallStartedEvent
+        from crewai.events.types.tool_usage_events import ToolUsageFinishedEvent, ToolUsageStartedEvent
+
+        self._tracer = tracer
+        # a map of every event's id to its span. If the event does not
+        # create a span, then it's mapped to the span created by its nearest ancestor event
+        self._event_id_to_span = DictWithLock()
+        self._event_type_handlers: Dict[type, Any] = {
+            CrewKickoffStartedEvent: self._on_crew_start,
+            CrewKickoffCompletedEvent: self._on_crew_completed,
+            CrewKickoffFailedEvent: self._on_crew_failed,
+            AgentExecutionStartedEvent: self._on_agent_start,
+            AgentExecutionCompletedEvent: self._on_agent_completed,
+            AgentExecutionErrorEvent: self._on_agent_failed,
+            ToolUsageStartedEvent: self._on_tool_start,
+            ToolUsageFinishedEvent: self._on_tool_finished,
+            LLMCallStartedEvent: self._on_llm_start,
+            LLMCallCompletedEvent: self._on_llm_completed,
+            LLMCallFailedEvent: self._on_llm_failed,
+        }
+
+    @skip_instrumentation_if_suppressed
+    def _handle_event(self, source: Any, event: "BaseEvent") -> None:
+        handler = self._event_type_handlers.get(type(event))
+        if handler:
+            handler(source, event)
+        else:
+            event_id = getattr(event, "event_id", None)
+            parent_event_id = getattr(event, "parent_event_id", None)
+            if event_id and parent_event_id:
+                parent_entry = self._event_id_to_span.get(parent_event_id)
+                if parent_entry:
+                    self._event_id_to_span.put(event_id, parent_entry)
+
+    def _on_crew_start(self, source: "Crew", event: "CrewKickoffStartedEvent") -> None:
+        crew_name = getattr(source, "name", None)
+        span_name = f"crew_kickoff {crew_name}" if crew_name else "crew_kickoff"
+        attributes: Dict[str, Any] = {
+            GEN_AI_OPERATION_NAME: GenAiOperationNameValues.INVOKE_AGENT.value,
+        }
+        if crew_name:
+            attributes[GEN_AI_AGENT_NAME] = crew_name
+        if hasattr(source, "id"):
+            attributes[GEN_AI_AGENT_ID] = str(source.id)
+
+        agents = getattr(source, "agents", [])
+        if agents:
+            all_tools = []
+            for agent in agents:
+                all_tools.extend(getattr(agent, "tools", []) or [])
+            if all_tools:
+                tool_defs = self._extract_tool_definitions(all_tools)
+                if tool_defs:
+                    attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs)
+
+        self._start_span(span_name, event.event_id, attributes, event.parent_event_id)
+
+    def _on_crew_completed(
+        self, source: "Crew", event: "CrewKickoffCompletedEvent"  # pylint: disable=unused-argument
+    ) -> None:
+        self._end_span(event.started_event_id)
+        self._event_id_to_span.clear()
+
+    def _on_crew_failed(
+        self, source: "Crew", event: "CrewKickoffFailedEvent"  # pylint: disable=unused-argument
+    ) -> None:
+        self._end_span(event.started_event_id, error=getattr(event, "error", None))
+        self._event_id_to_span.clear()
+
+    def _on_agent_start(
+        self, source: "BaseAgent", event: "AgentExecutionStartedEvent"  # pylint: disable=unused-argument
+    ) -> None:
+        agent = getattr(event, "agent", None)
+        agent_role = getattr(agent, "role", None) if agent else None
+        span_name = (
+            f"{GenAiOperationNameValues.INVOKE_AGENT.value} {agent_role}"
+            if agent_role
+            else GenAiOperationNameValues.INVOKE_AGENT.value
+        )
+        attributes: Dict[str, Any] = {
+            GEN_AI_OPERATION_NAME: GenAiOperationNameValues.INVOKE_AGENT.value,
+        }
+        if agent:
+            if agent_role:
+                attributes[GEN_AI_AGENT_NAME] = agent_role
+            if hasattr(agent, "id"):
+                attributes[GEN_AI_AGENT_ID] = str(agent.id)
+            goal = getattr(agent, "goal", None)
+            if goal:
+                attributes[GEN_AI_AGENT_DESCRIPTION] = goal
+            backstory = getattr(agent, "backstory", None)
+            if backstory:
+                attributes[GEN_AI_SYSTEM_INSTRUCTIONS] = backstory
+
+            llm = getattr(agent, "llm", None)
+            provider, model = self._extract_provider_and_model(llm)
+            if provider:
+                attributes[GEN_AI_PROVIDER_NAME] = provider
+            if model:
+                attributes[GEN_AI_REQUEST_MODEL] = model
+            if llm:
+                temperature = getattr(llm, "temperature", None)
+                if temperature is not None:
+                    attributes[GEN_AI_REQUEST_TEMPERATURE] = temperature
+                max_tokens = getattr(llm, "max_tokens", None)
+                if max_tokens is not None:
+                    attributes[GEN_AI_REQUEST_MAX_TOKENS] = max_tokens
+
+        self._start_span(span_name, event.event_id, attributes, event.parent_event_id)
+
+    def _on_agent_completed(
+        self, source: "BaseAgent", event: "AgentExecutionCompletedEvent"  # pylint: disable=unused-argument
+    ) -> None:
+        self._end_span(event.started_event_id)
+
+    def _on_agent_failed(
+        self, source: "BaseAgent", event: "AgentExecutionErrorEvent"  # pylint: disable=unused-argument
+    ) -> None:
+        self._end_span(event.started_event_id, error=getattr(event, "error", None))
+
+    def _on_tool_start(self, source: "ToolUsage", event: "ToolUsageStartedEvent") -> None:
+        tool_name = event.tool_name
+        span_name = (
+            f"{GenAiOperationNameValues.EXECUTE_TOOL.value} {tool_name}"
+            if tool_name
+            else GenAiOperationNameValues.EXECUTE_TOOL.value
+        )
+        attributes: Dict[str, Any] = {
+            GEN_AI_OPERATION_NAME: GenAiOperationNameValues.EXECUTE_TOOL.value,
+            GEN_AI_TOOL_TYPE: "function",
+        }
+        if tool_name:
+            attributes[GEN_AI_TOOL_NAME] = tool_name
+
+        desc = self._find_tool_description(source, event, tool_name)
+        if desc:
+            attributes[GEN_AI_TOOL_DESCRIPTION] = desc
+
+        agent = getattr(source, "agent", None)
+        if agent:
+            llm = getattr(agent, "llm", None)
+            provider, model = self._extract_provider_and_model(llm)
+            if provider:
+                attributes[GEN_AI_PROVIDER_NAME] = provider
+            if model:
+                attributes[GEN_AI_REQUEST_MODEL] = model
+
+        if event.tool_args:
+            attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = serialize_to_json_string(event.tool_args)
+
+        self._start_span(span_name, event.event_id, attributes, event.parent_event_id)
+
+    def _on_tool_finished(
+        self, source: "ToolUsage", event: "ToolUsageFinishedEvent"  # pylint: disable=unused-argument
+    ) -> None:
+        attrs: Dict[str, Any] = {}
+        output = getattr(event, "output", None)
+        if output is not None:
+            attrs[GEN_AI_TOOL_CALL_RESULT] = serialize_to_json_string(output)
+        self._end_span(event.started_event_id, attrs)
+
+    def _on_llm_start(self, source: "LLM", event: "LLMCallStartedEvent") -> None:
+        attributes: Dict[str, Any] = {
+            GEN_AI_OPERATION_NAME: GenAiOperationNameValues.CHAT.value,
+        }
+
+        provider, model_name = self._extract_provider_and_model(source)
+        if provider:
+            attributes[GEN_AI_PROVIDER_NAME] = provider
+        if model_name:
+            attributes[GEN_AI_REQUEST_MODEL] = model_name
+        temperature = getattr(source, "temperature", None)
+        if temperature is not None:
+            attributes[GEN_AI_REQUEST_TEMPERATURE] = temperature
+
+        span_name = (
+            f"{GenAiOperationNameValues.CHAT.value} {model_name}" if model_name else GenAiOperationNameValues.CHAT.value
+        )
+
+        messages = event.messages
+        if messages:
+            if isinstance(messages, str):
+                messages = [{"role": "user", "content": messages}]
+            system_instructions = [m for m in messages if m.get("role") == "system"]
+            non_system_messages = [m for m in messages if m.get("role") != "system"]
+            if system_instructions:
+                parts = [{"type": "text", "content": m.get("content", "")} for m in system_instructions]
+                attributes[GEN_AI_SYSTEM_INSTRUCTIONS] = serialize_to_json_string(parts)
+            if non_system_messages:
+                attributes[GEN_AI_INPUT_MESSAGES] = serialize_to_json_string(
+                    [self._to_input_message(m) for m in non_system_messages]
+                )
+
+        self._start_span(span_name, event.event_id, attributes, event.parent_event_id)
+
+    def _on_llm_completed(self, source: "LLM", event: "LLMCallCompletedEvent") -> None:
+        attrs: Dict[str, Any] = {}
+
+        from crewai.events.types.llm_events import LLMCallType  # pylint: disable=import-outside-toplevel
+
+        finish_reason = "tool_call" if event.call_type == LLMCallType.TOOL_CALL else "stop"
+
+        response = event.response
+        if response:
+            if isinstance(response, str):
+                attrs[GEN_AI_OUTPUT_MESSAGES] = serialize_to_json_string(
+                    [self._to_output_message({"role": "assistant", "content": response}, finish_reason)]
+                )
+            elif isinstance(response, list) and response:
+                if isinstance(response[0], dict) and "role" in response[0]:
+                    attrs[GEN_AI_OUTPUT_MESSAGES] = serialize_to_json_string(
+                        [self._to_output_message(m, finish_reason) for m in response]
+                    )
+                else:
+                    parts = self._to_tool_call_parts(response)
+                    if parts:
+                        attrs[GEN_AI_OUTPUT_MESSAGES] = serialize_to_json_string(
+                            [{"role": "assistant", "parts": parts, "finish_reason": finish_reason}]
+                        )
+
+        _, model_name = self._extract_provider_and_model(source)
+        if model_name:
+            attrs[GEN_AI_RESPONSE_MODEL] = model_name
+
+        usage: "UsageMetrics" = source.get_token_usage_summary()
+        if usage.prompt_tokens > 0:
+            attrs[GEN_AI_USAGE_INPUT_TOKENS] = usage.prompt_tokens
+        if usage.completion_tokens > 0:
+            attrs[GEN_AI_USAGE_OUTPUT_TOKENS] = usage.completion_tokens
+
+        self._end_span(event.started_event_id, attrs)
+
+    def _on_llm_failed(self, source: Any, event: "LLMCallFailedEvent") -> None:  # pylint: disable=unused-argument
+        self._end_span(event.started_event_id, error=getattr(event, "error", None))
+
+    def _start_span(
+        self,
+        name: str,
+        event_id: str,
+        attributes: Optional[Dict[str, Any]] = None,
+        parent_event_id: Optional[str] = None,
+    ) -> None:
+        parent_ctx = None
+        if parent_event_id:
+            parent_entry = self._event_id_to_span.get(parent_event_id)
+            if parent_entry:
+                parent_ctx = trace.set_span_in_context(parent_entry.span)
+
+        span = self._tracer.start_span(name, kind=SpanKind.INTERNAL, attributes=attributes, context=parent_ctx)
+        token = context.attach(trace.set_span_in_context(span))
+        self._event_id_to_span.put(event_id, _SpanEntry(span=span, token=token))
+
+    def _end_span(
+        self,
+        started_event_id: Optional[str],
+        set_attrs: Optional[Dict[str, Any]] = None,
+        error: Optional[str] = None,
+    ) -> None:
+        if not started_event_id:
+            return
+        entry = self._event_id_to_span.pop(started_event_id)
+        if entry:
+            if set_attrs:
+                for key, value in set_attrs.items():
+                    if value is not None:
+                        entry.span.set_attribute(key, value)
+            if error:
+                entry.span.set_status(Status(StatusCode.ERROR, error))
+                entry.span.set_attribute(ERROR_MESSAGE, error)
+            else:
+                entry.span.set_status(Status(StatusCode.OK))
+            entry.span.end()
+            context.detach(entry.token)
+
+    @staticmethod
+    def _extract_provider_and_model(llm: Any) -> Tuple[Optional[str], Optional[str]]:
+        if not llm:
+            return None, None
+        model = getattr(llm, "model", None)
+        if not model:
+            return None, None
+        if "/" in model:
+            prefix, _, model_part = model.partition("/")
+            provider_name = PROVIDER_MAP.get(prefix.lower(), prefix)
+            return provider_name, model_part
+        provider = getattr(llm, "provider", None)
+        if provider:
+            return PROVIDER_MAP.get(provider.lower(), provider), model
+        return None, model
+
+    @staticmethod
+    def _to_input_message(msg: Dict[str, Any]) -> Dict[str, Any]:
+        role = msg.get("role", "user")
+        if role == "tool":
+            part: Dict[str, Any] = {"type": "tool_call_response"}
+            if msg.get("tool_call_id"):
+                part["id"] = msg["tool_call_id"]
+            part["response"] = msg.get("content", "")
+            return {"role": role, "parts": [part]}
+        parts = []
+        content = msg.get("content")
+        if content:
+            parts.append({"type": "text", "content": content})
+        tool_calls = msg.get("tool_calls")
+        if tool_calls:
+            parts.extend(OpenTelemetryEventHandler._to_tool_call_parts(tool_calls))
+        if not parts:
+            parts.append({"type": "text", "content": ""})
+        return {"role": role, "parts": parts}
+
+    @staticmethod
+    def _to_output_message(msg: Dict[str, Any], finish_reason: str = "stop") -> Dict[str, Any]:
+        parts = []
+        content = msg.get("content")
+        if content:
+            parts.append({"type": "text", "content": content})
+        tool_calls = msg.get("tool_calls")
+        if tool_calls:
+            parts.extend(OpenTelemetryEventHandler._to_tool_call_parts(tool_calls))
+        if not parts:
+            parts.append({"type": "text", "content": ""})
+        return {
+            "role": msg.get("role", "assistant"),
+            "parts": parts,
+            "finish_reason": finish_reason,
+        }
+
+    @staticmethod
+    def _to_tool_call_parts(tool_calls: list) -> list:
+        parts = []
+        for tc in tool_calls:
+            part: Dict[str, Any] = {"type": "tool_call"}
+            if isinstance(tc, dict):
+                if tc.get("name"):
+                    part["name"] = tc["name"]
+                if tc.get("input"):
+                    part["arguments"] = tc["input"]
+                tc_id = tc.get("toolUseId") or tc.get("id")
+                if tc_id:
+                    part["id"] = tc_id
+            elif hasattr(tc, "function"):
+                func = tc.function
+                if getattr(func, "name", None):
+                    part["name"] = func.name
+                if getattr(func, "arguments", None):
+                    part["arguments"] = func.arguments
+                if getattr(tc, "id", None):
+                    part["id"] = tc.id
+            else:
+                continue
+            parts.append(part)
+        return parts
+
+    @staticmethod
+    def _find_tool_description(source: Any, event: Any, tool_name: Optional[str]) -> Optional[str]:
+        if not tool_name:
+            return None
+        tool_class = getattr(event, "tool_class", None)
+        if tool_class:
+            desc = getattr(tool_class, "description", None)
+            if desc:
+                return desc
+        for tools_holder in [source, getattr(source, "agent", None), getattr(event, "agent", None)]:
+            tools = getattr(tools_holder, "tools", None) if tools_holder else None
+            if not tools:
+                continue
+            for tool in tools:
+                if getattr(tool, "name", None) == tool_name:
+                    desc = getattr(tool, "description", None)
+                    if desc:
+                        return desc
+        return None
+
+    @staticmethod
+    def _extract_tool_definitions(tools: Any) -> list:
+        defs = []
+        for tool in tools:
+            tool_def: Dict[str, Any] = {"type": "function"}
+            if name := getattr(tool, "name", None):
+                tool_def["name"] = name
+            if desc := getattr(tool, "description", None):
+                tool_def["description"] = desc
+            args_schema = getattr(tool, "args_schema", None)
+            if args_schema is not None:
+                try:
+                    tool_def["parameters"] = args_schema.model_json_schema()
+                except Exception:  # pylint: disable=broad-exception-caught
+                    pass
+            defs.append(tool_def)
+        return defs

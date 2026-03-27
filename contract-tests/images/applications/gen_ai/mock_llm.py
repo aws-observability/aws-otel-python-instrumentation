@@ -24,7 +24,14 @@ class MockLLMHandler(BaseHTTPRequestHandler):
         global _llm_call_count  # pylint: disable=global-statement
         _llm_call_count += 1
 
-        if _llm_call_count % 2 == 1:
+        body = {}
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length:
+            body = json.loads(self.rfile.read(content_length))
+
+        tool_name, tool_args = self._extract_first_tool(body)
+
+        if _llm_call_count % 2 == 1 and tool_name:
             message = {
                 "role": "assistant",
                 "content": None,
@@ -32,10 +39,7 @@ class MockLLMHandler(BaseHTTPRequestHandler):
                     {
                         "id": f"call_{_llm_call_count}",
                         "type": "function",
-                        "function": {
-                            "name": "get_greeting",
-                            "arguments": json.dumps({"name": "World"}),
-                        },
+                        "function": {"name": tool_name, "arguments": json.dumps(tool_args)},
                     }
                 ],
             }
@@ -57,6 +61,17 @@ class MockLLMHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.end_headers()
         self.wfile.write(json.dumps(response).encode())
+
+    @staticmethod
+    def _extract_first_tool(body):
+        tools = body.get("tools", [])
+        if not tools:
+            return None, {}
+        func = tools[0].get("function", {})
+        name = func.get("name")
+        props = func.get("parameters", {}).get("properties", {})
+        args = {param: "World" for param in props}
+        return name, args
 
     def log_message(self, format, *args):  # pylint: disable=redefined-builtin
         pass
