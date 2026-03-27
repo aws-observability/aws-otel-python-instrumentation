@@ -526,7 +526,7 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource, sam
     # AI applications typically have low throughput traffic patterns and require
     # comprehensive monitoring to catch subtle failure modes like hallucinations
     # and quality degradation that sampling could miss.
-    if is_agent_observability_enabled():
+    if is_agentic_observability_enabled():
         _export_unsampled_span_for_agent_observability(provider, resource)
         baggage_keys.add("session.id")
 
