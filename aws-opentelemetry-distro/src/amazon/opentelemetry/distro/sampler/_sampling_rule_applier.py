@@ -141,6 +141,12 @@ class _SamplingRuleApplier:
     def has_boost(self) -> bool:
         return self.__has_boost
 
+    def is_default_anomaly_detection_disabled(self) -> bool:
+        return (
+            self.sampling_rule.SamplingRateBoost is not None
+            and self.sampling_rule.SamplingRateBoost.DisableDefaultAnomalyDetection
+        )
+
     def count_trace(self) -> None:
         with self.__statistics_lock:
             self.__statistics.TotalCount += 1

@@ -1,0 +1,101 @@
+name: Build AgentCore Runtime Collector
+
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  check-for-changes:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      latest_sha: ${{ steps.check.outputs.latest_sha }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Restore last known SHA from cache
+        id: cache-sha
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .last-code-sha
+          key: last-code-sha
+
+      - name: Check for new commits
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LATEST_SHA=$(gh api repos/wangzlei/opentelemetry-collector-contrib/commits/genai-adapter-connector --jq '.sha')
+          LAST_SHA=$(cat .last-code-sha 2>/dev/null || echo "")
+
+          echo "Latest SHA: $LATEST_SHA"
+          echo "Last SHA: $LAST_SHA"
+
+          if [ "$LATEST_SHA" != "$LAST_SHA" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Build triggered (new commit or manual dispatch)"
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "$LATEST_SHA" > .last-code-sha
+          else
+            echo "No change."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "latest_sha=$LATEST_SHA" >> "$GITHUB_OUTPUT"
+
+  build-collector:
+    needs: check-for-changes
+    if: needs.check-for-changes.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout code repo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: wangzlei/opentelemetry-collector-contrib
+          ref: ${{ needs.check-for-changes.outputs.latest_sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build otelcol-agentcore for linux/arm64
+        run: |
+          GOOS=linux GOARCH=arm64 make otelcol-agentcore
+
+      - name: Upload collector binary as artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: otelcol-agentcore-linux-arm64
+          path: bin/otelcol-agentcore_linux_arm64
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@a03048d87541d1d9fcf2ecf528a4a65ba9bd7838 # v5.0.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Package and upload collector to S3
+        run: |
+          mkdir -p collector-package
+          cp bin/otelcol-agentcore_linux_arm64 collector-package/otelcol-agentcore
+          cp cmd/otelcol-agentcore/config.yaml collector-package/config.yaml
+          cd collector-package && zip -r ../otelcol-agentcore.zip . && cd ..
+          aws s3 cp otelcol-agentcore.zip s3://${{ secrets.STAGING_BUCKET_NAME }}/otelcol-agentcore.zip
+
+      - name: Checkout current repo for cache context
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Save SHA to cache after successful upload
+        run: echo "${{ needs.check-for-changes.outputs.latest_sha }}" > .last-code-sha
+
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .last-code-sha
+          key: last-code-sha-${{ needs.check-for-changes.outputs.latest_sha }}
