@@ -17,6 +17,7 @@ _SERVER_MODULE = "mcp.server.lowlevel.server"
 _STDIO_MODULE = "mcp.client.stdio"
 _HTTP_MODULE = "mcp.client.streamable_http"
 _SSE_MODULE = "mcp.client.sse"
+_FASTMCP_MODULE = "mcp.server.fastmcp.server"
 
 
 class McpInstrumentor(BaseInstrumentor):
@@ -76,10 +77,24 @@ class McpInstrumentor(BaseInstrumentor):
             self._client_wrapper.wrap_handle_post_request,
         )
 
+        _LOG.debug("Instrument MCP server ASGI apps to suppress redundant HTTP spans.")
+
+        try_wrap(
+            _FASTMCP_MODULE,
+            "FastMCP.streamable_http_app",
+            self._server_wrapper.wrap_mcp_http_sse_app_factory,
+        )
+        try_wrap(
+            _FASTMCP_MODULE,
+            "FastMCP.sse_app",
+            self._server_wrapper.wrap_mcp_http_sse_app_factory,
+        )
+
     def _uninstrument(self, **kwargs: Any) -> None:  # pylint: disable=no-self-use
         try:
             # pylint: disable=import-outside-toplevel
             from mcp.client import sse, stdio, streamable_http
+            from mcp.server.fastmcp import server as fastmcp_server
             from mcp.server.lowlevel import server
             from mcp.shared import session
 
@@ -100,5 +115,7 @@ class McpInstrumentor(BaseInstrumentor):
                     streamable_http.StreamableHTTPTransport,
                     "_handle_post_request",
                 )
-        except ImportError:
-            _LOG.debug("MCP SDK not available, nothing to uninstrument")
+            try_unwrap(fastmcp_server.FastMCP, "streamable_http_app")
+            try_unwrap(fastmcp_server.FastMCP, "sse_app")
+        except (ImportError, AttributeError) as exc:
+            _LOG.debug("MCP SDK not fully available, nothing to uninstrument: %s", exc)

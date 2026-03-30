@@ -39,25 +39,25 @@ class GenAITestBase(ContractTestBase):
     def _assert_semantic_conventions_span_attributes(
         self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str, status_code: int, **kwargs
     ) -> None:
-        invoke_agent_spans, execute_tool_spans, invoke_model_spans = self._collect_gen_ai_spans(resource_scope_spans)
+        invoke_agent_spans, execute_tool_spans, chat_spans = self._collect_gen_ai_spans(resource_scope_spans)
         if "agent" in path:
             self._assert_invoke_agent_spans(invoke_agent_spans, kwargs.get("expected_agent_count", 1))
             self._assert_execute_tool_spans(execute_tool_spans, kwargs.get("expected_tool_count", 1))
-        self._assert_invoke_model_spans(invoke_model_spans, kwargs.get("expected_chat_count", 1))
+        self._assert_chat_spans(chat_spans, kwargs.get("expected_chat_count", 1))
 
     def _collect_gen_ai_spans(self, resource_scope_spans: List[ResourceScopeSpan]):
         invoke_agent_spans = []
         execute_tool_spans = []
-        invoke_model_spans = []
+        chat_spans = []
         for resource_scope_span in resource_scope_spans:
             span = resource_scope_span.span
             if "invoke_agent" in span.name:
                 invoke_agent_spans.append(span)
             elif "execute_tool" in span.name:
                 execute_tool_spans.append(span)
-            elif "invoke_model" in span.name or "chat" in span.name.lower():
-                invoke_model_spans.append(span)
-        return invoke_agent_spans, execute_tool_spans, invoke_model_spans
+            elif "chat" in span.name.lower():
+                chat_spans.append(span)
+        return invoke_agent_spans, execute_tool_spans, chat_spans
 
     def _assert_invoke_agent_spans(self, invoke_agent_spans: list, expected_count: int = 1):
         self.assertEqual(len(invoke_agent_spans), expected_count)
@@ -80,9 +80,9 @@ class GenAITestBase(ContractTestBase):
             self.assertIn(GEN_AI_TOOL_CALL_ARGUMENTS, attrs)
             self.assertIn(GEN_AI_TOOL_CALL_RESULT, attrs)
 
-    def _assert_invoke_model_spans(self, invoke_model_spans: list, expected_count: int = 1):
-        self.assertGreaterEqual(len(invoke_model_spans), expected_count)
-        for span in invoke_model_spans:
+    def _assert_chat_spans(self, chat_spans: list, expected_count: int = 1):
+        self.assertGreaterEqual(len(chat_spans), expected_count)
+        for span in chat_spans:
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, "chat")
             self.assertIn(GEN_AI_PROVIDER_NAME, attrs)
@@ -92,7 +92,5 @@ class GenAITestBase(ContractTestBase):
             self.assertIn(GEN_AI_RESPONSE_MODEL, attrs)
             self.assertIn(GEN_AI_USAGE_INPUT_TOKENS, attrs)
             self.assertIn(GEN_AI_USAGE_OUTPUT_TOKENS, attrs)
-        completed_spans = [
-            s for s in invoke_model_spans if GEN_AI_OUTPUT_MESSAGES in self._get_attributes_dict(s.attributes)
-        ]
+        completed_spans = [s for s in chat_spans if GEN_AI_OUTPUT_MESSAGES in self._get_attributes_dict(s.attributes)]
         self.assertGreaterEqual(len(completed_spans), 1)
