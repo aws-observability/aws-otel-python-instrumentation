@@ -18,8 +18,8 @@ class LangChainTest(GenAITestBase):
         self.do_test_requests("langchain/multiagent", "GET", 200, 0, 0, expected_agent_count=2)
 
     @override
-    def _assert_invoke_model_spans(self, invoke_model_spans: list, expected_count: int = 1):
-        super()._assert_invoke_model_spans(invoke_model_spans, expected_count)
-        for span in invoke_model_spans:
+    def _assert_chat_spans(self, chat_spans: list, expected_count: int = 1):
+        super()._assert_chat_spans(chat_spans, expected_count)
+        for span in chat_spans:
             attrs = self._get_attributes_dict(span.attributes)
             self.assertIn(GEN_AI_RESPONSE_ID, attrs)
