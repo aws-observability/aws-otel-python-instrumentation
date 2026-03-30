@@ -63,18 +63,19 @@ class DictWithLock:
 
 
 def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:
+    json_safe_types = (str, int, float, bool, dict, list, tuple, type(None))
 
-    def _truncate(obj: Any, depth: int) -> Any:
+    def _sanitize(obj: Any, depth: int) -> Any:
         if depth <= 0:
             return "..."
         if isinstance(obj, dict):
-            return {k: _truncate(v, depth - 1) for k, v in obj.items()}
+            return {k: _sanitize(v, depth - 1) for k, v in obj.items() if isinstance(v, json_safe_types)}
         if isinstance(obj, (list, tuple)):
-            return [_truncate(item, depth - 1) for item in obj]
+            return [_sanitize(item, depth - 1) for item in obj if isinstance(item, json_safe_types)]
         return obj
 
     try:
-        return json.dumps(_truncate(value, max_depth))
+        return json.dumps(_sanitize(value, max_depth))
     except (TypeError, ValueError):
         return str(value)
 
