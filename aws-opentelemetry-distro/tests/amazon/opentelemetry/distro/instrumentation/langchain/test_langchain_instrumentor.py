@@ -173,7 +173,7 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(len(spans), 1)
         span = spans[0]
 
-        self.assertIn("invoke_model", span.name)
+        self.assertIn("chat", span.name)
         self.assertEqual(span.attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.CHAT.value)
         self.assertEqual(span.attributes[GEN_AI_PROVIDER_NAME], "openai")
 
@@ -305,7 +305,7 @@ class TestLangChainInstrumentor(TestCase):
         spans = self.span_exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
         span = spans[0]
-        self.assertIn("invoke_model", span.name)
+        self.assertIn("chat", span.name)
         self.assertEqual(span.status.status_code, StatusCode.ERROR)
 
     def test_tool_error_sets_error_status(self):
@@ -330,7 +330,7 @@ class TestLangChainInstrumentor(TestCase):
 
         spans = self.span_exporter.get_finished_spans()
         self.assertGreater(len(spans), 0)
-        chat_spans = [s for s in spans if "invoke_model" in s.name]
+        chat_spans = [s for s in spans if "chat" in s.name]
         self.assertEqual(len(chat_spans), 1)
 
     def test_text_completion_llm_creates_span(self):
@@ -611,7 +611,7 @@ class TestLangChainInstrumentor(TestCase):
         # Agent spans created by langgraph should have step and node attributes
         # The exact values depend on the langgraph runtime, but we verify
         # the chat span inside the agent has the attributes set when metadata is present
-        chat_spans = [s for s in spans if "invoke_model" in s.name]
+        chat_spans = [s for s in spans if "chat" in s.name]
         self.assertGreater(len(chat_spans), 0)
 
 
