@@ -16,6 +16,7 @@ def _apply_starlette_instrumentation_patches() -> None:
     try:
         # pylint: disable=import-outside-toplevel
         from opentelemetry.instrumentation.asgi import OpenTelemetryMiddleware
+        from opentelemetry.instrumentation.utils import is_http_instrumentation_enabled
 
         # pylint: disable=line-too-long
         # Patch to exclude http receive/send ASGI event spans from Bedrock AgentCore,
@@ -35,6 +36,17 @@ def _apply_starlette_instrumentation_patches() -> None:
                     self.exclude_send_span = True
 
             OpenTelemetryMiddleware.__init__ = patched_init
+
+            # TODO: Remove this patch once upstream PR is merged:
+            # https://github.com/open-telemetry/opentelemetry-python-contrib/pull/4375
+            original_call = OpenTelemetryMiddleware.__call__
+
+            async def patched_call(self, scope, receive, send):
+                if not is_http_instrumentation_enabled():
+                    return await self.app(scope, receive, send)
+                return await original_call(self, scope, receive, send)
+
+            OpenTelemetryMiddleware.__call__ = patched_call
 
         _logger.debug("Successfully patched Starlette ASGI middleware")
     except Exception as exc:  # pylint: disable=broad-except

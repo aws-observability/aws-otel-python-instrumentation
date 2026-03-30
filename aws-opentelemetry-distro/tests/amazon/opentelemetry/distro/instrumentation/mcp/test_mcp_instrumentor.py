@@ -3,12 +3,14 @@
 
 import asyncio
 import json
+import os
 import signal
 import socket
 import subprocess
 import sys
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 from threading import Thread
 from unittest import TestCase
@@ -16,6 +18,7 @@ from unittest import TestCase
 from collector import OTLPServer, Telemetry
 
 from amazon.opentelemetry.distro.instrumentation.mcp import McpInstrumentor
+from amazon.opentelemetry.distro.instrumentation.mcp._wrappers import OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION
 from opentelemetry.baggage.propagation import W3CBaggagePropagator
 
 try:
@@ -38,7 +41,6 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
 )
 from opentelemetry.semconv._incubating.attributes.mcp_attributes import (
     MCP_METHOD_NAME,
-    MCP_PROTOCOL_VERSION,
     MCP_RESOURCE_URI,
     MCP_SESSION_ID,
     McpMethodNameValues,
@@ -300,36 +302,38 @@ class TestMcpInstrumentor(McpInstrumentorTestBase):
         session_span = self._get_span(client_spans, "mcp.session")
         self.assertEqual(session_span.kind, SpanKind.INTERNAL)
 
-        init_span = self._get_span(client_spans, f"mcp {McpMethodNameValues.INITIALIZE.value}")
-        self.assertIsNotNone(init_span.attributes.get(MCP_PROTOCOL_VERSION))
+        # TODO: Uncomment once we get user requirement to unsuppress initialize spans.
 
-        client_notif_init_span = self._get_span(
-            client_spans, f"mcp {McpMethodNameValues.NOTIFICATIONS_INITIALIZED.value}"
-        )
+        # init_span = self._get_span(client_spans, f"mcp {McpMethodNameValues.INITIALIZE.value}")
+        # self.assertIsNotNone(init_span.attributes.get(MCP_PROTOCOL_VERSION))
+        #
+        # client_notif_init_span = self._get_span(
+        #     client_spans, f"mcp {McpMethodNameValues.NOTIFICATIONS_INITIALIZED.value}"
+        # )
+        #
+        # self.assertEqual(init_span.kind, SpanKind.CLIENT)
+        # self._assert_span_attrs(
+        #     init_span, {MCP_METHOD_NAME: McpMethodNameValues.INITIALIZE.value, NETWORK_TRANSPORT: expected_transport}
+        # )
+        #
+        # self.assertEqual(client_notif_init_span.kind, SpanKind.CLIENT)
+        # self._assert_span_attrs(
+        #     client_notif_init_span,
+        #     {
+        #         MCP_METHOD_NAME: McpMethodNameValues.NOTIFICATIONS_INITIALIZED.value,
+        #         NETWORK_TRANSPORT: expected_transport,
+        #     },
+        # )
+        #
+        # server_init_span = self._get_span(server_spans, f"mcp {McpMethodNameValues.NOTIFICATIONS_INITIALIZED.value}")
+        # self.assertEqual(server_init_span.kind, ProtoSpan.SpanKind.SPAN_KIND_SERVER)
+        # self._assert_span_attrs(
+        #     server_init_span, {MCP_METHOD_NAME: McpMethodNameValues.NOTIFICATIONS_INITIALIZED.value}
+        # )
+        # self._assert_no_attr(server_init_span, NETWORK_TRANSPORT)
+        # self._assert_context_propagation(client_notif_init_span, server_init_span)
 
-        self.assertEqual(init_span.kind, SpanKind.CLIENT)
-        self._assert_span_attrs(
-            init_span, {MCP_METHOD_NAME: McpMethodNameValues.INITIALIZE.value, NETWORK_TRANSPORT: expected_transport}
-        )
-
-        self.assertEqual(client_notif_init_span.kind, SpanKind.CLIENT)
-        self._assert_span_attrs(
-            client_notif_init_span,
-            {
-                MCP_METHOD_NAME: McpMethodNameValues.NOTIFICATIONS_INITIALIZED.value,
-                NETWORK_TRANSPORT: expected_transport,
-            },
-        )
-
-        server_init_span = self._get_span(server_spans, f"mcp {McpMethodNameValues.NOTIFICATIONS_INITIALIZED.value}")
-        self.assertEqual(server_init_span.kind, ProtoSpan.SpanKind.SPAN_KIND_SERVER)
-        self._assert_span_attrs(
-            server_init_span, {MCP_METHOD_NAME: McpMethodNameValues.NOTIFICATIONS_INITIALIZED.value}
-        )
-        self._assert_no_attr(server_init_span, NETWORK_TRANSPORT)
-        self._assert_context_propagation(client_notif_init_span, server_init_span)
-
-        client_op_spans = [init_span, client_notif_init_span]
+        client_op_spans = []
 
         if operation_span_name:
             client_op_span = self._get_span(client_spans, operation_span_name)
@@ -428,30 +432,46 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
         self.assertIsNotNone(server_span.attributes.get(CLIENT_ADDRESS))
         self.assertIsNotNone(server_span.attributes.get(CLIENT_PORT))
 
-    def test_http_span_parented_under_mcp_request(self):
+    def test_http_span_suppression(self):
+        for suppress_value, expect_post_spans in [("false", True), ("true", False), (None, False)]:
+            label = f"suppress={suppress_value}" if suppress_value else "suppress=default"
+            with self.subTest(label):
+                self.instrumentor.uninstrument()
+                self.span_exporter.clear()
 
-        HTTPXClientInstrumentor().instrument(tracer_provider=self.tracer_provider)
-        try:
+                patch_env = {}
+                if suppress_value is not None:
+                    patch_env[OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION] = suppress_value
 
-            async def run(session):
-                await session.call_tool("hello", {"name": "World"})
+                with unittest.mock.patch.dict(os.environ, patch_env):
+                    if suppress_value is None:
+                        os.environ.pop(OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION, None)
 
-            asyncio.run(self._run_http_inprocess(run))
-            spans = self.span_exporter.get_finished_spans()
+                    self.instrumentor.instrument(tracer_provider=self.tracer_provider, propagators=self.propagator)
+                    self.server = self._create_server()
+                    HTTPXClientInstrumentor().instrument(tracer_provider=self.tracer_provider)
+                    try:
 
-            tool_span = next(s for s in spans if s.name == "mcp tools/call hello" and s.kind == SpanKind.CLIENT)
-            post_spans = [s for s in spans if s.name == "POST" and s.kind == SpanKind.CLIENT]
+                        async def run(session):
+                            await session.call_tool("hello", {"name": "World"})
 
-            self.assertTrue(len(post_spans) > 0, "Expected at least one httpx POST span")
+                        asyncio.run(self._run_http_inprocess(run))
+                        spans = self.span_exporter.get_finished_spans()
 
-            tool_span_id = format(tool_span.context.span_id, "016x")
-            parented_posts = [s for s in post_spans if format(s.parent.span_id, "016x") == tool_span_id]
-            self.assertTrue(
-                len(parented_posts) > 0,
-                "httpx POST span should be parented under MCP tool call span",
-            )
-        finally:
-            HTTPXClientInstrumentor().uninstrument()
+                        tool_span = next(
+                            s for s in spans if s.name == "mcp tools/call hello" and s.kind == SpanKind.CLIENT
+                        )
+                        post_spans = [s for s in spans if s.name == "POST" and s.kind == SpanKind.CLIENT]
+
+                        if expect_post_spans:
+                            self.assertTrue(len(post_spans) > 0, "Expected httpx POST spans when unsuppressed")
+                            tool_span_id = format(tool_span.context.span_id, "016x")
+                            parented_posts = [s for s in post_spans if format(s.parent.span_id, "016x") == tool_span_id]
+                            self.assertTrue(len(parented_posts) > 0, "POST span should parent under MCP tool call")
+                        else:
+                            self.assertEqual(len(post_spans), 0, "Expected no httpx POST spans when suppressed")
+                    finally:
+                        HTTPXClientInstrumentor().uninstrument()
 
     def test_mcp_respects_active_parent_span(self):
         tracer = get_tracer("test", tracer_provider=self.tracer_provider)
