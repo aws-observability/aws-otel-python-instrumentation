@@ -22,8 +22,8 @@ from llama_index.core.tools import BaseTool
 from llama_index.core.tools.types import ToolOutput
 from pydantic import PrivateAttr
 
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import skip_instrumentation_if_suppressed
 from opentelemetry import context as context_api
-from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
 from opentelemetry.trace import SpanKind, Tracer, set_span_in_context
 
 from ._span import (  # noqa: F401  # pylint: disable=unused-import
@@ -119,6 +119,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         method = id_.partition("-")[0].rpartition(".")[-1]
         return method not in _ALLOWED_METHODS
 
+    @skip_instrumentation_if_suppressed
     def new_span(
         self,
         id_: str,
@@ -128,9 +129,6 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         tags: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
     ) -> Optional[_Span]:
-        if context_api.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
-            return None
-
         with self.lock:
             parent = self.open_spans.get(parent_span_id) if parent_span_id else None
 
@@ -167,6 +165,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
 
         return span
 
+    @skip_instrumentation_if_suppressed
     def prepare_to_exit_span(
         self,
         id_: str,
@@ -175,8 +174,6 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         result: Optional[Any] = None,
         **kwargs: Any,
     ) -> Any:
-        if context_api.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
-            return None
         with self.lock:
             span = self.open_spans.get(id_)
         if not span:
@@ -189,6 +186,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         span.end()
         return span
 
+    @skip_instrumentation_if_suppressed
     def prepare_to_drop_span(
         self,
         id_: str,
@@ -197,8 +195,6 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         err: Optional[BaseException] = None,
         **kwargs: Any,
     ) -> Any:
-        if context_api.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
-            return None
         with self.lock:
             span = self.open_spans.get(id_)
         if not span:
@@ -217,9 +213,8 @@ class EventHandler(BaseEventHandler, extra="allow"):
         super().__init__()
         self._span_handler = span_handler
 
+    @skip_instrumentation_if_suppressed
     def handle(self, event: BaseEvent, **kwargs: Any) -> Any:
-        if context_api.get_value(_SUPPRESS_INSTRUMENTATION_KEY):
-            return None
         if not event.span_id:
             return event
         span = self._span_handler.open_spans.get(event.span_id)
