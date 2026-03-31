@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import os
 import urllib.request
+
+os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
 
 _OTEL_SCHEMA_BASE = "https://opentelemetry.io/docs/specs/semconv"
 _SCHEMA_CACHE: dict = {}

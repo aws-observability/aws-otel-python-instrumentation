@@ -1,6 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+# flake8: noqa: E402
+# pylint: disable=wrong-import-position
 import asyncio
 import json
 import os
@@ -14,8 +16,6 @@ from conftest import validate_otel_genai_schema
 
 if sys.version_info < (3, 10):
     raise unittest.SkipTest("crewai requires >=3.10")
-
-os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
 
 from crewai import LLM, Agent, Crew, Task
 from crewai.tools import tool
