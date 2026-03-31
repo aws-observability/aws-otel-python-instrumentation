@@ -15,6 +15,8 @@ from conftest import validate_otel_genai_schema
 if sys.version_info < (3, 10):
     raise unittest.SkipTest("crewai requires >=3.10")
 
+os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
+
 from crewai import LLM, Agent, Crew, Task
 from crewai.tools import tool
 
