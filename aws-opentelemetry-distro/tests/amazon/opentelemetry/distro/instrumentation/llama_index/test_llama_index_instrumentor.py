@@ -7,6 +7,7 @@ import json
 import unittest
 from unittest.mock import Mock
 
+from conftest import validate_otel_genai_schema
 from llama_index.core.base.llms.types import ChatMessage, ChatResponse, CompletionResponse, MessageRole
 from llama_index.core.tools import FunctionTool
 from llama_index.core.tools.types import ToolOutput
@@ -43,9 +44,6 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
 
 def _has_module(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
-
-
-from conftest import validate_otel_genai_schema
 
 
 class TestLlamaIndexInstrumentor(unittest.TestCase):
