@@ -1,13 +1,21 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+
+# flake8: noqa: E402
+# pylint: disable=wrong-import-position
 import importlib
 import importlib.util
 import inspect
 import json
+import sys
 import unittest
 from unittest.mock import Mock
 
 from conftest import validate_otel_genai_schema
+
+if sys.version_info < (3, 10):
+    raise unittest.SkipTest("llama-index requires Python >= 3.10")
+
 from llama_index.core.base.llms.types import ChatMessage, ChatResponse, CompletionResponse, MessageRole
 from llama_index.core.tools import FunctionTool
 from llama_index.core.tools.types import ToolOutput
