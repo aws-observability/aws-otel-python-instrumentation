@@ -43,5 +43,5 @@ class GenAiNestedClientSpanProcessor(SpanProcessor):
     def shutdown(self) -> None:
         self._has_gen_ai_client_child.clear()
 
-    def force_flush(self, timeout_millis: int = 30000) -> bool:
+    def force_flush(self, timeout_millis: int = 30000) -> bool:  # pylint: disable=no-self-use
         return True
