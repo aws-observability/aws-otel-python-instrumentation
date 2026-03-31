@@ -61,6 +61,7 @@ from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_r
 )
 from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter import OTLPAwsLogRecordExporter
 from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
+from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAiNestedClientSpanProcessor
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler._aws_xray_sampling_client import _AwsXRaySamplingClient
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
@@ -494,12 +495,14 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
         os.environ["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] = "https://xray.us-east-1.amazonaws.com/v1/traces"
         _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
-        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 2)
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 3)
 
         first_processor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
         self.assertIsInstance(first_processor, BatchUnsampledSpanProcessor)
         second_processor = mock_tracer_provider.add_span_processor.call_args_list[1].args[0]
-        self.assertIsInstance(second_processor, BaggageSpanProcessor)
+        self.assertIsInstance(second_processor, GenAiNestedClientSpanProcessor)
+        third_processor = mock_tracer_provider.add_span_processor.call_args_list[2].args[0]
+        self.assertIsInstance(third_processor, BaggageSpanProcessor)
 
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
         os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", None)
@@ -902,13 +905,14 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.setdefault("AGENT_OBSERVABILITY_ENABLED", "true")
         os.environ.setdefault("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "https://xray.us-east-1.amazonaws.com/v1/traces")
         _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
-        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 4)
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 5)
 
         processors = [call.args[0] for call in mock_tracer_provider.add_span_processor.call_args_list]
         self.assertIsInstance(processors[0], BatchUnsampledSpanProcessor)
-        self.assertIsInstance(processors[1], BaggageSpanProcessor)
-        self.assertIsInstance(processors[2], AttributePropagatingSpanProcessor)
-        self.assertIsInstance(processors[3], AwsSpanMetricsProcessor)
+        self.assertIsInstance(processors[1], GenAiNestedClientSpanProcessor)
+        self.assertIsInstance(processors[2], BaggageSpanProcessor)
+        self.assertIsInstance(processors[3], AttributePropagatingSpanProcessor)
+        self.assertIsInstance(processors[4], AwsSpanMetricsProcessor)
 
         os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
 

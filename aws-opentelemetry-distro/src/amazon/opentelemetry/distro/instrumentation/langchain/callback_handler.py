@@ -114,7 +114,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             f"{GenAiOperationNameValues.CHAT.value} {model_name}" if model_name else GenAiOperationNameValues.CHAT.value
         )
 
-        span: Span = self._start_span(run_id, parent_run_id, span_name)
+        span: Span = self._start_span(run_id, parent_run_id, span_name, kind=SpanKind.CLIENT)
 
         self._set_langgraph_span_attributes(span, metadata)
         self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
@@ -147,7 +147,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             if model_name
             else GenAiOperationNameValues.TEXT_COMPLETION.value
         )
-        span: Span = self._start_span(run_id, parent_run_id, span_name)
+        span: Span = self._start_span(run_id, parent_run_id, span_name, kind=SpanKind.CLIENT)
 
         self._set_langgraph_span_attributes(span, metadata)
         self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
