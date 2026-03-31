@@ -1,6 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+# flake8: noqa: E402
+# pylint: disable=wrong-import-position
 import asyncio
 import json
 import os
@@ -9,6 +11,14 @@ import unittest
 from typing import Any, Dict, Optional, Sequence
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
+
+from conftest import validate_otel_genai_schema
+
+if sys.version_info < (3, 10):
+    raise unittest.SkipTest("crewai requires >=3.10")
+
+from crewai import LLM, Agent, Crew, Task
+from crewai.tools import tool
 
 from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumentor
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
@@ -36,36 +46,10 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_TYPE,
 )
 
-_OTEL_SCHEMA_BASE = "https://opentelemetry.io/docs/specs/semconv/gen-ai"
-_SCHEMA_CACHE: dict = {}
-
-
-def _validate_otel_schema(data: list, schema_name: str) -> None:
-    import urllib.request  # pylint: disable=import-outside-toplevel
-
-    import jsonschema  # pylint: disable=import-outside-toplevel
-
-    if schema_name not in _SCHEMA_CACHE:
-        url = f"{_OTEL_SCHEMA_BASE}/{schema_name}.json"
-        with urllib.request.urlopen(url) as resp:
-            _SCHEMA_CACHE[schema_name] = json.loads(resp.read())
-    jsonschema.validate(data, _SCHEMA_CACHE[schema_name])
-
 
 # https://pypi.org/project/crewai/
-@unittest.skipIf(sys.version_info < (3, 10) or sys.version_info >= (3, 14), "crewai requires >=3.10, <3.14")
 class TestCrewAIInstrumentor(TestCase):
     def setUp(self):
-        # pylint: disable=import-outside-toplevel
-        from crewai import LLM, Agent, Crew, Task
-        from crewai.tools import tool
-
-        self.LLM = LLM
-        self.Agent = Agent
-        self.Crew = Crew
-        self.Task = Task
-        self.tool = tool
-
         self._env_backup = {}
         self._set_env("CREWAI_DISABLE_TELEMETRY", "true")
         self._set_env("OPENAI_API_KEY", "fake-key")
@@ -106,14 +90,14 @@ class TestCrewAIInstrumentor(TestCase):
         self._run_crew_kickoff_test("anthropic/claude-3-sonnet-20240229", "anthropic", "claude-3-sonnet-20240229")
 
     def test_crew_kickoff_error_handling(self):
-        mock_llm = MagicMock(spec=self.LLM)
+        mock_llm = MagicMock(spec=LLM)
         mock_llm.provider = "openai"
         mock_llm.model = "gpt-4"
         mock_llm.temperature = 0.7
         mock_llm.max_tokens = 1024
         mock_llm.call.side_effect = RuntimeError("LLM call failed")
 
-        with patch.object(self.LLM, "__new__", return_value=mock_llm):
+        with patch.object(LLM, "__new__", return_value=mock_llm):
             crew = self._create_test_crew("openai/gpt-4")
             with self.assertRaises(RuntimeError):
                 crew.kickoff()
@@ -124,7 +108,7 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertIn("LLM call failed", error_span.attributes.get(ERROR_MESSAGE, ""))
 
     def test_text_based_tool_calling(self):
-        mock_llm = MagicMock(spec=self.LLM)
+        mock_llm = MagicMock(spec=LLM)
         mock_llm.provider = "openai"
         mock_llm.model = "gpt-4"
         mock_llm.temperature = 0.7
@@ -136,7 +120,7 @@ class TestCrewAIInstrumentor(TestCase):
             "Thought: I now know the final answer\nFinal Answer: Hello! Welcome!",
         ]
 
-        with patch.object(self.LLM, "__new__", return_value=mock_llm):
+        with patch.object(LLM, "__new__", return_value=mock_llm):
             crew = self._create_test_crew("openai/gpt-4")
             crew.kickoff()
 
@@ -160,11 +144,11 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertIn(GEN_AI_TOOL_CALL_RESULT, tool_span.attributes)
 
     def test_single_agent_no_tools(self):
-        llm = self.LLM(model="openai/gpt-4", is_litellm=True)
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
         llm.supports_function_calling = lambda: True
-        agent = self.Agent(role="Simple", goal="Say hi", backstory="Simple agent.", llm=llm, tools=[])
-        task = self.Task(description="Say hi.", expected_output="A greeting.", agent=agent)
-        crew = self.Crew(name="SimpleCrew", agents=[agent], tasks=[task])
+        agent = Agent(role="Simple", goal="Say hi", backstory="Simple agent.", llm=llm, tools=[])
+        task = Task(description="Say hi.", expected_output="A greeting.", agent=agent)
+        crew = Crew(name="SimpleCrew", agents=[agent], tasks=[task])
 
         with patch("litellm.completion", return_value=self._mock_response("Final Answer: Hello!")):
             crew.kickoff()
@@ -180,21 +164,21 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_spans_all_ended()
 
     def test_single_agent_multiple_tool_calls(self):
-        @self.tool
+        @tool
         def tool_a(value: str) -> str:
             """Tool A."""
             return f"A: {value}"
 
-        @self.tool
+        @tool
         def tool_b(value: str) -> str:
             """Tool B."""
             return f"B: {value}"
 
-        llm = self.LLM(model="openai/gpt-4", is_litellm=True)
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
         llm.supports_function_calling = lambda: True
-        agent = self.Agent(role="Multi", goal="Use tools", backstory="Agent.", llm=llm, tools=[tool_a, tool_b])
-        task = self.Task(description="Use tools.", expected_output="Results.", agent=agent)
-        crew = self.Crew(name="MultiToolCrew", agents=[agent], tasks=[task])
+        agent = Agent(role="Multi", goal="Use tools", backstory="Agent.", llm=llm, tools=[tool_a, tool_b])
+        task = Task(description="Use tools.", expected_output="Results.", agent=agent)
+        crew = Crew(name="MultiToolCrew", agents=[agent], tasks=[task])
 
         with patch(
             "litellm.completion",
@@ -214,26 +198,26 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_spans_all_ended()
 
     def test_multiple_agents_sequential_tasks(self):
-        @self.tool
+        @tool
         def t1(v: str) -> str:
             """T1."""
             return f"t1:{v}"
 
-        @self.tool
+        @tool
         def t2(v: str) -> str:
             """T2."""
             return f"t2:{v}"
 
-        llm1 = self.LLM(model="openai/gpt-4", is_litellm=True)
+        llm1 = LLM(model="openai/gpt-4", is_litellm=True)
         llm1.supports_function_calling = lambda: True
-        llm2 = self.LLM(model="openai/gpt-4", is_litellm=True)
+        llm2 = LLM(model="openai/gpt-4", is_litellm=True)
         llm2.supports_function_calling = lambda: True
 
-        a1 = self.Agent(role="A1", goal="Task1", backstory="First.", llm=llm1, tools=[t1])
-        a2 = self.Agent(role="A2", goal="Task2", backstory="Second.", llm=llm2, tools=[t2])
-        task1 = self.Task(description="Do task1.", expected_output="R1.", agent=a1)
-        task2 = self.Task(description="Do task2.", expected_output="R2.", agent=a2)
-        crew = self.Crew(name="MultiAgent", agents=[a1, a2], tasks=[task1, task2])
+        a1 = Agent(role="A1", goal="Task1", backstory="First.", llm=llm1, tools=[t1])
+        a2 = Agent(role="A2", goal="Task2", backstory="Second.", llm=llm2, tools=[t2])
+        task1 = Task(description="Do task1.", expected_output="R1.", agent=a1)
+        task2 = Task(description="Do task2.", expected_output="R2.", agent=a2)
+        crew = Crew(name="MultiAgent", agents=[a1, a2], tasks=[task1, task2])
 
         with patch(
             "litellm.completion",
@@ -258,13 +242,13 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_spans_all_ended()
 
     def test_multiple_agents_shared_llm(self):
-        shared_llm = self.LLM(model="openai/gpt-4", is_litellm=True)
+        shared_llm = LLM(model="openai/gpt-4", is_litellm=True)
         shared_llm.supports_function_calling = lambda: True
-        a1 = self.Agent(role="Shared1", goal="G1", backstory="S1.", llm=shared_llm, tools=[])
-        a2 = self.Agent(role="Shared2", goal="G2", backstory="S2.", llm=shared_llm, tools=[])
-        task1 = self.Task(description="T1.", expected_output="R1.", agent=a1)
-        task2 = self.Task(description="T2.", expected_output="R2.", agent=a2)
-        crew = self.Crew(name="SharedLLM", agents=[a1, a2], tasks=[task1, task2])
+        a1 = Agent(role="Shared1", goal="G1", backstory="S1.", llm=shared_llm, tools=[])
+        a2 = Agent(role="Shared2", goal="G2", backstory="S2.", llm=shared_llm, tools=[])
+        task1 = Task(description="T1.", expected_output="R1.", agent=a1)
+        task2 = Task(description="T2.", expected_output="R2.", agent=a2)
+        crew = Crew(name="SharedLLM", agents=[a1, a2], tasks=[task1, task2])
 
         with patch(
             "litellm.completion",
@@ -282,11 +266,11 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_spans_all_ended()
 
     def test_llm_call_failure(self):
-        llm = self.LLM(model="openai/gpt-4", is_litellm=True)
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
         llm.supports_function_calling = lambda: True
-        agent = self.Agent(role="Failing", goal="Fail", backstory="Will fail.", llm=llm, tools=[])
-        task = self.Task(description="Fail.", expected_output="N/A.", agent=agent)
-        crew = self.Crew(name="FailCrew", agents=[agent], tasks=[task])
+        agent = Agent(role="Failing", goal="Fail", backstory="Will fail.", llm=llm, tools=[])
+        task = Task(description="Fail.", expected_output="N/A.", agent=agent)
+        crew = Crew(name="FailCrew", agents=[agent], tasks=[task])
 
         with patch("litellm.completion", side_effect=RuntimeError("Service unavailable")):
             with self.assertRaises(RuntimeError):
@@ -298,16 +282,16 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_spans_all_ended()
 
     def test_tool_execution_error(self):
-        @self.tool
+        @tool
         def bad_tool(value: str) -> str:
             """A tool that fails."""
             raise ValueError(f"Tool failed: {value}")
 
-        llm = self.LLM(model="openai/gpt-4", is_litellm=True)
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
         llm.supports_function_calling = lambda: True
-        agent = self.Agent(role="ToolErr", goal="Handle errors", backstory="Agent.", llm=llm, tools=[bad_tool])
-        task = self.Task(description="Use bad tool.", expected_output="Result.", agent=agent)
-        crew = self.Crew(name="ToolErrCrew", agents=[agent], tasks=[task])
+        agent = Agent(role="ToolErr", goal="Handle errors", backstory="Agent.", llm=llm, tools=[bad_tool])
+        task = Task(description="Use bad tool.", expected_output="Result.", agent=agent)
+        crew = Crew(name="ToolErrCrew", agents=[agent], tasks=[task])
 
         with patch(
             "litellm.completion",
@@ -323,17 +307,17 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_spans_all_ended()
 
     def test_large_message_payloads(self):
-        @self.tool
+        @tool
         def big_tool(size: int) -> str:
             """Returns large data."""
             return "X" * size
 
-        llm = self.LLM(model="openai/gpt-4", is_litellm=True)
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
         llm.supports_function_calling = lambda: True
         large_args = json.dumps({"size": 10000, "extra": "Y" * 5000})
-        agent = self.Agent(role="BigData", goal="Handle big data", backstory="Agent.", llm=llm, tools=[big_tool])
-        task = self.Task(description="Big data.", expected_output="Result.", agent=agent)
-        crew = self.Crew(name="BigCrew", agents=[agent], tasks=[task])
+        agent = Agent(role="BigData", goal="Handle big data", backstory="Agent.", llm=llm, tools=[big_tool])
+        task = Task(description="Big data.", expected_output="Result.", agent=agent)
+        crew = Crew(name="BigCrew", agents=[agent], tasks=[task])
 
         with patch(
             "litellm.completion",
@@ -351,16 +335,16 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_spans_all_ended()
 
     def test_multiple_sequential_crew_kickoffs(self):
-        @self.tool
+        @tool
         def seq_tool(v: str) -> str:
             """Sequential tool."""
             return f"seq:{v}"
 
-        llm = self.LLM(model="openai/gpt-4", is_litellm=True)
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
         llm.supports_function_calling = lambda: True
-        agent = self.Agent(role="Seq", goal="Run twice", backstory="Agent.", llm=llm, tools=[seq_tool])
-        task = self.Task(description="Sequential.", expected_output="Result.", agent=agent)
-        crew = self.Crew(name="SeqCrew", agents=[agent], tasks=[task])
+        agent = Agent(role="Seq", goal="Run twice", backstory="Agent.", llm=llm, tools=[seq_tool])
+        task = Task(description="Sequential.", expected_output="Result.", agent=agent)
+        crew = Crew(name="SeqCrew", agents=[agent], tasks=[task])
 
         with patch(
             "litellm.completion",
@@ -384,16 +368,16 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_spans_all_ended()
 
     def test_async_crew_kickoff(self):
-        @self.tool
+        @tool
         def async_tool(name: str) -> str:
             """Async tool."""
             return f"Hello, {name}!"
 
-        llm = self.LLM(model="openai/gpt-4", is_litellm=True)
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
         llm.supports_function_calling = lambda: True
-        agent = self.Agent(role="AsyncAgent", goal="Greet", backstory="Async.", llm=llm, tools=[async_tool])
-        task = self.Task(description="Greet.", expected_output="Greeting.", agent=agent)
-        crew = self.Crew(name="AsyncCrew", agents=[agent], tasks=[task])
+        agent = Agent(role="AsyncAgent", goal="Greet", backstory="Async.", llm=llm, tools=[async_tool])
+        task = Task(description="Greet.", expected_output="Greeting.", agent=agent)
+        crew = Crew(name="AsyncCrew", agents=[agent], tasks=[task])
 
         responses = iter(
             [
@@ -422,15 +406,15 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_spans_all_ended()
 
     def test_async_multiple_agents(self):
-        llm1 = self.LLM(model="openai/gpt-4", is_litellm=True)
+        llm1 = LLM(model="openai/gpt-4", is_litellm=True)
         llm1.supports_function_calling = lambda: True
-        llm2 = self.LLM(model="openai/gpt-4", is_litellm=True)
+        llm2 = LLM(model="openai/gpt-4", is_litellm=True)
         llm2.supports_function_calling = lambda: True
-        a1 = self.Agent(role="AsyncA1", goal="G1", backstory="A1.", llm=llm1, tools=[])
-        a2 = self.Agent(role="AsyncA2", goal="G2", backstory="A2.", llm=llm2, tools=[])
-        t1 = self.Task(description="T1.", expected_output="R1.", agent=a1)
-        t2 = self.Task(description="T2.", expected_output="R2.", agent=a2)
-        crew = self.Crew(name="AsyncMulti", agents=[a1, a2], tasks=[t1, t2])
+        a1 = Agent(role="AsyncA1", goal="G1", backstory="A1.", llm=llm1, tools=[])
+        a2 = Agent(role="AsyncA2", goal="G2", backstory="A2.", llm=llm2, tools=[])
+        t1 = Task(description="T1.", expected_output="R1.", agent=a1)
+        t2 = Task(description="T2.", expected_output="R2.", agent=a2)
+        crew = Crew(name="AsyncMulti", agents=[a1, a2], tasks=[t1, t2])
 
         responses = iter(
             [
@@ -461,15 +445,15 @@ class TestCrewAIInstrumentor(TestCase):
         test_tracer = self.tracer_provider.get_tracer("test")
         tc = self._mock_tool_call()
 
-        @self.tool
+        @tool
         def get_greeting(name: str) -> str:
             """Get a greeting message for the given name."""
             with test_tracer.start_as_current_span("custom_downstream_span"):
                 return f"Hello, {name}!"
 
-        llm = self.LLM(model=model, is_litellm=True, temperature=0.7, max_tokens=1024)
+        llm = LLM(model=model, is_litellm=True, temperature=0.7, max_tokens=1024)
         llm.supports_function_calling = lambda: True
-        agent = self.Agent(
+        agent = Agent(
             role="Greeter",
             goal="Greet the user",
             backstory="You are a friendly greeter.",
@@ -477,8 +461,8 @@ class TestCrewAIInstrumentor(TestCase):
             tools=[get_greeting],
             verbose=True,
         )
-        task = self.Task(description="Greet the user warmly.", expected_output="A friendly greeting.", agent=agent)
-        crew = self.Crew(name="GreetingCrew", agents=[agent], tasks=[task], verbose=True)
+        task = Task(description="Greet the user warmly.", expected_output="A friendly greeting.", agent=agent)
+        crew = Crew(name="GreetingCrew", agents=[agent], tasks=[task], verbose=True)
 
         with patch(
             "litellm.completion",
@@ -552,26 +536,26 @@ class TestCrewAIInstrumentor(TestCase):
         )
         self.assertIsNotNone(chat_span, f"chat {model_id} span with output not found")
         input_messages = json.loads(chat_span.attributes[GEN_AI_INPUT_MESSAGES])
-        _validate_otel_schema(input_messages, "gen-ai-input-messages")
+        validate_otel_genai_schema(input_messages, "gen-ai-input-messages")
         self.assertTrue(any(m["role"] == "user" for m in input_messages))
         system_instructions = json.loads(chat_span.attributes[GEN_AI_SYSTEM_INSTRUCTIONS])
-        _validate_otel_schema(system_instructions, "gen-ai-system-instructions")
+        validate_otel_genai_schema(system_instructions, "gen-ai-system-instructions")
         self.assertTrue(any("friendly greeter" in i.get("content", "") for i in system_instructions))
         output_messages = json.loads(chat_span.attributes[GEN_AI_OUTPUT_MESSAGES])
-        _validate_otel_schema(output_messages, "gen-ai-output-messages")
+        validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
         self.assertEqual(chat_span.attributes.get(GEN_AI_RESPONSE_MODEL), model_id)
 
     def _create_test_crew(self, model: str):
         test_tracer = self.tracer_provider.get_tracer("test")
 
-        @self.tool
+        @tool
         def get_greeting(name: str) -> str:
             """Get a greeting message for the given name."""
             with test_tracer.start_as_current_span("custom_downstream_span"):
                 return f"Hello, {name}!"
 
-        llm = self.LLM(model=model, temperature=0.7)
-        agent = self.Agent(
+        llm = LLM(model=model, temperature=0.7)
+        agent = Agent(
             role="Greeter",
             goal="Greet the user",
             backstory="You are a friendly greeter.",
@@ -579,8 +563,8 @@ class TestCrewAIInstrumentor(TestCase):
             tools=[get_greeting],
             verbose=True,
         )
-        task = self.Task(description="Greet the user warmly.", expected_output="A friendly greeting.", agent=agent)
-        return self.Crew(name="GreetingCrew", agents=[agent], tasks=[task], verbose=True)
+        task = Task(description="Greet the user warmly.", expected_output="A friendly greeting.", agent=agent)
+        return Crew(name="GreetingCrew", agents=[agent], tasks=[task], verbose=True)
 
     def _assert_span_attributes(
         self,
