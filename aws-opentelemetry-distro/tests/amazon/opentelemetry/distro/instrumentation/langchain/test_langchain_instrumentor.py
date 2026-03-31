@@ -6,6 +6,8 @@ import sys
 import unittest
 from unittest import TestCase
 
+from conftest import validate_otel_genai_schema
+
 from opentelemetry import context
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
 from opentelemetry.sdk.trace import TracerProvider
@@ -35,21 +37,6 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GenAiOperationNameValues,
 )
 from opentelemetry.trace.status import StatusCode
-
-_OTEL_SCHEMA_BASE = "https://opentelemetry.io/docs/specs/semconv/gen-ai"
-_SCHEMA_CACHE: dict = {}
-
-
-def _validate_otel_schema(data: list, schema_name: str) -> None:
-    import urllib.request
-
-    import jsonschema
-
-    if schema_name not in _SCHEMA_CACHE:
-        url = f"{_OTEL_SCHEMA_BASE}/{schema_name}.json"
-        with urllib.request.urlopen(url) as resp:
-            _SCHEMA_CACHE[schema_name] = json.loads(resp.read())
-    jsonschema.validate(data, _SCHEMA_CACHE[schema_name])
 
 
 # https://pypi.org/project/langchain/
@@ -550,13 +537,13 @@ class TestLangChainInstrumentor(TestCase):
 
         self.assertIsNotNone(span.attributes.get(GEN_AI_INPUT_MESSAGES))
         messages = json.loads(span.attributes[GEN_AI_INPUT_MESSAGES])
-        _validate_otel_schema(messages, "gen-ai-input-messages")
+        validate_otel_genai_schema(messages, "gen-ai-input-messages")
         self.assertEqual(messages[0]["role"], "user")
         self.assertEqual(messages[0]["parts"][0]["type"], "text")
 
         self.assertIsNotNone(span.attributes.get(GEN_AI_OUTPUT_MESSAGES))
         output = json.loads(span.attributes[GEN_AI_OUTPUT_MESSAGES])
-        _validate_otel_schema(output, "gen-ai-output-messages")
+        validate_otel_genai_schema(output, "gen-ai-output-messages")
         self.assertEqual(output[0]["role"], "assistant")
         self.assertEqual(output[0]["parts"][0]["type"], "text")
         self.assertIn("Done.", output[0]["parts"][0]["content"])
@@ -571,7 +558,7 @@ class TestLangChainInstrumentor(TestCase):
 
         self.assertIsNotNone(span.attributes.get(GEN_AI_SYSTEM_INSTRUCTIONS))
         instructions = json.loads(span.attributes[GEN_AI_SYSTEM_INSTRUCTIONS])
-        _validate_otel_schema(instructions, "gen-ai-system-instructions")
+        validate_otel_genai_schema(instructions, "gen-ai-system-instructions")
         self.assertEqual(instructions[0]["type"], "text")
         self.assertIn("helpful assistant", instructions[0]["content"])
 

@@ -10,6 +10,8 @@ from typing import Any, Dict, Optional, Sequence
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
+from conftest import validate_otel_genai_schema
+
 from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumentor
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -35,21 +37,6 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
 )
-
-_OTEL_SCHEMA_BASE = "https://opentelemetry.io/docs/specs/semconv/gen-ai"
-_SCHEMA_CACHE: dict = {}
-
-
-def _validate_otel_schema(data: list, schema_name: str) -> None:
-    import urllib.request  # pylint: disable=import-outside-toplevel
-
-    import jsonschema  # pylint: disable=import-outside-toplevel
-
-    if schema_name not in _SCHEMA_CACHE:
-        url = f"{_OTEL_SCHEMA_BASE}/{schema_name}.json"
-        with urllib.request.urlopen(url) as resp:
-            _SCHEMA_CACHE[schema_name] = json.loads(resp.read())
-    jsonschema.validate(data, _SCHEMA_CACHE[schema_name])
 
 
 # https://pypi.org/project/crewai/
@@ -552,13 +539,13 @@ class TestCrewAIInstrumentor(TestCase):
         )
         self.assertIsNotNone(chat_span, f"chat {model_id} span with output not found")
         input_messages = json.loads(chat_span.attributes[GEN_AI_INPUT_MESSAGES])
-        _validate_otel_schema(input_messages, "gen-ai-input-messages")
+        validate_otel_genai_schema(input_messages, "gen-ai-input-messages")
         self.assertTrue(any(m["role"] == "user" for m in input_messages))
         system_instructions = json.loads(chat_span.attributes[GEN_AI_SYSTEM_INSTRUCTIONS])
-        _validate_otel_schema(system_instructions, "gen-ai-system-instructions")
+        validate_otel_genai_schema(system_instructions, "gen-ai-system-instructions")
         self.assertTrue(any("friendly greeter" in i.get("content", "") for i in system_instructions))
         output_messages = json.loads(chat_span.attributes[GEN_AI_OUTPUT_MESSAGES])
-        _validate_otel_schema(output_messages, "gen-ai-output-messages")
+        validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
         self.assertEqual(chat_span.attributes.get(GEN_AI_RESPONSE_MODEL), model_id)
 
     def _create_test_crew(self, model: str):
