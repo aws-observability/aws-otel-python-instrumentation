@@ -12,8 +12,8 @@ from unittest.mock import MagicMock, patch
 
 from conftest import validate_otel_genai_schema
 
-if sys.version_info < (3, 10) or sys.version_info >= (3, 14):
-    raise unittest.SkipTest("crewai requires >=3.10, <3.14")
+if sys.version_info < (3, 10):
+    raise unittest.SkipTest("crewai requires >=3.10")
 
 from crewai import LLM, Agent, Crew, Task
 from crewai.tools import tool

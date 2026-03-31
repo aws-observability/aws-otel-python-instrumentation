@@ -8,8 +8,8 @@ from unittest import TestCase
 
 from conftest import validate_otel_genai_schema
 
-if sys.version_info < (3, 10) or sys.version_info >= (4, 0):
-    raise unittest.SkipTest("langchain requires >=3.10, <4.0")
+if sys.version_info < (3, 10):
+    raise unittest.SkipTest("langchain requires >=3.10")
 
 from langchain.agents import create_agent
 from langchain_core.language_models.fake import FakeListLLM
