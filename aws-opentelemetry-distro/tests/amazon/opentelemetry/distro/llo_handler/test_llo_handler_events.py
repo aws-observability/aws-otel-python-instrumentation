@@ -25,6 +25,9 @@ class TestLLOHandlerEvents(LLOHandlerTestBase):  # pylint: disable=too-many-publ
             "gen_ai.agent.actual_output": "agent output",
             "crewai.crew.tasks_output": "tasks output",
             "crewai.crew.result": "crew result",
+            "gen_ai.input.messages": "structured input messages",
+            "gen_ai.output.messages": "structured output messages",
+            "gen_ai.system_instructions": "system instructions content",
         }
 
         span = self._create_mock_span(attributes)
@@ -50,7 +53,7 @@ class TestLLOHandlerEvents(LLOHandlerTestBase):  # pylint: disable=too-many-publ
         self.assertIn("messages", event_body["output"])
 
         input_messages = event_body["input"]["messages"]
-        self.assertEqual(len(input_messages), 2)
+        self.assertEqual(len(input_messages), 4)
 
         user_prompt = next((msg for msg in input_messages if msg["content"] == "prompt content"), None)
         self.assertIsNotNone(user_prompt)
@@ -60,8 +63,18 @@ class TestLLOHandlerEvents(LLOHandlerTestBase):  # pylint: disable=too-many-publ
         self.assertIsNotNone(traceloop_input)
         self.assertEqual(traceloop_input["role"], "user")
 
+        structured_input = next((msg for msg in input_messages if msg["content"] == "structured input messages"), None)
+        self.assertIsNotNone(structured_input)
+        self.assertEqual(structured_input["role"], "user")
+
+        system_instructions = next(
+            (msg for msg in input_messages if msg["content"] == "system instructions content"), None
+        )
+        self.assertIsNotNone(system_instructions)
+        self.assertEqual(system_instructions["role"], "system")
+
         output_messages = event_body["output"]["messages"]
-        self.assertTrue(len(output_messages) >= 3)
+        self.assertTrue(len(output_messages) >= 5)
 
         completion = next((msg for msg in output_messages if msg["content"] == "completion content"), None)
         self.assertIsNotNone(completion)
@@ -70,6 +83,12 @@ class TestLLOHandlerEvents(LLOHandlerTestBase):  # pylint: disable=too-many-publ
         agent_output = next((msg for msg in output_messages if msg["content"] == "agent output"), None)
         self.assertIsNotNone(agent_output)
         self.assertEqual(agent_output["role"], "assistant")
+
+        structured_output = next(
+            (msg for msg in output_messages if msg["content"] == "structured output messages"), None
+        )
+        self.assertIsNotNone(structured_output)
+        self.assertEqual(structured_output["role"], "assistant")
 
     def test_emit_llo_attributes_multiple_frameworks(self):
         """
@@ -88,6 +107,9 @@ class TestLLOHandlerEvents(LLOHandlerTestBase):  # pylint: disable=too-many-publ
             "input.value": "How do transformers work?",
             "output.value": "Transformers are a type of neural network architecture...",
             "crewai.crew.result": "Task completed successfully",
+            "gen_ai.input.messages": "What is deep learning?",
+            "gen_ai.output.messages": "Deep learning uses neural networks with many layers...",
+            "gen_ai.system_instructions": "You are an AI tutor.",
         }
 
         span = self._create_mock_span(attributes)
@@ -113,6 +135,8 @@ class TestLLOHandlerEvents(LLOHandlerTestBase):  # pylint: disable=too-many-publ
         self.assertIn("What is machine learning?", input_contents)
         self.assertIn("Explain neural networks", input_contents)
         self.assertIn("How do transformers work?", input_contents)
+        self.assertIn("What is deep learning?", input_contents)
+        self.assertIn("You are an AI tutor.", input_contents)
 
         output_messages = event_body["output"]["messages"]
         output_contents = [msg["content"] for msg in output_messages]
@@ -121,6 +145,7 @@ class TestLLOHandlerEvents(LLOHandlerTestBase):  # pylint: disable=too-many-publ
         self.assertIn("Neural networks are computing systems...", output_contents)
         self.assertIn("Transformers are a type of neural network architecture...", output_contents)
         self.assertIn("Task completed successfully", output_contents)
+        self.assertIn("Deep learning uses neural networks with many layers...", output_contents)
 
         for msg in input_messages:
             self.assertIn(msg["role"], ["user", "system"])
