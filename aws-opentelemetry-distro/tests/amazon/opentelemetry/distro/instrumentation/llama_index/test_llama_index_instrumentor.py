@@ -1,11 +1,20 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+
+# flake8: noqa: E402
+# pylint: disable=wrong-import-position
 import importlib
 import importlib.util
 import inspect
 import json
+import sys
 import unittest
 from unittest.mock import Mock
+
+from conftest import validate_otel_genai_schema
+
+if sys.version_info < (3, 10):
+    raise unittest.SkipTest("llama-index requires Python >= 3.10")
 
 from llama_index.core.base.llms.types import ChatMessage, ChatResponse, CompletionResponse, MessageRole
 from llama_index.core.tools import FunctionTool
@@ -43,23 +52,6 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
 
 def _has_module(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
-
-
-_OTEL_SCHEMA_BASE = "https://opentelemetry.io/docs/specs/semconv/gen-ai"
-_SCHEMA_CACHE: dict = {}
-
-
-def _validate_otel_schema(data: list, schema_name: str) -> None:
-    """Validate data against OTel GenAI JSON Schema fetched from opentelemetry.io."""
-    import urllib.request
-
-    import jsonschema
-
-    if schema_name not in _SCHEMA_CACHE:
-        url = f"{_OTEL_SCHEMA_BASE}/{schema_name}.json"
-        with urllib.request.urlopen(url) as resp:
-            _SCHEMA_CACHE[schema_name] = json.loads(resp.read())
-    jsonschema.validate(data, _SCHEMA_CACHE[schema_name])
 
 
 class TestLlamaIndexInstrumentor(unittest.TestCase):
@@ -1297,7 +1289,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         raw = span._attributes.get(GEN_AI_INPUT_MESSAGES)
         self.assertIsNotNone(raw)
         messages = json.loads(raw)
-        _validate_otel_schema(messages, "gen-ai-input-messages")
+        validate_otel_genai_schema(messages, "gen-ai-input-messages")
         self.assertEqual(messages[0]["role"], "user")
         self.assertEqual(messages[0]["parts"][0]["type"], "text")
         self.assertIn("weather", messages[0]["parts"][0]["content"])
@@ -1323,7 +1315,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         raw = span._attributes.get(GEN_AI_OUTPUT_MESSAGES)
         self.assertIsNotNone(raw)
         output = json.loads(raw)
-        _validate_otel_schema(output, "gen-ai-output-messages")
+        validate_otel_genai_schema(output, "gen-ai-output-messages")
         self.assertEqual(output[0]["role"], "assistant")
         self.assertEqual(output[0]["parts"][0]["type"], "text")
         self.assertIn("sunny", output[0]["parts"][0]["content"])
@@ -1353,7 +1345,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         raw_instructions = span._attributes.get(GEN_AI_SYSTEM_INSTRUCTIONS)
         self.assertIsNotNone(raw_instructions)
         instructions = json.loads(raw_instructions)
-        _validate_otel_schema(instructions, "gen-ai-system-instructions")
+        validate_otel_genai_schema(instructions, "gen-ai-system-instructions")
         self.assertEqual(instructions[0]["type"], "text")
         self.assertIn("helpful assistant", instructions[0]["content"])
 
@@ -1361,7 +1353,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         raw_input = span._attributes.get(GEN_AI_INPUT_MESSAGES)
         self.assertIsNotNone(raw_input)
         input_msgs = json.loads(raw_input)
-        _validate_otel_schema(input_msgs, "gen-ai-input-messages")
+        validate_otel_genai_schema(input_msgs, "gen-ai-input-messages")
         self.assertEqual(len(input_msgs), 1)
         self.assertEqual(input_msgs[0]["role"], "user")
         span.end()
