@@ -129,23 +129,11 @@ class TestFlaskPatchesRealApp(TestBase):
 
     def test_flask_patches_import_error_handling(self):
         """Test Flask patches with import errors."""
-        # Test that patches handle import errors gracefully by mocking sys.modules
         import sys
+        from unittest.mock import patch
 
-        original_modules = sys.modules.copy()
-
-        try:
-            # Remove flask from sys.modules to simulate import error
-            if "flask" in sys.modules:
-                del sys.modules["flask"]
-
-            # Should not raise exception even with missing flask
+        with patch.dict(sys.modules, {"flask": None}):
             _apply_flask_instrumentation_patches()
-
-        finally:
-            # Restore original modules
-            sys.modules.clear()
-            sys.modules.update(original_modules)
 
     def test_flask_patches_view_function_decoration(self):
         """Test Flask patches view function decoration edge cases."""
@@ -217,29 +205,14 @@ class TestFlaskPatchesRealApp(TestBase):
 
     def test_flask_patches_code_correlation_import_error(self):
         """Test Flask patches when code_correlation import fails."""
-        # Mock import error for code_correlation module
         import sys
+        from unittest.mock import patch
 
-        original_modules = sys.modules.copy()
-
-        try:
-            # Remove code_correlation module to simulate import error
-            modules_to_remove = [
-                "amazon.opentelemetry.distro.code_correlation",
-                "amazon.opentelemetry.distro.code_correlation.record_code_attributes",
-            ]
-            for module in modules_to_remove:
-                if module in sys.modules:
-                    del sys.modules[module]
-
-            # Create instrumentor and apply patches - should handle import error gracefully
+        blocked = {
+            "amazon.opentelemetry.distro.code_correlation": None,
+            "amazon.opentelemetry.distro.code_correlation.record_code_attributes": None,
+        }
+        with patch.dict(sys.modules, blocked):
             instrumentor = FlaskInstrumentor()
             _apply_flask_instrumentation_patches()
-
-            # Try to trigger the patched methods
             instrumentor._instrument()
-
-        finally:
-            # Restore original modules
-            sys.modules.clear()
-            sys.modules.update(original_modules)
