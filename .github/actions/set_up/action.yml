@@ -43,6 +43,29 @@ runs:
       if: ${{ inputs.run_unit_tests == 'true' }}
       shell: bash
       run: |
-        ENV_NAME="${{ inputs.python_version }}-test-${{ inputs.package_name }}"
-        echo "Running tox env: $ENV_NAME"
-        tox -e "$ENV_NAME" -- -ra
+        PY_VERSION="${{ inputs.python_version }}"
+        ENVS=$(tox list -q | grep "^${PY_VERSION}-test-" | sed 's/ .*//' | tr '\n' ',' | sed 's/,$//' || true)
+        # TODO: remove this guard once Python 3.14 is added to tox envlist
+        if [ -z "$ENVS" ]; then
+          echo "No tox envs found for Python ${PY_VERSION}, skipping"
+          exit 0
+        fi
+        echo "Running tox envs: $ENVS"
+        tox --parallel auto --parallel-live -e "$ENVS" -- -v
+
+    - name: Combine and check coverage
+      if: ${{ inputs.run_unit_tests == 'true' }}
+      shell: bash
+      run: |
+        if ! ls .coverage.* 1>/dev/null 2>&1; then
+          echo "No coverage data found, skipping"
+          exit 0
+        fi
+        pip install coverage
+        if [ "${{ inputs.python_version }}" = "3.9" ]; then
+          RCFILE=.coveragerc-py39
+        else
+          RCFILE=.coveragerc
+        fi
+        coverage combine --rcfile=$RCFILE
+        coverage report --rcfile=$RCFILE
