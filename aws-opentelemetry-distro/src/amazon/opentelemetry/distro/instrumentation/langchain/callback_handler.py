@@ -567,6 +567,11 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
 
     @staticmethod
     def _extract_llm_provider(serialized: dict[str, Any], kwargs: dict[str, Any]) -> Optional[str]:
+        if ids := (serialized or {}).get("id", []):
+            for part in ids:
+                if provider := PROVIDER_MAP.get(part.lower()):
+                    return provider
+
         inv_type = kwargs.get("invocation_params", {}).get("_type", "")
         if inv_type:
             prefix = inv_type.split("-")[0].lower()
@@ -578,11 +583,6 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             prefix = model.split("/")[0].lower()
             if provider := PROVIDER_MAP.get(prefix):
                 return provider
-
-        if ids := (serialized or {}).get("id", []):
-            for part in ids:
-                if provider := PROVIDER_MAP.get(part.lower()):
-                    return provider
 
         return None
 
