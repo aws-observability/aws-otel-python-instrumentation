@@ -1,11 +1,30 @@
 [run]
-omit =
-    */instrumentation/crewai/*
-    */instrumentation/llama_index/*
-    */instrumentation/langchain/*
-    */instrumentation/mcp/*
+; This flag writes per-process coverage data files so subprocess coverage
+; can be combined with the main test process by pytest-cov. Works with COVERAGE_PROCESS_START in
+; tox.ini env variable
+; see: https://coverage.readthedocs.io/en/6.5.0/cmd.html#combining-data-files-coverage-combine
+parallel = true
+
+[paths]
+; Normalize installed package paths back to source tree so coverage data
+; from different tox envs can be combined into a single report
+source =
+    aws-opentelemetry-distro/src/amazon
+    .tox/3.*/lib/python*/site-packages/amazon
+    */site-packages/amazon
 
 [report]
 include_namespace_packages = true
 fail_under = 95.00
 precision = 2
+; Exclude framework instrumentation not installed on 3.9,
+; test files that share the amazon namespace, and pip build artifacts
+; so only source code is reported
+omit =
+    */instrumentation/crewai/*
+    */instrumentation/llama_index/*
+    */instrumentation/langchain/*
+    */instrumentation/mcp/*
+    */instrumentation/openai_agents/*
+    */tests/*
+    */pip-build-env-*/*
