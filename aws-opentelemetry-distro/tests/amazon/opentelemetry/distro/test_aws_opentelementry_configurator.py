@@ -932,8 +932,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         # Test with code correlation enabled - should add CodeAttributesSpanProcessor
         os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "true"
 
-        with patch("amazon.opentelemetry.distro.code_correlation.CodeAttributesSpanProcessor"), patch(
-            "amazon.opentelemetry.distro.code_correlation.code_attributes_span_processor.CodeAttributesSpanProcessor"
+        with patch(
+            "amazon.opentelemetry.distro.code_correlation.CodeAttributesSpanProcessor"
         ) as mock_code_processor_class:
             mock_code_processor_instance = MagicMock()
             mock_code_processor_class.return_value = mock_code_processor_instance
@@ -951,8 +951,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ["OTEL_AWS_APPLICATION_SIGNALS_ENABLED"] = "True"
         os.environ["OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED"] = "False"
 
-        with patch("amazon.opentelemetry.distro.code_correlation.CodeAttributesSpanProcessor"), patch(
-            "amazon.opentelemetry.distro.code_correlation.code_attributes_span_processor.CodeAttributesSpanProcessor"
+        with patch(
+            "amazon.opentelemetry.distro.code_correlation.CodeAttributesSpanProcessor"
         ) as mock_code_processor_class:
             mock_code_processor_instance = MagicMock()
             mock_code_processor_class.return_value = mock_code_processor_instance
