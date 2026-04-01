@@ -932,6 +932,13 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         # Test with code correlation enabled - should add CodeAttributesSpanProcessor
         os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "true"
 
+        import sys
+        print(f"\n[DEBUG] Python {sys.version_info}", flush=True)
+        print(f"[DEBUG] OTEL_AWS_ENHANCED_CODE_ATTRIBUTES={OTEL_AWS_ENHANCED_CODE_ATTRIBUTES!r}", flush=True)
+        print(f"[DEBUG] env var value={os.environ.get(OTEL_AWS_ENHANCED_CODE_ATTRIBUTES)!r}", flush=True)
+        print(f"[DEBUG] is_enhanced_code_attributes()={is_enhanced_code_attributes()!r}", flush=True)
+        print(f"[DEBUG] all OTEL_ vars: {[k for k in os.environ if k.startswith('OTEL_')]}", flush=True)
+
         with patch(
             "amazon.opentelemetry.distro.code_correlation.CodeAttributesSpanProcessor"
         ) as mock_code_processor_class:
