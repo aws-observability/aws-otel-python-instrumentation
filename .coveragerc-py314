@@ -1,0 +1,19 @@
+; Python 3.14 coverage config. See .coveragerc for details on shared settings.
+
+[run]
+parallel = true
+
+[paths]
+source =
+    aws-opentelemetry-distro/src/amazon
+    .tox/3.*/lib/python*/site-packages/amazon
+    */site-packages/amazon
+
+[report]
+include_namespace_packages = true
+fail_under = 95.00
+precision = 2
+omit =
+    */instrumentation/crewai/*
+    */tests/*
+    */pip-build-env-*/*

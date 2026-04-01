@@ -121,6 +121,9 @@ class TestLLOHandlerPatterns(LLOHandlerTestBase):
         self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.system.message"))
         self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.tool.message"))
         self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.choice"))
+        self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.input.messages"))
+        self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.output.messages"))
+        self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.system_instructions"))
 
     def test_is_llo_attribute_otel_genai_patterns_no_match(self):
         """
@@ -132,3 +135,8 @@ class TestLLOHandlerPatterns(LLOHandlerTestBase):
         self.assertFalse(self.llo_handler._is_llo_attribute("gen_ai.tool"))
         self.assertFalse(self.llo_handler._is_llo_attribute("gen_ai.user.message.content"))
         self.assertFalse(self.llo_handler._is_llo_attribute("gen_ai.invalid.message"))
+        self.assertFalse(self.llo_handler._is_llo_attribute("gen_ai.input"))
+        self.assertFalse(self.llo_handler._is_llo_attribute("gen_ai.output"))
+        self.assertFalse(self.llo_handler._is_llo_attribute("gen_ai.input.message"))
+        self.assertFalse(self.llo_handler._is_llo_attribute("gen_ai.output.message"))
+        self.assertFalse(self.llo_handler._is_llo_attribute("gen_ai.system_instruction"))
