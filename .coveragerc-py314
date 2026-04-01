@@ -1,5 +1,4 @@
-; Python 3.14 coverage config — see .coveragerc for details on shared settings.
-; This file only differs in the omit list (crewai is excluded on 3.14).
+; Python 3.14 coverage config. See .coveragerc for details on shared settings.
 
 [run]
 parallel = true
