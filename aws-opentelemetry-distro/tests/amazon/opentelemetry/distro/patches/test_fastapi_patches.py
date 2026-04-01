@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import sys
+from unittest.mock import patch
 
 from fastapi import APIRouter, FastAPI
 
@@ -89,24 +90,13 @@ class TestFastAPIPatchesRealApp(TestBase):
 
     def test_fastapi_patches_import_error_handling(self):
         """Test FastAPI patches with import errors."""
-        original_modules = sys.modules.copy()
-
-        try:
-            # Simulate import error
-            modules_to_remove = [
-                "fastapi.routing",
-                "amazon.opentelemetry.distro.code_correlation",
-                "opentelemetry.instrumentation.fastapi",
-            ]
-            for module in modules_to_remove:
-                if module in sys.modules:
-                    del sys.modules[module]
-
+        blocked = {
+            "fastapi.routing": None,
+            "amazon.opentelemetry.distro.code_correlation": None,
+            "opentelemetry.instrumentation.fastapi": None,
+        }
+        with patch.dict(sys.modules, blocked):
             _apply_fastapi_instrumentation_patches()
-
-        finally:
-            sys.modules.clear()
-            sys.modules.update(original_modules)
 
     def test_fastapi_patches_endpoint_decoration(self):
         """Test endpoint decoration functionality."""
@@ -142,25 +132,14 @@ class TestFastAPIPatchesRealApp(TestBase):
 
     def test_fastapi_patches_code_correlation_import_error(self):
         """Test code correlation import error handling."""
-        original_modules = sys.modules.copy()
-
-        try:
-            # Remove code_correlation module to simulate import error
-            modules_to_remove = [
-                "amazon.opentelemetry.distro.code_correlation",
-                "amazon.opentelemetry.distro.code_correlation.record_code_attributes",
-            ]
-            for module in modules_to_remove:
-                if module in sys.modules:
-                    del sys.modules[module]
-
+        blocked = {
+            "amazon.opentelemetry.distro.code_correlation": None,
+            "amazon.opentelemetry.distro.code_correlation.record_code_attributes": None,
+        }
+        with patch.dict(sys.modules, blocked):
             instrumentor = FastAPIInstrumentor()
             _apply_fastapi_instrumentation_patches()
             instrumentor._instrument()
-
-        finally:
-            sys.modules.clear()
-            sys.modules.update(original_modules)
 
     def test_fastapi_patches_double_decoration_prevention(self):
         """Test prevention of double decoration."""
