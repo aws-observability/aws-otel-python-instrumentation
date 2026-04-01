@@ -20,19 +20,28 @@ _logger = logging.getLogger(__name__)
 PROVIDER_MAP = {
     "bedrock": GenAiProviderNameValues.AWS_BEDROCK.value,
     "aws": GenAiProviderNameValues.AWS_BEDROCK.value,
+    "langchain_aws": GenAiProviderNameValues.AWS_BEDROCK.value,
     "openai": GenAiProviderNameValues.OPENAI.value,
     "anthropic": GenAiProviderNameValues.ANTHROPIC.value,
     "claude": GenAiProviderNameValues.ANTHROPIC.value,
     "azure": GenAiProviderNameValues.AZURE_AI_OPENAI.value,
     "azure_openai": GenAiProviderNameValues.AZURE_AI_OPENAI.value,
     "google": GenAiProviderNameValues.GCP_GEN_AI.value,
+    "langchain_google_genai": GenAiProviderNameValues.GCP_GEN_AI.value,
     "vertex": GenAiProviderNameValues.GCP_VERTEX_AI.value,
+    "vertexai": GenAiProviderNameValues.GCP_VERTEX_AI.value,
     "gemini": GenAiProviderNameValues.GCP_GEMINI.value,
     "cohere": GenAiProviderNameValues.COHERE.value,
+    "langchain_cohere": GenAiProviderNameValues.COHERE.value,
     "mistral": GenAiProviderNameValues.MISTRAL_AI.value,
+    "mistralai": GenAiProviderNameValues.MISTRAL_AI.value,
     "groq": GenAiProviderNameValues.GROQ.value,
+    "langchain_groq": GenAiProviderNameValues.GROQ.value,
     "deepseek": GenAiProviderNameValues.DEEPSEEK.value,
+    "langchain_deepseek": GenAiProviderNameValues.DEEPSEEK.value,
     "perplexity": GenAiProviderNameValues.PERPLEXITY.value,
+    "xai": GenAiProviderNameValues.X_AI.value,
+    "langchain_xai": GenAiProviderNameValues.X_AI.value,
 }
 
 
