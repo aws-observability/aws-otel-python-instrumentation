@@ -14,6 +14,10 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 - feat: add OpenTelemetry package version compatibility check at distro startup
   ([#694](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/694))
+- feat(llama_index-instrumentation): add llama-index to agent observability disabled instrumentations
+  ([#704](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/704))
+- fix(langchain-instrumentor): expand provider detection for all supported LLM providers
+  ([#702](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/702))
 - feat: add LLO handler support for gen_ai.input.messages, gen_ai.output.messages, and gen_ai.system_instructions
   ([#699](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/699))
 - feat: suppress redundant HTTP/ASGI and initialization spans in MCP instrumentation

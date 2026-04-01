@@ -110,12 +110,12 @@ _load._logger.setLevel(LEVELS.get(os.environ.get(OTEL_PYTHON_LOG_LEVEL, "error")
 
 AGENT_OBSERVABILITY_DISABLED_INSTRUMENTATIONS = (
     "sqlalchemy,psycopg2,pymysql,sqlite3,aiopg,asyncpg,mysql_connector,"
-    "system_metrics,google-genai,aws_crewai,aws_langchain,aws_mcp,aws_openai_agents"
+    "system_metrics,google-genai,aws_crewai,aws_langchain,aws_llama-index,aws_mcp,aws_openai_agents"
 )
 
 AWS_AGENTIC_OBSERVABILITY_DISABLED_INSTRUMENTATIONS = (
     "sqlalchemy,psycopg2,pymysql,sqlite3,aiopg,asyncpg,mysql_connector,"
-    "system_metrics,google-genai,crewai,langchain,mcp,openai_agents"
+    "system_metrics,google-genai,crewai,langchain,llama-index,llama_index,mcp,openai_agents"
 )
 
 
