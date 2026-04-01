@@ -44,12 +44,9 @@ runs:
       shell: bash
       run: |
         PY_VERSION="${{ inputs.python_version }}"
+        # we intend for new or unrecognized Python versions to fail if a new Python version is added to the test 
+        # to ensure they are not silently skipped from testing
         ENVS=$(tox list -q | grep "^${PY_VERSION}-test-" | sed 's/ .*//' | tr '\n' ',' | sed 's/,$//' || true)
-        # TODO: remove this guard once Python 3.14 is added to tox envlist
-        if [ -z "$ENVS" ]; then
-          echo "No tox envs found for Python ${PY_VERSION}, skipping"
-          exit 0
-        fi
         echo "Running tox envs: $ENVS"
         tox --parallel auto --parallel-live -e "$ENVS" -- -v
 
@@ -57,13 +54,11 @@ runs:
       if: ${{ inputs.run_unit_tests == 'true' }}
       shell: bash
       run: |
-        if ! ls .coverage.* 1>/dev/null 2>&1; then
-          echo "No coverage data found, skipping"
-          exit 0
-        fi
         pip install coverage
         if [ "${{ inputs.python_version }}" = "3.9" ]; then
           RCFILE=.coveragerc-py39
+        elif [ "${{ inputs.python_version }}" = "3.14" ]; then
+          RCFILE=.coveragerc-py314
         else
           RCFILE=.coveragerc
         fi
