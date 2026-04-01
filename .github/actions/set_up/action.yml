@@ -45,10 +45,6 @@ runs:
       run: |
         PY_VERSION="${{ inputs.python_version }}"
         ENVS=$(tox list -q | grep "^${PY_VERSION}-test-" | sed 's/ .*//' | tr '\n' ',' | sed 's/,$//' || true)
-        if [ -z "$ENVS" ]; then
-          echo "No tox envs found for Python ${PY_VERSION}, skipping"
-          exit 0
-        fi
         echo "Running tox envs: $ENVS"
         tox --parallel auto --parallel-live -e "$ENVS" -- -v
 
