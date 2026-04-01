@@ -12,12 +12,14 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
-- feat: add GenAiNestedClientSpanProcessor to deduplicate nested client spans
-  ([#698](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/698))
+- feat(llama_index-instrumentation): add llama-index to agent observability disabled instrumentations
+  ([#704](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/704))
 - fix(langchain-instrumentor): expand provider detection for all supported LLM providers
   ([#702](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/702))
 - feat: add LLO handler support for gen_ai.input.messages, gen_ai.output.messages, and gen_ai.system_instructions
   ([#699](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/699))
+- feat: add GenAiNestedClientSpanProcessor to deduplicate nested client spans
+  ([#698](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/698))
 - feat: suppress redundant HTTP/ASGI and initialization spans in MCP instrumentation
   ([#695](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/695))
 - feat: [BREAKING CHANGE] introduce AWS_AGENTIC_OBSERVABILITY_OPT_IN and refactor agent observability config
