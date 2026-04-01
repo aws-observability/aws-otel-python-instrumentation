@@ -12,12 +12,22 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix(langchain-instrumentor): expand provider detection for all supported LLM providers
+  ([#702](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/702))
+- feat: add LLO handler support for gen_ai.input.messages, gen_ai.output.messages, and gen_ai.system_instructions
+  ([#699](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/699))
+- feat: suppress redundant HTTP/ASGI and initialization spans in MCP instrumentation
+  ([#695](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/695))
+- feat: [BREAKING CHANGE] introduce AWS_AGENTIC_OBSERVABILITY_OPT_IN and refactor agent observability config
+  ([#691](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/691))
 - feat: propagate HTTP context for MCP requests and prefix all span names with mcp
   ([#683](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/683))
 - feat: add threading instrumentation dependency
   ([#685](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/685))
 - feat: add openai-agents-v2 instrumentation dependency
   ([#684](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/684))
+- feat: add BaggageSpanProcessor by default in ADOT
+  ([#687](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/687))
 - feat: Rewrite CrewAI instrumentation using Event based approach
   ([#681](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/681))
 
@@ -37,6 +47,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
   ([#658](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/658))
 - Fix AwsCloudWatchOtlpBatchLogRecordProcessor custom _export not being invoked; rename otlp_aws_logs_exporter to otlp_aws_log_record_exporter
   ([#611](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/611))
+- Add native LlamaIndex instrumentation support
+  ([#595](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/595))
 - Add native CrewAI instrumentation support
   ([#586](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/586))
 

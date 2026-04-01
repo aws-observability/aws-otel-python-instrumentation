@@ -5,7 +5,24 @@ import json
 import sys
 import unittest
 from unittest import TestCase
+from unittest.mock import patch
 
+from conftest import validate_otel_genai_schema
+
+if sys.version_info < (3, 10):
+    raise unittest.SkipTest("langchain requires >=3.10")
+
+from langchain.agents import create_agent
+from langchain_core.language_models.fake import FakeListLLM
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
+from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+from langchain_core.tools import StructuredTool, tool
+
+from amazon.opentelemetry.distro.instrumentation.langchain import LangChainInstrumentor
 from opentelemetry import context
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
 from opentelemetry.sdk.trace import TracerProvider
@@ -33,98 +50,54 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
     GenAiOperationNameValues,
+    GenAiProviderNameValues,
 )
 from opentelemetry.trace.status import StatusCode
 
-_OTEL_SCHEMA_BASE = "https://opentelemetry.io/docs/specs/semconv/gen-ai"
-_SCHEMA_CACHE: dict = {}
-
-
-def _validate_otel_schema(data: list, schema_name: str) -> None:
-    import urllib.request
-
-    import jsonschema
-
-    if schema_name not in _SCHEMA_CACHE:
-        url = f"{_OTEL_SCHEMA_BASE}/{schema_name}.json"
-        with urllib.request.urlopen(url) as resp:
-            _SCHEMA_CACHE[schema_name] = json.loads(resp.read())
-    jsonschema.validate(data, _SCHEMA_CACHE[schema_name])
-
 
 # https://pypi.org/project/langchain/
-@unittest.skipIf(sys.version_info < (3, 10) or sys.version_info >= (4, 0), "langchain requires >=3.10, <4.0")
 class TestLangChainInstrumentor(TestCase):
+
+    class FakeChatModel(GenericFakeChatModel):
+        model_id: str = "test-model-id"
+        temperature: float = 0.7
+        top_p: float = 0.9
+        max_tokens: int = 100
+
+        @property
+        def _default_params(self) -> dict:
+            return {
+                "model_id": self.model_id,
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+                "max_tokens": self.max_tokens,
+            }
+
+        @classmethod
+        def is_lc_serializable(cls) -> bool:
+            return True
+
+        @classmethod
+        def get_lc_namespace(cls):
+            return ["langchain", "chat_models", "openai"]
+
+        def bind_tools(self, tools, **kwargs):
+            return self
+
+        def with_structured_output(self, schema, **kwargs):
+            return self
+
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+            return ChatResult(
+                generations=[ChatGeneration(message=AIMessage(content="Done."))],
+                llm_output={
+                    "model_name": "test-model",
+                    "id": "test-response-id",
+                    "token_usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                },
+            )
+
     def setUp(self):
-        # pylint: disable=import-outside-toplevel
-        from langchain.agents import create_agent
-        from langchain_core.language_models.fake import FakeListLLM
-        from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-        from langchain_core.output_parsers import StrOutputParser
-        from langchain_core.outputs import ChatGeneration, ChatResult
-        from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
-        from langchain_core.runnables import RunnableLambda, RunnablePassthrough
-        from langchain_core.tools import StructuredTool, tool
-
-        from amazon.opentelemetry.distro.instrumentation.langchain import LangChainInstrumentor
-
-        self.create_agent = create_agent
-        self.FakeListLLM = FakeListLLM
-        self.AIMessage = AIMessage
-        self.HumanMessage = HumanMessage
-        self.SystemMessage = SystemMessage
-        self.StrOutputParser = StrOutputParser
-        self.ChatGeneration = ChatGeneration
-        self.ChatResult = ChatResult
-        self.ChatPromptTemplate = ChatPromptTemplate
-        self.PromptTemplate = PromptTemplate
-        self.RunnableLambda = RunnableLambda
-        self.RunnablePassthrough = RunnablePassthrough
-        self.StructuredTool = StructuredTool
-        self.tool = tool
-
-        class FakeChatModel(GenericFakeChatModel):
-            model_id: str = "test-model-id"
-            temperature: float = 0.7
-            top_p: float = 0.9
-            max_tokens: int = 100
-
-            @property
-            def _default_params(self) -> dict:
-                return {
-                    "model_id": self.model_id,
-                    "temperature": self.temperature,
-                    "top_p": self.top_p,
-                    "max_tokens": self.max_tokens,
-                }
-
-            @classmethod
-            def is_lc_serializable(cls) -> bool:
-                return True
-
-            @classmethod
-            def get_lc_namespace(cls):
-                return ["langchain", "chat_models", "openai"]
-
-            def bind_tools(self, tools, **kwargs):
-                return self
-
-            def with_structured_output(self, schema, **kwargs):
-                return self
-
-            def _generate(self, messages, stop=None, run_manager=None, **kwargs):
-                return ChatResult(
-                    generations=[ChatGeneration(message=AIMessage(content="Done."))],
-                    llm_output={
-                        "model_name": "test-model",
-                        "id": "test-response-id",
-                        "token_usage": {"prompt_tokens": 10, "completion_tokens": 20},
-                    },
-                )
-
-        self.FakeChatModel = FakeChatModel
-
         try:
             from langchain.agents import AgentType, initialize_agent
 
@@ -154,26 +127,26 @@ class TestLangChainInstrumentor(TestCase):
     def test_suppressed_instrumentation_generates_no_spans(self):
         token = context.attach(context.set_value(_SUPPRESS_INSTRUMENTATION_KEY, True))
         try:
-            self.FakeChatModel(messages=iter([self.AIMessage(content="Done.")])).invoke("test")
-            self.FakeListLLM(responses=["hello"]).invoke("test")
-            self.StructuredTool.from_function(func=lambda: "ok", name="t", description="d").invoke({})
-            (
-                self.RunnableLambda(lambda x: x) | self.FakeChatModel(messages=iter([self.AIMessage(content="Done.")]))
-            ).invoke("test")
+            self.FakeChatModel(messages=iter([AIMessage(content="Done.")])).invoke("test")
+            FakeListLLM(responses=["hello"]).invoke("test")
+            StructuredTool.from_function(func=lambda: "ok", name="t", description="d").invoke({})
+            (RunnableLambda(lambda x: x) | self.FakeChatModel(messages=iter([AIMessage(content="Done.")]))).invoke(
+                "test"
+            )
         finally:
             context.detach(token)
 
         self.assertEqual(len(self.span_exporter.get_finished_spans()), 0)
 
     def test_chat_model_span_has_all_attributes(self):
-        llm = self.FakeChatModel(messages=iter([self.AIMessage(content="Hello!")]))
+        llm = self.FakeChatModel(messages=iter([AIMessage(content="Hello!")]))
         llm.invoke("Say hello")
 
         spans = self.span_exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
         span = spans[0]
 
-        self.assertIn("invoke_model", span.name)
+        self.assertIn("chat", span.name)
         self.assertEqual(span.attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.CHAT.value)
         self.assertEqual(span.attributes[GEN_AI_PROVIDER_NAME], "openai")
 
@@ -202,14 +175,14 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 20)
 
     def test_create_agent_creates_invoke_agent_span(self):
-        @self.tool
+        @tool
         def get_weather(city: str) -> str:
             """Get weather for a city."""
             return f"Weather in {city}: sunny"
 
-        llm = self.FakeChatModel(messages=iter([self.AIMessage(content="Done.")]))
+        llm = self.FakeChatModel(messages=iter([AIMessage(content="Done.")]))
         tools = [get_weather]
-        agent = self.create_agent(llm, tools, name="TestAgent")
+        agent = create_agent(llm, tools, name="TestAgent")
 
         agent.invoke({"messages": [("human", "What's the weather in Paris?")]})
 
@@ -224,9 +197,7 @@ class TestLangChainInstrumentor(TestCase):
         def add_numbers(a: int, b: int) -> int:
             return a + b
 
-        add_tool = self.StructuredTool.from_function(
-            func=add_numbers, name="add_numbers", description="Add two numbers"
-        )
+        add_tool = StructuredTool.from_function(func=add_numbers, name="add_numbers", description="Add two numbers")
         result = add_tool.invoke({"a": 1, "b": 2})
 
         spans = self.span_exporter.get_finished_spans()
@@ -243,17 +214,17 @@ class TestLangChainInstrumentor(TestCase):
 
     def test_internal_chains_suppressed(self):
         chain_factories = [
-            ("RunnableLambda", lambda llm: self.RunnableLambda(lambda x: x) | llm),
-            ("RunnablePassthrough", lambda llm: self.RunnablePassthrough() | llm),
-            ("RunnableSequence", lambda llm: self.RunnableLambda(lambda x: x) | self.RunnableLambda(lambda x: x) | llm),
-            ("PromptTemplate", lambda llm: self.PromptTemplate.from_template("{input}") | llm),
-            ("ChatPromptTemplate", lambda llm: self.ChatPromptTemplate.from_template("{input}") | llm),
-            ("StrOutputParser", lambda llm: llm | self.StrOutputParser()),
+            ("RunnableLambda", lambda llm: RunnableLambda(lambda x: x) | llm),
+            ("RunnablePassthrough", lambda llm: RunnablePassthrough() | llm),
+            ("RunnableSequence", lambda llm: RunnableLambda(lambda x: x) | RunnableLambda(lambda x: x) | llm),
+            ("PromptTemplate", lambda llm: PromptTemplate.from_template("{input}") | llm),
+            ("ChatPromptTemplate", lambda llm: ChatPromptTemplate.from_template("{input}") | llm),
+            ("StrOutputParser", lambda llm: llm | StrOutputParser()),
         ]
         for name, factory in chain_factories:
             with self.subTest(chain_type=name):
                 self.span_exporter.clear()
-                llm = self.FakeChatModel(messages=iter([self.AIMessage(content="Hello!")]))
+                llm = self.FakeChatModel(messages=iter([AIMessage(content="Hello!")]))
                 chain = factory(llm)
                 chain.invoke({"input": "hello"} if "Prompt" in name else "hello")
 
@@ -263,13 +234,13 @@ class TestLangChainInstrumentor(TestCase):
                 self.assertEqual(len(suppressed), 0, f"Internal spans should be suppressed for {name}")
 
     def test_langgraph_internal_nodes_suppressed(self):
-        @self.tool
+        @tool
         def dummy_tool() -> str:
             """Dummy tool."""
             return "done"
 
-        llm = self.FakeChatModel(messages=iter([self.AIMessage(content="Done.")]))
-        agent = self.create_agent(llm, [dummy_tool], name="TestAgent")
+        llm = self.FakeChatModel(messages=iter([AIMessage(content="Done.")]))
+        agent = create_agent(llm, [dummy_tool], name="TestAgent")
         agent.invoke({"messages": [("human", "test")]})
 
         spans = self.span_exporter.get_finished_spans()
@@ -285,7 +256,7 @@ class TestLangChainInstrumentor(TestCase):
     def test_uninstrument_removes_handler(self):
         self.instrumentor.uninstrument()
 
-        llm = self.FakeChatModel(messages=iter([self.AIMessage(content="test")]))
+        llm = self.FakeChatModel(messages=iter([AIMessage(content="test")]))
         llm.invoke("test")
 
         spans = self.span_exporter.get_finished_spans()
@@ -305,14 +276,14 @@ class TestLangChainInstrumentor(TestCase):
         spans = self.span_exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
         span = spans[0]
-        self.assertIn("invoke_model", span.name)
+        self.assertIn("chat", span.name)
         self.assertEqual(span.status.status_code, StatusCode.ERROR)
 
     def test_tool_error_sets_error_status(self):
         def failing_tool() -> str:
             raise RuntimeError("Tool failed")
 
-        fail_tool = self.StructuredTool.from_function(func=failing_tool, name="fail", description="Fails")
+        fail_tool = StructuredTool.from_function(func=failing_tool, name="fail", description="Fails")
         with self.assertRaises(RuntimeError):
             fail_tool.invoke({})
 
@@ -323,18 +294,18 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(span.status.status_code, StatusCode.ERROR)
 
     def test_chain_error_does_not_crash_instrumentation(self):
-        llm = self.FakeChatModel(messages=iter([self.AIMessage(content="Hello!")]))
-        chain = self.RunnableLambda(lambda x: x) | llm | self.RunnableLambda(lambda x: 1 / 0)
+        llm = self.FakeChatModel(messages=iter([AIMessage(content="Hello!")]))
+        chain = RunnableLambda(lambda x: x) | llm | RunnableLambda(lambda x: 1 / 0)
         with self.assertRaises(ZeroDivisionError):
             chain.invoke("test")
 
         spans = self.span_exporter.get_finished_spans()
         self.assertGreater(len(spans), 0)
-        chat_spans = [s for s in spans if "invoke_model" in s.name]
+        chat_spans = [s for s in spans if "chat" in s.name]
         self.assertEqual(len(chat_spans), 1)
 
     def test_text_completion_llm_creates_span(self):
-        llm = self.FakeListLLM(responses=["hello"])
+        llm = FakeListLLM(responses=["hello"])
         llm.invoke("test")
 
         spans = self.span_exporter.get_finished_spans()
@@ -343,30 +314,90 @@ class TestLangChainInstrumentor(TestCase):
         self.assertIn("text_completion", span.name)
         self.assertEqual(span.attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.TEXT_COMPLETION.value)
 
-    def test_provider_extracted_from_model_id_prefix(self):
+    def test_provider_detection_from_langchain_models(self):
+        from langchain_anthropic import ChatAnthropic
+        from langchain_aws import ChatBedrock, ChatBedrockConverse
+        from langchain_cohere import ChatCohere
+        from langchain_deepseek import ChatDeepSeek
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        from langchain_google_vertexai import ChatVertexAI
+        from langchain_groq import ChatGroq
+        from langchain_mistralai import ChatMistralAI
+        from langchain_openai import AzureChatOpenAI, ChatOpenAI
+        from langchain_xai import ChatXAI
+
+        fake_result = ChatResult(
+            generations=[ChatGeneration(message=AIMessage(content="ok"))],
+            llm_output={
+                "model_name": "test",
+                "token_usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            },
+        )
+
+        cases = [
+            (ChatBedrock, {"model_id": "test", "region_name": "us-east-1"}, GenAiProviderNameValues.AWS_BEDROCK.value),
+            (
+                ChatBedrockConverse,
+                {"model": "test", "region_name": "us-east-1"},
+                GenAiProviderNameValues.AWS_BEDROCK.value,
+            ),
+            (ChatOpenAI, {"api_key": "fake"}, GenAiProviderNameValues.OPENAI.value),
+            (
+                AzureChatOpenAI,
+                {"api_key": "fake", "azure_endpoint": "https://fake.openai.azure.com", "api_version": "2024-01-01"},
+                GenAiProviderNameValues.AZURE_AI_OPENAI.value,
+            ),
+            (
+                ChatAnthropic,
+                {"anthropic_api_key": "fake", "model_name": "claude-3"},
+                GenAiProviderNameValues.ANTHROPIC.value,
+            ),
+            (
+                ChatGoogleGenerativeAI,
+                {"google_api_key": "fake", "model": "gemini-pro"},
+                GenAiProviderNameValues.GCP_GEN_AI.value,
+            ),
+            (ChatVertexAI, {"project": "fake", "model": "gemini-pro"}, GenAiProviderNameValues.GCP_VERTEX_AI.value),
+            (ChatMistralAI, {"api_key": "fake", "model": "test"}, GenAiProviderNameValues.MISTRAL_AI.value),
+            (ChatGroq, {"api_key": "fake", "model": "test"}, GenAiProviderNameValues.GROQ.value),
+            (ChatCohere, {"cohere_api_key": "fake", "model": "test"}, GenAiProviderNameValues.COHERE.value),
+            (ChatDeepSeek, {"api_key": "fake", "model": "test"}, GenAiProviderNameValues.DEEPSEEK.value),
+            (ChatXAI, {"api_key": "fake", "model": "test"}, GenAiProviderNameValues.X_AI.value),
+        ]
+        for model_cls, init_kwargs, expected_provider in cases:
+            with self.subTest(model=model_cls.__name__):
+                self.span_exporter.clear()
+
+                llm = model_cls(**init_kwargs)
+                with patch.object(type(llm), "_generate", return_value=fake_result):
+                    llm.invoke("test")
+
+                spans = self.span_exporter.get_finished_spans()
+                chat_spans = [s for s in spans if "chat" in s.name or "text_completion" in s.name]
+                self.assertGreaterEqual(len(chat_spans), 1, f"No chat span for {model_cls.__name__}")
+                attrs = chat_spans[0].attributes
+                self.assertEqual(attrs.get(GEN_AI_PROVIDER_NAME), expected_provider)
+                self.assertEqual(attrs.get(GEN_AI_OPERATION_NAME), GenAiOperationNameValues.CHAT.value)
+                self.assertIsNotNone(attrs.get(GEN_AI_INPUT_MESSAGES))
+                self.assertIsNotNone(attrs.get(GEN_AI_OUTPUT_MESSAGES))
+                validate_otel_genai_schema(json.loads(attrs[GEN_AI_INPUT_MESSAGES]), "gen-ai-input-messages")
+                validate_otel_genai_schema(json.loads(attrs[GEN_AI_OUTPUT_MESSAGES]), "gen-ai-output-messages")
+
+    def test_provider_extracted_from_serialized_id(self):
         FakeChatModel = self.FakeChatModel
-        AIMessage = self.AIMessage
 
-        class ModelWithProvider(FakeChatModel):
-            def _get_invocation_params(self, stop=None, **kwargs):
-                return {"model_id": "anthropic/claude-3"}
-
-        llm = ModelWithProvider(messages=iter([AIMessage(content="Done.")]))
+        llm = FakeChatModel(messages=iter([AIMessage(content="Done.")]))
         llm.invoke("test")
 
         spans = self.span_exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
-        self.assertEqual(spans[0].attributes.get(GEN_AI_PROVIDER_NAME), "anthropic")
+        self.assertEqual(spans[0].attributes.get(GEN_AI_PROVIDER_NAME), "openai")
 
     def test_legacy_agent_executor_triggers_agent_callbacks(self):
         if not self.HAS_LEGACY_LANGCHAIN:
             self.skipTest("langchain_classic not available")
 
         FakeChatModel = self.FakeChatModel
-        AIMessage = self.AIMessage
-        ChatResult = self.ChatResult
-        ChatGeneration = self.ChatGeneration
-        tool = self.tool
 
         responses = iter(
             [
@@ -399,7 +430,6 @@ class TestLangChainInstrumentor(TestCase):
             self.skipTest("langchain_classic not available")
 
         FakeChatModel = self.FakeChatModel
-        tool = self.tool
 
         class FailingChatModel(FakeChatModel):
             def _generate(self, messages, stop=None, run_manager=None, **kwargs):
@@ -424,7 +454,6 @@ class TestLangChainInstrumentor(TestCase):
 
     def test_provider_from_type_prefix(self):
         FakeChatModel = self.FakeChatModel
-        AIMessage = self.AIMessage
 
         class OpenAIStyleModel(FakeChatModel):
             def _get_invocation_params(self, stop=None, **kwargs):
@@ -439,7 +468,6 @@ class TestLangChainInstrumentor(TestCase):
 
     def test_provider_from_serialized_id(self):
         FakeChatModel = self.FakeChatModel
-        AIMessage = self.AIMessage
 
         class OpenAIChatModel(FakeChatModel):
             @classmethod
@@ -455,7 +483,6 @@ class TestLangChainInstrumentor(TestCase):
 
     def test_model_id_from_invocation_params(self):
         FakeChatModel = self.FakeChatModel
-        AIMessage = self.AIMessage
 
         class ModelWithInvocationParams(FakeChatModel):
             @classmethod
@@ -473,13 +500,13 @@ class TestLangChainInstrumentor(TestCase):
         self.assertIn("custom-model-from-params", spans[0].name)
 
     def test_chat_model_propagates_to_parent_agent(self):
-        @self.tool
+        @tool
         def dummy_tool() -> str:
             """Dummy tool."""
             return "done"
 
-        llm = self.FakeChatModel(messages=iter([self.AIMessage(content="Done.")]))
-        agent = self.create_agent(llm, [dummy_tool], name="TestAgent")
+        llm = self.FakeChatModel(messages=iter([AIMessage(content="Done.")]))
+        agent = create_agent(llm, [dummy_tool], name="TestAgent")
         agent.invoke({"messages": [("human", "test")]})
 
         spans = self.span_exporter.get_finished_spans()
@@ -493,12 +520,12 @@ class TestLangChainInstrumentor(TestCase):
         if not self.HAS_LEGACY_LANGCHAIN:
             self.skipTest("langchain_classic not available")
 
-        @self.tool
+        @tool
         def search(query: str) -> str:
             """Search."""
             return "result"
 
-        llm = self.FakeListLLM(responses=["Final Answer: done"])
+        llm = FakeListLLM(responses=["Final Answer: done"])
         agent = self.initialize_agent([search], llm, agent=self.AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=False)
         try:
             agent.run("test")
@@ -519,16 +546,14 @@ class TestLangChainInstrumentor(TestCase):
             with self.subTest(agent_name=agent_name):
                 self.span_exporter.clear()
 
-                @self.tool
+                @tool
                 def dummy_tool() -> str:
                     """Dummy tool."""
                     return "done"
 
-                llm = self.FakeChatModel(messages=iter([self.AIMessage(content="Done.")]))
+                llm = self.FakeChatModel(messages=iter([AIMessage(content="Done.")]))
                 agent = (
-                    self.create_agent(llm, [dummy_tool], name=agent_name)
-                    if agent_name
-                    else self.create_agent(llm, [dummy_tool])
+                    create_agent(llm, [dummy_tool], name=agent_name) if agent_name else create_agent(llm, [dummy_tool])
                 )
                 agent.invoke({"messages": [("human", "test")]})
 
@@ -541,7 +566,7 @@ class TestLangChainInstrumentor(TestCase):
                 self.assertEqual(agent_spans[0].attributes[GEN_AI_AGENT_NAME], expected_name)
 
     def test_chat_model_records_input_and_output_messages(self):
-        llm = self.FakeChatModel(messages=iter([self.AIMessage(content="Hello!")]))
+        llm = self.FakeChatModel(messages=iter([AIMessage(content="Hello!")]))
         llm.invoke("Say hello")
 
         spans = self.span_exporter.get_finished_spans()
@@ -550,20 +575,20 @@ class TestLangChainInstrumentor(TestCase):
 
         self.assertIsNotNone(span.attributes.get(GEN_AI_INPUT_MESSAGES))
         messages = json.loads(span.attributes[GEN_AI_INPUT_MESSAGES])
-        _validate_otel_schema(messages, "gen-ai-input-messages")
+        validate_otel_genai_schema(messages, "gen-ai-input-messages")
         self.assertEqual(messages[0]["role"], "user")
         self.assertEqual(messages[0]["parts"][0]["type"], "text")
 
         self.assertIsNotNone(span.attributes.get(GEN_AI_OUTPUT_MESSAGES))
         output = json.loads(span.attributes[GEN_AI_OUTPUT_MESSAGES])
-        _validate_otel_schema(output, "gen-ai-output-messages")
+        validate_otel_genai_schema(output, "gen-ai-output-messages")
         self.assertEqual(output[0]["role"], "assistant")
         self.assertEqual(output[0]["parts"][0]["type"], "text")
         self.assertIn("Done.", output[0]["parts"][0]["content"])
 
     def test_system_instructions_schema_validation(self):
-        llm = self.FakeChatModel(messages=iter([self.AIMessage(content="Hi!")]))
-        llm.invoke([self.SystemMessage(content="You are a helpful assistant."), self.HumanMessage(content="Hello")])
+        llm = self.FakeChatModel(messages=iter([AIMessage(content="Hi!")]))
+        llm.invoke([SystemMessage(content="You are a helpful assistant."), HumanMessage(content="Hello")])
 
         spans = self.span_exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
@@ -571,12 +596,12 @@ class TestLangChainInstrumentor(TestCase):
 
         self.assertIsNotNone(span.attributes.get(GEN_AI_SYSTEM_INSTRUCTIONS))
         instructions = json.loads(span.attributes[GEN_AI_SYSTEM_INSTRUCTIONS])
-        _validate_otel_schema(instructions, "gen-ai-system-instructions")
+        validate_otel_genai_schema(instructions, "gen-ai-system-instructions")
         self.assertEqual(instructions[0]["type"], "text")
         self.assertIn("helpful assistant", instructions[0]["content"])
 
     def test_text_completion_records_prompt_and_output(self):
-        llm = self.FakeListLLM(responses=["hello"])
+        llm = FakeListLLM(responses=["hello"])
         llm.invoke("test prompt")
 
         spans = self.span_exporter.get_finished_spans()
@@ -596,13 +621,13 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(output[0]["parts"][0]["content"], "hello")
 
     def test_langgraph_attributes_on_agent_spans(self):
-        @self.tool
+        @tool
         def dummy_tool() -> str:
             """Dummy tool."""
             return "done"
 
-        llm = self.FakeChatModel(messages=iter([self.AIMessage(content="Done.")]))
-        agent = self.create_agent(llm, [dummy_tool], name="TestAgent")
+        llm = self.FakeChatModel(messages=iter([AIMessage(content="Done.")]))
+        agent = create_agent(llm, [dummy_tool], name="TestAgent")
         agent.invoke({"messages": [("human", "test")]})
 
         spans = self.span_exporter.get_finished_spans()
@@ -611,7 +636,7 @@ class TestLangChainInstrumentor(TestCase):
         # Agent spans created by langgraph should have step and node attributes
         # The exact values depend on the langgraph runtime, but we verify
         # the chat span inside the agent has the attributes set when metadata is present
-        chat_spans = [s for s in spans if "invoke_model" in s.name]
+        chat_spans = [s for s in spans if "chat" in s.name]
         self.assertGreater(len(chat_spans), 0)
 
 

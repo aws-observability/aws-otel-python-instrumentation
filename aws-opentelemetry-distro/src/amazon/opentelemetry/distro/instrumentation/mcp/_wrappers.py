@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from contextvars import Token
 from typing import Any, Callable, Coroutine, Dict, Optional, Tuple
@@ -9,6 +10,7 @@ from urllib.parse import urlparse
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import serialize_to_json_string
 from opentelemetry import context, trace
+from opentelemetry.instrumentation.utils import suppress_http_instrumentation
 from opentelemetry.propagate import get_global_textmap
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
@@ -35,6 +37,8 @@ from opentelemetry.trace import SpanKind, Status, StatusCode
 
 _LOG = logging.getLogger(__name__)
 
+OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION = "OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION"
+
 # Context key for storing client transport metadata alongside the session span.
 _TRANSPORT_KEY = context.create_key("mcp_client_transport")
 
@@ -53,6 +57,20 @@ class McpWrapper:
     def __init__(self, tracer: trace.Tracer, **kwargs: Any) -> None:
         self._tracer = tracer
         self._propagators = kwargs.get("propagators") or get_global_textmap()
+        self._should_suppress_http_spans = (
+            os.environ.get(OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION, "true").lower() == "true"
+        )
+
+    @staticmethod
+    def _should_suppress_mcp_span(message: Any) -> bool:
+        from mcp import types  # pylint: disable=import-outside-toplevel
+
+        if isinstance(
+            message, (types.ClientRequest, types.ClientNotification, types.ServerRequest, types.ServerNotification)
+        ):
+            message = message.root
+        # noisy spans most of the time
+        return isinstance(message, (types.InitializeRequest, types.InitializedNotification))
 
     @staticmethod
     def _set_mcp_attributes(span: trace.Span, message: Any, request_id: Optional[int]) -> None:
@@ -179,6 +197,9 @@ class ClientWrapper(McpWrapper):
             if not message:
                 return await wrapped(*args, **kwargs)
 
+            if self._should_suppress_http_spans and self._should_suppress_mcp_span(message):
+                return await wrapped(*args, **kwargs)
+
             span = self._tracer.start_span(name=self._CLIENT_SPAN_NAME, kind=SpanKind.CLIENT)
             ctx = trace.set_span_in_context(span)
             token = context.attach(ctx)
@@ -252,8 +273,13 @@ class ClientWrapper(McpWrapper):
                 }
             )
             try:
-                async with wrapped(*args, **kwargs) as streams:
-                    yield streams
+                if self._should_suppress_http_spans:
+                    with suppress_http_instrumentation():
+                        async with wrapped(*args, **kwargs) as streams:
+                            yield streams
+                else:
+                    async with wrapped(*args, **kwargs) as streams:
+                        yield streams
             finally:
                 session_span.end()
                 context.detach(token)
@@ -292,7 +318,11 @@ class ClientWrapper(McpWrapper):
             if ctx:
                 token = context.attach(ctx)
                 try:
-                    return await wrapped(*args, **kwargs)
+                    if self._should_suppress_http_spans:
+                        with suppress_http_instrumentation():
+                            return await wrapped(*args, **kwargs)
+                    else:
+                        return await wrapped(*args, **kwargs)
                 finally:
                     context.detach(token)
             else:
@@ -331,6 +361,25 @@ class ServerWrapper(McpWrapper):
     # initialize and notifications/initialized spans, which are handled before Server._handle_request.
     # Though we can opt out of doing so as well as believe those spans provide minimum value with added
     # complexity.
+
+    def wrap_mcp_http_sse_app_factory(self, wrapped: Callable[..., Any], instance: Any, args: Any, kwargs: Any) -> Any:
+        if not self._should_suppress_http_spans:
+            return wrapped(*args, **kwargs)
+
+        class _HttpSuppressionMiddleware:
+            def __init__(self, inner_app: Any) -> None:
+                self.app = inner_app
+
+            async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+                with suppress_http_instrumentation():
+                    await self.app(scope, receive, send)
+
+        app = wrapped(*args, **kwargs)
+        try:
+            app.add_middleware(_HttpSuppressionMiddleware)
+        except Exception:  # pylint: disable=broad-exception-caught
+            _LOG.debug("Failed to apply ASGI suppression to MCP server app", exc_info=True)
+        return app
 
     async def _wrap_server_handle_request(
         self,
@@ -394,6 +443,9 @@ class ServerWrapper(McpWrapper):
             Result from the wrapped method
         """
         if not incoming_msg:
+            return await wrapped(*args, **kwargs)
+
+        if self._should_suppress_http_spans and self._should_suppress_mcp_span(incoming_msg):
             return await wrapped(*args, **kwargs)
 
         request_id = getattr(incoming_msg, "id", None)

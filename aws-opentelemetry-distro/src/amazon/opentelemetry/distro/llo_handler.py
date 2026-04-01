@@ -138,10 +138,8 @@ LLO_PATTERNS: Dict[str, PatternConfig] = {
         "role": ROLE_USER,
         "source": "prompt",
     },
-    # OTel GenAI Semantic Convention used by the latest Strands SDK
-    # References:
-    # - OTel GenAI SemConv: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/
-    # - Strands SDK PR(introduced in v0.1.9): https://github.com/strands-agents/sdk-python/pull/319
+    # OTel GenAI Semantic Convention
+    # Reference: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/
     "gen_ai.user.message": {
         "type": PatternType.DIRECT,
         "role": ROLE_USER,
@@ -166,6 +164,21 @@ LLO_PATTERNS: Dict[str, PatternConfig] = {
         "type": PatternType.DIRECT,
         "role": ROLE_ASSISTANT,
         "source": "output",
+    },
+    "gen_ai.input.messages": {
+        "type": PatternType.DIRECT,
+        "role": ROLE_USER,
+        "source": "input",
+    },
+    "gen_ai.output.messages": {
+        "type": PatternType.DIRECT,
+        "role": ROLE_ASSISTANT,
+        "source": "output",
+    },
+    "gen_ai.system_instructions": {
+        "type": PatternType.DIRECT,
+        "role": ROLE_SYSTEM,
+        "source": "prompt",
     },
 }
 

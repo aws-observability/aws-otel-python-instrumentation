@@ -260,25 +260,25 @@ class TestCodeAttributesSpanProcessor(TestCase):
         self.assertEqual(mock_is_user_code.call_count, CodeAttributesSpanProcessor.MAX_STACK_FRAMES)
         mock_add_attributes.assert_not_called()
 
-    @patch("amazon.opentelemetry.distro.code_correlation.code_attributes_span_processor.sys._getframe")
-    def test_capture_code_attributes_getframe_oserror(self, mock_getframe):
+    def test_capture_code_attributes_getframe_oserror(self):
         """Test handling of OSError when sys._getframe is not available."""
-        mock_getframe.side_effect = OSError("sys._getframe not available")
-
         span = self.create_mock_span()
 
-        # Should not raise exception
-        self.processor._capture_code_attributes(span)
+        with patch(
+            "amazon.opentelemetry.distro.code_correlation.code_attributes_span_processor.sys._getframe",
+            side_effect=OSError("sys._getframe not available"),
+        ):
+            self.processor._capture_code_attributes(span)
 
-    @patch("amazon.opentelemetry.distro.code_correlation.code_attributes_span_processor.sys._getframe")
-    def test_capture_code_attributes_getframe_valueerror(self, mock_getframe):
+    def test_capture_code_attributes_getframe_valueerror(self):
         """Test handling of ValueError when sys._getframe is called with invalid argument."""
-        mock_getframe.side_effect = ValueError("invalid frame")
-
         span = self.create_mock_span()
 
-        # Should not raise exception
-        self.processor._capture_code_attributes(span)
+        with patch(
+            "amazon.opentelemetry.distro.code_correlation.code_attributes_span_processor.sys._getframe",
+            side_effect=ValueError("invalid frame"),
+        ):
+            self.processor._capture_code_attributes(span)
 
     @patch("amazon.opentelemetry.distro.code_correlation.code_attributes_span_processor.sys._getframe")
     @patch("amazon.opentelemetry.distro.code_correlation.code_attributes_span_processor.is_user_code")
