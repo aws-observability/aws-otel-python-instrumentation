@@ -945,7 +945,19 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             mock_code_processor_instance = MagicMock()
             mock_code_processor_class.return_value = mock_code_processor_instance
 
+            import amazon.opentelemetry.distro.code_correlation as cc_mod
+            print(f"[DEBUG] inside patch: cc_mod.CodeAttributesSpanProcessor is mock? {cc_mod.CodeAttributesSpanProcessor is mock_code_processor_class}", flush=True)
+            print(f"[DEBUG] cc_mod id: {id(cc_mod)}", flush=True)
+            print(f"[DEBUG] cc_mod.__file__: {getattr(cc_mod, '__file__', 'N/A')}", flush=True)
+            print(f"[DEBUG] cc_mod.CodeAttributesSpanProcessor: {cc_mod.CodeAttributesSpanProcessor}", flush=True)
+            print(f"[DEBUG] mock_code_processor_class: {mock_code_processor_class}", flush=True)
+            print(f"[DEBUG] add_span_processor calls before: {mock_tracer_provider.add_span_processor.call_count}", flush=True)
+
             _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
+
+            print(f"[DEBUG] add_span_processor calls after: {mock_tracer_provider.add_span_processor.call_count}", flush=True)
+            print(f"[DEBUG] add_span_processor call args: {mock_tracer_provider.add_span_processor.call_args_list}", flush=True)
+            print(f"[DEBUG] mock_code_processor_class call count: {mock_code_processor_class.call_count}", flush=True)
 
             # Verify CodeAttributesSpanProcessor was created and added
             mock_code_processor_class.assert_called_once()
