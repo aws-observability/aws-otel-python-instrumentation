@@ -44,7 +44,8 @@ runs:
       shell: bash
       run: |
         PY_VERSION="${{ inputs.python_version }}"
-        # All Python versions in the build matrix have matching tox envs, so no empty guard needed
+        # we intend for new or unrecognized Python versions to fail if a new Python version is added to the test 
+        # to ensure they are not silently skipped from testing
         ENVS=$(tox list -q | grep "^${PY_VERSION}-test-" | sed 's/ .*//' | tr '\n' ',' | sed 's/,$//' || true)
         echo "Running tox envs: $ENVS"
         tox --parallel auto --parallel-live -e "$ENVS" -- -v
