@@ -932,32 +932,13 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         # Test with code correlation enabled - should add CodeAttributesSpanProcessor
         os.environ[OTEL_AWS_ENHANCED_CODE_ATTRIBUTES] = "true"
 
-        import sys
-        print(f"\n[DEBUG] Python {sys.version_info}", flush=True)
-        print(f"[DEBUG] OTEL_AWS_ENHANCED_CODE_ATTRIBUTES={OTEL_AWS_ENHANCED_CODE_ATTRIBUTES!r}", flush=True)
-        print(f"[DEBUG] env var value={os.environ.get(OTEL_AWS_ENHANCED_CODE_ATTRIBUTES)!r}", flush=True)
-        print(f"[DEBUG] is_enhanced_code_attributes()={is_enhanced_code_attributes()!r}", flush=True)
-        print(f"[DEBUG] all OTEL_ vars: {[k for k in os.environ if k.startswith('OTEL_')]}", flush=True)
-
-        with patch(
-            "amazon.opentelemetry.distro.code_correlation.CodeAttributesSpanProcessor"
+        with patch("amazon.opentelemetry.distro.code_correlation.CodeAttributesSpanProcessor"), patch(
+            "amazon.opentelemetry.distro.code_correlation.code_attributes_span_processor.CodeAttributesSpanProcessor"
         ) as mock_code_processor_class:
             mock_code_processor_instance = MagicMock()
             mock_code_processor_class.return_value = mock_code_processor_instance
 
-            import amazon.opentelemetry.distro.code_correlation as cc_mod
-            print(f"[DEBUG] inside patch: cc_mod.CodeAttributesSpanProcessor is mock? {cc_mod.CodeAttributesSpanProcessor is mock_code_processor_class}", flush=True)
-            print(f"[DEBUG] cc_mod id: {id(cc_mod)}", flush=True)
-            print(f"[DEBUG] cc_mod.__file__: {getattr(cc_mod, '__file__', 'N/A')}", flush=True)
-            print(f"[DEBUG] cc_mod.CodeAttributesSpanProcessor: {cc_mod.CodeAttributesSpanProcessor}", flush=True)
-            print(f"[DEBUG] mock_code_processor_class: {mock_code_processor_class}", flush=True)
-            print(f"[DEBUG] add_span_processor calls before: {mock_tracer_provider.add_span_processor.call_count}", flush=True)
-
             _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
-
-            print(f"[DEBUG] add_span_processor calls after: {mock_tracer_provider.add_span_processor.call_count}", flush=True)
-            print(f"[DEBUG] add_span_processor call args: {mock_tracer_provider.add_span_processor.call_args_list}", flush=True)
-            print(f"[DEBUG] mock_code_processor_class call count: {mock_code_processor_class.call_count}", flush=True)
 
             # Verify CodeAttributesSpanProcessor was created and added
             mock_code_processor_class.assert_called_once()
@@ -970,8 +951,8 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ["OTEL_AWS_APPLICATION_SIGNALS_ENABLED"] = "True"
         os.environ["OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED"] = "False"
 
-        with patch(
-            "amazon.opentelemetry.distro.code_correlation.CodeAttributesSpanProcessor"
+        with patch("amazon.opentelemetry.distro.code_correlation.CodeAttributesSpanProcessor"), patch(
+            "amazon.opentelemetry.distro.code_correlation.code_attributes_span_processor.CodeAttributesSpanProcessor"
         ) as mock_code_processor_class:
             mock_code_processor_instance = MagicMock()
             mock_code_processor_class.return_value = mock_code_processor_instance
