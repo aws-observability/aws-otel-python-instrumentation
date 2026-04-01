@@ -52,10 +52,6 @@ runs:
       if: ${{ inputs.run_unit_tests == 'true' }}
       shell: bash
       run: |
-        if ! ls .coverage.* 1>/dev/null 2>&1; then
-          echo "No coverage data found, skipping"
-          exit 0
-        fi
         pip install coverage
         if [ "${{ inputs.python_version }}" = "3.9" ]; then
           RCFILE=.coveragerc-py39
