@@ -5,6 +5,7 @@ import json
 import sys
 import unittest
 from unittest import TestCase
+from unittest.mock import patch
 
 from conftest import validate_otel_genai_schema
 
@@ -49,6 +50,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
     GenAiOperationNameValues,
+    GenAiProviderNameValues,
 )
 from opentelemetry.trace.status import StatusCode
 
@@ -312,19 +314,84 @@ class TestLangChainInstrumentor(TestCase):
         self.assertIn("text_completion", span.name)
         self.assertEqual(span.attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.TEXT_COMPLETION.value)
 
-    def test_provider_extracted_from_model_id_prefix(self):
+    def test_provider_detection_from_langchain_models(self):
+        from langchain_anthropic import ChatAnthropic
+        from langchain_aws import ChatBedrock, ChatBedrockConverse
+        from langchain_cohere import ChatCohere
+        from langchain_deepseek import ChatDeepSeek
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        from langchain_google_vertexai import ChatVertexAI
+        from langchain_groq import ChatGroq
+        from langchain_mistralai import ChatMistralAI
+        from langchain_openai import AzureChatOpenAI, ChatOpenAI
+        from langchain_xai import ChatXAI
+
+        fake_result = ChatResult(
+            generations=[ChatGeneration(message=AIMessage(content="ok"))],
+            llm_output={
+                "model_name": "test",
+                "token_usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            },
+        )
+
+        cases = [
+            (ChatBedrock, {"model_id": "test", "region_name": "us-east-1"}, GenAiProviderNameValues.AWS_BEDROCK.value),
+            (
+                ChatBedrockConverse,
+                {"model": "test", "region_name": "us-east-1"},
+                GenAiProviderNameValues.AWS_BEDROCK.value,
+            ),
+            (ChatOpenAI, {"api_key": "fake"}, GenAiProviderNameValues.OPENAI.value),
+            (
+                AzureChatOpenAI,
+                {"api_key": "fake", "azure_endpoint": "https://fake.openai.azure.com", "api_version": "2024-01-01"},
+                GenAiProviderNameValues.AZURE_AI_OPENAI.value,
+            ),
+            (
+                ChatAnthropic,
+                {"anthropic_api_key": "fake", "model_name": "claude-3"},
+                GenAiProviderNameValues.ANTHROPIC.value,
+            ),
+            (
+                ChatGoogleGenerativeAI,
+                {"google_api_key": "fake", "model": "gemini-pro"},
+                GenAiProviderNameValues.GCP_GEN_AI.value,
+            ),
+            (ChatVertexAI, {"project": "fake", "model": "gemini-pro"}, GenAiProviderNameValues.GCP_VERTEX_AI.value),
+            (ChatMistralAI, {"api_key": "fake", "model": "test"}, GenAiProviderNameValues.MISTRAL_AI.value),
+            (ChatGroq, {"api_key": "fake", "model": "test"}, GenAiProviderNameValues.GROQ.value),
+            (ChatCohere, {"cohere_api_key": "fake", "model": "test"}, GenAiProviderNameValues.COHERE.value),
+            (ChatDeepSeek, {"api_key": "fake", "model": "test"}, GenAiProviderNameValues.DEEPSEEK.value),
+            (ChatXAI, {"api_key": "fake", "model": "test"}, GenAiProviderNameValues.X_AI.value),
+        ]
+        for model_cls, init_kwargs, expected_provider in cases:
+            with self.subTest(model=model_cls.__name__):
+                self.span_exporter.clear()
+
+                llm = model_cls(**init_kwargs)
+                with patch.object(type(llm), "_generate", return_value=fake_result):
+                    llm.invoke("test")
+
+                spans = self.span_exporter.get_finished_spans()
+                chat_spans = [s for s in spans if "chat" in s.name or "text_completion" in s.name]
+                self.assertGreaterEqual(len(chat_spans), 1, f"No chat span for {model_cls.__name__}")
+                attrs = chat_spans[0].attributes
+                self.assertEqual(attrs.get(GEN_AI_PROVIDER_NAME), expected_provider)
+                self.assertEqual(attrs.get(GEN_AI_OPERATION_NAME), GenAiOperationNameValues.CHAT.value)
+                self.assertIsNotNone(attrs.get(GEN_AI_INPUT_MESSAGES))
+                self.assertIsNotNone(attrs.get(GEN_AI_OUTPUT_MESSAGES))
+                validate_otel_genai_schema(json.loads(attrs[GEN_AI_INPUT_MESSAGES]), "gen-ai-input-messages")
+                validate_otel_genai_schema(json.loads(attrs[GEN_AI_OUTPUT_MESSAGES]), "gen-ai-output-messages")
+
+    def test_provider_extracted_from_serialized_id(self):
         FakeChatModel = self.FakeChatModel
 
-        class ModelWithProvider(FakeChatModel):
-            def _get_invocation_params(self, stop=None, **kwargs):
-                return {"model_id": "anthropic/claude-3"}
-
-        llm = ModelWithProvider(messages=iter([AIMessage(content="Done.")]))
+        llm = FakeChatModel(messages=iter([AIMessage(content="Done.")]))
         llm.invoke("test")
 
         spans = self.span_exporter.get_finished_spans()
         self.assertEqual(len(spans), 1)
-        self.assertEqual(spans[0].attributes.get(GEN_AI_PROVIDER_NAME), "anthropic")
+        self.assertEqual(spans[0].attributes.get(GEN_AI_PROVIDER_NAME), "openai")
 
     def test_legacy_agent_executor_triggers_agent_callbacks(self):
         if not self.HAS_LEGACY_LANGCHAIN:

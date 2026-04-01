@@ -14,8 +14,8 @@ from unittest.mock import MagicMock, patch
 
 from conftest import validate_otel_genai_schema
 
-if sys.version_info < (3, 10):
-    raise unittest.SkipTest("crewai requires >=3.10")
+if sys.version_info < (3, 10) or sys.version_info >= (3, 14):
+    raise unittest.SkipTest("crewai requires >=3.10, <3.14")
 
 from crewai import LLM, Agent, Crew, Task
 from crewai.tools import tool
@@ -44,6 +44,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
+    GenAiProviderNameValues,
 )
 
 
@@ -79,15 +80,40 @@ class TestCrewAIInstrumentor(TestCase):
     def test_bedrock_crew_kickoff(self):
         self._run_crew_kickoff_test(
             "bedrock/anthropic.claude-3-haiku-20240307-v1:0",
-            "aws.bedrock",
+            GenAiProviderNameValues.AWS_BEDROCK.value,
             "anthropic.claude-3-haiku-20240307-v1:0",
         )
 
     def test_openai_crew_kickoff(self):
-        self._run_crew_kickoff_test("openai/gpt-4", "openai", "gpt-4")
+        self._run_crew_kickoff_test("openai/gpt-4", GenAiProviderNameValues.OPENAI.value, "gpt-4")
 
     def test_anthropic_crew_kickoff(self):
-        self._run_crew_kickoff_test("anthropic/claude-3-sonnet-20240229", "anthropic", "claude-3-sonnet-20240229")
+        self._run_crew_kickoff_test(
+            "anthropic/claude-3-sonnet-20240229",
+            GenAiProviderNameValues.ANTHROPIC.value,
+            "claude-3-sonnet-20240229",
+        )
+
+    def test_azure_crew_kickoff(self):
+        self._run_crew_kickoff_test("azure/gpt-4", GenAiProviderNameValues.AZURE_AI_OPENAI.value, "gpt-4")
+
+    def test_google_crew_kickoff(self):
+        self._run_crew_kickoff_test("google/gemini-pro", GenAiProviderNameValues.GCP_GEN_AI.value, "gemini-pro")
+
+    def test_groq_crew_kickoff(self):
+        self._run_crew_kickoff_test("groq/llama-3", GenAiProviderNameValues.GROQ.value, "llama-3")
+
+    def test_cohere_crew_kickoff(self):
+        self._run_crew_kickoff_test("cohere/command-r", GenAiProviderNameValues.COHERE.value, "command-r")
+
+    def test_mistral_crew_kickoff(self):
+        self._run_crew_kickoff_test("mistral/mistral-large", GenAiProviderNameValues.MISTRAL_AI.value, "mistral-large")
+
+    def test_deepseek_crew_kickoff(self):
+        self._run_crew_kickoff_test("deepseek/deepseek-chat", GenAiProviderNameValues.DEEPSEEK.value, "deepseek-chat")
+
+    def test_perplexity_crew_kickoff(self):
+        self._run_crew_kickoff_test("perplexity/sonar-medium", GenAiProviderNameValues.PERPLEXITY.value, "sonar-medium")
 
     def test_crew_kickoff_error_handling(self):
         mock_llm = MagicMock(spec=LLM)

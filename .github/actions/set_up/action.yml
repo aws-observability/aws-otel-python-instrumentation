@@ -43,6 +43,24 @@ runs:
       if: ${{ inputs.run_unit_tests == 'true' }}
       shell: bash
       run: |
-        ENV_NAME="${{ inputs.python_version }}-test-${{ inputs.package_name }}"
-        echo "Running tox env: $ENV_NAME"
-        tox -e "$ENV_NAME" -- -ra
+        PY_VERSION="${{ inputs.python_version }}"
+        # we intend for new or unrecognized Python versions to fail if a new Python version is added to the test 
+        # to ensure they are not silently skipped from testing
+        ENVS=$(tox list -q | grep "^${PY_VERSION}-test-" | sed 's/ .*//' | tr '\n' ',' | sed 's/,$//' || true)
+        echo "Running tox envs: $ENVS"
+        tox --parallel auto --parallel-live -e "$ENVS" -- -v
+
+    - name: Combine and check coverage
+      if: ${{ inputs.run_unit_tests == 'true' }}
+      shell: bash
+      run: |
+        pip install coverage
+        if [ "${{ inputs.python_version }}" = "3.9" ]; then
+          RCFILE=.coveragerc-py39
+        elif [ "${{ inputs.python_version }}" = "3.14" ]; then
+          RCFILE=.coveragerc-py314
+        else
+          RCFILE=.coveragerc
+        fi
+        coverage combine --rcfile=$RCFILE
+        coverage report --rcfile=$RCFILE
