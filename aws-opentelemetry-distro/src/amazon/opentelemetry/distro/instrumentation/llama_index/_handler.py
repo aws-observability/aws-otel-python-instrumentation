@@ -6,7 +6,6 @@ from time import time_ns
 from typing import Any, Dict, Optional
 
 from llama_index.core.agent.workflow import AgentWorkflow, BaseWorkflowAgent
-from llama_index.core.agent.workflow.workflow_events import AgentSetup
 from llama_index.core.base.base_query_engine import BaseQueryEngine
 from llama_index.core.base.base_retriever import BaseRetriever
 from llama_index.core.base.embeddings.base import BaseEmbedding
@@ -22,11 +21,6 @@ from pydantic import PrivateAttr
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import skip_instrumentation_if_suppressed
 from opentelemetry import context as context_api
-from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
-    GEN_AI_AGENT_NAME,
-    GEN_AI_OPERATION_NAME,
-    GenAiOperationNameValues,
-)
 from opentelemetry.trace import SpanKind, Tracer, set_span_in_context
 
 from ._span import (  # noqa: F401  # pylint: disable=unused-import
@@ -111,20 +105,13 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         self._separate_trace_from_runtime_context = separate_trace_from_runtime_context
 
     @staticmethod
-    def _get_agent_setup(bound_args: inspect.BoundArguments) -> Optional[AgentSetup]:
-        ev = bound_args.arguments.get("ev")
-        return ev if isinstance(ev, AgentSetup) else None
-
-    @staticmethod
-    def _should_suppress(instance: Any, id_: str, bound_args: inspect.BoundArguments) -> bool:
+    def _should_suppress(instance: Any, id_: str) -> bool:
         """Check if this span should be a passthrough (no OTel span created).
 
         A span is suppressed (passthrough) when:
         - The instance is not one of _INSTRUMENTED_TYPES, OR
-        - The method is internal plumbing not in _ALLOWED_METHODS.
+        - The method is internal plumbing listed in _PASSTHROUGH_METHODS.
         """
-        if _SpanHandler._get_agent_setup(bound_args) is not None:
-            return False
         if not isinstance(instance, _INSTRUMENTED_TYPES):
             return True
         method = id_.partition("-")[0].rpartition(".")[-1]
@@ -143,7 +130,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         with self.lock:
             parent = self.open_spans.get(parent_span_id) if parent_span_id else None
 
-        if self._should_suppress(instance, id_, bound_args):
+        if self._should_suppress(instance, id_):
             return _PassthroughSpan(
                 parent=parent,
                 id_=id_,
@@ -171,16 +158,8 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             id_=id_,
             parent_id=parent_span_id,
         )
-
-        agent_setup = self._get_agent_setup(bound_args)
-        if agent_setup is not None:
-            span[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.INVOKE_AGENT.value
-            agent_name = getattr(agent_setup, "current_agent_name", None)
-            if agent_name:
-                span[GEN_AI_AGENT_NAME] = agent_name
-        else:
-            span.process_instance(instance)
-            span.process_input(instance, bound_args)
+        span.process_instance(instance)
+        span.process_input(instance, bound_args)
 
         return span
 
