@@ -159,6 +159,7 @@ class _Span(BaseSpan):
     _attributes: Dict[str, AttributeValue] = PrivateAttr()
     _parent: Optional["_Span"] = PrivateAttr()
     _context_token: Optional[object] = PrivateAttr()
+    _deferred: bool = PrivateAttr(default=False)
 
     def __init__(
         self,
@@ -172,10 +173,20 @@ class _Span(BaseSpan):
         self._parent = parent
         self._attributes = {}
         self._context_token = context_token
+        self._deferred = False
 
     @property
     def is_passthrough(self) -> bool:
         return False
+
+    def set_deferred(self) -> None:
+        """Mark this span as deferred -- it will be ended later by a terminal event."""
+        self._deferred = True
+
+    def _end_deferred(self) -> None:
+        """End a deferred span after late-arriving event data has been recorded."""
+        if self._deferred:
+            self.end()
 
     def __setitem__(self, key: str, value: AttributeValue) -> None:
         self._attributes[key] = value
@@ -335,10 +346,13 @@ class _Span(BaseSpan):
     @_process_event.register
     def _(self, event: StreamChatErrorEvent) -> None:
         self.record_exception(event.exception)
+        if self._deferred:
+            self.end(event.exception)
 
     @_process_event.register
     def _(self, event: StreamChatEndEvent) -> None:
         self[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.CHAT.value
+        self._end_deferred()
 
     @_process_event.register
     def _(self, event: LLMPredictStartEvent) -> None:
@@ -351,6 +365,7 @@ class _Span(BaseSpan):
     def _(self, event: LLMCompletionEndEvent) -> None:
         self[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.TEXT_COMPLETION.value
         self._extract_token_counts(event.response)
+        self._end_deferred()
 
     @_process_event.register
     def _(self, event: LLMChatStartEvent) -> None:
@@ -368,6 +383,7 @@ class _Span(BaseSpan):
     def _(self, event: LLMChatEndEvent) -> None:
         self[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.CHAT.value
         if (response := event.response) is None:
+            self._end_deferred()
             return
         self._extract_token_counts(response)
         _, output = _format_messages([response.message])
@@ -376,6 +392,7 @@ class _Span(BaseSpan):
             for msg in output:
                 msg.setdefault("finish_reason", "stop")
             self[GEN_AI_OUTPUT_MESSAGES] = serialize_to_json_string(output)
+        self._end_deferred()
 
     @_process_event.register
     def _(self, event: ReRankStartEvent) -> None:

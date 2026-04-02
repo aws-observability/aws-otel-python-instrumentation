@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import collections.abc
 import inspect
 import logging
 from time import time_ns
@@ -179,6 +180,21 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             return None
         if span.is_passthrough:
             return span
+
+        # For streaming responses (async generators), the dispatcher calls
+        # span_exit as soon as the generator object is returned -- before
+        # any tokens have been streamed.  Late-arriving events like
+        # LLMChatEndEvent carry token counts and output messages that we
+        # need to record on the span.
+        #
+        # Returning None tells BaseSpanHandler.span_exit() to keep the
+        # span in open_spans so EventHandler.handle() can still find it.
+        # The span will be ended later by _Span._end_deferred() when the
+        # final event (LLMChatEndEvent / LLMCompletionEndEvent) arrives.
+        if isinstance(result, collections.abc.AsyncIterator):
+            span.set_deferred()
+            return None
+
         if isinstance(result, ToolOutput):
             span._attributes[GEN_AI_TOOL_CALL_RESULT] = result.content
         span.end()
