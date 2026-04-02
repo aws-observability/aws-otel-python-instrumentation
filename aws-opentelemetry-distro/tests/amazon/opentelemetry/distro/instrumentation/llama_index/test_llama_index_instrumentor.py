@@ -1367,7 +1367,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         span.end()
 
 
-    def test_agent_workflow_span_hierarchy(self):
+    def test_agent_workflow(self):
         class _AsyncChatStream:
             def __init__(self, resp):
                 self._resp = resp
