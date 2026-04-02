@@ -202,6 +202,7 @@ class _Span(BaseSpan):
             return self._span_name
 
         op = self._attributes.get(GEN_AI_OPERATION_NAME)
+        # generic fallback if no operation name
         if not op:
             return "llama_index.operation"
 

@@ -33,12 +33,14 @@ _GEN_AI_EMBEDDINGS_DIMENSION_COUNT: str = "gen_ai.embeddings.dimension.count"
 _GEN_AI_AGENT_ID: str = "gen_ai.agent.id"
 _GEN_AI_AGENT_NAME: str = "gen_ai.agent.name"
 _GEN_AI_AGENT_DESCRIPTION: str = "gen_ai.agent.description"
+_GEN_AI_WORKFLOW_NAME: str = "gen_ai.workflow.name"
 
 # LlamaIndex operation names
 _OPERATION_CHAT: str = "chat"
 _OPERATION_TEXT_COMPLETION: str = "text_completion"
 _OPERATION_EMBEDDINGS: str = "embeddings"
 _OPERATION_INVOKE_AGENT: str = "invoke_agent"
+_OPERATION_INVOKE_WORKFLOW: str = "invoke_workflow"
 _OPERATION_EXECUTE_TOOL: str = "execute_tool"
 _OPERATION_QUERY: str = "query"
 _OPERATION_RETRIEVE: str = "retrieve"
@@ -61,6 +63,17 @@ class LlamaIndexTest(ContractTestBase):
             0,
             0,
             test_type="agent",
+        )
+
+    def test_llamaindex_workflow(self):
+        """Test AgentWorkflow with multiple agents."""
+        self.do_test_requests(
+            "llamaindex/workflow",
+            "GET",
+            200,
+            0,
+            0,
+            test_type="workflow",
         )
 
     def test_llamaindex_chat(self):
@@ -117,7 +130,9 @@ class LlamaIndexTest(ContractTestBase):
     ) -> None:
         test_type = kwargs.get("test_type", "")
 
-        if test_type == "agent":
+        if test_type == "workflow":
+            self._assert_workflow_spans(resource_scope_spans)
+        elif test_type == "agent":
             self._assert_agent_spans(resource_scope_spans)
         elif test_type == "chat":
             self._assert_chat_spans(resource_scope_spans)
@@ -335,6 +350,38 @@ class LlamaIndexTest(ContractTestBase):
 
             self.assertIn(_GEN_AI_INPUT_MESSAGES, attrs)
             self.assertIn(_GEN_AI_OUTPUT_MESSAGES, attrs)
+
+    def _assert_workflow_spans(self, resource_scope_spans: List[ResourceScopeSpan]) -> None:
+        invoke_workflow_spans = []
+        invoke_agent_spans = []
+        chat_spans = []
+
+        for resource_scope_span in resource_scope_spans:
+            span = resource_scope_span.span
+            attrs = self._get_attributes_dict(span.attributes)
+
+            if attrs.get(_GEN_AI_OPERATION_NAME):
+                op_name = attrs[_GEN_AI_OPERATION_NAME].string_value
+
+                if op_name == _OPERATION_INVOKE_WORKFLOW:
+                    invoke_workflow_spans.append(span)
+                elif op_name == _OPERATION_INVOKE_AGENT:
+                    invoke_agent_spans.append(span)
+                elif op_name == _OPERATION_CHAT:
+                    chat_spans.append(span)
+
+        self.assertEqual(len(invoke_workflow_spans), 1, "Expected exactly one invoke_workflow span")
+        wf_attrs = self._get_attributes_dict(invoke_workflow_spans[0].attributes)
+        self._assert_str_attribute(wf_attrs, _GEN_AI_OPERATION_NAME, _OPERATION_INVOKE_WORKFLOW)
+        self._assert_str_attribute(wf_attrs, _GEN_AI_WORKFLOW_NAME, "multi_agent_workflow")
+
+        self.assertGreater(len(invoke_agent_spans), 0, "Expected at least one invoke_agent span")
+        for span in invoke_agent_spans:
+            attrs = self._get_attributes_dict(span.attributes)
+            self._assert_str_attribute(attrs, _GEN_AI_OPERATION_NAME, _OPERATION_INVOKE_AGENT)
+            self.assertIn(_GEN_AI_AGENT_NAME, attrs)
+
+        self.assertGreater(len(chat_spans), 0, "Expected at least one chat span")
 
     @override
     def _assert_metric_attributes(self, resource_scope_metrics, metric_name: str, expected_sum: int, **kwargs) -> None:

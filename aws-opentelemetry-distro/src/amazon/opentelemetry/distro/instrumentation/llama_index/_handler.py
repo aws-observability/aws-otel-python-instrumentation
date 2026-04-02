@@ -1,10 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-import collections.abc
 import inspect
 import logging
 from time import time_ns
-from typing import Any, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Optional
 
 from llama_index.core.agent.workflow import AgentWorkflow, BaseWorkflowAgent
 from llama_index.core.agent.workflow.workflow_events import AgentSetup
@@ -118,6 +117,12 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
 
     @staticmethod
     def _should_suppress(instance: Any, id_: str, bound_args: inspect.BoundArguments) -> bool:
+        """Check if this span should be a passthrough (no OTel span created).
+
+        A span is suppressed (passthrough) when:
+        - The instance is not one of _INSTRUMENTED_TYPES, OR
+        - The method is internal plumbing not in _ALLOWED_METHODS.
+        """
         if _SpanHandler._get_agent_setup(bound_args) is not None:
             return False
         if not isinstance(instance, _INSTRUMENTED_TYPES):
@@ -146,7 +151,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             )
 
         otel_span = self._otel_tracer.start_span(
-            name="llama_index.operation",
+            name="llama_index.operation",  # generic operation name, updated in span.end()
             start_time=time_ns(),
             attributes={},
             kind=SpanKind.INTERNAL,
@@ -197,7 +202,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         if span.is_passthrough:
             return span
 
-        if isinstance(result, collections.abc.AsyncIterator):
+        if isinstance(result, AsyncGenerator):
             span.set_deferred()
             return None
 

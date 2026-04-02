@@ -1465,11 +1465,19 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         spans = self.span_exporter.get_finished_spans()
 
         workflow_spans = [s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == OPERATION_INVOKE_WORKFLOW]
+        agent_step_spans = [
+            s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == "invoke_agent" and "run_agent_step" in s.name
+        ]
         tool_spans = [s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == "execute_tool"]
 
         self.assertEqual(len(workflow_spans), 1)
         self.assertEqual(workflow_spans[0].name, "invoke_workflow greeting_workflow")
         self.assertEqual(workflow_spans[0].attributes[GEN_AI_WORKFLOW_NAME], "greeting_workflow")
+
+        self.assertGreaterEqual(len(agent_step_spans), 1)
+        for step_span in agent_step_spans:
+            self.assertEqual(step_span.name, "run_agent_step Greeter")
+            self.assertEqual(step_span.attributes[GEN_AI_AGENT_NAME], "Greeter")
 
         self.assertEqual(len(tool_spans), 1)
         self.assertIn("greet", tool_spans[0].name)
