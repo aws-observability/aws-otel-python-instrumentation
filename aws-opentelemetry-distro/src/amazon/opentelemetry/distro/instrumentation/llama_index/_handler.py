@@ -46,6 +46,8 @@ from ._span import (  # noqa: F401  # pylint: disable=unused-import
 
 logger = logging.getLogger(__name__)
 
+# Instance types that produce semantically meaningful spans.
+# Only these types get real OTel spans; all others get passthrough spans.
 _INSTRUMENTED_TYPES = tuple(
     filter(
         None,
@@ -63,35 +65,45 @@ _INSTRUMENTED_TYPES = tuple(
     )
 )
 
+# Methods on instrumented types that produce user-facing spans.
+# Any method NOT in this set becomes a passthrough span (fail-safe:
+# new/unknown methods are invisible rather than creating ghost spans).
 _ALLOWED_METHODS = frozenset(
     (
+        # QueryEngine
         "query",
         "aquery",
+        # Retriever
         "retrieve",
         "aretrieve",
+        # Synthesizer
         "synthesize",
         "asynthesize",
+        # LLM (complete/stream_complete are passthrough because
+        # Bedrock converts them to chat internally, and the chat
+        # span carries the semantic operation name from events)
         "chat",
         "achat",
         "stream_chat",
         "astream_chat",
+        # Embedding
         "get_query_embedding",
         "aget_query_embedding",
         "get_text_embedding",
         "aget_text_embedding",
         "get_text_embedding_batch",
         "aget_text_embedding_batch",
+        # Tool
         "call",
         "acall",
+        # Agent
         "run",
     )
 )
 
-_AGENT_STEP_METHOD = "run_agent_step"
-
 
 def _is_agent_step(id_: str) -> bool:
-    return _AGENT_STEP_METHOD in id_.partition("-")[0]
+    return "run_agent_step" in id_.partition("-")[0]
 
 
 def _is_workflow_run(id_: str) -> bool:
@@ -124,7 +136,18 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
     _separate_trace_from_runtime_context: bool = PrivateAttr()
     _workflow_agent_span: Optional[_Span] = PrivateAttr(default=None)
 
-    def __init__(self, tracer: Tracer, separate_trace_from_runtime_context: bool = False) -> None:
+    def __init__(
+        self,
+        tracer: Tracer,
+        separate_trace_from_runtime_context: bool = False,
+    ) -> None:
+        """Initialize the span handler.
+
+        Args:
+            tracer (trace_api.Tracer): The OpenTelemetry tracer for creating spans.
+            separate_trace_from_runtime_context (bool): When True, always start a new trace for each
+                span without a parent, isolating it from any existing trace in the runtime context.
+        """
         super().__init__()
         self._otel_tracer = tracer
         self._separate_trace_from_runtime_context = separate_trace_from_runtime_context
@@ -132,6 +155,15 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
 
     @staticmethod
     def _should_suppress(instance: Any, id_: str) -> bool:
+        """Check if this span should be a passthrough (no OTel span created).
+
+        A span is suppressed (passthrough) when:
+        - The instance is not one of _INSTRUMENTED_TYPES, OR
+        - The method is internal plumbing not in _ALLOWED_METHODS.
+
+        Exception: AgentWorkflow.run_agent_step dispatches have instance=None
+        but represent agent executions and are handled in new_span.
+        """
         if _is_agent_step(id_):
             return False
         if not isinstance(instance, _INSTRUMENTED_TYPES):
@@ -141,7 +173,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
 
     def _start_span(self, id_: str, parent: Optional[_Span], parent_span_id: Optional[str]) -> _Span:
         otel_span = self._otel_tracer.start_span(
-            name="llama_index.operation",
+            name="llama_index.operation",  # generic operation name, updated in span.end()
             start_time=time_ns(),
             attributes={},
             kind=SpanKind.INTERNAL,
@@ -152,7 +184,9 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             ),
         )
         token = context_api.attach(set_span_in_context(otel_span, parent.context if parent else None))
-        return _Span(otel_span=otel_span, parent=parent, context_token=token, id_=id_, parent_id=parent_span_id)
+        return _Span(
+            otel_span=otel_span, parent=parent, context_token=token, id_=id_, parent_id=parent_span_id
+        )
 
     def _close_workflow_agent_span(self, err: Optional[BaseException] = None) -> None:
         if self._workflow_agent_span:
@@ -172,15 +206,16 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         with self.lock:
             parent = self.open_spans.get(parent_span_id) if parent_span_id else None
 
+        # AgentWorkflow.run_agent_step: merge iterations into one invoke_agent span per agent
         if _is_agent_step(id_):
             agent_name = _get_agent_name(bound_args)
-
             if self._workflow_agent_span:
                 current = self._workflow_agent_span._attributes.get(GEN_AI_AGENT_NAME)
                 if current == agent_name:
-                    return _PassthroughSpan(parent=self._workflow_agent_span, id_=id_, parent_id=parent_span_id)
+                    return _PassthroughSpan(
+                        parent=self._workflow_agent_span, id_=id_, parent_id=parent_span_id
+                    )
                 self._close_workflow_agent_span()
-
             span = self._start_span(id_, parent, parent_span_id)
             span[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.INVOKE_AGENT.value
             if agent_name:
@@ -192,7 +227,11 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             return span
 
         if self._should_suppress(instance, id_):
-            return _PassthroughSpan(parent=parent, id_=id_, parent_id=parent_span_id)
+            return _PassthroughSpan(
+                parent=parent,
+                id_=id_,
+                parent_id=parent_span_id,
+            )
 
         span = self._start_span(id_, parent, parent_span_id)
         span.process_instance(instance)
@@ -215,8 +254,10 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             return None
         if span.is_passthrough:
             return span
+        # Keep the workflow agent span open across iterations
         if span is self._workflow_agent_span:
             return span
+        # Close the agent span when the workflow finishes
         if _is_workflow_run(id_):
             self._close_workflow_agent_span()
         if isinstance(result, ToolOutput):
