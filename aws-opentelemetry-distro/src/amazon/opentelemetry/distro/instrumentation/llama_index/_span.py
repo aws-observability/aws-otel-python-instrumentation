@@ -160,6 +160,7 @@ class _Span(BaseSpan):
     _parent: Optional["_Span"] = PrivateAttr()
     _context_token: Optional[object] = PrivateAttr()
     _deferred: bool = PrivateAttr(default=False)
+    _span_name: Optional[str] = PrivateAttr(default=None)
 
     def __init__(
         self,
@@ -180,11 +181,13 @@ class _Span(BaseSpan):
         return False
 
     def set_deferred(self) -> None:
-        """Mark this span as deferred -- it will be ended later by a terminal event."""
+        # Streaming LLM calls return an async generator immediately, causing the
+        # LlamaIndex dispatcher to exit the span before tokens are streamed.
+        # Deferred spans stay open until a terminal event like LLMChatEndEvent
+        # delivers token counts and output messages via _end_deferred.
         self._deferred = True
 
     def _end_deferred(self) -> None:
-        """End a deferred span after late-arriving event data has been recorded."""
         if self._deferred:
             self.end()
 
@@ -195,25 +198,20 @@ class _Span(BaseSpan):
         self._otel_span.record_exception(exception)
 
     def _get_span_name(self) -> str:
-        operation_name = self._attributes.get(GEN_AI_OPERATION_NAME)
+        if self._span_name:
+            return self._span_name
 
-        # generic fallback if no operation name
-        if not operation_name:
+        op = self._attributes.get(GEN_AI_OPERATION_NAME)
+        if not op:
             return "llama_index.operation"
 
-        if operation_name == GenAiOperationNameValues.INVOKE_AGENT.value:
-            if agent_name := self._attributes.get(GEN_AI_AGENT_NAME):
-                return f"{operation_name} {agent_name}"
-        elif operation_name == OPERATION_INVOKE_WORKFLOW:
-            if workflow_name := self._attributes.get(GEN_AI_WORKFLOW_NAME):
-                return f"{operation_name} {workflow_name}"
-        elif operation_name == GenAiOperationNameValues.EXECUTE_TOOL.value:
-            if tool_name := self._attributes.get(GEN_AI_TOOL_NAME):
-                return f"{operation_name} {tool_name}"
-        elif model := self._attributes.get(GEN_AI_REQUEST_MODEL):
-            return f"{operation_name} {model}"
+        suffix = {
+            GenAiOperationNameValues.INVOKE_AGENT.value: self._attributes.get(GEN_AI_AGENT_NAME),
+            OPERATION_INVOKE_WORKFLOW: self._attributes.get(GEN_AI_WORKFLOW_NAME),
+            GenAiOperationNameValues.EXECUTE_TOOL.value: self._attributes.get(GEN_AI_TOOL_NAME),
+        }.get(op, self._attributes.get(GEN_AI_REQUEST_MODEL))
 
-        return operation_name
+        return f"{op} {suffix}" if suffix else op
 
     def end(self, exception: Optional[BaseException] = None) -> None:
         if not self._otel_span.is_recording():

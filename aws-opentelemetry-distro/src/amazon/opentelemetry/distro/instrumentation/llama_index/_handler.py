@@ -7,6 +7,7 @@ from time import time_ns
 from typing import Any, Dict, Optional
 
 from llama_index.core.agent.workflow import AgentWorkflow, BaseWorkflowAgent
+from llama_index.core.agent.workflow.workflow_events import AgentSetup
 from llama_index.core.base.base_query_engine import BaseQueryEngine
 from llama_index.core.base.base_retriever import BaseRetriever
 from llama_index.core.base.embeddings.base import BaseEmbedding
@@ -22,6 +23,11 @@ from pydantic import PrivateAttr
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import skip_instrumentation_if_suppressed
 from opentelemetry import context as context_api
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
+    GEN_AI_AGENT_NAME,
+    GEN_AI_OPERATION_NAME,
+    GenAiOperationNameValues,
+)
 from opentelemetry.trace import SpanKind, Tracer, set_span_in_context
 
 from ._span import (  # noqa: F401  # pylint: disable=unused-import
@@ -106,13 +112,14 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         self._separate_trace_from_runtime_context = separate_trace_from_runtime_context
 
     @staticmethod
-    def _should_suppress(instance: Any, id_: str) -> bool:
-        """Check if this span should be a passthrough (no OTel span created).
+    def _get_agent_setup(bound_args: inspect.BoundArguments) -> Optional[AgentSetup]:
+        ev = bound_args.arguments.get("ev")
+        return ev if isinstance(ev, AgentSetup) else None
 
-        A span is suppressed (passthrough) when:
-        - The instance is not one of _INSTRUMENTED_TYPES, OR
-        - The method is internal plumbing listed in _PASSTHROUGH_METHODS.
-        """
+    @staticmethod
+    def _should_suppress(instance: Any, id_: str, bound_args: inspect.BoundArguments) -> bool:
+        if _SpanHandler._get_agent_setup(bound_args) is not None:
+            return False
         if not isinstance(instance, _INSTRUMENTED_TYPES):
             return True
         method = id_.partition("-")[0].rpartition(".")[-1]
@@ -131,7 +138,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         with self.lock:
             parent = self.open_spans.get(parent_span_id) if parent_span_id else None
 
-        if self._should_suppress(instance, id_):
+        if self._should_suppress(instance, id_, bound_args):
             return _PassthroughSpan(
                 parent=parent,
                 id_=id_,
@@ -139,7 +146,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             )
 
         otel_span = self._otel_tracer.start_span(
-            name="llama_index.operation",  # generic operation name, updated in span.end()
+            name="llama_index.operation",
             start_time=time_ns(),
             attributes={},
             kind=SpanKind.INTERNAL,
@@ -159,8 +166,17 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             id_=id_,
             parent_id=parent_span_id,
         )
-        span.process_instance(instance)
-        span.process_input(instance, bound_args)
+
+        agent_setup = self._get_agent_setup(bound_args)
+        if agent_setup is not None:
+            span[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.INVOKE_AGENT.value
+            agent_name = getattr(agent_setup, "current_agent_name", None)
+            if agent_name:
+                span[GEN_AI_AGENT_NAME] = agent_name
+                span._span_name = f"run_agent_step {agent_name}"
+        else:
+            span.process_instance(instance)
+            span.process_input(instance, bound_args)
 
         return span
 
@@ -181,16 +197,6 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         if span.is_passthrough:
             return span
 
-        # For streaming responses (async generators), the dispatcher calls
-        # span_exit as soon as the generator object is returned -- before
-        # any tokens have been streamed.  Late-arriving events like
-        # LLMChatEndEvent carry token counts and output messages that we
-        # need to record on the span.
-        #
-        # Returning None tells BaseSpanHandler.span_exit() to keep the
-        # span in open_spans so EventHandler.handle() can still find it.
-        # The span will be ended later by _Span._end_deferred() when the
-        # final event (LLMChatEndEvent / LLMCompletionEndEvent) arrives.
         if isinstance(result, collections.abc.AsyncIterator):
             span.set_deferred()
             return None
