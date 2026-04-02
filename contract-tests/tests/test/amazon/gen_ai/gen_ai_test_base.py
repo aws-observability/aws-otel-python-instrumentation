@@ -8,6 +8,7 @@ from typing_extensions import override
 from amazon.base.contract_test_base import ContractTestBase
 
 GEN_AI_OPERATION_NAME: str = "gen_ai.operation.name"
+GEN_AI_WORKFLOW_NAME: str = "gen_ai.workflow.name"
 GEN_AI_AGENT_NAME: str = "gen_ai.agent.name"
 GEN_AI_PROVIDER_NAME: str = "gen_ai.provider.name"
 GEN_AI_REQUEST_MODEL: str = "gen_ai.request.model"
@@ -39,25 +40,38 @@ class GenAITestBase(ContractTestBase):
     def _assert_semantic_conventions_span_attributes(
         self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str, status_code: int, **kwargs
     ) -> None:
-        invoke_agent_spans, execute_tool_spans, chat_spans = self._collect_gen_ai_spans(resource_scope_spans)
+        invoke_workflow_spans, invoke_agent_spans, execute_tool_spans, chat_spans = self._collect_gen_ai_spans(
+            resource_scope_spans
+        )
         if "agent" in path:
+            if invoke_workflow_spans:
+                self._assert_invoke_workflow_spans(invoke_workflow_spans)
             self._assert_invoke_agent_spans(invoke_agent_spans, kwargs.get("expected_agent_count", 1))
             self._assert_execute_tool_spans(execute_tool_spans, kwargs.get("expected_tool_count", 1))
         self._assert_chat_spans(chat_spans, kwargs.get("expected_chat_count", 1))
 
     def _collect_gen_ai_spans(self, resource_scope_spans: List[ResourceScopeSpan]):
+        invoke_workflow_spans = []
         invoke_agent_spans = []
         execute_tool_spans = []
         chat_spans = []
         for resource_scope_span in resource_scope_spans:
             span = resource_scope_span.span
-            if "invoke_agent" in span.name:
+            if "invoke_workflow" in span.name:
+                invoke_workflow_spans.append(span)
+            elif "invoke_agent" in span.name:
                 invoke_agent_spans.append(span)
             elif "execute_tool" in span.name:
                 execute_tool_spans.append(span)
             elif "chat" in span.name.lower():
                 chat_spans.append(span)
-        return invoke_agent_spans, execute_tool_spans, chat_spans
+        return invoke_workflow_spans, invoke_agent_spans, execute_tool_spans, chat_spans
+
+    def _assert_invoke_workflow_spans(self, invoke_workflow_spans: list):
+        self.assertEqual(len(invoke_workflow_spans), 1)
+        attrs = self._get_attributes_dict(invoke_workflow_spans[0].attributes)
+        self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, "invoke_workflow")
+        self.assertIn(GEN_AI_WORKFLOW_NAME, attrs)
 
     def _assert_invoke_agent_spans(self, invoke_agent_spans: list, expected_count: int = 1):
         self.assertEqual(len(invoke_agent_spans), expected_count)
