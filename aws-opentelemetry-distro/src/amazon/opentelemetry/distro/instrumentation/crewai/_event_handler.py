@@ -334,7 +334,7 @@ class OpenTelemetryEventHandler:
                     [self._to_input_message(m) for m in non_system_messages]
                 )
 
-        self._start_span(span_name, event.event_id, attributes, event.parent_event_id)
+        self._start_span(span_name, event.event_id, attributes, event.parent_event_id, kind=SpanKind.CLIENT)
 
     def _on_llm_completed(self, source: "LLM", event: "LLMCallCompletedEvent") -> None:
         attrs: Dict[str, Any] = {}
@@ -382,6 +382,7 @@ class OpenTelemetryEventHandler:
         event_id: str,
         attributes: Optional[Dict[str, Any]] = None,
         parent_event_id: Optional[str] = None,
+        kind: SpanKind = SpanKind.INTERNAL,
     ) -> None:
         parent_ctx = None
         if parent_event_id:
@@ -389,7 +390,7 @@ class OpenTelemetryEventHandler:
             if parent_entry:
                 parent_ctx = trace.set_span_in_context(parent_entry.span)
 
-        span = self._tracer.start_span(name, kind=SpanKind.INTERNAL, attributes=attributes, context=parent_ctx)
+        span = self._tracer.start_span(name, kind=kind, attributes=attributes, context=parent_ctx)
         token = context.attach(trace.set_span_in_context(span))
         self._event_id_to_span.put(event_id, _SpanEntry(span=span, token=token))
 
