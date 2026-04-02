@@ -1366,7 +1366,6 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self.assertEqual(input_msgs[0]["role"], "user")
         span.end()
 
-
     def test_agent_workflow(self):
         class _AsyncChatStream:
             def __init__(self, resp):
@@ -1465,27 +1464,22 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         asyncio.run(_run())
         spans = self.span_exporter.get_finished_spans()
 
-        with self.subTest("produces invoke_workflow span"):
-            wf_spans = [s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == OPERATION_INVOKE_WORKFLOW]
-            self.assertEqual(len(wf_spans), 1)
-            self.assertEqual(wf_spans[0].name, "invoke_workflow greeting_workflow")
-            self.assertEqual(wf_spans[0].attributes[GEN_AI_WORKFLOW_NAME], "greeting_workflow")
+        workflow_spans = [s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == OPERATION_INVOKE_WORKFLOW]
+        agent_spans = [s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == "invoke_agent"]
+        tool_spans = [s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == "execute_tool"]
 
-        with self.subTest("produces single invoke_agent span"):
-            agent_spans = [s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == "invoke_agent"]
-            self.assertEqual(len(agent_spans), 1)
-            self.assertEqual(agent_spans[0].name, "invoke_agent Greeter")
-            self.assertEqual(agent_spans[0].attributes[GEN_AI_AGENT_NAME], "Greeter")
+        self.assertEqual(len(workflow_spans), 1)
+        self.assertEqual(workflow_spans[0].name, "invoke_workflow greeting_workflow")
+        self.assertEqual(workflow_spans[0].attributes[GEN_AI_WORKFLOW_NAME], "greeting_workflow")
 
-        with self.subTest("produces execute_tool span"):
-            tool_spans = [s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == "execute_tool"]
-            self.assertEqual(len(tool_spans), 1)
-            self.assertIn("greet", tool_spans[0].name)
+        self.assertEqual(len(agent_spans), 1)
+        self.assertEqual(agent_spans[0].name, "invoke_agent Greeter")
+        self.assertEqual(agent_spans[0].attributes[GEN_AI_AGENT_NAME], "Greeter")
 
-        with self.subTest("invoke_agent is child of invoke_workflow"):
-            wf_span = [s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == OPERATION_INVOKE_WORKFLOW][0]
-            agent_span = [s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == "invoke_agent"][0]
-            self.assertEqual(agent_span.parent.span_id, wf_span.context.span_id)
+        self.assertEqual(len(tool_spans), 1)
+        self.assertIn("greet", tool_spans[0].name)
+
+        self.assertEqual(agent_spans[0].parent.span_id, workflow_spans[0].context.span_id)
 
 
 if __name__ == "__main__":

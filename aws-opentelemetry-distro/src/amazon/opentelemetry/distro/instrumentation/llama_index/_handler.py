@@ -5,14 +5,8 @@ import logging
 from time import time_ns
 from typing import Any, Dict, Optional
 
-try:
-    from llama_index.core.agent import BaseAgent  # type: ignore[attr-defined]
-except ImportError:
-    from llama_index.core.agent.workflow import BaseWorkflowAgent as BaseAgent  # type: ignore[attr-defined]
-try:
-    from llama_index.core.agent.workflow import AgentWorkflow  # type: ignore[attr-defined]
-except ImportError:
-    AgentWorkflow = None  # type: ignore[assignment,misc]
+from llama_index.core.agent.workflow import AgentWorkflow, BaseWorkflowAgent
+from llama_index.core.agent.workflow.workflow_events import AgentSetup
 from llama_index.core.base.base_query_engine import BaseQueryEngine
 from llama_index.core.base.base_retriever import BaseRetriever
 from llama_index.core.base.embeddings.base import BaseEmbedding
@@ -48,21 +42,16 @@ logger = logging.getLogger(__name__)
 
 # Instance types that produce semantically meaningful spans.
 # Only these types get real OTel spans; all others get passthrough spans.
-_INSTRUMENTED_TYPES = tuple(
-    filter(
-        None,
-        (
-            BaseLLM,
-            MultiModalLLM,
-            BaseEmbedding,
-            BaseTool,
-            BaseAgent,
-            AgentWorkflow,
-            BaseQueryEngine,
-            BaseRetriever,
-            BaseSynthesizer,
-        ),
-    )
+_INSTRUMENTED_TYPES = (
+    BaseLLM,
+    MultiModalLLM,
+    BaseEmbedding,
+    BaseTool,
+    BaseWorkflowAgent,
+    AgentWorkflow,
+    BaseQueryEngine,
+    BaseRetriever,
+    BaseSynthesizer,
 )
 
 # Methods on instrumented types that produce user-facing spans.
@@ -102,35 +91,6 @@ _ALLOWED_METHODS = frozenset(
 )
 
 
-def _is_agent_step(id_: str) -> bool:
-    return "run_agent_step" in id_.partition("-")[0]
-
-
-def _is_workflow_run(id_: str) -> bool:
-    return id_.partition("-")[0] == "AgentWorkflow.run"
-
-
-def _get_agent_name(bound_args: inspect.BoundArguments) -> Optional[str]:
-    ev = bound_args.arguments.get("ev")
-    return getattr(ev, "current_agent_name", None) if ev else None
-
-
-def _get_system_prompt(bound_args: inspect.BoundArguments) -> Optional[str]:
-    ev = bound_args.arguments.get("ev")
-    if ev is None:
-        return None
-    messages = getattr(ev, "input", None)
-    if not messages:
-        return None
-    first = messages[0]
-    role = getattr(first, "role", None)
-    if role and str(role.value) == "system":
-        blocks = getattr(first, "blocks", None)
-        if blocks:
-            return getattr(blocks[0], "text", None)
-    return None
-
-
 class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
     _otel_tracer: Tracer = PrivateAttr()
     _separate_trace_from_runtime_context: bool = PrivateAttr()
@@ -154,17 +114,30 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         self._workflow_agent_span = None
 
     @staticmethod
-    def _should_suppress(instance: Any, id_: str) -> bool:
+    def _get_agent_setup(bound_args: inspect.BoundArguments) -> Optional[AgentSetup]:
+        ev = bound_args.arguments.get("ev")
+        return ev if isinstance(ev, AgentSetup) else None
+
+    @staticmethod
+    def _get_system_prompt(agent_setup: AgentSetup) -> Optional[str]:
+        # https://github.com/run-llama/llama_index/blob/65d8f3a/llama-index-core/llama_index/core/agent/workflow/workflow_events.py#L31
+        try:
+            first = agent_setup.input[0]
+            if first.role.value == "system" and first.blocks:
+                return getattr(first.blocks[0], "text", None)
+        except (IndexError, AttributeError):
+            pass
+        return None
+
+    @staticmethod
+    def _should_suppress(instance: Any, id_: str, bound_args: inspect.BoundArguments) -> bool:
         """Check if this span should be a passthrough (no OTel span created).
 
         A span is suppressed (passthrough) when:
         - The instance is not one of _INSTRUMENTED_TYPES, OR
         - The method is internal plumbing not in _ALLOWED_METHODS.
-
-        Exception: AgentWorkflow.run_agent_step dispatches have instance=None
-        but represent agent executions and are handled in new_span.
         """
-        if _is_agent_step(id_):
+        if _SpanHandler._get_agent_setup(bound_args) is not None:
             return False
         if not isinstance(instance, _INSTRUMENTED_TYPES):
             return True
@@ -184,9 +157,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             ),
         )
         token = context_api.attach(set_span_in_context(otel_span, parent.context if parent else None))
-        return _Span(
-            otel_span=otel_span, parent=parent, context_token=token, id_=id_, parent_id=parent_span_id
-        )
+        return _Span(otel_span=otel_span, parent=parent, context_token=token, id_=id_, parent_id=parent_span_id)
 
     def _close_workflow_agent_span(self, err: Optional[BaseException] = None) -> None:
         if self._workflow_agent_span:
@@ -206,27 +177,25 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         with self.lock:
             parent = self.open_spans.get(parent_span_id) if parent_span_id else None
 
-        # AgentWorkflow.run_agent_step: merge iterations into one invoke_agent span per agent
-        if _is_agent_step(id_):
-            agent_name = _get_agent_name(bound_args)
+        agent_setup = self._get_agent_setup(bound_args)
+        if agent_setup is not None:
+            agent_name = getattr(agent_setup, "current_agent_name", None)
             if self._workflow_agent_span:
                 current = self._workflow_agent_span._attributes.get(GEN_AI_AGENT_NAME)
                 if current == agent_name:
-                    return _PassthroughSpan(
-                        parent=self._workflow_agent_span, id_=id_, parent_id=parent_span_id
-                    )
+                    return _PassthroughSpan(parent=self._workflow_agent_span, id_=id_, parent_id=parent_span_id)
                 self._close_workflow_agent_span()
             span = self._start_span(id_, parent, parent_span_id)
             span[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.INVOKE_AGENT.value
             if agent_name:
                 span[GEN_AI_AGENT_NAME] = agent_name
-            system_prompt = _get_system_prompt(bound_args)
+            system_prompt = self._get_system_prompt(agent_setup)
             if system_prompt:
                 span[GEN_AI_SYSTEM_INSTRUCTIONS] = system_prompt
             self._workflow_agent_span = span
             return span
 
-        if self._should_suppress(instance, id_):
+        if self._should_suppress(instance, id_, bound_args):
             return _PassthroughSpan(
                 parent=parent,
                 id_=id_,
@@ -250,15 +219,13 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         with self.lock:
             span = self.open_spans.get(id_)
         if not span:
-            logger.warning("Open span is missing for id_=%s", id_)
+            logger.debug("Open span is missing for id_=%s", id_)
             return None
         if span.is_passthrough:
             return span
-        # Keep the workflow agent span open across iterations
         if span is self._workflow_agent_span:
             return span
-        # Close the agent span when the workflow finishes
-        if _is_workflow_run(id_):
+        if isinstance(instance, AgentWorkflow):
             self._close_workflow_agent_span()
         if isinstance(result, ToolOutput):
             span._attributes[GEN_AI_TOOL_CALL_RESULT] = result.content
@@ -277,14 +244,14 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         with self.lock:
             span = self.open_spans.get(id_)
         if not span:
-            logger.warning("Open span is missing for id_=%s", id_)
+            logger.debug("Open span is missing for id_=%s", id_)
             return None
         if span.is_passthrough:
             return span
         if span is self._workflow_agent_span:
             self._close_workflow_agent_span(err)
             return span
-        if _is_workflow_run(id_):
+        if isinstance(instance, AgentWorkflow):
             self._close_workflow_agent_span(err)
         span.end(err)
         return span
@@ -303,7 +270,7 @@ class EventHandler(BaseEventHandler, extra="allow"):
             return event
         span = self._span_handler.open_spans.get(event.span_id)
         if span is None:
-            logger.warning("Open span is missing for span_id=%s, event_id=%s", event.span_id, event.id_)
+            logger.debug("Open span is missing for span_id=%s, event_id=%s", event.span_id, event.id_)
         else:
             try:
                 span.process_event(event)

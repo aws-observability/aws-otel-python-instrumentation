@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat(instrumentors): add invoke_workflow span support for LlamaIndex AgentWorkflow and CrewAI
+  ([#705](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/705))
 - feat: add OpenTelemetry package version compatibility check at distro startup
   ([#694](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/694))
 - feat(llama_index-instrumentation): add llama-index to agent observability disabled instrumentations

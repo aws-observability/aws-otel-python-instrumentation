@@ -20,15 +20,15 @@ if sys.version_info < (3, 10) or sys.version_info >= (3, 14):
 from crewai import LLM, Agent, Crew, Task
 from crewai.tools import tool
 
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
+    GEN_AI_WORKFLOW_NAME,
+    OPERATION_INVOKE_WORKFLOW,
+)
 from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumentor
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_MESSAGE
-from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
-    GEN_AI_WORKFLOW_NAME,
-    OPERATION_INVOKE_WORKFLOW,
-)
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_DESCRIPTION,
     GEN_AI_AGENT_ID,
@@ -81,45 +81,45 @@ class TestCrewAIInstrumentor(TestCase):
             else:
                 os.environ[key] = value
 
-    def test_bedrock_invoke_workflow(self):
-        self._run_invoke_workflow_test(
+    def test_bedrock_crew_kickoff(self):
+        self._run_crew_kickoff_test(
             "bedrock/anthropic.claude-3-haiku-20240307-v1:0",
             GenAiProviderNameValues.AWS_BEDROCK.value,
             "anthropic.claude-3-haiku-20240307-v1:0",
         )
 
-    def test_openai_invoke_workflow(self):
-        self._run_invoke_workflow_test("openai/gpt-4", GenAiProviderNameValues.OPENAI.value, "gpt-4")
+    def test_openai_crew_kickoff(self):
+        self._run_crew_kickoff_test("openai/gpt-4", GenAiProviderNameValues.OPENAI.value, "gpt-4")
 
-    def test_anthropic_invoke_workflow(self):
-        self._run_invoke_workflow_test(
+    def test_anthropic_crew_kickoff(self):
+        self._run_crew_kickoff_test(
             "anthropic/claude-3-sonnet-20240229",
             GenAiProviderNameValues.ANTHROPIC.value,
             "claude-3-sonnet-20240229",
         )
 
-    def test_azure_invoke_workflow(self):
-        self._run_invoke_workflow_test("azure/gpt-4", GenAiProviderNameValues.AZURE_AI_OPENAI.value, "gpt-4")
+    def test_azure_crew_kickoff(self):
+        self._run_crew_kickoff_test("azure/gpt-4", GenAiProviderNameValues.AZURE_AI_OPENAI.value, "gpt-4")
 
-    def test_google_invoke_workflow(self):
-        self._run_invoke_workflow_test("google/gemini-pro", GenAiProviderNameValues.GCP_GEN_AI.value, "gemini-pro")
+    def test_google_crew_kickoff(self):
+        self._run_crew_kickoff_test("google/gemini-pro", GenAiProviderNameValues.GCP_GEN_AI.value, "gemini-pro")
 
-    def test_groq_invoke_workflow(self):
-        self._run_invoke_workflow_test("groq/llama-3", GenAiProviderNameValues.GROQ.value, "llama-3")
+    def test_groq_crew_kickoff(self):
+        self._run_crew_kickoff_test("groq/llama-3", GenAiProviderNameValues.GROQ.value, "llama-3")
 
-    def test_cohere_invoke_workflow(self):
-        self._run_invoke_workflow_test("cohere/command-r", GenAiProviderNameValues.COHERE.value, "command-r")
+    def test_cohere_crew_kickoff(self):
+        self._run_crew_kickoff_test("cohere/command-r", GenAiProviderNameValues.COHERE.value, "command-r")
 
-    def test_mistral_invoke_workflow(self):
-        self._run_invoke_workflow_test("mistral/mistral-large", GenAiProviderNameValues.MISTRAL_AI.value, "mistral-large")
+    def test_mistral_crew_kickoff(self):
+        self._run_crew_kickoff_test("mistral/mistral-large", GenAiProviderNameValues.MISTRAL_AI.value, "mistral-large")
 
-    def test_deepseek_invoke_workflow(self):
-        self._run_invoke_workflow_test("deepseek/deepseek-chat", GenAiProviderNameValues.DEEPSEEK.value, "deepseek-chat")
+    def test_deepseek_crew_kickoff(self):
+        self._run_crew_kickoff_test("deepseek/deepseek-chat", GenAiProviderNameValues.DEEPSEEK.value, "deepseek-chat")
 
-    def test_perplexity_invoke_workflow(self):
-        self._run_invoke_workflow_test("perplexity/sonar-medium", GenAiProviderNameValues.PERPLEXITY.value, "sonar-medium")
+    def test_perplexity_crew_kickoff(self):
+        self._run_crew_kickoff_test("perplexity/sonar-medium", GenAiProviderNameValues.PERPLEXITY.value, "sonar-medium")
 
-    def test_invoke_workflow_error_handling(self):
+    def test_crew_kickoff_error_handling(self):
         mock_llm = MagicMock(spec=LLM)
         mock_llm.provider = "openai"
         mock_llm.model = "gpt-4"
@@ -364,7 +364,7 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertEqual(parsed_args["size"], 10000)
         self._assert_spans_all_ended()
 
-    def test_multiple_sequential_invoke_workflows(self):
+    def test_multiple_sequential_crew_kickoffs(self):
         @tool
         def seq_tool(v: str) -> str:
             """Sequential tool."""
@@ -397,7 +397,7 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertEqual(len(tool_spans), 2)
         self._assert_spans_all_ended()
 
-    def test_async_invoke_workflow(self):
+    def test_async_crew_kickoff(self):
         @tool
         def async_tool(name: str) -> str:
             """Async tool."""
@@ -471,7 +471,7 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_span_parent(a2_span, crew_span)
         self._assert_spans_all_ended()
 
-    def _run_invoke_workflow_test(self, model: str, provider: str, model_id: str):
+    def _run_crew_kickoff_test(self, model: str, provider: str, model_id: str):
         test_tracer = self.tracer_provider.get_tracer("test")
         tc = self._mock_tool_call()
 

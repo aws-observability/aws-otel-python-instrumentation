@@ -5,12 +5,40 @@ import logging
 from functools import singledispatchmethod
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, Iterator, Mapping, Optional, Tuple, Union
 
+from llama_index.core.agent.workflow import AgentWorkflow, BaseWorkflowAgent
+from llama_index.core.base.embeddings.base import BaseEmbedding
+from llama_index.core.base.llms.base import BaseLLM
+from llama_index.core.base.llms.types import ChatMessage, ChatResponse, CompletionResponse
+from llama_index.core.instrumentation.events import BaseEvent
+from llama_index.core.instrumentation.events.chat_engine import (
+    StreamChatDeltaReceivedEvent,
+    StreamChatEndEvent,
+    StreamChatErrorEvent,
+)
+from llama_index.core.instrumentation.events.embedding import EmbeddingEndEvent, EmbeddingStartEvent
+from llama_index.core.instrumentation.events.llm import (
+    LLMChatEndEvent,
+    LLMChatInProgressEvent,
+    LLMChatStartEvent,
+    LLMCompletionEndEvent,
+    LLMCompletionInProgressEvent,
+    LLMPredictStartEvent,
+)
+from llama_index.core.instrumentation.events.query import QueryStartEvent
+from llama_index.core.instrumentation.events.rerank import ReRankStartEvent
+from llama_index.core.instrumentation.events.retrieval import RetrievalStartEvent
+from llama_index.core.instrumentation.events.synthesis import GetResponseStartEvent, SynthesizeStartEvent
+from llama_index.core.instrumentation.span import BaseSpan
+from llama_index.core.multi_modal_llms import MultiModalLLM
+from llama_index.core.tools import FunctionTool  # type: ignore[attr-defined]
+from llama_index.core.tools import BaseTool
 from pydantic import PrivateAttr
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     GEN_AI_WORKFLOW_NAME,
     OPERATION_INVOKE_WORKFLOW,
     serialize_to_json_string,
+    try_detach,
 )
 from opentelemetry import context as context_api
 from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
@@ -39,43 +67,6 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (  # 
 )
 from opentelemetry.trace import Span, Status, StatusCode, set_span_in_context
 from opentelemetry.util.types import AttributeValue
-
-try:
-    from llama_index.core.agent import BaseAgent  # type: ignore[attr-defined]
-except ImportError:
-    # Fallback for newer versions where BaseAgent doesn't exist
-    from llama_index.core.agent.workflow import BaseWorkflowAgent as BaseAgent  # type: ignore[attr-defined]
-try:
-    from llama_index.core.agent.workflow import AgentWorkflow  # type: ignore[attr-defined]
-except ImportError:
-    AgentWorkflow = None  # type: ignore[assignment,misc]
-
-from llama_index.core.base.embeddings.base import BaseEmbedding
-from llama_index.core.base.llms.base import BaseLLM
-from llama_index.core.base.llms.types import ChatMessage, ChatResponse, CompletionResponse
-from llama_index.core.instrumentation.events import BaseEvent
-from llama_index.core.instrumentation.events.chat_engine import (
-    StreamChatDeltaReceivedEvent,
-    StreamChatEndEvent,
-    StreamChatErrorEvent,
-)
-from llama_index.core.instrumentation.events.embedding import EmbeddingEndEvent, EmbeddingStartEvent
-from llama_index.core.instrumentation.events.llm import (
-    LLMChatEndEvent,
-    LLMChatInProgressEvent,
-    LLMChatStartEvent,
-    LLMCompletionEndEvent,
-    LLMCompletionInProgressEvent,
-    LLMPredictStartEvent,
-)
-from llama_index.core.instrumentation.events.query import QueryStartEvent
-from llama_index.core.instrumentation.events.rerank import ReRankStartEvent
-from llama_index.core.instrumentation.events.retrieval import RetrievalStartEvent
-from llama_index.core.instrumentation.events.synthesis import GetResponseStartEvent, SynthesizeStartEvent
-from llama_index.core.instrumentation.span import BaseSpan
-from llama_index.core.multi_modal_llms import MultiModalLLM
-from llama_index.core.tools import FunctionTool  # type: ignore[attr-defined]
-from llama_index.core.tools import BaseTool
 
 logger = logging.getLogger(__name__)
 
@@ -218,12 +209,8 @@ class _Span(BaseSpan):
             return
 
         if self._context_token is not None:
-            try:
-                context_api.detach(self._context_token)
-            except Exception:  # pylint: disable=broad-exception-caught
-                pass
-            finally:
-                self._context_token = None
+            try_detach(self._context_token)  # type: ignore[arg-type]
+            self._context_token = None
 
         if exception is None:
             status = Status(status_code=StatusCode.OK)
@@ -456,8 +443,8 @@ class _Span(BaseSpan):
         except BaseException:
             pass
 
-    @process_instance.register(BaseAgent)
-    def _(self, instance: BaseAgent) -> None:
+    @process_instance.register(BaseWorkflowAgent)
+    def _(self, instance: BaseWorkflowAgent) -> None:
         self[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.INVOKE_AGENT.value
         if hasattr(instance, "name") and instance.name:
             self[GEN_AI_AGENT_NAME] = instance.name
@@ -466,14 +453,12 @@ class _Span(BaseSpan):
         if hasattr(instance, "system_prompt") and instance.system_prompt:
             self[GEN_AI_SYSTEM_INSTRUCTIONS] = instance.system_prompt
 
-    if AgentWorkflow is not None:
-
-        @process_instance.register(AgentWorkflow)
-        def _(self, instance: "AgentWorkflow") -> None:
-            self[GEN_AI_OPERATION_NAME] = OPERATION_INVOKE_WORKFLOW
-            workflow_name = getattr(instance, "workflow_name", None)
-            if workflow_name:
-                self[GEN_AI_WORKFLOW_NAME] = workflow_name
+    @process_instance.register(AgentWorkflow)
+    def _(self, instance: AgentWorkflow) -> None:
+        self[GEN_AI_OPERATION_NAME] = OPERATION_INVOKE_WORKFLOW
+        workflow_name = getattr(instance, "workflow_name", None)
+        if workflow_name:
+            self[GEN_AI_WORKFLOW_NAME] = workflow_name
 
 
 class _PassthroughSpan(_Span):
