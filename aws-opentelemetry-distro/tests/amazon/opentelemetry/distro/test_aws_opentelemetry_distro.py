@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import importlib
+import logging
 import os
 import sys
 from importlib.metadata import PackageNotFoundError, version
@@ -600,3 +601,141 @@ class TestAwsOpenTelemetryDistro(TestCase):
             "amazon.opentelemetry.distro.aws_opentelemetry_distro.get_aws_region", return_value=region
         ):
             AwsOpenTelemetryDistro()._configure()
+
+
+class TestVersionCompatibilityCheck(TestCase):
+    """Tests for the OpenTelemetry version compatibility check."""
+
+    MODULE_PATH = "amazon.opentelemetry.distro.aws_opentelemetry_distro"
+
+    def test_no_warning_when_versions_match(self):
+        """No warning should be logged when installed versions match expected versions."""
+        from amazon.opentelemetry.distro.aws_opentelemetry_distro import _check_otel_version_compatibility
+
+        with patch(f"{self.MODULE_PATH}._get_requires") as mock_requires, patch(
+            f"{self.MODULE_PATH}._get_version"
+        ) as mock_version:
+            mock_requires.return_value = [
+                "opentelemetry-api == 1.40.0",
+                "opentelemetry-sdk == 1.40.0",
+            ]
+            mock_version.side_effect = lambda pkg: "1.40.0"
+
+            with self.assertLogs(self.MODULE_PATH, level="WARNING") as cm:
+                logging.getLogger(self.MODULE_PATH).warning("dummy")
+                _check_otel_version_compatibility()
+
+            # Only the dummy log should be present
+            self.assertEqual(len(cm.output), 1)
+            self.assertIn("dummy", cm.output[0])
+
+    def test_warning_when_api_version_mismatched(self):
+        """Warning should be logged when opentelemetry-api version doesn't match expected."""
+        from amazon.opentelemetry.distro.aws_opentelemetry_distro import _check_otel_version_compatibility
+
+        with patch(f"{self.MODULE_PATH}._get_requires") as mock_requires, patch(
+            f"{self.MODULE_PATH}._get_version"
+        ) as mock_version:
+            mock_requires.return_value = [
+                "opentelemetry-api == 1.40.0",
+                "opentelemetry-sdk == 1.40.0",
+            ]
+            mock_version.side_effect = lambda pkg: {"opentelemetry-api": "1.33.1", "opentelemetry-sdk": "1.40.0"}[pkg]
+
+            with self.assertLogs(self.MODULE_PATH, level="WARNING") as cm:
+                _check_otel_version_compatibility()
+
+            self.assertEqual(len(cm.output), 1)
+            self.assertIn("opentelemetry-api==1.33.1", cm.output[0])
+            self.assertIn("opentelemetry-api==1.40.0", cm.output[0])
+
+    def test_warning_when_both_versions_mismatched(self):
+        """Warning should include both packages when api and sdk are both mismatched."""
+        from amazon.opentelemetry.distro.aws_opentelemetry_distro import _check_otel_version_compatibility
+
+        with patch(f"{self.MODULE_PATH}._get_requires") as mock_requires, patch(
+            f"{self.MODULE_PATH}._get_version"
+        ) as mock_version:
+            mock_requires.return_value = [
+                "opentelemetry-api == 1.40.0",
+                "opentelemetry-sdk == 1.40.0",
+            ]
+            mock_version.side_effect = lambda pkg: "1.33.1"
+
+            with self.assertLogs(self.MODULE_PATH, level="WARNING") as cm:
+                _check_otel_version_compatibility()
+
+            self.assertEqual(len(cm.output), 1)
+            self.assertIn("opentelemetry-api==1.33.1", cm.output[0])
+            self.assertIn("opentelemetry-sdk==1.33.1", cm.output[0])
+            self.assertIn("opentelemetry-api==1.40.0", cm.output[0])
+            self.assertIn("opentelemetry-sdk==1.40.0", cm.output[0])
+
+    def test_exception_does_not_propagate(self):
+        """Check should silently handle exceptions without blocking startup."""
+        from amazon.opentelemetry.distro.aws_opentelemetry_distro import _check_otel_version_compatibility
+
+        with patch(f"{self.MODULE_PATH}._get_requires", side_effect=Exception("metadata unavailable")):
+            # Should not raise
+            _check_otel_version_compatibility()
+
+    def test_parsing_skips_similar_package_names(self):
+        """Parser should not confuse opentelemetry-sdk with opentelemetry-sdk-extension-aws."""
+        from amazon.opentelemetry.distro.aws_opentelemetry_distro import _check_otel_version_compatibility
+
+        with patch(f"{self.MODULE_PATH}._get_requires") as mock_requires, patch(
+            f"{self.MODULE_PATH}._get_version"
+        ) as mock_version:
+            mock_requires.return_value = [
+                "opentelemetry-api == 1.40.0",
+                "opentelemetry-sdk-extension-aws == 2.1.0",
+                "opentelemetry-sdk == 1.40.0",
+            ]
+            # Return 2.1.0 for sdk to verify it doesn't pick up sdk-extension-aws version
+            mock_version.side_effect = lambda pkg: "1.40.0"
+
+            with self.assertLogs(self.MODULE_PATH, level="WARNING") as cm:
+                logging.getLogger(self.MODULE_PATH).warning("dummy")
+                _check_otel_version_compatibility()
+
+            # Only the dummy log — no mismatch
+            self.assertEqual(len(cm.output), 1)
+            self.assertIn("dummy", cm.output[0])
+
+    def test_parsing_handles_no_spaces(self):
+        """Parser should handle requirement strings without spaces around ==."""
+        from amazon.opentelemetry.distro.aws_opentelemetry_distro import _check_otel_version_compatibility
+
+        with patch(f"{self.MODULE_PATH}._get_requires") as mock_requires, patch(
+            f"{self.MODULE_PATH}._get_version"
+        ) as mock_version:
+            mock_requires.return_value = [
+                "opentelemetry-api==1.40.0",
+                "opentelemetry-sdk==1.40.0",
+            ]
+            mock_version.side_effect = lambda pkg: "1.33.1"
+
+            with self.assertLogs(self.MODULE_PATH, level="WARNING") as cm:
+                _check_otel_version_compatibility()
+
+            self.assertIn("opentelemetry-api==1.33.1", cm.output[0])
+            self.assertIn("opentelemetry-api==1.40.0", cm.output[0])
+
+    def test_parsing_handles_environment_markers(self):
+        """Parser should strip environment markers from version strings."""
+        from amazon.opentelemetry.distro.aws_opentelemetry_distro import _check_otel_version_compatibility
+
+        with patch(f"{self.MODULE_PATH}._get_requires") as mock_requires, patch(
+            f"{self.MODULE_PATH}._get_version"
+        ) as mock_version:
+            mock_requires.return_value = [
+                'opentelemetry-api == 1.40.0 ; python_version >= "3.9"',
+                "opentelemetry-sdk == 1.40.0",
+            ]
+            mock_version.side_effect = lambda pkg: "1.33.1"
+
+            with self.assertLogs(self.MODULE_PATH, level="WARNING") as cm:
+                _check_otel_version_compatibility()
+
+            self.assertIn("opentelemetry-api==1.33.1", cm.output[0])
+            self.assertIn("opentelemetry-api==1.40.0", cm.output[0])
