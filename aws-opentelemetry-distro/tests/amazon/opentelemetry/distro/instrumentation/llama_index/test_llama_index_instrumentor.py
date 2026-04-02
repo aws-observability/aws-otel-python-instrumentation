@@ -3,6 +3,7 @@
 
 # flake8: noqa: E402
 # pylint: disable=wrong-import-position
+import asyncio
 import importlib
 import importlib.util
 import inspect
@@ -16,10 +17,17 @@ from conftest import validate_otel_genai_schema
 if sys.version_info < (3, 10):
     raise unittest.SkipTest("llama-index requires Python >= 3.10")
 
-from llama_index.core.base.llms.types import ChatMessage, ChatResponse, CompletionResponse, MessageRole
+from llama_index.core.agent.workflow import AgentWorkflow, FunctionAgent
+from llama_index.core.base.llms.types import ChatMessage, ChatResponse, CompletionResponse, LLMMetadata, MessageRole
+from llama_index.core.llms.function_calling import FunctionCallingLLM
+from llama_index.core.llms.llm import ToolSelection
 from llama_index.core.tools import FunctionTool
 from llama_index.core.tools.types import ToolOutput
 
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
+    GEN_AI_WORKFLOW_NAME,
+    OPERATION_INVOKE_WORKFLOW,
+)
 from amazon.opentelemetry.distro.instrumentation.llama_index import LlamaIndexInstrumentor
 from opentelemetry import context as context_api
 from opentelemetry import trace
@@ -1357,6 +1365,127 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self.assertEqual(len(input_msgs), 1)
         self.assertEqual(input_msgs[0]["role"], "user")
         span.end()
+
+
+    def test_agent_workflow(self):
+        class _AsyncChatStream:
+            def __init__(self, resp):
+                self._resp = resp
+                self._done = False
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if self._done:
+                    raise StopAsyncIteration
+                self._done = True
+                return self._resp
+
+        class _FakeLLM(FunctionCallingLLM):
+            model_config = {"arbitrary_types_allowed": True}
+            model: str = "fake-model"
+            _call_count: int = 0
+
+            @property
+            def metadata(self):
+                return LLMMetadata(model_name="fake-model", is_function_calling_model=True)
+
+            def chat(self, messages, **kwargs):
+                return ChatResponse(message=ChatMessage(role=MessageRole.ASSISTANT, content="Done"))
+
+            def complete(self, prompt, **kwargs):
+                return CompletionResponse(text="Done")
+
+            def stream_chat(self, messages, **kwargs):
+                yield self.chat(messages)
+
+            def stream_complete(self, prompt, **kwargs):
+                yield self.complete(prompt)
+
+            async def achat(self, messages, **kwargs):
+                return self.chat(messages)
+
+            async def acomplete(self, prompt, **kwargs):
+                return self.complete(prompt)
+
+            async def astream_chat(self, messages, **kwargs):
+                return _AsyncChatStream(self.chat(messages))
+
+            async def astream_complete(self, prompt, **kwargs):
+                return self.complete(prompt)
+
+            def _prepare_chat_with_tools(self, tools, **kwargs):
+                return {"messages": [], "tools": tools}
+
+            async def astream_chat_with_tools(self, tools, **kwargs):
+                self._call_count += 1
+                if self._call_count == 1 and tools:
+                    t = tools[0]
+                    msg = ChatMessage(role=MessageRole.ASSISTANT, content="")
+                    msg.additional_kwargs = {
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "function": {
+                                    "name": t.metadata.name,
+                                    "arguments": '{"name": "World"}',
+                                },
+                            }
+                        ]
+                    }
+                    return _AsyncChatStream(ChatResponse(message=msg))
+                return _AsyncChatStream(
+                    ChatResponse(message=ChatMessage(role=MessageRole.ASSISTANT, content="Greeting complete!"))
+                )
+
+            def get_tool_calls_from_response(self, response, **kwargs):
+                calls = response.message.additional_kwargs.get("tool_calls", [])
+                return [
+                    ToolSelection(
+                        tool_id=c["id"],
+                        tool_name=c["function"]["name"],
+                        tool_kwargs=json.loads(c["function"]["arguments"]),
+                    )
+                    for c in calls
+                ]
+
+        def greet(name: str) -> str:
+            """Greet someone by name"""
+            return f"Hello {name}!"
+
+        tool = FunctionTool.from_defaults(fn=greet, name="greet", description="Greet someone")
+        llm = _FakeLLM()
+        agent = FunctionAgent(name="Greeter", tools=[tool], llm=llm, system_prompt="You greet people.")
+        wf = AgentWorkflow(agents=[agent], workflow_name="greeting_workflow")
+
+        async def _run():
+            await wf.run(user_msg="Greet World")
+
+        asyncio.run(_run())
+        spans = self.span_exporter.get_finished_spans()
+
+        with self.subTest("produces invoke_workflow span"):
+            wf_spans = [s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == OPERATION_INVOKE_WORKFLOW]
+            self.assertEqual(len(wf_spans), 1)
+            self.assertEqual(wf_spans[0].name, "invoke_workflow greeting_workflow")
+            self.assertEqual(wf_spans[0].attributes[GEN_AI_WORKFLOW_NAME], "greeting_workflow")
+
+        with self.subTest("produces single invoke_agent span"):
+            agent_spans = [s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == "invoke_agent"]
+            self.assertEqual(len(agent_spans), 1)
+            self.assertEqual(agent_spans[0].name, "invoke_agent Greeter")
+            self.assertEqual(agent_spans[0].attributes[GEN_AI_AGENT_NAME], "Greeter")
+
+        with self.subTest("produces execute_tool span"):
+            tool_spans = [s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == "execute_tool"]
+            self.assertEqual(len(tool_spans), 1)
+            self.assertIn("greet", tool_spans[0].name)
+
+        with self.subTest("invoke_agent is child of invoke_workflow"):
+            wf_span = [s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == OPERATION_INVOKE_WORKFLOW][0]
+            agent_span = [s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == "invoke_agent"][0]
+            self.assertEqual(agent_span.parent.span_id, wf_span.context.span_id)
 
 
 if __name__ == "__main__":

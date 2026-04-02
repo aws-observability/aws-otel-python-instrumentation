@@ -25,6 +25,10 @@ from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_MESSAGE
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
+    GEN_AI_WORKFLOW_NAME,
+    OPERATION_INVOKE_WORKFLOW,
+)
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_DESCRIPTION,
     GEN_AI_AGENT_ID,
@@ -77,45 +81,45 @@ class TestCrewAIInstrumentor(TestCase):
             else:
                 os.environ[key] = value
 
-    def test_bedrock_crew_kickoff(self):
-        self._run_crew_kickoff_test(
+    def test_bedrock_invoke_workflow(self):
+        self._run_invoke_workflow_test(
             "bedrock/anthropic.claude-3-haiku-20240307-v1:0",
             GenAiProviderNameValues.AWS_BEDROCK.value,
             "anthropic.claude-3-haiku-20240307-v1:0",
         )
 
-    def test_openai_crew_kickoff(self):
-        self._run_crew_kickoff_test("openai/gpt-4", GenAiProviderNameValues.OPENAI.value, "gpt-4")
+    def test_openai_invoke_workflow(self):
+        self._run_invoke_workflow_test("openai/gpt-4", GenAiProviderNameValues.OPENAI.value, "gpt-4")
 
-    def test_anthropic_crew_kickoff(self):
-        self._run_crew_kickoff_test(
+    def test_anthropic_invoke_workflow(self):
+        self._run_invoke_workflow_test(
             "anthropic/claude-3-sonnet-20240229",
             GenAiProviderNameValues.ANTHROPIC.value,
             "claude-3-sonnet-20240229",
         )
 
-    def test_azure_crew_kickoff(self):
-        self._run_crew_kickoff_test("azure/gpt-4", GenAiProviderNameValues.AZURE_AI_OPENAI.value, "gpt-4")
+    def test_azure_invoke_workflow(self):
+        self._run_invoke_workflow_test("azure/gpt-4", GenAiProviderNameValues.AZURE_AI_OPENAI.value, "gpt-4")
 
-    def test_google_crew_kickoff(self):
-        self._run_crew_kickoff_test("google/gemini-pro", GenAiProviderNameValues.GCP_GEN_AI.value, "gemini-pro")
+    def test_google_invoke_workflow(self):
+        self._run_invoke_workflow_test("google/gemini-pro", GenAiProviderNameValues.GCP_GEN_AI.value, "gemini-pro")
 
-    def test_groq_crew_kickoff(self):
-        self._run_crew_kickoff_test("groq/llama-3", GenAiProviderNameValues.GROQ.value, "llama-3")
+    def test_groq_invoke_workflow(self):
+        self._run_invoke_workflow_test("groq/llama-3", GenAiProviderNameValues.GROQ.value, "llama-3")
 
-    def test_cohere_crew_kickoff(self):
-        self._run_crew_kickoff_test("cohere/command-r", GenAiProviderNameValues.COHERE.value, "command-r")
+    def test_cohere_invoke_workflow(self):
+        self._run_invoke_workflow_test("cohere/command-r", GenAiProviderNameValues.COHERE.value, "command-r")
 
-    def test_mistral_crew_kickoff(self):
-        self._run_crew_kickoff_test("mistral/mistral-large", GenAiProviderNameValues.MISTRAL_AI.value, "mistral-large")
+    def test_mistral_invoke_workflow(self):
+        self._run_invoke_workflow_test("mistral/mistral-large", GenAiProviderNameValues.MISTRAL_AI.value, "mistral-large")
 
-    def test_deepseek_crew_kickoff(self):
-        self._run_crew_kickoff_test("deepseek/deepseek-chat", GenAiProviderNameValues.DEEPSEEK.value, "deepseek-chat")
+    def test_deepseek_invoke_workflow(self):
+        self._run_invoke_workflow_test("deepseek/deepseek-chat", GenAiProviderNameValues.DEEPSEEK.value, "deepseek-chat")
 
-    def test_perplexity_crew_kickoff(self):
-        self._run_crew_kickoff_test("perplexity/sonar-medium", GenAiProviderNameValues.PERPLEXITY.value, "sonar-medium")
+    def test_perplexity_invoke_workflow(self):
+        self._run_invoke_workflow_test("perplexity/sonar-medium", GenAiProviderNameValues.PERPLEXITY.value, "sonar-medium")
 
-    def test_crew_kickoff_error_handling(self):
+    def test_invoke_workflow_error_handling(self):
         mock_llm = MagicMock(spec=LLM)
         mock_llm.provider = "openai"
         mock_llm.model = "gpt-4"
@@ -179,7 +183,7 @@ class TestCrewAIInstrumentor(TestCase):
         with patch("litellm.completion", return_value=self._mock_response("Final Answer: Hello!")):
             crew.kickoff()
 
-        crew_span = self._find_span("crew_kickoff SimpleCrew")
+        crew_span = self._find_span("invoke_workflow SimpleCrew")
         agent_span = self._find_span("invoke_agent Simple")
         chat_span = self._find_span("chat gpt-4")
         self.assertIsNotNone(crew_span)
@@ -256,7 +260,7 @@ class TestCrewAIInstrumentor(TestCase):
         ):
             crew.kickoff()
 
-        crew_span = self._find_span("crew_kickoff MultiAgent")
+        crew_span = self._find_span("invoke_workflow MultiAgent")
         a1_span = self._find_span("invoke_agent A1")
         a2_span = self._find_span("invoke_agent A2")
         self.assertIsNotNone(a1_span)
@@ -328,7 +332,7 @@ class TestCrewAIInstrumentor(TestCase):
         ):
             crew.kickoff()
 
-        self.assertIsNotNone(self._find_span("crew_kickoff ToolErrCrew"))
+        self.assertIsNotNone(self._find_span("invoke_workflow ToolErrCrew"))
         self.assertIsNotNone(self._find_span("invoke_agent ToolErr"))
         self._assert_spans_all_ended()
 
@@ -360,7 +364,7 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertEqual(parsed_args["size"], 10000)
         self._assert_spans_all_ended()
 
-    def test_multiple_sequential_crew_kickoffs(self):
+    def test_multiple_sequential_invoke_workflows(self):
         @tool
         def seq_tool(v: str) -> str:
             """Sequential tool."""
@@ -387,13 +391,13 @@ class TestCrewAIInstrumentor(TestCase):
 
         spans = self.span_exporter.get_finished_spans()
         self.assertGreater(len(spans), first_count)
-        crew_spans = [s for s in spans if "crew_kickoff SeqCrew" in s.name]
+        crew_spans = [s for s in spans if "invoke_workflow SeqCrew" in s.name]
         self.assertEqual(len(crew_spans), 2)
         tool_spans = [s for s in spans if "execute_tool seq_tool" in s.name]
         self.assertEqual(len(tool_spans), 2)
         self._assert_spans_all_ended()
 
-    def test_async_crew_kickoff(self):
+    def test_async_invoke_workflow(self):
         @tool
         def async_tool(name: str) -> str:
             """Async tool."""
@@ -421,7 +425,7 @@ class TestCrewAIInstrumentor(TestCase):
 
         asyncio.run(run())
 
-        crew_span = self._find_span("crew_kickoff AsyncCrew")
+        crew_span = self._find_span("invoke_workflow AsyncCrew")
         agent_span = self._find_span("invoke_agent AsyncAgent")
         tool_span = self._find_span("execute_tool async_tool")
         self.assertIsNotNone(crew_span)
@@ -458,7 +462,7 @@ class TestCrewAIInstrumentor(TestCase):
 
         asyncio.run(run())
 
-        crew_span = self._find_span("crew_kickoff AsyncMulti")
+        crew_span = self._find_span("invoke_workflow AsyncMulti")
         a1_span = self._find_span("invoke_agent AsyncA1")
         a2_span = self._find_span("invoke_agent AsyncA2")
         self.assertIsNotNone(a1_span)
@@ -467,7 +471,7 @@ class TestCrewAIInstrumentor(TestCase):
         self._assert_span_parent(a2_span, crew_span)
         self._assert_spans_all_ended()
 
-    def _run_crew_kickoff_test(self, model: str, provider: str, model_id: str):
+    def _run_invoke_workflow_test(self, model: str, provider: str, model_id: str):
         test_tracer = self.tracer_provider.get_tracer("test")
         tc = self._mock_tool_call()
 
@@ -500,16 +504,16 @@ class TestCrewAIInstrumentor(TestCase):
             crew.kickoff()
 
         spans = self.span_exporter.get_finished_spans()
-        crew_span = next((s for s in spans if s.name == "crew_kickoff GreetingCrew"), None)
+        crew_span = next((s for s in spans if s.name == "invoke_workflow GreetingCrew"), None)
         agent_span = next((s for s in spans if s.name == "invoke_agent Greeter"), None)
         tool_span = next((s for s in spans if s.name == "execute_tool get_greeting"), None)
 
         self._assert_span_attributes(
             spans,
-            "crew_kickoff GreetingCrew",
+            "invoke_workflow GreetingCrew",
             {
-                GEN_AI_OPERATION_NAME: "invoke_agent",
-                GEN_AI_AGENT_NAME: "GreetingCrew",
+                GEN_AI_OPERATION_NAME: OPERATION_INVOKE_WORKFLOW,
+                GEN_AI_WORKFLOW_NAME: "GreetingCrew",
                 GEN_AI_AGENT_ID: str(crew.id),
             },
         )

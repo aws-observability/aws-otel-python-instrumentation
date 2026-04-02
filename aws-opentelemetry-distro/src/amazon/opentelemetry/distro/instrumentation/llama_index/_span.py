@@ -7,7 +7,11 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, Iterator, Mappi
 
 from pydantic import PrivateAttr
 
-from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import serialize_to_json_string
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
+    GEN_AI_WORKFLOW_NAME,
+    OPERATION_INVOKE_WORKFLOW,
+    serialize_to_json_string,
+)
 from opentelemetry import context as context_api
 from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
 
@@ -41,6 +45,10 @@ try:
 except ImportError:
     # Fallback for newer versions where BaseAgent doesn't exist
     from llama_index.core.agent.workflow import BaseWorkflowAgent as BaseAgent  # type: ignore[attr-defined]
+try:
+    from llama_index.core.agent.workflow import AgentWorkflow  # type: ignore[attr-defined]
+except ImportError:
+    AgentWorkflow = None  # type: ignore[assignment,misc]
 
 from llama_index.core.base.embeddings.base import BaseEmbedding
 from llama_index.core.base.llms.base import BaseLLM
@@ -194,6 +202,9 @@ class _Span(BaseSpan):
         if operation_name == GenAiOperationNameValues.INVOKE_AGENT.value:
             if agent_name := self._attributes.get(GEN_AI_AGENT_NAME):
                 return f"{operation_name} {agent_name}"
+        elif operation_name == OPERATION_INVOKE_WORKFLOW:
+            if workflow_name := self._attributes.get(GEN_AI_WORKFLOW_NAME):
+                return f"{operation_name} {workflow_name}"
         elif operation_name == GenAiOperationNameValues.EXECUTE_TOOL.value:
             if tool_name := self._attributes.get(GEN_AI_TOOL_NAME):
                 return f"{operation_name} {tool_name}"
@@ -454,6 +465,15 @@ class _Span(BaseSpan):
             self[GEN_AI_AGENT_DESCRIPTION] = instance.description
         if hasattr(instance, "system_prompt") and instance.system_prompt:
             self[GEN_AI_SYSTEM_INSTRUCTIONS] = instance.system_prompt
+
+    if AgentWorkflow is not None:
+
+        @process_instance.register(AgentWorkflow)
+        def _(self, instance: "AgentWorkflow") -> None:
+            self[GEN_AI_OPERATION_NAME] = OPERATION_INVOKE_WORKFLOW
+            workflow_name = getattr(instance, "workflow_name", None)
+            if workflow_name:
+                self[GEN_AI_WORKFLOW_NAME] = workflow_name
 
 
 class _PassthroughSpan(_Span):
