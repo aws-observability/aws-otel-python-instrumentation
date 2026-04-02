@@ -25,7 +25,6 @@ from opentelemetry import context as context_api
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_NAME,
     GEN_AI_OPERATION_NAME,
-    GEN_AI_SYSTEM_INSTRUCTIONS,
     GenAiOperationNameValues,
 )
 from opentelemetry.trace import SpanKind, Tracer, set_span_in_context
@@ -94,7 +93,6 @@ _ALLOWED_METHODS = frozenset(
 class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
     _otel_tracer: Tracer = PrivateAttr()
     _separate_trace_from_runtime_context: bool = PrivateAttr()
-    _workflow_agent_span: Optional[_Span] = PrivateAttr(default=None)
 
     def __init__(
         self,
@@ -111,23 +109,11 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         super().__init__()
         self._otel_tracer = tracer
         self._separate_trace_from_runtime_context = separate_trace_from_runtime_context
-        self._workflow_agent_span = None
 
     @staticmethod
     def _get_agent_setup(bound_args: inspect.BoundArguments) -> Optional[AgentSetup]:
         ev = bound_args.arguments.get("ev")
         return ev if isinstance(ev, AgentSetup) else None
-
-    @staticmethod
-    def _get_system_prompt(agent_setup: AgentSetup) -> Optional[str]:
-        # https://github.com/run-llama/llama_index/blob/65d8f3a/llama-index-core/llama_index/core/agent/workflow/workflow_events.py#L31
-        try:
-            first = agent_setup.input[0]
-            if first.role.value == "system" and first.blocks:
-                return getattr(first.blocks[0], "text", None)
-        except (IndexError, AttributeError):
-            pass
-        return None
 
     @staticmethod
     def _should_suppress(instance: Any, id_: str, bound_args: inspect.BoundArguments) -> bool:
@@ -144,26 +130,6 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         method = id_.partition("-")[0].rpartition(".")[-1]
         return method not in _ALLOWED_METHODS
 
-    def _start_span(self, id_: str, parent: Optional[_Span], parent_span_id: Optional[str]) -> _Span:
-        otel_span = self._otel_tracer.start_span(
-            name="llama_index.operation",  # generic operation name, updated in span.end()
-            start_time=time_ns(),
-            attributes={},
-            kind=SpanKind.INTERNAL,
-            context=(
-                parent.context
-                if parent
-                else (context_api.Context() if self._separate_trace_from_runtime_context else None)
-            ),
-        )
-        token = context_api.attach(set_span_in_context(otel_span, parent.context if parent else None))
-        return _Span(otel_span=otel_span, parent=parent, context_token=token, id_=id_, parent_id=parent_span_id)
-
-    def _close_workflow_agent_span(self, err: Optional[BaseException] = None) -> None:
-        if self._workflow_agent_span:
-            self._workflow_agent_span.end(err)
-            self._workflow_agent_span = None
-
     @skip_instrumentation_if_suppressed
     def new_span(
         self,
@@ -177,24 +143,6 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         with self.lock:
             parent = self.open_spans.get(parent_span_id) if parent_span_id else None
 
-        agent_setup = self._get_agent_setup(bound_args)
-        if agent_setup is not None:
-            agent_name = getattr(agent_setup, "current_agent_name", None)
-            if self._workflow_agent_span:
-                current = self._workflow_agent_span._attributes.get(GEN_AI_AGENT_NAME)
-                if current == agent_name:
-                    return _PassthroughSpan(parent=self._workflow_agent_span, id_=id_, parent_id=parent_span_id)
-                self._close_workflow_agent_span()
-            span = self._start_span(id_, parent, parent_span_id)
-            span[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.INVOKE_AGENT.value
-            if agent_name:
-                span[GEN_AI_AGENT_NAME] = agent_name
-            system_prompt = self._get_system_prompt(agent_setup)
-            if system_prompt:
-                span[GEN_AI_SYSTEM_INSTRUCTIONS] = system_prompt
-            self._workflow_agent_span = span
-            return span
-
         if self._should_suppress(instance, id_, bound_args):
             return _PassthroughSpan(
                 parent=parent,
@@ -202,9 +150,38 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
                 parent_id=parent_span_id,
             )
 
-        span = self._start_span(id_, parent, parent_span_id)
-        span.process_instance(instance)
-        span.process_input(instance, bound_args)
+        otel_span = self._otel_tracer.start_span(
+            name="llama_index.operation",  # generic operation name, updated in span.end()
+            start_time=time_ns(),
+            attributes={},
+            kind=SpanKind.INTERNAL,
+            context=(
+                parent.context
+                if parent
+                else (context_api.Context() if self._separate_trace_from_runtime_context else None)
+            ),
+        )
+
+        token = context_api.attach(set_span_in_context(otel_span, parent.context if parent else None))
+
+        span = _Span(
+            otel_span=otel_span,
+            parent=parent,
+            context_token=token,
+            id_=id_,
+            parent_id=parent_span_id,
+        )
+
+        agent_setup = self._get_agent_setup(bound_args)
+        if agent_setup is not None:
+            span[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.INVOKE_AGENT.value
+            agent_name = getattr(agent_setup, "current_agent_name", None)
+            if agent_name:
+                span[GEN_AI_AGENT_NAME] = agent_name
+        else:
+            span.process_instance(instance)
+            span.process_input(instance, bound_args)
+
         return span
 
     @skip_instrumentation_if_suppressed
@@ -223,10 +200,6 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             return None
         if span.is_passthrough:
             return span
-        if span is self._workflow_agent_span:
-            return span
-        if isinstance(instance, AgentWorkflow):
-            self._close_workflow_agent_span()
         if isinstance(result, ToolOutput):
             span._attributes[GEN_AI_TOOL_CALL_RESULT] = result.content
         span.end()
@@ -248,11 +221,6 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             return None
         if span.is_passthrough:
             return span
-        if span is self._workflow_agent_span:
-            self._close_workflow_agent_span(err)
-            return span
-        if isinstance(instance, AgentWorkflow):
-            self._close_workflow_agent_span(err)
         span.end(err)
         return span
 

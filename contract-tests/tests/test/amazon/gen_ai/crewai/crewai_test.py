@@ -5,11 +5,11 @@ from typing import List
 from mock_collector_client import ResourceScopeSpan
 from typing_extensions import override
 
-from amazon.gen_ai.gen_ai_test_base import GEN_AI_OPERATION_NAME, GEN_AI_WORKFLOW_NAME, GenAITestBase
+from amazon.gen_ai.gen_ai_test_base import GEN_AI_OPERATION_NAME, GenAITestBase
 
 GEN_AI_AGENT_ID: str = "gen_ai.agent.id"
 GEN_AI_AGENT_DESCRIPTION: str = "gen_ai.agent.description"
-GEN_AI_SYSTEM_INSTRUCTIONS: str = "gen_ai.system_instructions"
+GEN_AI_WORKFLOW_NAME: str = "gen_ai.workflow.name"
 GEN_AI_TOOL_DEFINITIONS: str = "gen_ai.tool.definitions"
 
 
@@ -44,7 +44,7 @@ class CrewAITest(GenAITestBase):
         self.assertIn(GEN_AI_AGENT_ID, crew_attrs)
         self.assertIn(GEN_AI_TOOL_DEFINITIONS, crew_attrs)
 
-        _, invoke_agent_spans, _, _ = self._collect_gen_ai_spans(resource_scope_spans)
+        invoke_agent_spans, _, _ = self._collect_gen_ai_spans(resource_scope_spans)
         for span in invoke_agent_spans:
             attrs = self._get_attributes_dict(span.attributes)
             self.assertIn(GEN_AI_AGENT_ID, attrs)
