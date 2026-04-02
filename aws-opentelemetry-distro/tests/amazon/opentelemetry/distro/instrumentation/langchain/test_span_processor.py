@@ -42,7 +42,7 @@ class TestLangChainSpanProcessor(TestCase):
     def test_shutdown_clears_state(self):
         span = self.tracer.start_span("invoke_agent test")
         assert isinstance(span, Span)
-        self.processor._span_id_to_nearest_invoke_agent_span_map[12345] = span
+        self.processor._span_id_to_nearest_invoke_agent_span_map.put(12345, span)
         span.end()
         self.assertEqual(len(self.processor._span_id_to_nearest_invoke_agent_span_map), 1)
         self.processor.shutdown()
@@ -82,7 +82,7 @@ class TestLangChainSpanProcessor(TestCase):
         chat_span.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
         chat_span.set_attribute(GEN_AI_REQUEST_MODEL, "gpt-4")
         assert chat_span.context is not None
-        self.processor._span_id_to_nearest_invoke_agent_span_map[chat_span.context.span_id] = agent_span
+        self.processor._span_id_to_nearest_invoke_agent_span_map.put(chat_span.context.span_id, agent_span)
         chat_span.end()
 
         spans = self.exporter.get_finished_spans()

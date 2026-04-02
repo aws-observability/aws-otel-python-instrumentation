@@ -75,6 +75,10 @@ class DictWithLock:
         with self._lock:
             return key in self._data
 
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._data)
+
 
 def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:
     json_safe_types = (str, int, float, bool, dict, list, tuple, type(None))
