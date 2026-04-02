@@ -20,6 +20,10 @@ from llama_index.core.base.llms.types import ChatMessage, ChatResponse, Completi
 from llama_index.core.tools import FunctionTool
 from llama_index.core.tools.types import ToolOutput
 
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
+    GEN_AI_WORKFLOW_NAME,
+    OPERATION_INVOKE_WORKFLOW,
+)
 from amazon.opentelemetry.distro.instrumentation.llama_index import LlamaIndexInstrumentor
 from opentelemetry import context as context_api
 from opentelemetry import trace
@@ -1357,6 +1361,94 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self.assertEqual(len(input_msgs), 1)
         self.assertEqual(input_msgs[0]["role"], "user")
         span.end()
+
+
+    def test_invoke_workflow(self):
+        from llama_index.core.agent.workflow import AgentWorkflow, FunctionAgent
+        from llama_index.llms.openai import OpenAI
+
+        handler_module = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._handler")
+        llm = OpenAI(model="gpt-3.5-turbo", api_key="fake-key")
+
+        def _make_agent_step_args(agent_name, system_prompt=None):
+            mock_ev = Mock()
+            mock_ev.current_agent_name = agent_name
+            if system_prompt:
+                mock_msg = Mock()
+                mock_msg.role = Mock()
+                mock_msg.role.value = "system"
+                mock_block = Mock()
+                mock_block.text = system_prompt
+                mock_msg.blocks = [mock_block]
+                mock_ev.input = [mock_msg]
+            else:
+                mock_ev.input = []
+            sig = inspect.Signature(parameters=[
+                inspect.Parameter("ctx", inspect.Parameter.POSITIONAL_OR_KEYWORD),
+                inspect.Parameter("ev", inspect.Parameter.POSITIONAL_OR_KEYWORD),
+            ])
+            return sig.bind(None, mock_ev)
+
+        with self.subTest("workflow span sets invoke_workflow and workflow name"):
+            agent = FunctionAgent(name="TestAgent", tools=[], llm=llm, system_prompt="test")
+            workflow = AgentWorkflow(agents=[agent], workflow_name="test_workflow")
+            otel_span = self.tracer.start_span("test")
+            span = self._Span(otel_span=otel_span)
+            span.process_instance(workflow)
+            self.assertEqual(span._attributes[GEN_AI_OPERATION_NAME], OPERATION_INVOKE_WORKFLOW)
+            self.assertEqual(span._attributes[GEN_AI_WORKFLOW_NAME], "test_workflow")
+            otel_span.end()
+
+        with self.subTest("workflow span name includes workflow name"):
+            otel_span = self.tracer.start_span("test")
+            span = self._Span(otel_span=otel_span)
+            span._attributes[GEN_AI_OPERATION_NAME] = OPERATION_INVOKE_WORKFLOW
+            span._attributes[GEN_AI_WORKFLOW_NAME] = "my_pipeline"
+            self.assertEqual(span._get_span_name(), "invoke_workflow my_pipeline")
+            otel_span.end()
+
+        with self.subTest("first run_agent_step creates invoke_agent span"):
+            span_handler = handler_module._SpanHandler(tracer=self.tracer)
+            bound = _make_agent_step_args("TestAgent", "You are helpful.")
+            span = span_handler.new_span(
+                id_="AgentWorkflow.run_agent_step-1", bound_args=bound, instance=None
+            )
+            self.assertFalse(span.is_passthrough)
+            self.assertEqual(span._attributes[GEN_AI_OPERATION_NAME], "invoke_agent")
+            self.assertEqual(span._attributes[GEN_AI_AGENT_NAME], "TestAgent")
+            self.assertEqual(span._attributes[GEN_AI_SYSTEM_INSTRUCTIONS], "You are helpful.")
+            span.end()
+
+        with self.subTest("subsequent run_agent_step for same agent reuses span"):
+            span_handler = handler_module._SpanHandler(tracer=self.tracer)
+            bound = _make_agent_step_args("TestAgent")
+            span1 = span_handler.new_span(
+                id_="AgentWorkflow.run_agent_step-1", bound_args=bound, instance=None
+            )
+            span2 = span_handler.new_span(
+                id_="AgentWorkflow.run_agent_step-2", bound_args=bound, instance=None
+            )
+            self.assertFalse(span1.is_passthrough)
+            self.assertTrue(span2.is_passthrough)
+            span1.end()
+
+        with self.subTest("agent change creates new span"):
+            span_handler = handler_module._SpanHandler(tracer=self.tracer)
+            span_a = span_handler.new_span(
+                id_="AgentWorkflow.run_agent_step-1",
+                bound_args=_make_agent_step_args("AgentA"),
+                instance=None,
+            )
+            span_b = span_handler.new_span(
+                id_="AgentWorkflow.run_agent_step-2",
+                bound_args=_make_agent_step_args("AgentB"),
+                instance=None,
+            )
+            self.assertFalse(span_a.is_passthrough)
+            self.assertFalse(span_b.is_passthrough)
+            self.assertEqual(span_a._attributes[GEN_AI_AGENT_NAME], "AgentA")
+            self.assertEqual(span_b._attributes[GEN_AI_AGENT_NAME], "AgentB")
+            span_b.end()
 
 
 if __name__ == "__main__":

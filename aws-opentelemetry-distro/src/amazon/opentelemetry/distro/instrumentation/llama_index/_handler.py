@@ -9,6 +9,10 @@ try:
     from llama_index.core.agent import BaseAgent  # type: ignore[attr-defined]
 except ImportError:
     from llama_index.core.agent.workflow import BaseWorkflowAgent as BaseAgent  # type: ignore[attr-defined]
+try:
+    from llama_index.core.agent.workflow import AgentWorkflow  # type: ignore[attr-defined]
+except ImportError:
+    AgentWorkflow = None  # type: ignore[assignment,misc]
 from llama_index.core.base.base_query_engine import BaseQueryEngine
 from llama_index.core.base.base_retriever import BaseRetriever
 from llama_index.core.base.embeddings.base import BaseEmbedding
@@ -24,6 +28,12 @@ from pydantic import PrivateAttr
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import skip_instrumentation_if_suppressed
 from opentelemetry import context as context_api
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
+    GEN_AI_AGENT_NAME,
+    GEN_AI_OPERATION_NAME,
+    GEN_AI_SYSTEM_INSTRUCTIONS,
+    GenAiOperationNameValues,
+)
 from opentelemetry.trace import SpanKind, Tracer, set_span_in_context
 
 from ._span import (  # noqa: F401  # pylint: disable=unused-import
@@ -36,88 +46,118 @@ from ._span import (  # noqa: F401  # pylint: disable=unused-import
 
 logger = logging.getLogger(__name__)
 
-# Instance types that produce semantically meaningful spans.
-# Only these types get real OTel spans; all others get passthrough spans.
-_INSTRUMENTED_TYPES = (
-    BaseLLM,
-    MultiModalLLM,
-    BaseEmbedding,
-    BaseTool,
-    BaseAgent,
-    BaseQueryEngine,
-    BaseRetriever,
-    BaseSynthesizer,
+_INSTRUMENTED_TYPES = tuple(
+    filter(
+        None,
+        (
+            BaseLLM,
+            MultiModalLLM,
+            BaseEmbedding,
+            BaseTool,
+            BaseAgent,
+            AgentWorkflow,
+            BaseQueryEngine,
+            BaseRetriever,
+            BaseSynthesizer,
+        ),
+    )
 )
 
-# Methods on instrumented types that produce user-facing spans.
-# Any method NOT in this set becomes a passthrough span (fail-safe:
-# new/unknown methods are invisible rather than creating ghost spans).
 _ALLOWED_METHODS = frozenset(
     (
-        # QueryEngine
         "query",
         "aquery",
-        # Retriever
         "retrieve",
         "aretrieve",
-        # Synthesizer
         "synthesize",
         "asynthesize",
-        # LLM (complete/stream_complete are passthrough because
-        # Bedrock converts them to chat internally, and the chat
-        # span carries the semantic operation name from events)
         "chat",
         "achat",
         "stream_chat",
         "astream_chat",
-        # Embedding
         "get_query_embedding",
         "aget_query_embedding",
         "get_text_embedding",
         "aget_text_embedding",
         "get_text_embedding_batch",
         "aget_text_embedding_batch",
-        # Tool
         "call",
         "acall",
-        # Agent
         "run",
     )
 )
+
+_AGENT_STEP_METHOD = "run_agent_step"
+
+
+def _is_agent_step(id_: str) -> bool:
+    return _AGENT_STEP_METHOD in id_.partition("-")[0]
+
+
+def _is_workflow_run(id_: str) -> bool:
+    return id_.partition("-")[0] == "AgentWorkflow.run"
+
+
+def _get_agent_name(bound_args: inspect.BoundArguments) -> Optional[str]:
+    ev = bound_args.arguments.get("ev")
+    return getattr(ev, "current_agent_name", None) if ev else None
+
+
+def _get_system_prompt(bound_args: inspect.BoundArguments) -> Optional[str]:
+    ev = bound_args.arguments.get("ev")
+    if ev is None:
+        return None
+    messages = getattr(ev, "input", None)
+    if not messages:
+        return None
+    first = messages[0]
+    role = getattr(first, "role", None)
+    if role and str(role.value) == "system":
+        blocks = getattr(first, "blocks", None)
+        if blocks:
+            return getattr(blocks[0], "text", None)
+    return None
 
 
 class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
     _otel_tracer: Tracer = PrivateAttr()
     _separate_trace_from_runtime_context: bool = PrivateAttr()
+    _workflow_agent_span: Optional[_Span] = PrivateAttr(default=None)
 
-    def __init__(
-        self,
-        tracer: Tracer,
-        separate_trace_from_runtime_context: bool = False,
-    ) -> None:
-        """Initialize the span handler.
-
-        Args:
-            tracer (trace_api.Tracer): The OpenTelemetry tracer for creating spans.
-            separate_trace_from_runtime_context (bool): When True, always start a new trace for each
-                span without a parent, isolating it from any existing trace in the runtime context.
-        """
+    def __init__(self, tracer: Tracer, separate_trace_from_runtime_context: bool = False) -> None:
         super().__init__()
         self._otel_tracer = tracer
         self._separate_trace_from_runtime_context = separate_trace_from_runtime_context
+        self._workflow_agent_span = None
 
     @staticmethod
     def _should_suppress(instance: Any, id_: str) -> bool:
-        """Check if this span should be a passthrough (no OTel span created).
-
-        A span is suppressed (passthrough) when:
-        - The instance is not one of _INSTRUMENTED_TYPES, OR
-        - The method is internal plumbing listed in _PASSTHROUGH_METHODS.
-        """
+        if _is_agent_step(id_):
+            return False
         if not isinstance(instance, _INSTRUMENTED_TYPES):
             return True
         method = id_.partition("-")[0].rpartition(".")[-1]
         return method not in _ALLOWED_METHODS
+
+    def _start_span(self, id_: str, parent: Optional[_Span], parent_span_id: Optional[str]) -> _Span:
+        otel_span = self._otel_tracer.start_span(
+            name="llama_index.operation",
+            start_time=time_ns(),
+            attributes={},
+            kind=SpanKind.INTERNAL,
+            context=(
+                parent.context
+                if parent
+                else (context_api.Context() if self._separate_trace_from_runtime_context else None)
+            ),
+        )
+        token = context_api.attach(set_span_in_context(otel_span, parent.context if parent else None))
+        return _Span(otel_span=otel_span, parent=parent, context_token=token, id_=id_, parent_id=parent_span_id)
+
+    def _close_workflow_agent_span(self, err: Optional[BaseException] = None) -> None:
+        if self._workflow_agent_span:
+            self._workflow_agent_span.end(err)
+            self._workflow_agent_span = None
 
     @skip_instrumentation_if_suppressed
     def new_span(
@@ -132,37 +172,31 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         with self.lock:
             parent = self.open_spans.get(parent_span_id) if parent_span_id else None
 
+        if _is_agent_step(id_):
+            agent_name = _get_agent_name(bound_args)
+
+            if self._workflow_agent_span:
+                current = self._workflow_agent_span._attributes.get(GEN_AI_AGENT_NAME)
+                if current == agent_name:
+                    return _PassthroughSpan(parent=self._workflow_agent_span, id_=id_, parent_id=parent_span_id)
+                self._close_workflow_agent_span()
+
+            span = self._start_span(id_, parent, parent_span_id)
+            span[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.INVOKE_AGENT.value
+            if agent_name:
+                span[GEN_AI_AGENT_NAME] = agent_name
+            system_prompt = _get_system_prompt(bound_args)
+            if system_prompt:
+                span[GEN_AI_SYSTEM_INSTRUCTIONS] = system_prompt
+            self._workflow_agent_span = span
+            return span
+
         if self._should_suppress(instance, id_):
-            return _PassthroughSpan(
-                parent=parent,
-                id_=id_,
-                parent_id=parent_span_id,
-            )
+            return _PassthroughSpan(parent=parent, id_=id_, parent_id=parent_span_id)
 
-        otel_span = self._otel_tracer.start_span(
-            name="llama_index.operation",  # generic operation name, updated in span.end()
-            start_time=time_ns(),
-            attributes={},
-            kind=SpanKind.INTERNAL,
-            context=(
-                parent.context
-                if parent
-                else (context_api.Context() if self._separate_trace_from_runtime_context else None)
-            ),
-        )
-
-        token = context_api.attach(set_span_in_context(otel_span, parent.context if parent else None))
-
-        span = _Span(
-            otel_span=otel_span,
-            parent=parent,
-            context_token=token,
-            id_=id_,
-            parent_id=parent_span_id,
-        )
+        span = self._start_span(id_, parent, parent_span_id)
         span.process_instance(instance)
         span.process_input(instance, bound_args)
-
         return span
 
     @skip_instrumentation_if_suppressed
@@ -181,6 +215,10 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             return None
         if span.is_passthrough:
             return span
+        if span is self._workflow_agent_span:
+            return span
+        if _is_workflow_run(id_):
+            self._close_workflow_agent_span()
         if isinstance(result, ToolOutput):
             span._attributes[GEN_AI_TOOL_CALL_RESULT] = result.content
         span.end()
@@ -202,6 +240,11 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             return None
         if span.is_passthrough:
             return span
+        if span is self._workflow_agent_span:
+            self._close_workflow_agent_span(err)
+            return span
+        if _is_workflow_run(id_):
+            self._close_workflow_agent_span(err)
         span.end(err)
         return span
 
