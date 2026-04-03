@@ -44,12 +44,15 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_INPUT_MESSAGES,
     GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
-    GEN_AI_PROMPT,
     GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_FREQUENCY_PENALTY,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
+    GEN_AI_REQUEST_PRESENCE_PENALTY,
     GEN_AI_REQUEST_TEMPERATURE,
+    GEN_AI_REQUEST_TOP_K,
     GEN_AI_REQUEST_TOP_P,
+    GEN_AI_RESPONSE_FINISH_REASONS,
     GEN_AI_RESPONSE_ID,
     GEN_AI_RESPONSE_MODEL,
     GEN_AI_SYSTEM_INSTRUCTIONS,
@@ -73,7 +76,10 @@ class TestLangChainInstrumentor(TestCase):
         model_id: str = "test-model-id"
         temperature: float = 0.7
         top_p: float = 0.9
+        top_k: int = 40
         max_tokens: int = 100
+        frequency_penalty: float = 0.5
+        presence_penalty: float = 0.3
 
         @property
         def _default_params(self) -> dict:
@@ -81,7 +87,10 @@ class TestLangChainInstrumentor(TestCase):
                 "model_id": self.model_id,
                 "temperature": self.temperature,
                 "top_p": self.top_p,
+                "top_k": self.top_k,
                 "max_tokens": self.max_tokens,
+                "frequency_penalty": self.frequency_penalty,
+                "presence_penalty": self.presence_penalty,
             }
 
         @classmethod
@@ -100,7 +109,12 @@ class TestLangChainInstrumentor(TestCase):
 
         def _generate(self, messages, stop=None, run_manager=None, **kwargs):
             return ChatResult(
-                generations=[ChatGeneration(message=AIMessage(content="Final Answer: Done."))],
+                generations=[
+                    ChatGeneration(
+                        message=AIMessage(content="Final Answer: Done."),
+                        generation_info={"finish_reason": "stop"},
+                    )
+                ],
                 llm_output={
                     "model_name": "test-model",
                     "id": "test-response-id",
@@ -164,7 +178,10 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(span.attributes[GEN_AI_REQUEST_MODEL], "test-model-id")
         self.assertEqual(span.attributes[GEN_AI_REQUEST_TEMPERATURE], 0.7)
         self.assertEqual(span.attributes[GEN_AI_REQUEST_TOP_P], 0.9)
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_TOP_K], 40)
         self.assertEqual(span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_FREQUENCY_PENALTY], 0.5)
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_PRESENCE_PENALTY], 0.3)
 
         self.assertIsNotNone(span.attributes.get(GEN_AI_INPUT_MESSAGES))
         input_messages = json.loads(span.attributes[GEN_AI_INPUT_MESSAGES])
@@ -184,6 +201,7 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(span.attributes[GEN_AI_RESPONSE_ID], "test-response-id")
         self.assertEqual(span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 10)
         self.assertEqual(span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 20)
+        self.assertEqual(span.attributes.get(GEN_AI_RESPONSE_FINISH_REASONS), ("stop",))
 
     def test_create_agent_creates_invoke_agent_span(self):
         @tool
@@ -338,7 +356,7 @@ class TestLangChainInstrumentor(TestCase):
         self.assertIn("text_completion", span.name)
         self.assertEqual(span.attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.TEXT_COMPLETION.value)
 
-    def test_provider_detection_from_langchain_models(self):
+    def test_llm_attributes_langchain_models(self):
         from langchain_anthropic import ChatAnthropic
         from langchain_aws import ChatBedrock, ChatBedrockConverse
         from langchain_cohere import ChatCohere
@@ -350,7 +368,7 @@ class TestLangChainInstrumentor(TestCase):
         from langchain_xai import ChatXAI
 
         fake_result = ChatResult(
-            generations=[ChatGeneration(message=AIMessage(content="ok"))],
+            generations=[ChatGeneration(message=AIMessage(content="ok"), generation_info={"finish_reason": "stop"})],
             llm_output={
                 "model_name": "test",
                 "token_usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
@@ -405,6 +423,7 @@ class TestLangChainInstrumentor(TestCase):
                 self.assertIsNotNone(attrs.get(GEN_AI_OUTPUT_MESSAGES))
                 validate_otel_genai_schema(json.loads(attrs[GEN_AI_INPUT_MESSAGES]), "gen-ai-input-messages")
                 validate_otel_genai_schema(json.loads(attrs[GEN_AI_OUTPUT_MESSAGES]), "gen-ai-output-messages")
+                self.assertEqual(attrs.get(GEN_AI_RESPONSE_FINISH_REASONS), ("stop",))
 
     def test_provider_extracted_from_serialized_id(self):
         FakeChatModel = self.FakeChatModel
@@ -650,7 +669,7 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(instructions[0]["type"], "text")
         self.assertIn("helpful assistant", instructions[0]["content"])
 
-    def test_text_completion_records_prompt_and_output(self):
+    def test_text_completion_records_input_messages_and_output(self):
         llm = FakeListLLM(responses=["hello"])
         llm.invoke("test prompt")
 
@@ -658,10 +677,11 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(len(spans), 1)
         span = spans[0]
 
-        self.assertIsNotNone(span.attributes.get(GEN_AI_PROMPT))
-        prompts = json.loads(span.attributes[GEN_AI_PROMPT])
-        self.assertIsInstance(prompts, list)
-        self.assertIn("test prompt", prompts[0])
+        self.assertIsNotNone(span.attributes.get(GEN_AI_INPUT_MESSAGES))
+        input_messages = json.loads(span.attributes[GEN_AI_INPUT_MESSAGES])
+        self.assertIsInstance(input_messages, list)
+        self.assertEqual(input_messages[0]["role"], "user")
+        self.assertIn("test prompt", input_messages[0]["parts"][0]["content"])
 
         self.assertIsNotNone(span.attributes.get(GEN_AI_OUTPUT_MESSAGES))
         output = json.loads(span.attributes[GEN_AI_OUTPUT_MESSAGES])

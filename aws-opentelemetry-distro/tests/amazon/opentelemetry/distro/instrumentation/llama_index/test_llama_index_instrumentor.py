@@ -44,9 +44,16 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_FREQUENCY_PENALTY,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
+    GEN_AI_REQUEST_PRESENCE_PENALTY,
+    GEN_AI_REQUEST_STOP_SEQUENCES,
     GEN_AI_REQUEST_TEMPERATURE,
+    GEN_AI_REQUEST_TOP_K,
+    GEN_AI_REQUEST_TOP_P,
+    GEN_AI_RESPONSE_FINISH_REASONS,
+    GEN_AI_RESPONSE_MODEL,
     GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_CALL_RESULT,
@@ -55,6 +62,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_NAME,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
+    GenAiOperationNameValues,
 )
 
 
@@ -205,7 +213,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
         span._process_event(event)
-        self.assertEqual(span._attributes[GEN_AI_OPERATION_NAME], "retrieve")
+        self.assertEqual(span._attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.RETRIEVAL.value)
         otel_span.end()
 
     def test_rerank_start_event(self):
@@ -339,7 +347,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self.assertEqual(span._attributes[GEN_AI_OPERATION_NAME], "invoke_agent")
         self.assertEqual(span._attributes[GEN_AI_AGENT_NAME], "TestAgent")
         self.assertEqual(span._attributes[GEN_AI_AGENT_DESCRIPTION], "A test agent")
-        self.assertEqual(span._attributes[GEN_AI_SYSTEM_INSTRUCTIONS], "You are helpful.")
+        self.assertNotIn(GEN_AI_SYSTEM_INSTRUCTIONS, span._attributes)
         otel_span.end()
 
     def test_process_instance_base_agent_no_name(self):
@@ -1327,7 +1335,114 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self.assertEqual(output[0]["role"], "assistant")
         self.assertEqual(output[0]["parts"][0]["type"], "text")
         self.assertIn("sunny", output[0]["parts"][0]["content"])
+        self.assertNotIn(GEN_AI_RESPONSE_FINISH_REASONS, span._attributes)
         span.end()
+
+    def test_chat_response_by_provider(self):
+        from llama_index.core.base.llms.types import TextBlock, ThinkingBlock, ToolCallBlock
+        from llama_index.core.instrumentation.events.llm import LLMChatEndEvent
+        from llama_index.llms.anthropic import Anthropic
+        from llama_index.llms.bedrock_converse import BedrockConverse
+        from llama_index.llms.openai import OpenAI
+
+        cases = [
+            {
+                "name": "openai_text",
+                "llm": OpenAI(model="gpt-4", api_key="fake"),
+                "message": ChatMessage(role="assistant", content="Hello!"),
+                "raw": {"choices": [{"finish_reason": "stop"}], "model": "gpt-4"},
+                "finish_reason": "stop",
+                "response_model": "gpt-4",
+                "part_types": ["text"],
+            },
+            {
+                "name": "openai_tool_call",
+                "llm": OpenAI(model="gpt-4", api_key="fake"),
+                "message": ChatMessage(
+                    role="assistant",
+                    blocks=[ToolCallBlock(tool_call_id="c1", tool_name="search", tool_kwargs={"q": "weather"})],
+                ),
+                "raw": {"choices": [{"finish_reason": "tool_calls"}], "model": "gpt-4"},
+                "finish_reason": "tool_calls",
+                "response_model": "gpt-4",
+                "part_types": ["tool_call"],
+            },
+            {
+                "name": "anthropic_with_thinking",
+                "llm": Anthropic(model="claude-3-haiku-20240307", api_key="fake"),
+                "message": ChatMessage(
+                    role="assistant",
+                    blocks=[ThinkingBlock(content="Let me think..."), TextBlock(text="It is sunny.")],
+                ),
+                "raw": {"stop_reason": "end_turn", "model": "claude-3-haiku"},
+                "finish_reason": "end_turn",
+                "response_model": "claude-3-haiku",
+                "part_types": ["reasoning", "text"],
+            },
+            {
+                "name": "bedrock",
+                "llm": BedrockConverse(model="anthropic.claude-3-haiku-20240307-v1:0", region_name="us-east-1"),
+                "message": ChatMessage(role="assistant", content="Done."),
+                "raw": {"stopReason": "end_turn"},
+                "finish_reason": "end_turn",
+                "response_model": None,
+                "part_types": ["text"],
+            },
+            {
+                "name": "vertex",
+                "llm": OpenAI(model="gpt-4", api_key="fake"),
+                "message": ChatMessage(role="assistant", content="Done."),
+                "raw": {"candidates": [{"finishReason": "STOP"}]},
+                "finish_reason": "STOP",
+                "response_model": None,
+                "part_types": ["text"],
+            },
+            {
+                "name": "no_finish_reason",
+                "llm": OpenAI(model="gpt-4", api_key="fake"),
+                "message": ChatMessage(role="assistant", content="Hello!"),
+                "raw": {"model": "gpt-4"},
+                "finish_reason": None,
+                "response_model": "gpt-4",
+                "part_types": ["text"],
+            },
+            {
+                "name": "no_raw",
+                "llm": OpenAI(model="gpt-4", api_key="fake"),
+                "message": ChatMessage(role="assistant", content="Hello!"),
+                "raw": None,
+                "finish_reason": None,
+                "response_model": None,
+                "part_types": ["text"],
+            },
+        ]
+
+        for case in cases:
+            with self.subTest(provider=case["name"]):
+                handler = self._make_span_handler()
+                span = handler.new_span(
+                    id_=f"llm.chat-{case['name']}", bound_args=self._make_bound_args(), instance=case["llm"]
+                )
+
+                response = Mock(spec=ChatResponse)
+                response.message = case["message"]
+                response.raw = case["raw"]
+                response.additional_kwargs = {}
+                span.process_event(LLMChatEndEvent(response=response, messages=[], model_dict={}))
+
+                output = json.loads(span._attributes[GEN_AI_OUTPUT_MESSAGES])
+                validate_otel_genai_schema(output, "gen-ai-output-messages")
+                self.assertEqual([p["type"] for p in output[0]["parts"]], case["part_types"])
+
+                if case["finish_reason"]:
+                    self.assertEqual(span._attributes.get(GEN_AI_RESPONSE_FINISH_REASONS), [case["finish_reason"]])
+                else:
+                    self.assertNotIn(GEN_AI_RESPONSE_FINISH_REASONS, span._attributes)
+
+                if case["response_model"]:
+                    self.assertEqual(span._attributes.get(GEN_AI_RESPONSE_MODEL), case["response_model"])
+
+                span.end()
 
     def test_system_instructions_conform_to_otel_schema(self):
         """Validate gen_ai.system_instructions against OTel GenAI JSON Schema."""

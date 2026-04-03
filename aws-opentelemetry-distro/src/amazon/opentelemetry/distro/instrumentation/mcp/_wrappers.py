@@ -14,7 +14,7 @@ from opentelemetry.instrumentation.utils import suppress_http_instrumentation
 from opentelemetry.propagate import get_global_textmap
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
-    GEN_AI_PROMPT,
+    GEN_AI_PROMPT_NAME,
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_NAME,
@@ -118,7 +118,7 @@ class McpWrapper:
         elif isinstance(message, types.GetPromptRequest):
             prompt_name = message.params.name
             span.update_name(create_mcp_span_name(str(McpMethodNameValues.PROMPTS_GET.value), str(prompt_name)))
-            span.set_attribute(GEN_AI_PROMPT, prompt_name)
+            span.set_attribute(GEN_AI_PROMPT_NAME, prompt_name)
 
         elif isinstance(
             message,

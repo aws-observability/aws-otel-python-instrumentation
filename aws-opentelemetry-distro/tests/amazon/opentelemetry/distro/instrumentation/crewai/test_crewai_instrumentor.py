@@ -28,7 +28,6 @@ from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumento
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_MESSAGE
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_DESCRIPTION,
     GEN_AI_AGENT_ID,
@@ -37,9 +36,14 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_FREQUENCY_PENALTY,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
+    GEN_AI_REQUEST_PRESENCE_PENALTY,
+    GEN_AI_REQUEST_STOP_SEQUENCES,
     GEN_AI_REQUEST_TEMPERATURE,
+    GEN_AI_REQUEST_TOP_P,
+    GEN_AI_RESPONSE_FINISH_REASONS,
     GEN_AI_RESPONSE_MODEL,
     GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
@@ -50,6 +54,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_TYPE,
     GenAiProviderNameValues,
 )
+from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 
 
 # https://pypi.org/project/crewai/
@@ -135,7 +140,7 @@ class TestCrewAIInstrumentor(TestCase):
         spans = self.span_exporter.get_finished_spans()
         error_span = next((s for s in spans if s.status.status_code.name == "ERROR"), None)
         self.assertIsNotNone(error_span, "Expected at least one span with ERROR status")
-        self.assertIn("LLM call failed", error_span.attributes.get(ERROR_MESSAGE, ""))
+        self.assertIn("LLM call failed", error_span.attributes.get(ERROR_TYPE, ""))
 
     def test_text_based_tool_calling(self):
         mock_llm = MagicMock(spec=LLM)
@@ -308,7 +313,7 @@ class TestCrewAIInstrumentor(TestCase):
 
         error_spans = [s for s in self.span_exporter.get_finished_spans() if s.status.status_code.name == "ERROR"]
         self.assertGreater(len(error_spans), 0)
-        self.assertIn(ERROR_MESSAGE, error_spans[0].attributes)
+        self.assertIn(ERROR_TYPE, error_spans[0].attributes)
         self._assert_spans_all_ended()
 
     def test_tool_execution_error(self):
@@ -534,7 +539,6 @@ class TestCrewAIInstrumentor(TestCase):
                 GEN_AI_AGENT_DESCRIPTION: "Greet the user",
                 GEN_AI_REQUEST_TEMPERATURE: 0.7,
                 GEN_AI_REQUEST_MAX_TOKENS: 1024,
-                GEN_AI_SYSTEM_INSTRUCTIONS: "You are a friendly greeter.",
             },
         )
 
@@ -574,6 +578,7 @@ class TestCrewAIInstrumentor(TestCase):
         output_messages = json.loads(chat_span.attributes[GEN_AI_OUTPUT_MESSAGES])
         validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
         self.assertEqual(chat_span.attributes.get(GEN_AI_RESPONSE_MODEL), model_id)
+        self.assertIn(GEN_AI_RESPONSE_FINISH_REASONS, chat_span.attributes)
 
     def _create_test_crew(self, model: str):
         test_tracer = self.tracer_provider.get_tracer("test")
