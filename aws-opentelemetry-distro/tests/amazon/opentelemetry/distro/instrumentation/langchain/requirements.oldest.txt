@@ -1,0 +1,12 @@
+langchain==0.3.21
+langchain-classic
+langchain-aws
+langchain-openai
+langchain-anthropic
+langchain-google-genai
+langchain-google-vertexai
+langchain-mistralai
+langchain-groq
+langchain-cohere
+langchain-deepseek
+langchain-xai
