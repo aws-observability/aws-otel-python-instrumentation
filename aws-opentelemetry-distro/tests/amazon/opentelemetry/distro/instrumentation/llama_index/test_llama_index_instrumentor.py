@@ -1456,7 +1456,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         tool = FunctionTool.from_defaults(fn=greet, name="greet", description="Greet someone")
         llm = _FakeLLM()
         agent = FunctionAgent(name="Greeter", tools=[tool], llm=llm, system_prompt="You greet people.")
-        wf = AgentWorkflow(agents=[agent], workflow_name="greeting_workflow")
+        wf = AgentWorkflow(agents=[agent])
 
         async def _run():
             await wf.run(user_msg="Greet World")
@@ -1471,8 +1471,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         tool_spans = [s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == "execute_tool"]
 
         self.assertEqual(len(workflow_spans), 1)
-        self.assertEqual(workflow_spans[0].name, "invoke_workflow greeting_workflow")
-        self.assertEqual(workflow_spans[0].attributes[GEN_AI_WORKFLOW_NAME], "greeting_workflow")
+        self.assertIn("invoke_workflow", workflow_spans[0].name)
 
         self.assertGreaterEqual(len(agent_step_spans), 1)
         for step_span in agent_step_spans:

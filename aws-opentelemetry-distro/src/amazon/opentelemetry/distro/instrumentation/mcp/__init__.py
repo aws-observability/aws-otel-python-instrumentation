@@ -37,7 +37,7 @@ class McpInstrumentor(BaseInstrumentor):
         self._server_wrapper: ServerWrapper | None = None
 
     def instrumentation_dependencies(self) -> Collection[str]:  # pylint: disable=no-self-use
-        return ("mcp >= 1.8.1",)
+        return ("mcp >= 1.10.0",)
 
     def _instrument(self, **kwargs: Any) -> None:
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()

@@ -1,1 +1,1 @@
-crewai[litellm,anthropic,bedrock,azure-ai-inference,google-genai]==1.9.0
+crewai[litellm,anthropic,bedrock,azure-ai-inference,google-genai]==1.10.0

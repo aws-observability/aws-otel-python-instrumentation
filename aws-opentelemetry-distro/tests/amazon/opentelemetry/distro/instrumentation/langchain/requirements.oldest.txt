@@ -1,10 +1,8 @@
-langchain==0.3.21
-langchain-classic
+langchain==0.3.23
 langchain-aws
 langchain-openai
 langchain-anthropic
 langchain-google-genai
-langchain-google-vertexai
 langchain-mistralai
 langchain-groq
 langchain-cohere
