@@ -634,9 +634,7 @@ class TestCrewAIInstrumentor(TestCase):
         r.choices[0].message = MagicMock()
         r.choices[0].message.content = content
         r.choices[0].message.tool_calls = tool_calls or []
-        r.usage = MagicMock()
-        r.usage.prompt_tokens = 100
-        r.usage.completion_tokens = 50
+        r.usage = {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
         return r
 
     @staticmethod
