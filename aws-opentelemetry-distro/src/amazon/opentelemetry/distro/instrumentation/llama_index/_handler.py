@@ -3,12 +3,10 @@
 import inspect
 import logging
 from time import time_ns
-from typing import Any, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Optional
 
-try:
-    from llama_index.core.agent import BaseAgent  # type: ignore[attr-defined]
-except ImportError:
-    from llama_index.core.agent.workflow import BaseWorkflowAgent as BaseAgent  # type: ignore[attr-defined]
+from llama_index.core.agent.workflow import AgentWorkflow, BaseWorkflowAgent
+from llama_index.core.agent.workflow.workflow_events import AgentSetup
 from llama_index.core.base.base_query_engine import BaseQueryEngine
 from llama_index.core.base.base_retriever import BaseRetriever
 from llama_index.core.base.embeddings.base import BaseEmbedding
@@ -24,6 +22,11 @@ from pydantic import PrivateAttr
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import skip_instrumentation_if_suppressed
 from opentelemetry import context as context_api
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
+    GEN_AI_AGENT_NAME,
+    GEN_AI_OPERATION_NAME,
+    GenAiOperationNameValues,
+)
 from opentelemetry.trace import SpanKind, Tracer, set_span_in_context
 
 from ._span import (  # noqa: F401  # pylint: disable=unused-import
@@ -43,7 +46,8 @@ _INSTRUMENTED_TYPES = (
     MultiModalLLM,
     BaseEmbedding,
     BaseTool,
-    BaseAgent,
+    BaseWorkflowAgent,
+    AgentWorkflow,
     BaseQueryEngine,
     BaseRetriever,
     BaseSynthesizer,
@@ -107,13 +111,20 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         self._separate_trace_from_runtime_context = separate_trace_from_runtime_context
 
     @staticmethod
-    def _should_suppress(instance: Any, id_: str) -> bool:
+    def _get_agent_setup(bound_args: inspect.BoundArguments) -> Optional[AgentSetup]:
+        ev = bound_args.arguments.get("ev")
+        return ev if isinstance(ev, AgentSetup) else None
+
+    @staticmethod
+    def _should_suppress(instance: Any, id_: str, bound_args: inspect.BoundArguments) -> bool:
         """Check if this span should be a passthrough (no OTel span created).
 
         A span is suppressed (passthrough) when:
         - The instance is not one of _INSTRUMENTED_TYPES, OR
-        - The method is internal plumbing listed in _PASSTHROUGH_METHODS.
+        - The method is internal plumbing not in _ALLOWED_METHODS.
         """
+        if _SpanHandler._get_agent_setup(bound_args) is not None:
+            return False
         if not isinstance(instance, _INSTRUMENTED_TYPES):
             return True
         method = id_.partition("-")[0].rpartition(".")[-1]
@@ -132,7 +143,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         with self.lock:
             parent = self.open_spans.get(parent_span_id) if parent_span_id else None
 
-        if self._should_suppress(instance, id_):
+        if self._should_suppress(instance, id_, bound_args):
             return _PassthroughSpan(
                 parent=parent,
                 id_=id_,
@@ -160,8 +171,17 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             id_=id_,
             parent_id=parent_span_id,
         )
-        span.process_instance(instance)
-        span.process_input(instance, bound_args)
+
+        agent_setup = self._get_agent_setup(bound_args)
+        if agent_setup is not None:
+            span[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.INVOKE_AGENT.value
+            agent_name = getattr(agent_setup, "current_agent_name", None)
+            if agent_name:
+                span[GEN_AI_AGENT_NAME] = agent_name
+                span._span_name = f"run_agent_step {agent_name}"
+        else:
+            span.process_instance(instance)
+            span.process_input(instance, bound_args)
 
         return span
 
@@ -177,10 +197,15 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         with self.lock:
             span = self.open_spans.get(id_)
         if not span:
-            logger.warning("Open span is missing for id_=%s", id_)
+            logger.debug("Open span is missing for id_=%s", id_)
             return None
         if span.is_passthrough:
             return span
+
+        if isinstance(result, AsyncGenerator):
+            span.set_deferred()
+            return None
+
         if isinstance(result, ToolOutput):
             span._attributes[GEN_AI_TOOL_CALL_RESULT] = result.content
         span.end()
@@ -198,7 +223,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         with self.lock:
             span = self.open_spans.get(id_)
         if not span:
-            logger.warning("Open span is missing for id_=%s", id_)
+            logger.debug("Open span is missing for id_=%s", id_)
             return None
         if span.is_passthrough:
             return span
@@ -219,7 +244,7 @@ class EventHandler(BaseEventHandler, extra="allow"):
             return event
         span = self._span_handler.open_spans.get(event.span_id)
         if span is None:
-            logger.warning("Open span is missing for span_id=%s, event_id=%s", event.span_id, event.id_)
+            logger.debug("Open span is missing for span_id=%s, event_id=%s", event.span_id, event.id_)
         else:
             try:
                 span.process_event(event)

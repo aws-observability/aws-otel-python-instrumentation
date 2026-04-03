@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
+    GEN_AI_WORKFLOW_NAME,
+    OPERATION_INVOKE_WORKFLOW,
     PROVIDER_MAP,
     DictWithLock,
     serialize_to_json_string,
@@ -177,12 +179,12 @@ class OpenTelemetryEventHandler:
 
     def _on_crew_start(self, source: "Crew", event: "CrewKickoffStartedEvent") -> None:
         crew_name = getattr(source, "name", None)
-        span_name = f"crew_kickoff {crew_name}" if crew_name else "crew_kickoff"
+        span_name = f"{OPERATION_INVOKE_WORKFLOW} {crew_name}" if crew_name else OPERATION_INVOKE_WORKFLOW
         attributes: Dict[str, Any] = {
-            GEN_AI_OPERATION_NAME: GenAiOperationNameValues.INVOKE_AGENT.value,
+            GEN_AI_OPERATION_NAME: OPERATION_INVOKE_WORKFLOW,
         }
         if crew_name:
-            attributes[GEN_AI_AGENT_NAME] = crew_name
+            attributes[GEN_AI_WORKFLOW_NAME] = crew_name
         if hasattr(source, "id"):
             attributes[GEN_AI_AGENT_ID] = str(source.id)
 

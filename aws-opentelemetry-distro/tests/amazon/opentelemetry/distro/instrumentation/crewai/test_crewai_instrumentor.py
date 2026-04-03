@@ -20,6 +20,10 @@ if sys.version_info < (3, 10) or sys.version_info >= (3, 14):
 from crewai import LLM, Agent, Crew, Task
 from crewai.tools import tool
 
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
+    GEN_AI_WORKFLOW_NAME,
+    OPERATION_INVOKE_WORKFLOW,
+)
 from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumentor
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -179,7 +183,7 @@ class TestCrewAIInstrumentor(TestCase):
         with patch("litellm.completion", return_value=self._mock_response("Final Answer: Hello!")):
             crew.kickoff()
 
-        crew_span = self._find_span("crew_kickoff SimpleCrew")
+        crew_span = self._find_span("invoke_workflow SimpleCrew")
         agent_span = self._find_span("invoke_agent Simple")
         chat_span = self._find_span("chat gpt-4")
         self.assertIsNotNone(crew_span)
@@ -256,7 +260,7 @@ class TestCrewAIInstrumentor(TestCase):
         ):
             crew.kickoff()
 
-        crew_span = self._find_span("crew_kickoff MultiAgent")
+        crew_span = self._find_span("invoke_workflow MultiAgent")
         a1_span = self._find_span("invoke_agent A1")
         a2_span = self._find_span("invoke_agent A2")
         self.assertIsNotNone(a1_span)
@@ -328,7 +332,7 @@ class TestCrewAIInstrumentor(TestCase):
         ):
             crew.kickoff()
 
-        self.assertIsNotNone(self._find_span("crew_kickoff ToolErrCrew"))
+        self.assertIsNotNone(self._find_span("invoke_workflow ToolErrCrew"))
         self.assertIsNotNone(self._find_span("invoke_agent ToolErr"))
         self._assert_spans_all_ended()
 
@@ -387,7 +391,7 @@ class TestCrewAIInstrumentor(TestCase):
 
         spans = self.span_exporter.get_finished_spans()
         self.assertGreater(len(spans), first_count)
-        crew_spans = [s for s in spans if "crew_kickoff SeqCrew" in s.name]
+        crew_spans = [s for s in spans if "invoke_workflow SeqCrew" in s.name]
         self.assertEqual(len(crew_spans), 2)
         tool_spans = [s for s in spans if "execute_tool seq_tool" in s.name]
         self.assertEqual(len(tool_spans), 2)
@@ -421,7 +425,7 @@ class TestCrewAIInstrumentor(TestCase):
 
         asyncio.run(run())
 
-        crew_span = self._find_span("crew_kickoff AsyncCrew")
+        crew_span = self._find_span("invoke_workflow AsyncCrew")
         agent_span = self._find_span("invoke_agent AsyncAgent")
         tool_span = self._find_span("execute_tool async_tool")
         self.assertIsNotNone(crew_span)
@@ -458,7 +462,7 @@ class TestCrewAIInstrumentor(TestCase):
 
         asyncio.run(run())
 
-        crew_span = self._find_span("crew_kickoff AsyncMulti")
+        crew_span = self._find_span("invoke_workflow AsyncMulti")
         a1_span = self._find_span("invoke_agent AsyncA1")
         a2_span = self._find_span("invoke_agent AsyncA2")
         self.assertIsNotNone(a1_span)
@@ -500,16 +504,16 @@ class TestCrewAIInstrumentor(TestCase):
             crew.kickoff()
 
         spans = self.span_exporter.get_finished_spans()
-        crew_span = next((s for s in spans if s.name == "crew_kickoff GreetingCrew"), None)
+        crew_span = next((s for s in spans if s.name == "invoke_workflow GreetingCrew"), None)
         agent_span = next((s for s in spans if s.name == "invoke_agent Greeter"), None)
         tool_span = next((s for s in spans if s.name == "execute_tool get_greeting"), None)
 
         self._assert_span_attributes(
             spans,
-            "crew_kickoff GreetingCrew",
+            "invoke_workflow GreetingCrew",
             {
-                GEN_AI_OPERATION_NAME: "invoke_agent",
-                GEN_AI_AGENT_NAME: "GreetingCrew",
+                GEN_AI_OPERATION_NAME: OPERATION_INVOKE_WORKFLOW,
+                GEN_AI_WORKFLOW_NAME: "GreetingCrew",
                 GEN_AI_AGENT_ID: str(crew.id),
             },
         )
@@ -630,9 +634,7 @@ class TestCrewAIInstrumentor(TestCase):
         r.choices[0].message = MagicMock()
         r.choices[0].message.content = content
         r.choices[0].message.tool_calls = tool_calls or []
-        r.usage = MagicMock()
-        r.usage.prompt_tokens = 100
-        r.usage.completion_tokens = 50
+        r.usage = {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
         return r
 
     @staticmethod

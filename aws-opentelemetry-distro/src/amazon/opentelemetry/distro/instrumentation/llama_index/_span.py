@@ -5,9 +5,41 @@ import logging
 from functools import singledispatchmethod
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, Iterator, Mapping, Optional, Tuple, Union
 
+from llama_index.core.agent.workflow import AgentWorkflow, BaseWorkflowAgent
+from llama_index.core.base.embeddings.base import BaseEmbedding
+from llama_index.core.base.llms.base import BaseLLM
+from llama_index.core.base.llms.types import ChatMessage, ChatResponse, CompletionResponse
+from llama_index.core.instrumentation.events import BaseEvent
+from llama_index.core.instrumentation.events.chat_engine import (
+    StreamChatDeltaReceivedEvent,
+    StreamChatEndEvent,
+    StreamChatErrorEvent,
+)
+from llama_index.core.instrumentation.events.embedding import EmbeddingEndEvent, EmbeddingStartEvent
+from llama_index.core.instrumentation.events.llm import (
+    LLMChatEndEvent,
+    LLMChatInProgressEvent,
+    LLMChatStartEvent,
+    LLMCompletionEndEvent,
+    LLMCompletionInProgressEvent,
+    LLMPredictStartEvent,
+)
+from llama_index.core.instrumentation.events.query import QueryStartEvent
+from llama_index.core.instrumentation.events.rerank import ReRankStartEvent
+from llama_index.core.instrumentation.events.retrieval import RetrievalStartEvent
+from llama_index.core.instrumentation.events.synthesis import GetResponseStartEvent, SynthesizeStartEvent
+from llama_index.core.instrumentation.span import BaseSpan
+from llama_index.core.multi_modal_llms import MultiModalLLM
+from llama_index.core.tools import FunctionTool  # type: ignore[attr-defined]
+from llama_index.core.tools import BaseTool
 from pydantic import PrivateAttr
 
-from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import serialize_to_json_string
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
+    GEN_AI_WORKFLOW_NAME,
+    OPERATION_INVOKE_WORKFLOW,
+    serialize_to_json_string,
+    try_detach,
+)
 from opentelemetry import context as context_api
 from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
 
@@ -35,39 +67,6 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (  # 
 )
 from opentelemetry.trace import Span, Status, StatusCode, set_span_in_context
 from opentelemetry.util.types import AttributeValue
-
-try:
-    from llama_index.core.agent import BaseAgent  # type: ignore[attr-defined]
-except ImportError:
-    # Fallback for newer versions where BaseAgent doesn't exist
-    from llama_index.core.agent.workflow import BaseWorkflowAgent as BaseAgent  # type: ignore[attr-defined]
-
-from llama_index.core.base.embeddings.base import BaseEmbedding
-from llama_index.core.base.llms.base import BaseLLM
-from llama_index.core.base.llms.types import ChatMessage, ChatResponse, CompletionResponse
-from llama_index.core.instrumentation.events import BaseEvent
-from llama_index.core.instrumentation.events.chat_engine import (
-    StreamChatDeltaReceivedEvent,
-    StreamChatEndEvent,
-    StreamChatErrorEvent,
-)
-from llama_index.core.instrumentation.events.embedding import EmbeddingEndEvent, EmbeddingStartEvent
-from llama_index.core.instrumentation.events.llm import (
-    LLMChatEndEvent,
-    LLMChatInProgressEvent,
-    LLMChatStartEvent,
-    LLMCompletionEndEvent,
-    LLMCompletionInProgressEvent,
-    LLMPredictStartEvent,
-)
-from llama_index.core.instrumentation.events.query import QueryStartEvent
-from llama_index.core.instrumentation.events.rerank import ReRankStartEvent
-from llama_index.core.instrumentation.events.retrieval import RetrievalStartEvent
-from llama_index.core.instrumentation.events.synthesis import GetResponseStartEvent, SynthesizeStartEvent
-from llama_index.core.instrumentation.span import BaseSpan
-from llama_index.core.multi_modal_llms import MultiModalLLM
-from llama_index.core.tools import FunctionTool  # type: ignore[attr-defined]
-from llama_index.core.tools import BaseTool
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +159,8 @@ class _Span(BaseSpan):
     _attributes: Dict[str, AttributeValue] = PrivateAttr()
     _parent: Optional["_Span"] = PrivateAttr()
     _context_token: Optional[object] = PrivateAttr()
+    _deferred: bool = PrivateAttr(default=False)
+    _span_name: Optional[str] = PrivateAttr(default=None)
 
     def __init__(
         self,
@@ -173,10 +174,22 @@ class _Span(BaseSpan):
         self._parent = parent
         self._attributes = {}
         self._context_token = context_token
+        self._deferred = False
 
     @property
     def is_passthrough(self) -> bool:
         return False
+
+    def set_deferred(self) -> None:
+        # Streaming LLM calls return an async generator immediately, causing the
+        # LlamaIndex dispatcher to exit the span before tokens are streamed.
+        # Deferred spans stay open until a terminal event like LLMChatEndEvent
+        # delivers token counts and output messages via _end_deferred.
+        self._deferred = True
+
+    def _end_deferred(self) -> None:
+        if self._deferred:
+            self.end()
 
     def __setitem__(self, key: str, value: AttributeValue) -> None:
         self._attributes[key] = value
@@ -185,34 +198,29 @@ class _Span(BaseSpan):
         self._otel_span.record_exception(exception)
 
     def _get_span_name(self) -> str:
-        operation_name = self._attributes.get(GEN_AI_OPERATION_NAME)
+        if self._span_name:
+            return self._span_name
 
+        op = self._attributes.get(GEN_AI_OPERATION_NAME)
         # generic fallback if no operation name
-        if not operation_name:
+        if not op:
             return "llama_index.operation"
 
-        if operation_name == GenAiOperationNameValues.INVOKE_AGENT.value:
-            if agent_name := self._attributes.get(GEN_AI_AGENT_NAME):
-                return f"{operation_name} {agent_name}"
-        elif operation_name == GenAiOperationNameValues.EXECUTE_TOOL.value:
-            if tool_name := self._attributes.get(GEN_AI_TOOL_NAME):
-                return f"{operation_name} {tool_name}"
-        elif model := self._attributes.get(GEN_AI_REQUEST_MODEL):
-            return f"{operation_name} {model}"
+        suffix = {
+            GenAiOperationNameValues.INVOKE_AGENT.value: self._attributes.get(GEN_AI_AGENT_NAME),
+            OPERATION_INVOKE_WORKFLOW: self._attributes.get(GEN_AI_WORKFLOW_NAME),
+            GenAiOperationNameValues.EXECUTE_TOOL.value: self._attributes.get(GEN_AI_TOOL_NAME),
+        }.get(op, self._attributes.get(GEN_AI_REQUEST_MODEL))
 
-        return operation_name
+        return f"{op} {suffix}" if suffix else op
 
     def end(self, exception: Optional[BaseException] = None) -> None:
         if not self._otel_span.is_recording():
             return
 
         if self._context_token is not None:
-            try:
-                context_api.detach(self._context_token)
-            except Exception:  # pylint: disable=broad-exception-caught
-                pass
-            finally:
-                self._context_token = None
+            try_detach(self._context_token)  # type: ignore[arg-type]
+            self._context_token = None
 
         if exception is None:
             status = Status(status_code=StatusCode.OK)
@@ -337,10 +345,13 @@ class _Span(BaseSpan):
     @_process_event.register
     def _(self, event: StreamChatErrorEvent) -> None:
         self.record_exception(event.exception)
+        if self._deferred:
+            self.end(event.exception)
 
     @_process_event.register
     def _(self, event: StreamChatEndEvent) -> None:
         self[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.CHAT.value
+        self._end_deferred()
 
     @_process_event.register
     def _(self, event: LLMPredictStartEvent) -> None:
@@ -353,6 +364,7 @@ class _Span(BaseSpan):
     def _(self, event: LLMCompletionEndEvent) -> None:
         self[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.TEXT_COMPLETION.value
         self._extract_token_counts(event.response)
+        self._end_deferred()
 
     @_process_event.register
     def _(self, event: LLMChatStartEvent) -> None:
@@ -370,6 +382,7 @@ class _Span(BaseSpan):
     def _(self, event: LLMChatEndEvent) -> None:
         self[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.CHAT.value
         if (response := event.response) is None:
+            self._end_deferred()
             return
         self._extract_token_counts(response)
         _, output = _format_messages([response.message])
@@ -378,6 +391,7 @@ class _Span(BaseSpan):
             for msg in output:
                 msg.setdefault("finish_reason", "stop")
             self[GEN_AI_OUTPUT_MESSAGES] = serialize_to_json_string(output)
+        self._end_deferred()
 
     @_process_event.register
     def _(self, event: ReRankStartEvent) -> None:
@@ -445,8 +459,8 @@ class _Span(BaseSpan):
         except BaseException:
             pass
 
-    @process_instance.register(BaseAgent)
-    def _(self, instance: BaseAgent) -> None:
+    @process_instance.register(BaseWorkflowAgent)
+    def _(self, instance: BaseWorkflowAgent) -> None:
         self[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.INVOKE_AGENT.value
         if hasattr(instance, "name") and instance.name:
             self[GEN_AI_AGENT_NAME] = instance.name
@@ -454,6 +468,13 @@ class _Span(BaseSpan):
             self[GEN_AI_AGENT_DESCRIPTION] = instance.description
         if hasattr(instance, "system_prompt") and instance.system_prompt:
             self[GEN_AI_SYSTEM_INSTRUCTIONS] = instance.system_prompt
+
+    @process_instance.register(AgentWorkflow)
+    def _(self, instance: AgentWorkflow) -> None:
+        self[GEN_AI_OPERATION_NAME] = OPERATION_INVOKE_WORKFLOW
+        workflow_name = getattr(instance, "workflow_name", None)
+        if workflow_name:
+            self[GEN_AI_WORKFLOW_NAME] = workflow_name
 
 
 class _PassthroughSpan(_Span):

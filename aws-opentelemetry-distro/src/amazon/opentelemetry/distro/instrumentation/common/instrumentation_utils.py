@@ -17,6 +17,11 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import GenAi
 
 _logger = logging.getLogger(__name__)
 
+# TODO: Remove these constants once the OTel semantic conventions release includes invoke_workflow.
+# https://github.com/open-telemetry/semantic-conventions/pull/3249
+GEN_AI_WORKFLOW_NAME = "gen_ai.workflow.name"
+OPERATION_INVOKE_WORKFLOW = "invoke_workflow"
+
 PROVIDER_MAP = {
     "bedrock": GenAiProviderNameValues.AWS_BEDROCK.value,
     "aws": GenAiProviderNameValues.AWS_BEDROCK.value,
