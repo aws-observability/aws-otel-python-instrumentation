@@ -6,11 +6,15 @@ from mock_collector_client import ResourceScopeSpan
 from typing_extensions import override
 
 from amazon.gen_ai.gen_ai_test_base import GEN_AI_OPERATION_NAME, GenAITestBase
-
-GEN_AI_AGENT_ID: str = "gen_ai.agent.id"
-GEN_AI_AGENT_DESCRIPTION: str = "gen_ai.agent.description"
-GEN_AI_WORKFLOW_NAME: str = "gen_ai.workflow.name"
-GEN_AI_TOOL_DEFINITIONS: str = "gen_ai.tool.definitions"
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
+    GEN_AI_WORKFLOW_NAME,
+    OPERATION_INVOKE_WORKFLOW,
+)
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
+    GEN_AI_AGENT_DESCRIPTION,
+    GEN_AI_AGENT_ID,
+    GEN_AI_TOOL_DEFINITIONS,
+)
 
 
 class CrewAITest(GenAITestBase):
@@ -39,7 +43,7 @@ class CrewAITest(GenAITestBase):
 
         self.assertIsNotNone(invoke_workflow_span)
         crew_attrs = self._get_attributes_dict(invoke_workflow_span.attributes)
-        self._assert_str_attribute(crew_attrs, GEN_AI_OPERATION_NAME, "invoke_workflow")
+        self._assert_str_attribute(crew_attrs, GEN_AI_OPERATION_NAME, OPERATION_INVOKE_WORKFLOW)
         self.assertIn(GEN_AI_WORKFLOW_NAME, crew_attrs)
         self.assertIn(GEN_AI_AGENT_ID, crew_attrs)
         self.assertIn(GEN_AI_TOOL_DEFINITIONS, crew_attrs)

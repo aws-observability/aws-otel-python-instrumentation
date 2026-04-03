@@ -6,23 +6,26 @@ from mock_collector_client import ResourceScopeSpan
 from typing_extensions import override
 
 from amazon.base.contract_test_base import ContractTestBase
-
-GEN_AI_OPERATION_NAME: str = "gen_ai.operation.name"
-GEN_AI_AGENT_NAME: str = "gen_ai.agent.name"
-GEN_AI_PROVIDER_NAME: str = "gen_ai.provider.name"
-GEN_AI_REQUEST_MODEL: str = "gen_ai.request.model"
-GEN_AI_REQUEST_TEMPERATURE: str = "gen_ai.request.temperature"
-GEN_AI_INPUT_MESSAGES: str = "gen_ai.input.messages"
-GEN_AI_OUTPUT_MESSAGES: str = "gen_ai.output.messages"
-GEN_AI_RESPONSE_MODEL: str = "gen_ai.response.model"
-GEN_AI_RESPONSE_ID: str = "gen_ai.response.id"
-GEN_AI_USAGE_INPUT_TOKENS: str = "gen_ai.usage.input_tokens"
-GEN_AI_USAGE_OUTPUT_TOKENS: str = "gen_ai.usage.output_tokens"
-GEN_AI_TOOL_NAME: str = "gen_ai.tool.name"
-GEN_AI_TOOL_TYPE: str = "gen_ai.tool.type"
-GEN_AI_TOOL_DESCRIPTION: str = "gen_ai.tool.description"
-GEN_AI_TOOL_CALL_ARGUMENTS: str = "gen_ai.tool.call.arguments"
-GEN_AI_TOOL_CALL_RESULT: str = "gen_ai.tool.call.result"
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import GEN_AI_RESPONSE_ID  # noqa: F401
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
+    GEN_AI_AGENT_NAME,
+    GEN_AI_INPUT_MESSAGES,
+    GEN_AI_OPERATION_NAME,
+    GEN_AI_OUTPUT_MESSAGES,
+    GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_MODEL,
+    GEN_AI_REQUEST_TEMPERATURE,
+    GEN_AI_RESPONSE_MODEL,
+    GEN_AI_SYSTEM_INSTRUCTIONS,
+    GEN_AI_TOOL_CALL_ARGUMENTS,
+    GEN_AI_TOOL_CALL_RESULT,
+    GEN_AI_TOOL_DESCRIPTION,
+    GEN_AI_TOOL_NAME,
+    GEN_AI_TOOL_TYPE,
+    GEN_AI_USAGE_INPUT_TOKENS,
+    GEN_AI_USAGE_OUTPUT_TOKENS,
+    GenAiOperationNameValues,
+)
 
 
 class GenAITestBase(ContractTestBase):
@@ -63,7 +66,7 @@ class GenAITestBase(ContractTestBase):
         self.assertEqual(len(invoke_agent_spans), expected_count)
         for span in invoke_agent_spans:
             attrs = self._get_attributes_dict(span.attributes)
-            self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, "invoke_agent")
+            self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
             self.assertIn(GEN_AI_AGENT_NAME, attrs)
             self.assertIn(GEN_AI_PROVIDER_NAME, attrs)
             self.assertIn(GEN_AI_REQUEST_MODEL, attrs)
@@ -73,7 +76,7 @@ class GenAITestBase(ContractTestBase):
         self.assertGreaterEqual(len(execute_tool_spans), expected_count)
         for span in execute_tool_spans:
             attrs = self._get_attributes_dict(span.attributes)
-            self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, "execute_tool")
+            self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.EXECUTE_TOOL.value)
             self.assertIn(GEN_AI_TOOL_NAME, attrs)
             self._assert_str_attribute(attrs, GEN_AI_TOOL_TYPE, "function")
             self.assertIn(GEN_AI_TOOL_DESCRIPTION, attrs)
@@ -84,11 +87,12 @@ class GenAITestBase(ContractTestBase):
         self.assertGreaterEqual(len(chat_spans), expected_count)
         for span in chat_spans:
             attrs = self._get_attributes_dict(span.attributes)
-            self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, "chat")
+            self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
             self.assertIn(GEN_AI_PROVIDER_NAME, attrs)
             self.assertIn(GEN_AI_REQUEST_MODEL, attrs)
             self.assertIn(GEN_AI_REQUEST_TEMPERATURE, attrs)
             self.assertIn(GEN_AI_INPUT_MESSAGES, attrs)
+            self.assertIn(GEN_AI_SYSTEM_INSTRUCTIONS, attrs)
             self.assertIn(GEN_AI_RESPONSE_MODEL, attrs)
             self.assertIn(GEN_AI_USAGE_INPUT_TOKENS, attrs)
             self.assertIn(GEN_AI_USAGE_OUTPUT_TOKENS, attrs)

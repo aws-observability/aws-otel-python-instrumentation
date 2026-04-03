@@ -8,7 +8,14 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, Iterator, Mappi
 from llama_index.core.agent.workflow import AgentWorkflow, BaseWorkflowAgent
 from llama_index.core.base.embeddings.base import BaseEmbedding
 from llama_index.core.base.llms.base import BaseLLM
-from llama_index.core.base.llms.types import ChatMessage, ChatResponse, CompletionResponse
+from llama_index.core.base.llms.types import (
+    ChatMessage,
+    ChatResponse,
+    CompletionResponse,
+    TextBlock,
+    ThinkingBlock,
+    ToolCallBlock,
+)
 from llama_index.core.instrumentation.events import BaseEvent
 from llama_index.core.instrumentation.events.chat_engine import (
     StreamChatDeltaReceivedEvent,
@@ -52,9 +59,15 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (  # 
     GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_FREQUENCY_PENALTY,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
+    GEN_AI_REQUEST_PRESENCE_PENALTY,
+    GEN_AI_REQUEST_STOP_SEQUENCES,
     GEN_AI_REQUEST_TEMPERATURE,
+    GEN_AI_REQUEST_TOP_K,
+    GEN_AI_REQUEST_TOP_P,
+    GEN_AI_RESPONSE_MODEL,
     GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_CALL_RESULT,
@@ -72,7 +85,6 @@ logger = logging.getLogger(__name__)
 
 # Custom operation names for LlamaIndex-specific operations (not in OTel semconv)
 _OPERATION_RERANK = "rerank"
-_OPERATION_RETRIEVE = "retrieve"
 _OPERATION_SYNTHESIZE = "synthesize"
 _OPERATION_QUERY = "query"
 
@@ -144,14 +156,37 @@ def _format_messages(messages: Iterable[ChatMessage]) -> tuple:
     conversation = []
     for msg in messages:
         raw_role = getattr(msg, "role", "user")
-        # LlamaIndex uses MessageRole enum; extract the value string
         role = role_map.get(str(raw_role).rsplit(".", 1)[-1].lower(), str(raw_role))
-        content = str(getattr(msg, "content", ""))
+        parts = _message_to_parts(msg)
         if role == "system":
-            system_instructions.append({"type": "text", "content": content})
+            system_instructions.extend(parts)
         else:
-            conversation.append({"role": role, "parts": [{"type": "text", "content": content}]})
+            conversation.append({"role": role, "parts": parts})
     return system_instructions, conversation
+
+
+def _message_to_parts(msg: ChatMessage) -> list:
+    """Convert a ChatMessage to OTel GenAI part objects."""
+    parts = []
+    blocks = getattr(msg, "blocks", None)
+    if blocks:
+        for block in blocks:
+            if isinstance(block, TextBlock):
+                parts.append({"type": "text", "content": str(block.text)})
+            elif isinstance(block, ToolCallBlock):
+                part: dict = {"type": "tool_call", "name": block.tool_name}
+                if block.tool_call_id:
+                    part["id"] = block.tool_call_id
+                if block.tool_kwargs:
+                    part["arguments"] = block.tool_kwargs
+                parts.append(part)
+            elif isinstance(block, ThinkingBlock):
+                parts.append({"type": "reasoning", "content": str(block.content)})
+    if not parts:
+        content = str(getattr(msg, "content", ""))
+        if content:
+            parts.append({"type": "text", "content": content})
+    return parts
 
 
 class _Span(BaseSpan):
@@ -295,13 +330,23 @@ class _Span(BaseSpan):
         if provider := _detect_llm_provider(instance):
             self[GEN_AI_PROVIDER_NAME] = provider
 
-        # Capture temperature if available
         if hasattr(instance, "temperature") and instance.temperature is not None:
             self[GEN_AI_REQUEST_TEMPERATURE] = instance.temperature
-
-        # Capture max_tokens if available
         if hasattr(instance, "max_tokens") and instance.max_tokens is not None:
             self[GEN_AI_REQUEST_MAX_TOKENS] = instance.max_tokens
+
+        extra = getattr(instance, "additional_kwargs", None) or {}
+        if extra.get("top_p") is not None:
+            self[GEN_AI_REQUEST_TOP_P] = extra["top_p"]
+        if extra.get("top_k") is not None:
+            self[GEN_AI_REQUEST_TOP_K] = extra["top_k"]
+        if extra.get("frequency_penalty") is not None:
+            self[GEN_AI_REQUEST_FREQUENCY_PENALTY] = extra["frequency_penalty"]
+        if extra.get("presence_penalty") is not None:
+            self[GEN_AI_REQUEST_PRESENCE_PENALTY] = extra["presence_penalty"]
+        stop = extra.get("stop") or extra.get("stop_sequences")
+        if stop:
+            self[GEN_AI_REQUEST_STOP_SEQUENCES] = stop
 
     @process_instance.register
     def _(self, instance: BaseEmbedding) -> None:
@@ -364,6 +409,7 @@ class _Span(BaseSpan):
     def _(self, event: LLMCompletionEndEvent) -> None:
         self[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.TEXT_COMPLETION.value
         self._extract_token_counts(event.response)
+        self._extract_response_model(event.response)
         self._end_deferred()
 
     @_process_event.register
@@ -385,6 +431,7 @@ class _Span(BaseSpan):
             self._end_deferred()
             return
         self._extract_token_counts(response)
+        self._extract_response_model(response)
         _, output = _format_messages([response.message])
         if output:
             # Output messages require finish_reason per OTel semconv
@@ -404,7 +451,7 @@ class _Span(BaseSpan):
 
     @_process_event.register
     def _(self, event: RetrievalStartEvent) -> None:
-        self[GEN_AI_OPERATION_NAME] = _OPERATION_RETRIEVE
+        self[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.RETRIEVAL.value
 
     @_process_event.register
     def _(self, event: SynthesizeStartEvent) -> None:
@@ -413,6 +460,14 @@ class _Span(BaseSpan):
     @_process_event.register
     def _(self, event: GetResponseStartEvent) -> None:
         self[GEN_AI_OPERATION_NAME] = _OPERATION_SYNTHESIZE
+
+    def _extract_response_model(self, response: Union[ChatResponse, CompletionResponse]) -> None:
+        raw = getattr(response, "raw", None)
+        if raw is None:
+            return
+        model = raw.get("model") if isinstance(raw, Mapping) else getattr(raw, "model", None)
+        if model:
+            self[GEN_AI_RESPONSE_MODEL] = model
 
     def _extract_token_counts(self, response: Union[ChatResponse, CompletionResponse]) -> None:
         if raw := getattr(response, "raw", None):
@@ -466,8 +521,6 @@ class _Span(BaseSpan):
             self[GEN_AI_AGENT_NAME] = instance.name
         if hasattr(instance, "description") and instance.description:
             self[GEN_AI_AGENT_DESCRIPTION] = instance.description
-        if hasattr(instance, "system_prompt") and instance.system_prompt:
-            self[GEN_AI_SYSTEM_INSTRUCTIONS] = instance.system_prompt
 
     @process_instance.register(AgentWorkflow)
     def _(self, instance: AgentWorkflow) -> None:
