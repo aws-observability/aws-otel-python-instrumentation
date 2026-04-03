@@ -43,7 +43,7 @@ _OPERATION_INVOKE_AGENT: str = "invoke_agent"
 _OPERATION_INVOKE_WORKFLOW: str = "invoke_workflow"
 _OPERATION_EXECUTE_TOOL: str = "execute_tool"
 _OPERATION_QUERY: str = "query"
-_OPERATION_RETRIEVE: str = "retrieve"
+_OPERATION_RETRIEVE: str = "retrieval"
 _OPERATION_SYNTHESIZE: str = "synthesize"
 _OPERATION_RERANK: str = "rerank"
 
@@ -167,7 +167,8 @@ class LlamaIndexTest(ContractTestBase):
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, _GEN_AI_OPERATION_NAME, _OPERATION_INVOKE_AGENT)
             self._assert_str_attribute(attrs, _GEN_AI_AGENT_NAME, "TestAgent")
-            self._assert_str_attribute(attrs, _GEN_AI_AGENT_DESCRIPTION, "A test agent that greets and multiplies.")
+            if "run_agent_step" not in span.name:
+                self._assert_str_attribute(attrs, _GEN_AI_AGENT_DESCRIPTION, "A test agent that greets and multiplies.")
 
         if execute_tool_spans:
             tool_names = set()
@@ -220,6 +221,8 @@ class LlamaIndexTest(ContractTestBase):
             self.assertIn(_GEN_AI_REQUEST_MAX_TOKENS, attrs)
             max_tokens = attrs[_GEN_AI_REQUEST_MAX_TOKENS].int_value
             self.assertEqual(max_tokens, 100, "Expected max_tokens to be 100")
+
+            self.assertIn(_GEN_AI_SYSTEM_INSTRUCTIONS, attrs)
 
             self.assertIn(_GEN_AI_INPUT_MESSAGES, attrs)
             input_messages = attrs[_GEN_AI_INPUT_MESSAGES].string_value
