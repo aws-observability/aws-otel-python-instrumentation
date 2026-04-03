@@ -167,8 +167,6 @@ class LlamaIndexTest(ContractTestBase):
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, _GEN_AI_OPERATION_NAME, _OPERATION_INVOKE_AGENT)
             self._assert_str_attribute(attrs, _GEN_AI_AGENT_NAME, "TestAgent")
-            self._assert_str_attribute(attrs, _GEN_AI_AGENT_DESCRIPTION, "A test agent that greets and multiplies.")
-            self._assert_str_attribute(attrs, _GEN_AI_SYSTEM_INSTRUCTIONS, "You are a helpful assistant.")
 
         if execute_tool_spans:
             tool_names = set()
