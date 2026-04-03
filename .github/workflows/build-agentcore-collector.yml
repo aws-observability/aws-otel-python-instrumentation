@@ -29,7 +29,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          LATEST_SHA=$(gh api repos/wangzlei/opentelemetry-collector-contrib/commits/genai-adapter-connector --jq '.sha')
+          LATEST_SHA=$(gh api repos/amazon-contributing/opentelemetry-collector-contrib/commits/aws-cwa-dev --jq '.sha')
           LAST_SHA=$(cat .last-code-sha 2>/dev/null || echo "")
 
           echo "Latest SHA: $LATEST_SHA"
@@ -57,7 +57,7 @@ jobs:
       - name: Checkout code repo
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          repository: wangzlei/opentelemetry-collector-contrib
+          repository: amazon-contributing/opentelemetry-collector-contrib
           ref: ${{ needs.check-for-changes.outputs.latest_sha }}
 
       - name: Set up Go
