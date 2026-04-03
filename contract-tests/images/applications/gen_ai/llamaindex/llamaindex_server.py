@@ -184,6 +184,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 name="Greeter",
                 description="Greets people by name.",
                 system_prompt="You greet people.",
+                can_handoff_to=["Calculator"],
             )
             calculator = FunctionAgent(
                 tools=[multiply],
@@ -191,9 +192,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                 name="Calculator",
                 description="Multiplies numbers.",
                 system_prompt="You multiply numbers.",
-                is_root=False,
             )
-            workflow = AgentWorkflow(agents=[greeter, calculator], workflow_name="multi_agent_workflow")
+            workflow = AgentWorkflow(
+                agents=[greeter, calculator], root_agent="Greeter", workflow_name="multi_agent_workflow"
+            )
 
             async def run_workflow():
                 return await workflow.run(user_msg="Please greet the world")
