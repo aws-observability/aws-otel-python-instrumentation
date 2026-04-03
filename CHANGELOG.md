@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat(genai-instrumentation): add oldest/latest dependency testing and scheduled instrumentation tests for GenAI libraries
+  ([#708](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/708))
 - feat(instrumentors): add invoke_workflow span support for LlamaIndex AgentWorkflow and CrewAI
   ([#705](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/705))
 - feat: add OpenTelemetry package version compatibility check at distro startup

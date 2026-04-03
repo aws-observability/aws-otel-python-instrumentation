@@ -490,13 +490,13 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
         self.assertEqual(format(tool_call.parent.span_id, "016x"), tool_parent_id)
 
     async def _run_inprocess(self, callback, raise_exceptions=False):
+        from mcp.server.fastmcp import FastMCP  # pylint: disable=import-outside-toplevel
         from mcp.shared.memory import (  # pylint: disable=import-outside-toplevel
             create_connected_server_and_client_session,
         )
 
-        async with create_connected_server_and_client_session(
-            self.server, raise_exceptions=raise_exceptions
-        ) as session:
+        server = self.server._mcp_server if isinstance(self.server, FastMCP) else self.server
+        async with create_connected_server_and_client_session(server, raise_exceptions=raise_exceptions) as session:
             await callback(session)
 
     async def _run_http_inprocess(self, callback):
