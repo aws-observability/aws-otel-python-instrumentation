@@ -33,7 +33,7 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
-    GEN_AI_PROMPT_NAME,
+    GEN_AI_PROMPT,
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_NAME,
@@ -197,7 +197,7 @@ class TestMcpInstrumentor(McpInstrumentorTestBase):
                 client_spans, _ = self._run_transport_test(run_client, transport, "mcp prompts/get greeting_prompt")
 
                 prompt_span = self._get_span(client_spans, "mcp prompts/get greeting_prompt")
-                self.assertEqual(prompt_span.attributes.get(GEN_AI_PROMPT_NAME), "greeting_prompt")
+                self.assertEqual(prompt_span.attributes.get(GEN_AI_PROMPT), "greeting_prompt")
 
     def test_mcp_resource(self):
         for transport in ["stdio", "http", "sse"]:

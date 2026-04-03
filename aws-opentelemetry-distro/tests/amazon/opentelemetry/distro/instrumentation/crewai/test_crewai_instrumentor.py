@@ -28,7 +28,7 @@ from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumento
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
+from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_MESSAGE
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_DESCRIPTION,
     GEN_AI_AGENT_ID,
@@ -37,13 +37,9 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_PROVIDER_NAME,
-    GEN_AI_REQUEST_FREQUENCY_PENALTY,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
-    GEN_AI_REQUEST_PRESENCE_PENALTY,
-    GEN_AI_REQUEST_STOP_SEQUENCES,
     GEN_AI_REQUEST_TEMPERATURE,
-    GEN_AI_REQUEST_TOP_P,
     GEN_AI_RESPONSE_MODEL,
     GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
@@ -139,7 +135,7 @@ class TestCrewAIInstrumentor(TestCase):
         spans = self.span_exporter.get_finished_spans()
         error_span = next((s for s in spans if s.status.status_code.name == "ERROR"), None)
         self.assertIsNotNone(error_span, "Expected at least one span with ERROR status")
-        self.assertIn("LLM call failed", error_span.attributes.get(ERROR_TYPE, ""))
+        self.assertIn("LLM call failed", error_span.attributes.get(ERROR_MESSAGE, ""))
 
     def test_text_based_tool_calling(self):
         mock_llm = MagicMock(spec=LLM)
@@ -312,7 +308,7 @@ class TestCrewAIInstrumentor(TestCase):
 
         error_spans = [s for s in self.span_exporter.get_finished_spans() if s.status.status_code.name == "ERROR"]
         self.assertGreater(len(error_spans), 0)
-        self.assertIn(ERROR_TYPE, error_spans[0].attributes)
+        self.assertIn(ERROR_MESSAGE, error_spans[0].attributes)
         self._assert_spans_all_ended()
 
     def test_tool_execution_error(self):
@@ -485,16 +481,7 @@ class TestCrewAIInstrumentor(TestCase):
             with test_tracer.start_as_current_span("custom_downstream_span"):
                 return f"Hello, {name}!"
 
-        llm = LLM(
-            model=model,
-            is_litellm=True,
-            temperature=0.7,
-            max_tokens=1024,
-            top_p=0.9,
-            frequency_penalty=0.5,
-            presence_penalty=0.3,
-            stop=["END"],
-        )
+        llm = LLM(model=model, is_litellm=True, temperature=0.7, max_tokens=1024)
         llm.supports_function_calling = lambda: True
         agent = Agent(
             role="Greeter",
@@ -547,14 +534,9 @@ class TestCrewAIInstrumentor(TestCase):
                 GEN_AI_AGENT_DESCRIPTION: "Greet the user",
                 GEN_AI_REQUEST_TEMPERATURE: 0.7,
                 GEN_AI_REQUEST_MAX_TOKENS: 1024,
-                GEN_AI_REQUEST_TOP_P: 0.9,
-                GEN_AI_REQUEST_FREQUENCY_PENALTY: 0.5,
-                GEN_AI_REQUEST_PRESENCE_PENALTY: 0.3,
+                GEN_AI_SYSTEM_INSTRUCTIONS: "You are a friendly greeter.",
             },
         )
-        stop_seqs = agent_span.attributes.get(GEN_AI_REQUEST_STOP_SEQUENCES)
-        self.assertIsInstance(stop_seqs, tuple)
-        self.assertIn("END", stop_seqs)
 
         self._assert_span_attributes(
             spans,

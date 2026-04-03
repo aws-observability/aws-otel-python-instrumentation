@@ -33,14 +33,11 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_INPUT_MESSAGES,
     GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
+    GEN_AI_PROMPT,
     GEN_AI_PROVIDER_NAME,
-    GEN_AI_REQUEST_FREQUENCY_PENALTY,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
-    GEN_AI_REQUEST_PRESENCE_PENALTY,
-    GEN_AI_REQUEST_STOP_SEQUENCES,
     GEN_AI_REQUEST_TEMPERATURE,
-    GEN_AI_REQUEST_TOP_K,
     GEN_AI_REQUEST_TOP_P,
     GEN_AI_RESPONSE_ID,
     GEN_AI_RESPONSE_MODEL,
@@ -65,11 +62,7 @@ class TestLangChainInstrumentor(TestCase):
         model_id: str = "test-model-id"
         temperature: float = 0.7
         top_p: float = 0.9
-        top_k: int = 40
         max_tokens: int = 100
-        frequency_penalty: float = 0.5
-        presence_penalty: float = 0.3
-        stop: list = ["END"]
 
         @property
         def _default_params(self) -> dict:
@@ -77,11 +70,7 @@ class TestLangChainInstrumentor(TestCase):
                 "model_id": self.model_id,
                 "temperature": self.temperature,
                 "top_p": self.top_p,
-                "top_k": self.top_k,
                 "max_tokens": self.max_tokens,
-                "frequency_penalty": self.frequency_penalty,
-                "presence_penalty": self.presence_penalty,
-                "stop": self.stop,
             }
 
         @classmethod
@@ -164,11 +153,7 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(span.attributes[GEN_AI_REQUEST_MODEL], "test-model-id")
         self.assertEqual(span.attributes[GEN_AI_REQUEST_TEMPERATURE], 0.7)
         self.assertEqual(span.attributes[GEN_AI_REQUEST_TOP_P], 0.9)
-        self.assertEqual(span.attributes[GEN_AI_REQUEST_TOP_K], 40)
         self.assertEqual(span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
-        self.assertEqual(span.attributes[GEN_AI_REQUEST_FREQUENCY_PENALTY], 0.5)
-        self.assertEqual(span.attributes[GEN_AI_REQUEST_PRESENCE_PENALTY], 0.3)
-        self.assertEqual(span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ("END",))
 
         self.assertIsNotNone(span.attributes.get(GEN_AI_INPUT_MESSAGES))
         input_messages = json.loads(span.attributes[GEN_AI_INPUT_MESSAGES])
@@ -623,11 +608,10 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(len(spans), 1)
         span = spans[0]
 
-        self.assertIsNotNone(span.attributes.get(GEN_AI_INPUT_MESSAGES))
-        messages = json.loads(span.attributes[GEN_AI_INPUT_MESSAGES])
-        self.assertIsInstance(messages, list)
-        self.assertEqual(messages[0]["role"], "user")
-        self.assertIn("test prompt", messages[0]["parts"][0]["content"])
+        self.assertIsNotNone(span.attributes.get(GEN_AI_PROMPT))
+        prompts = json.loads(span.attributes[GEN_AI_PROMPT])
+        self.assertIsInstance(prompts, list)
+        self.assertIn("test prompt", prompts[0])
 
         self.assertIsNotNone(span.attributes.get(GEN_AI_OUTPUT_MESSAGES))
         output = json.loads(span.attributes[GEN_AI_OUTPUT_MESSAGES])

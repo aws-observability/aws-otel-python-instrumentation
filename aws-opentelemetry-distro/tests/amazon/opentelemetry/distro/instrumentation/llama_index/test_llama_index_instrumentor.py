@@ -44,14 +44,9 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_PROVIDER_NAME,
-    GEN_AI_REQUEST_FREQUENCY_PENALTY,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
-    GEN_AI_REQUEST_PRESENCE_PENALTY,
-    GEN_AI_REQUEST_STOP_SEQUENCES,
     GEN_AI_REQUEST_TEMPERATURE,
-    GEN_AI_REQUEST_TOP_K,
-    GEN_AI_REQUEST_TOP_P,
     GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_CALL_RESULT,
@@ -60,7 +55,6 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_NAME,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
-    GenAiOperationNameValues,
 )
 
 
@@ -211,7 +205,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
         span._process_event(event)
-        self.assertEqual(span._attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.RETRIEVAL.value)
+        self.assertEqual(span._attributes[GEN_AI_OPERATION_NAME], "retrieve")
         otel_span.end()
 
     def test_rerank_start_event(self):
@@ -287,32 +281,16 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self.assertEqual(span._attributes[GEN_AI_PROVIDER_NAME], "openai")
         otel_span.end()
 
-    def test_process_instance_llm_request_params(self):
+    def test_process_instance_llm_with_temperature_and_max_tokens(self):
+        """Test that temperature and max_tokens are captured from LLM instances."""
         from llama_index.llms.openai import OpenAI
 
-        llm = OpenAI(
-            model="gpt-4",
-            api_key="fake-key",
-            temperature=0.7,
-            max_tokens=100,
-            additional_kwargs={
-                "top_p": 0.9,
-                "top_k": 5,
-                "frequency_penalty": 0.5,
-                "presence_penalty": 0.3,
-                "stop": ["END", "STOP"],
-            },
-        )
+        llm = OpenAI(model="gpt-4", api_key="fake-key", temperature=0.7, max_tokens=100)
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
         span.process_instance(llm)
         self.assertEqual(span._attributes[GEN_AI_REQUEST_TEMPERATURE], 0.7)
         self.assertEqual(span._attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
-        self.assertEqual(span._attributes[GEN_AI_REQUEST_TOP_P], 0.9)
-        self.assertEqual(span._attributes[GEN_AI_REQUEST_TOP_K], 5)
-        self.assertEqual(span._attributes[GEN_AI_REQUEST_FREQUENCY_PENALTY], 0.5)
-        self.assertEqual(span._attributes[GEN_AI_REQUEST_PRESENCE_PENALTY], 0.3)
-        self.assertEqual(span._attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ["END", "STOP"])
         otel_span.end()
 
     def test_process_instance_embedding(self):
@@ -361,7 +339,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self.assertEqual(span._attributes[GEN_AI_OPERATION_NAME], "invoke_agent")
         self.assertEqual(span._attributes[GEN_AI_AGENT_NAME], "TestAgent")
         self.assertEqual(span._attributes[GEN_AI_AGENT_DESCRIPTION], "A test agent")
-        self.assertNotIn(GEN_AI_SYSTEM_INSTRUCTIONS, span._attributes)
+        self.assertEqual(span._attributes[GEN_AI_SYSTEM_INSTRUCTIONS], "You are helpful.")
         otel_span.end()
 
     def test_process_instance_base_agent_no_name(self):
@@ -1349,65 +1327,6 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self.assertEqual(output[0]["role"], "assistant")
         self.assertEqual(output[0]["parts"][0]["type"], "text")
         self.assertIn("sunny", output[0]["parts"][0]["content"])
-        span.end()
-
-    def test_output_messages_tool_call_parts_conform_to_otel_schema(self):
-        from llama_index.core.base.llms.types import ToolCallBlock
-        from llama_index.core.instrumentation.events.llm import LLMChatEndEvent
-
-        handler = self._make_span_handler()
-        from llama_index.llms.openai import OpenAI
-
-        llm = OpenAI(model="gpt-4", api_key="fake")
-        span = handler.new_span(id_="OpenAI.chat-1", bound_args=self._make_bound_args(), instance=llm)
-
-        tool_block = ToolCallBlock(tool_call_id="call_abc", tool_name="get_weather", tool_kwargs={"city": "Seattle"})
-        response = Mock(spec=ChatResponse)
-        response.message = ChatMessage(role="assistant", blocks=[tool_block])
-        response.raw = None
-        response.additional_kwargs = {}
-        event = LLMChatEndEvent(response=response, messages=[], model_dict={})
-        span.process_event(event)
-
-        raw = span._attributes.get(GEN_AI_OUTPUT_MESSAGES)
-        self.assertIsNotNone(raw)
-        output = json.loads(raw)
-        validate_otel_genai_schema(output, "gen-ai-output-messages")
-        tool_parts = [p for p in output[0]["parts"] if p["type"] == "tool_call"]
-        self.assertEqual(len(tool_parts), 1)
-        self.assertEqual(tool_parts[0]["name"], "get_weather")
-        self.assertEqual(tool_parts[0]["id"], "call_abc")
-        self.assertEqual(tool_parts[0]["arguments"], {"city": "Seattle"})
-        span.end()
-
-    def test_output_messages_reasoning_parts_conform_to_otel_schema(self):
-        from llama_index.core.base.llms.types import TextBlock, ThinkingBlock
-        from llama_index.core.instrumentation.events.llm import LLMChatEndEvent
-
-        handler = self._make_span_handler()
-        from llama_index.llms.openai import OpenAI
-
-        llm = OpenAI(model="gpt-4", api_key="fake")
-        span = handler.new_span(id_="OpenAI.chat-1", bound_args=self._make_bound_args(), instance=llm)
-
-        thinking = ThinkingBlock(content="Let me think about the weather...")
-        text = TextBlock(text="It is sunny.")
-        response = Mock(spec=ChatResponse)
-        response.message = ChatMessage(role="assistant", blocks=[thinking, text])
-        response.raw = None
-        response.additional_kwargs = {}
-        event = LLMChatEndEvent(response=response, messages=[], model_dict={})
-        span.process_event(event)
-
-        raw = span._attributes.get(GEN_AI_OUTPUT_MESSAGES)
-        self.assertIsNotNone(raw)
-        output = json.loads(raw)
-        validate_otel_genai_schema(output, "gen-ai-output-messages")
-        parts = output[0]["parts"]
-        self.assertEqual(parts[0]["type"], "reasoning")
-        self.assertIn("think about", parts[0]["content"])
-        self.assertEqual(parts[1]["type"], "text")
-        self.assertIn("sunny", parts[1]["content"])
         span.end()
 
     def test_system_instructions_conform_to_otel_schema(self):
