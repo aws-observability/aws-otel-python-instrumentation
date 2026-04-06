@@ -1351,9 +1351,6 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
             ThinkingBlock = None
             ToolCallBlock = None
 
-        # When ToolCallBlock/ThinkingBlock are available (core >= 0.14.5), use them to test
-        # rich block parsing. On older versions, fall back to plain text messages but still
-        # exercise the same provider/finish_reason/model extraction paths.
         if ToolCallBlock is not None:
             tool_call_message = ChatMessage(
                 role="assistant",
