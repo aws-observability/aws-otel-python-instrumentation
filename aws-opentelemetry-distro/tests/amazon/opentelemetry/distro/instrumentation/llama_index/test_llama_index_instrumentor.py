@@ -1339,17 +1339,11 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         span.end()
 
     def test_chat_response_by_provider(self):
-        from llama_index.core.base.llms.types import TextBlock
+        from llama_index.core.base.llms.types import TextBlock, ThinkingBlock, ToolCallBlock
         from llama_index.core.instrumentation.events.llm import LLMChatEndEvent
         from llama_index.llms.anthropic import Anthropic
         from llama_index.llms.bedrock_converse import BedrockConverse
         from llama_index.llms.openai import OpenAI
-
-        try:
-            from llama_index.core.base.llms.types import ThinkingBlock, ToolCallBlock
-        except ImportError:
-            ThinkingBlock = None
-            ToolCallBlock = None
 
         cases = [
             {
@@ -1361,41 +1355,30 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
                 "response_model": "gpt-4",
                 "part_types": ["text"],
             },
-        ]
-
-        if ToolCallBlock is not None:
-            cases.append(
-                {
-                    "name": "openai_tool_call",
-                    "llm": OpenAI(model="gpt-4", api_key="fake"),
-                    "message": ChatMessage(
-                        role="assistant",
-                        blocks=[ToolCallBlock(tool_call_id="c1", tool_name="search", tool_kwargs={"q": "weather"})],
-                    ),
-                    "raw": {"choices": [{"finish_reason": "tool_calls"}], "model": "gpt-4"},
-                    "finish_reason": "tool_calls",
-                    "response_model": "gpt-4",
-                    "part_types": ["tool_call"],
-                },
-            )
-
-        if ThinkingBlock is not None:
-            cases.append(
-                {
-                    "name": "anthropic_with_thinking",
-                    "llm": Anthropic(model="claude-3-haiku-20240307", api_key="fake"),
-                    "message": ChatMessage(
-                        role="assistant",
-                        blocks=[ThinkingBlock(content="Let me think..."), TextBlock(text="It is sunny.")],
-                    ),
-                    "raw": {"stop_reason": "end_turn", "model": "claude-3-haiku"},
-                    "finish_reason": "end_turn",
-                    "response_model": "claude-3-haiku",
-                    "part_types": ["reasoning", "text"],
-                },
-            )
-
-        cases.extend([
+            {
+                "name": "openai_tool_call",
+                "llm": OpenAI(model="gpt-4", api_key="fake"),
+                "message": ChatMessage(
+                    role="assistant",
+                    blocks=[ToolCallBlock(tool_call_id="c1", tool_name="search", tool_kwargs={"q": "weather"})],
+                ),
+                "raw": {"choices": [{"finish_reason": "tool_calls"}], "model": "gpt-4"},
+                "finish_reason": "tool_calls",
+                "response_model": "gpt-4",
+                "part_types": ["tool_call"],
+            },
+            {
+                "name": "anthropic_with_thinking",
+                "llm": Anthropic(model="claude-3-haiku-20240307", api_key="fake"),
+                "message": ChatMessage(
+                    role="assistant",
+                    blocks=[ThinkingBlock(content="Let me think..."), TextBlock(text="It is sunny.")],
+                ),
+                "raw": {"stop_reason": "end_turn", "model": "claude-3-haiku"},
+                "finish_reason": "end_turn",
+                "response_model": "claude-3-haiku",
+                "part_types": ["reasoning", "text"],
+            },
             {
                 "name": "bedrock",
                 "llm": BedrockConverse(model="anthropic.claude-3-haiku-20240307-v1:0", region_name="us-east-1"),
@@ -1432,7 +1415,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
                 "response_model": None,
                 "part_types": ["text"],
             },
-        ])
+        ]
 
         for case in cases:
             with self.subTest(provider=case["name"]):

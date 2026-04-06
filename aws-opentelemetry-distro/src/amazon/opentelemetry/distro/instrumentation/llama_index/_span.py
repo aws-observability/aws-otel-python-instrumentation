@@ -8,17 +8,14 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, Iterator, Mappi
 from llama_index.core.agent.workflow import AgentWorkflow, BaseWorkflowAgent
 from llama_index.core.base.embeddings.base import BaseEmbedding
 from llama_index.core.base.llms.base import BaseLLM
-from llama_index.core.base.llms.types import ChatMessage, ChatResponse, CompletionResponse, TextBlock
-
-try:
-    from llama_index.core.base.llms.types import ThinkingBlock
-except ImportError:
-    ThinkingBlock = None
-
-try:
-    from llama_index.core.base.llms.types import ToolCallBlock
-except ImportError:
-    ToolCallBlock = None
+from llama_index.core.base.llms.types import (
+    ChatMessage,
+    ChatResponse,
+    CompletionResponse,
+    TextBlock,
+    ThinkingBlock,
+    ToolCallBlock,
+)
 from llama_index.core.instrumentation.events import BaseEvent
 from llama_index.core.instrumentation.events.chat_engine import (
     StreamChatDeltaReceivedEvent,
@@ -156,7 +153,7 @@ def _message_to_parts(msg: ChatMessage) -> list:
         for block in blocks:
             if isinstance(block, TextBlock):
                 parts.append({"type": "text", "content": block.text})
-            elif ToolCallBlock is not None and isinstance(block, ToolCallBlock):
+            elif isinstance(block, ToolCallBlock):
                 part: dict = {"type": "tool_call"}
                 if hasattr(block, "tool_name") and block.tool_name:
                     part["name"] = block.tool_name
@@ -165,7 +162,7 @@ def _message_to_parts(msg: ChatMessage) -> list:
                 if hasattr(block, "tool_call_id") and block.tool_call_id:
                     part["id"] = block.tool_call_id
                 parts.append(part)
-            elif ThinkingBlock is not None and isinstance(block, ThinkingBlock):
+            elif isinstance(block, ThinkingBlock):
                 parts.append({"type": "reasoning", "content": str(block.content)})
         if parts:
             return parts
