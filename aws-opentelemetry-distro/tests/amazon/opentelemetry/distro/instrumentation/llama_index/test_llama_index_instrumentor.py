@@ -1339,11 +1339,40 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         span.end()
 
     def test_chat_response_by_provider(self):
-        from llama_index.core.base.llms.types import TextBlock, ThinkingBlock, ToolCallBlock
+        from llama_index.core.base.llms.types import TextBlock
         from llama_index.core.instrumentation.events.llm import LLMChatEndEvent
         from llama_index.llms.anthropic import Anthropic
         from llama_index.llms.bedrock_converse import BedrockConverse
         from llama_index.llms.openai import OpenAI
+
+        try:
+            from llama_index.core.base.llms.types import ThinkingBlock, ToolCallBlock
+        except ImportError:
+            ThinkingBlock = None
+            ToolCallBlock = None
+
+        # When ToolCallBlock/ThinkingBlock are available (core >= 0.14.5), use them to test
+        # rich block parsing. On older versions, fall back to plain text messages but still
+        # exercise the same provider/finish_reason/model extraction paths.
+        if ToolCallBlock is not None:
+            tool_call_message = ChatMessage(
+                role="assistant",
+                blocks=[ToolCallBlock(tool_call_id="c1", tool_name="search", tool_kwargs={"q": "weather"})],
+            )
+            tool_call_part_types = ["tool_call"]
+        else:
+            tool_call_message = ChatMessage(role="assistant", content="tool call result")
+            tool_call_part_types = ["text"]
+
+        if ThinkingBlock is not None:
+            thinking_message = ChatMessage(
+                role="assistant",
+                blocks=[ThinkingBlock(content="Let me think..."), TextBlock(text="It is sunny.")],
+            )
+            thinking_part_types = ["reasoning", "text"]
+        else:
+            thinking_message = ChatMessage(role="assistant", content="It is sunny.")
+            thinking_part_types = ["text"]
 
         cases = [
             {
@@ -1358,26 +1387,20 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
             {
                 "name": "openai_tool_call",
                 "llm": OpenAI(model="gpt-4", api_key="fake"),
-                "message": ChatMessage(
-                    role="assistant",
-                    blocks=[ToolCallBlock(tool_call_id="c1", tool_name="search", tool_kwargs={"q": "weather"})],
-                ),
+                "message": tool_call_message,
                 "raw": {"choices": [{"finish_reason": "tool_calls"}], "model": "gpt-4"},
                 "finish_reason": "tool_calls",
                 "response_model": "gpt-4",
-                "part_types": ["tool_call"],
+                "part_types": tool_call_part_types,
             },
             {
                 "name": "anthropic_with_thinking",
                 "llm": Anthropic(model="claude-3-haiku-20240307", api_key="fake"),
-                "message": ChatMessage(
-                    role="assistant",
-                    blocks=[ThinkingBlock(content="Let me think..."), TextBlock(text="It is sunny.")],
-                ),
+                "message": thinking_message,
                 "raw": {"stop_reason": "end_turn", "model": "claude-3-haiku"},
                 "finish_reason": "end_turn",
                 "response_model": "claude-3-haiku",
-                "part_types": ["reasoning", "text"],
+                "part_types": thinking_part_types,
             },
             {
                 "name": "bedrock",
