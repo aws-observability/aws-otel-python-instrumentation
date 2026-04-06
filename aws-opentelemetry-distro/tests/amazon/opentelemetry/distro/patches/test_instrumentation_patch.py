@@ -1,9 +1,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import base64
+import json
 from importlib.metadata import PackageNotFoundError
 from typing import Any, Dict
 from unittest import TestCase
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_AUTH_ACCESS_KEY,
@@ -25,6 +27,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_REGION,
     AWS_SQS_QUEUE_NAME,
 )
+from amazon.opentelemetry.distro.patches._eks_resource_detector_patches import _is_eks_with_fallback
 from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_instrumentation_patches
 from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_BROWSER_ID,
@@ -33,6 +36,8 @@ from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attribute
     GEN_AI_MEMORY_ID,
     GEN_AI_RUNTIME_ID,
 )
+import opentelemetry.sdk.extension.aws.resource.eks as eks_resource
+from opentelemetry.sdk.extension.aws.resource.eks import _is_eks
 from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
 from opentelemetry.instrumentation.botocore.extensions import _KNOWN_EXTENSIONS, bedrock_utils
 from opentelemetry.propagate import get_global_textmap
@@ -130,6 +135,7 @@ class TestInstrumentationPatch(TestCase):
         self._test_unpatched_botocore_instrumentation()
         self._test_unpatched_botocore_propagator()
         self._test_unpatched_starlette_instrumentation()
+        self._test_unpatched_eks_resource_detector()
 
         # Apply patches
         apply_instrumentation_patches()
@@ -138,6 +144,7 @@ class TestInstrumentationPatch(TestCase):
         self._test_patched_botocore_instrumentation()
         self._test_patched_botocore_propagator()
         self._test_patched_starlette_instrumentation()
+        self._test_patched_eks_resource_detector()
 
         # Apply patches
         apply_instrumentation_patches()
@@ -799,6 +806,38 @@ class TestInstrumentationPatch(TestCase):
             bedrock_agent_success_attributes: Dict[str, str] = _do_on_success_bedrock("bedrock-agent", operation)
             self.assertEqual(len(bedrock_agent_success_attributes), 1)
             self.assertEqual(bedrock_agent_success_attributes[attribute_tuple[0]], attribute_tuple[1])
+
+    def _test_unpatched_eks_resource_detector(self):
+        with patch.object(eks_resource, "_aws_http_request", side_effect=Exception("403 Forbidden")):
+            with self.assertRaises(Exception):
+                _is_eks("cred")
+
+    def _test_patched_eks_resource_detector(self):
+        self.assertEqual(eks_resource._is_eks, _is_eks_with_fallback)
+
+        token_header = base64.urlsafe_b64encode(json.dumps({"alg": "RS256"}).encode()).rstrip(b"=").decode()
+        eks_payload = base64.urlsafe_b64encode(
+            json.dumps({"iss": "https://oidc.eks.us-east-1.amazonaws.com/id/ABC123"}).encode()
+        ).rstrip(b"=").decode()
+        eks_token = f"{token_header}.{eks_payload}.fakesig"
+
+        non_eks_payload = base64.urlsafe_b64encode(
+            json.dumps({"iss": "https://kubernetes.default.svc"}).encode()
+        ).rstrip(b"=").decode()
+        non_eks_token = f"{token_header}.{non_eks_payload}.fakesig"
+
+        with patch(
+            "amazon.opentelemetry.distro.patches._eks_resource_detector_patches._original_is_eks",
+            side_effect=Exception("403 Forbidden"),
+        ):
+            with patch("builtins.open", mock_open(read_data=eks_token)):
+                self.assertTrue(eks_resource._is_eks("cred"))
+
+            with patch("builtins.open", mock_open(read_data=non_eks_token)):
+                self.assertFalse(eks_resource._is_eks("cred"))
+
+            with patch("builtins.open", side_effect=FileNotFoundError):
+                self.assertFalse(eks_resource._is_eks("cred"))
 
     def _test_unpatched_botocore_propagator(self):
         """Test that BotocoreInstrumentor uses its own propagator by default."""

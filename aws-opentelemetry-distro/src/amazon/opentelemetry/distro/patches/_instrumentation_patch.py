@@ -18,6 +18,11 @@ def apply_instrumentation_patches() -> None:  # pylint: disable=too-many-branche
 
     Where possible, automated testing should be run to catch upstream changes resulting in broken patches
     """
+    # pylint: disable=import-outside-toplevel
+    from amazon.opentelemetry.distro.patches._eks_resource_detector_patches import _apply_eks_resource_detector_patches
+
+    _apply_eks_resource_detector_patches()
+
     if is_installed("botocore ~= 1.0"):
         # pylint: disable=import-outside-toplevel
         # Delay import to only occur if patches is safe to apply (e.g. the instrumented library is installed).
