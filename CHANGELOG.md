@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix(genai-instrumentors): cleanup code, align with OTel GenAI semconv, add missing attributes and fix deprecated usage
+  ([#706](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/706))
 - feat(genai-instrumentation): add oldest/latest dependency testing and scheduled instrumentation tests for GenAI libraries
   ([#708](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/708))
 - feat(instrumentors): add invoke_workflow span support for LlamaIndex AgentWorkflow and CrewAI

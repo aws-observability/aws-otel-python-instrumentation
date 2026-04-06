@@ -14,7 +14,6 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     skip_instrumentation_if_suppressed,
 )
 from opentelemetry import context, trace
-from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_MESSAGE
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_DESCRIPTION,
     GEN_AI_AGENT_ID,
@@ -23,9 +22,14 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_FREQUENCY_PENALTY,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
+    GEN_AI_REQUEST_PRESENCE_PENALTY,
+    GEN_AI_REQUEST_STOP_SEQUENCES,
     GEN_AI_REQUEST_TEMPERATURE,
+    GEN_AI_REQUEST_TOP_P,
+    GEN_AI_RESPONSE_FINISH_REASONS,
     GEN_AI_RESPONSE_MODEL,
     GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
@@ -38,6 +42,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_USAGE_OUTPUT_TOKENS,
     GenAiOperationNameValues,
 )
+from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
 if TYPE_CHECKING:
@@ -201,18 +206,18 @@ class OpenTelemetryEventHandler:
         self._start_span(span_name, event.event_id, attributes, event.parent_event_id)
 
     def _on_crew_completed(
-        self, source: "Crew", event: "CrewKickoffCompletedEvent"  # pylint: disable=unused-argument
-    ) -> None:
+        self, source: "Crew", event: "CrewKickoffCompletedEvent"
+    ) -> None:  # pylint: disable=unused-argument
         self._end_span(event.started_event_id)
         self._event_id_to_span.clear()
 
     def _on_crew_failed(
-        self, source: "Crew", event: "CrewKickoffFailedEvent"  # pylint: disable=unused-argument
-    ) -> None:
+        self, source: "Crew", event: "CrewKickoffFailedEvent"
+    ) -> None:  # pylint: disable=unused-argument
         self._end_span(event.started_event_id, error=getattr(event, "error", None))
         self._event_id_to_span.clear()
 
-    def _on_agent_start(
+    def _on_agent_start(  # pylint: disable=too-many-branches
         self, source: "BaseAgent", event: "AgentExecutionStartedEvent"  # pylint: disable=unused-argument
     ) -> None:
         agent = getattr(event, "agent", None)
@@ -233,9 +238,6 @@ class OpenTelemetryEventHandler:
             goal = getattr(agent, "goal", None)
             if goal:
                 attributes[GEN_AI_AGENT_DESCRIPTION] = goal
-            backstory = getattr(agent, "backstory", None)
-            if backstory:
-                attributes[GEN_AI_SYSTEM_INSTRUCTIONS] = backstory
 
             llm = getattr(agent, "llm", None)
             provider, model = self._extract_provider_and_model(llm)
@@ -244,12 +246,18 @@ class OpenTelemetryEventHandler:
             if model:
                 attributes[GEN_AI_REQUEST_MODEL] = model
             if llm:
-                temperature = getattr(llm, "temperature", None)
-                if temperature is not None:
-                    attributes[GEN_AI_REQUEST_TEMPERATURE] = temperature
-                max_tokens = getattr(llm, "max_tokens", None)
-                if max_tokens is not None:
-                    attributes[GEN_AI_REQUEST_MAX_TOKENS] = max_tokens
+                if getattr(llm, "temperature", None) is not None:
+                    attributes[GEN_AI_REQUEST_TEMPERATURE] = llm.temperature
+                if getattr(llm, "max_tokens", None) is not None:
+                    attributes[GEN_AI_REQUEST_MAX_TOKENS] = llm.max_tokens
+                if getattr(llm, "top_p", None) is not None:
+                    attributes[GEN_AI_REQUEST_TOP_P] = llm.top_p
+                if getattr(llm, "frequency_penalty", None) is not None:
+                    attributes[GEN_AI_REQUEST_FREQUENCY_PENALTY] = llm.frequency_penalty
+                if getattr(llm, "presence_penalty", None) is not None:
+                    attributes[GEN_AI_REQUEST_PRESENCE_PENALTY] = llm.presence_penalty
+                if getattr(llm, "stop", None):
+                    attributes[GEN_AI_REQUEST_STOP_SEQUENCES] = llm.stop
 
         self._start_span(span_name, event.event_id, attributes, event.parent_event_id)
 
@@ -259,8 +267,8 @@ class OpenTelemetryEventHandler:
         self._end_span(event.started_event_id)
 
     def _on_agent_failed(
-        self, source: "BaseAgent", event: "AgentExecutionErrorEvent"  # pylint: disable=unused-argument
-    ) -> None:
+        self, source: "BaseAgent", event: "AgentExecutionErrorEvent"
+    ) -> None:  # pylint: disable=unused-argument
         self._end_span(event.started_event_id, error=getattr(event, "error", None))
 
     def _on_tool_start(self, source: "ToolUsage", event: "ToolUsageStartedEvent") -> None:
@@ -296,8 +304,8 @@ class OpenTelemetryEventHandler:
         self._start_span(span_name, event.event_id, attributes, event.parent_event_id)
 
     def _on_tool_finished(
-        self, source: "ToolUsage", event: "ToolUsageFinishedEvent"  # pylint: disable=unused-argument
-    ) -> None:
+        self, source: "ToolUsage", event: "ToolUsageFinishedEvent"
+    ) -> None:  # pylint: disable=unused-argument
         attrs: Dict[str, Any] = {}
         output = getattr(event, "output", None)
         if output is not None:
@@ -344,6 +352,7 @@ class OpenTelemetryEventHandler:
         from crewai.events.types.llm_events import LLMCallType  # pylint: disable=import-outside-toplevel
 
         finish_reason = "tool_call" if event.call_type == LLMCallType.TOOL_CALL else "stop"
+        attrs[GEN_AI_RESPONSE_FINISH_REASONS] = [finish_reason]
 
         response = event.response
         if response:
@@ -412,7 +421,7 @@ class OpenTelemetryEventHandler:
                         entry.span.set_attribute(key, value)
             if error:
                 entry.span.set_status(Status(StatusCode.ERROR, error))
-                entry.span.set_attribute(ERROR_MESSAGE, error)
+                entry.span.set_attribute(ERROR_TYPE, error)
             else:
                 entry.span.set_status(Status(StatusCode.OK))
             entry.span.end()

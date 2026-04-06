@@ -150,11 +150,13 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
                 parent_id=parent_span_id,
             )
 
+        kind = SpanKind.CLIENT if isinstance(instance, (BaseLLM, MultiModalLLM, BaseEmbedding)) else SpanKind.INTERNAL
+
         otel_span = self._otel_tracer.start_span(
             name="llama_index.operation",  # generic operation name, updated in span.end()
             start_time=time_ns(),
             attributes={},
-            kind=SpanKind.INTERNAL,
+            kind=kind,
             context=(
                 parent.context
                 if parent
