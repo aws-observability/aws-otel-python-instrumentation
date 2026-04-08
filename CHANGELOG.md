@@ -12,7 +12,7 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
-- fix(lambda-layer): disable GenAI and OpenAI Agents instrumentations in Lambda otel-instrument script
+- fix(lambda-layer): Disable all agentic instrumentation in Lambda by default
   ([#710](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/710))
 - fix(genai-instrumentors): cleanup code, align with OTel GenAI semconv, add missing attributes and fix deprecated usage
   ([#706](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/706))
