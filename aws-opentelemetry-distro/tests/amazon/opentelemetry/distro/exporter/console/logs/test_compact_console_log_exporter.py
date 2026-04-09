@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import inspect
 import io
 import json
 import unittest
@@ -13,20 +14,25 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 from opentelemetry.trace import TraceFlags
 
-# Support both old (LogData) and new (ReadableLogRecord) SDK APIs
+# SDK 1.40+ moved LogRecord to _internal and removed 'resource' from its constructor.
+# ReadableLogRecord wraps LogRecord with resource + scope on 1.40+.
+# Older SDKs use LogData for the same purpose and LogRecord accepts 'resource'.
 try:
-    from opentelemetry.sdk._logs import ReadableLogRecord as _ReadableLogRecord
-
-    _HAS_READABLE_LOG_RECORD = True
+    from opentelemetry.sdk._logs import LogRecord
 except ImportError:
-    _HAS_READABLE_LOG_RECORD = False
+    from opentelemetry.sdk._logs._internal import LogRecord
 
-from opentelemetry.sdk._logs import LogRecord
+try:
+    from opentelemetry.sdk._logs import ReadableLogRecord
+except ImportError:
+    ReadableLogRecord = None
 
 try:
     from opentelemetry.sdk._logs import LogData
 except ImportError:
     LogData = None
+
+_LOG_RECORD_ACCEPTS_RESOURCE = "resource" in inspect.signature(LogRecord.__init__).parameters
 
 
 def _make_log_data(
@@ -55,7 +61,7 @@ def _make_log_data(
             schema_url="https://opentelemetry.io/schemas/1.0.0",
         )
 
-    log_record = LogRecord(
+    log_record_kwargs = dict(
         timestamp=timestamp,
         observed_timestamp=observed_timestamp,
         trace_id=trace_id,
@@ -63,13 +69,15 @@ def _make_log_data(
         trace_flags=trace_flags,
         severity_number=severity_number,
         body=body,
-        resource=resource,
         attributes=attributes if attributes else None,
     )
+    if _LOG_RECORD_ACCEPTS_RESOURCE:
+        log_record_kwargs["resource"] = resource
 
-    # Use ReadableLogRecord (1.40+) if available, otherwise LogData
-    if _HAS_READABLE_LOG_RECORD:
-        return _ReadableLogRecord(
+    log_record = LogRecord(**log_record_kwargs)
+
+    if ReadableLogRecord is not None:
+        return ReadableLogRecord(
             log_record=log_record,
             resource=resource,
             instrumentation_scope=scope,
@@ -97,9 +105,18 @@ class TestCompactConsoleLogRecordExporter(unittest.TestCase):
 
         # Validate all top-level fields are present
         expected_keys = [
-            "resource", "body", "severityNumber", "severityText",
-            "attributes", "droppedAttributes", "timestamp", "observedTimestamp",
-            "traceId", "spanId", "traceFlags", "instrumentationScope",
+            "resource",
+            "body",
+            "severityNumber",
+            "severityText",
+            "attributes",
+            "droppedAttributes",
+            "timestamp",
+            "observedTimestamp",
+            "traceId",
+            "spanId",
+            "traceFlags",
+            "instrumentationScope",
         ]
         for key in expected_keys:
             self.assertIn(key, parsed, f"Missing key: {key}")
@@ -119,7 +136,10 @@ class TestCompactConsoleLogRecordExporter(unittest.TestCase):
         # Validate nested objects
         self.assertIn("attributes", parsed["resource"])
         self.assertEqual(parsed["resource"]["attributes"]["service.name"], "test-service")
-        self.assertEqual(parsed["resource"]["schemaUrl"], "https://opentelemetry.io/schemas/1.0.0")
+        self.assertEqual(
+            parsed["resource"]["schemaUrl"],
+            "https://opentelemetry.io/schemas/1.0.0",
+        )
 
         scope = parsed["instrumentationScope"]
         self.assertEqual(scope["name"], "test-scope")
@@ -216,7 +236,6 @@ class TestCompactConsoleLogRecordExporter(unittest.TestCase):
         self.assertEqual(parsed["instrumentationScope"]["schemaUrl"], "")
 
     def test_timestamp_with_milliseconds(self):
-        # 1000000000 seconds + 123 milliseconds
         nanos = 1000000000 * 1_000_000_000 + 123 * 1_000_000
         data = _make_log_data(timestamp=nanos)
         self.exporter.export([data])
@@ -224,7 +243,6 @@ class TestCompactConsoleLogRecordExporter(unittest.TestCase):
         self.assertEqual(parsed["timestamp"], "2001-09-09T01:46:40.123Z")
 
     def test_timestamp_trailing_zero_truncation(self):
-        # 1000000000 seconds + 100 milliseconds -> .1Z not .100Z
         nanos = 1000000000 * 1_000_000_000 + 100 * 1_000_000
         data = _make_log_data(timestamp=nanos)
         self.exporter.export([data])
