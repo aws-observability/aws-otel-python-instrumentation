@@ -381,3 +381,193 @@ class TestAwsSpanProcessingUtil(TestCase):
         keywords: List[str] = _get_dialect_keywords()
         for keyword in keywords:
             self.assertLessEqual(len(keyword), MAX_KEYWORD_LENGTH)
+
+
+class TestOperationPaths(TestCase):
+    """Tests for OTEL_AWS_HTTP_OPERATION_PATHS and apply_operation_path_span_name."""
+
+    def setUp(self):
+        from amazon.opentelemetry.distro._aws_span_processing_util import reset_operation_paths
+
+        reset_operation_paths()
+        self.span_mock = MagicMock()
+        self.span_mock.attributes = {}
+        self.span_mock.name = "GET /api"
+        self.span_mock._name = "GET /api"
+
+    def tearDown(self):
+        from amazon.opentelemetry.distro._aws_span_processing_util import reset_operation_paths
+
+        reset_operation_paths()
+
+    # --- _segments_match tests ---
+
+    def test_segments_match_exact(self):
+        from amazon.opentelemetry.distro._aws_span_processing_util import _segments_match
+
+        self.assertTrue(_segments_match("/api/contests".split("/"), "/api/contests".split("/")))
+
+    def test_segments_match_no_match(self):
+        from amazon.opentelemetry.distro._aws_span_processing_util import _segments_match
+
+        self.assertFalse(_segments_match("/api/players".split("/"), "/api/contests".split("/")))
+
+    def test_segments_match_extra_url_segments_allowed(self):
+        from amazon.opentelemetry.distro._aws_span_processing_util import _segments_match
+
+        self.assertTrue(_segments_match("/api/contests/123/extra".split("/"), "/api/contests".split("/")))
+
+    def test_segments_match_pattern_longer_than_url(self):
+        from amazon.opentelemetry.distro._aws_span_processing_util import _segments_match
+
+        self.assertFalse(_segments_match("/api".split("/"), "/api/contests/{id}".split("/")))
+
+    def test_segments_match_curly_brace_wildcard(self):
+        from amazon.opentelemetry.distro._aws_span_processing_util import _segments_match
+
+        self.assertTrue(_segments_match("/api/contests/123".split("/"), "/api/contests/{id}".split("/")))
+
+    def test_segments_match_colon_param_wildcard(self):
+        from amazon.opentelemetry.distro._aws_span_processing_util import _segments_match
+
+        self.assertTrue(_segments_match("/api/users/42".split("/"), "/api/users/:userId".split("/")))
+
+    def test_segments_match_star_wildcard(self):
+        from amazon.opentelemetry.distro._aws_span_processing_util import _segments_match
+
+        self.assertTrue(
+            _segments_match("/api/contests/123/leaderboard".split("/"), "/api/contests/*/leaderboard".split("/"))
+        )
+
+    def test_segments_match_wildcard_does_not_match_empty(self):
+        from amazon.opentelemetry.distro._aws_span_processing_util import _segments_match
+
+        self.assertFalse(_segments_match("/api/contests/".split("/"), "/api/contests/{id}".split("/")))
+
+    # --- apply_operation_path_span_name tests ---
+
+    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/contests/{id}/leaderboard, /api/contests/{id}, /api/contests"})
+    def test_apply_matches_url_path(self):
+        from amazon.opentelemetry.distro._aws_span_processing_util import (
+            apply_operation_path_span_name,
+            reset_operation_paths,
+        )
+
+        reset_operation_paths()
+        self.span_mock.attributes = {"url.path": "/api/contests/123/leaderboard", "http.request.method": "GET"}
+        result = apply_operation_path_span_name(self.span_mock)
+        self.assertEqual(result._name, "GET /api/contests/{id}/leaderboard")
+
+    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/teams/{id}, /api/teams"})
+    def test_apply_matches_http_target_with_query(self):
+        from amazon.opentelemetry.distro._aws_span_processing_util import (
+            apply_operation_path_span_name,
+            reset_operation_paths,
+        )
+
+        reset_operation_paths()
+        self.span_mock.attributes = {"http.target": "/api/teams/5?include=roster", "http.request.method": "GET"}
+        result = apply_operation_path_span_name(self.span_mock)
+        self.assertEqual(result._name, "GET /api/teams/{id}")
+
+    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/contests/{id}/leaderboard, /api/contests/{id}, /api/contests, /api"})
+    def test_apply_longest_match_wins(self):
+        from amazon.opentelemetry.distro._aws_span_processing_util import (
+            apply_operation_path_span_name,
+            reset_operation_paths,
+        )
+
+        reset_operation_paths()
+        self.span_mock.attributes = {"url.path": "/api/contests/42", "http.request.method": "GET"}
+        result = apply_operation_path_span_name(self.span_mock)
+        self.assertEqual(result._name, "GET /api/contests/{id}")
+
+    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/contests/{id}"})
+    def test_apply_no_match_returns_original(self):
+        from amazon.opentelemetry.distro._aws_span_processing_util import (
+            apply_operation_path_span_name,
+            reset_operation_paths,
+        )
+
+        reset_operation_paths()
+        self.span_mock.attributes = {"url.path": "/unknown/path", "http.request.method": "GET"}
+        result = apply_operation_path_span_name(self.span_mock)
+        self.assertEqual(result._name, "GET /api")  # unchanged
+
+    def test_apply_empty_config_returns_original(self):
+        from amazon.opentelemetry.distro._aws_span_processing_util import apply_operation_path_span_name
+
+        result = apply_operation_path_span_name(self.span_mock)
+        self.assertIs(result, self.span_mock)
+
+    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/contests"})
+    def test_apply_no_http_method(self):
+        from amazon.opentelemetry.distro._aws_span_processing_util import (
+            apply_operation_path_span_name,
+            reset_operation_paths,
+        )
+
+        reset_operation_paths()
+        self.span_mock.attributes = {"url.path": "/api/contests"}
+        result = apply_operation_path_span_name(self.span_mock)
+        self.assertEqual(result._name, "/api/contests")
+
+    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/v1/{userId}, /api/{version}/user1"})
+    def test_apply_same_length_first_config_wins(self):
+        from amazon.opentelemetry.distro._aws_span_processing_util import (
+            apply_operation_path_span_name,
+            reset_operation_paths,
+        )
+
+        reset_operation_paths()
+        self.span_mock.attributes = {"url.path": "/api/v1/user1", "http.request.method": "GET"}
+        result = apply_operation_path_span_name(self.span_mock)
+        self.assertEqual(result._name, "GET /api/v1/{userId}")
+
+    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/contests"})
+    def test_apply_trailing_slash_normalized(self):
+        from amazon.opentelemetry.distro._aws_span_processing_util import (
+            apply_operation_path_span_name,
+            reset_operation_paths,
+        )
+
+        reset_operation_paths()
+        self.span_mock.attributes = {"url.path": "/api/contests/", "http.request.method": "GET"}
+        result = apply_operation_path_span_name(self.span_mock)
+        self.assertEqual(result._name, "GET /api/contests")
+
+    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/contests"})
+    def test_apply_query_string_stripped(self):
+        from amazon.opentelemetry.distro._aws_span_processing_util import (
+            apply_operation_path_span_name,
+            reset_operation_paths,
+        )
+
+        reset_operation_paths()
+        self.span_mock.attributes = {"url.path": "/api/contests?page=1&size=10", "http.request.method": "GET"}
+        result = apply_operation_path_span_name(self.span_mock)
+        self.assertEqual(result._name, "GET /api/contests")
+
+    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/users/:userId/stats"})
+    def test_apply_colon_param_in_config(self):
+        from amazon.opentelemetry.distro._aws_span_processing_util import (
+            apply_operation_path_span_name,
+            reset_operation_paths,
+        )
+
+        reset_operation_paths()
+        self.span_mock.attributes = {"url.path": "/api/users/42/stats", "http.request.method": "GET"}
+        result = apply_operation_path_span_name(self.span_mock)
+        self.assertEqual(result._name, "GET /api/users/:userId/stats")
+
+    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/*/users/*"})
+    def test_apply_star_wildcard_in_config(self):
+        from amazon.opentelemetry.distro._aws_span_processing_util import (
+            apply_operation_path_span_name,
+            reset_operation_paths,
+        )
+
+        reset_operation_paths()
+        self.span_mock.attributes = {"url.path": "/api/v2/users/42", "http.request.method": "GET"}
+        result = apply_operation_path_span_name(self.span_mock)
+        self.assertEqual(result._name, "GET /api/*/users/*")
