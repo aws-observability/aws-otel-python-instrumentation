@@ -7,7 +7,6 @@ from typing_extensions import override
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_SPAN_KIND
 from amazon.opentelemetry.distro._aws_span_processing_util import (
     LOCAL_ROOT,
-    apply_operation_path_span_name,
     should_generate_dependency_metric_attributes,
     should_generate_service_metric_attributes,
 )
@@ -59,11 +58,6 @@ class AwsMetricAttributesSpanExporter(SpanExporter):
         modified_spans: List[ReadableSpan] = []
 
         for span in spans:
-            # If OTEL_AWS_HTTP_OPERATION_PATHS is configured and matches, override the span name
-            # so that the exported trace carries the correct span name and getIngressOperation
-            # derives aws.local.operation from the overridden name.
-            span = apply_operation_path_span_name(span)
-
             # If the attribute_map has no items, no modifications are required. If there is one item, it means the
             # span either produces Service or Dependency metric attributes, and in either case we want to
             # modify the span with them. If there are two items, the span produces both Service and
