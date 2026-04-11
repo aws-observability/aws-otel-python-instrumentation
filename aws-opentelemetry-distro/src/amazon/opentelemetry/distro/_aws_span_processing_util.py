@@ -49,7 +49,7 @@ SQL_KEYWORD_PATTERN = r"^(?:" + "|".join(_get_dialect_keywords()) + r")\b"
 
 def get_operation_paths() -> List[str]:
     """Parse OTEL_AWS_HTTP_OPERATION_PATHS env var into a sorted list of path templates (longest first)."""
-    global _operation_paths
+    global _operation_paths  # pylint: disable=global-statement
     if _operation_paths is None:
         config = os.environ.get(OTEL_AWS_HTTP_OPERATION_PATHS_CONFIG)
         if config is None or config.strip() == "":
@@ -64,7 +64,7 @@ def get_operation_paths() -> List[str]:
 
 def reset_operation_paths() -> None:
     """Reset cached operation paths (for testing)."""
-    global _operation_paths
+    global _operation_paths  # pylint: disable=global-statement
     _operation_paths = None
 
 
@@ -125,16 +125,17 @@ def _get_http_method(span: ReadableSpan) -> str:
         return method
     return span.attributes.get(SpanAttributes.HTTP_METHOD)
 
+
 def _segments_match(url_segments: List[str], pattern_segments: List[str]) -> bool:
     """Check if URL segments match a pattern's segments.
 
     Pattern segments can use {param}, :param, or * as wildcards matching any single non-empty segment.
     The pattern acts as a prefix — extra URL segments after the pattern are allowed.
     """
-    for i, ps in enumerate(pattern_segments):
-        if i >= len(url_segments):
+    for idx, ps in enumerate(pattern_segments):
+        if idx >= len(url_segments):
             return False
-        us = url_segments[i]
+        us = url_segments[idx]
 
         if _is_wildcard_segment(ps):
             if us == "":

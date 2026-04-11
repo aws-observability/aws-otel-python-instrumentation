@@ -446,7 +446,10 @@ class TestOperationPaths(TestCase):
 
     # --- apply_operation_path_span_name tests ---
 
-    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/contests/{id}/leaderboard, /api/contests/{id}, /api/contests"})
+    @patch.dict(
+        os.environ,
+        {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/contests/{id}/leaderboard, /api/contests/{id}, /api/contests"},
+    )
     def test_apply_matches_url_path(self):
         from amazon.opentelemetry.distro._aws_span_processing_util import (
             apply_operation_path_span_name,
@@ -470,7 +473,10 @@ class TestOperationPaths(TestCase):
         result = apply_operation_path_span_name(self.span_mock)
         self.assertEqual(result._name, "GET /api/teams/{id}")
 
-    @patch.dict(os.environ, {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/contests/{id}/leaderboard, /api/contests/{id}, /api/contests, /api"})
+    @patch.dict(
+        os.environ,
+        {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/contests/{id}/leaderboard, /api/contests/{id}, /api/contests, /api"},
+    )
     def test_apply_longest_match_wins(self):
         from amazon.opentelemetry.distro._aws_span_processing_util import (
             apply_operation_path_span_name,
