@@ -99,7 +99,7 @@ def apply_operation_path_span_name(span: ReadableSpan) -> ReadableSpan:
         if _segments_match(url_segments, normalized_pattern.split("/")):
             http_method = _get_http_method(span)
             new_name = f"{http_method} {pattern}" if http_method else pattern
-            # Override the span name directly (same approach as wrap_span_with_attributes)
+            # Override the span name directly
             span._name = new_name
             return span
 
@@ -278,8 +278,8 @@ def _is_valid_operation(span: ReadableSpan, operation: str) -> bool:
     if operation is None or operation == UNKNOWN_OPERATION:
         return False
 
-    if is_key_present(span, SpanAttributes.HTTP_METHOD):
-        http_method: str = span.attributes.get(SpanAttributes.HTTP_METHOD)
+    http_method: str = _get_http_method(span)
+    if http_method:
         return operation != http_method
 
     return True
