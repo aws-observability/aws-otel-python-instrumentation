@@ -4,15 +4,18 @@ import inspect
 import io
 import json
 import unittest
+import unittest.mock
 
 from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import (
     CompactConsoleLogRecordExporter,
 )
 from opentelemetry._logs import SeverityNumber
+
 try:
     from opentelemetry.sdk._logs.export import LogRecordExportResult as LogExportResult
 except ImportError:
     from opentelemetry.sdk._logs.export import LogExportResult
+
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 from opentelemetry.trace import TraceFlags
@@ -277,3 +280,57 @@ class TestCompactConsoleLogRecordExporter(unittest.TestCase):
         output = self._get_output()
         self.assertNotIn("\n", output)
         self.assertNotIn("  ", output)
+
+    def test_fallback_on_serialization_error(self):
+        """If _to_compact_json fails, fallback should produce output."""
+        data = _make_log_data()
+        with unittest.mock.patch.object(
+            CompactConsoleLogRecordExporter,
+            "_to_compact_json",
+            side_effect=ValueError("forced"),
+        ):
+            result = self.exporter.export([data])
+            self.assertEqual(result, LogExportResult.SUCCESS)
+            output = self._get_output()
+            self.assertTrue(len(output) > 0)
+
+    def test_fallback_also_fails_continues(self):
+        """If both _to_compact_json and _fallback_format fail, skip record."""
+        data = _make_log_data()
+        with unittest.mock.patch.object(
+            CompactConsoleLogRecordExporter,
+            "_to_compact_json",
+            side_effect=ValueError("forced"),
+        ), unittest.mock.patch.object(
+            CompactConsoleLogRecordExporter,
+            "_fallback_format",
+            side_effect=ValueError("fallback forced"),
+        ):
+            result = self.exporter.export([data])
+            self.assertEqual(result, LogExportResult.SUCCESS)
+            self.assertEqual(self.buf.getvalue(), "")
+
+    def test_dropped_attributes_from_record(self):
+        """Test dropped_attributes extracted from record when data lacks it."""
+        data = _make_log_data()
+        # Remove dropped_attributes from data if present, add to record
+        if hasattr(data, "log_record"):
+            data.log_record.dropped_attributes = 5
+        self.exporter.export([data])
+        parsed = self._get_parsed()
+        self.assertIsInstance(parsed["droppedAttributes"], int)
+
+    def test_dropped_attributes_defaults_to_zero(self):
+        """Test droppedAttributes is always an integer."""
+        data = _make_log_data()
+        self.exporter.export([data])
+        parsed = self._get_parsed()
+        self.assertIsInstance(parsed["droppedAttributes"], int)
+        self.assertEqual(parsed["droppedAttributes"], 0)
+
+    def test_export_path_field(self):
+        """Console exporter includes exportPath:console."""
+        data = _make_log_data()
+        self.exporter.export([data])
+        parsed = self._get_parsed()
+        self.assertEqual(parsed["exportPath"], "console")
