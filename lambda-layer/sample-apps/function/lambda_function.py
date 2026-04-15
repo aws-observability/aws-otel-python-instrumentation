@@ -4,7 +4,8 @@ import os
 
 import boto3
 import requests
-from opentelemetry._logs import get_logger, LogRecord, SeverityNumber
+
+from opentelemetry._logs import LogRecord, SeverityNumber, get_logger
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
