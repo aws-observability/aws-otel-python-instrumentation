@@ -14,6 +14,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 - -fix(lambda-layer): Standardize CompactConsoleLogRecordExporter output with CloudWatch OTLP backend schema.
   ([#715](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/715))
+- feat: support environment-configured endpoint visibility for HTTP operation names
+  ([#718](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/718))
 - fix(lambda-layer): Disable all agentic instrumentation in Lambda by default
   ([#710](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/710))
 - fix(genai-instrumentors): cleanup code, align with OTel GenAI semconv, add missing attributes and fix deprecated usage
