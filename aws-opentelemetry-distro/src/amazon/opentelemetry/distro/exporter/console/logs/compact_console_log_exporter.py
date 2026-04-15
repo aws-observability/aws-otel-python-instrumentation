@@ -4,10 +4,12 @@ import json
 import logging
 import re
 import sys
-from datetime import datetime, timezone
-from typing import IO, Optional, Sequence
+from typing import IO, Sequence
 
-from opentelemetry.sdk._logs.export import LogExportResult
+try:
+    from opentelemetry.sdk._logs.export import LogRecordExportResult as LogExportResult
+except ImportError:
+    from opentelemetry.sdk._logs.export import LogExportResult
 
 # Support both old (LogData/LogExporter) and new (ReadableLogRecord/LogRecordExporter) APIs
 try:
@@ -22,12 +24,27 @@ except ImportError:
 _logger = logging.getLogger(__name__)
 
 
+def _preserve_attrs(attributes) -> dict:
+    """Preserve attribute value types (int, float, bool, str, list)."""
+    if not attributes:
+        return {}
+    return dict(attributes)
+
+
+def _get_dropped_attrs(data, record) -> int:
+    """Extract dropped attributes count from whichever object has it."""
+    if hasattr(data, "dropped_attributes"):
+        return data.dropped_attributes or 0
+    if hasattr(record, "dropped_attributes"):
+        return record.dropped_attributes or 0
+    return 0
+
+
 class CompactConsoleLogRecordExporter(_BASE_CLASS):
     """Exports log records as compact JSON to stdout.
 
-    Produces a single-line JSON object per log record matching the canonical
-    schema shared across all ADOT language implementations. This exporter is
-    used in AWS Lambda environments when OTEL_LOGS_EXPORTER=console.
+    Produces a single-line JSON object per log record aligned with the
+    CloudWatch OTLP backend's flattened JSON format.
 
     If the standardized serialization fails for any reason, falls back to
     the upstream SDK's to_json() format to avoid breaking existing infrastructure.
@@ -44,12 +61,16 @@ class CompactConsoleLogRecordExporter(_BASE_CLASS):
         for data in batch:
             try:
                 line = self._to_compact_json(data)
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 _logger.debug(
-                    "Failed to serialize log record with standardized format, falling back to upstream SDK",
+                    "Failed to serialize log record, falling back",
                     exc_info=True,
                 )
-                line = self._fallback_format(data)
+                try:
+                    line = self._fallback_format(data)
+                except Exception:  # pylint: disable=broad-exception-caught
+                    _logger.debug("Fallback also failed", exc_info=True)
+                    continue
 
             self._out.write(line + "\n")
             self._out.flush()
@@ -59,77 +80,42 @@ class CompactConsoleLogRecordExporter(_BASE_CLASS):
     def shutdown(self):
         self._shutdown = True
 
-    def _to_compact_json(self, data) -> str:
-        # Support both ReadableLogRecord (1.40+) and LogData (older) APIs.
-        # ReadableLogRecord: .log_record, .resource, .instrumentation_scope
-        # LogData: .log_record, .instrumentation_scope (resource on log_record)
+    @staticmethod
+    def _to_compact_json(data) -> str:
+        # Support both ReadableLogRecord (1.39+) and LogData (older) APIs.
         record = data.log_record
         resource = getattr(data, "resource", None) or getattr(record, "resource", None)
         scope = getattr(data, "instrumentation_scope", None)
 
-        # Resource
-        resource_attrs = {}
-        if resource and resource.attributes:
-            for k, v in resource.attributes.items():
-                resource_attrs[k] = str(v)
-        resource_schema_url = ""
-        if resource and hasattr(resource, "schema_url") and resource.schema_url:
-            resource_schema_url = resource.schema_url
-
-        # Span context validity: both trace_id and span_id must be non-zero
         trace_id = getattr(record, "trace_id", None)
         span_id = getattr(record, "span_id", None)
-        trace_id_valid = trace_id is not None and span_id is not None and trace_id != 0 and span_id != 0
+        is_valid = trace_id is not None and span_id is not None and trace_id != 0 and span_id != 0
 
-        # Attributes — coerce all values to strings
-        attrs = {}
-        if record.attributes:
-            for k, v in record.attributes.items():
-                attrs[k] = str(v)
-
-        # Severity text from severity number enum name (matches OTel spec names)
-        severity_text = record.severity_number.name if record.severity_number is not None else "UNSPECIFIED"
-        severity_number = record.severity_number.value if record.severity_number is not None else 0
-
-        # Instrumentation scope
-        scope_name = ""
-        scope_version = ""
-        scope_schema_url = ""
-        if scope:
-            scope_name = getattr(scope, "name", "") or ""
-            scope_version = getattr(scope, "version", "") or ""
-            scope_schema_url = getattr(scope, "schema_url", "") or ""
-
-        # Dropped attributes
-        dropped = 0
-        if hasattr(data, "dropped_attributes"):
-            dropped = data.dropped_attributes
-        elif hasattr(record, "dropped_attributes"):
-            dropped = record.dropped_attributes
-
-        output = {
-            "resource": {
-                "attributes": resource_attrs,
-                "schemaUrl": resource_schema_url,
+        return json.dumps(
+            {
+                "resource": {
+                    "attributes": _preserve_attrs(resource.attributes if resource else None),
+                    "schemaUrl": getattr(resource, "schema_url", "") or "" if resource else "",
+                },
+                "scope": {
+                    "name": getattr(scope, "name", "") or "" if scope else "",
+                    "version": getattr(scope, "version", "") or "" if scope else "",
+                    "schemaUrl": getattr(scope, "schema_url", "") or "" if scope else "",
+                },
+                "body": record.body if record.body is not None else None,
+                "severityNumber": (record.severity_number.value if record.severity_number is not None else 0),
+                "severityText": (record.severity_number.name if record.severity_number is not None else "UNSPECIFIED"),
+                "attributes": _preserve_attrs(record.attributes),
+                "droppedAttributes": _get_dropped_attrs(data, record),
+                "timeUnixNano": record.timestamp or 0,
+                "observedTimeUnixNano": (record.observed_timestamp or 0),
+                "traceId": format(trace_id, "032x") if is_valid else "",
+                "spanId": format(span_id, "016x") if is_valid else "",
+                "flags": int(record.trace_flags) if record.trace_flags is not None else 0,
+                "exportPath": "console",
             },
-            "body": record.body if record.body is not None else None,
-            "severityNumber": severity_number,
-            "severityText": severity_text,
-            "attributes": attrs,
-            "droppedAttributes": dropped,
-            "timestamp": _format_nanos(record.timestamp),
-            "observedTimestamp": _format_nanos(record.observed_timestamp),
-            "traceId": format(trace_id, "032x") if trace_id_valid else "",
-            "spanId": format(span_id, "016x") if trace_id_valid else "",
-            "traceFlags": int(record.trace_flags) if record.trace_flags is not None else 0,
-            "instrumentationScope": {
-                "name": scope_name,
-                "version": scope_version,
-                "schemaUrl": scope_schema_url,
-            },
-        }
-
-        return json.dumps(output, separators=(",", ":"))
+            separators=(",", ":"),
+        )
 
     @staticmethod
     def _fallback_format(data) -> str:
@@ -138,23 +124,3 @@ class CompactConsoleLogRecordExporter(_BASE_CLASS):
         obj = data if hasattr(data, "to_json") else data.log_record
         formatted_json = obj.to_json()
         return re.sub(r"\s*([{}[\]:,])\s*", r"\1", formatted_json)
-
-
-def _format_nanos(nanos) -> Optional[str]:
-    """Convert epoch nanoseconds to ISO-8601 UTC string with trailing zero truncation.
-
-    Matches Java's DateTimeFormatter.ISO_INSTANT behavior:
-    - 2001-09-09T01:46:40Z (no fractional seconds when millis == 0)
-    - 2001-09-09T01:46:40.1Z (truncated trailing zeros)
-    - 2001-09-09T01:46:40.12Z
-    - 2001-09-09T01:46:40.123Z
-    """
-    if nanos is None or nanos == 0:
-        return None
-    millis = nanos // 1_000_000
-    dt = datetime.fromtimestamp(millis / 1000, tz=timezone.utc)
-    frac_millis = millis % 1000
-    if frac_millis == 0:
-        return dt.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
-    frac = f".{frac_millis:03d}".rstrip("0")
-    return dt.strftime("%Y-%m-%dT%H:%M:%S") + frac + "Z"

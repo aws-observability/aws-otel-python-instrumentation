@@ -9,7 +9,10 @@ from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_expor
     CompactConsoleLogRecordExporter,
 )
 from opentelemetry._logs import SeverityNumber
-from opentelemetry.sdk._logs.export import LogExportResult
+try:
+    from opentelemetry.sdk._logs.export import LogRecordExportResult as LogExportResult
+except ImportError:
+    from opentelemetry.sdk._logs.export import LogExportResult
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 from opentelemetry.trace import TraceFlags
@@ -106,17 +109,17 @@ class TestCompactConsoleLogRecordExporter(unittest.TestCase):
         # Validate all top-level fields are present
         expected_keys = [
             "resource",
+            "scope",
             "body",
             "severityNumber",
             "severityText",
             "attributes",
             "droppedAttributes",
-            "timestamp",
-            "observedTimestamp",
+            "timeUnixNano",
+            "observedTimeUnixNano",
             "traceId",
             "spanId",
-            "traceFlags",
-            "instrumentationScope",
+            "flags",
         ]
         for key in expected_keys:
             self.assertIn(key, parsed, f"Missing key: {key}")
@@ -127,11 +130,11 @@ class TestCompactConsoleLogRecordExporter(unittest.TestCase):
         self.assertEqual(parsed["severityText"], "INFO")
         self.assertEqual(parsed["attributes"], {"key": "value"})
         self.assertEqual(parsed["droppedAttributes"], 0)
-        self.assertEqual(parsed["timestamp"], "2001-09-09T01:46:40Z")
-        self.assertEqual(parsed["observedTimestamp"], "2001-09-09T01:46:40Z")
+        self.assertEqual(parsed["timeUnixNano"], 1000000000 * 1_000_000_000)
+        self.assertEqual(parsed["observedTimeUnixNano"], 1000000000 * 1_000_000_000)
         self.assertEqual(parsed["traceId"], "12345678901234567890123456789012")
         self.assertEqual(parsed["spanId"], "1234567890123456")
-        self.assertEqual(parsed["traceFlags"], 1)
+        self.assertEqual(parsed["flags"], 1)
 
         # Validate nested objects
         self.assertIn("attributes", parsed["resource"])
@@ -141,7 +144,7 @@ class TestCompactConsoleLogRecordExporter(unittest.TestCase):
             "https://opentelemetry.io/schemas/1.0.0",
         )
 
-        scope = parsed["instrumentationScope"]
+        scope = parsed["scope"]
         self.assertEqual(scope["name"], "test-scope")
         self.assertEqual(scope["version"], "1.0.0")
         self.assertEqual(scope["schemaUrl"], "https://opentelemetry.io/schemas/1.0.0")
@@ -156,8 +159,8 @@ class TestCompactConsoleLogRecordExporter(unittest.TestCase):
         data = _make_log_data(timestamp=0, observed_timestamp=0)
         self.exporter.export([data])
         parsed = self._get_parsed()
-        self.assertIsNone(parsed["timestamp"])
-        self.assertIsNone(parsed["observedTimestamp"])
+        self.assertEqual(parsed["timeUnixNano"], 0)
+        self.assertEqual(parsed["observedTimeUnixNano"], 0)
 
     def test_invalid_span_context_all_zeros(self):
         data = _make_log_data(trace_id=0, span_id=0)
@@ -186,7 +189,7 @@ class TestCompactConsoleLogRecordExporter(unittest.TestCase):
         parsed = self._get_parsed()
         self.assertEqual(parsed["traceId"], "")
         self.assertEqual(parsed["spanId"], "")
-        self.assertEqual(parsed["traceFlags"], 0)
+        self.assertEqual(parsed["flags"], 0)
 
     def test_empty_attributes(self):
         data = _make_log_data(attributes={})
@@ -194,12 +197,14 @@ class TestCompactConsoleLogRecordExporter(unittest.TestCase):
         parsed = self._get_parsed()
         self.assertEqual(parsed["attributes"], {})
 
-    def test_numeric_attribute_values_coerced_to_string(self):
-        data = _make_log_data(attributes={"count": 42, "enabled": True})
+    def test_attribute_values_preserve_types(self):
+        data = _make_log_data(attributes={"count": 42, "enabled": True, "rate": 3.14, "name": "test"})
         self.exporter.export([data])
         parsed = self._get_parsed()
-        self.assertEqual(parsed["attributes"]["count"], "42")
-        self.assertEqual(parsed["attributes"]["enabled"], "True")
+        self.assertEqual(parsed["attributes"]["count"], 42)
+        self.assertEqual(parsed["attributes"]["enabled"], True)
+        self.assertEqual(parsed["attributes"]["rate"], 3.14)
+        self.assertEqual(parsed["attributes"]["name"], "test")
 
     def test_multiple_log_records(self):
         data1 = _make_log_data(body="first")
@@ -231,23 +236,23 @@ class TestCompactConsoleLogRecordExporter(unittest.TestCase):
         parsed = self._get_parsed()
         self.assertEqual(parsed["resource"]["attributes"], {})
         self.assertEqual(parsed["resource"]["schemaUrl"], "")
-        self.assertEqual(parsed["instrumentationScope"]["name"], "")
-        self.assertEqual(parsed["instrumentationScope"]["version"], "")
-        self.assertEqual(parsed["instrumentationScope"]["schemaUrl"], "")
+        self.assertEqual(parsed["scope"]["name"], "")
+        self.assertEqual(parsed["scope"]["version"], "")
+        self.assertEqual(parsed["scope"]["schemaUrl"], "")
 
-    def test_timestamp_with_milliseconds(self):
+    def test_timestamp_raw_nanos(self):
         nanos = 1000000000 * 1_000_000_000 + 123 * 1_000_000
         data = _make_log_data(timestamp=nanos)
         self.exporter.export([data])
         parsed = self._get_parsed()
-        self.assertEqual(parsed["timestamp"], "2001-09-09T01:46:40.123Z")
+        self.assertEqual(parsed["timeUnixNano"], nanos)
 
-    def test_timestamp_trailing_zero_truncation(self):
+    def test_timestamp_preserves_full_precision(self):
         nanos = 1000000000 * 1_000_000_000 + 100 * 1_000_000
         data = _make_log_data(timestamp=nanos)
         self.exporter.export([data])
         parsed = self._get_parsed()
-        self.assertEqual(parsed["timestamp"], "2001-09-09T01:46:40.1Z")
+        self.assertEqual(parsed["timeUnixNano"], nanos)
 
     def test_severity_text_uses_enum_name(self):
         for sev, expected_name in [
