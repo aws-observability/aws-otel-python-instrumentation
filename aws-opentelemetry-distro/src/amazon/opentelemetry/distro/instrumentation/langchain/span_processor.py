@@ -3,8 +3,7 @@
 
 from __future__ import annotations
 
-from threading import Lock
-
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import DictWithLock
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
@@ -23,8 +22,7 @@ class LangChainSpanProcessor(SpanProcessor):
     # processor that propagates LLM model span attributes to the parent invoke_agent span
     def __init__(self, scope_name: str) -> None:
         self._scope_name = scope_name
-        self._lock = Lock()
-        self._span_id_to_nearest_invoke_agent_span_map: dict[int, Span] = {}
+        self._span_id_to_nearest_invoke_agent_span_map: DictWithLock = DictWithLock()
 
     def on_start(self, span: Span, parent_context: Context | None = None) -> None:
         if not span.context or not self._is_langchain_span(span):
@@ -32,21 +30,19 @@ class LangChainSpanProcessor(SpanProcessor):
         span_id = span.context.span_id
         parent_id = span.parent.span_id if span.parent else None
 
-        with self._lock:
-            if span.name and GenAiOperationNameValues.INVOKE_AGENT.value in span.name:
-                self._span_id_to_nearest_invoke_agent_span_map[span_id] = span
-            elif parent_id and parent_id in self._span_id_to_nearest_invoke_agent_span_map:
-                self._span_id_to_nearest_invoke_agent_span_map[span_id] = (
-                    self._span_id_to_nearest_invoke_agent_span_map[parent_id]
-                )
+        if span.name and GenAiOperationNameValues.INVOKE_AGENT.value in span.name:
+            self._span_id_to_nearest_invoke_agent_span_map.put(span_id, span)
+        elif parent_id:
+            agent_span = self._span_id_to_nearest_invoke_agent_span_map.get(parent_id)
+            if agent_span:
+                self._span_id_to_nearest_invoke_agent_span_map.put(span_id, agent_span)
 
     def on_end(self, span: ReadableSpan) -> None:
         span_id = span.context.span_id if span.context else None
         if span_id is None:
             return
 
-        with self._lock:
-            agent_span = self._span_id_to_nearest_invoke_agent_span_map.pop(span_id, None)
+        agent_span = self._span_id_to_nearest_invoke_agent_span_map.pop(span_id)
 
         op = span.attributes.get(GEN_AI_OPERATION_NAME) if span.attributes else None
         if op in (GenAiOperationNameValues.CHAT.value, GenAiOperationNameValues.TEXT_COMPLETION.value):
@@ -57,8 +53,7 @@ class LangChainSpanProcessor(SpanProcessor):
                         agent_span.set_attribute(attr, val)
 
     def shutdown(self) -> None:
-        with self._lock:
-            self._span_id_to_nearest_invoke_agent_span_map.clear()
+        self._span_id_to_nearest_invoke_agent_span_map.clear()
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:  # pylint: disable=no-self-use
         return True

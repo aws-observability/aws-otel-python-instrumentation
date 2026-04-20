@@ -31,6 +31,7 @@ from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSp
 from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import (
     CompactConsoleLogRecordExporter,
 )
+from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAiNestedClientSpanProcessor
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler._aws_xray_adaptive_sampling_config import (
     _AnomalyCaptureLimit,
@@ -528,6 +529,7 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource, sam
     # and quality degradation that sampling could miss.
     if is_agentic_observability_enabled():
         _export_unsampled_span_for_agent_observability(provider, resource)
+        provider.add_span_processor(GenAiNestedClientSpanProcessor())
         baggage_keys.add("session.id")
 
     provider.add_span_processor(BaggageSpanProcessor(lambda key: key in baggage_keys))

@@ -3,6 +3,7 @@
 
 # flake8: noqa: E402
 # pylint: disable=wrong-import-position
+import asyncio
 import importlib
 import importlib.util
 import inspect
@@ -16,10 +17,17 @@ from conftest import validate_otel_genai_schema
 if sys.version_info < (3, 10):
     raise unittest.SkipTest("llama-index requires Python >= 3.10")
 
-from llama_index.core.base.llms.types import ChatMessage, ChatResponse, CompletionResponse, MessageRole
+from llama_index.core.agent.workflow import AgentWorkflow, FunctionAgent
+from llama_index.core.base.llms.types import ChatMessage, ChatResponse, CompletionResponse, LLMMetadata, MessageRole
+from llama_index.core.llms.function_calling import FunctionCallingLLM
+from llama_index.core.llms.llm import ToolSelection
 from llama_index.core.tools import FunctionTool
 from llama_index.core.tools.types import ToolOutput
 
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
+    GEN_AI_WORKFLOW_NAME,
+    OPERATION_INVOKE_WORKFLOW,
+)
 from amazon.opentelemetry.distro.instrumentation.llama_index import LlamaIndexInstrumentor
 from opentelemetry import context as context_api
 from opentelemetry import trace
@@ -36,9 +44,16 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_FREQUENCY_PENALTY,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
+    GEN_AI_REQUEST_PRESENCE_PENALTY,
+    GEN_AI_REQUEST_STOP_SEQUENCES,
     GEN_AI_REQUEST_TEMPERATURE,
+    GEN_AI_REQUEST_TOP_K,
+    GEN_AI_REQUEST_TOP_P,
+    GEN_AI_RESPONSE_FINISH_REASONS,
+    GEN_AI_RESPONSE_MODEL,
     GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_CALL_RESULT,
@@ -47,6 +62,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_NAME,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
+    GenAiOperationNameValues,
 )
 
 
@@ -197,7 +213,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
         span._process_event(event)
-        self.assertEqual(span._attributes[GEN_AI_OPERATION_NAME], "retrieve")
+        self.assertEqual(span._attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.RETRIEVAL.value)
         otel_span.end()
 
     def test_rerank_start_event(self):
@@ -331,7 +347,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self.assertEqual(span._attributes[GEN_AI_OPERATION_NAME], "invoke_agent")
         self.assertEqual(span._attributes[GEN_AI_AGENT_NAME], "TestAgent")
         self.assertEqual(span._attributes[GEN_AI_AGENT_DESCRIPTION], "A test agent")
-        self.assertEqual(span._attributes[GEN_AI_SYSTEM_INSTRUCTIONS], "You are helpful.")
+        self.assertNotIn(GEN_AI_SYSTEM_INSTRUCTIONS, span._attributes)
         otel_span.end()
 
     def test_process_instance_base_agent_no_name(self):
@@ -1319,7 +1335,134 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self.assertEqual(output[0]["role"], "assistant")
         self.assertEqual(output[0]["parts"][0]["type"], "text")
         self.assertIn("sunny", output[0]["parts"][0]["content"])
+        self.assertNotIn(GEN_AI_RESPONSE_FINISH_REASONS, span._attributes)
         span.end()
+
+    def test_chat_response_by_provider(self):
+        from llama_index.core.base.llms.types import TextBlock
+        from llama_index.core.instrumentation.events.llm import LLMChatEndEvent
+        from llama_index.llms.anthropic import Anthropic
+        from llama_index.llms.bedrock_converse import BedrockConverse
+        from llama_index.llms.openai import OpenAI
+
+        try:
+            from llama_index.core.base.llms.types import ThinkingBlock, ToolCallBlock
+        except ImportError:
+            ThinkingBlock = None
+            ToolCallBlock = None
+
+        if ToolCallBlock is not None:
+            tool_call_message = ChatMessage(
+                role="assistant",
+                blocks=[ToolCallBlock(tool_call_id="c1", tool_name="search", tool_kwargs={"q": "weather"})],
+            )
+            tool_call_part_types = ["tool_call"]
+        else:
+            tool_call_message = ChatMessage(role="assistant", content="tool call result")
+            tool_call_part_types = ["text"]
+
+        if ThinkingBlock is not None:
+            thinking_message = ChatMessage(
+                role="assistant",
+                blocks=[ThinkingBlock(content="Let me think..."), TextBlock(text="It is sunny.")],
+            )
+            thinking_part_types = ["reasoning", "text"]
+        else:
+            thinking_message = ChatMessage(role="assistant", content="It is sunny.")
+            thinking_part_types = ["text"]
+
+        cases = [
+            {
+                "name": "openai_text",
+                "llm": OpenAI(model="gpt-4", api_key="fake"),
+                "message": ChatMessage(role="assistant", content="Hello!"),
+                "raw": {"choices": [{"finish_reason": "stop"}], "model": "gpt-4"},
+                "finish_reason": "stop",
+                "response_model": "gpt-4",
+                "part_types": ["text"],
+            },
+            {
+                "name": "openai_tool_call",
+                "llm": OpenAI(model="gpt-4", api_key="fake"),
+                "message": tool_call_message,
+                "raw": {"choices": [{"finish_reason": "tool_calls"}], "model": "gpt-4"},
+                "finish_reason": "tool_calls",
+                "response_model": "gpt-4",
+                "part_types": tool_call_part_types,
+            },
+            {
+                "name": "anthropic_with_thinking",
+                "llm": Anthropic(model="claude-3-haiku-20240307", api_key="fake"),
+                "message": thinking_message,
+                "raw": {"stop_reason": "end_turn", "model": "claude-3-haiku"},
+                "finish_reason": "end_turn",
+                "response_model": "claude-3-haiku",
+                "part_types": thinking_part_types,
+            },
+            {
+                "name": "bedrock",
+                "llm": BedrockConverse(model="anthropic.claude-3-haiku-20240307-v1:0", region_name="us-east-1"),
+                "message": ChatMessage(role="assistant", content="Done."),
+                "raw": {"stopReason": "end_turn"},
+                "finish_reason": "end_turn",
+                "response_model": None,
+                "part_types": ["text"],
+            },
+            {
+                "name": "vertex",
+                "llm": OpenAI(model="gpt-4", api_key="fake"),
+                "message": ChatMessage(role="assistant", content="Done."),
+                "raw": {"candidates": [{"finishReason": "STOP"}]},
+                "finish_reason": "STOP",
+                "response_model": None,
+                "part_types": ["text"],
+            },
+            {
+                "name": "no_finish_reason",
+                "llm": OpenAI(model="gpt-4", api_key="fake"),
+                "message": ChatMessage(role="assistant", content="Hello!"),
+                "raw": {"model": "gpt-4"},
+                "finish_reason": None,
+                "response_model": "gpt-4",
+                "part_types": ["text"],
+            },
+            {
+                "name": "no_raw",
+                "llm": OpenAI(model="gpt-4", api_key="fake"),
+                "message": ChatMessage(role="assistant", content="Hello!"),
+                "raw": None,
+                "finish_reason": None,
+                "response_model": None,
+                "part_types": ["text"],
+            },
+        ]
+
+        for case in cases:
+            with self.subTest(provider=case["name"]):
+                handler = self._make_span_handler()
+                span = handler.new_span(
+                    id_=f"llm.chat-{case['name']}", bound_args=self._make_bound_args(), instance=case["llm"]
+                )
+
+                response = Mock(spec=ChatResponse)
+                response.message = case["message"]
+                response.raw = case["raw"]
+                response.additional_kwargs = {}
+                span.process_event(LLMChatEndEvent(response=response, messages=[], model_dict={}))
+
+                output = json.loads(span._attributes[GEN_AI_OUTPUT_MESSAGES])
+                validate_otel_genai_schema(output, "gen-ai-output-messages")
+                self.assertEqual([p["type"] for p in output[0]["parts"]], case["part_types"])
+
+                if case["finish_reason"]:
+                    self.assertEqual(span._attributes.get(GEN_AI_RESPONSE_FINISH_REASONS), [case["finish_reason"]])
+                else:
+                    self.assertNotIn(GEN_AI_RESPONSE_FINISH_REASONS, span._attributes)
+
+                if case["response_model"]:
+                    self.assertEqual(span._attributes.get(GEN_AI_RESPONSE_MODEL), case["response_model"])
+
+                span.end()
 
     def test_system_instructions_conform_to_otel_schema(self):
         """Validate gen_ai.system_instructions against OTel GenAI JSON Schema."""
@@ -1357,6 +1500,121 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self.assertEqual(len(input_msgs), 1)
         self.assertEqual(input_msgs[0]["role"], "user")
         span.end()
+
+    def test_agent_workflow(self):
+        class _AsyncChatStream:
+            def __init__(self, resp):
+                self._resp = resp
+                self._done = False
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if self._done:
+                    raise StopAsyncIteration
+                self._done = True
+                return self._resp
+
+        class _FakeLLM(FunctionCallingLLM):
+            model_config = {"arbitrary_types_allowed": True}
+            model: str = "fake-model"
+            _call_count: int = 0
+
+            @property
+            def metadata(self):
+                return LLMMetadata(model_name="fake-model", is_function_calling_model=True)
+
+            def chat(self, messages, **kwargs):
+                return ChatResponse(message=ChatMessage(role=MessageRole.ASSISTANT, content="Done"))
+
+            def complete(self, prompt, **kwargs):
+                return CompletionResponse(text="Done")
+
+            def stream_chat(self, messages, **kwargs):
+                yield self.chat(messages)
+
+            def stream_complete(self, prompt, **kwargs):
+                yield self.complete(prompt)
+
+            async def achat(self, messages, **kwargs):
+                return self.chat(messages)
+
+            async def acomplete(self, prompt, **kwargs):
+                return self.complete(prompt)
+
+            async def astream_chat(self, messages, **kwargs):
+                return _AsyncChatStream(self.chat(messages))
+
+            async def astream_complete(self, prompt, **kwargs):
+                return self.complete(prompt)
+
+            def _prepare_chat_with_tools(self, tools, **kwargs):
+                return {"messages": [], "tools": tools}
+
+            async def astream_chat_with_tools(self, tools, **kwargs):
+                self._call_count += 1
+                if self._call_count == 1 and tools:
+                    t = tools[0]
+                    msg = ChatMessage(role=MessageRole.ASSISTANT, content="")
+                    msg.additional_kwargs = {
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "function": {
+                                    "name": t.metadata.name,
+                                    "arguments": '{"name": "World"}',
+                                },
+                            }
+                        ]
+                    }
+                    return _AsyncChatStream(ChatResponse(message=msg))
+                return _AsyncChatStream(
+                    ChatResponse(message=ChatMessage(role=MessageRole.ASSISTANT, content="Greeting complete!"))
+                )
+
+            def get_tool_calls_from_response(self, response, **kwargs):
+                calls = response.message.additional_kwargs.get("tool_calls", [])
+                return [
+                    ToolSelection(
+                        tool_id=c["id"],
+                        tool_name=c["function"]["name"],
+                        tool_kwargs=json.loads(c["function"]["arguments"]),
+                    )
+                    for c in calls
+                ]
+
+        def greet(name: str) -> str:
+            """Greet someone by name"""
+            return f"Hello {name}!"
+
+        tool = FunctionTool.from_defaults(fn=greet, name="greet", description="Greet someone")
+        llm = _FakeLLM()
+        agent = FunctionAgent(name="Greeter", tools=[tool], llm=llm, system_prompt="You greet people.")
+        wf = AgentWorkflow(agents=[agent])
+
+        async def _run():
+            await wf.run(user_msg="Greet World")
+
+        asyncio.run(_run())
+        spans = self.span_exporter.get_finished_spans()
+
+        workflow_spans = [s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == OPERATION_INVOKE_WORKFLOW]
+        agent_step_spans = [
+            s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == "invoke_agent" and "run_agent_step" in s.name
+        ]
+        tool_spans = [s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == "execute_tool"]
+
+        self.assertEqual(len(workflow_spans), 1)
+        self.assertIn("invoke_workflow", workflow_spans[0].name)
+
+        self.assertGreaterEqual(len(agent_step_spans), 1)
+        for step_span in agent_step_spans:
+            self.assertEqual(step_span.name, "run_agent_step Greeter")
+            self.assertEqual(step_span.attributes[GEN_AI_AGENT_NAME], "Greeter")
+
+        self.assertEqual(len(tool_spans), 1)
+        self.assertIn("greet", tool_spans[0].name)
 
 
 if __name__ == "__main__":

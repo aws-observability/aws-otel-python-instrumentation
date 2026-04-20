@@ -5,46 +5,20 @@ import logging
 from functools import singledispatchmethod
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, Iterator, Mapping, Optional, Tuple, Union
 
-from pydantic import PrivateAttr
-
-from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import serialize_to_json_string
-from opentelemetry import context as context_api
-from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
-
-# pylint: disable=unused-import
-from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (  # noqa: F401
-    GEN_AI_AGENT_DESCRIPTION,
-    GEN_AI_AGENT_NAME,
-    GEN_AI_EMBEDDINGS_DIMENSION_COUNT,
-    GEN_AI_INPUT_MESSAGES,
-    GEN_AI_OPERATION_NAME,
-    GEN_AI_OUTPUT_MESSAGES,
-    GEN_AI_PROVIDER_NAME,
-    GEN_AI_REQUEST_MAX_TOKENS,
-    GEN_AI_REQUEST_MODEL,
-    GEN_AI_REQUEST_TEMPERATURE,
-    GEN_AI_SYSTEM_INSTRUCTIONS,
-    GEN_AI_TOOL_CALL_ARGUMENTS,
-    GEN_AI_TOOL_CALL_RESULT,
-    GEN_AI_TOOL_DEFINITIONS,
-    GEN_AI_TOOL_DESCRIPTION,
-    GEN_AI_TOOL_NAME,
-    GEN_AI_USAGE_INPUT_TOKENS,
-    GEN_AI_USAGE_OUTPUT_TOKENS,
-    GenAiOperationNameValues,
-)
-from opentelemetry.trace import Span, Status, StatusCode, set_span_in_context
-from opentelemetry.util.types import AttributeValue
-
-try:
-    from llama_index.core.agent import BaseAgent  # type: ignore[attr-defined]
-except ImportError:
-    # Fallback for newer versions where BaseAgent doesn't exist
-    from llama_index.core.agent.workflow import BaseWorkflowAgent as BaseAgent  # type: ignore[attr-defined]
-
+from llama_index.core.agent.workflow import AgentWorkflow, BaseWorkflowAgent
 from llama_index.core.base.embeddings.base import BaseEmbedding
 from llama_index.core.base.llms.base import BaseLLM
-from llama_index.core.base.llms.types import ChatMessage, ChatResponse, CompletionResponse
+from llama_index.core.base.llms.types import ChatMessage, ChatResponse, CompletionResponse, TextBlock
+
+try:
+    from llama_index.core.base.llms.types import ThinkingBlock
+except ImportError:
+    ThinkingBlock = None
+
+try:
+    from llama_index.core.base.llms.types import ToolCallBlock
+except ImportError:
+    ToolCallBlock = None
 from llama_index.core.instrumentation.events import BaseEvent
 from llama_index.core.instrumentation.events.chat_engine import (
     StreamChatDeltaReceivedEvent,
@@ -68,12 +42,53 @@ from llama_index.core.instrumentation.span import BaseSpan
 from llama_index.core.multi_modal_llms import MultiModalLLM
 from llama_index.core.tools import FunctionTool  # type: ignore[attr-defined]
 from llama_index.core.tools import BaseTool
+from pydantic import PrivateAttr
+
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
+    GEN_AI_WORKFLOW_NAME,
+    OPERATION_INVOKE_WORKFLOW,
+    serialize_to_json_string,
+    try_detach,
+)
+from opentelemetry import context as context_api
+from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
+
+# pylint: disable=unused-import
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (  # noqa: F401
+    GEN_AI_AGENT_DESCRIPTION,
+    GEN_AI_AGENT_NAME,
+    GEN_AI_EMBEDDINGS_DIMENSION_COUNT,
+    GEN_AI_INPUT_MESSAGES,
+    GEN_AI_OPERATION_NAME,
+    GEN_AI_OUTPUT_MESSAGES,
+    GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_FREQUENCY_PENALTY,
+    GEN_AI_REQUEST_MAX_TOKENS,
+    GEN_AI_REQUEST_MODEL,
+    GEN_AI_REQUEST_PRESENCE_PENALTY,
+    GEN_AI_REQUEST_STOP_SEQUENCES,
+    GEN_AI_REQUEST_TEMPERATURE,
+    GEN_AI_REQUEST_TOP_K,
+    GEN_AI_REQUEST_TOP_P,
+    GEN_AI_RESPONSE_FINISH_REASONS,
+    GEN_AI_RESPONSE_MODEL,
+    GEN_AI_SYSTEM_INSTRUCTIONS,
+    GEN_AI_TOOL_CALL_ARGUMENTS,
+    GEN_AI_TOOL_CALL_RESULT,
+    GEN_AI_TOOL_DEFINITIONS,
+    GEN_AI_TOOL_DESCRIPTION,
+    GEN_AI_TOOL_NAME,
+    GEN_AI_USAGE_INPUT_TOKENS,
+    GEN_AI_USAGE_OUTPUT_TOKENS,
+    GenAiOperationNameValues,
+)
+from opentelemetry.trace import Span, Status, StatusCode, set_span_in_context
+from opentelemetry.util.types import AttributeValue
 
 logger = logging.getLogger(__name__)
 
-# Custom operation names for LlamaIndex-specific operations (not in OTel semconv)
+
 _OPERATION_RERANK = "rerank"
-_OPERATION_RETRIEVE = "retrieve"
 _OPERATION_SYNTHESIZE = "synthesize"
 _OPERATION_QUERY = "query"
 
@@ -128,6 +143,36 @@ def _detect_llm_provider(instance: Any) -> Optional[str]:
     return None
 
 
+def _safe_get(obj: Any, key: str) -> Any:
+    """Get a value from an object that may be a dict or an object with attributes."""
+    return obj.get(key) if isinstance(obj, Mapping) else getattr(obj, key, None)
+
+
+def _message_to_parts(msg: ChatMessage) -> list:
+    """Convert a ChatMessage's blocks to OTel parts format."""
+    blocks = getattr(msg, "blocks", None)
+    if blocks:
+        parts = []
+        for block in blocks:
+            if isinstance(block, TextBlock):
+                parts.append({"type": "text", "content": block.text})
+            elif ToolCallBlock is not None and isinstance(block, ToolCallBlock):
+                part: dict = {"type": "tool_call"}
+                if hasattr(block, "tool_name") and block.tool_name:
+                    part["name"] = block.tool_name
+                if hasattr(block, "tool_kwargs") and block.tool_kwargs:
+                    part["arguments"] = block.tool_kwargs
+                if hasattr(block, "tool_call_id") and block.tool_call_id:
+                    part["id"] = block.tool_call_id
+                parts.append(part)
+            elif ThinkingBlock is not None and isinstance(block, ThinkingBlock):
+                parts.append({"type": "reasoning", "content": str(block.content)})
+        if parts:
+            return parts
+    content = str(getattr(msg, "content", ""))
+    return [{"type": "text", "content": content}]
+
+
 def _format_messages(messages: Iterable[ChatMessage]) -> tuple:
     """Convert LlamaIndex ChatMessages to OTel GenAI semconv format.
 
@@ -147,11 +192,11 @@ def _format_messages(messages: Iterable[ChatMessage]) -> tuple:
         raw_role = getattr(msg, "role", "user")
         # LlamaIndex uses MessageRole enum; extract the value string
         role = role_map.get(str(raw_role).rsplit(".", 1)[-1].lower(), str(raw_role))
-        content = str(getattr(msg, "content", ""))
+        parts = _message_to_parts(msg)
         if role == "system":
-            system_instructions.append({"type": "text", "content": content})
+            system_instructions.extend(parts)
         else:
-            conversation.append({"role": role, "parts": [{"type": "text", "content": content}]})
+            conversation.append({"role": role, "parts": parts})
     return system_instructions, conversation
 
 
@@ -160,6 +205,8 @@ class _Span(BaseSpan):
     _attributes: Dict[str, AttributeValue] = PrivateAttr()
     _parent: Optional["_Span"] = PrivateAttr()
     _context_token: Optional[object] = PrivateAttr()
+    _deferred: bool = PrivateAttr(default=False)
+    _span_name: Optional[str] = PrivateAttr(default=None)
 
     def __init__(
         self,
@@ -173,10 +220,22 @@ class _Span(BaseSpan):
         self._parent = parent
         self._attributes = {}
         self._context_token = context_token
+        self._deferred = False
 
     @property
     def is_passthrough(self) -> bool:
         return False
+
+    def set_deferred(self) -> None:
+        # Streaming LLM calls return an async generator immediately, causing the
+        # LlamaIndex dispatcher to exit the span before tokens are streamed.
+        # Deferred spans stay open until a terminal event like LLMChatEndEvent
+        # delivers token counts and output messages via _end_deferred.
+        self._deferred = True
+
+    def _end_deferred(self) -> None:
+        if self._deferred:
+            self.end()
 
     def __setitem__(self, key: str, value: AttributeValue) -> None:
         self._attributes[key] = value
@@ -185,34 +244,29 @@ class _Span(BaseSpan):
         self._otel_span.record_exception(exception)
 
     def _get_span_name(self) -> str:
-        operation_name = self._attributes.get(GEN_AI_OPERATION_NAME)
+        if self._span_name:
+            return self._span_name
 
+        op = self._attributes.get(GEN_AI_OPERATION_NAME)
         # generic fallback if no operation name
-        if not operation_name:
+        if not op:
             return "llama_index.operation"
 
-        if operation_name == GenAiOperationNameValues.INVOKE_AGENT.value:
-            if agent_name := self._attributes.get(GEN_AI_AGENT_NAME):
-                return f"{operation_name} {agent_name}"
-        elif operation_name == GenAiOperationNameValues.EXECUTE_TOOL.value:
-            if tool_name := self._attributes.get(GEN_AI_TOOL_NAME):
-                return f"{operation_name} {tool_name}"
-        elif model := self._attributes.get(GEN_AI_REQUEST_MODEL):
-            return f"{operation_name} {model}"
+        suffix = {
+            GenAiOperationNameValues.INVOKE_AGENT.value: self._attributes.get(GEN_AI_AGENT_NAME),
+            OPERATION_INVOKE_WORKFLOW: self._attributes.get(GEN_AI_WORKFLOW_NAME),
+            GenAiOperationNameValues.EXECUTE_TOOL.value: self._attributes.get(GEN_AI_TOOL_NAME),
+        }.get(op, self._attributes.get(GEN_AI_REQUEST_MODEL))
 
-        return operation_name
+        return f"{op} {suffix}" if suffix else op
 
     def end(self, exception: Optional[BaseException] = None) -> None:
         if not self._otel_span.is_recording():
             return
 
         if self._context_token is not None:
-            try:
-                context_api.detach(self._context_token)
-            except Exception:  # pylint: disable=broad-exception-caught
-                pass
-            finally:
-                self._context_token = None
+            try_detach(self._context_token)  # type: ignore[arg-type]
+            self._context_token = None
 
         if exception is None:
             status = Status(status_code=StatusCode.OK)
@@ -295,6 +349,18 @@ class _Span(BaseSpan):
         if hasattr(instance, "max_tokens") and instance.max_tokens is not None:
             self[GEN_AI_REQUEST_MAX_TOKENS] = instance.max_tokens
 
+        additional_kwargs = getattr(instance, "additional_kwargs", None) or {}
+        if (top_p := additional_kwargs.get("top_p")) is not None:
+            self[GEN_AI_REQUEST_TOP_P] = top_p
+        if (top_k := additional_kwargs.get("top_k")) is not None:
+            self[GEN_AI_REQUEST_TOP_K] = top_k
+        if (frequency_penalty := additional_kwargs.get("frequency_penalty")) is not None:
+            self[GEN_AI_REQUEST_FREQUENCY_PENALTY] = frequency_penalty
+        if (presence_penalty := additional_kwargs.get("presence_penalty")) is not None:
+            self[GEN_AI_REQUEST_PRESENCE_PENALTY] = presence_penalty
+        if stop := (additional_kwargs.get("stop") or additional_kwargs.get("stop_sequences")):
+            self[GEN_AI_REQUEST_STOP_SEQUENCES] = stop
+
     @process_instance.register
     def _(self, instance: BaseEmbedding) -> None:
         if name := instance.model_name:
@@ -337,10 +403,13 @@ class _Span(BaseSpan):
     @_process_event.register
     def _(self, event: StreamChatErrorEvent) -> None:
         self.record_exception(event.exception)
+        if self._deferred:
+            self.end(event.exception)
 
     @_process_event.register
     def _(self, event: StreamChatEndEvent) -> None:
         self[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.CHAT.value
+        self._end_deferred()
 
     @_process_event.register
     def _(self, event: LLMPredictStartEvent) -> None:
@@ -353,6 +422,8 @@ class _Span(BaseSpan):
     def _(self, event: LLMCompletionEndEvent) -> None:
         self[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.TEXT_COMPLETION.value
         self._extract_token_counts(event.response)
+        self._extract_response_model(event.response)
+        self._end_deferred()
 
     @_process_event.register
     def _(self, event: LLMChatStartEvent) -> None:
@@ -370,14 +441,21 @@ class _Span(BaseSpan):
     def _(self, event: LLMChatEndEvent) -> None:
         self[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.CHAT.value
         if (response := event.response) is None:
+            self._end_deferred()
             return
         self._extract_token_counts(response)
+        self._extract_response_model(response)
+        finish_reason = self._extract_finish_reason(response)
         _, output = _format_messages([response.message])
         if output:
             # Output messages require finish_reason per OTel semconv
+            default_reason = finish_reason or "stop"
             for msg in output:
-                msg.setdefault("finish_reason", "stop")
+                msg.setdefault("finish_reason", default_reason)
             self[GEN_AI_OUTPUT_MESSAGES] = serialize_to_json_string(output)
+        if finish_reason:
+            self[GEN_AI_RESPONSE_FINISH_REASONS] = [finish_reason]
+        self._end_deferred()
 
     @_process_event.register
     def _(self, event: ReRankStartEvent) -> None:
@@ -390,7 +468,7 @@ class _Span(BaseSpan):
 
     @_process_event.register
     def _(self, event: RetrievalStartEvent) -> None:
-        self[GEN_AI_OPERATION_NAME] = _OPERATION_RETRIEVE
+        self[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.RETRIEVAL.value
 
     @_process_event.register
     def _(self, event: SynthesizeStartEvent) -> None:
@@ -399,6 +477,35 @@ class _Span(BaseSpan):
     @_process_event.register
     def _(self, event: GetResponseStartEvent) -> None:
         self[GEN_AI_OPERATION_NAME] = _OPERATION_SYNTHESIZE
+
+    def _extract_response_model(self, response: Union[ChatResponse, CompletionResponse]) -> None:
+        raw = getattr(response, "raw", None)
+        if raw is None:
+            return
+        model = _safe_get(raw, "model")
+        if model:
+            self[GEN_AI_RESPONSE_MODEL] = model
+
+    @staticmethod
+    def _extract_finish_reason(response: Union[ChatResponse, CompletionResponse]) -> Optional[str]:
+        """Extract finish reason from the raw response, returning None if not found."""
+        raw = getattr(response, "raw", None)
+        if raw is None:
+            return None
+        try:
+            choices = _safe_get(raw, "choices") or _safe_get(raw, "candidates")
+            if isinstance(choices, (list, tuple)) and choices:
+                first = choices[0]
+                reason = _safe_get(first, "finish_reason") or _safe_get(first, "finishReason")
+                if reason:
+                    return str(reason)
+
+            reason = _safe_get(raw, "stop_reason") or _safe_get(raw, "stopReason")
+            if reason:
+                return str(reason)
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+        return None
 
     def _extract_token_counts(self, response: Union[ChatResponse, CompletionResponse]) -> None:
         if raw := getattr(response, "raw", None):
@@ -445,15 +552,20 @@ class _Span(BaseSpan):
         except BaseException:
             pass
 
-    @process_instance.register(BaseAgent)
-    def _(self, instance: BaseAgent) -> None:
+    @process_instance.register(BaseWorkflowAgent)
+    def _(self, instance: BaseWorkflowAgent) -> None:
         self[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.INVOKE_AGENT.value
         if hasattr(instance, "name") and instance.name:
             self[GEN_AI_AGENT_NAME] = instance.name
         if hasattr(instance, "description") and instance.description:
             self[GEN_AI_AGENT_DESCRIPTION] = instance.description
-        if hasattr(instance, "system_prompt") and instance.system_prompt:
-            self[GEN_AI_SYSTEM_INSTRUCTIONS] = instance.system_prompt
+
+    @process_instance.register(AgentWorkflow)
+    def _(self, instance: AgentWorkflow) -> None:
+        self[GEN_AI_OPERATION_NAME] = OPERATION_INVOKE_WORKFLOW
+        workflow_name = getattr(instance, "workflow_name", None)
+        if workflow_name:
+            self[GEN_AI_WORKFLOW_NAME] = workflow_name
 
 
 class _PassthroughSpan(_Span):

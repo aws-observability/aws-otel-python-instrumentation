@@ -33,7 +33,7 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
-    GEN_AI_PROMPT,
+    GEN_AI_PROMPT_NAME,
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_NAME,
@@ -197,7 +197,7 @@ class TestMcpInstrumentor(McpInstrumentorTestBase):
                 client_spans, _ = self._run_transport_test(run_client, transport, "mcp prompts/get greeting_prompt")
 
                 prompt_span = self._get_span(client_spans, "mcp prompts/get greeting_prompt")
-                self.assertEqual(prompt_span.attributes.get(GEN_AI_PROMPT), "greeting_prompt")
+                self.assertEqual(prompt_span.attributes.get(GEN_AI_PROMPT_NAME), "greeting_prompt")
 
     def test_mcp_resource(self):
         for transport in ["stdio", "http", "sse"]:
@@ -490,13 +490,13 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
         self.assertEqual(format(tool_call.parent.span_id, "016x"), tool_parent_id)
 
     async def _run_inprocess(self, callback, raise_exceptions=False):
+        from mcp.server.fastmcp import FastMCP  # pylint: disable=import-outside-toplevel
         from mcp.shared.memory import (  # pylint: disable=import-outside-toplevel
             create_connected_server_and_client_session,
         )
 
-        async with create_connected_server_and_client_session(
-            self.server, raise_exceptions=raise_exceptions
-        ) as session:
+        server = self.server._mcp_server if isinstance(self.server, FastMCP) else self.server
+        async with create_connected_server_and_client_session(server, raise_exceptions=raise_exceptions) as session:
             await callback(session)
 
     async def _run_http_inprocess(self, callback):

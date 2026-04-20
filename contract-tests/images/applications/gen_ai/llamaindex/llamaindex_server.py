@@ -10,7 +10,7 @@ from threading import Thread
 from typing import Tuple
 
 from llama_index.core import Document, Settings, VectorStoreIndex
-from llama_index.core.agent.workflow import FunctionAgent
+from llama_index.core.agent.workflow import AgentWorkflow, FunctionAgent
 from llama_index.core.base.llms.types import ChatMessage, MessageRole
 from llama_index.core.embeddings import MockEmbedding
 from llama_index.core.tools import FunctionTool
@@ -104,7 +104,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         return sub_path in self.path
 
     def _handle_llamaindex_request(self) -> None:
-        if self.in_path("agent"):
+        if self.in_path("workflow"):
+            self._run_workflow()
+        elif self.in_path("agent"):
             self._run_agent()
         elif self.in_path("chat"):
             self._run_chat()
@@ -154,6 +156,55 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         except Exception as exc:  # pylint: disable=broad-exception-caught
             print(f"Error in _run_agent: {exc}")
+            traceback.print_exc()
+
+    def _run_workflow(self) -> None:  # pylint: disable=no-self-use
+        global _llm_call_count  # pylint: disable=global-statement
+        _llm_call_count = 0
+        set_main_status(200)
+
+        try:
+
+            def get_greeting(name: str) -> str:
+                return f"Hello, {name}!"
+
+            def multiply(a: float, b: float) -> float:
+                return a * b
+
+            llm = OpenAI(
+                model="gpt-4",
+                api_base=f"http://localhost:{_MOCK_LLM_PORT}/v1",
+                temperature=0.7,
+                max_tokens=100,
+            )
+
+            greeter = FunctionAgent(
+                tools=[get_greeting],
+                llm=llm,
+                name="Greeter",
+                description="Greets people by name.",
+                system_prompt="You greet people.",
+                can_handoff_to=["Calculator"],
+            )
+            calculator = FunctionAgent(
+                tools=[multiply],
+                llm=llm,
+                name="Calculator",
+                description="Multiplies numbers.",
+                system_prompt="You multiply numbers.",
+            )
+            workflow = AgentWorkflow(
+                agents=[greeter, calculator], root_agent="Greeter", workflow_name="multi_agent_workflow"
+            )
+
+            async def run_workflow():
+                return await workflow.run(user_msg="Please greet the world")
+
+            response = asyncio.run(run_workflow())
+            print(f"Workflow response: {response}")
+
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            print(f"Error in _run_workflow: {exc}")
             traceback.print_exc()
 
     def _run_chat(self) -> None:  # pylint: disable=no-self-use

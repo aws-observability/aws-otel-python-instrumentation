@@ -11,6 +11,56 @@ from amazon.opentelemetry.distro.patches._gevent_patches import apply_gevent_mon
 
 apply_gevent_monkey_patch()
 # ========================================================================
+
+# Version compatibility check: opentelemetry-api and opentelemetry-sdk are expected to share the same
+# minor version. A mismatch does not always cause problems, but may lead to unexpected errors if one
+# package references symbols introduced in a newer version of the other.
+import logging as _logging
+from importlib.metadata import requires as _get_requires
+from importlib.metadata import version as _get_version
+
+_compat_logger = _logging.getLogger(__name__)
+
+_PACKAGES_TO_CHECK = ("opentelemetry-api", "opentelemetry-sdk")
+
+
+def _check_otel_version_compatibility():
+    """Check that installed opentelemetry-api/sdk versions match what the distro expects.
+
+    This is a best-effort check: it logs a warning on mismatch but never raises.
+    """
+    try:
+        expected_versions = {}
+        distro_requires = _get_requires("aws-opentelemetry-distro") or []
+        for req_str in distro_requires:
+            for pkg_name in _PACKAGES_TO_CHECK:
+                if req_str.startswith(pkg_name) and len(req_str) > len(pkg_name):
+                    next_char = req_str[len(pkg_name)]
+                    if next_char not in ("-", "_") and "==" in req_str:
+                        expected_versions[pkg_name] = req_str.split("==")[1].strip().split(";")[0].strip()
+                        break
+            if len(expected_versions) == len(_PACKAGES_TO_CHECK):
+                break
+
+        mismatched = []
+        for pkg, expected in expected_versions.items():
+            installed = _get_version(pkg)
+            if installed != expected:
+                mismatched.append((pkg, installed, expected))
+
+        if mismatched:
+            _compat_logger.warning(
+                "OpenTelemetry package version mismatch: %s. "
+                "AWS OpenTelemetry Distro expects %s, which may cause unexpected errors.",
+                ", ".join(f"{p}=={inst}" for p, inst, _ in mismatched),
+                ", ".join(f"{p}=={exp}" for p, _, exp in mismatched),
+            )
+    except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+        pass  # Best-effort check; don't block startup if metadata is unavailable
+
+
+_check_otel_version_compatibility()
+
 import importlib
 import os
 import sys
@@ -60,12 +110,12 @@ _load._logger.setLevel(LEVELS.get(os.environ.get(OTEL_PYTHON_LOG_LEVEL, "error")
 
 AGENT_OBSERVABILITY_DISABLED_INSTRUMENTATIONS = (
     "sqlalchemy,psycopg2,pymysql,sqlite3,aiopg,asyncpg,mysql_connector,"
-    "system_metrics,google-genai,aws_crewai,aws_langchain,aws_mcp,aws_openai_agents"
+    "system_metrics,google-genai,jinja2,aws_crewai,aws_langchain,aws_llama-index,aws_mcp,aws_openai_agents"
 )
 
 AWS_AGENTIC_OBSERVABILITY_DISABLED_INSTRUMENTATIONS = (
     "sqlalchemy,psycopg2,pymysql,sqlite3,aiopg,asyncpg,mysql_connector,"
-    "system_metrics,google-genai,crewai,langchain,mcp,openai_agents"
+    "system_metrics,google-genai,jinja2,crewai,langchain,llama-index,llama_index,mcp,openai_agents"
 )
 
 

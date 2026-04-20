@@ -12,10 +12,26 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat: support environment-configured endpoint visibility for HTTP operation names
+  ([#718](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/718))
+- fix(lambda-layer): Disable all agentic instrumentation in Lambda by default
+  ([#710](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/710))
+- fix(genai-instrumentors): cleanup code, align with OTel GenAI semconv, add missing attributes and fix deprecated usage
+  ([#706](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/706))
+- feat(genai-instrumentation): add oldest/latest dependency testing and scheduled instrumentation tests for GenAI libraries
+  ([#708](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/708))
+- feat(instrumentors): add invoke_workflow span support for LlamaIndex AgentWorkflow and CrewAI
+  ([#705](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/705))
+- feat: add OpenTelemetry package version compatibility check at distro startup
+  ([#694](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/694))
+- feat(llama_index-instrumentation): add llama-index to agent observability disabled instrumentations
+  ([#704](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/704))
 - fix(langchain-instrumentor): expand provider detection for all supported LLM providers
   ([#702](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/702))
 - feat: add LLO handler support for gen_ai.input.messages, gen_ai.output.messages, and gen_ai.system_instructions
   ([#699](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/699))
+- feat: add GenAiNestedClientSpanProcessor to deduplicate nested client spans
+  ([#698](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/698))
 - feat: suppress redundant HTTP/ASGI and initialization spans in MCP instrumentation
   ([#695](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/695))
 - feat: [BREAKING CHANGE] introduce AWS_AGENTIC_OBSERVABILITY_OPT_IN and refactor agent observability config
