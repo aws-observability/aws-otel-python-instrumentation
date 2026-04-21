@@ -51,7 +51,7 @@ class TestOTLPAwsSpanExporter(TestCase):
         self.assertIn("User-Agent", exporter._session.headers)
 
     @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agentic_observability_enabled"
+        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agent_observability_enabled"
     )
     def test_ensure_llo_handler_when_disabled(self, mock_is_enabled):
         # Test _ensure_llo_handler when agent observability is disabled
@@ -67,7 +67,7 @@ class TestOTLPAwsSpanExporter(TestCase):
 
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.get_logger_provider")
     @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agentic_observability_enabled"
+        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agent_observability_enabled"
     )
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.LLOHandler")
     def test_ensure_llo_handler_lazy_initialization(
@@ -103,7 +103,7 @@ class TestOTLPAwsSpanExporter(TestCase):
 
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.get_logger_provider")
     @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agentic_observability_enabled"
+        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agent_observability_enabled"
     )
     def test_ensure_llo_handler_with_existing_logger_provider(self, mock_is_enabled, mock_get_logger_provider):
         # Test when logger_provider is already provided
@@ -130,7 +130,7 @@ class TestOTLPAwsSpanExporter(TestCase):
 
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.get_logger_provider")
     @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agentic_observability_enabled"
+        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agent_observability_enabled"
     )
     def test_ensure_llo_handler_get_logger_provider_fails(self, mock_is_enabled, mock_get_logger_provider):
         # Test when get_logger_provider raises exception
@@ -146,7 +146,7 @@ class TestOTLPAwsSpanExporter(TestCase):
         self.assertIsNone(exporter._llo_handler)
 
     @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agentic_observability_enabled"
+        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agent_observability_enabled"
     )
     def test_export_with_llo_disabled(self, mock_is_enabled):
         # Test export when LLO is disabled
@@ -167,7 +167,7 @@ class TestOTLPAwsSpanExporter(TestCase):
             self.assertIsNone(exporter._llo_handler)
 
     @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agentic_observability_enabled"
+        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agent_observability_enabled"
     )
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.get_logger_provider")
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.LLOHandler")
@@ -199,7 +199,7 @@ class TestOTLPAwsSpanExporter(TestCase):
             mock_parent_export.assert_called_once_with(processed_spans)
 
     @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agentic_observability_enabled"
+        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agent_observability_enabled"
     )
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.get_logger_provider")
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.LLOHandler")
