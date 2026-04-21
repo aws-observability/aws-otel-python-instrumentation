@@ -12,6 +12,9 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat: auto-detect and mutually exclude AWS native vs third-party agentic instrumentors; add `AWS_AGENTIC_INSTRUMENTATION_OPT_IN` env var to override auto-detection
+  ([#729](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/729))
+
 ## v0.17.0 - 2026-04-08
 
 - feat: support environment-configured endpoint visibility for HTTP operation names

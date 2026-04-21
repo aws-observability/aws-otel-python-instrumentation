@@ -13,6 +13,7 @@ _logger: Logger = getLogger(__name__)
 AGENT_OBSERVABILITY_ENABLED = "AGENT_OBSERVABILITY_ENABLED"
 OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS = "OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS"
 
+
 def is_installed(req: str) -> bool:
     """Is the given required package installed?"""
     req = Requirement(req)

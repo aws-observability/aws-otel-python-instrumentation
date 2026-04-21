@@ -98,14 +98,20 @@ from opentelemetry.sdk.environment_variables import (
     OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION,
     OTEL_EXPORTER_OTLP_PROTOCOL,
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
-    OTEL_TRACES_SAMPLER,
 )
+from opentelemetry.util._importlib_metadata import EntryPoint, entry_points
 
 _logger: Logger = getLogger(__name__)
 # Suppress configurator warnings from auto-instrumentation
 _load._logger.setLevel(LEVELS.get(os.environ.get(OTEL_PYTHON_LOG_LEVEL, "error").lower(), ERROR))
 
 
+# When set to "true", opt in to AWS agentic instrumentors over third-party ones (e.g. OpenInference),
+# even if both are installed. By default, auto-detection prefers third-party when present.
+AWS_AGENTIC_INSTRUMENTATION_OPT_IN = "AWS_AGENTIC_INSTRUMENTATION_OPT_IN"
+
+# Maps third-party instrumentor entry point names to their AWS native equivalents.
+# Used for mutual exclusion: only one side instruments each library at a time.
 _THIRDPARTY_TO_AWS_NATIVE = {
     "crewai": "aws_crewai",
     "langchain": "aws_langchain",
@@ -114,6 +120,10 @@ _THIRDPARTY_TO_AWS_NATIVE = {
     "mcp": "aws_mcp",
     "openai_agents": "aws_openai_agents",
 }
+
+# Dist names owned by ADOT that register entry points with the same names as third-party ones.
+# These are excluded from third-party detection to avoid false positives.
+_ADOT_OWNED_DISTS = {"opentelemetry-instrumentation-openai-agents-v2"}
 
 
 class AwsOpenTelemetryDistro(OpenTelemetryDistro):
@@ -207,7 +217,6 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
                     "Please set AWS_REGION environment variable or configure OTLP endpoints manually."
                 )
 
-            os.environ.setdefault(OTEL_TRACES_SAMPLER, "parentbased_always_on")
             os.environ.setdefault(
                 OTEL_PYTHON_DISABLED_INSTRUMENTATIONS,
                 "http,sqlalchemy,psycopg2,pymysql,sqlite3,aiopg,asyncpg,mysql_connector,"
@@ -219,9 +228,45 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             os.environ.setdefault(OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS, "false")
             os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
 
-
         super(AwsOpenTelemetryDistro, self)._configure()
 
         if kwargs.get("apply_patches", True):
             apply_instrumentation_patches()
 
+    def load_instrumentor(self, entry_point: EntryPoint, **kwargs):
+        """Mutual exclusion between AWS native and third-party agentic instrumentors.
+
+        When agent observability is enabled:
+        - Skip ADOT-owned dists that duplicate an aws_* entry point (e.g. openai-agents-v2).
+        - Auto-detect: if a third-party instrumentor is registered for the same library,
+          skip the AWS native one. If not, skip the third-party one.
+        - AWS_AGENTIC_INSTRUMENTATION_OPT_IN=true overrides auto-detection and forces
+          AWS native instrumentors, skipping third-party ones.
+        """
+        if is_agent_observability_enabled() and self._should_skip_instrumentor(entry_point):
+            return
+        super().load_instrumentor(entry_point, **kwargs)
+
+    @staticmethod
+    def _should_skip_instrumentor(entry_point):
+        if entry_point.dist and entry_point.dist.name in _ADOT_OWNED_DISTS:
+            return True
+
+        prefer_native = os.environ.get(AWS_AGENTIC_INSTRUMENTATION_OPT_IN, "false").lower() == "true"
+        third_party_names = {
+            ep.name
+            for ep in entry_points(group="opentelemetry_instrumentor")
+            if not (ep.dist and ep.dist.name in _ADOT_OWNED_DISTS)
+        }
+
+        if entry_point.name in _THIRDPARTY_TO_AWS_NATIVE.values() and not prefer_native:
+            for tp_name, aws_name in _THIRDPARTY_TO_AWS_NATIVE.items():
+                if entry_point.name == aws_name and tp_name in third_party_names:
+                    _logger.debug("Skipping %s: third-party %s is registered", aws_name, tp_name)
+                    return True
+
+        if entry_point.name in _THIRDPARTY_TO_AWS_NATIVE and prefer_native:
+            _logger.debug("Skipping third-party %s: AWS native preferred", entry_point.name)
+            return True
+
+        return False
