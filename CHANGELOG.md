@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix(lambda-layer): align context propagation with JS — delegate to global propagator so W3C traceparent is no longer ignored when X-Ray active tracing is enabled
+  ([#727](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/727))
 - feat: support environment-configured endpoint visibility for HTTP operation names
   ([#718](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/718))
 - fix(lambda-layer): Disable all agentic instrumentation in Lambda by default
