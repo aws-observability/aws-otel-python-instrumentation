@@ -189,7 +189,7 @@ jobs:
   
   publish-layer-prod:
     runs-on: ubuntu-latest
-    needs: [download-artifacts]
+    needs: [download-artifacts, publish-sdk]
     strategy:
       matrix:
         aws_region: ${{ fromJson(needs.download-artifacts.outputs.aws_regions_json) }}
