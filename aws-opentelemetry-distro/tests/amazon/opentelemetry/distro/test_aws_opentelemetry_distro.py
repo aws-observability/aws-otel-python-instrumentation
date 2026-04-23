@@ -492,11 +492,11 @@ class TestAwsOpenTelemetryDistro(TestCase):
         disabled = os.environ.get(OTEL_PYTHON_DISABLED_INSTRUMENTATIONS, "")
         self.assertTrue(disabled.startswith("custom_lib"))
 
-    def test_base_otlp_endpoint_does_not_prevent_specific_endpoints(self):
+    def test_base_otlp_endpoint_prevents_specific_endpoints(self):
         os.environ[OTEL_EXPORTER_OTLP_ENDPOINT] = "http://my-collector:4318"
         self._configure_with_agent_observability()
-        self.assertIn(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, os.environ)
-        self.assertIn(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, os.environ)
+        self.assertNotIn(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, os.environ)
+        self.assertNotIn(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, os.environ)
 
     @staticmethod
     def _make_ep(name, dist_name=None):

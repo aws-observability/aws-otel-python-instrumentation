@@ -94,6 +94,7 @@ from opentelemetry.sdk.environment_variables import (
     _OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED as OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED,
 )
 from opentelemetry.sdk.environment_variables import (
+    OTEL_EXPORTER_OTLP_ENDPOINT,
     OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
     OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION,
     OTEL_EXPORTER_OTLP_PROTOCOL,
@@ -206,16 +207,19 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             os.environ.setdefault("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "true")
 
             region = get_aws_region()
-            if region:
-                os.environ.setdefault(
-                    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, f"https://xray.{region}.amazonaws.com/v1/traces"
-                )
-                os.environ.setdefault(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, f"https://logs.{region}.amazonaws.com/v1/logs")
-            else:
-                _logger.warning(
-                    "AWS region could not be determined. OTLP endpoints will not be automatically configured. "
-                    "Please set AWS_REGION environment variable or configure OTLP endpoints manually."
-                )
+            if not os.environ.get(OTEL_EXPORTER_OTLP_ENDPOINT):
+                if region:
+                    os.environ.setdefault(
+                        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, f"https://xray.{region}.amazonaws.com/v1/traces"
+                    )
+                    os.environ.setdefault(
+                        OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, f"https://logs.{region}.amazonaws.com/v1/logs"
+                    )
+                else:
+                    _logger.warning(
+                        "AWS region could not be determined. OTLP endpoints will not be automatically configured. "
+                        "Please set AWS_REGION environment variable or configure OTLP endpoints manually."
+                    )
 
             os.environ.setdefault(
                 OTEL_PYTHON_DISABLED_INSTRUMENTATIONS,
