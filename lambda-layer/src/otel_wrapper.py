@@ -64,7 +64,7 @@ def custom_event_context_extractor(lambda_event: Any) -> Context:
     if not isinstance(headers, dict):
         headers = {}
     else:
-        headers = {k: v for k, v in headers.items()}
+        headers = headers.copy()
 
     if xray_env_var:
         headers = {k: v for k, v in headers.items() if k.lower() != TRACE_HEADER_KEY.lower()}
