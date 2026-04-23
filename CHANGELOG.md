@@ -12,6 +12,16 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat: auto-detect and mutually exclude AWS native vs third-party agentic instrumentors; add `AWS_AGENTIC_INSTRUMENTATION_OPT_IN` env var to override auto-detection
+  ([#729](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/729))
+- fix(lambda-layer): align context propagation with JS — delegate to global propagator so W3C traceparent is no longer ignored when X-Ray active tracing is enabled
+  ([#727](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/727))
+## v0.17.0 - 2026-04-08
+
+- feat: support environment-configured endpoint visibility for HTTP operation names
+  ([#718](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/718))
+- fix(lambda-layer): Disable all agentic instrumentation in Lambda by default
+  ([#710](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/710))
 - fix(genai-instrumentors): cleanup code, align with OTel GenAI semconv, add missing attributes and fix deprecated usage
   ([#706](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/706))
 - feat(genai-instrumentation): add oldest/latest dependency testing and scheduled instrumentation tests for GenAI libraries
