@@ -330,12 +330,19 @@ def _export_unsampled_span_for_agent_observability(trace_provider: TracerProvide
     if not is_agent_observability_enabled():
         return
 
-    traces_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
-    if traces_endpoint and _is_aws_otlp_endpoint(traces_endpoint, XRAY_SERVICE):
+    traces_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT) or os.environ.get(
+        "OTEL_EXPORTER_OTLP_ENDPOINT"
+    )
+    if not traces_endpoint:
+        return
+
+    if _is_aws_otlp_endpoint(traces_endpoint, XRAY_SERVICE):
         endpoint, region = _extract_endpoint_and_region_from_otlp_endpoint(traces_endpoint)
         span_exporter = _create_aws_otlp_exporter(endpoint=endpoint, service=XRAY_SERVICE, region=region)
+    else:
+        span_exporter = OTLPSpanExporter(endpoint=traces_endpoint)
 
-        trace_provider.add_span_processor(BatchUnsampledSpanProcessor(span_exporter=span_exporter))
+    trace_provider.add_span_processor(BatchUnsampledSpanProcessor(span_exporter=span_exporter))
 
 
 def _is_defer_to_workers_enabled():
