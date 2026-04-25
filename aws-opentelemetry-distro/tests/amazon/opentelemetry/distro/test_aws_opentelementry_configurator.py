@@ -1110,6 +1110,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 1)
         processor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
         self.assertIsInstance(processor, BatchUnsampledSpanProcessor)
+        self.assertEqual(processor.span_exporter._endpoint, "http://localhost:4318/v1/traces")
 
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
         os.environ.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)

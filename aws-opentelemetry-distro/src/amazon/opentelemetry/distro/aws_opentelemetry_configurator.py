@@ -330,9 +330,11 @@ def _export_unsampled_span_for_agent_observability(trace_provider: TracerProvide
     if not is_agent_observability_enabled():
         return
 
-    traces_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT) or os.environ.get(
-        "OTEL_EXPORTER_OTLP_ENDPOINT"
-    )
+    traces_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
+    if not traces_endpoint:
+        base_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+        if base_endpoint:
+            traces_endpoint = base_endpoint.rstrip("/") + "/v1/traces"
     if not traces_endpoint:
         return
 
