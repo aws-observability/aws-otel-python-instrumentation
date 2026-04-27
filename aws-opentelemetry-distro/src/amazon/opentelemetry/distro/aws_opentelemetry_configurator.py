@@ -64,6 +64,7 @@ from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogRecordExporter, LogRecordExporter
 from opentelemetry.sdk.environment_variables import (
     _OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED,
+    OTEL_EXPORTER_OTLP_ENDPOINT,
     OTEL_EXPORTER_OTLP_METRICS_PROTOCOL,
     OTEL_EXPORTER_OTLP_PROTOCOL,
     OTEL_TRACES_SAMPLER_ARG,
@@ -332,7 +333,7 @@ def _export_unsampled_span_for_agent_observability(trace_provider: TracerProvide
 
     traces_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
     if not traces_endpoint:
-        base_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+        base_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_ENDPOINT)
         if base_endpoint:
             traces_endpoint = base_endpoint.rstrip("/") + "/v1/traces"
     if not traces_endpoint:
