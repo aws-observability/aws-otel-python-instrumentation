@@ -17,7 +17,7 @@ from typing_extensions import override
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE, AWS_SERVICE_TYPE
 from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
-from amazon.opentelemetry.distro._utils import get_aws_session, is_agentic_observability_enabled
+from amazon.opentelemetry.distro._utils import get_aws_session, is_agent_observability_enabled
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor_builder import (
     AttributePropagatingSpanProcessorBuilder,
@@ -64,6 +64,7 @@ from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogRecordExporter, LogRecordExporter
 from opentelemetry.sdk.environment_variables import (
     _OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED,
+    OTEL_EXPORTER_OTLP_ENDPOINT,
     OTEL_EXPORTER_OTLP_METRICS_PROTOCOL,
     OTEL_EXPORTER_OTLP_PROTOCOL,
     OTEL_TRACES_SAMPLER_ARG,
@@ -205,7 +206,7 @@ def _initialize_components():
             AwsEksResourceDetector(),
             AwsEcsResourceDetector(),
         ]
-        if not (_is_lambda_environment() or is_agentic_observability_enabled())
+        if not (_is_lambda_environment() or is_agent_observability_enabled())
         else []
     )
 
@@ -327,15 +328,24 @@ def _export_unsampled_span_for_lambda(trace_provider: TracerProvider, resource: 
 
 
 def _export_unsampled_span_for_agent_observability(trace_provider: TracerProvider, resource: Resource = None):
-    if not is_agentic_observability_enabled():
+    if not is_agent_observability_enabled():
         return
 
     traces_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
-    if traces_endpoint and _is_aws_otlp_endpoint(traces_endpoint, XRAY_SERVICE):
+    if not traces_endpoint:
+        base_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_ENDPOINT)
+        if base_endpoint:
+            traces_endpoint = base_endpoint.rstrip("/") + "/v1/traces"
+    if not traces_endpoint:
+        return
+
+    if _is_aws_otlp_endpoint(traces_endpoint, XRAY_SERVICE):
         endpoint, region = _extract_endpoint_and_region_from_otlp_endpoint(traces_endpoint)
         span_exporter = _create_aws_otlp_exporter(endpoint=endpoint, service=XRAY_SERVICE, region=region)
+    else:
+        span_exporter = OTLPSpanExporter(endpoint=traces_endpoint)
 
-        trace_provider.add_span_processor(BatchUnsampledSpanProcessor(span_exporter=span_exporter))
+    trace_provider.add_span_processor(BatchUnsampledSpanProcessor(span_exporter=span_exporter))
 
 
 def _is_defer_to_workers_enabled():
@@ -468,7 +478,7 @@ def _customize_log_record_processor(logger_provider: LoggerProvider, log_exporte
     if not log_exporter:
         return
 
-    if is_agentic_observability_enabled():
+    if is_agent_observability_enabled():
         # pylint: disable=import-outside-toplevel
         from amazon.opentelemetry.distro.exporter.otlp.aws.logs._aws_cw_otlp_batch_log_record_processor import (
             AwsCloudWatchOtlpBatchLogRecordProcessor,
@@ -527,7 +537,7 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource, sam
     # AI applications typically have low throughput traffic patterns and require
     # comprehensive monitoring to catch subtle failure modes like hallucinations
     # and quality degradation that sampling could miss.
-    if is_agentic_observability_enabled():
+    if is_agent_observability_enabled():
         _export_unsampled_span_for_agent_observability(provider, resource)
         provider.add_span_processor(GenAiNestedClientSpanProcessor())
         baggage_keys.add("session.id")
@@ -635,7 +645,7 @@ def _customize_resource(resource: Resource) -> Resource:
 
     custom_attributes = {AWS_LOCAL_SERVICE: service_name}
 
-    if is_agentic_observability_enabled():
+    if is_agent_observability_enabled():
         # Add aws.service.type if it doesn't exist in the resource
         if resource and resource.attributes.get(AWS_SERVICE_TYPE) is None:
             # Set a default agent type for AI agent observability
@@ -921,7 +931,7 @@ def _create_aws_otlp_exporter(endpoint: str, service: str, region: str):
         from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 
         if service == XRAY_SERVICE:
-            if is_agentic_observability_enabled():
+            if is_agent_observability_enabled():
                 # Span exporter needs an instance of logger provider in ai agent
                 # observability case because we need to split input/output prompts
                 # from span attributes and send them to the logs pipeline per
