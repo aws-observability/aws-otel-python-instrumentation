@@ -6,7 +6,7 @@ from typing import Dict, Optional, Sequence
 
 from botocore.session import Session
 
-from amazon.opentelemetry.distro._utils import is_agent_observability_enabled
+from amazon.opentelemetry.distro._utils import is_agent_observability_enabled, is_genai_content_extraction_opted_out
 from amazon.opentelemetry.distro.exporter.otlp.aws.common._aws_http_headers import _OTLP_AWS_HTTP_HEADERS
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 from amazon.opentelemetry.distro.llo_handler import LLOHandler
@@ -77,7 +77,11 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
 
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
         try:
-            if is_agent_observability_enabled() and self._ensure_llo_handler():
+            if (
+                is_agent_observability_enabled()
+                and not is_genai_content_extraction_opted_out()
+                and self._ensure_llo_handler()
+            ):
                 llo_processed_spans = self._llo_handler.process_spans(spans)
                 return super().export(llo_processed_spans)
         except Exception:  # pylint: disable=broad-exception-caught
