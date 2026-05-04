@@ -180,7 +180,6 @@ class TestUtils(TestCase):
         os.environ.pop("AWS_DEFAULT_REGION", None)
 
     def test_is_genai_content_extraction_opted_out_various_values(self):
-        """Test is_genai_content_extraction_opted_out with various environment variable values"""
         os.environ[GENAI_CONTENT_EXTRACTION_OPT_OUT] = "true"
         self.assertTrue(is_genai_content_extraction_opted_out())
 
