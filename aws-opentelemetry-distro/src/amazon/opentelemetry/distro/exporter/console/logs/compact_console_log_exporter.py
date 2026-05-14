@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import json
 import logging
+import os
 import re
 import sys
 from typing import IO, Sequence
@@ -95,12 +96,12 @@ class CompactConsoleLogRecordExporter(_BASE_CLASS):
             {
                 "resource": {
                     "attributes": _preserve_attrs(resource.attributes if resource else None),
-                    "schemaUrl": getattr(resource, "schema_url", "") or "" if resource else "",
+                    "schemaUrl": (getattr(resource, "schema_url", "") or "") if resource else "",
                 },
                 "scope": {
-                    "name": getattr(scope, "name", "") or "" if scope else "",
-                    "version": getattr(scope, "version", "") or "" if scope else "",
-                    "schemaUrl": getattr(scope, "schema_url", "") or "" if scope else "",
+                    "name": (getattr(scope, "name", "") or "") if scope else "",
+                    "version": (getattr(scope, "version", "") or "") if scope else "",
+                    "schemaUrl": (getattr(scope, "schema_url", "") or "") if scope else "",
                 },
                 "body": record.body if record.body is not None else None,
                 "severityNumber": (record.severity_number.value if record.severity_number is not None else 0),
@@ -112,7 +113,7 @@ class CompactConsoleLogRecordExporter(_BASE_CLASS):
                 "traceId": format(trace_id, "032x") if is_valid else "",
                 "spanId": format(span_id, "016x") if is_valid else "",
                 "flags": int(record.trace_flags) if record.trace_flags is not None else 0,
-                "exportPath": "console",
+                **({"exportPath": "console"} if os.environ.get("ADOT_TEST_EXPORT_PATH_ENABLED") == "true" else {}),
             },
             separators=(",", ":"),
         )
