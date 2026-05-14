@@ -328,9 +328,9 @@ class TestCompactConsoleLogRecordExporter(unittest.TestCase):
         self.assertIsInstance(parsed["droppedAttributes"], int)
         self.assertEqual(parsed["droppedAttributes"], 0)
 
-    def test_export_path_field(self):
-        """Console exporter includes exportPath:console."""
+    def test_export_path_field_absent_when_env_unset(self):
+        """Console exporter omits exportPath when env var is not set."""
         data = _make_log_data()
         self.exporter.export([data])
         parsed = self._get_parsed()
-        self.assertEqual(parsed["exportPath"], "console")
+        self.assertNotIn("exportPath", parsed)
