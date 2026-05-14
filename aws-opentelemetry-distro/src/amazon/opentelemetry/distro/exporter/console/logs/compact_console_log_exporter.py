@@ -79,6 +79,7 @@ class CompactConsoleLogRecordExporter(_BASE_CLASS):
         return LogExportResult.SUCCESS
 
     def shutdown(self):
+        self._out.flush()
         self._shutdown = True
 
     @staticmethod
