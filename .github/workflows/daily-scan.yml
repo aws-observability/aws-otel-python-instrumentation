@@ -95,7 +95,7 @@ jobs:
         id: high_scan
         uses: ./.github/actions/image_scan
         with:
-          image-ref: "public.ecr.aws/aws-observability/adot-autoinstrumentation-python:v0.16.0"
+          image-ref: "public.ecr.aws/aws-observability/adot-autoinstrumentation-python:v0.17.0"
           severity: 'CRITICAL,HIGH'
           logout: 'false'
           trivyignore-file: .github/trivy/daily-scan.trivyignore.yaml
@@ -105,7 +105,7 @@ jobs:
         id: low_scan
         uses: ./.github/actions/image_scan
         with:
-          image-ref: "public.ecr.aws/aws-observability/adot-autoinstrumentation-python:v0.16.0"
+          image-ref: "public.ecr.aws/aws-observability/adot-autoinstrumentation-python:v0.17.0"
           severity: 'MEDIUM,LOW,UNKNOWN'
           logout: 'false'
           trivyignore-file: .github/trivy/daily-scan.trivyignore.yaml
