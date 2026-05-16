@@ -41,7 +41,6 @@ from typing import Any
 from opentelemetry.context import Context
 from opentelemetry.instrumentation.aws_lambda import _X_AMZN_TRACE_ID, AwsLambdaInstrumentor
 from opentelemetry.propagate import get_global_textmap
-from opentelemetry.propagators.aws import AwsXRayPropagator
 from opentelemetry.propagators.aws.aws_xray_propagator import TRACE_HEADER_KEY
 from opentelemetry.trace import get_current_span
 
@@ -57,21 +56,24 @@ class HandlerError(Exception):
 
 def custom_event_context_extractor(lambda_event: Any) -> Context:
     xray_env_var = os.environ.get(_X_AMZN_TRACE_ID)
-    lambda_trace_context = AwsXRayPropagator().extract({TRACE_HEADER_KEY: xray_env_var})
-    parent_span_context = get_current_span(lambda_trace_context).get_span_context()
 
-    if parent_span_context is None or not parent_span_context.is_valid:
+    try:
+        headers = lambda_event["headers"]
+    except (TypeError, KeyError):
         headers = None
-        try:
-            headers = lambda_event["headers"]
-        except (TypeError, KeyError):
-            pass
-        if not isinstance(headers, dict):
-            headers = {}
+    if not isinstance(headers, dict):
+        headers = {}
+    else:
+        headers = headers.copy()
 
-        return get_global_textmap().extract(headers)
+    if xray_env_var:
+        headers = {k: v for k, v in headers.items() if k.lower() != TRACE_HEADER_KEY.lower()}
+        headers[TRACE_HEADER_KEY] = xray_env_var
 
-    return lambda_trace_context
+    extracted_context = get_global_textmap().extract(headers)
+    if get_current_span(extracted_context).get_span_context():
+        return extracted_context
+    return Context()
 
 
 AwsLambdaInstrumentor().instrument(event_context_extractor=custom_event_context_extractor)
@@ -82,7 +84,7 @@ if path is None:
     raise HandlerError("ORIG_HANDLER is not defined.")
 
 try:
-    (mod_name, handler_name) = path.rsplit(".", 1)
+    mod_name, handler_name = path.rsplit(".", 1)
 except ValueError as e:
     raise HandlerError("Bad path '{}' for ORIG_HANDLER: {}".format(path, str(e)))
 

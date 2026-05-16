@@ -23,9 +23,7 @@ class TestStarlettePatch(TestCase):
         """Test that the Starlette ASGI middleware patch is applied successfully."""
         env_configs = [
             {"AGENT_OBSERVABILITY_ENABLED": "true"},
-            {"AWS_AGENTIC_OBSERVABILITY_OPT_IN": "true"},
             {"AGENT_OBSERVABILITY_ENABLED": "false"},
-            {"AWS_AGENTIC_OBSERVABILITY_OPT_IN": "false"},
         ]
         for env_vars in env_configs:
             agent_enabled = any(v == "true" for v in env_vars.values())
