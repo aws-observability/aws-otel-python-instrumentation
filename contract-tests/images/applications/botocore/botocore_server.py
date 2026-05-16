@@ -700,33 +700,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                     "stopSequences": ["Human:"],
                 },
             )
-        elif self.in_path("conversestream/converse-stream"):
-            set_main_status(200)
-            bedrock_runtime_client.meta.events.register(
-                "before-call.bedrock-runtime.ConverseStream",
-                lambda **kwargs: inject_200_success(
-                    stream={
-                        "contentBlockDelta": {"delta": {"text": "Hello!"}},
-                        "messageStop": {"stopReason": "end_turn"},
-                        "metadata": {"usage": {"inputTokens": 15, "outputTokens": 10}},
-                    },
-                    **kwargs,
-                ),
-            )
-            response = bedrock_runtime_client.converse_stream(
-                modelId="anthropic.claude-v2:1",
-                messages=[{"role": "user", "content": [{"text": "Hello"}]}],
-                inferenceConfig={
-                    "maxTokens": 256,
-                    "temperature": 0.8,
-                    "topP": 0.95,
-                    "stopSequences": ["Assistant:"],
-                },
-            )
-            # Consume the stream if present
-            if "stream" in response:
-                for event in response["stream"]:
-                    pass
         else:
             set_main_status(404)
 

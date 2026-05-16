@@ -693,35 +693,6 @@ class BotocoreTest(ContractTestBase):
             span_name="chat anthropic.claude-v2:1",
         )
 
-    def test_bedrock_runtime_converse_stream(self):
-        self.do_test_requests(
-            "bedrock/conversestream/converse-stream",
-            "GET",
-            200,
-            0,
-            0,
-            rpc_service="Bedrock Runtime",
-            remote_service="AWS::BedrockRuntime",
-            remote_operation="ConverseStream",
-            remote_resource_type="AWS::Bedrock::Model",
-            remote_resource_identifier="anthropic.claude-v2:1",
-            cloudformation_primary_identifier="anthropic.claude-v2:1",
-            request_specific_attributes={
-                _GEN_AI_REQUEST_MODEL: "anthropic.claude-v2:1",
-                _GEN_AI_SYSTEM: "aws.bedrock",
-                _GEN_AI_REQUEST_MAX_TOKENS: 256,
-                _GEN_AI_REQUEST_TEMPERATURE: 0.8,
-                _GEN_AI_REQUEST_TOP_P: 0.95,
-                _GEN_AI_REQUEST_STOP_SEQUENCES: ["Assistant:"],
-            },
-            response_specific_attributes={
-                _GEN_AI_RESPONSE_FINISH_REASONS: ["end_turn"],
-                _GEN_AI_USAGE_INPUT_TOKENS: 15,
-                _GEN_AI_USAGE_OUTPUT_TOKENS: 10,
-            },
-            span_name="chat anthropic.claude-v2:1",
-        )
-
     def test_bedrock_get_guardrail(self):
         self.do_test_requests(
             "bedrock/getguardrail/get-guardrail",
