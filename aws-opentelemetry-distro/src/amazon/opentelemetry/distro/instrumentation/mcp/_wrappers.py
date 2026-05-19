@@ -73,6 +73,7 @@ class McpWrapper:
         # noisy spans most of the time
         if isinstance(message, (types.InitializeRequest, types.InitializedNotification)):
             return True
+        # MCP servers hosted on AgentCore get frequent /ping health checks
         if is_agent_observability_enabled() and isinstance(message, types.PingRequest):
             return True
         return False
