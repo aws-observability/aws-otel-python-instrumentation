@@ -8,6 +8,7 @@ from contextvars import Token
 from typing import Any, Callable, Coroutine, Dict, Optional, Tuple
 from urllib.parse import urlparse
 
+from amazon.opentelemetry.distro._utils import is_agent_observability_enabled
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import serialize_to_json_string
 from opentelemetry import context, trace
 from opentelemetry.instrumentation.utils import suppress_http_instrumentation
@@ -69,8 +70,11 @@ class McpWrapper:
             message, (types.ClientRequest, types.ClientNotification, types.ServerRequest, types.ServerNotification)
         ):
             message = message.root
-        # noisy spans most of the time
-        return isinstance(message, (types.InitializeRequest, types.InitializedNotification))
+        if isinstance(message, (types.InitializeRequest, types.InitializedNotification)):
+            return True
+        if is_agent_observability_enabled() and isinstance(message, types.PingRequest):
+            return True
+        return False
 
     @staticmethod
     def _set_mcp_attributes(span: trace.Span, message: Any, request_id: Optional[int]) -> None:

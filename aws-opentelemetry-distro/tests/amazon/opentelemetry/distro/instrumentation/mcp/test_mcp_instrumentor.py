@@ -473,6 +473,24 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
                     finally:
                         HTTPXClientInstrumentor().uninstrument()
 
+    def test_ping_span_suppression(self):
+        for agent_obs_enabled, expect_suppressed in [("true", True), ("false", False)]:
+            with self.subTest(agent_observability=agent_obs_enabled):
+                self.span_exporter.clear()
+                with unittest.mock.patch.dict(os.environ, {"AGENT_OBSERVABILITY_ENABLED": agent_obs_enabled}):
+
+                    async def run(session):
+                        await session.send_ping()
+
+                    asyncio.run(self._run_inprocess(run))
+                    spans = self.span_exporter.get_finished_spans()
+
+                    ping_spans = [s for s in spans if "ping" in s.name.lower()]
+                    if expect_suppressed:
+                        self.assertEqual(len(ping_spans), 0, "Ping spans should be suppressed")
+                    else:
+                        self.assertGreater(len(ping_spans), 0, "Ping spans should not be suppressed")
+
     def test_mcp_respects_active_parent_span(self):
         tracer = get_tracer("test", tracer_provider=self.tracer_provider)
 
