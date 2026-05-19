@@ -203,7 +203,7 @@ class ClientWrapper(McpWrapper):
             if not message:
                 return await wrapped(*args, **kwargs)
 
-            if self._should_suppress_mcp_span(message):
+            if self._should_suppress_http_spans and self._should_suppress_mcp_span(message):
                 return await wrapped(*args, **kwargs)
 
             span = self._tracer.start_span(name=self._CLIENT_SPAN_NAME, kind=SpanKind.CLIENT)
@@ -451,7 +451,7 @@ class ServerWrapper(McpWrapper):
         if not incoming_msg:
             return await wrapped(*args, **kwargs)
 
-        if self._should_suppress_mcp_span(incoming_msg):
+        if self._should_suppress_http_spans and self._should_suppress_mcp_span(incoming_msg):
             return await wrapped(*args, **kwargs)
 
         request_id = getattr(incoming_msg, "id", None)
