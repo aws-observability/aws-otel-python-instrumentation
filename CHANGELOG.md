@@ -12,7 +12,7 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
-- feat(mcp): suppress MCP `/ping` spans when agent observability is enabled
+- fix(mcp-instrumentation): suppress MCP `/ping` spans when agent observability is enabled
   ([#748](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/748))
 - fix(agent-observability): fall back to OTEL_EXPORTER_OTLP_ENDPOINT for unsampled spans; also export unsampled spans to non-AWS endpoints
   ([#738](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/738))
