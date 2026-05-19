@@ -476,8 +476,11 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
     def test_ping_span_suppression(self):
         for agent_obs_enabled, expect_suppressed in [("true", True), ("false", False)]:
             with self.subTest(agent_observability=agent_obs_enabled):
+                self.instrumentor.uninstrument()
                 self.span_exporter.clear()
                 with unittest.mock.patch.dict(os.environ, {"AGENT_OBSERVABILITY_ENABLED": agent_obs_enabled}):
+                    self.instrumentor.instrument(tracer_provider=self.tracer_provider, propagators=self.propagator)
+                    self.server = self._create_server()
 
                     async def run(session):
                         await session.send_ping()

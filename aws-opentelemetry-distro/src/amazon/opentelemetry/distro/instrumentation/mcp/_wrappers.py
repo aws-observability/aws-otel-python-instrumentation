@@ -61,9 +61,9 @@ class McpWrapper:
         self._should_suppress_http_spans = (
             os.environ.get(OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION, "true").lower() == "true"
         )
+        self._agent_observability_enabled = is_agent_observability_enabled()
 
-    @staticmethod
-    def _should_suppress_mcp_span(message: Any) -> bool:
+    def _should_suppress_mcp_span(self, message: Any) -> bool:
         from mcp import types  # pylint: disable=import-outside-toplevel
 
         if isinstance(
@@ -74,7 +74,7 @@ class McpWrapper:
         if isinstance(message, (types.InitializeRequest, types.InitializedNotification)):
             return True
         # MCP servers hosted on AgentCore get frequent /ping health checks
-        if is_agent_observability_enabled() and isinstance(message, types.PingRequest):
+        if self._agent_observability_enabled and isinstance(message, types.PingRequest):
             return True
         return False
 
@@ -203,7 +203,7 @@ class ClientWrapper(McpWrapper):
             if not message:
                 return await wrapped(*args, **kwargs)
 
-            if self._should_suppress_http_spans and self._should_suppress_mcp_span(message):
+            if self._should_suppress_mcp_span(message):
                 return await wrapped(*args, **kwargs)
 
             span = self._tracer.start_span(name=self._CLIENT_SPAN_NAME, kind=SpanKind.CLIENT)
@@ -451,7 +451,7 @@ class ServerWrapper(McpWrapper):
         if not incoming_msg:
             return await wrapped(*args, **kwargs)
 
-        if self._should_suppress_http_spans and self._should_suppress_mcp_span(incoming_msg):
+        if self._should_suppress_mcp_span(incoming_msg):
             return await wrapped(*args, **kwargs)
 
         request_id = getattr(incoming_msg, "id", None)
