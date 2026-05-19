@@ -70,6 +70,7 @@ class McpWrapper:
             message, (types.ClientRequest, types.ClientNotification, types.ServerRequest, types.ServerNotification)
         ):
             message = message.root
+        # noisy spans most of the time
         if isinstance(message, (types.InitializeRequest, types.InitializedNotification)):
             return True
         if is_agent_observability_enabled() and isinstance(message, types.PingRequest):
