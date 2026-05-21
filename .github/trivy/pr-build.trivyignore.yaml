@@ -8,7 +8,4 @@
 #    statement: "<Why are we excluding?> <link to CVE where we can we status>"
 #    expired_at: <required - YYYY-MM-DD>
 
-vulnerabilities:
-  - id: CVE-2026-0994
-    statement: "Excluding to unblock PR build as the CVE is not yet fixed: https://nvd.nist.gov/vuln/detail/CVE-2026-0994"
-    expired_at: 2026-02-23
+vulnerabilities: []
