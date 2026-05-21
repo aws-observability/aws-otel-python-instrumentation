@@ -228,7 +228,9 @@ class TestOTLPAwsSpanExporter(TestCase):
         "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter."
         "is_genai_content_extraction_opted_out"
     )
-    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agentic_observability_enabled")
+    @patch(
+        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agentic_observability_enabled"
+    )
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.get_logger_provider")
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.LLOHandler")
     def test_export_skips_llo_when_content_extraction_opted_out(
@@ -257,7 +259,9 @@ class TestOTLPAwsSpanExporter(TestCase):
         "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter."
         "is_genai_content_extraction_opted_out"
     )
-    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agentic_observability_enabled")
+    @patch(
+        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agentic_observability_enabled"
+    )
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.get_logger_provider")
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.LLOHandler")
     def test_export_processes_llo_when_content_extraction_not_opted_out(
