@@ -12,6 +12,7 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix(otlp-aws-exporter): avoid `RecursionError` when `pip_system_certs` replaces `ssl.SSLContext` on Python 3.12 by rebinding stale `botocore`/`urllib3` SSL context references and caching credentials in `AwsAuthSession`
 - fix(genai-instrumentors): cleanup code, align with OTel GenAI semconv, add missing attributes and fix deprecated usage
   ([#706](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/706))
 - feat(genai-instrumentation): add oldest/latest dependency testing and scheduled instrumentation tests for GenAI libraries
