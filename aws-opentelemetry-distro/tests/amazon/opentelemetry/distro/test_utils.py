@@ -8,14 +8,14 @@ from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro._utils import (
     AGENT_OBSERVABILITY_ENABLED,
-    AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT,
     AWS_AGENTIC_OBSERVABILITY_OPT_IN,
+    AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT,
     get_aws_region,
     get_aws_session,
     is_agent_observability_enabled,
-    is_genai_content_extraction_opted_out,
     is_agentic_observability_enabled,
     is_aws_agentic_observability_opt_in,
+    is_genai_content_extraction_opted_out,
     is_installed,
 )
 
