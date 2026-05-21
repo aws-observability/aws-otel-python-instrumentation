@@ -17,7 +17,7 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 - fix(mcp-instrumentation): suppress MCP `/ping` spans when agent observability is enabled
   ([#748](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/748))
 - fix: pin urllib3 to 2.7.0 to fix CVE-2026-44431 and CVE-2026-44432
-  ([#752](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/752))
+  ([#753](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/753))
 
 ## v0.17.0 - 2026-04-08
 
