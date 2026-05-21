@@ -12,6 +12,10 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat(agent-observability): add `AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT` env var to allow disabling LLO content extraction from spans
+  ([#741](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/741))
+- fix(mcp-instrumentation): suppress MCP `/ping` spans when agent observability is enabled
+  ([#748](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/748))
 - fix(agent-observability): fall back to OTEL_EXPORTER_OTLP_ENDPOINT for unsampled spans; also export unsampled spans to non-AWS endpoints
   ([#738](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/738))
 - fix(lambda-layer): align context propagation with JS — delegate to global propagator so W3C traceparent is no longer ignored when X-Ray active tracing is enabled
