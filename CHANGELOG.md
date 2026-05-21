@@ -12,7 +12,7 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
-- feat(agent-observability): add `GENAI_CONTENT_EXTRACTION_OPT_OUT` env var to allow disabling LLO content extraction from spans
+- feat(agent-observability): add `AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT` env var to allow disabling LLO content extraction from spans
   ([#741](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/741))
 - fix(agent-observability): fall back to OTEL_EXPORTER_OTLP_ENDPOINT for unsampled spans; also export unsampled spans to non-AWS endpoints
   ([#738](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/738))

@@ -12,7 +12,7 @@ _logger: Logger = getLogger(__name__)
 
 AGENT_OBSERVABILITY_ENABLED = "AGENT_OBSERVABILITY_ENABLED"
 OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS = "OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS"
-GENAI_CONTENT_EXTRACTION_OPT_OUT = "GENAI_CONTENT_EXTRACTION_OPT_OUT"
+AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT = "AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT"
 
 
 def is_installed(req: str) -> bool:
@@ -42,7 +42,7 @@ def is_agent_observability_enabled() -> bool:
 
 def is_genai_content_extraction_opted_out() -> bool:
     """Has the user opted out of GenAI content extraction from spans?"""
-    return os.environ.get(GENAI_CONTENT_EXTRACTION_OPT_OUT, "false").lower() == "true"
+    return os.environ.get(AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT, "false").lower() == "true"
 
 
 def should_add_application_signals_dimensions() -> bool:
