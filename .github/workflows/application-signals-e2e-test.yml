@@ -127,7 +127,6 @@ jobs:
 
   eks-py310-amd64:
     if: ${{ always() }}
-    needs: eks-py39-amd64
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
