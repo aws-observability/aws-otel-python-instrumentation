@@ -12,22 +12,28 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat: support environment-configured endpoint visibility for HTTP operation names
+  ([#718](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/718))
 - fix(lambda-layer): Standardize CompactConsoleLogRecordExporter output with CloudWatch OTLP backend schema.
   ([#715](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/715))
-- feat(agent-observability): add `AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT` env var to allow disabling LLO content extraction from spans
-  ([#741](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/741))
-- fix(mcp-instrumentation): suppress MCP `/ping` spans when agent observability is enabled
-  ([#748](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/748))
 - fix(agent-observability): fall back to OTEL_EXPORTER_OTLP_ENDPOINT for unsampled spans; also export unsampled spans to non-AWS endpoints
   ([#738](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/738))
 - feat: auto-detect and mutually exclude AWS native vs third-party agentic instrumentors; add `AWS_AGENTIC_INSTRUMENTATION_OPT_IN` env var to override auto-detection
   ([#729](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/729))
 - fix(lambda-layer): align context propagation with JS — delegate to global propagator so W3C traceparent is no longer ignored when X-Ray active tracing is enabled
   ([#727](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/727))
+
+## v0.17.1 - 2026-05-22
+
+- feat(agent-observability): add `AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT` env var to allow disabling LLO content extraction from spans
+  ([#741](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/741))
+- fix(mcp-instrumentation): suppress MCP `/ping` spans when agent observability is enabled
+  ([#748](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/748))
+- fix: pin urllib3 to 2.7.0 to fix CVE-2026-44431 and CVE-2026-44432
+  ([#753](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/753))
+
 ## v0.17.0 - 2026-04-08
 
-- feat: support environment-configured endpoint visibility for HTTP operation names
-  ([#718](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/718))
 - fix(lambda-layer): Disable all agentic instrumentation in Lambda by default
   ([#710](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/710))
 - fix(genai-instrumentors): cleanup code, align with OTel GenAI semconv, add missing attributes and fix deprecated usage
