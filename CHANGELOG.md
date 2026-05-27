@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat: support environment-configured endpoint visibility for HTTP operation names
+  ([#718](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/718))
 - fix(lambda-layer): Standardize CompactConsoleLogRecordExporter output with CloudWatch OTLP backend schema.
   ([#715](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/715))
 - fix(agent-observability): fall back to OTEL_EXPORTER_OTLP_ENDPOINT for unsampled spans; also export unsampled spans to non-AWS endpoints
