@@ -26,6 +26,12 @@ _BOTO3SQS_INSTRUMENTATION_SCOPE: str = "opentelemetry.instrumentation.boto3sqs"
 # Max keyword length supported by parsing into remote_operation from DB_STATEMENT
 MAX_KEYWORD_LENGTH = 27
 
+# Environment variable for configurable operation name paths
+OTEL_AWS_HTTP_OPERATION_PATHS_CONFIG: str = "OTEL_AWS_HTTP_OPERATION_PATHS"
+
+# Cached parsed operation paths (sorted longest first)
+_operation_paths: List[str] = None
+
 
 # Get dialect keywords retrieved from dialect_keywords.json file.
 # Only meant to be invoked by SQL_KEYWORD_PATTERN and unit tests
@@ -39,6 +45,112 @@ def _get_dialect_keywords() -> List[str]:
 
 # A regular expression pattern to match SQL keywords.
 SQL_KEYWORD_PATTERN = r"^(?:" + "|".join(_get_dialect_keywords()) + r")\b"
+
+
+def get_operation_paths() -> List[str]:
+    """Parse OTEL_AWS_HTTP_OPERATION_PATHS env var into a sorted list of path templates (longest first)."""
+    global _operation_paths  # pylint: disable=global-statement
+    if _operation_paths is None:
+        config = os.environ.get(OTEL_AWS_HTTP_OPERATION_PATHS_CONFIG)
+        if config is None or config.strip() == "":
+            _operation_paths = []
+        else:
+            paths = [p.strip() for p in config.split(",") if p.strip()]
+            # Sort longest first (by segment count) for longest-prefix-match
+            paths.sort(key=lambda p: len(p.split("/")), reverse=True)
+            _operation_paths = paths
+    return _operation_paths
+
+
+def reset_operation_paths() -> None:
+    """Reset cached operation paths (for testing)."""
+    global _operation_paths  # pylint: disable=global-statement
+    _operation_paths = None
+
+
+def apply_operation_path_span_name(span: ReadableSpan) -> ReadableSpan:
+    """If OTEL_AWS_HTTP_OPERATION_PATHS is configured and matches, override the span name.
+
+    Returns the span (possibly with modified _name) if a match is found, or the original span unchanged.
+    """
+    paths = get_operation_paths()
+    if not paths:
+        return span
+
+    url_path = _get_url_path(span)
+    if url_path is None or url_path == "":
+        return span
+
+    # Strip query string and fragment (relevant for http.target)
+    for sep in ("?", "#"):
+        idx = url_path.find(sep)
+        if idx >= 0:
+            url_path = url_path[:idx]
+
+    # Normalize trailing slashes
+    while url_path.endswith("/") and len(url_path) > 1:
+        url_path = url_path[:-1]
+
+    url_segments = url_path.split("/")
+    for pattern in paths:
+        normalized_pattern = pattern
+        while normalized_pattern.endswith("/") and len(normalized_pattern) > 1:
+            normalized_pattern = normalized_pattern[:-1]
+        if _segments_match(url_segments, normalized_pattern.split("/")):
+            http_method = _get_http_method(span)
+            new_name = f"{http_method} {pattern}" if http_method else pattern
+            # Override the span name directly
+            span._name = new_name
+            return span
+
+    return span
+
+
+def _get_url_path(span: ReadableSpan) -> str:
+    """Get the URL path from the span, checking url.path first, then falling back to http.target (deprecated)."""
+    if span.attributes is None:
+        return None
+    url_path = span.attributes.get(SpanAttributes.URL_PATH)
+    if url_path is not None:
+        return url_path
+    return span.attributes.get(SpanAttributes.HTTP_TARGET)
+
+
+def _get_http_method(span: ReadableSpan) -> str:
+    """Get the HTTP method from the span, checking http.request.method first, then http.method (deprecated)."""
+    if span.attributes is None:
+        return None
+    method = span.attributes.get(SpanAttributes.HTTP_REQUEST_METHOD)
+    if method is not None:
+        return method
+    return span.attributes.get(SpanAttributes.HTTP_METHOD)
+
+
+def _segments_match(url_segments: List[str], pattern_segments: List[str]) -> bool:
+    """Check if URL segments match a pattern's segments.
+
+    Pattern segments can use {param}, :param, or * as wildcards matching any single non-empty segment.
+    The pattern acts as a prefix — extra URL segments after the pattern are allowed.
+    """
+    for idx, ps in enumerate(pattern_segments):
+        if idx >= len(url_segments):
+            return False
+        us = url_segments[idx]
+
+        if _is_wildcard_segment(ps):
+            if us == "":
+                return False
+            continue
+
+        if ps != us:
+            return False
+
+    return True
+
+
+def _is_wildcard_segment(segment: str) -> bool:
+    """A segment is a wildcard if it uses {param}, :param, or * format."""
+    return (segment.startswith("{") and segment.endswith("}")) or segment.startswith(":") or segment == "*"
 
 
 def get_ingress_operation(__, span: ReadableSpan) -> str:
@@ -166,8 +278,8 @@ def _is_valid_operation(span: ReadableSpan, operation: str) -> bool:
     if operation is None or operation == UNKNOWN_OPERATION:
         return False
 
-    if is_key_present(span, SpanAttributes.HTTP_METHOD):
-        http_method: str = span.attributes.get(SpanAttributes.HTTP_METHOD)
+    http_method: str = _get_http_method(span)
+    if http_method:
         return operation != http_method
 
     return True

@@ -5,6 +5,7 @@ from typing import Callable, Dict, Optional
 from typing_extensions import override
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_REMOTE_SERVICE
+from amazon.opentelemetry.distro._aws_span_processing_util import apply_operation_path_span_name
 from amazon.opentelemetry.distro.metric_attribute_generator import MetricAttributeGenerator
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from opentelemetry.context import Context
@@ -86,6 +87,10 @@ class AwsSpanMetricsProcessor(SpanProcessor):
 
     @override
     def on_end(self, span: ReadableSpan) -> None:
+        # If OTEL_AWS_HTTP_OPERATION_PATHS is configured, override the span name
+        # so that metrics use the configured operation path instead of the original span name.
+        span = apply_operation_path_span_name(span)
+
         attribute_dict: Dict[str, BoundedAttributes] = self._generator.generate_metric_attributes_dict_from_span(
             span, self._resource
         )

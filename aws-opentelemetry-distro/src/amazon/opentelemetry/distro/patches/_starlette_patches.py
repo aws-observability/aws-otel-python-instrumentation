@@ -3,7 +3,7 @@
 # Modifications Copyright The OpenTelemetry Authors. Licensed under the Apache License 2.0 License.
 from logging import Logger, getLogger
 
-from amazon.opentelemetry.distro._utils import is_agentic_observability_enabled
+from amazon.opentelemetry.distro._utils import is_agent_observability_enabled
 
 _logger: Logger = getLogger(__name__)
 
@@ -25,7 +25,7 @@ def _apply_starlette_instrumentation_patches() -> None:
         #
         # Issue for tracking a feature to customize this setting within Starlette:
         # https://github.com/open-telemetry/opentelemetry-python-contrib/issues/3725
-        if is_agentic_observability_enabled():
+        if is_agent_observability_enabled():
             original_init = OpenTelemetryMiddleware.__init__
 
             def patched_init(self, app, **kwargs):
