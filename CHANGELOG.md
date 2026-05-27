@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix(lambda-layer): Standardize CompactConsoleLogRecordExporter output with CloudWatch OTLP backend schema.
+  ([#715](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/715))
 - feat(agent-observability): add `AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT` env var to allow disabling LLO content extraction from spans
   ([#741](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/741))
 - fix(mcp-instrumentation): suppress MCP `/ping` spans when agent observability is enabled
