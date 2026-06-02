@@ -127,7 +127,7 @@ jobs:
 
   eks-py310-amd64:
     if: ${{ always() }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@rds-migration
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -139,7 +139,7 @@ jobs:
   eks-py311-amd64:
     if: ${{ always() }}
     needs: eks-py310-amd64
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@rds-migration
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -151,7 +151,7 @@ jobs:
   eks-py312-amd64:
     if: ${{ always() }}
     needs: eks-py311-amd64
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@rds-migration
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -163,7 +163,7 @@ jobs:
   eks-py313-amd64:
     if: ${{ always() }}
     needs: eks-py312-amd64
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@rds-migration
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -175,7 +175,7 @@ jobs:
   eks-py314-amd64:
     if: ${{ always() }}
     needs: eks-py313-amd64
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@rds-migration
     secrets: inherit
     with:
       aws-region: us-east-1
