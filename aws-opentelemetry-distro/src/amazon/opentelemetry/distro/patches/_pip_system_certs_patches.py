@@ -7,6 +7,10 @@ from logging import Logger, getLogger
 _logger: Logger = getLogger(__name__)
 
 # Module-level guard so the patch is applied at most once per process.
+# The plain bool is intentional: the patch body itself is idempotent
+# (re-running it produces the same final state), so a benign race between two
+# threads where both observe ``_patch_applied is False`` and both run the rebind
+# costs an extra dict assignment and nothing more. We don't pay for a lock here.
 _patch_applied = False
 
 
@@ -51,7 +55,9 @@ def apply_pip_system_certs_compatibility_patch() -> None:
 
     The patch is idempotent: a module-level guard ensures it only runs once per
     process. It is a no-op when ``pip_system_certs`` is not installed or when the
-    references already match ``ssl.SSLContext``.
+    references already match ``ssl.SSLContext``. ``ImportError`` is the only
+    expected failure (e.g., ``botocore`` or ``urllib3`` not installed in some
+    minimal environment) and is silently skipped per library.
     """
     global _patch_applied  # pylint: disable=global-statement
     if _patch_applied:
@@ -77,8 +83,6 @@ def apply_pip_system_certs_compatibility_patch() -> None:
     except ImportError:
         # botocore not installed; nothing to rebind on the botocore side.
         pass
-    except Exception as exc:  # pylint: disable=broad-except
-        _logger.warning("Failed to rebind botocore.httpsession.SSLContext: %s", exc)
 
     try:
         # pylint: disable=import-outside-toplevel
@@ -92,7 +96,5 @@ def apply_pip_system_certs_compatibility_patch() -> None:
     except ImportError:
         # urllib3 not installed; nothing to rebind.
         pass
-    except Exception as exc:  # pylint: disable=broad-except
-        _logger.warning("Failed to rebind urllib3.util.ssl_.SSLContext: %s", exc)
 
     _patch_applied = True

@@ -97,3 +97,49 @@ class TestPipSystemCertsPatches(TestCase):
         apply_pip_system_certs_compatibility_patch()
 
         self.assertEqual(mock_version.call_count, 1)
+
+    @patch("amazon.opentelemetry.distro.patches._pip_system_certs_patches.version")
+    def test_botocore_import_failure_does_not_crash(self, mock_version):
+        """If botocore.httpsession is absent the patch silently skips it and
+        still processes urllib3."""
+        mock_version.return_value = "5.3"
+
+        # pylint: disable=import-outside-toplevel
+        import sys
+        import urllib3.util.ssl_
+
+        saved = sys.modules.get("botocore.httpsession")
+        # Setting to None forces Python to raise ImportError on `import botocore.httpsession`.
+        sys.modules["botocore.httpsession"] = None
+        try:
+            apply_pip_system_certs_compatibility_patch()
+        finally:
+            if saved is None:
+                sys.modules.pop("botocore.httpsession", None)
+            else:
+                sys.modules["botocore.httpsession"] = saved
+
+        # Patch should still mark itself as applied even when one library is missing.
+        self.assertTrue(_pip_system_certs_patches._patch_applied)
+        # urllib3 path should still have been considered.
+        self.assertTrue(hasattr(urllib3.util.ssl_, "SSLContext"))
+
+    @patch("amazon.opentelemetry.distro.patches._pip_system_certs_patches.version")
+    def test_urllib3_import_failure_does_not_crash(self, mock_version):
+        """If urllib3.util.ssl_ is absent the patch silently skips it."""
+        mock_version.return_value = "5.3"
+
+        # pylint: disable=import-outside-toplevel
+        import sys
+
+        saved = sys.modules.get("urllib3.util.ssl_")
+        sys.modules["urllib3.util.ssl_"] = None
+        try:
+            apply_pip_system_certs_compatibility_patch()
+        finally:
+            if saved is None:
+                sys.modules.pop("urllib3.util.ssl_", None)
+            else:
+                sys.modules["urllib3.util.ssl_"] = saved
+
+        self.assertTrue(_pip_system_certs_patches._patch_applied)

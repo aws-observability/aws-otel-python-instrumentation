@@ -64,6 +64,17 @@ class AwsAuthSession(requests.Session):
 
         Credentials are also resolved once here. ``RefreshableCredentials`` handles
         rotation internally on attribute access, so caching the reference is safe.
+
+        On a transient credential resolution failure (e.g., IMDS timeout), the
+        ``_credentials_resolved`` flag is left ``False`` so the next ``request()`` call
+        will retry. Only a successful resolution latches the flag, matching the
+        original "retry every request" behavior for the failure path while keeping
+        the SSL-context-construction cost amortized to once on the success path.
+
+        Note: the read of ``_credentials_resolved`` outside the lock is safe because
+        Python's GIL makes attribute reads/writes atomic. On free-threaded Python
+        builds (3.13t+) this would need a memory barrier; revisit if/when we
+        support those.
         """
         if self._credentials_resolved:
             return
@@ -78,15 +89,17 @@ class AwsAuthSession(requests.Session):
             try:
                 apply_pip_system_certs_compatibility_patch()
             except Exception as patch_error:  # pylint: disable=broad-except
-                _logger.warning(
-                    "Failed to apply pip_system_certs compatibility patch: %s", patch_error
-                )
+                _logger.warning("Failed to apply pip_system_certs compatibility patch: %s", patch_error)
 
             try:
                 self._credentials = self._session.get_credentials()
             except Exception as cred_error:  # pylint: disable=broad-except
+                # Don't latch _credentials_resolved on failure - leave it False so
+                # the next request retries credential resolution. This preserves
+                # self-healing behavior on transient errors (e.g., IMDS timeouts).
                 _logger.error("Failed to load AWS Credentials: %s", cred_error)
                 self._credentials = None
+                return
 
             self._credentials_resolved = True
 

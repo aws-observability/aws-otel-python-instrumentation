@@ -67,6 +67,39 @@ class TestAwsAuthSession(TestCase):
         self.assertEqual(mock_get_credentials.call_count, 1)
 
     @patch("requests.Session.request", return_value=requests.Response())
+    def test_credentials_retry_after_transient_failure(self, _):
+        """A transient ``get_credentials()`` failure must NOT latch the resolved
+        flag. The next ``request()`` call must retry resolution. This preserves
+        self-healing behavior on transient errors (e.g., IMDS timeouts) and matches
+        the pre-fix behavior on the failure path.
+        """
+        # First call raises, subsequent calls succeed.
+        get_credentials_mock = patch(
+            "botocore.session.Session.get_credentials",
+            side_effect=[RuntimeError("transient"), mock_credentials, mock_credentials],
+        )
+        with get_credentials_mock as mock_get_credentials:
+            session = AwsAuthSession("us-east-1", "xray", get_aws_session())
+
+            # 1st request: get_credentials raises, no auth headers added.
+            headers_first = {}
+            session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers=headers_first)
+            self.assertNotIn(AUTHORIZATION_HEADER, headers_first)
+
+            # 2nd request: get_credentials succeeds, auth headers must appear.
+            headers_second = {}
+            session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers=headers_second)
+            self.assertIn(AUTHORIZATION_HEADER, headers_second)
+
+            # 3rd request: cached credentials reused, no further get_credentials calls.
+            headers_third = {}
+            session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers=headers_third)
+            self.assertIn(AUTHORIZATION_HEADER, headers_third)
+
+            # Two resolution attempts: one failed, one succeeded; third request reuses cache.
+            self.assertEqual(mock_get_credentials.call_count, 2)
+
+    @patch("requests.Session.request", return_value=requests.Response())
     @patch("botocore.session.Session.get_credentials", return_value=mock_credentials)
     @patch(
         "amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session"
@@ -85,3 +118,59 @@ class TestAwsAuthSession(TestCase):
         session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers={})
 
         self.assertEqual(mock_apply_patch.call_count, 1)
+
+    @patch("requests.Session.request", return_value=requests.Response())
+    @patch(
+        "amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session"
+        ".apply_pip_system_certs_compatibility_patch",
+        side_effect=RuntimeError("simulated patch failure"),
+    )
+    @patch("botocore.session.Session.get_credentials", return_value=mock_credentials)
+    def test_patch_failure_does_not_break_request(self, _, __, ___):
+        """If the SSL-context-rebind helper itself raises, the failure is logged
+        but ``request()`` still proceeds and signs successfully. The patch is
+        defensive infrastructure, not a hard precondition."""
+        session = AwsAuthSession("us-east-1", "xray", get_aws_session())
+        actual_headers: dict = {}
+
+        session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers=actual_headers)
+
+        self.assertIn(AUTHORIZATION_HEADER, actual_headers)
+
+    @patch("requests.Session.request", return_value=requests.Response())
+    @patch("botocore.session.Session.get_credentials", return_value=mock_credentials)
+    def test_signing_failure_does_not_break_request(self, _, __):
+        """If SigV4 signing itself raises, ``request()`` still issues the
+        unauthenticated request rather than crashing the caller."""
+        session = AwsAuthSession("us-east-1", "xray", get_aws_session())
+
+        with patch("amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session.SigV4Auth") as mock_sigv4:
+            mock_sigv4.return_value.add_auth.side_effect = RuntimeError("signing boom")
+            actual_headers: dict = {}
+            # Should not raise
+            session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers=actual_headers)
+
+        # No auth header because signing raised before headers could be merged.
+        self.assertNotIn(AUTHORIZATION_HEADER, actual_headers)
+
+    @patch("requests.Session.request", return_value=requests.Response())
+    @patch("botocore.session.Session.get_credentials", return_value=mock_credentials)
+    def test_concurrent_requests_resolve_credentials_once(self, mock_get_credentials, _):
+        """Two threads racing on the first request must both observe a single
+        credential resolution. The double-checked locking in ``_ensure_initialized``
+        is what provides this guarantee."""
+        # pylint: disable=import-outside-toplevel
+        from threading import Thread
+
+        session = AwsAuthSession("us-east-1", "xray", get_aws_session())
+
+        def call():
+            session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers={})
+
+        threads = [Thread(target=call) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(mock_get_credentials.call_count, 1)
