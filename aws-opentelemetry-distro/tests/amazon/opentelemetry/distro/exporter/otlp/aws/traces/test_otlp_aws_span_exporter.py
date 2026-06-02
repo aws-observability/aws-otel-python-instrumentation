@@ -50,9 +50,7 @@ class TestOTLPAwsSpanExporter(TestCase):
         self.assertEqual(exporter._session.headers["X-Custom-Header"], "custom-value")
         self.assertIn("User-Agent", exporter._session.headers)
 
-    @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agentic_observability_enabled"
-    )
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agent_observability_enabled")
     def test_ensure_llo_handler_when_disabled(self, mock_is_enabled):
         # Test _ensure_llo_handler when agent observability is disabled
         mock_is_enabled.return_value = False
@@ -66,9 +64,7 @@ class TestOTLPAwsSpanExporter(TestCase):
         mock_is_enabled.assert_called_once()
 
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.get_logger_provider")
-    @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agentic_observability_enabled"
-    )
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agent_observability_enabled")
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.LLOHandler")
     def test_ensure_llo_handler_lazy_initialization(
         self, mock_llo_handler_class, mock_is_enabled, mock_get_logger_provider
@@ -102,9 +98,7 @@ class TestOTLPAwsSpanExporter(TestCase):
         mock_get_logger_provider.assert_not_called()
 
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.get_logger_provider")
-    @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agentic_observability_enabled"
-    )
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agent_observability_enabled")
     def test_ensure_llo_handler_with_existing_logger_provider(self, mock_is_enabled, mock_get_logger_provider):
         # Test when logger_provider is already provided
         mock_is_enabled.return_value = True
@@ -129,9 +123,7 @@ class TestOTLPAwsSpanExporter(TestCase):
             mock_get_logger_provider.assert_not_called()
 
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.get_logger_provider")
-    @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agentic_observability_enabled"
-    )
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agent_observability_enabled")
     def test_ensure_llo_handler_get_logger_provider_fails(self, mock_is_enabled, mock_get_logger_provider):
         # Test when get_logger_provider raises exception
         mock_is_enabled.return_value = True
@@ -145,9 +137,7 @@ class TestOTLPAwsSpanExporter(TestCase):
         self.assertFalse(result)
         self.assertIsNone(exporter._llo_handler)
 
-    @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agentic_observability_enabled"
-    )
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agent_observability_enabled")
     def test_export_with_llo_disabled(self, mock_is_enabled):
         # Test export when LLO is disabled
         mock_is_enabled.return_value = False
@@ -166,9 +156,7 @@ class TestOTLPAwsSpanExporter(TestCase):
             mock_parent_export.assert_called_once_with(spans)
             self.assertIsNone(exporter._llo_handler)
 
-    @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agentic_observability_enabled"
-    )
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agent_observability_enabled")
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.get_logger_provider")
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.LLOHandler")
     def test_export_with_llo_enabled(self, mock_llo_handler_class, mock_get_logger_provider, mock_is_enabled):
@@ -198,9 +186,7 @@ class TestOTLPAwsSpanExporter(TestCase):
             mock_llo_handler.process_spans.assert_called_once_with(original_spans)
             mock_parent_export.assert_called_once_with(processed_spans)
 
-    @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agentic_observability_enabled"
-    )
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agent_observability_enabled")
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.get_logger_provider")
     @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.LLOHandler")
     def test_export_with_llo_processing_failure(
@@ -223,3 +209,66 @@ class TestOTLPAwsSpanExporter(TestCase):
         result = exporter.export(spans)
 
         self.assertEqual(result, SpanExportResult.FAILURE)
+
+    @patch(
+        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter."
+        "is_genai_content_extraction_opted_out"
+    )
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.get_logger_provider")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.LLOHandler")
+    def test_export_skips_llo_when_content_extraction_opted_out(
+        self, mock_llo_handler_class, mock_get_logger_provider, mock_is_enabled, mock_opted_out
+    ):
+        mock_is_enabled.return_value = True
+        mock_opted_out.return_value = True
+        mock_logger_provider = MagicMock(spec=LoggerProvider)
+        mock_get_logger_provider.return_value = mock_logger_provider
+
+        endpoint = "https://xray.us-east-1.amazonaws.com/v1/traces"
+        exporter = OTLPAwsSpanExporter(session=get_aws_session(), aws_region="us-east-1", endpoint=endpoint)
+
+        original_spans = [MagicMock(spec=ReadableSpan)]
+
+        with patch.object(OTLPSpanExporter, "export") as mock_parent_export:
+            mock_parent_export.return_value = SpanExportResult.SUCCESS
+
+            result = exporter.export(original_spans)
+
+            self.assertEqual(result, SpanExportResult.SUCCESS)
+            mock_parent_export.assert_called_once_with(original_spans)
+            mock_llo_handler_class.assert_not_called()
+
+    @patch(
+        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter."
+        "is_genai_content_extraction_opted_out"
+    )
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.is_agent_observability_enabled")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.get_logger_provider")
+    @patch("amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.LLOHandler")
+    def test_export_processes_llo_when_content_extraction_not_opted_out(
+        self, mock_llo_handler_class, mock_get_logger_provider, mock_is_enabled, mock_opted_out
+    ):
+        mock_is_enabled.return_value = True
+        mock_opted_out.return_value = False
+        mock_logger_provider = MagicMock(spec=LoggerProvider)
+        mock_get_logger_provider.return_value = mock_logger_provider
+
+        mock_llo_handler = MagicMock()
+        mock_llo_handler_class.return_value = mock_llo_handler
+
+        endpoint = "https://xray.us-east-1.amazonaws.com/v1/traces"
+        exporter = OTLPAwsSpanExporter(session=get_aws_session(), aws_region="us-east-1", endpoint=endpoint)
+
+        original_spans = [MagicMock(spec=ReadableSpan)]
+        processed_spans = [MagicMock(spec=ReadableSpan)]
+        mock_llo_handler.process_spans.return_value = processed_spans
+
+        with patch.object(OTLPSpanExporter, "export") as mock_parent_export:
+            mock_parent_export.return_value = SpanExportResult.SUCCESS
+
+            result = exporter.export(original_spans)
+
+            self.assertEqual(result, SpanExportResult.SUCCESS)
+            mock_llo_handler.process_spans.assert_called_once_with(original_spans)
+            mock_parent_export.assert_called_once_with(processed_spans)

@@ -8,31 +8,33 @@ from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro._utils import (
     AGENT_OBSERVABILITY_ENABLED,
-    AWS_AGENTIC_OBSERVABILITY_OPT_IN,
+    AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT,
     get_aws_region,
     get_aws_session,
     is_agent_observability_enabled,
-    is_agentic_observability_enabled,
-    is_aws_agentic_observability_opt_in,
+    is_genai_content_extraction_opted_out,
     is_installed,
 )
 
 
 class TestUtils(TestCase):
     def setUp(self):
-        # Store original env var if it exists
         self.original_env = os.environ.get(AGENT_OBSERVABILITY_ENABLED)
-        # Clear it to ensure clean state
+        self.original_opt_out_env = os.environ.get(AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT)
         if AGENT_OBSERVABILITY_ENABLED in os.environ:
             del os.environ[AGENT_OBSERVABILITY_ENABLED]
+        if AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT in os.environ:
+            del os.environ[AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT]
 
     def tearDown(self):
-        # First clear the env var
         if AGENT_OBSERVABILITY_ENABLED in os.environ:
             del os.environ[AGENT_OBSERVABILITY_ENABLED]
-        # Then restore original if it existed
+        if AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT in os.environ:
+            del os.environ[AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT]
         if self.original_env is not None:
             os.environ[AGENT_OBSERVABILITY_ENABLED] = self.original_env
+        if self.original_opt_out_env is not None:
+            os.environ[AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT] = self.original_opt_out_env
 
     def test_is_installed_package_not_found(self):
         """Test is_installed returns False when package is not found"""
@@ -108,41 +110,6 @@ class TestUtils(TestCase):
             del os.environ[AGENT_OBSERVABILITY_ENABLED]
         self.assertFalse(is_agent_observability_enabled())
 
-    def test_is_aws_agentic_observability_opt_in_various_values(self):
-        """Test is_aws_agentic_observability_opt_in with various environment variable values"""
-        os.environ[AWS_AGENTIC_OBSERVABILITY_OPT_IN] = "true"
-        self.assertTrue(is_aws_agentic_observability_opt_in())
-
-        os.environ[AWS_AGENTIC_OBSERVABILITY_OPT_IN] = "True"
-        self.assertTrue(is_aws_agentic_observability_opt_in())
-
-        os.environ[AWS_AGENTIC_OBSERVABILITY_OPT_IN] = "false"
-        self.assertFalse(is_aws_agentic_observability_opt_in())
-
-        if AWS_AGENTIC_OBSERVABILITY_OPT_IN in os.environ:
-            del os.environ[AWS_AGENTIC_OBSERVABILITY_OPT_IN]
-        self.assertFalse(is_aws_agentic_observability_opt_in())
-
-    def test_is_agentic_observability_enabled_combined(self):
-        """Test is_agentic_observability_enabled returns True if either env var is set"""
-        os.environ.pop(AGENT_OBSERVABILITY_ENABLED, None)
-        os.environ.pop(AWS_AGENTIC_OBSERVABILITY_OPT_IN, None)
-        self.assertFalse(is_agentic_observability_enabled())
-
-        os.environ[AGENT_OBSERVABILITY_ENABLED] = "true"
-        self.assertTrue(is_agentic_observability_enabled())
-        os.environ.pop(AGENT_OBSERVABILITY_ENABLED, None)
-
-        os.environ[AWS_AGENTIC_OBSERVABILITY_OPT_IN] = "true"
-        self.assertTrue(is_agentic_observability_enabled())
-        os.environ.pop(AWS_AGENTIC_OBSERVABILITY_OPT_IN, None)
-
-        os.environ[AGENT_OBSERVABILITY_ENABLED] = "true"
-        os.environ[AWS_AGENTIC_OBSERVABILITY_OPT_IN] = "true"
-        self.assertTrue(is_agentic_observability_enabled())
-        os.environ.pop(AGENT_OBSERVABILITY_ENABLED, None)
-        os.environ.pop(AWS_AGENTIC_OBSERVABILITY_OPT_IN, None)
-
     def test_get_aws_session_with_botocore(self):
         """Test get_aws_session when botocore is installed"""
         with patch("amazon.opentelemetry.distro._utils.IS_BOTOCORE_INSTALLED", True):
@@ -211,3 +178,26 @@ class TestUtils(TestCase):
         self.assertEqual(region, "eu-west-1")
 
         os.environ.pop("AWS_DEFAULT_REGION", None)
+
+    def test_is_genai_content_extraction_opted_out_various_values(self):
+        os.environ[AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT] = "true"
+        self.assertTrue(is_genai_content_extraction_opted_out())
+
+        os.environ[AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT] = "True"
+        self.assertTrue(is_genai_content_extraction_opted_out())
+
+        os.environ[AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT] = "TRUE"
+        self.assertTrue(is_genai_content_extraction_opted_out())
+
+        os.environ[AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT] = "false"
+        self.assertFalse(is_genai_content_extraction_opted_out())
+
+        os.environ[AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT] = "False"
+        self.assertFalse(is_genai_content_extraction_opted_out())
+
+        os.environ[AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT] = ""
+        self.assertFalse(is_genai_content_extraction_opted_out())
+
+        if AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT in os.environ:
+            del os.environ[AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT]
+        self.assertFalse(is_genai_content_extraction_opted_out())
