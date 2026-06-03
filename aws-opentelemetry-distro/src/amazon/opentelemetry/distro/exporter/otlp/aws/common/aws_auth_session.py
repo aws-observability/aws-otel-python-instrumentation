@@ -9,9 +9,7 @@ from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
 from botocore.session import Session
 
-from amazon.opentelemetry.distro.patches._pip_system_certs_patches import (
-    apply_pip_system_certs_compatibility_patch,
-)
+from amazon.opentelemetry.distro.patches._pip_system_certs_patches import apply_pip_system_certs_compatibility_patch
 
 _logger = logging.getLogger(__name__)
 

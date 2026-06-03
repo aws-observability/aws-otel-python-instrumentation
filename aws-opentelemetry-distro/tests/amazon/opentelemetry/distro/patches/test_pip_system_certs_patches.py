@@ -5,9 +5,7 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from amazon.opentelemetry.distro.patches import _pip_system_certs_patches
-from amazon.opentelemetry.distro.patches._pip_system_certs_patches import (
-    apply_pip_system_certs_compatibility_patch,
-)
+from amazon.opentelemetry.distro.patches._pip_system_certs_patches import apply_pip_system_certs_compatibility_patch
 
 
 class TestPipSystemCertsPatches(TestCase):
@@ -51,6 +49,7 @@ class TestPipSystemCertsPatches(TestCase):
 
         # pylint: disable=import-outside-toplevel
         import ssl
+
         import botocore.httpsession
         import urllib3.util.ssl_
 
@@ -75,6 +74,7 @@ class TestPipSystemCertsPatches(TestCase):
 
         # pylint: disable=import-outside-toplevel
         import ssl
+
         import botocore.httpsession
         import urllib3.util.ssl_
 
@@ -106,6 +106,7 @@ class TestPipSystemCertsPatches(TestCase):
 
         # pylint: disable=import-outside-toplevel
         import sys
+
         import urllib3.util.ssl_
 
         saved = sys.modules.get("botocore.httpsession")
