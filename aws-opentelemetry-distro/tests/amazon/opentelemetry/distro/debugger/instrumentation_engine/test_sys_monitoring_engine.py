@@ -95,9 +95,16 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
 
     def test_initialization_failure(self):
         """Test that cleanup is called when initialization fails."""
-        with mock.patch("sys.monitoring.register_callback") as mock_register:
-            mock_register.side_effect = RuntimeError("Callback registration failed")
+        # Only fail for OUR tool id; pass other callers (e.g. coverage.py's own sys.monitoring
+        # backend on Python 3.14) through to the real implementation.
+        real_register_callback = sys.monitoring.register_callback
 
+        def fail_for_our_tool(tool_id, *args, **kwargs):
+            if tool_id == self.engine.tool_id:
+                raise RuntimeError("Callback registration failed")
+            return real_register_callback(tool_id, *args, **kwargs)
+
+        with mock.patch("sys.monitoring.register_callback", side_effect=fail_for_our_tool):
             self.engine.initialize(hit_count_callback=self.callback)
 
             self.assertFalse(self.engine._initialized)
@@ -167,7 +174,17 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
         code = func.__code__
 
         self.engine.initialize()
-        with mock.patch("sys.monitoring.set_local_events", side_effect=RuntimeError("set_local_events error")):
+        # Only fail for OUR tool id; pass other callers (e.g. coverage.py's own sys.monitoring
+        # backend on Python 3.14) through to the real implementation. See
+        # test_disable_breakpoints_exception_handling for details.
+        real_set_local_events = sys.monitoring.set_local_events
+
+        def fail_for_our_tool(tool_id, *args, **kwargs):
+            if tool_id == self.engine.tool_id:
+                raise RuntimeError("set_local_events error")
+            return real_set_local_events(tool_id, *args, **kwargs)
+
+        with mock.patch("sys.monitoring.set_local_events", side_effect=fail_for_our_tool):
             self.engine.enable_breakpoints_for_function(
                 code=code, func=func, line_numbers={code.co_firstlineno + 2}, function_key="test.func"
             )
@@ -217,7 +234,17 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
             code=code, func=func, line_numbers={code.co_firstlineno + 2}, function_key="test.func"
         )
 
-        with mock.patch("sys.monitoring.set_local_events", side_effect=RuntimeError("set_local_events error")):
+        # Only fail for OUR tool id. On Python 3.14, coverage.py uses sys.monitoring itself, so a
+        # blanket side_effect would also break coverage's own set_local_events callbacks; scope the
+        # failure to the engine's tool id and pass everything else through to the real implementation.
+        real_set_local_events = sys.monitoring.set_local_events
+
+        def fail_for_our_tool(tool_id, *args, **kwargs):
+            if tool_id == self.engine.tool_id:
+                raise RuntimeError("set_local_events error")
+            return real_set_local_events(tool_id, *args, **kwargs)
+
+        with mock.patch("sys.monitoring.set_local_events", side_effect=fail_for_our_tool):
             self.engine.disable_breakpoints_for_function(code=code, func=func)
         # Should not crash, engine still initialized
         self.assertTrue(self.engine._initialized)
