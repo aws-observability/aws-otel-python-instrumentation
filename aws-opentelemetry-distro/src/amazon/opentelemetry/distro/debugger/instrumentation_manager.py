@@ -94,7 +94,7 @@ class InstrumentationManager:
         except Exception:  # pylint: disable=broad-exception-caught
             return None
 
-    def _select_engine(self) -> Optional[InstrumentationEngine]:  # pylint: disable=no-self-use
+    def _select_engine(self) -> Optional[InstrumentationEngine]:  # pragma: no cover  # pylint: disable=no-self-use
         """
         Select and initialize the appropriate instrumentation engine based on Python version.
 
@@ -102,6 +102,10 @@ class InstrumentationManager:
 
         Returns:
             InstrumentationEngine instance or None if no engine available
+
+        Not unit-tested: it imports and initializes the real, version-specific line-breakpoint
+        engine (registering sys.monitoring or rewriting bytecode). Exercised on every real DI
+        startup and validated end-to-end by the DI contract tests.
         """
         try:
             # Python 3.12+ - Use SysMonitoringEngine

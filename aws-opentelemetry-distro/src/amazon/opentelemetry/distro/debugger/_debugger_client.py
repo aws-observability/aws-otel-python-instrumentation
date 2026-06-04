@@ -199,9 +199,10 @@ class DebuggerClient:
         self._poller = None
         logger.debug("Stopped configuration polling")
 
-    def fetch_configuration_by_type(  # pylint: disable=too-many-return-statements,too-many-branches,too-many-locals,too-many-statements
+    def fetch_configuration_by_type(
         self, instrumentation_type: str, last_sync_time: Optional[float] = None
     ) -> Optional[Dict[str, Any]]:
+        # pylint: disable=too-many-return-statements,too-many-branches,too-many-locals,too-many-statements
         """Fetch configuration for specific instrumentation type.
 
         Args:
@@ -462,7 +463,9 @@ class ConfigurationPoller:
                 DEGRADED_POLL_INTERVAL,
             )
 
-    def _poll_probes_loop(self):  # pylint: disable=too-many-branches
+    def _poll_probes_loop(self):  # pragma: no cover  # pylint: disable=too-many-branches
+        # Long-running daemon thread loop; exercised end-to-end by the DI contract tests
+        # rather than unit tests (it blocks on a stop event and polls on an interval).
         logger.debug("Starting PROBE polling loop for %s : %s", self.client.service_name, self.client.environment)
 
         is_first_fetch = True
@@ -533,7 +536,10 @@ class ConfigurationPoller:
 
         logger.debug("Probe polling loop ended")
 
-    def _poll_breakpoints_loop(self) -> None:  # pylint: disable=too-many-branches,too-many-statements
+    def _poll_breakpoints_loop(self) -> None:  # pragma: no cover
+        # pylint: disable=too-many-branches,too-many-statements
+        # Long-running daemon thread loop; exercised end-to-end by the DI contract tests
+        # rather than unit tests (it blocks on a stop event and polls on an interval).
         logger.debug("Starting BREAKPOINT polling loop for %s : %s", self.client.service_name, self.client.environment)
 
         is_first_fetch = True
