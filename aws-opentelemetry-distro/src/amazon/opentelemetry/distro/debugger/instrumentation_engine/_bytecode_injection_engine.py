@@ -124,7 +124,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         """Check if bytecode injection is supported (Python 3.9-3.11)."""
         return (3, 9) <= sys.version_info < (3, 12) and IS_BYTECODE_INSTALLED
 
-    def enable_breakpoints_for_function(  # pylint: disable=too-many-positional-arguments
+    def enable_breakpoints_for_function(
         self,
         code: CodeType,
         func: FunctionType,

@@ -18,11 +18,7 @@ from unittest import mock
 
 from amazon.opentelemetry.distro.debugger import _status_reporter as sr_module
 from amazon.opentelemetry.distro.debugger._data_models import BreakpointState, FunctionBreakpointSet
-from amazon.opentelemetry.distro.debugger._status_reporter import (
-    ConfigurationStatus,
-    ErrorCause,
-    StatusReporter,
-)
+from amazon.opentelemetry.distro.debugger._status_reporter import ConfigurationStatus, ErrorCause, StatusReporter
 
 
 def _make_client(status_code=200):

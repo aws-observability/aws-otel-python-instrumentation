@@ -42,7 +42,7 @@ DEGRADED_POLL_INTERVAL = 300  # 5 minutes — used when API endpoint is unreacha
 class DebuggerClient:
     """SDK client for fetching configuration from debugger API."""
 
-    def __init__(  # pylint: disable=too-many-positional-arguments
+    def __init__(
         self,
         probe_poll_interval: int,
         breakpoint_poll_interval: int,

@@ -239,7 +239,7 @@ class StatusReporter:
             logger.debug("Error sending status report: %s", exception)
 
     @staticmethod
-    def _build_status_entry(  # pylint: disable=too-many-positional-arguments
+    def _build_status_entry(
         instrumentation_type: str,
         signal_type: str,
         location_hash: str,

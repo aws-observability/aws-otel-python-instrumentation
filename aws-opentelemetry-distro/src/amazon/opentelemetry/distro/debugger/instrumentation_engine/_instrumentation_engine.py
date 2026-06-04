@@ -29,7 +29,7 @@ class InstrumentationEngine(ABC):
         """
 
     @abstractmethod
-    def enable_breakpoints_for_function(  # pylint: disable=too-many-positional-arguments
+    def enable_breakpoints_for_function(
         self,
         code: CodeType,
         func: FunctionType,

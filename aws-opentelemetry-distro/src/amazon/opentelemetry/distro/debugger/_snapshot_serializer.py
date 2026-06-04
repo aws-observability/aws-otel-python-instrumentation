@@ -32,7 +32,7 @@ class SnapshotSerializer:
     circular reference detection, and timeout.
     """
 
-    def __init__(  # pylint: disable=too-many-positional-arguments
+    def __init__(
         self,
         max_depth: int = DEFAULT_MAX_DEPTH,
         max_collection_size: int = DEFAULT_MAX_COLLECTION_SIZE,

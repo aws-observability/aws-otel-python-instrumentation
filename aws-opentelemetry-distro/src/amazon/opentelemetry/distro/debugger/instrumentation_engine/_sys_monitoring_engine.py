@@ -110,7 +110,7 @@ class SysMonitoringEngine(InstrumentationEngine):
             logger.error("Failed to initialize SysMonitoringEngine: %s", exc, exc_info=True)
             self.cleanup()
 
-    def enable_breakpoints_for_function(  # pylint: disable=too-many-positional-arguments
+    def enable_breakpoints_for_function(
         self,
         code: CodeType,
         func: FunctionType,

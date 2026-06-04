@@ -100,7 +100,7 @@ class FunctionWrapper:
         self._serializer = SnapshotSerializer()
         logger.debug("FunctionWrapper initialized")
 
-    def instrument_function(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    def instrument_function(  # pylint: disable=too-many-arguments
         self,
         module_name: str,
         function_name: str,
@@ -392,7 +392,7 @@ class FunctionWrapper:
             return MethodType.CLASS
         return MethodType.INSTANCE
 
-    def _create_wrapper(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+    def _create_wrapper(  # pylint: disable=too-many-arguments
         self,
         original_func: Callable,
         capture_config: Optional[CaptureConfig],
@@ -417,7 +417,7 @@ class FunctionWrapper:
             return self._create_async_wrapper(original_func, capture_config, module_name, location_hash, manager)
         return self._create_sync_wrapper(original_func, capture_config, module_name, location_hash, manager)
 
-    def _create_sync_wrapper(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-statements
+    def _create_sync_wrapper(  # pylint: disable=too-many-arguments,too-many-statements
         self,
         original_func: Callable,
         capture_config: Optional[CaptureConfig],
@@ -534,7 +534,7 @@ class FunctionWrapper:
 
         return sync_wrapper
 
-    def _create_async_wrapper(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-statements
+    def _create_async_wrapper(  # pylint: disable=too-many-arguments,too-many-statements
         self,
         original_func: Callable,
         capture_config: Optional[CaptureConfig],
@@ -925,7 +925,7 @@ class FunctionWrapper:
             logger.warning("Failed to capture return context: %s", exc)
             return None
 
-    def _build_snapshot(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    def _build_snapshot(  # pylint: disable=too-many-arguments,too-many-locals
         self,
         module_name: str,
         qualified_name: str,
