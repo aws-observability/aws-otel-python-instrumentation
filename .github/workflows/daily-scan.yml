@@ -62,13 +62,13 @@ jobs:
             OSS_INDEX, ${{ secrets.OSS_INDEX_SECRET_ARN }}
           parse-json-secrets: true
 
-      # See http://jeremylong.github.io/DependencyCheck/dependency-check-cli/ for installation explanation
+      # See https://dependency-check.github.io/DependencyCheck/dependency-check-cli/ for installation explanation
       - name: Install and run dependency scan
         id: dep_scan
         if: always()
         run: |
           gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 259A55407DD6C00299E6607EFFDE55BE73A2D1ED
-          VERSION=$(curl -s https://jeremylong.github.io/DependencyCheck/current.txt | head -n1 | cut -d' ' -f1)
+          VERSION=$(curl -s https://dependency-check.github.io/DependencyCheck/current.txt | head -n1 | cut -d' ' -f1)
           curl -Ls "https://github.com/dependency-check/DependencyCheck/releases/download/v$VERSION/dependency-check-$VERSION-release.zip" --output dependency-check.zip
           curl -Ls "https://github.com/dependency-check/DependencyCheck/releases/download/v$VERSION/dependency-check-$VERSION-release.zip.asc" --output dependency-check.zip.asc
           gpg --verify dependency-check.zip.asc
