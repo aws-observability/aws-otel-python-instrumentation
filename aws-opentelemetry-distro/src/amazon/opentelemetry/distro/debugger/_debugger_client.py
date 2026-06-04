@@ -42,7 +42,7 @@ DEGRADED_POLL_INTERVAL = 300  # 5 minutes — used when API endpoint is unreacha
 class DebuggerClient:
     """SDK client for fetching configuration from debugger API."""
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-positional-arguments
         self,
         probe_poll_interval: int,
         breakpoint_poll_interval: int,
@@ -199,7 +199,7 @@ class DebuggerClient:
         self._poller = None
         logger.debug("Stopped configuration polling")
 
-    def fetch_configuration_by_type(
+    def fetch_configuration_by_type(  # pylint: disable=too-many-return-statements,too-many-branches,too-many-locals,too-many-statements
         self, instrumentation_type: str, last_sync_time: Optional[float] = None
     ) -> Optional[Dict[str, Any]]:
         """Fetch configuration for specific instrumentation type.
@@ -329,8 +329,8 @@ class DebuggerClient:
         except requests.exceptions.RequestException as exception:
             logger.error("Request failed: %s", exception)
             return None
-        except Exception as e:
-            logger.error("Error fetching %s configuration: %s", instrumentation_type, e)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Error fetching %s configuration: %s", instrumentation_type, exc)
             return None
 
 
@@ -438,7 +438,7 @@ class ConfigurationPoller:
         self._running = False
         logger.debug("Configuration poller stopped")
 
-    def _check_degraded_mode(self, poller_name: str, attempt: int) -> None:
+    def _check_degraded_mode(self, poller_name: str, attempt: int) -> None:  # pylint: disable=no-self-use
         """Log a warning when entering degraded polling mode after repeated initial-fetch failures.
 
         Previously this was a circuit breaker that stopped all polling permanently. Now the poller
@@ -462,7 +462,7 @@ class ConfigurationPoller:
                 DEGRADED_POLL_INTERVAL,
             )
 
-    def _poll_probes_loop(self):
+    def _poll_probes_loop(self):  # pylint: disable=too-many-branches
         logger.debug("Starting PROBE polling loop for %s : %s", self.client.service_name, self.client.environment)
 
         is_first_fetch = True
@@ -497,7 +497,7 @@ class ConfigurationPoller:
 
                 # Handle fetch failure
                 if config is None:
-                    if is_first_fetch:
+                    if is_first_fetch:  # pylint: disable=no-else-continue
                         attempt += 1
                         self._check_degraded_mode("PROBE", attempt)
                         logger.warning("[PROBE] Initial fetch attempt %d failed, will retry", attempt)
@@ -525,7 +525,7 @@ class ConfigurationPoller:
                     is_first_fetch = False
                     attempt = 0
 
-            except Exception as exc:
+            except Exception as exc:  # pylint: disable=broad-exception-caught
                 logger.error("Unexpected error during probe configuration polling: %s", exc)
                 if is_first_fetch:
                     attempt += 1
@@ -533,7 +533,7 @@ class ConfigurationPoller:
 
         logger.debug("Probe polling loop ended")
 
-    def _poll_breakpoints_loop(self) -> None:
+    def _poll_breakpoints_loop(self) -> None:  # pylint: disable=too-many-branches,too-many-statements
         logger.debug("Starting BREAKPOINT polling loop for %s : %s", self.client.service_name, self.client.environment)
 
         is_first_fetch = True
@@ -568,7 +568,7 @@ class ConfigurationPoller:
 
                 # Handle fetch failure
                 if config is None:
-                    if is_first_fetch:
+                    if is_first_fetch:  # pylint: disable=no-else-continue
                         attempt += 1
                         self._check_degraded_mode("BREAKPOINT", attempt)
                         logger.warning("[BREAKPOINT] Initial fetch attempt %d failed, will retry", attempt)
@@ -606,7 +606,7 @@ class ConfigurationPoller:
                     is_first_fetch = False
                     attempt = 0
 
-            except Exception as exc:
+            except Exception as exc:  # pylint: disable=broad-exception-caught
                 logger.error("Unexpected error during breakpoint configuration polling: %s", exc)
                 if is_first_fetch:
                     attempt += 1

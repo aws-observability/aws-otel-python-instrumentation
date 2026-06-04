@@ -83,7 +83,7 @@ class InstrumentationManager:
     def _build_resource(service, environment):
         """Build a Resource with service name and environment for the OTLP LoggerProvider."""
         try:
-            from opentelemetry.sdk.resources import Resource
+            from opentelemetry.sdk.resources import Resource  # pylint: disable=import-outside-toplevel
 
             attrs = {}
             if service:
@@ -91,7 +91,7 @@ class InstrumentationManager:
             if environment:
                 attrs["deployment.environment"] = environment
             return Resource.create(attrs) if attrs else None
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             return None
 
     def _select_engine(self) -> Optional[InstrumentationEngine]:  # pylint: disable=no-self-use
@@ -253,7 +253,9 @@ class InstrumentationManager:
             return {}
 
     @staticmethod
-    def _has_changed(old: FunctionBreakpointSet, new: FunctionBreakpointSet) -> bool:
+    def _has_changed(  # pylint: disable=too-many-return-statements
+        old: FunctionBreakpointSet, new: FunctionBreakpointSet
+    ) -> bool:
         """
         Check if breakpoint set has changed by comparing config identity.
 
@@ -354,7 +356,7 @@ class InstrumentationManager:
             logger.error("Error getting unchanged breakpoints: %s", exception, exc_info=True)
             return set()
 
-    def _apply_function(self, bp_set: FunctionBreakpointSet):
+    def _apply_function(self, bp_set: FunctionBreakpointSet):  # pylint: disable=too-many-branches,too-many-statements
         """
         Apply function wrapper (no line breakpoints yet - Phase 5).
 
@@ -681,7 +683,9 @@ class InstrumentationManager:
         except Exception as exception:  # pylint: disable=broad-exception-caught
             logger.error("Error cleaning up orphaned states: %s", exception, exc_info=True)
 
-    def apply_configuration(self, configs: List[BreakpointConfiguration]) -> Dict[str, any]:
+    def apply_configuration(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+        self, configs: List[BreakpointConfiguration]
+    ) -> Dict[str, any]:
         """
         Apply new breakpoint configuration atomically with error isolation.
 

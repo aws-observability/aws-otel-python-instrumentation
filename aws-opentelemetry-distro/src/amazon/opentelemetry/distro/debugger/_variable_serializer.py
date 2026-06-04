@@ -24,7 +24,7 @@ class VariableSerializer:
     """
 
     @staticmethod
-    def safe_json_serialize(
+    def safe_json_serialize(  # pylint: disable=too-many-positional-arguments
         obj: Any,
         max_length: int = DEFAULT_MAX_STRING_LENGTH,
         max_collection_depth: int = 3,

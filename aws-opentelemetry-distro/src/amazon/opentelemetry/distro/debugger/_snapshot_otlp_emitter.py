@@ -90,7 +90,7 @@ class SnapshotOtlpEmitter:
                 logger.debug("DI OTLP emitter initialized (endpoint: %s)", self._logs_endpoint)
                 return True
 
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 logger.warning(
                     "Failed to initialize DI OTLP LoggerProvider, snapshots will not be exported",
                     exc_info=True,
@@ -111,7 +111,7 @@ class SnapshotOtlpEmitter:
 
         try:
             self._emit_snapshot_internal(snapshot, config)
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             logger.warning("Error emitting snapshot as OTLP LogRecord", exc_info=True)
 
     def _emit_snapshot_internal(self, snapshot, config):
@@ -186,7 +186,7 @@ class SnapshotOtlpEmitter:
                 self._logger_provider.force_flush()
                 self._logger_provider.shutdown()
                 logger.debug("DI OTLP LoggerProvider shut down")
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 logger.warning("Error shutting down DI OTLP LoggerProvider", exc_info=True)
             self._logger_provider = None
             self._event_logger = None

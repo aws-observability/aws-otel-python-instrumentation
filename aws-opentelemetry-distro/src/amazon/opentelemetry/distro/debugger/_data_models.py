@@ -227,7 +227,7 @@ class BreakpointConfiguration:
         return self.instrumentation_type == "BREAKPOINT"
 
     # TODO: Should refactor and simplify this method in the future and get rid of the disable.
-    # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+    # pylint: disable=too-many-locals,too-many-branches,too-many-statements,too-many-return-statements
     @classmethod
     def from_api_config(cls, breakpoint_config: Dict[str, Any]) -> Optional["BreakpointConfiguration"]:
         """
@@ -450,8 +450,8 @@ class BreakpointConfiguration:
                         # Try as ISO 8601 string
                         elif isinstance(expires_at_value, str):
                             expires_at = isoparse(expires_at_value)
-                    except Exception as e:
-                        logger.warning("Invalid ExpiresAt format %s: %s", expires_at_value, e)
+                    except Exception as exc:  # pylint: disable=broad-exception-caught
+                        logger.warning("Invalid ExpiresAt format %s: %s", expires_at_value, exc)
             elif breakpoint_config.get("ExpiresAt"):
                 logger.debug("Ignoring ExpiresAt for PROBE instrumentation %s.%s", module, function)
 
@@ -464,8 +464,8 @@ class BreakpointConfiguration:
                         created_at = datetime.fromtimestamp(created_at_value, tz=timezone.utc)
                     elif isinstance(created_at_value, str):
                         created_at = isoparse(created_at_value)
-                except Exception as e:
-                    logger.warning("Invalid CreatedAt format %s: %s", created_at_value, e)
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    logger.warning("Invalid CreatedAt format %s: %s", created_at_value, exc)
 
             # Parse and clamp max_hits
             # For PROBE: Ignore max_hits (permanent instrumentation)

@@ -38,7 +38,7 @@ def _create_http_handler(logs_collector: MockCollectorLogsService, metrics_colle
         return raw
 
     class OtlpHttpHandler(BaseHTTPRequestHandler):
-        def do_POST(self):
+        def do_POST(self):  # pylint: disable=invalid-name
             if self.path == "/v1/logs":
                 body = _read_body(self)
                 request = ExportLogsServiceRequest()

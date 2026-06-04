@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+# pylint: disable=too-many-lines
 # pylint: disable=broad-exception-caught
 
 """
@@ -99,7 +100,7 @@ class FunctionWrapper:
         self._serializer = SnapshotSerializer()
         logger.debug("FunctionWrapper initialized")
 
-    def instrument_function(  # pylint: disable=too-many-arguments
+    def instrument_function(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         module_name: str,
         function_name: str,
@@ -391,7 +392,7 @@ class FunctionWrapper:
             return MethodType.CLASS
         return MethodType.INSTANCE
 
-    def _create_wrapper(  # pylint: disable=too-many-arguments
+    def _create_wrapper(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         original_func: Callable,
         capture_config: Optional[CaptureConfig],
@@ -416,7 +417,7 @@ class FunctionWrapper:
             return self._create_async_wrapper(original_func, capture_config, module_name, location_hash, manager)
         return self._create_sync_wrapper(original_func, capture_config, module_name, location_hash, manager)
 
-    def _create_sync_wrapper(  # pylint: disable=too-many-arguments
+    def _create_sync_wrapper(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-statements
         self,
         original_func: Callable,
         capture_config: Optional[CaptureConfig],
@@ -427,7 +428,7 @@ class FunctionWrapper:
         """Create synchronous wrapper that produces Snapshots instead of Spans."""
         wrapper_self = self
 
-        def sync_wrapper(*args, **kwargs):
+        def sync_wrapper(*args, **kwargs):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
             """
             CRITICAL: This wrapper must never crash user's function.
             All instrumentation errors are caught and logged.
@@ -533,7 +534,7 @@ class FunctionWrapper:
 
         return sync_wrapper
 
-    def _create_async_wrapper(  # pylint: disable=too-many-arguments
+    def _create_async_wrapper(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-statements
         self,
         original_func: Callable,
         capture_config: Optional[CaptureConfig],
@@ -544,7 +545,9 @@ class FunctionWrapper:
         """Create asynchronous wrapper that produces Snapshots instead of Spans."""
         wrapper_self = self
 
-        async def async_wrapper(*args, **kwargs):
+        async def async_wrapper(
+            *args, **kwargs
+        ):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
             """
             CRITICAL: This wrapper must never crash user's async function.
             All instrumentation errors are caught and logged.
@@ -667,8 +670,6 @@ class FunctionWrapper:
             # Fallback: match by filename stem
             main_file = getattr(main_module, "__file__", None)
             if main_file:
-                import os  # pylint: disable=import-outside-toplevel
-
                 stem = os.path.splitext(os.path.basename(main_file))[0]
                 if stem == module_name:
                     return main_module
@@ -924,7 +925,7 @@ class FunctionWrapper:
             logger.warning("Failed to capture return context: %s", exc)
             return None
 
-    def _build_snapshot(  # pylint: disable=too-many-arguments
+    def _build_snapshot(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
         self,
         module_name: str,
         qualified_name: str,
@@ -952,21 +953,21 @@ class FunctionWrapper:
             # Try OTEL_RESOURCE_ATTRIBUTES
             for pair in os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "").split(","):
                 if "=" in pair:
-                    k, v = pair.split("=", 1)
-                    if k.strip() == "service.name":
-                        service_name = v.strip()
+                    key, value = pair.split("=", 1)
+                    if key.strip() == "service.name":
+                        service_name = value.strip()
                         break
 
         environment = None
         for pair in os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "").split(","):
             if "=" in pair:
-                k, v = pair.split("=", 1)
-                k = k.strip()
-                if k == "deployment.environment.name":
-                    environment = v.strip()
+                key, value = pair.split("=", 1)
+                key = key.strip()
+                if key == "deployment.environment.name":
+                    environment = value.strip()
                     break
-                if k == "deployment.environment" and not environment:
-                    environment = v.strip()
+                if key == "deployment.environment" and not environment:
+                    environment = value.strip()
 
         # Build instrumentation details per v1 spec
         method_name = qualified_name.split(".")[-1]

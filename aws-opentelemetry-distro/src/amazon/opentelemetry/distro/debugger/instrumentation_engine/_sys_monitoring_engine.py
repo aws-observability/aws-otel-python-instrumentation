@@ -110,7 +110,7 @@ class SysMonitoringEngine(InstrumentationEngine):
             logger.error("Failed to initialize SysMonitoringEngine: %s", exc, exc_info=True)
             self.cleanup()
 
-    def enable_breakpoints_for_function(
+    def enable_breakpoints_for_function(  # pylint: disable=too-many-positional-arguments
         self,
         code: CodeType,
         func: FunctionType,
@@ -305,7 +305,9 @@ class SysMonitoringEngine(InstrumentationEngine):
             pass
         return None
 
-    def _handle_breakpoint(self, code: CodeType, line_number: int):
+    def _handle_breakpoint(
+        self, code: CodeType, line_number: int
+    ):  # pylint: disable=too-many-locals,too-many-statements
         """
         Handle a breakpoint hit by creating a line-level Snapshot.
 

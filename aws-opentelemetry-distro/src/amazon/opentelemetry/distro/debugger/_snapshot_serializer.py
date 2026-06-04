@@ -32,7 +32,7 @@ class SnapshotSerializer:
     circular reference detection, and timeout.
     """
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-positional-arguments
         self,
         max_depth: int = DEFAULT_MAX_DEPTH,
         max_collection_size: int = DEFAULT_MAX_COLLECTION_SIZE,
@@ -64,7 +64,7 @@ class SnapshotSerializer:
             type_name = type(value).__name__
             return CapturedValue(type=type_name, not_captured_reason="timeout")
 
-    def _serialize_value(
+    def _serialize_value(  # pylint: disable=too-many-return-statements
         self,
         value: Any,
         depth: int,
@@ -133,13 +133,13 @@ class SnapshotSerializer:
         """Serialize a dict as entries list."""
         original_size = len(value)
         entries = []
-        for i, (k, v) in enumerate(value.items()):
-            if i >= self.max_collection_size:
+        for idx, (key, value_item) in enumerate(value.items()):
+            if idx >= self.max_collection_size:
                 break
             if time.monotonic() > deadline:
                 return CapturedValue(type="dict", not_captured_reason="timeout")
-            key_cv = self._serialize_value(k, depth + 1, deadline, seen)
-            val_cv = self._serialize_value(v, depth + 1, deadline, seen)
+            key_cv = self._serialize_value(key, depth + 1, deadline, seen)
+            val_cv = self._serialize_value(value_item, depth + 1, deadline, seen)
             entries.append({"key": key_cv, "value": val_cv})
 
         cv = CapturedValue(type="dict", entries=entries)
@@ -154,8 +154,8 @@ class SnapshotSerializer:
         items = list(value)
         original_size = len(items)
         elements = []
-        for i, item in enumerate(items):
-            if i >= self.max_collection_size:
+        for idx, item in enumerate(items):
+            if idx >= self.max_collection_size:
                 break
             if time.monotonic() > deadline:
                 return CapturedValue(type=type_name, not_captured_reason="timeout")
@@ -176,7 +176,7 @@ class SnapshotSerializer:
 
         try:
             obj_dict = getattr(value, "__dict__", None)
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             # Property descriptor on __dict__ threw — fall back to type name only
             return CapturedValue(type=type_name, not_captured_reason="fieldCount")
 
@@ -184,7 +184,7 @@ class SnapshotSerializer:
             # No __dict__ — fall back to str representation
             try:
                 repr_str = repr(value)
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 repr_str = f"<{type_name}: repr failed>"
             return CapturedValue(type=type_name, value=self._truncate_str(repr_str))
 
@@ -192,7 +192,7 @@ class SnapshotSerializer:
         field_count = 0
         try:
             dict_items = obj_dict.items()
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             # Custom dict-like with broken items() — fall back to type only
             return CapturedValue(type=type_name, not_captured_reason="fieldCount")
 
