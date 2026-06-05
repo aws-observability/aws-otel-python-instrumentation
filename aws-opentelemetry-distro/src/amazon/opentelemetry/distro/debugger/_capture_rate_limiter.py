@@ -15,6 +15,7 @@ application's hot path with minimal overhead.
 
 import threading
 import time
+from typing import Optional
 
 DEFAULT_MAX_CAPTURES_PER_SECOND = 5
 
@@ -28,25 +29,25 @@ class CaptureRateLimiter:
         if max_captures_per_second <= 0:
             raise ValueError(f"max_captures_per_second must be positive, got: {max_captures_per_second}")
         self._max_captures_per_second = max_captures_per_second
-        self._window_start_ns: int = 0  # lazily set on first try_acquire
+        self._window_start_ns: Optional[int] = None  # lazily set on first try_acquire
         self._capture_count: int = 0
         self._lock = threading.Lock()
 
-    def try_acquire(self, now_ns: int = 0) -> bool:
+    def try_acquire(self, now_ns: Optional[int] = None) -> bool:
         """Try to acquire a capture permit.
 
         Args:
-            now_ns: Current monotonic time in nanoseconds. If 0, uses time.monotonic_ns().
+            now_ns: Current monotonic time in nanoseconds. If None, uses time.monotonic_ns().
 
         Returns:
             True if capture is allowed, False if rate limit exceeded.
         """
-        if now_ns == 0:
+        if now_ns is None:
             now_ns = time.monotonic_ns()
 
         with self._lock:
             # Lazy init: first call sets the window start
-            if self._window_start_ns == 0:
+            if self._window_start_ns is None:
                 self._window_start_ns = now_ns
                 self._capture_count = 1
                 return True
