@@ -615,9 +615,7 @@ class InstrumentationManager:
                         # counting toward max_hits so a burst can't exhaust the budget
                         # of attempts before any snapshots are actually captured.
                         if not state.rate_limiter.try_acquire():
-                            logger.debug(
-                                "Breakpoint %s rate-limited (count %d)", breakpoint_key, state.hit_count
-                            )
+                            logger.debug("Breakpoint %s rate-limited (count %d)", breakpoint_key, state.hit_count)
                             return False
 
                         # Capture is going to proceed — count it.
