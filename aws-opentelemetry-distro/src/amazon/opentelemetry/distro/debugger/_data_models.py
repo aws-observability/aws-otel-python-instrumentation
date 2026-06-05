@@ -446,7 +446,7 @@ class BreakpointConfiguration:
                     try:
                         # Try as Unix timestamp (float/int) first
                         if isinstance(expires_at_value, (int, float)):
-                            expires_at = datetime.fromtimestamp(expires_at_value)
+                            expires_at = datetime.fromtimestamp(expires_at_value, tz=timezone.utc)
                         # Try as ISO 8601 string
                         elif isinstance(expires_at_value, str):
                             expires_at = isoparse(expires_at_value)
