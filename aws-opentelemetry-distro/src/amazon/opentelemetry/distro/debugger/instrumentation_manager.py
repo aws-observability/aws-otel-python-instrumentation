@@ -611,17 +611,27 @@ class InstrumentationManager:
                         line_number = int(breakpoint_key.split(":")[-1])
                         config = bp_set.breakpoints.get(line_number)
 
-                        # Increment hit count and set flag for status reporting
+                        # Check rate limit FIRST — transient throttle, skip without
+                        # counting toward max_hits so a burst can't exhaust the budget
+                        # of attempts before any snapshots are actually captured.
+                        if not state.rate_limiter.try_acquire():
+                            logger.debug(
+                                "Breakpoint %s rate-limited (count %d)", breakpoint_key, state.hit_count
+                            )
+                            return False
+
+                        # Capture is going to proceed — count it.
                         state.hit_count += 1
                         state.hit_in_last_period = True
 
-                        # Report ACTIVE immediately on first hit
+                        # Report ACTIVE immediately on first successful hit
                         if state.hit_count == 1:
                             self._report_immediate(
                                 state.location_hash, state.instrumentation_type, ConfigurationStatus.ACTIVE
                             )
 
-                        # Check maxHits disable condition (BREAKPOINT only, not PROBE)
+                        # Check maxHits disable condition (BREAKPOINT only, not PROBE).
+                        # After hit_count reaches max_hits, the next call disables.
                         if config and not config.is_permanent and state.hit_count > config.max_hits:
                             # Disable the breakpoint
                             state.is_disabled = True
@@ -635,11 +645,6 @@ class InstrumentationManager:
                             self._report_immediate(
                                 state.location_hash, state.instrumentation_type, ConfigurationStatus.DISABLED
                             )
-                            return False
-
-                        # Check rate limit — transient throttle, skip capture without disabling
-                        if not state.rate_limiter.try_acquire():
-                            logger.debug("Breakpoint %s rate-limited (count %d)", breakpoint_key, state.hit_count)
                             return False
 
                         logger.debug("Breakpoint %s hit count: %d", breakpoint_key, state.hit_count)
