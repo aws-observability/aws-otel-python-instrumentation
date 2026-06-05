@@ -944,8 +944,9 @@ class FunctionWrapper:
         """
         timestamp_ms = int(time.time() * 1000)
 
-        # Convert duration from nanoseconds to milliseconds per v1 spec
-        duration_ms = duration_ns / 1_000_000 if duration_ns else None
+        # Convert duration from nanoseconds to milliseconds per v1 spec.
+        # Snapshot.duration is typed Optional[int]; use floor division to keep it int.
+        duration_ms = duration_ns // 1_000_000 if duration_ns else None
 
         # Service and environment from OTel resource attributes
         service_name = os.environ.get("OTEL_SERVICE_NAME")
