@@ -789,6 +789,7 @@ class FunctionWrapper:
                 return  # Flask not installed, nothing to patch
 
             func_name = getattr(original_func, "__name__", "unknown")
+            func_module = getattr(original_func, "__module__", None)
 
             # Scan module attributes for Flask app instances
             for attr_name in dir(module):
@@ -796,7 +797,9 @@ class FunctionWrapper:
                     attr = getattr(module, attr_name, None)
                     if attr is None or not isinstance(attr, Flask):
                         continue
-                    FunctionWrapper._patch_single_flask_app(attr, attr_name, original_func, new_func, func_name)
+                    FunctionWrapper._patch_single_flask_app(
+                        attr, attr_name, original_func, new_func, func_name, func_module
+                    )
                 except Exception as exc:
                     logger.warning("Error checking module attribute '%s' for Flask app: %s", attr_name, exc)
                     continue
@@ -805,7 +808,7 @@ class FunctionWrapper:
             logger.warning("Error patching Flask view_functions: %s", exc)
 
     @staticmethod
-    def _patch_single_flask_app(flask_app, app_name, original_func, new_func, func_name):
+    def _patch_single_flask_app(flask_app, app_name, original_func, new_func, func_name, func_module=None):
         """Patch view_functions in a single Flask app instance."""
         view_functions = getattr(flask_app, "view_functions", None)
         if not view_functions or not isinstance(view_functions, dict):
@@ -828,21 +831,33 @@ class FunctionWrapper:
             )
             return
 
-        # Identity check failed — try name-based matching (handles OTel Flask instrumentation wrapping)
-        matching_endpoints = [ep for ep, vf in view_functions.items() if getattr(vf, "__name__", None) == func_name]
+        # Identity check failed — try name+module-based matching. functools.wraps
+        # (used by OTel's Flask instrumentation) preserves __module__, so requiring
+        # both name and module avoids accidentally patching a same-named view from
+        # a different module. If the original has no __module__, fall back to
+        # name-only matching.
+        def _matches(vf):
+            if getattr(vf, "__name__", None) != func_name:
+                return False
+            if func_module is None:
+                return True
+            return getattr(vf, "__module__", None) == func_module
+
+        matching_endpoints = [ep for ep, vf in view_functions.items() if _matches(vf)]
         if matching_endpoints:
             logger.debug(
-                "Flask app '%s' has endpoint(s) %s with name '%s' but identity mismatch "
-                "(original_func id=%d, view_func id=%d). Patching by name instead.",
+                "Flask app '%s' has endpoint(s) %s with name '%s' (module '%s') but identity "
+                "mismatch (original_func id=%d, view_func id=%d). Patching by name+module.",
                 app_name,
                 matching_endpoints,
                 func_name,
+                func_module,
                 id(original_func),
                 id(view_functions[matching_endpoints[0]]),
             )
             for ep in matching_endpoints:
                 view_functions[ep] = new_func
-                logger.debug("Patched Flask view_functions[%s] by name match", ep)
+                logger.debug("Patched Flask view_functions[%s] by name+module match", ep)
 
     @staticmethod
     def _get_qualified_name(original_func: Callable) -> str:
