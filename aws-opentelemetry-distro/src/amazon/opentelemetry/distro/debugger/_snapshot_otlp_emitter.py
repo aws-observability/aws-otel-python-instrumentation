@@ -64,11 +64,6 @@ class SnapshotOtlpEmitter:
         Uses double-checked locking to be thread-safe without contention on the
         common path (already initialized).
         """
-        if self._event_logger is not None:
-            return True
-        if self._init_failed:
-            return False
-
         with self._lock:
             if self._event_logger is not None:
                 return True
