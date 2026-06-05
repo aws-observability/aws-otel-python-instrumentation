@@ -15,7 +15,7 @@ import importlib.util
 import logging
 import sys
 from threading import RLock
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from amazon.opentelemetry.distro.debugger._data_models import (
     BreakpointConfiguration,
@@ -689,7 +689,7 @@ class InstrumentationManager:
 
     def apply_configuration(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         self, configs: List[BreakpointConfiguration]
-    ) -> Dict[str, any]:
+    ) -> Dict[str, Any]:
         """
         Apply new breakpoint configuration atomically with error isolation.
 
