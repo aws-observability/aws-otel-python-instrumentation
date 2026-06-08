@@ -8,6 +8,7 @@ Replaces the flat span-attribute serialization with the recursive
 CapturedValue tree structure defined in the Snapshot v1 spec.
 """
 
+import itertools
 import logging
 import time
 from typing import Any, Dict, Set
@@ -151,12 +152,9 @@ class SnapshotSerializer:
     def _serialize_collection(self, value: Any, depth: int, deadline: float, seen: Set[int]) -> CapturedValue:
         """Serialize list/tuple/set/frozenset as elements."""
         type_name = type(value).__name__
-        items = list(value)
-        original_size = len(items)
+        original_size = len(value)
         elements = []
-        for idx, item in enumerate(items):
-            if idx >= self.max_collection_size:
-                break
+        for idx, item in enumerate(itertools.islice(value, self.max_collection_size)):
             if time.monotonic() > deadline:
                 return CapturedValue(type=type_name, not_captured_reason="timeout")
             elements.append(self._serialize_value(item, depth + 1, deadline, seen))
