@@ -154,7 +154,7 @@ class SnapshotSerializer:
         type_name = type(value).__name__
         original_size = len(value)
         elements = []
-        for idx, item in enumerate(itertools.islice(value, self.max_collection_size)):
+        for item in itertools.islice(value, self.max_collection_size):
             if time.monotonic() > deadline:
                 return CapturedValue(type=type_name, not_captured_reason="timeout")
             elements.append(self._serialize_value(item, depth + 1, deadline, seen))
