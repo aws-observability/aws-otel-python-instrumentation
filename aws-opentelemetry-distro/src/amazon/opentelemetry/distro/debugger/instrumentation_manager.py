@@ -593,64 +593,56 @@ class InstrumentationManager:
         logger.debug("increment_hit_count called for %s, status_reporter=%s", breakpoint_key, self._status_reporter)
         try:
             with self._lock:
-                # Find the breakpoint state
-                # TODO: optimize the breakpoint lookup using function name and breakpoint id or something.
-                #   we shouldn't be iterating on functions and breakpoints for every hit and increment.
-                for bp_set in self._active_functions.values():
-                    if breakpoint_key in bp_set.states:
-                        state = bp_set.states[breakpoint_key]
+                func_key = breakpoint_key.rsplit(":", 1)[0]
+                bp_set = self._active_functions.get(func_key)
+                if bp_set is None or breakpoint_key not in bp_set.states:
+                    logger.warning("Breakpoint %s not found in active functions", breakpoint_key)
+                    return False
+                state = bp_set.states[breakpoint_key]
 
-                        # Don't increment if already disabled
-                        if state.is_disabled:
-                            logger.debug("Breakpoint %s is disabled, ignoring hit", breakpoint_key)
-                            return False
+                # Don't increment if already disabled
+                if state.is_disabled:
+                    logger.debug("Breakpoint %s is disabled, ignoring hit", breakpoint_key)
+                    return False
 
-                        # Find the configuration for this breakpoint
-                        # TODO: Should be using the BreakpointConfiguration object to get
-                        # this information instead of splitting keys.
-                        line_number = int(breakpoint_key.split(":")[-1])
-                        config = bp_set.breakpoints.get(line_number)
+                # Find the configuration for this breakpoint
+                line_number = int(breakpoint_key.rsplit(":", 1)[-1])
+                config = bp_set.breakpoints.get(line_number)
 
-                        # Check rate limit FIRST — transient throttle, skip without
-                        # counting toward max_hits so a burst can't exhaust the budget
-                        # of attempts before any snapshots are actually captured.
-                        if not state.rate_limiter.try_acquire():
-                            logger.debug("Breakpoint %s rate-limited (count %d)", breakpoint_key, state.hit_count)
-                            return False
+                # Check rate limit FIRST — transient throttle, skip without
+                # counting toward max_hits so a burst can't exhaust the budget
+                # of attempts before any snapshots are actually captured.
+                if not state.rate_limiter.try_acquire():
+                    logger.debug("Breakpoint %s rate-limited (count %d)", breakpoint_key, state.hit_count)
+                    return False
 
-                        # Capture is going to proceed — count it.
-                        state.hit_count += 1
-                        state.hit_in_last_period = True
+                # Capture is going to proceed — count it.
+                state.hit_count += 1
+                state.hit_in_last_period = True
 
-                        # Report ACTIVE immediately on first successful hit
-                        if state.hit_count == 1:
-                            self._report_immediate(
-                                state.location_hash, state.instrumentation_type, ConfigurationStatus.ACTIVE
-                            )
+                # Report ACTIVE immediately on first successful hit
+                if state.hit_count == 1:
+                    self._report_immediate(state.location_hash, state.instrumentation_type, ConfigurationStatus.ACTIVE)
 
-                        # Check maxHits disable condition (BREAKPOINT only, not PROBE).
-                        # After hit_count reaches max_hits, the next call disables.
-                        if config and not config.is_permanent and state.hit_count > config.max_hits:
-                            # Disable the breakpoint
-                            state.is_disabled = True
-                            logger.debug(
-                                "Disabled breakpoint %s after %d hits (limit: %d)",
-                                breakpoint_key,
-                                state.hit_count,
-                                config.max_hits,
-                            )
-                            # Report DISABLED immediately
-                            self._report_immediate(
-                                state.location_hash, state.instrumentation_type, ConfigurationStatus.DISABLED
-                            )
-                            return False
+                # Check maxHits disable condition (BREAKPOINT only, not PROBE).
+                # After hit_count reaches max_hits, the next call disables.
+                if config and not config.is_permanent and state.hit_count > config.max_hits:
+                    # Disable the breakpoint
+                    state.is_disabled = True
+                    logger.debug(
+                        "Disabled breakpoint %s after %d hits (limit: %d)",
+                        breakpoint_key,
+                        state.hit_count,
+                        config.max_hits,
+                    )
+                    # Report DISABLED immediately
+                    self._report_immediate(
+                        state.location_hash, state.instrumentation_type, ConfigurationStatus.DISABLED
+                    )
+                    return False
 
-                        logger.debug("Breakpoint %s hit count: %d", breakpoint_key, state.hit_count)
-                        return True
-
-                # Breakpoint not found - this shouldn't happen but handle gracefully
-                logger.warning("Breakpoint %s not found in active functions", breakpoint_key)
-                return False
+                logger.debug("Breakpoint %s hit count: %d", breakpoint_key, state.hit_count)
+                return True
 
         except Exception as exception:  # pylint: disable=broad-exception-caught
             logger.error("Error incrementing hit count for %s: %s", breakpoint_key, exception, exc_info=True)
