@@ -83,6 +83,11 @@ def get_snapshot_emitter():
 def set_snapshot_emitter(emitter):
     """Set the global snapshot OTLP emitter instance."""
     global _snapshot_emitter  # pylint: disable=global-statement
+    if _snapshot_emitter is not None and _snapshot_emitter is not emitter:
+        try:
+            _snapshot_emitter.shutdown()
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.debug("Error shutting down previous emitter", exc_info=True)
     _snapshot_emitter = emitter
 
 
