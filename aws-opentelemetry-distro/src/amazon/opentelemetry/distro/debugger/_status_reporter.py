@@ -6,6 +6,7 @@ Status reporter for instrumentation configurations.
 """
 
 import logging
+import queue
 import threading
 import time
 from datetime import datetime, timezone
@@ -63,24 +64,28 @@ class StatusReporter:
         self._lock = threading.Lock()
 
         # Background thread for continuous reporting
-        self._reporter_thread: Optional[threading.Thread] = None
+        self._periodic_status_reporter_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+
+        self._background_status_reporter = BackgroundStatusReporter(self._send_report, self._stop_event)
 
         logger.debug("StatusReporter initialized")
 
     def start(self):
-        """Start background thread for continuous reporting."""
-        if self._reporter_thread is None or not self._reporter_thread.is_alive():
+        """Start background threads for continuous + immediate reporting."""
+        if self._periodic_status_reporter_thread is None or not self._periodic_status_reporter_thread.is_alive():
             self._stop_event.clear()
-            self._reporter_thread = threading.Thread(target=self._report_loop, daemon=True)
-            self._reporter_thread.start()
+            self._periodic_status_reporter_thread = threading.Thread(target=self._report_loop, daemon=True)
+            self._periodic_status_reporter_thread.start()
             logger.debug("Status reporter background thread started")
+        self._background_status_reporter.start()
 
     def stop(self):
-        """Stop background thread."""
+        """Stop background threads."""
         self._stop_event.set()
-        if self._reporter_thread:
-            self._reporter_thread.join(timeout=5)
+        self._background_status_reporter.stop()
+        if self._periodic_status_reporter_thread:
+            self._periodic_status_reporter_thread.join(timeout=5)
         logger.debug("Status reporter stopped")
 
     def report_now(self):
@@ -118,15 +123,9 @@ class StatusReporter:
             entry = StatusReporter._build_status_entry(
                 instrumentation_type, "SNAPSHOT", location_hash, status, error_cause
             )
-            self._send_report([entry])
-            logger.debug(
-                "Immediate status report: %s -> %s (hash=%s)",
-                instrumentation_type,
-                status.value,
-                location_hash,
-            )
+            self._background_status_reporter.submit(entry)
         except Exception as exception:  # pylint: disable=broad-exception-caught
-            logger.debug("Failed to send immediate status report: %s", exception)
+            logger.debug("Failed to enqueue immediate status report: %s", exception)
 
     def _report_loop(self):
         """Background loop for pulling and reporting breakpoint statuses."""
@@ -282,3 +281,58 @@ class StatusReporter:
         if status and status in (ConfigurationStatus.READY, ConfigurationStatus.ERROR, ConfigurationStatus.DISABLED):
             return f"{base_key}:{status.value}"
         return base_key
+
+
+class BackgroundStatusReporter:
+    _MAX_QUEUE_SIZE = 256
+
+    def __init__(self, send_callback, stop_event):
+        self._send = send_callback
+        self._stop_event = stop_event
+        self._queue: "queue.Queue" = queue.Queue(maxsize=self._MAX_QUEUE_SIZE)
+        self._thread: Optional[threading.Thread] = None
+
+    def start(self):
+        if self._thread is None or not self._thread.is_alive():
+            self._thread = threading.Thread(
+                target=self._run,
+                daemon=True,
+                name="BackgroundStatusReporter",
+            )
+            self._thread.start()
+
+    def stop(self):
+        try:
+            self._queue.put_nowait(None)
+        except queue.Full:
+            pass
+        if self._thread:
+            self._thread.join(timeout=5)
+
+    def submit(self, entry):
+        try:
+            self._queue.put_nowait(entry)
+        except queue.Full:
+            logger.debug("Background status reporter queue full; dropping entry")
+
+    def _run(self):
+        while not self._stop_event.is_set():
+            try:
+                first = self._queue.get(timeout=1.0)
+            except queue.Empty:
+                continue
+            if first is None:
+                return
+            batch = [first]
+            try:
+                while True:
+                    batch.append(self._queue.get_nowait())
+            except queue.Empty:
+                pass
+            try:
+                batch = [e for e in batch if e is not None]
+                if batch:
+                    self._send(batch)
+                    logger.debug("Background status reporter flushed %d entries", len(batch))
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                logger.debug("Background status reporter send failed: %s", exc)

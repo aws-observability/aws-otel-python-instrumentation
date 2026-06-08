@@ -12,6 +12,8 @@ covered by test_status_reporter.py / test_status_reporter_snapshot.py and are
 intentionally not re-tested here.
 """
 
+import threading
+import time
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -63,7 +65,7 @@ class TestInit(unittest.TestCase):
         reporter = StatusReporter(client=_make_client(), manager=_make_manager())
         self.assertEqual(reporter.report_interval, 60)
         self.assertEqual(reporter._reported_configs, set())
-        self.assertIsNone(reporter._reporter_thread)
+        self.assertIsNone(reporter._periodic_status_reporter_thread)
         self.assertFalse(reporter._stop_event.is_set())
 
     def test_init_custom_interval(self):
@@ -103,16 +105,15 @@ class TestSendReport(unittest.TestCase):
 
 
 class TestReportStatusImmediately(unittest.TestCase):
-    def test_report_status_immediately_sends_single_entry(self):
+    def test_report_status_immediately_enqueues_entry(self):
         client = _make_client()
         reporter = StatusReporter(client=client, manager=_make_manager())
 
         reporter.report_status_immediately("hash-1", "BREAKPOINT", ConfigurationStatus.READY)
 
-        client._session.post.assert_called_once()
-        configurations = client._session.post.call_args.kwargs["json"]["Configurations"]
-        self.assertEqual(len(configurations), 1)
-        entry = configurations[0]
+        client._session.post.assert_not_called()
+        self.assertEqual(reporter._background_status_reporter._queue.qsize(), 1)
+        entry = reporter._background_status_reporter._queue.get_nowait()
         self.assertEqual(entry["LocationHash"], "hash-1")
         self.assertEqual(entry["InstrumentationType"], "BREAKPOINT")
         self.assertEqual(entry["SignalType"], "SNAPSHOT")
@@ -126,7 +127,7 @@ class TestReportStatusImmediately(unittest.TestCase):
             "hash-err", "PROBE", ConfigurationStatus.ERROR, error_cause=ErrorCause.METHOD_NOT_FOUND
         )
 
-        entry = client._session.post.call_args.kwargs["json"]["Configurations"][0]
+        entry = reporter._background_status_reporter._queue.get_nowait()
         self.assertEqual(entry["Status"], "ERROR")
         self.assertEqual(entry["ErrorCause"], "METHOD_NOT_FOUND")
 
@@ -258,29 +259,34 @@ class TestLifecycle(unittest.TestCase):
             mock_thread_cls.return_value = thread_instance
             reporter.start()
 
-        mock_thread_cls.assert_called_once()
-        self.assertTrue(mock_thread_cls.call_args.kwargs["daemon"])
-        # Bound methods compare equal by (__self__, __func__) but are not identical objects.
-        self.assertEqual(mock_thread_cls.call_args.kwargs["target"], reporter._report_loop)
-        thread_instance.start.assert_called_once()
-        self.assertIs(reporter._reporter_thread, thread_instance)
+        # Two daemon threads start: the periodic report loop and the
+        # BackgroundStatusReporter drain.
+        self.assertEqual(mock_thread_cls.call_count, 2)
+        targets = [c.kwargs["target"] for c in mock_thread_cls.call_args_list]
+        self.assertIn(reporter._report_loop, targets)
+        self.assertIn(reporter._background_status_reporter._run, targets)
+        for c in mock_thread_cls.call_args_list:
+            self.assertTrue(c.kwargs["daemon"])
+        self.assertEqual(thread_instance.start.call_count, 2)
+        self.assertIs(reporter._periodic_status_reporter_thread, thread_instance)
         self.assertFalse(reporter._stop_event.is_set())
 
     def test_start_is_idempotent_when_thread_alive(self):
         reporter = StatusReporter(client=_make_client(), manager=_make_manager())
         alive_thread = mock.MagicMock()
         alive_thread.is_alive.return_value = True
-        reporter._reporter_thread = alive_thread
+        reporter._periodic_status_reporter_thread = alive_thread
+        reporter._background_status_reporter._thread = alive_thread
 
         with mock.patch.object(sr_module.threading, "Thread") as mock_thread_cls:
             reporter.start()
-        # Already-alive thread => no new thread created.
+        # Already-alive threads => no new threads created.
         mock_thread_cls.assert_not_called()
 
     def test_stop_sets_event_and_joins_existing_thread(self):
         reporter = StatusReporter(client=_make_client(), manager=_make_manager())
         thread_instance = mock.MagicMock()
-        reporter._reporter_thread = thread_instance
+        reporter._periodic_status_reporter_thread = thread_instance
 
         reporter.stop()
 
@@ -310,6 +316,78 @@ class TestReportLoop(unittest.TestCase):
             with mock.patch.object(reporter, "_pull_and_report_statuses", side_effect=RuntimeError("boom")):
                 # Should not raise; the loop catches and proceeds to the next wait().
                 reporter._report_loop()
+
+
+class TestBackgroundStatusReporter(unittest.TestCase):
+    def test_submit_does_not_block_when_send_is_slow(self):
+        send_started = threading.Event()
+        let_send_finish = threading.Event()
+
+        def hang_send(_entries):
+            send_started.set()
+            let_send_finish.wait(timeout=10)
+
+        reporter = StatusReporter(client=_make_client(), manager=_make_manager())
+        reporter._background_status_reporter._send = hang_send
+        reporter._background_status_reporter.start()
+        try:
+            reporter.report_status_immediately("hash-warm", "BREAKPOINT", ConfigurationStatus.READY)
+            self.assertTrue(send_started.wait(timeout=2))
+
+            t0 = time.perf_counter()
+            reporter.report_status_immediately("hash-2", "BREAKPOINT", ConfigurationStatus.READY)
+            elapsed = time.perf_counter() - t0
+
+            self.assertLess(elapsed, 0.1)
+        finally:
+            let_send_finish.set()
+            reporter.stop()
+
+    def test_submit_drops_silently_when_queue_full(self):
+        reporter = StatusReporter(client=_make_client(), manager=_make_manager())
+        bg = reporter._background_status_reporter
+        for idx in range(bg._MAX_QUEUE_SIZE):
+            bg.submit({"i": idx})
+        self.assertEqual(bg._queue.qsize(), bg._MAX_QUEUE_SIZE)
+
+        t0 = time.perf_counter()
+        bg.submit({"i": "overflow"})
+        elapsed = time.perf_counter() - t0
+
+        self.assertLess(elapsed, 0.1)
+        self.assertEqual(bg._queue.qsize(), bg._MAX_QUEUE_SIZE)
+
+    def test_drain_actually_sends(self):
+        sent = []
+        reporter = StatusReporter(client=_make_client(), manager=_make_manager())
+        reporter._background_status_reporter._send = sent.append
+        reporter._background_status_reporter.start()
+        try:
+            reporter.report_status_immediately("hash-1", "BREAKPOINT", ConfigurationStatus.READY)
+            deadline = time.time() + 5
+            while time.time() < deadline and not sent:
+                time.sleep(0.05)
+            self.assertEqual(len(sent), 1)
+            self.assertEqual(sent[0][0]["LocationHash"], "hash-1")
+        finally:
+            reporter.stop()
+
+    def test_drain_batches_multiple_entries_into_one_send(self):
+        sent_batches = []
+        reporter = StatusReporter(client=_make_client(), manager=_make_manager())
+        bg = reporter._background_status_reporter
+        bg._send = lambda batch: sent_batches.append(list(batch))
+        for idx in range(5):
+            bg.submit({"i": idx})
+        bg.start()
+        try:
+            deadline = time.time() + 5
+            while time.time() < deadline and not sent_batches:
+                time.sleep(0.05)
+            self.assertEqual(len(sent_batches), 1)
+            self.assertEqual(len(sent_batches[0]), 5)
+        finally:
+            reporter.stop()
 
 
 if __name__ == "__main__":
