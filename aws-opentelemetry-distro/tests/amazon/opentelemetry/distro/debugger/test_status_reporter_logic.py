@@ -46,7 +46,7 @@ def _make_manager(states_by_func=None):
         bp_set = FunctionBreakpointSet(function_key=func_key, module="m", function_name="f")
         bp_set.states = states
         active[func_key] = bp_set
-    return SimpleNamespace(_active_functions=active)
+    return SimpleNamespace(_active_functions=active, _lock=threading.RLock())
 
 
 def _state(location_hash, *, hit_count=0, is_disabled=False, hit_in_last_period=False, instr_type="BREAKPOINT"):

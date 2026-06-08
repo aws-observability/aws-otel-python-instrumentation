@@ -145,14 +145,16 @@ class StatusReporter:
             is_initial_report: True for out-of-band reports when configs are applied,
                              False for periodic 60s reports
         """
+        with self._manager._lock:
+            bp_sets_snapshot = list(self._manager._active_functions.values())
+
         with self._lock:
-            # Pull all breakpoint states from manager
             ready_entries = []
             active_entries = []
             disabled_entries = []
             error_entries = []
 
-            for bp_set in self._manager._active_functions.values():
+            for bp_set in bp_sets_snapshot:
                 for _, state in bp_set.states.items():
                     # Determine status based on state
                     # Report Active if hit in last period (skip if disabled — DISABLED
