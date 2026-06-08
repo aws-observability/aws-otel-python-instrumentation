@@ -100,6 +100,41 @@ class TestAwsAuthSession(TestCase):
             self.assertEqual(mock_get_credentials.call_count, 2)
 
     @patch("requests.Session.request", return_value=requests.Response())
+    def test_credential_exception_logged_once_not_twice(self, _):
+        """When get_credentials() raises, the failure is logged exactly once (in
+        _ensure_initialized with detail), not a second time by request()'s else
+        branch."""
+        with patch(
+            "botocore.session.Session.get_credentials",
+            side_effect=RuntimeError("imds timeout"),
+        ):
+            session = AwsAuthSession("us-east-1", "xray", get_aws_session())
+            with self.assertLogs(
+                "amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session",
+                level="ERROR",
+            ) as log_ctx:
+                session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers={})
+
+        # Exactly one error log, and it carries the exception detail.
+        self.assertEqual(len(log_ctx.records), 1)
+        self.assertIn("imds timeout", log_ctx.output[0])
+
+    @patch("requests.Session.request", return_value=requests.Response())
+    @patch("botocore.session.Session.get_credentials", return_value=None)
+    def test_none_credentials_logged_once(self, _, __):
+        """When get_credentials() returns None without raising (no provider
+        configured), request() surfaces it with a single error log."""
+        session = AwsAuthSession("us-east-1", "xray", get_aws_session())
+        with self.assertLogs(
+            "amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session",
+            level="ERROR",
+        ) as log_ctx:
+            session.request("POST", AWS_OTLP_TRACES_ENDPOINT, data="", headers={})
+
+        self.assertEqual(len(log_ctx.records), 1)
+        self.assertIn("Failed to load AWS Credentials", log_ctx.output[0])
+
+    @patch("requests.Session.request", return_value=requests.Response())
     @patch("botocore.session.Session.get_credentials", return_value=mock_credentials)
     @patch(
         "amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session"

@@ -50,6 +50,14 @@ class AwsAuthSession(requests.Session):
         self._credentials_resolved = False
         self._credentials_lock = Lock()
 
+        # Tracks whether the most recent credential resolution attempt already logged
+        # an error (because ``get_credentials()`` raised). When True, ``request()``
+        # skips its own "Failed to load AWS Credentials" log to avoid double-logging
+        # the same failure. It stays False when ``get_credentials()`` returns ``None``
+        # without raising, so that the "no credentials configured" case is still
+        # surfaced exactly once by ``request()``.
+        self._credentials_error_logged = False
+
         super().__init__()
 
     def _ensure_initialized(self) -> None:
@@ -97,8 +105,12 @@ class AwsAuthSession(requests.Session):
                 # self-healing behavior on transient errors (e.g., IMDS timeouts).
                 _logger.error("Failed to load AWS Credentials: %s", cred_error)
                 self._credentials = None
+                self._credentials_error_logged = True
                 return
 
+            # Successful resolution (may still be None if no provider is configured).
+            # Clear the error-logged flag so request() can surface a None result.
+            self._credentials_error_logged = False
             self._credentials_resolved = True
 
     def request(self, method, url, *args, data=None, headers=None, **kwargs):
@@ -123,7 +135,11 @@ class AwsAuthSession(requests.Session):
 
             except Exception as signing_error:  # pylint: disable=broad-except
                 _logger.error("Failed to sign request: %s", signing_error)
-        else:
+        elif not self._credentials_error_logged:
+            # Only log here when get_credentials() returned None without raising
+            # (e.g., no credential provider configured). The exception path already
+            # logged the failure with detail in _ensure_initialized, so we avoid
+            # double-logging the same error.
             _logger.error("Failed to load AWS Credentials")
 
         return super().request(method=method, url=url, *args, data=data, headers=headers, **kwargs)
