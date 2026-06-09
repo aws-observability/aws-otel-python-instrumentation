@@ -646,6 +646,61 @@ class TestApplyFunction(unittest.TestCase):
             manager._apply_function(bp_set)
 
 
+class TestApplyFunctionDescriptors(unittest.TestCase):
+    def _make_set(self, configs, module=__name__):
+        first = configs[0]
+        bp_set = FunctionBreakpointSet(
+            function_key=f"{module}.{first.function_name}",
+            module=module,
+            function_name=first.function_name,
+            breakpoints={config.line_number: config for config in configs},
+        )
+        return bp_set
+
+    def test_staticmethod_descriptor_resolves_code_object_and_enables_engine(self):
+        manager = _make_manager()
+        descriptor = staticmethod(_real_target_function)
+        manager._wrapper.instrument_function.return_value = (descriptor, mock.MagicMock())
+
+        line_bp = _make_config(method_name="C.handler", line_number=42, location_hash="bp-1")
+        bp_set = self._make_set([line_bp])
+
+        manager._apply_function(bp_set)
+
+        self.assertIs(bp_set.code_object, _real_target_function.__code__)
+        manager._engine.enable_breakpoints_for_function.assert_called_once()
+        _, kwargs = manager._engine.enable_breakpoints_for_function.call_args
+        self.assertIs(kwargs["code"], _real_target_function.__code__)
+        self.assertIs(kwargs["func"], _real_target_function)
+
+    def test_classmethod_descriptor_resolves_code_object_and_enables_engine(self):
+        manager = _make_manager()
+        descriptor = classmethod(_real_target_function)
+        manager._wrapper.instrument_function.return_value = (descriptor, mock.MagicMock())
+
+        line_bp = _make_config(method_name="C.handler", line_number=99, location_hash="bp-cm")
+        bp_set = self._make_set([line_bp])
+
+        manager._apply_function(bp_set)
+
+        self.assertIs(bp_set.code_object, _real_target_function.__code__)
+        manager._engine.enable_breakpoints_for_function.assert_called_once()
+        _, kwargs = manager._engine.enable_breakpoints_for_function.call_args
+        self.assertIs(kwargs["func"], _real_target_function)
+
+    def test_staticmethod_original_function_stored_as_descriptor_for_restore(self):
+        manager = _make_manager()
+        descriptor = staticmethod(_real_target_function)
+        manager._wrapper.instrument_function.return_value = (descriptor, mock.MagicMock())
+
+        line_bp = _make_config(method_name="C.handler", line_number=42, location_hash="bp-1")
+        bp_set = self._make_set([line_bp])
+
+        manager._apply_function(bp_set)
+
+        self.assertIs(bp_set.original_function, descriptor)
+
+
 class TestRemoveFunction(unittest.TestCase):
     """Tests for _remove_function with a mocked wrapper and engine."""
 
@@ -694,6 +749,22 @@ class TestRemoveFunction(unittest.TestCase):
         # Should still complete and remove from active functions.
         manager._remove_function(bp_set.function_key)
         self.assertNotIn(bp_set.function_key, manager._active_functions)
+
+    def test_remove_unwraps_staticmethod_descriptor_for_engine_disable(self):
+        manager = _make_manager()
+        manager._wrapper.restore_function.return_value = True
+        config = _make_config(instrumentation_type="PROBE", method_name="handler", location_hash="probe-1")
+        bp_set = _bp_set_for(config)
+        bp_set.is_instrumented = True
+        bp_set.original_function = staticmethod(_real_target_function)
+        bp_set.code_object = _real_target_function.__code__
+        manager._active_functions[bp_set.function_key] = bp_set
+
+        manager._remove_function(bp_set.function_key)
+
+        manager._engine.disable_breakpoints_for_function.assert_called_once()
+        _, kwargs = manager._engine.disable_breakpoints_for_function.call_args
+        self.assertIs(kwargs["func"], _real_target_function)
 
     def test_remove_handles_engine_disable_failure(self):
         manager = _make_manager()

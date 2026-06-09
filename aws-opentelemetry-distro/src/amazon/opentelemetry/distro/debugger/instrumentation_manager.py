@@ -409,10 +409,10 @@ class InstrumentationManager:
                 manager=self,
             )
 
-            # Store instrumentation state
+            original_callable = original.__func__ if isinstance(original, (staticmethod, classmethod)) else original
             bp_set.original_function = original
             bp_set.wrapped_function = wrapped
-            bp_set.code_object = getattr(original, "__code__", None)
+            bp_set.code_object = getattr(original_callable, "__code__", None)
             bp_set.is_instrumented = True
 
             # Enable line breakpoints if engine is available and there are line breakpoints
@@ -429,7 +429,7 @@ class InstrumentationManager:
 
                     self._engine.enable_breakpoints_for_function(
                         code=bp_set.code_object,
-                        func=original,
+                        func=original_callable,
                         line_numbers=bp_set.line_numbers,
                         function_key=bp_set.function_key,
                         line_location_hashes=line_location_hashes,
@@ -519,9 +519,11 @@ class InstrumentationManager:
             # Disable line breakpoints if engine is available
             if self._engine and bp_set.code_object and bp_set.original_function:
                 try:
-                    self._engine.disable_breakpoints_for_function(
-                        code=bp_set.code_object, func=bp_set.original_function
+                    original = bp_set.original_function
+                    original_callable = (
+                        original.__func__ if isinstance(original, (staticmethod, classmethod)) else original
                     )
+                    self._engine.disable_breakpoints_for_function(code=bp_set.code_object, func=original_callable)
                     logger.debug("Disabled line breakpoints for %s", func_key)
                 except Exception as exception:  # pylint: disable=broad-exception-caught
                     logger.warning(
