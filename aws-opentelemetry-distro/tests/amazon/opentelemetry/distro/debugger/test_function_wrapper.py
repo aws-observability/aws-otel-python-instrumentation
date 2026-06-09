@@ -485,9 +485,7 @@ class TestSyncWrapper(_SnapshotEmitterFixture):
     def _instrument(self, func, *, increment_result=True, has_line0=True, disabled=False, capture_config=None):
         func_name = func.__name__
         module = _register_module(self.module_name, **{func_name: func})
-        # The wrapper keys breakpoint sets by the function's __qualname__, so the
-        # FunctionBreakpointSet must be registered under the same key.
-        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(func)}"
+        func_key = f"{self.module_name}.{func_name}"
         bp_set = _make_function_bp_set(func_key, self.module_name, func_name, has_line0=has_line0, disabled=disabled)
         manager = _FakeManager({func_key: bp_set}, increment_result=increment_result)
         capture_config = capture_config if capture_config is not None else CaptureConfig(capture_return=True)
@@ -540,7 +538,7 @@ class TestSyncWrapper(_SnapshotEmitterFixture):
 
         func_name = func.__name__
         module = _register_module(self.module_name, **{func_name: func})
-        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(func)}"
+        func_key = f"{self.module_name}.{func_name}"
         # Build a set with a disabled state but NO line-0 breakpoint registered.
         bp_set = FunctionBreakpointSet(function_key=func_key, module=self.module_name, function_name=func_name)
         bp_set.states[f"{func_key}:5"] = BreakpointState(breakpoint_key=f"{func_key}:5", is_disabled=True)
@@ -631,7 +629,7 @@ class TestAsyncWrapper(_SnapshotEmitterFixture):
         func_name = func.__name__
         module = _register_module(self.module_name, **{func_name: func})
         # The wrapper keys breakpoint sets by the function's __qualname__.
-        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(func)}"
+        func_key = f"{self.module_name}.{func_name}"
         bp_set = _make_function_bp_set(func_key, self.module_name, func_name, has_line0=has_line0, disabled=disabled)
         manager = _FakeManager({func_key: bp_set}, increment_result=increment_result)
         capture_config = capture_config if capture_config is not None else CaptureConfig(capture_return=True)
@@ -677,7 +675,7 @@ class TestAsyncWrapper(_SnapshotEmitterFixture):
 
         func_name = func.__name__
         module = _register_module(self.module_name, **{func_name: func})
-        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(func)}"
+        func_key = f"{self.module_name}.{func_name}"
         bp_set = FunctionBreakpointSet(function_key=func_key, module=self.module_name, function_name=func_name)
         bp_set.states[f"{func_key}:5"] = BreakpointState(breakpoint_key=f"{func_key}:5", is_disabled=True)
         manager = _FakeManager({func_key: bp_set})
@@ -811,8 +809,7 @@ class TestClassMethodInstrumentation(_SnapshotEmitterFixture):
         # Use a dedicated module attribute name matching that qualname's class component.
         Service = type("Service", (_Service,), {"handle": _Service.handle})
         _register_module(self.module_name, Service=Service)
-        # The wrapper keys by the bound method's __qualname__.
-        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(Service.handle)}"
+        func_key = f"{self.module_name}.Service.handle"
         bp_set = _make_function_bp_set(func_key, self.module_name, "Service.handle")
         manager = _FakeManager({func_key: bp_set})
 
