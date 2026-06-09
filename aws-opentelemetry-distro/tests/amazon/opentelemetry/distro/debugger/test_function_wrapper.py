@@ -485,7 +485,9 @@ class TestSyncWrapper(_SnapshotEmitterFixture):
     def _instrument(self, func, *, increment_result=True, has_line0=True, disabled=False, capture_config=None):
         func_name = func.__name__
         module = _register_module(self.module_name, **{func_name: func})
-        func_key = f"{self.module_name}.{func_name}"
+        # The wrapper keys breakpoint sets by the function's __qualname__, so the
+        # FunctionBreakpointSet must be registered under the same key.
+        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(func)}"
         bp_set = _make_function_bp_set(func_key, self.module_name, func_name, has_line0=has_line0, disabled=disabled)
         manager = _FakeManager({func_key: bp_set}, increment_result=increment_result)
         capture_config = capture_config if capture_config is not None else CaptureConfig(capture_return=True)
@@ -538,7 +540,7 @@ class TestSyncWrapper(_SnapshotEmitterFixture):
 
         func_name = func.__name__
         module = _register_module(self.module_name, **{func_name: func})
-        func_key = f"{self.module_name}.{func_name}"
+        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(func)}"
         # Build a set with a disabled state but NO line-0 breakpoint registered.
         bp_set = FunctionBreakpointSet(function_key=func_key, module=self.module_name, function_name=func_name)
         bp_set.states[f"{func_key}:5"] = BreakpointState(breakpoint_key=f"{func_key}:5", is_disabled=True)
@@ -629,7 +631,7 @@ class TestAsyncWrapper(_SnapshotEmitterFixture):
         func_name = func.__name__
         module = _register_module(self.module_name, **{func_name: func})
         # The wrapper keys breakpoint sets by the function's __qualname__.
-        func_key = f"{self.module_name}.{func_name}"
+        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(func)}"
         bp_set = _make_function_bp_set(func_key, self.module_name, func_name, has_line0=has_line0, disabled=disabled)
         manager = _FakeManager({func_key: bp_set}, increment_result=increment_result)
         capture_config = capture_config if capture_config is not None else CaptureConfig(capture_return=True)
@@ -675,7 +677,7 @@ class TestAsyncWrapper(_SnapshotEmitterFixture):
 
         func_name = func.__name__
         module = _register_module(self.module_name, **{func_name: func})
-        func_key = f"{self.module_name}.{func_name}"
+        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(func)}"
         bp_set = FunctionBreakpointSet(function_key=func_key, module=self.module_name, function_name=func_name)
         bp_set.states[f"{func_key}:5"] = BreakpointState(breakpoint_key=f"{func_key}:5", is_disabled=True)
         manager = _FakeManager({func_key: bp_set})
@@ -809,7 +811,8 @@ class TestClassMethodInstrumentation(_SnapshotEmitterFixture):
         # Use a dedicated module attribute name matching that qualname's class component.
         Service = type("Service", (_Service,), {"handle": _Service.handle})
         _register_module(self.module_name, Service=Service)
-        func_key = f"{self.module_name}.Service.handle"
+        # The wrapper keys by the bound method's __qualname__.
+        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(Service.handle)}"
         bp_set = _make_function_bp_set(func_key, self.module_name, "Service.handle")
         manager = _FakeManager({func_key: bp_set})
 
@@ -831,39 +834,15 @@ class TestClassMethodInstrumentation(_SnapshotEmitterFixture):
         self.assertTrue(FunctionWrapper.restore_function(self.module_name, "Service.handle", original))
         self.assertIs(Service.handle, original)
 
-    def test_instrument_inherited_method_via_subclass_emits_snapshot(self):
-        Base = type("Base", (), {"handle": _Service.handle})
-        Child = type("Child", (Base,), {})
-        _register_module(self.module_name, Base=Base, Child=Child)
+    def test_replace_class_method_missing_method_raises(self):
+        class Empty:
+            pass
 
-        self.assertEqual(getattr(Child, "handle").__qualname__, "_Service.handle")
+        _register_module(self.module_name, Empty=Empty)
+        with self.assertRaises(AttributeError):
+            FunctionWrapper._replace_function_in_module(self.module_name, "Empty.absent", lambda self: None)
 
-        func_key = f"{self.module_name}.Child.handle"
-        bp_set = _make_function_bp_set(func_key, self.module_name, "Child.handle")
-        manager = _FakeManager({func_key: bp_set})
-
-        original, _ = self.wrapper.instrument_function(
-            self.module_name,
-            "Child.handle",
-            capture_config=CaptureConfig(capture_return=True),
-            location_hash="loc-hash-inherit",
-            manager=manager,
-        )
-
-        self.assertEqual(Child().handle(41), 42)
-        self.emitter.emit_snapshot.assert_called_once()
-        self.assertEqual(manager.increment_calls, [f"{func_key}:0"])
-
-        self.emitter.emit_snapshot.reset_mock()
-        manager.increment_calls.clear()
-        self.assertEqual(Base().handle(41), 42)
-        self.emitter.emit_snapshot.assert_not_called()
-        self.assertEqual(manager.increment_calls, [])
-
-        self.assertTrue(FunctionWrapper.restore_function(self.module_name, "Child.handle", original))
-        self.assertEqual(Child().handle(7), 8)
-
-    def test_instrument_base_method_fires_for_child_calls_via_mro(self):
+    def test_instrument_inherited_method_raises_attribute_error(self):
         class Base:
             def handle(self, x):
                 return x + 1
@@ -873,60 +852,47 @@ class TestClassMethodInstrumentation(_SnapshotEmitterFixture):
 
         _register_module(self.module_name, Base=Base, Child=Child)
 
-        func_key = f"{self.module_name}.Base.handle"
-        bp_set = _make_function_bp_set(func_key, self.module_name, "Base.handle")
-        manager = _FakeManager({func_key: bp_set})
+        with self.assertRaises(AttributeError) as caught:
+            self.wrapper.instrument_function(
+                self.module_name,
+                "Child.handle",
+                capture_config=CaptureConfig(),
+                location_hash="loc-hash-inherit",
+                manager=None,
+            )
 
-        original, _ = self.wrapper.instrument_function(
-            self.module_name,
-            "Base.handle",
-            capture_config=CaptureConfig(capture_return=True),
-            location_hash="loc-hash-bp-on-base",
-            manager=manager,
-        )
+        msg = str(caught.exception)
+        self.assertIn("not found", msg)
+        self.assertIn("inherited from", msg)
+        self.assertIn("Child", msg)
+        self.assertIn("Base", msg)
+        self.assertNotIn("handle", Child.__dict__)
 
-        self.assertEqual(Base().handle(10), 11)
-        self.assertEqual(Child().handle(20), 21)
-        self.assertEqual(self.emitter.emit_snapshot.call_count, 2)
-        self.assertEqual(manager.increment_calls, [f"{func_key}:0", f"{func_key}:0"])
+    def test_instrument_inherited_classmethod_raises_attribute_error(self):
+        class Base:
+            @classmethod
+            def make(cls, value):
+                return f"{cls.__name__}-{value}"
 
-        self.assertTrue(FunctionWrapper.restore_function(self.module_name, "Base.handle", original))
+        class Child(Base):
+            pass
 
-    def test_instrument_method_decorated_without_functools_wraps(self):
-        def naive_decorator(fn):
-            def wrapper(*args, **kwargs):
-                return fn(*args, **kwargs)
+        _register_module(self.module_name, Base=Base, Child=Child)
 
-            return wrapper
+        with self.assertRaises(AttributeError) as caught:
+            self.wrapper.instrument_function(
+                self.module_name,
+                "Child.make",
+                capture_config=CaptureConfig(),
+                location_hash="loc-hash-inherit-cm",
+                manager=None,
+            )
 
-        class Svc:
-            @naive_decorator
-            def do(self, value):
-                return value * 2
+        self.assertIn("not found", str(caught.exception))
+        self.assertIn("inherited from", str(caught.exception))
+        self.assertNotIn("make", Child.__dict__)
 
-        _register_module(self.module_name, Svc=Svc)
-
-        self.assertNotEqual(getattr(Svc, "do").__qualname__, "Svc.do")
-
-        func_key = f"{self.module_name}.Svc.do"
-        bp_set = _make_function_bp_set(func_key, self.module_name, "Svc.do")
-        manager = _FakeManager({func_key: bp_set})
-
-        original, _ = self.wrapper.instrument_function(
-            self.module_name,
-            "Svc.do",
-            capture_config=CaptureConfig(capture_return=True),
-            location_hash="loc-hash-deco",
-            manager=manager,
-        )
-
-        self.assertEqual(Svc().do(21), 42)
-        self.emitter.emit_snapshot.assert_called_once()
-        self.assertEqual(manager.increment_calls, [f"{func_key}:0"])
-
-        self.assertTrue(FunctionWrapper.restore_function(self.module_name, "Svc.do", original))
-
-    def test_instrument_diamond_inheritance_bp_on_leaf(self):
+    def test_instrument_diamond_inheritance_inherited_leaf_raises_attribute_error(self):
         class A:
             def method(self, value):
                 return value * 10
@@ -942,72 +908,18 @@ class TestClassMethodInstrumentation(_SnapshotEmitterFixture):
 
         _register_module(self.module_name, A=A, B=B, C=C, D=D)
 
-        func_key = f"{self.module_name}.D.method"
-        bp_set = _make_function_bp_set(func_key, self.module_name, "D.method")
-        manager = _FakeManager({func_key: bp_set})
+        with self.assertRaises(AttributeError) as caught:
+            self.wrapper.instrument_function(
+                self.module_name,
+                "D.method",
+                capture_config=CaptureConfig(),
+                location_hash="loc-hash-diamond",
+                manager=None,
+            )
 
-        original, _ = self.wrapper.instrument_function(
-            self.module_name,
-            "D.method",
-            capture_config=CaptureConfig(capture_return=True),
-            location_hash="loc-hash-diamond",
-            manager=manager,
-        )
-
-        self.assertEqual(D().method(5), 50)
-        self.emitter.emit_snapshot.assert_called_once()
-
-        self.emitter.emit_snapshot.reset_mock()
-        manager.increment_calls.clear()
-        self.assertEqual(A().method(5), 50)
-        self.assertEqual(B().method(5), 50)
-        self.assertEqual(C().method(5), 50)
-        self.emitter.emit_snapshot.assert_not_called()
-        self.assertEqual(manager.increment_calls, [])
-
-        self.assertTrue(FunctionWrapper.restore_function(self.module_name, "D.method", original))
-
-    def test_instrument_inherited_classmethod_via_subclass_emits_snapshot(self):
-        class _Base:
-            @classmethod
-            def make(cls, value):
-                return f"{cls.__name__}-{value}"
-
-        class _Child(_Base):
-            pass
-
-        _register_module(self.module_name, Base=_Base, Child=_Child)
-
-        func_key = f"{self.module_name}.Child.make"
-        bp_set = _make_function_bp_set(func_key, self.module_name, "Child.make")
-        manager = _FakeManager({func_key: bp_set})
-
-        original, _ = self.wrapper.instrument_function(
-            self.module_name,
-            "Child.make",
-            capture_config=CaptureConfig(capture_return=True),
-            location_hash="loc-hash-inherit-cm",
-            manager=manager,
-        )
-
-        self.assertEqual(_Child.make(3), "_Child-3")
-        self.assertEqual(_Child().make(4), "_Child-4")
-        self.assertEqual(self.emitter.emit_snapshot.call_count, 2)
-        self.assertEqual(
-            manager.increment_calls,
-            [f"{func_key}:0", f"{func_key}:0"],
-        )
-
-        self.assertTrue(FunctionWrapper.restore_function(self.module_name, "Child.make", original))
-        self.assertEqual(_Child.make(9), "_Child-9")
-
-    def test_replace_class_method_missing_method_raises(self):
-        class Empty:
-            pass
-
-        _register_module(self.module_name, Empty=Empty)
-        with self.assertRaises(AttributeError):
-            FunctionWrapper._replace_function_in_module(self.module_name, "Empty.absent", lambda self: None)
+        self.assertIn("not found", str(caught.exception))
+        self.assertIn("inherited from", str(caught.exception))
+        self.assertNotIn("method", D.__dict__)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,8 @@ SnapshotOtlpEmitter, the engine) patched out so the coordination logic can be
 exercised deterministically without real instrumentation, threads, or network.
 """
 
+import sys
+import types
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -777,6 +779,73 @@ class TestGlobalManager(unittest.TestCase):
             first = initialize_global_manager()
             second = initialize_global_manager()
         self.assertIs(first, second)
+
+
+class TestInheritedMethodEndToEnd(unittest.TestCase):
+    def setUp(self):
+        self._module_name = "_test_im_inherited_e2e_module"
+        sys.modules.pop(self._module_name, None)
+        self.addCleanup(lambda: sys.modules.pop(self._module_name, None))
+
+        with mock.patch.object(im_module, "SnapshotOtlpEmitter"), mock.patch.object(
+            im_module, "set_snapshot_emitter"
+        ), mock.patch.object(InstrumentationManager, "_select_engine", return_value=mock.MagicMock()):
+            self.manager = InstrumentationManager(service="svc", environment="prod")
+
+        self.reporter = mock.MagicMock()
+        self.manager._status_reporter = self.reporter
+
+    def test_apply_inherited_method_reports_method_not_found_error(self):
+        class Base:
+            def handle(self, x):
+                return x + 1
+
+        class Child(Base):
+            pass
+
+        module = types.ModuleType(self._module_name)
+        module.Base = Base
+        module.Child = Child
+        sys.modules[self._module_name] = module
+
+        config = BreakpointConfiguration.from_api_config(
+            {
+                "InstrumentationType": "BREAKPOINT",
+                "Location": {
+                    "CodeLocation": {
+                        "Language": "python",
+                        "CodeUnit": self._module_name,
+                        "ClassName": "Child",
+                        "MethodName": "handle",
+                        "LineNumber": 0,
+                    }
+                },
+                "CaptureConfiguration": {"CodeCapture": {}},
+                "LocationHash": "loc-inherited-1",
+            }
+        )
+        self.assertIsNotNone(config)
+
+        result = self.manager.apply_configuration([config])
+
+        self.assertEqual(result["failed"], 1)
+        self.assertEqual(result["applied"], 0)
+        self.assertFalse(result["success"])
+
+        failed_entry = result["details"]["failed"][0]
+        self.assertEqual(failed_entry["error_cause"], ErrorCause.METHOD_NOT_FOUND)
+        self.assertIn("inherited from", failed_entry["error"])
+
+        self.assertEqual(self.manager._failed_configs.get("loc-inherited-1"), ErrorCause.METHOD_NOT_FOUND)
+
+        self.reporter.report_status_immediately.assert_called_with(
+            "loc-inherited-1",
+            "BREAKPOINT",
+            ConfigurationStatus.ERROR,
+            ErrorCause.METHOD_NOT_FOUND,
+        )
+
+        self.assertNotIn("handle", Child.__dict__)
 
 
 if __name__ == "__main__":

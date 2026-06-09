@@ -155,9 +155,7 @@ class FunctionWrapper:
                 original_func = discovered
 
             # Create the instrumented wrapper
-            instrumented_func = self._create_wrapper(
-                original_func, capture_config, module_name, function_name, location_hash, manager
-            )
+            instrumented_func = self._create_wrapper(original_func, capture_config, module_name, location_hash, manager)
 
             # Re-apply the descriptor type so instance access binds correctly.
             if method_type == MethodType.STATIC:
@@ -336,6 +334,12 @@ class FunctionWrapper:
             # Find which class in MRO actually defines this method
             defining_class = FunctionWrapper._find_defining_class(class_obj, method_name)
 
+            if defining_class is not class_obj:
+                raise AttributeError(
+                    f"Method '{method_name}' not found as a declared method on class "
+                    f"'{class_obj.__name__}' (inherited from '{defining_class.__name__}')"
+                )
+
             # Detect method type (static, class, instance)
             method_type = FunctionWrapper._detect_method_type(defining_class, method_name)
 
@@ -420,7 +424,6 @@ class FunctionWrapper:
         original_func: Callable,
         capture_config: Optional[CaptureConfig],
         module_name: str,
-        function_name: str,
         location_hash: Optional[str] = None,
         manager=None,
     ) -> Callable:
@@ -431,7 +434,6 @@ class FunctionWrapper:
             original_func: The original function to wrap
             capture_config: Optional configuration for data capture
             module_name: Module name for snapshot metadata
-            function_name: Registered function name (e.g. "ChildHandler.handle")
             location_hash: Optional location hash for instrumentation ID
             manager: Optional InstrumentationManager for hit count checking
 
@@ -439,25 +441,19 @@ class FunctionWrapper:
             Instrumented wrapper function
         """
         if inspect.iscoroutinefunction(original_func):
-            return self._create_async_wrapper(
-                original_func, capture_config, module_name, function_name, location_hash, manager
-            )
-        return self._create_sync_wrapper(
-            original_func, capture_config, module_name, function_name, location_hash, manager
-        )
+            return self._create_async_wrapper(original_func, capture_config, module_name, location_hash, manager)
+        return self._create_sync_wrapper(original_func, capture_config, module_name, location_hash, manager)
 
     def _create_sync_wrapper(  # pylint: disable=too-many-arguments,too-many-statements
         self,
         original_func: Callable,
         capture_config: Optional[CaptureConfig],
         module_name: str,
-        function_name: str,
         location_hash: Optional[str] = None,
         manager=None,
     ) -> Callable:
         """Create synchronous wrapper that produces Snapshots instead of Spans."""
         wrapper_self = self
-        func_key = f"{module_name}.{function_name}"
 
         def sync_wrapper(*args, **kwargs):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
             """
@@ -468,8 +464,11 @@ class FunctionWrapper:
             line0_breakpoint_key = None
             instr_type = None
             qualified_name = FunctionWrapper._get_qualified_name(original_func)
+            # Defensive local snapshot of manager for clarity. The actual safety
+            # against shutdown races is provided by the try/except below.
             mgr = manager
             if mgr:
+                func_key = f"{module_name}.{qualified_name}"
                 try:
                     with mgr._lock:  # pylint: disable=protected-access
                         bp_set = mgr._active_functions.get(func_key)
@@ -567,13 +566,11 @@ class FunctionWrapper:
         original_func: Callable,
         capture_config: Optional[CaptureConfig],
         module_name: str,
-        function_name: str,
         location_hash: Optional[str] = None,
         manager=None,
     ) -> Callable:
         """Create asynchronous wrapper that produces Snapshots instead of Spans."""
         wrapper_self = self
-        func_key = f"{module_name}.{function_name}"
 
         async def async_wrapper(
             *args, **kwargs
@@ -586,8 +583,11 @@ class FunctionWrapper:
             line0_breakpoint_key = None
             instr_type = None
             qualified_name = FunctionWrapper._get_qualified_name(original_func)
+            # Defensive local snapshot of manager for clarity. The actual safety
+            # against shutdown races is provided by the try/except below.
             mgr = manager
             if mgr:
+                func_key = f"{module_name}.{qualified_name}"
                 try:
                     with mgr._lock:  # pylint: disable=protected-access
                         bp_set = mgr._active_functions.get(func_key)
