@@ -140,9 +140,11 @@ class FunctionWrapper:
             discovered = FunctionWrapper._discover_function(module_name, function_name)
 
             # Extract the actual callable
+            method_type: Optional[MethodType] = None
             if isinstance(discovered, MethodInfo):
                 # Class method - use the method from MethodInfo
                 original_func = discovered.method
+                method_type = discovered.method_type
                 logger.debug(
                     "Instrumenting %s method: %s",
                     discovered.method_type.value,
@@ -155,11 +157,22 @@ class FunctionWrapper:
             # Create the instrumented wrapper
             instrumented_func = self._create_wrapper(original_func, capture_config, module_name, location_hash, manager)
 
+            # Re-apply the descriptor type so instance access binds correctly.
+            if method_type == MethodType.STATIC:
+                installed: Any = staticmethod(instrumented_func)
+                original_descriptor: Any = staticmethod(original_func)
+            elif method_type == MethodType.CLASS:
+                installed = classmethod(instrumented_func)
+                original_descriptor = classmethod(original_func)
+            else:
+                installed = instrumented_func
+                original_descriptor = original_func
+
             # Replace the function in the module
-            FunctionWrapper._replace_function_in_module(module_name, function_name, instrumented_func)
+            FunctionWrapper._replace_function_in_module(module_name, function_name, installed)
 
             logger.debug("Successfully instrumented function: %s.%s", module_name, function_name)
-            return original_func, instrumented_func
+            return original_descriptor, instrumented_func
 
         except (ImportError, AttributeError):
             # Re-raise known exceptions for manager to handle
@@ -323,6 +336,9 @@ class FunctionWrapper:
 
             # Detect method type (static, class, instance)
             method_type = FunctionWrapper._detect_method_type(defining_class, method_name)
+
+            if method_type == MethodType.CLASS:
+                method = getattr(method, "__func__", method)
 
             logger.debug(
                 "Successfully discovered %s method: %s.%s",
