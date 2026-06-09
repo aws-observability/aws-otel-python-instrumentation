@@ -114,6 +114,33 @@ class TestFetchConfigurationByType(unittest.TestCase):
         self.assertEqual(item["ConfigurationData"], {"foo": 1})
         self.assertEqual(item["AttributeFilters"], [])
 
+    def test_non_string_configuration_data_skips_item_without_aborting_page(self):
+        client = _make_client()
+        body = {
+            "LatestConfigurations": [
+                {"LocationHash": "bad", "ConfigurationData": {"already": "dict"}, "AttributeFilters": None},
+                {"LocationHash": "ok", "ConfigurationData": '{"foo": 1}', "AttributeFilters": None},
+            ],
+        }
+        client._session.post.return_value = _response(200, body)
+        result = client.fetch_configuration_by_type("PROBE")
+        self.assertEqual(len(result["LatestConfigurations"]), 1)
+        self.assertEqual(result["LatestConfigurations"][0]["LocationHash"], "ok")
+        self.assertEqual(result["LatestConfigurations"][0]["ConfigurationData"], {"foo": 1})
+
+    def test_invalid_json_in_configuration_data_skips_item_without_aborting_page(self):
+        client = _make_client()
+        body = {
+            "LatestConfigurations": [
+                {"LocationHash": "bad", "ConfigurationData": "{not valid json", "AttributeFilters": None},
+                {"LocationHash": "ok", "ConfigurationData": '{"foo": 1}', "AttributeFilters": None},
+            ],
+        }
+        client._session.post.return_value = _response(200, body)
+        result = client.fetch_configuration_by_type("PROBE")
+        self.assertEqual(len(result["LatestConfigurations"]), 1)
+        self.assertEqual(result["LatestConfigurations"][0]["LocationHash"], "ok")
+
     def test_payload_includes_service_environment_and_type(self):
         client = _make_client()
         client._session.post.return_value = _response(200, {"LatestConfigurations": []})

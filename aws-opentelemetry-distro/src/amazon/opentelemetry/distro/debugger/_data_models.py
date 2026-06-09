@@ -226,6 +226,21 @@ class BreakpointConfiguration:
         """Check if this is a temporary instrumentation (BREAKPOINT)"""
         return self.instrumentation_type == "BREAKPOINT"
 
+    @staticmethod
+    def _parse_utc_datetime(value: Any, field_name: str) -> Optional[datetime]:
+        try:
+            if isinstance(value, (int, float)):
+                return datetime.fromtimestamp(value, tz=timezone.utc)
+            if isinstance(value, str):
+                parsed = isoparse(value)
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                return parsed
+            return None
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.warning("Invalid %s format %s: %s", field_name, value, exc)
+            return None
+
     # TODO: Should refactor and simplify this method in the future and get rid of the disable.
     # pylint: disable=too-many-locals,too-many-branches,too-many-statements,too-many-return-statements
     @classmethod
@@ -443,15 +458,7 @@ class BreakpointConfiguration:
             if instrumentation_type == "BREAKPOINT":
                 expires_at_value = breakpoint_config.get("ExpiresAt")
                 if expires_at_value:
-                    try:
-                        # Try as Unix timestamp (float/int) first
-                        if isinstance(expires_at_value, (int, float)):
-                            expires_at = datetime.fromtimestamp(expires_at_value, tz=timezone.utc)
-                        # Try as ISO 8601 string
-                        elif isinstance(expires_at_value, str):
-                            expires_at = isoparse(expires_at_value)
-                    except Exception as exc:  # pylint: disable=broad-exception-caught
-                        logger.warning("Invalid ExpiresAt format %s: %s", expires_at_value, exc)
+                    expires_at = BreakpointConfiguration._parse_utc_datetime(expires_at_value, "ExpiresAt")
             elif breakpoint_config.get("ExpiresAt"):
                 logger.debug("Ignoring ExpiresAt for PROBE instrumentation %s.%s", module, function)
 
@@ -459,13 +466,7 @@ class BreakpointConfiguration:
             created_at = None
             created_at_value = breakpoint_config.get("CreatedAt")
             if created_at_value is not None:
-                try:
-                    if isinstance(created_at_value, (int, float)):
-                        created_at = datetime.fromtimestamp(created_at_value, tz=timezone.utc)
-                    elif isinstance(created_at_value, str):
-                        created_at = isoparse(created_at_value)
-                except Exception as exc:  # pylint: disable=broad-exception-caught
-                    logger.warning("Invalid CreatedAt format %s: %s", created_at_value, exc)
+                created_at = BreakpointConfiguration._parse_utc_datetime(created_at_value, "CreatedAt")
 
             # Parse and clamp max_hits
             # For PROBE: Ignore max_hits (permanent instrumentation)

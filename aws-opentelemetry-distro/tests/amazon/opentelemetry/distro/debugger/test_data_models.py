@@ -400,6 +400,19 @@ class TestBreakpointConfiguration(unittest.TestCase):
                 else:
                     self.assertIsNone(config.expires_at)
 
+    def test_from_api_config_iso_without_offset_is_utc_aware(self):
+        api_config = {
+            "Location": {"CodeLocation": {"Language": "python", "CodeUnit": "myapp", "MethodName": "func"}},
+            "ExpiresAt": "2025-10-27T19:34:00",
+            "CreatedAt": "2025-10-27T18:00:00",
+            "LocationHash": "naive-iso",
+        }
+        config = BreakpointConfiguration.from_api_config(api_config)
+        self.assertIsNotNone(config.expires_at)
+        self.assertIsNotNone(config.expires_at.tzinfo)
+        self.assertIsNotNone(config.created_at)
+        self.assertIsNotNone(config.created_at.tzinfo)
+
     def test_from_api_config_invalid_cases(self):
         """Test all cases where from_api_config returns None."""
         test_cases = {

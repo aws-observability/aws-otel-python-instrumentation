@@ -199,6 +199,26 @@ class DebuggerClient:
         self._poller = None
         logger.debug("Stopped configuration polling")
 
+    @staticmethod
+    def _normalize_config_item(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        config_item = item.copy()
+        config_data_str = item.get("ConfigurationData")
+        if config_data_str:
+            if not isinstance(config_data_str, str):
+                logger.warning(
+                    "Skipping config with non-string ConfigurationData: type=%s",
+                    type(config_data_str).__name__,
+                )
+                return None
+            try:
+                config_item["ConfigurationData"] = json.loads(config_data_str)
+            except (json.JSONDecodeError, ValueError) as exception:
+                logger.warning("Skipping config with invalid ConfigurationData JSON: %s", exception)
+                return None
+        if config_item.get("AttributeFilters") is None:
+            config_item["AttributeFilters"] = []
+        return config_item
+
     def fetch_configuration_by_type(
         self, instrumentation_type: str, last_sync_time: Optional[float] = None
     ) -> Optional[Dict[str, Any]]:
@@ -275,14 +295,9 @@ class DebuggerClient:
 
                             # Process LatestConfigurations and deserialize ConfigurationData
                             for item in raw_config.get("LatestConfigurations") or []:
-                                config_item = item.copy()
-                                config_data_str = item.get("ConfigurationData")
-                                if config_data_str:
-                                    config_item["ConfigurationData"] = json.loads(config_data_str)
-                                # Ensure AttributeFilters is a list or None
-                                if config_item.get("AttributeFilters") is None:
-                                    config_item["AttributeFilters"] = []
-                                all_configs.append(config_item)
+                                config_item = self._normalize_config_item(item)
+                                if config_item is not None:
+                                    all_configs.append(config_item)
 
                             # Check for next page
                             next_token = raw_config.get("NextToken")
