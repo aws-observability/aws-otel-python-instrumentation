@@ -94,9 +94,8 @@ class TestSerializeBroadExcept(unittest.TestCase):
         serializer = SnapshotSerializer()
         with mock.patch.object(serializer, "_serialize_value", side_effect=RuntimeError("boom")):
             cv = serializer.serialize([1, 2, 3])
-        # The except returns a timeout-marked CapturedValue using the value's type name.
         self.assertEqual(cv.type, "list")
-        self.assertEqual(cv.not_captured_reason, "timeout")
+        self.assertEqual(cv.not_captured_reason, "serializationError")
 
     def test_serialize_variables_swallows_per_var_error(self):
         serializer = SnapshotSerializer()

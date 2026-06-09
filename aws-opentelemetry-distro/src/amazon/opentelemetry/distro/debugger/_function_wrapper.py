@@ -867,7 +867,10 @@ class FunctionWrapper:
     @staticmethod
     def _get_qualified_name(original_func: Callable) -> str:
         """Return a stable qualified name for functions and methods."""
-        return getattr(original_func, "__qualname__", original_func.__name__)
+        qualname = getattr(original_func, "__qualname__", None)
+        if qualname is not None:
+            return qualname
+        return getattr(original_func, "__name__", "<anonymous>")
 
     def _capture_entry_context(
         self, original_func: Callable, args: tuple, kwargs: dict, capture_config: CaptureConfig

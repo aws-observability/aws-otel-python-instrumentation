@@ -62,8 +62,8 @@ class SnapshotSerializer:
         try:
             return self._serialize_value(value, 0, deadline, seen)
         except Exception:  # pylint: disable=broad-exception-caught
-            type_name = type(value).__name__
-            return CapturedValue(type=type_name, not_captured_reason="timeout")
+            reason = "timeout" if time.monotonic() > deadline else "serializationError"
+            return CapturedValue(type=type(value).__name__, not_captured_reason=reason)
 
     def _serialize_value(  # pylint: disable=too-many-return-statements
         self,
@@ -89,7 +89,11 @@ class SnapshotSerializer:
             return CapturedValue(type="bool", value=str(value).lower())
 
         if isinstance(value, int):
-            return CapturedValue(type="int", value=str(value))
+            try:
+                return CapturedValue(type="int", value=str(value))
+            except ValueError:
+                # CPython 3.11+ caps int->str at sys.set_int_max_str_digits()
+                return CapturedValue(type="int", not_captured_reason="serializationError")
 
         if isinstance(value, float):
             return CapturedValue(type="float", value=str(value))
