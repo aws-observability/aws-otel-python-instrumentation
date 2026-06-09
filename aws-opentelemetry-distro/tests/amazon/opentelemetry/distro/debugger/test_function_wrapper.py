@@ -831,6 +831,176 @@ class TestClassMethodInstrumentation(_SnapshotEmitterFixture):
         self.assertTrue(FunctionWrapper.restore_function(self.module_name, "Service.handle", original))
         self.assertIs(Service.handle, original)
 
+    def test_instrument_inherited_method_via_subclass_emits_snapshot(self):
+        Base = type("Base", (), {"handle": _Service.handle})
+        Child = type("Child", (Base,), {})
+        _register_module(self.module_name, Base=Base, Child=Child)
+
+        self.assertEqual(getattr(Child, "handle").__qualname__, "_Service.handle")
+
+        func_key = f"{self.module_name}.Child.handle"
+        bp_set = _make_function_bp_set(func_key, self.module_name, "Child.handle")
+        manager = _FakeManager({func_key: bp_set})
+
+        original, _ = self.wrapper.instrument_function(
+            self.module_name,
+            "Child.handle",
+            capture_config=CaptureConfig(capture_return=True),
+            location_hash="loc-hash-inherit",
+            manager=manager,
+        )
+
+        self.assertEqual(Child().handle(41), 42)
+        self.emitter.emit_snapshot.assert_called_once()
+        self.assertEqual(manager.increment_calls, [f"{func_key}:0"])
+
+        self.emitter.emit_snapshot.reset_mock()
+        manager.increment_calls.clear()
+        self.assertEqual(Base().handle(41), 42)
+        self.emitter.emit_snapshot.assert_not_called()
+        self.assertEqual(manager.increment_calls, [])
+
+        self.assertTrue(FunctionWrapper.restore_function(self.module_name, "Child.handle", original))
+        self.assertEqual(Child().handle(7), 8)
+
+    def test_instrument_base_method_fires_for_child_calls_via_mro(self):
+        class Base:
+            def handle(self, x):
+                return x + 1
+
+        class Child(Base):
+            pass
+
+        _register_module(self.module_name, Base=Base, Child=Child)
+
+        func_key = f"{self.module_name}.Base.handle"
+        bp_set = _make_function_bp_set(func_key, self.module_name, "Base.handle")
+        manager = _FakeManager({func_key: bp_set})
+
+        original, _ = self.wrapper.instrument_function(
+            self.module_name,
+            "Base.handle",
+            capture_config=CaptureConfig(capture_return=True),
+            location_hash="loc-hash-bp-on-base",
+            manager=manager,
+        )
+
+        self.assertEqual(Base().handle(10), 11)
+        self.assertEqual(Child().handle(20), 21)
+        self.assertEqual(self.emitter.emit_snapshot.call_count, 2)
+        self.assertEqual(manager.increment_calls, [f"{func_key}:0", f"{func_key}:0"])
+
+        self.assertTrue(FunctionWrapper.restore_function(self.module_name, "Base.handle", original))
+
+    def test_instrument_method_decorated_without_functools_wraps(self):
+        def naive_decorator(fn):
+            def wrapper(*args, **kwargs):
+                return fn(*args, **kwargs)
+
+            return wrapper
+
+        class Svc:
+            @naive_decorator
+            def do(self, value):
+                return value * 2
+
+        _register_module(self.module_name, Svc=Svc)
+
+        self.assertNotEqual(getattr(Svc, "do").__qualname__, "Svc.do")
+
+        func_key = f"{self.module_name}.Svc.do"
+        bp_set = _make_function_bp_set(func_key, self.module_name, "Svc.do")
+        manager = _FakeManager({func_key: bp_set})
+
+        original, _ = self.wrapper.instrument_function(
+            self.module_name,
+            "Svc.do",
+            capture_config=CaptureConfig(capture_return=True),
+            location_hash="loc-hash-deco",
+            manager=manager,
+        )
+
+        self.assertEqual(Svc().do(21), 42)
+        self.emitter.emit_snapshot.assert_called_once()
+        self.assertEqual(manager.increment_calls, [f"{func_key}:0"])
+
+        self.assertTrue(FunctionWrapper.restore_function(self.module_name, "Svc.do", original))
+
+    def test_instrument_diamond_inheritance_bp_on_leaf(self):
+        class A:
+            def method(self, value):
+                return value * 10
+
+        class B(A):
+            pass
+
+        class C(A):
+            pass
+
+        class D(B, C):
+            pass
+
+        _register_module(self.module_name, A=A, B=B, C=C, D=D)
+
+        func_key = f"{self.module_name}.D.method"
+        bp_set = _make_function_bp_set(func_key, self.module_name, "D.method")
+        manager = _FakeManager({func_key: bp_set})
+
+        original, _ = self.wrapper.instrument_function(
+            self.module_name,
+            "D.method",
+            capture_config=CaptureConfig(capture_return=True),
+            location_hash="loc-hash-diamond",
+            manager=manager,
+        )
+
+        self.assertEqual(D().method(5), 50)
+        self.emitter.emit_snapshot.assert_called_once()
+
+        self.emitter.emit_snapshot.reset_mock()
+        manager.increment_calls.clear()
+        self.assertEqual(A().method(5), 50)
+        self.assertEqual(B().method(5), 50)
+        self.assertEqual(C().method(5), 50)
+        self.emitter.emit_snapshot.assert_not_called()
+        self.assertEqual(manager.increment_calls, [])
+
+        self.assertTrue(FunctionWrapper.restore_function(self.module_name, "D.method", original))
+
+    def test_instrument_inherited_classmethod_via_subclass_emits_snapshot(self):
+        class _Base:
+            @classmethod
+            def make(cls, value):
+                return f"{cls.__name__}-{value}"
+
+        class _Child(_Base):
+            pass
+
+        _register_module(self.module_name, Base=_Base, Child=_Child)
+
+        func_key = f"{self.module_name}.Child.make"
+        bp_set = _make_function_bp_set(func_key, self.module_name, "Child.make")
+        manager = _FakeManager({func_key: bp_set})
+
+        original, _ = self.wrapper.instrument_function(
+            self.module_name,
+            "Child.make",
+            capture_config=CaptureConfig(capture_return=True),
+            location_hash="loc-hash-inherit-cm",
+            manager=manager,
+        )
+
+        self.assertEqual(_Child.make(3), "_Child-3")
+        self.assertEqual(_Child().make(4), "_Child-4")
+        self.assertEqual(self.emitter.emit_snapshot.call_count, 2)
+        self.assertEqual(
+            manager.increment_calls,
+            [f"{func_key}:0", f"{func_key}:0"],
+        )
+
+        self.assertTrue(FunctionWrapper.restore_function(self.module_name, "Child.make", original))
+        self.assertEqual(_Child.make(9), "_Child-9")
+
     def test_replace_class_method_missing_method_raises(self):
         class Empty:
             pass
