@@ -28,7 +28,11 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Optional, Tuple, Type, Union
 
-from amazon.opentelemetry.distro.debugger._data_models import CaptureConfig
+from amazon.opentelemetry.distro.debugger._data_models import (
+    DEFAULT_MAX_FIELDS_PER_OBJECT,
+    DEFAULT_MAX_STRING_LENGTH,
+    CaptureConfig,
+)
 from amazon.opentelemetry.distro.debugger._snapshot_models import (
     CapturedContext,
     CapturedThrowable,
@@ -102,8 +106,16 @@ class FunctionWrapper:
 
     def __init__(self):
         """Initialize the FunctionWrapper."""
-        self._serializer = SnapshotSerializer()
         logger.debug("FunctionWrapper initialized")
+
+    @staticmethod
+    def _build_serializer(capture_config: Optional[CaptureConfig]) -> SnapshotSerializer:
+        return SnapshotSerializer(
+            max_fields=capture_config.max_fields_per_object if capture_config else DEFAULT_MAX_FIELDS_PER_OBJECT,
+            max_string_length=capture_config.max_string_length if capture_config else DEFAULT_MAX_STRING_LENGTH,
+            max_depth=capture_config.max_object_depth if capture_config else 3,
+            max_collection_size=capture_config.max_collection_width if capture_config else 10,
+        )
 
     def instrument_function(  # pylint: disable=too-many-arguments
         self,
@@ -894,7 +906,7 @@ class FunctionWrapper:
             return qualname
         return getattr(original_func, "__name__", "<anonymous>")
 
-    def _capture_entry_context(
+    def _capture_entry_context(  # pylint: disable=no-self-use
         self, original_func: Callable, args: tuple, kwargs: dict, capture_config: CaptureConfig
     ) -> Optional[CapturedContext]:
         """
@@ -921,13 +933,14 @@ class FunctionWrapper:
             if not filtered:
                 return None
 
-            arguments = self._serializer.serialize_variables(filtered)
+            serializer = FunctionWrapper._build_serializer(capture_config)
+            arguments = serializer.serialize_variables(filtered)
             return CapturedContext(arguments=arguments)
         except Exception as exc:
             logger.warning("Failed to capture entry context: %s", exc)
             return None
 
-    def _capture_return_context(
+    def _capture_return_context(  # pylint: disable=no-self-use
         self,
         result: Any,
         thrown: Optional[Exception],
@@ -963,7 +976,8 @@ class FunctionWrapper:
                 )
 
             if result is not None and capture_config.capture_return:
-                ctx.return_value = self._serializer.serialize(result)
+                serializer = FunctionWrapper._build_serializer(capture_config)
+                ctx.return_value = serializer.serialize(result)
 
             return ctx
         except Exception as exc:

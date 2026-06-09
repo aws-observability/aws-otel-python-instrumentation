@@ -374,8 +374,10 @@ class TestCaptureReturnContextError(unittest.TestCase):
 
     def test_serialize_failure_returns_none(self):
         config = CaptureConfig(capture_return=True)
-        # The serializer raises while serializing the return value -> except returns None.
-        with mock.patch.object(self.wrapper._serializer, "serialize", side_effect=RuntimeError("serialize boom")):
+        with mock.patch(
+            "amazon.opentelemetry.distro.debugger._function_wrapper.SnapshotSerializer.serialize",
+            side_effect=RuntimeError("serialize boom"),
+        ):
             result = self.wrapper._capture_return_context("a-value", None, config, None)
         self.assertIsNone(result)
 

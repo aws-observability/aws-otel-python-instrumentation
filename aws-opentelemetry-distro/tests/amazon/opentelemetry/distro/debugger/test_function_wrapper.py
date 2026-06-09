@@ -334,6 +334,34 @@ class TestCaptureEntryContext(unittest.TestCase):
         # Too many positional args => sig.bind raises, caught internally.
         self.assertIsNone(self.wrapper._capture_entry_context(func, (1, 2, 3), {}, config))
 
+    def test_entry_capture_respects_capture_config_max_string_length(self):
+        def func(payload):
+            return payload
+
+        long_value = "x" * 200
+        config = CaptureConfig(capture_arguments=[], max_string_length=10)
+        ctx = self.wrapper._capture_entry_context(func, (long_value,), {}, config)
+        captured = ctx.arguments["payload"]
+        self.assertEqual(captured.value, "x" * 10)
+        self.assertTrue(captured.truncated)
+        self.assertEqual(captured.size, 200)
+
+    def test_entry_capture_respects_capture_config_max_fields_per_object(self):
+        class Bag:
+            def __init__(self):
+                for idx in range(40):
+                    setattr(self, f"f{idx}", idx)
+
+        def func(bag):
+            return bag
+
+        config = CaptureConfig(capture_arguments=[], max_fields_per_object=5)
+        ctx = self.wrapper._capture_entry_context(func, (Bag(),), {}, config)
+        captured = ctx.arguments["bag"]
+        self.assertEqual(len(captured.fields), 5)
+        self.assertEqual(captured.not_captured_reason, "fieldCount")
+        self.assertEqual(captured.size, 40)
+
 
 class TestCaptureReturnContext(unittest.TestCase):
     def setUp(self):
@@ -371,6 +399,22 @@ class TestCaptureReturnContext(unittest.TestCase):
         except RuntimeError as exc:
             ctx = self.wrapper._capture_return_context(None, exc, config, caller_stack)
         self.assertEqual(ctx.throwable.type, "RuntimeError")
+
+    def test_return_capture_respects_capture_config_max_string_length(self):
+        long_value = "y" * 200
+        config = CaptureConfig(capture_return=True, max_string_length=10)
+        ctx = self.wrapper._capture_return_context(long_value, None, config, None)
+        self.assertEqual(ctx.return_value.value, "y" * 10)
+        self.assertTrue(ctx.return_value.truncated)
+        self.assertEqual(ctx.return_value.size, 200)
+
+    def test_return_capture_respects_capture_config_max_collection_width(self):
+        big_list = list(range(50))
+        config = CaptureConfig(capture_return=True, max_collection_width=4)
+        ctx = self.wrapper._capture_return_context(big_list, None, config, None)
+        self.assertEqual(len(ctx.return_value.elements), 4)
+        self.assertTrue(ctx.return_value.truncated)
+        self.assertEqual(ctx.return_value.size, 50)
 
 
 class TestBuildSnapshot(unittest.TestCase):
