@@ -111,6 +111,10 @@ if [ -z "${OTEL_LOGS_EXPORTER}" ]; then
         export OTEL_LOGS_EXPORTER="none";
 fi
 
+if [ -z "${AWS_LAMBDA_LITE_MODE}" ]; then
+    export AWS_LAMBDA_LITE_MODE="false";
+fi
+
 if [ -z "${OTEL_AWS_APPLICATION_SIGNALS_ENABLED}" ]; then
     export OTEL_AWS_APPLICATION_SIGNALS_ENABLED="true";
 fi
@@ -147,6 +151,11 @@ export OTEL_PYTHON_DISABLED_INSTRUMENTATIONS="$OTEL_PYTHON_DISABLED_INSTRUMENTAT
 export ORIG_HANDLER=$_HANDLER;
 export _HANDLER="otel_wrapper.lambda_handler";
 
-# - Call the upstream auto instrumentation script
+# - Lite mode: skip full SDK bootstrap, use lite SDK configured in otel_wrapper.py
+# - Full mode: use standard opentelemetry-instrument path
 
-exec python3 $LAMBDA_LAYER_PKGS_DIR/bin/opentelemetry-instrument "$@"
+if [ "$(echo "${AWS_LAMBDA_LITE_MODE}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+    exec "$@"
+else
+    exec python3 $LAMBDA_LAYER_PKGS_DIR/bin/opentelemetry-instrument "$@"
+fi
