@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   claude-review:
-    if: ${{ !github.event.pull_request.draft }}
+    if: ${{ !github.event.pull_request.draft && !contains(github.event.pull_request.title, '[skip-claude]') }}
     timeout-minutes: 30
     runs-on: ubuntu-latest
     permissions:
@@ -43,7 +43,32 @@ jobs:
         with:
           use_bedrock: "true"
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          use_sticky_comment: "true"
+          track_progress: "true"
           claude_args: |
             --model us.anthropic.claude-opus-4-6-v1 --allowedTools "Bash(gh pr diff ${{ github.event.pull_request.number }}),Bash(gh pr diff ${{ github.event.pull_request.number }} *),Bash(gh pr view ${{ github.event.pull_request.number }}),Bash(gh pr view ${{ github.event.pull_request.number }} *),Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments*),Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews*)"
           prompt: |
-            Review PR #${{ github.event.pull_request.number }} in this repository for bugs, security issues, and code quality. Post your findings as inline review comments on the relevant lines of this PR only. Do not modify, comment on, or interact with any other PR.
+            You are reviewing PR #${{ github.event.pull_request.number }} in ${{ github.repository }}.
+
+            STEP 1 — Read prior bot reviews FIRST, before looking at the diff:
+              gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews
+              gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments
+
+            Identify your prior comments (author login matches "claude" or contains "github-actions"). Note the most recent review's commit_id and the (path, line, body) of every existing comment you have already posted.
+
+            STEP 2 — Scope what is new:
+              gh pr view ${{ github.event.pull_request.number }} --json commits
+            Determine which commits landed AFTER your most recent review's commit_id. If there are no new commits and no unaddressed prior findings warrant a follow-up, post nothing and exit.
+
+            STEP 3 — Review only the changes since your last review:
+              gh pr diff ${{ github.event.pull_request.number }}
+            Focus your attention on lines touched by commits newer than your last review's commit_id. On the very first review of this PR, review the full diff.
+
+            STEP 4 — Dedupe before posting. For each candidate finding:
+              - If a prior comment already exists at the same (file, line) raising the same underlying issue, skip it — even if your wording would differ.
+              - If a prior finding is still applicable but unaddressed, do not re-post; the original comment is still on the line.
+              - Only post genuinely new findings.
+
+            STEP 5 — Post findings as inline review comments on this PR only.
+
+            Bias toward silence: posting nothing is the correct outcome when no new substantive issues exist. Do not modify, comment on, or interact with any other PR.
