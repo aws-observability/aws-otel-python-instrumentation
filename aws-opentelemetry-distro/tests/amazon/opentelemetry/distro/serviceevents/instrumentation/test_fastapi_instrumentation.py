@@ -297,6 +297,35 @@ class TestInstallFastAPIHooks(TestCase):
         self.assertTrue(original_init_called["called"])
         app.add_middleware.assert_called_once_with(ServiceEventsFastAPIMiddleware)
 
+    def test_instrumented_init_swallows_middleware_install_failure(self):
+        """Crash-safety: if add_middleware raises, app construction must still succeed.
+
+        Telemetry must never break the host app. The original FastAPI __init__ must run
+        and the constructed instance must be usable even when installing our middleware
+        fails. The failure is swallowed (logged at debug), not propagated.
+        """
+        original_init_called = {}
+
+        class FakeFastAPI:
+            def __init__(self, *args, **kwargs):
+                original_init_called["called"] = True
+                self.title = "test-app"
+                # add_middleware blows up the way a framework-internal failure would.
+                self.add_middleware = MagicMock(side_effect=RuntimeError("middleware exploded"))
+
+        mock_fastapi_module = MagicMock()
+        mock_fastapi_module.FastAPI = FakeFastAPI
+
+        with patch.dict("sys.modules", {"fastapi": mock_fastapi_module}):
+            install_fastapi_hooks()
+            # Must NOT raise even though add_middleware throws inside instrumented_init.
+            app = FakeFastAPI()
+
+        # Original init ran and the app was constructed despite the telemetry failure.
+        self.assertTrue(original_init_called["called"])
+        self.assertEqual(app.title, "test-app")
+        app.add_middleware.assert_called_once_with(ServiceEventsFastAPIMiddleware)
+
 
 class TestFastAPIMiddleware(unittest.IsolatedAsyncioTestCase):
     """Async tests for ServiceEventsFastAPIMiddleware."""

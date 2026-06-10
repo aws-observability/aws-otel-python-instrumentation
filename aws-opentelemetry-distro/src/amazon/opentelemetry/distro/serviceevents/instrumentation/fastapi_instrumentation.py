@@ -419,14 +419,31 @@ def install_fastapi_hooks(endpoint_collector=None, incident_snapshot_collector=N
 
     def instrumented_init(self, *args, **kwargs):
         """Wrap FastAPI.__init__ to install middleware after app creation."""
-        # Call original init
+        # Call original init first and outside the guard below: this is the real
+        # FastAPI constructor and must always run. Only OUR added work is guarded,
+        # so a telemetry failure can never break FastAPI app construction.
         original_init(self, *args, **kwargs)
 
-        # Add ServiceEvents middleware to the FastAPI app
-        # Note: Middleware is added first so it wraps all other middleware
-        self.add_middleware(ServiceEventsFastAPIMiddleware)
+        # Crash-safety: telemetry must never break the host app. Installing the
+        # middleware runs inside the customer's FastAPI.__init__, so any failure
+        # here is swallowed and the app is constructed as if uninstrumented.
+        try:
+            # Add ServiceEvents middleware to the FastAPI app.
+            # Known limitation: middleware is installed during FastAPI.__init__, the
+            # earliest possible point. Under Starlette's add_middleware semantics
+            # (insert(0, ...) + reversed-wrap when the stack is built), the last
+            # middleware added becomes the OUTERMOST. So any user middleware added
+            # after construction wraps ours, leaving ServiceEvents INNERMOST relative
+            # to user middleware. Consequence: end-to-end duration may exclude time
+            # spent in outer user middleware, and status/response changes made by
+            # outer user middleware are not observed. We do not rework this to be
+            # outermost because doing so reliably requires framework-internal hooks
+            # that are version-fragile.
+            self.add_middleware(ServiceEventsFastAPIMiddleware)
 
-        logger.info("ServiceEvents FastAPI hooks installed on app: %s", self.title)
+            logger.info("ServiceEvents FastAPI hooks installed on app: %s", self.title)
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.debug("Failed to install ServiceEvents FastAPI middleware", exc_info=True)
 
     # Replace FastAPI.__init__ with instrumented version
     FastAPI.__init__ = instrumented_init

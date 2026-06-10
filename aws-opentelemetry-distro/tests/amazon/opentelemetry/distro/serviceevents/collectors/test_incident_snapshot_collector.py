@@ -1460,6 +1460,32 @@ class TestCollectExceptionInfo(TestCase):
         self.assertIn("ValueError", result[0].stack_trace)
         self.assertTrue(result[0].call_path[0].error)
 
+    def test_monitor_captured_exception_with_preformatted_traceback_string(self):
+        """The monitor now stores traceback_info as a pre-formatted string; use it as-is."""
+        collector = self._make_collector()
+        preformatted = "Traceback (most recent call last):\n  ...\nValueError: captured\n"
+        collector._monitor_state.get_investigation_data.return_value = {
+            "exception": {
+                "function_name": "func_a",
+                "name": "ValueError",
+                "message": "captured",
+                "traceback_info": preformatted,
+            },
+            "call_path": [{"function_name": "func_a", "caller_function_name": None, "duration_ns": 5}],
+        }
+
+        with patch(
+            "amazon.opentelemetry.distro.serviceevents.collectors." "incident_snapshot_collector.get_function_info",
+            return_value={"is_async": False},
+        ):
+            result = collector._collect_exception_info(None)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].exception_type, "ValueError")
+        # The pre-formatted string is used verbatim, not re-formatted.
+        self.assertEqual(result[0].stack_trace, preformatted)
+        self.assertTrue(result[0].call_path[0].error)
+
     def test_monitor_captured_exception_traceback_info_format_fails(self):
         """When formatting traceback_info raises, fall back to name+message string."""
         collector = self._make_collector()

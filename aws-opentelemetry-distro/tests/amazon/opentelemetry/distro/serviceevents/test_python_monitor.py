@@ -173,6 +173,27 @@ class TestPythonServiceEventsMonitor(TestCase):
         self.assertIsNotNone(inv_data["exception"])
         self.assertEqual(inv_data["exception"]["name"], "ValueError")
         self.assertEqual(inv_data["exception"]["function_name"], "error_func")
+        # The traceback is formatted to a STRING eagerly (not stored as an
+        # (exc_type, exc_value, exc_traceback) tuple) so it cannot pin the frame
+        # chain alive in the ContextVar; the formatted text includes the exception.
+        traceback_info = inv_data["exception"]["traceback_info"]
+        self.assertIsInstance(traceback_info, str)
+        self.assertIn("ValueError", traceback_info)
+        self.assertIn("Test error", traceback_info)
+
+    def test_exception_does_not_set_dead_exception_info_attr(self):
+        """The monitor no longer keeps a self.exception_info attr pinning the traceback."""
+        state = _ServiceEventsMonitorState.get_instance()
+        state.begin_investigation()
+
+        monitor = PythonServiceEventsMonitor("error_func")
+        with self.assertRaises(ValueError):
+            with monitor:
+                raise ValueError("boom")
+
+        # The dead instance attribute was removed; exception data flows only through
+        # the investigation-data dict, so nothing on the monitor pins the traceback.
+        self.assertFalse(hasattr(monitor, "exception_info"))
 
     @patch("amazon.opentelemetry.distro.serviceevents.python_monitor_impl.time.perf_counter_ns")
     def test_multiple_invocations(self, mock_time):

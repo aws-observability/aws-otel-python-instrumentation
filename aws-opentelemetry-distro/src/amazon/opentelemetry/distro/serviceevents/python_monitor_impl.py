@@ -11,6 +11,7 @@ which handles native/Python implementation selection.
 
 import threading
 import time
+import traceback
 from contextvars import ContextVar
 from typing import Dict, Optional
 
@@ -418,7 +419,6 @@ class PythonServiceEventsMonitor:
         self.function_name = function_name
         self.start_time = None
         self.caller = None
-        self.exception_info = None
         self.is_sampled = False
         # Whether __enter__ actually pushed this frame onto _call_stack. __exit__
         # pops only when this is True, so a failed/partial __enter__ never causes
@@ -500,16 +500,19 @@ class PythonServiceEventsMonitor:
             exception_name = None
             if exc_type is not None:
                 exception_name = exc_type.__name__
-                self.exception_info = {
-                    "type": exc_type,
-                    "value": exc_value,
-                    "traceback": exc_traceback,
-                }
 
-                # Record in investigation data (defer traceback formatting for performance).
-                # str(exc_value) runs the customer's exception __str__ — guarded by the
+                # Format the traceback to a string eagerly rather than stashing the
+                # (exc_type, exc_value, exc_traceback) tuple: holding exc_traceback pins the
+                # entire frame chain (every local in every frame) alive in the ContextVar until
+                # the next request overwrites the investigation data. On the common non-incident
+                # path that window can be arbitrarily long under low request rates. str()/
+                # format_exception run the customer's exception __str__ — guarded by the
                 # surrounding try so a misbehaving __str__ can't escape here.
-                #
+                try:
+                    stack_trace = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                except Exception:  # pylint: disable=broad-exception-caught
+                    stack_trace = f"{exception_name}: {exc_value}"
+
                 # First-writer-wins: __exit__ unwinds innermost-first, so the first frame to
                 # observe a propagating exception is the one closest to the raise (the true
                 # origin). Outer frames re-observe the same exception as it propagates out; they
@@ -520,7 +523,7 @@ class PythonServiceEventsMonitor:
                     inv_data["exception"] = {
                         "name": exception_name,
                         "message": str(exc_value),
-                        "traceback_info": (exc_type, exc_value, exc_traceback),
+                        "traceback_info": stack_trace,
                         "function_name": self.function_name,  # Capture which function threw the exception
                     }
 

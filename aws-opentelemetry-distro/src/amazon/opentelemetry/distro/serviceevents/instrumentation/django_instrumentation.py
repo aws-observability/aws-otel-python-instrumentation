@@ -414,10 +414,10 @@ def install_django_hooks(endpoint_collector=None, incident_snapshot_collector=No
 
     def instrumented_load_middleware(self, *args, **kwargs):
         """Wrap BaseHandler.load_middleware to prepend ServiceEvents middleware."""
-        # Call original load_middleware first
-        original_load_middleware(self, *args, **kwargs)
-
-        # Now inject our middleware into settings.MIDDLEWARE
+        # Inject our middleware into settings.MIDDLEWARE BEFORE building the stack so the
+        # stack is built exactly once. load_middleware re-instantiates every middleware on
+        # each call, so a second call would double-init every third-party middleware on
+        # first startup (duplicate signal handlers, threads, connections, etc.).
         try:
             # Lazy import: defer optional heavy dependency (Django) until install time.
             # pylint: disable=import-outside-toplevel
@@ -430,12 +430,14 @@ def install_django_hooks(endpoint_collector=None, incident_snapshot_collector=No
                 middleware_list.insert(0, _SERVICE_EVENTS_MIDDLEWARE_PATH)
                 settings.MIDDLEWARE = middleware_list
 
-                # Reload middleware to pick up our addition
-                original_load_middleware(self, *args, **kwargs)
-
                 logger.info("ServiceEvents Django middleware prepended to settings.MIDDLEWARE")
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error("Error injecting ServiceEvents Django middleware: %s", exc, exc_info=True)
+
+        # Build the middleware stack exactly once, now that settings.MIDDLEWARE includes ours.
+        # Called unconditionally so handler init still builds a chain when SE middleware was
+        # already present (e.g. pre-configured in user settings) or when injection failed.
+        original_load_middleware(self, *args, **kwargs)
 
     # Replace BaseHandler.load_middleware with instrumented version
     BaseHandler.load_middleware = instrumented_load_middleware

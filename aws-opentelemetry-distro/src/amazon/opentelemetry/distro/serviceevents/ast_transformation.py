@@ -160,7 +160,7 @@ def get_registry_size() -> int:
 def get_deployment_event_telemetry(
     service_name: str = "unknown-service",
     environment: Optional[str] = None,
-    sdk_version: str = "0.14.2",
+    sdk_version: str = "",
     pid: Optional[int] = None,
     resource_attributes=None,
 ) -> Dict[str, Any]:
@@ -440,7 +440,22 @@ class ServiceEventsSourceLoader(SourceFileLoader):
                 level=0,
             )
             ast.fix_missing_locations(import_node)
-            transformed_tree.body.insert(0, import_node)
+            # Insert the import after a leading module docstring (if any). A module's
+            # __doc__ is populated only when the FIRST statement is a string-constant Expr;
+            # inserting the import at index 0 would displace the docstring and silently make
+            # __doc__ None, breaking pydoc/help()/doctest/__doc__-based tooling. Mirrors the
+            # docstring predicate in get_and_remove_docstring (incl. the 3.8 ast.Str fallback).
+            AstStrType = ast.Constant if sys.version_info >= (3, 8) else ast.Str  # pylint: disable=invalid-name
+            has_leading_docstring = bool(transformed_tree.body) and (
+                isinstance(transformed_tree.body[0], ast.Expr)
+                and isinstance(transformed_tree.body[0].value, AstStrType)
+                and (
+                    isinstance(transformed_tree.body[0].value.value, str)  # type: ignore[attr-defined]
+                    if sys.version_info >= (3, 8)
+                    else isinstance(transformed_tree.body[0].value.s, str)  # type: ignore[attr-defined]
+                )
+            )
+            transformed_tree.body.insert(1 if has_leading_docstring else 0, import_node)
 
             # Compile transformed AST to code object
             code = compile(

@@ -39,7 +39,9 @@ class TestEndpointMetricCollector(TestCase):
 
         self.assertEqual(collector.environment, "production")
         self.assertEqual(collector.service_name, "api-svc")
-        self.assertEqual(collector.sdk_version, "0.14.2")
+        # sdk_version defaults to "" (must be provided by the caller, which always passes
+        # ServiceEventsConfig.sdk_version = ADOT_VERSION); the old "0.14.2" default was stale.
+        self.assertEqual(collector.sdk_version, "")
 
     def test_record_request_creates_aggregation_entry(self):
         """Test that record_request creates an aggregation entry."""

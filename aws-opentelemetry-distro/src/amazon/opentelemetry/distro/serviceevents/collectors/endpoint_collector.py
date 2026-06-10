@@ -40,7 +40,7 @@ class EndpointMetricCollector(BaseCollector):
         flush_interval_ms: int,
         environment: Optional[str] = None,
         service_name: Optional[str] = None,
-        sdk_version: str = "0.14.2",
+        sdk_version: str = "",
         resource_attributes: Optional[ResourceAttributes] = None,
         otlp_emitter=None,
         suppress_endpoint_summary: bool = False,

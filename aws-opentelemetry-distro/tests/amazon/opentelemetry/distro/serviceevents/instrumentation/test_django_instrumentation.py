@@ -208,12 +208,20 @@ class TestInstallDjangoHooks(TestCase):
         self.assertIsNot(FakeBaseHandler.load_middleware, original_load)
 
     def test_instrumented_load_middleware_injects_middleware(self):
-        """The wrapped load_middleware prepends the middleware to settings.MIDDLEWARE and reloads."""
+        """The wrapped load_middleware prepends the middleware to settings.MIDDLEWARE before building once."""
         call_count = {"n": 0}
+
+        middleware_path = (
+            "amazon.opentelemetry.distro.serviceevents.instrumentation."
+            "django_instrumentation.ServiceEventsDjangoMiddleware"
+        )
 
         class FakeBaseHandler:
             def load_middleware(self, *args, **kwargs):
                 call_count["n"] += 1
+                # Stack must be built only after SE middleware is already injected, so
+                # every middleware is instantiated exactly once.
+                assert fake_settings.MIDDLEWARE[0] == middleware_path
 
         mock_django_handler = MagicMock()
         mock_django_handler.BaseHandler = FakeBaseHandler
@@ -232,14 +240,11 @@ class TestInstallDjangoHooks(TestCase):
             # Drive the instrumented load_middleware on an instance.
             FakeBaseHandler().load_middleware()
 
-        middleware_path = (
-            "amazon.opentelemetry.distro.serviceevents.instrumentation."
-            "django_instrumentation.ServiceEventsDjangoMiddleware"
-        )
         # Our middleware was prepended to the front of MIDDLEWARE.
         self.assertEqual(fake_settings.MIDDLEWARE[0], middleware_path)
-        # Original load_middleware called twice: once initially, once after injection.
-        self.assertEqual(call_count["n"], 2)
+        # Original load_middleware called exactly once: the SE middleware is injected before
+        # the single build, so the stack (and every middleware) is built only once on first init.
+        self.assertEqual(call_count["n"], 1)
 
     def test_instrumented_load_middleware_skips_when_already_present(self):
         """The wrapped load_middleware does not re-inject when its middleware is already listed."""

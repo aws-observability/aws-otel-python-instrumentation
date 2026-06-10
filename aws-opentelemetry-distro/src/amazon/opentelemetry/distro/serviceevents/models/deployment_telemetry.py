@@ -114,7 +114,7 @@ class DeploymentEventTelemetry:
         service_name: str = "unknown-service",
         environment: Optional[str] = None,
         instance_id: Optional[str] = None,
-        sdk_version: str = "0.14.2",
+        sdk_version: str = "",
         pid: Optional[int] = None,
         include_deployment_context: bool = True,
         resource_attributes: Optional["ResourceAttributes"] = None,

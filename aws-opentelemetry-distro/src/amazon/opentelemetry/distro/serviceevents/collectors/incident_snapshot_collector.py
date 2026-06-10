@@ -67,7 +67,7 @@ class IncidentSnapshotCollector(BaseCollector):
         max_per_period: int,
         environment: Optional[str] = None,
         service_name: Optional[str] = None,
-        sdk_version: str = "0.14.2",
+        sdk_version: str = "",
         capture_request_body: bool = False,
         max_same_error: int = 1,
         resource_attributes: Optional[ResourceAttributes] = None,
@@ -784,7 +784,12 @@ class IncidentSnapshotCollector(BaseCollector):
             error_function_name = exc_data.get("function_name")
             call_path = self._build_call_path(inv_data, error_function_name)
             traceback_info = exc_data.get("traceback_info")
-            if traceback_info:
+            if isinstance(traceback_info, str):
+                # The monitor formats the traceback to a string eagerly (so it does not pin the
+                # frame chain alive in the ContextVar); use it as-is.
+                stack_trace = traceback_info
+            elif traceback_info:
+                # Backward-compatible path: an (exc_type, exc_value, exc_traceback) tuple.
                 try:
                     stack_trace = "".join(traceback.format_exception(*traceback_info))
                 except Exception:  # pylint: disable=broad-exception-caught  # telemetry must never crash host app
