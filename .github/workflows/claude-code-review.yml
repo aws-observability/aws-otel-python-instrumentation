@@ -69,6 +69,6 @@ jobs:
               - If a prior finding is still applicable but unaddressed, do not re-post; the original comment is still on the line.
               - Only post genuinely new findings.
 
-            STEP 5 — Post findings as inline review comments on this PR only.
+            STEP 5 — Post your findings as inline review comments on the relevant lines of this PR only.
 
             Bias toward silence: posting nothing is the correct outcome when no new substantive issues exist. Do not modify, comment on, or interact with any other PR.
