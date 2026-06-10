@@ -48,7 +48,7 @@ jobs:
           claude_args: |
             --model us.anthropic.claude-opus-4-6-v1 --allowedTools "Bash(gh pr diff ${{ github.event.pull_request.number }}),Bash(gh pr diff ${{ github.event.pull_request.number }} *),Bash(gh pr view ${{ github.event.pull_request.number }}),Bash(gh pr view ${{ github.event.pull_request.number }} *),Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments*),Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews*)"
           prompt: |
-            You are reviewing PR #${{ github.event.pull_request.number }} in ${{ github.repository }}.
+            You are reviewing PR #${{ github.event.pull_request.number }} in ${{ github.repository }} for bugs, security issues, and code quality.
 
             STEP 1 — Read prior bot reviews FIRST, before looking at the diff:
               gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews
