@@ -50,25 +50,23 @@ jobs:
           prompt: |
             You are reviewing PR #${{ github.event.pull_request.number }} in ${{ github.repository }} for bugs, security issues, and code quality.
 
-            STEP 1 — Read prior bot reviews FIRST, before looking at the diff:
-              gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews
+            SELF-IDENTIFICATION: every inline comment you post MUST end with this exact hidden HTML marker on its own line so future runs can reliably identify your prior reviews:
+              <!-- claude-code-review:v1 -->
+
+            STEP 1 — Read prior reviews FIRST, before looking at the diff:
               gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments
+              gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews
 
-            Identify your prior comments (author login matches "claude" or contains "github-actions"). Note the most recent review's commit_id and the (path, line, body) of every existing comment you have already posted.
+            Identify YOUR prior comments by matching the marker `<!-- claude-code-review:v1 -->` in the body. Do NOT match on author login (github-actions[bot] is shared by many workflows — linting, coverage, etc. — and matching by login causes false dedup). Build a set of your prior (path, line, finding) tuples.
 
-            STEP 2 — Scope what is new:
-              gh pr view ${{ github.event.pull_request.number }} --json commits
-            Determine which commits landed AFTER your most recent review's commit_id. If there are no new commits and no unaddressed prior findings warrant a follow-up, post nothing and exit.
-
-            STEP 3 — Review only the changes since your last review:
+            STEP 2 — Review the full PR diff:
               gh pr diff ${{ github.event.pull_request.number }}
-            Focus your attention on lines touched by commits newer than your last review's commit_id. On the very first review of this PR, review the full diff.
 
-            STEP 4 — Dedupe before posting. For each candidate finding:
-              - If a prior comment already exists at the same (file, line) raising the same underlying issue, skip it — even if your wording would differ.
+            STEP 3 — Dedupe before posting. For each candidate finding:
+              - If you have a prior comment at the same (path, line) raising the same underlying issue, skip it — even if your wording would differ.
               - If a prior finding is still applicable but unaddressed, do not re-post; the original comment is still on the line.
               - Only post genuinely new findings.
 
-            STEP 5 — Post your findings as inline review comments on the relevant lines of this PR only.
+            STEP 4 — Post your findings as inline review comments on the relevant lines of this PR only. Append the `<!-- claude-code-review:v1 -->` marker to every comment body.
 
             Bias toward silence: posting nothing is the correct outcome when no new substantive issues exist. Do not modify, comment on, or interact with any other PR.
