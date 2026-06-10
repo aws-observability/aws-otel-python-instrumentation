@@ -34,6 +34,22 @@ _registry_lock = threading.Lock()
 FunctionDef = TypeVar("FunctionDef", ast.FunctionDef, ast.AsyncFunctionDef)
 
 
+def _is_docstring_expr(node: ast.stmt) -> bool:
+    """Return True if ``node`` is a string-constant expression statement (a docstring).
+
+    A docstring is only recognised as the FIRST statement of a module/function body. Handles
+    the 3.8 AST change (``ast.Str`` with ``.s`` → ``ast.Constant`` with ``.value``); ``ast.Str``
+    is deprecated and removed in newer CPython, so the version gate keeps this working across
+    interpreters. Shared by the module-docstring check (preamble insertion) and the
+    function-docstring check (body rewrite) so the two cannot drift apart.
+    """
+    if not isinstance(node, ast.Expr):
+        return False
+    if sys.version_info >= (3, 8):
+        return isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
+    return isinstance(node.value, ast.Str) and isinstance(node.value.s, str)  # type: ignore[attr-defined]
+
+
 def _file_path_to_module_path(file_path: str) -> str:
     """Convert a file path to a module-style path for function naming.
 
@@ -226,21 +242,7 @@ class ServiceEventsASTTransformer(ast.NodeTransformer):
         node: Union[ast.FunctionDef, ast.AsyncFunctionDef],
     ) -> Optional[ast.stmt]:
         """If the first expression in the function is a docstring, remove and return it."""
-        # Mirrors an ast type name (Constant/Str); kept CamelCase to match the ast API.
-        AstStrType = ast.Constant if sys.version_info >= (3, 8) else ast.Str  # pylint: disable=invalid-name
-
-        if not node.body:
-            return None
-
-        if (
-            isinstance(node.body[0], ast.Expr)
-            and isinstance(node.body[0].value, AstStrType)
-            and (
-                isinstance(node.body[0].value.value, str)  # type: ignore[attr-defined]
-                if sys.version_info >= (3, 8)
-                else isinstance(node.body[0].value.s, str)  # type: ignore[attr-defined]
-            )
-        ):
+        if node.body and _is_docstring_expr(node.body[0]):
             return node.body.pop(0)
         return None
 
@@ -407,6 +409,35 @@ class ServiceEventsSourceLoader(SourceFileLoader):
         # Fallback: return the original path unchanged
         return source_path
 
+    @staticmethod
+    def _preamble_insert_index(body: List[ast.stmt]) -> int:
+        """Index at which an injected import may go without displacing required leading statements.
+
+        Returns the position just past the module's mandatory "preamble" so the injected
+        ``PythonServiceEventsMonitor`` import cannot push aside statements Python requires
+        to come first:
+          1. A module docstring — ``__doc__`` is populated only when the FIRST statement is a
+             string-constant ``Expr``; inserting before it silently makes ``__doc__`` None
+             (breaks pydoc/help()/doctest/``__doc__``-based tooling).
+          2. ``from __future__ import ...`` — these MUST be the first statements (after any
+             docstring); inserting before one raises ``SyntaxError`` at compile(), which
+             get_code's broad-except would swallow into a silent fall back to *uninstrumented*
+             loading for the whole module.
+
+        Note on (2): in the current pipeline ServiceEventsASTTransformer.visit_ImportFrom strips
+        every ``__future__`` node into compiler flags BEFORE this runs, so on a transformed tree
+        no ``__future__`` node survives for the loop to skip. The skip is kept deliberately so this
+        helper is correct on ANY body (it is unit-tested directly on un-transformed bodies, and
+        stays safe if that strip step is ever changed) — not because the loop fires today.
+        """
+        if not body:
+            return 0
+        index = 1 if _is_docstring_expr(body[0]) else 0
+        # Skip past any leading ``from __future__`` imports (they may follow the docstring).
+        while index < len(body) and isinstance(body[index], ast.ImportFrom) and body[index].module == "__future__":
+            index += 1
+        return index
+
     def get_code(self, fullname: str) -> Optional[types.CodeType]:
         """Load and transform the module's source code."""
         source_path = self.get_filename(fullname)
@@ -440,22 +471,10 @@ class ServiceEventsSourceLoader(SourceFileLoader):
                 level=0,
             )
             ast.fix_missing_locations(import_node)
-            # Insert the import after a leading module docstring (if any). A module's
-            # __doc__ is populated only when the FIRST statement is a string-constant Expr;
-            # inserting the import at index 0 would displace the docstring and silently make
-            # __doc__ None, breaking pydoc/help()/doctest/__doc__-based tooling. Mirrors the
-            # docstring predicate in get_and_remove_docstring (incl. the 3.8 ast.Str fallback).
-            AstStrType = ast.Constant if sys.version_info >= (3, 8) else ast.Str  # pylint: disable=invalid-name
-            has_leading_docstring = bool(transformed_tree.body) and (
-                isinstance(transformed_tree.body[0], ast.Expr)
-                and isinstance(transformed_tree.body[0].value, AstStrType)
-                and (
-                    isinstance(transformed_tree.body[0].value.value, str)  # type: ignore[attr-defined]
-                    if sys.version_info >= (3, 8)
-                    else isinstance(transformed_tree.body[0].value.s, str)  # type: ignore[attr-defined]
-                )
-            )
-            transformed_tree.body.insert(1 if has_leading_docstring else 0, import_node)
+            # Insert after the module's mandatory preamble (docstring + ``from __future__``)
+            # so the injected import never displaces a statement Python requires to come first.
+            insert_index = self._preamble_insert_index(transformed_tree.body)
+            transformed_tree.body.insert(insert_index, import_node)
 
             # Compile transformed AST to code object
             code = compile(

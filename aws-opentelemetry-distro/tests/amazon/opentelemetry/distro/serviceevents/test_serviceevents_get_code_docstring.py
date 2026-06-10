@@ -11,6 +11,7 @@ pydoc/help()/doctest/__doc__-based tooling). These tests load a transformed modu
 assert the docstring is preserved, while the import is still injected and functional.
 """
 
+import ast
 import os
 import tempfile
 from unittest import TestCase
@@ -79,3 +80,56 @@ class TestGetCodePreservesModuleDocstring(TestCase):
         self.assertEqual(namespace.get("__doc__"), MODULE_DOCSTRING)
         self.assertEqual(namespace["x"], 1)
         self.assertIn("PythonServiceEventsMonitor", namespace)
+
+    def test_docstring_then_future_import_keeps_docstring_and_instruments(self):
+        """A module with a docstring followed by ``from __future__`` stays valid and instrumented.
+
+        End-to-end through get_code, ``from __future__`` is folded into compiler flags by the
+        transformer (visit_ImportFrom), not kept as a body statement, so this asserts the
+        observable contract: the docstring survives and the monitor import is injected. The
+        placement of the injected import relative to a *retained* ``__future__`` node is covered
+        directly in TestPreambleInsertIndex below.
+        """
+        source = (
+            f'"""{MODULE_DOCSTRING}"""\n' "from __future__ import annotations\n" "\n" "def qux():\n" "    return 4\n"
+        )
+        namespace = self._load("doc_then_future", source)
+        self.assertEqual(namespace.get("__doc__"), MODULE_DOCSTRING)
+        self.assertIn("PythonServiceEventsMonitor", namespace)
+        self.assertEqual(namespace["qux"](), 4)
+
+
+class TestPreambleInsertIndex(TestCase):
+    """Direct unit tests for _preamble_insert_index on raw (un-transformed) AST bodies.
+
+    These exercise the helper on bodies that still contain ``from __future__`` nodes — which
+    the real get_code pipeline strips into compiler flags before insertion — so they actually
+    cover the ``__future__``-skipping branch that the end-to-end get_code tests cannot reach.
+    """
+
+    @staticmethod
+    def _index(source):
+        return ServiceEventsSourceLoader._preamble_insert_index(ast.parse(source).body)
+
+    def test_empty_body(self):
+        self.assertEqual(ServiceEventsSourceLoader._preamble_insert_index([]), 0)
+
+    def test_plain_module_inserts_at_zero(self):
+        self.assertEqual(self._index("def f():\n    return 1\n"), 0)
+
+    def test_leading_docstring_inserts_after_it(self):
+        self.assertEqual(self._index('"""doc"""\ndef f():\n    return 1\n'), 1)
+
+    def test_skips_single_future_import(self):
+        self.assertEqual(self._index("from __future__ import annotations\ndef f():\n    return 1\n"), 1)
+
+    def test_skips_docstring_then_future_import(self):
+        self.assertEqual(self._index('"""doc"""\nfrom __future__ import annotations\ndef f():\n    return 1\n'), 2)
+
+    def test_skips_multiple_future_imports(self):
+        source = "from __future__ import annotations\nfrom __future__ import division\ndef f():\n    return 1\n"
+        self.assertEqual(self._index(source), 2)
+
+    def test_non_future_importfrom_is_not_skipped(self):
+        """A regular ``from x import y`` is not preamble; the import goes before it."""
+        self.assertEqual(self._index("from os import path\ndef f():\n    return 1\n"), 0)

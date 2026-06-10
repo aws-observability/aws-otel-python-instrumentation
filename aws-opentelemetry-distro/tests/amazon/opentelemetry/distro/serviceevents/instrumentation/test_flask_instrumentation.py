@@ -5,6 +5,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import amazon.opentelemetry.distro.serviceevents.instrumentation.flask_instrumentation as flask_mod
+from amazon.opentelemetry.distro.serviceevents.instrumentation._constants import UNMATCHED_ROUTE
 from amazon.opentelemetry.distro.serviceevents.instrumentation.flask_instrumentation import (
     _after_request_hook,
     _before_request_hook,
@@ -37,14 +38,16 @@ class TestGetRoutePattern(TestCase):
         result = _get_route_pattern(request)
         self.assertEqual(result, "/user_detail")
 
-    def test_get_route_pattern_from_path(self):
-        """Falls back to path when both url_rule and endpoint are None."""
+    def test_get_route_pattern_unmatched_uses_sentinel(self):
+        """Unmatched requests (no url_rule, no endpoint) collapse to the <unmatched>
+        sentinel instead of the raw path, to bound metric cardinality for scanner/bot
+        traffic. Parity with the Django/FastAPI instrumentation."""
         request = MagicMock()
         request.url_rule = None
         request.endpoint = None
-        request.path = "/users/42"
+        request.path = "/wp-admin/setup-config.php"
         result = _get_route_pattern(request)
-        self.assertEqual(result, "/users/42")
+        self.assertEqual(result, UNMATCHED_ROUTE)
 
 
 class TestGetRequestBody(TestCase):
@@ -268,6 +271,35 @@ class TestInstallFlaskHooks(TestCase):
         app.after_request.assert_called_once_with(flask_mod._after_request_hook)
         app.teardown_request.assert_called_once_with(flask_mod._teardown_request_hook)
 
+    def test_instrumented_init_swallows_hook_registration_failure(self):
+        """A failure while registering hooks must NOT break Flask app construction.
+
+        Telemetry must never crash the host app: if before_request/after_request/
+        teardown_request registration raises, instrumented_init swallows it and the
+        app is constructed as if uninstrumented (the original __init__ still ran).
+        """
+        init_calls = []
+
+        class FakeFlask:
+            def __init__(self, name, *args, **kwargs):
+                init_calls.append(name)
+                self.name = name
+                # before_request raises -> simulates a hook-registration failure.
+                self.before_request = MagicMock(side_effect=RuntimeError("registration boom"))
+                self.after_request = MagicMock()
+                self.teardown_request = MagicMock()
+
+        mock_flask_module = MagicMock()
+        mock_flask_module.Flask = FakeFlask
+
+        with patch.dict("sys.modules", {"flask": mock_flask_module}):
+            install_flask_hooks()
+            # Must not raise despite before_request blowing up inside instrumented_init.
+            app = FakeFlask("my_app")
+
+        self.assertEqual(init_calls, ["my_app"])  # original __init__ still ran
+        self.assertEqual(app.name, "my_app")  # app fully constructed/usable
+
 
 class TestFlaskHookFunctions(TestCase):
     """Tests for the Flask hook functions (_before_request_hook, _after_request_hook, _teardown_request_hook)."""
@@ -462,6 +494,43 @@ class TestFlaskHookFunctions(TestCase):
             _teardown_request_hook(exception=None)
 
         mock_clear.assert_called_once()
+
+    @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.flask_instrumentation._ServiceEventsMonitorState")
+    @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.flask_instrumentation.clear_current_operation")
+    def test_teardown_clears_investigation_data_on_normal_path(self, _mock_clear, mock_state_cls):
+        """Teardown drops investigation data unconditionally (the non-incident leak fix).
+
+        On the normal path no incident is collected, so get_investigation_data() is never
+        called; teardown must still clear it so a stale dict (and any captured traceback)
+        does not linger on a pooled worker thread.
+        """
+        mock_state = MagicMock()
+        mock_state_cls.get_instance.return_value = mock_state
+
+        mock_g = MagicMock()
+        mock_g.serviceevents_skip = False
+        mock_g.serviceevents_start_time = 1000000000
+        mock_g.serviceevents_duration_ms = 10.0
+        mock_g.serviceevents_status_code = 200
+        mock_g.serviceevents_route = "/api/test"
+        mock_g.serviceevents_method = "GET"
+        mock_g.serviceevents_path = "/api/test"
+        mock_g.serviceevents_endpoint = "test"
+        del mock_g.serviceevents_incident_processed
+
+        mock_request = MagicMock()
+        mock_request.headers = {}
+        mock_request.args = {}
+        mock_request.view_args = {}
+
+        flask_mock = MagicMock()
+        flask_mock.g = mock_g
+        flask_mock.request = mock_request
+
+        with patch.dict("sys.modules", {"flask": flask_mock}):
+            _teardown_request_hook(exception=None)
+
+        mock_state.clear_investigation_data.assert_called_once()
 
     @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.flask_instrumentation.clear_current_operation")
     def test_teardown_clears_operation_on_exception(self, mock_clear):

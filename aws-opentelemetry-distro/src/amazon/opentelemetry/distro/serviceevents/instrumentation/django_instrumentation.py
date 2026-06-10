@@ -17,6 +17,7 @@ import logging
 import time
 from typing import Any, Optional
 
+from amazon.opentelemetry.distro.serviceevents.instrumentation._constants import UNMATCHED_ROUTE
 from amazon.opentelemetry.distro.serviceevents.instrumentation.flask_instrumentation import (
     _extract_error_from_call_path,
 )
@@ -33,12 +34,9 @@ _endpoint_collector = None
 _incident_snapshot_collector = None
 _serviceevents_config = None
 
-# Route label for requests that matched no urlpattern. Django only calls process_view
-# after a URL resolves to a view, so an unmatched 404 never gets a route stored. Recording
-# the raw path for these would make every probed URL (/wp-admin, /.env, scanner noise) its
-# own metric series — a cardinality explosion. Collapsing to one sentinel keeps the
-# 404-rate signal without the cardinality. See _finalize_request.
-_UNMATCHED_ROUTE = "<unmatched>"
+# Django only calls process_view after a URL resolves to a view, so an unmatched 404 never
+# gets a route stored and _finalize_request falls back to the shared UNMATCHED_ROUTE sentinel
+# (see _constants for why the raw path is not used).
 
 
 def _get_request_body(request) -> Optional[Any]:
@@ -165,7 +163,7 @@ def _finalize_request(request, response, exception):  # pylint: disable=too-many
         # path so scanner/bot traffic to nonexistent URLs can't explode metric cardinality.
         route = getattr(request, "_serviceevents_route", None)
         if route is None:
-            route = _UNMATCHED_ROUTE
+            route = UNMATCHED_ROUTE
         method = getattr(request, "_serviceevents_method", request.method)
 
         # Extract error info if error occurred
@@ -220,6 +218,11 @@ def _finalize_request(request, response, exception):  # pylint: disable=too-many
     finally:
         # Always clear operation context, even if there's an error
         clear_current_operation()
+        # Drop request-scoped investigation data. The incident path clears it via
+        # get_investigation_data(), but the normal path returns early and never does, so
+        # clear it unconditionally here to avoid leaking a stale dict (and any captured
+        # traceback) onto pooled worker threads.
+        _ServiceEventsMonitorState.get_instance().clear_investigation_data()
 
 
 class ServiceEventsDjangoMiddleware:
@@ -413,31 +416,52 @@ def install_django_hooks(endpoint_collector=None, incident_snapshot_collector=No
     original_load_middleware = BaseHandler.load_middleware
 
     def instrumented_load_middleware(self, *args, **kwargs):
-        """Wrap BaseHandler.load_middleware to prepend ServiceEvents middleware."""
-        # Inject our middleware into settings.MIDDLEWARE BEFORE building the stack so the
-        # stack is built exactly once. load_middleware re-instantiates every middleware on
-        # each call, so a second call would double-init every third-party middleware on
-        # first startup (duplicate signal handlers, threads, connections, etc.).
+        """Wrap BaseHandler.load_middleware to prepend ServiceEvents middleware for the build.
+
+        Django reads settings.MIDDLEWARE only here, to materialize the middleware chain (and
+        register each middleware's process_view/process_exception hooks) into the handler; it
+        does not consult settings.MIDDLEWARE again per request. So we prepend our path at the
+        front for the duration of this single build, then restore the customer's original
+        MIDDLEWARE in the finally. Net result: ServiceEvents is wired outermost, but
+        settings.MIDDLEWARE is left exactly as the customer defined it — no persistent global
+        side effect for code/introspection that reads it, and apps that validate/freeze
+        settings post-build aren't tripped.
+
+        The stack is still built exactly once. load_middleware re-instantiates every
+        middleware on each call, so a second build would double-init every third-party
+        middleware on first startup (duplicate signal handlers, threads, connections, etc.).
+        """
+        settings = None
+        original_middleware = None
+        injected = False
         try:
             # Lazy import: defer optional heavy dependency (Django) until install time.
             # pylint: disable=import-outside-toplevel
-            from django.conf import settings
+            from django.conf import settings  # pylint: disable=redefined-outer-name
 
-            middleware_list = list(getattr(settings, "MIDDLEWARE", []))
-
-            if _SERVICE_EVENTS_MIDDLEWARE_PATH not in middleware_list:
-                # Prepend to beginning (outermost middleware)
-                middleware_list.insert(0, _SERVICE_EVENTS_MIDDLEWARE_PATH)
-                settings.MIDDLEWARE = middleware_list
-
-                logger.info("ServiceEvents Django middleware prepended to settings.MIDDLEWARE")
+            original_middleware = list(getattr(settings, "MIDDLEWARE", []) or [])
+            if _SERVICE_EVENTS_MIDDLEWARE_PATH not in original_middleware:
+                # Prepend to the front (outermost) just for this build.
+                settings.MIDDLEWARE = [_SERVICE_EVENTS_MIDDLEWARE_PATH, *original_middleware]
+                injected = True
+                logger.info("ServiceEvents Django middleware injected for the middleware-stack build")
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error("Error injecting ServiceEvents Django middleware: %s", exc, exc_info=True)
 
-        # Build the middleware stack exactly once, now that settings.MIDDLEWARE includes ours.
-        # Called unconditionally so handler init still builds a chain when SE middleware was
-        # already present (e.g. pre-configured in user settings) or when injection failed.
-        original_load_middleware(self, *args, **kwargs)
+        try:
+            # Build the middleware stack exactly once, now that settings.MIDDLEWARE includes ours.
+            # Called unconditionally so the handler still builds a chain when SE middleware was
+            # already present (e.g. pre-configured in user settings) or when injection failed.
+            original_load_middleware(self, *args, **kwargs)
+        finally:
+            # Restore the customer's MIDDLEWARE so our injection leaves no persistent global
+            # change. Only when we actually injected; the chain is already materialized above,
+            # so removing our entry from settings here does not unwire the middleware.
+            if injected and settings is not None:
+                try:
+                    settings.MIDDLEWARE = original_middleware
+                except Exception:  # pylint: disable=broad-exception-caught
+                    logger.debug("Failed to restore settings.MIDDLEWARE after ServiceEvents injection", exc_info=True)
 
     # Replace BaseHandler.load_middleware with instrumented version
     BaseHandler.load_middleware = instrumented_load_middleware

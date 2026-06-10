@@ -17,6 +17,7 @@ import time
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs
 
+from amazon.opentelemetry.distro.serviceevents.instrumentation._constants import UNMATCHED_ROUTE
 from amazon.opentelemetry.distro.serviceevents.instrumentation.flask_instrumentation import (
     _capture_active_trace_context,
     _extract_error_from_call_path,
@@ -97,8 +98,9 @@ def _get_route_pattern(scope) -> str:
     if resolved is not None:
         return resolved
 
-    # Fallback to path
-    return scope.get("path", "/unknown")
+    # No route matched (404 / scanner traffic). Collapse to a single sentinel rather than
+    # the raw path so probed URLs can't explode metric cardinality. Matches Flask/Django.
+    return UNMATCHED_ROUTE
 
 
 def _resolve_route_template(scope) -> Optional[str]:
@@ -293,9 +295,10 @@ class ServiceEventsFastAPIMiddleware:
             duration_ms = duration_ns / 1_000_000
 
             # Re-resolve the route now that the app has run. At middleware entry
-            # scope["route"] is unset, so `route` held the raw URL path (e.g.
-            # /users/42). Starlette/FastAPI routing populates scope["route"] in place
-            # during dispatch, so by here it resolves to the template (/users/{id}).
+            # scope["route"] is unset, so `route` was whatever _get_route_pattern could
+            # determine pre-routing: a pre-resolved template, or the <unmatched> sentinel
+            # when nothing matched. Starlette/FastAPI routing populates scope["route"] in
+            # place during dispatch, so by here it resolves to the template (/users/{id}).
             # Use the template for the exported endpoint telemetry below to avoid a
             # per-URL metric cardinality explosion. (The pre-await operation context
             # can't see the template yet — routing hasn't happened — so the FunctionCall
@@ -384,6 +387,11 @@ class ServiceEventsFastAPIMiddleware:
 
             # Always clear operation context
             clear_current_operation()
+            # Drop request-scoped investigation data. The incident path clears it via
+            # get_investigation_data(), but the normal path returns early and never does, so
+            # clear it unconditionally here to avoid leaking a stale dict (and any captured
+            # traceback) onto pooled worker threads.
+            _ServiceEventsMonitorState.get_instance().clear_investigation_data()
 
 
 def install_fastapi_hooks(endpoint_collector=None, incident_snapshot_collector=None, config=None):

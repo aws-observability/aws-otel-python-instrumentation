@@ -358,6 +358,19 @@ class _ServiceEventsMonitorState:
         """Peek at investigation data WITHOUT clearing it."""
         return self._investigation_data.get()
 
+    def clear_investigation_data(self) -> None:
+        """Drop any investigation data captured for the current request.
+
+        begin_investigation() seeds a dict at the start of every request, but only the
+        incident path consumes (and clears) it via get_investigation_data(). On the normal
+        path process_potential_incident returns early, so without this the dict — including
+        a captured traceback string on error paths — would linger in the ContextVar on
+        pooled worker threads until the next request on that thread overwrites it. Each
+        framework calls this unconditionally in its request-finalize path. Idempotent: a
+        no-op when already cleared (e.g. an incident was collected this request).
+        """
+        self._investigation_data.set(None)
+
     def record_execution_flow(self, caller: Optional[str], callee: str):
         """
         Record a function call edge for investigation.

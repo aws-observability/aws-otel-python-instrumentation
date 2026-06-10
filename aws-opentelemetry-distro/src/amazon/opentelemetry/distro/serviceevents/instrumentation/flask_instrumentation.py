@@ -14,6 +14,7 @@ import logging
 import time
 from typing import Any, Dict, Optional
 
+from amazon.opentelemetry.distro.serviceevents.instrumentation._constants import UNMATCHED_ROUTE
 from amazon.opentelemetry.distro.serviceevents.instrumentation._safety import never_raises
 from amazon.opentelemetry.distro.serviceevents.python_monitor import (
     _ServiceEventsMonitorState,
@@ -102,15 +103,23 @@ def install_flask_hooks(endpoint_collector=None, incident_snapshot_collector=Non
 
     def instrumented_init(self, *args, **kwargs):
         """Wrap Flask.__init__ to install hooks after app creation."""
-        # Call original init
+        # Call original init first and outside the guard below: this is the real
+        # Flask constructor and must always run. Only OUR added work is guarded,
+        # so a telemetry failure can never break Flask app construction.
         original_init(self, *args, **kwargs)
 
-        # Install before_request and after_request hooks
-        self.before_request(_before_request_hook)
-        self.after_request(_after_request_hook)
-        self.teardown_request(_teardown_request_hook)
+        # Crash-safety: telemetry must never break the host app. Registering the
+        # hooks runs inside the customer's Flask.__init__, so any failure here is
+        # swallowed and the app is constructed as if uninstrumented.
+        try:
+            # Install before_request and after_request hooks
+            self.before_request(_before_request_hook)
+            self.after_request(_after_request_hook)
+            self.teardown_request(_teardown_request_hook)
 
-        logger.info("ServiceEvents Flask hooks installed on app: %s", self.name)
+            logger.info("ServiceEvents Flask hooks installed on app: %s", self.name)
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.debug("Failed to install ServiceEvents Flask hooks", exc_info=True)
 
     # Replace Flask.__init__ with instrumented version
     Flask.__init__ = instrumented_init
@@ -293,6 +302,11 @@ def _teardown_request_hook(exception=None):  # pylint: disable=too-many-branches
     finally:
         # Always clear operation context, even if there's an error
         clear_current_operation()
+        # Drop request-scoped investigation data. The incident path clears it via
+        # get_investigation_data(), but the normal path returns early and never does, so
+        # clear it unconditionally here to avoid leaking a stale dict (and any captured
+        # traceback) onto pooled worker threads. Runs even on the early returns above.
+        _ServiceEventsMonitorState.get_instance().clear_investigation_data()
 
 
 def _capture_active_trace_context():
@@ -330,12 +344,14 @@ def _get_route_pattern(request) -> str:
     if request.url_rule:
         return request.url_rule.rule
 
-    # Fallback to endpoint name
+    # Fallback to endpoint name (still a bounded, registered label)
     if request.endpoint:
         return f"/{request.endpoint}"
 
-    # Last resort: use path
-    return request.path
+    # No url_rule and no endpoint means the URL matched no route (404 / scanner traffic).
+    # Collapse to a single sentinel rather than the raw path so probed URLs can't explode
+    # metric cardinality.
+    return UNMATCHED_ROUTE
 
 
 def _extract_error_from_call_path(exception, route, method) -> Optional[Dict]:

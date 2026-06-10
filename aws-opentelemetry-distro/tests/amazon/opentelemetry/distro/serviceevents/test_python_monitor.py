@@ -93,6 +93,27 @@ class TestServiceEventsMonitorState(TestCase):
         inv_data2 = state.get_investigation_data()
         self.assertIsNone(inv_data2)
 
+    def test_clear_investigation_data(self):
+        """clear_investigation_data drops the dict on the normal (non-incident) path."""
+        state = _ServiceEventsMonitorState.get_instance()
+
+        state.begin_investigation()
+        self.assertIsNotNone(state.peek_investigation_data())
+
+        state.clear_investigation_data()
+
+        # Dropped without going through get_investigation_data (the incident-only path).
+        self.assertIsNone(state.peek_investigation_data())
+
+    def test_clear_investigation_data_is_idempotent(self):
+        """Calling clear when there is nothing to clear is a safe no-op."""
+        state = _ServiceEventsMonitorState.get_instance()
+
+        # Already empty (or already consumed by the incident path): must not raise.
+        state.clear_investigation_data()
+        state.clear_investigation_data()
+        self.assertIsNone(state.peek_investigation_data())
+
 
 class TestPythonServiceEventsMonitor(TestCase):
     """Test the PythonServiceEventsMonitor context manager."""

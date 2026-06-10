@@ -207,9 +207,10 @@ class TestInstallDjangoHooks(TestCase):
         # load_middleware should have been replaced
         self.assertIsNot(FakeBaseHandler.load_middleware, original_load)
 
-    def test_instrumented_load_middleware_injects_middleware(self):
-        """The wrapped load_middleware prepends the middleware to settings.MIDDLEWARE before building once."""
+    def test_instrumented_load_middleware_injects_for_build_then_restores(self):
+        """SE middleware is at the front DURING the build, and settings.MIDDLEWARE is restored after."""
         call_count = {"n": 0}
+        middleware_during_build = {"value": None}
 
         middleware_path = (
             "amazon.opentelemetry.distro.serviceevents.instrumentation."
@@ -219,8 +220,9 @@ class TestInstallDjangoHooks(TestCase):
         class FakeBaseHandler:
             def load_middleware(self, *args, **kwargs):
                 call_count["n"] += 1
-                # Stack must be built only after SE middleware is already injected, so
-                # every middleware is instantiated exactly once.
+                # Snapshot what the stack build sees: SE middleware must be present and
+                # outermost so its process_view/process_exception hooks get registered.
+                middleware_during_build["value"] = list(fake_settings.MIDDLEWARE)
                 assert fake_settings.MIDDLEWARE[0] == middleware_path
 
         mock_django_handler = MagicMock()
@@ -240,10 +242,13 @@ class TestInstallDjangoHooks(TestCase):
             # Drive the instrumented load_middleware on an instance.
             FakeBaseHandler().load_middleware()
 
-        # Our middleware was prepended to the front of MIDDLEWARE.
-        self.assertEqual(fake_settings.MIDDLEWARE[0], middleware_path)
-        # Original load_middleware called exactly once: the SE middleware is injected before
-        # the single build, so the stack (and every middleware) is built only once on first init.
+        # During the build the stack saw SE middleware prepended (outermost).
+        self.assertEqual(middleware_during_build["value"][0], middleware_path)
+        # After the build the customer's MIDDLEWARE is restored unchanged — no persistent
+        # global side effect (the chain was already materialized during the build).
+        self.assertEqual(fake_settings.MIDDLEWARE, ["django.middleware.common.CommonMiddleware"])
+        # Original load_middleware called exactly once: SE middleware is injected before the
+        # single build, so the stack (and every middleware) is built only once on first init.
         self.assertEqual(call_count["n"], 1)
 
     def test_instrumented_load_middleware_skips_when_already_present(self):
