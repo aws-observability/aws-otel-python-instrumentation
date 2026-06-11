@@ -5,7 +5,7 @@
 This project is a redistribution of the [OpenTelemetry Distro for Python](https://github.com/open-telemetry/opentelemetry-python-contrib/tree/main/opentelemetry-distro),
 preconfigured for use with AWS services. Please check out that project too to get a better
 understanding of the underlying internals. You won't see much code in this repository since we only
-apply some small configuration changes, and our OpenTelemetry friends takes care of the rest. The 
+apply some small configuration changes, and our OpenTelemetry friends take care of the rest. The 
 exception to this is support for Application Signals.
 
 We provided a Python agent that can be attached to any application using a supported Python version and dynamically injects
