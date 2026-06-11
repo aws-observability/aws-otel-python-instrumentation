@@ -76,7 +76,7 @@ class SnapshotOtlpEmitter:
 
             try:
                 exporter = OTLPLogExporter(endpoint=self._logs_endpoint)
-                resource = self._resource if self._resource else Resource.get_empty()
+                resource = self._resource if self._resource else Resource.create()
 
                 self._logger_provider = LoggerProvider(resource=resource)
                 self._logger_provider.add_log_record_processor(BatchLogRecordProcessor(exporter))
