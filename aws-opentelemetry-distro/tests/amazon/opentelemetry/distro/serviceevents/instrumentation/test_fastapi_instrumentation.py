@@ -466,6 +466,41 @@ class TestFastAPIMiddleware(unittest.IsolatedAsyncioTestCase):
 
     @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.fastapi_instrumentation.clear_current_operation")
     @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.fastapi_instrumentation.set_current_operation")
+    async def test_middleware_send_failure_does_not_mask_app_exception(self, mock_set_op, mock_clear_op):
+        """If the error-response send() raises, the ORIGINAL app exception must still propagate.
+
+        Crash-safety: a client disconnect / broken pipe during our best-effort 500 send must
+        not replace the application's own exception with the send error — telemetry must never
+        alter which exception the host application sees.
+        """
+        fastapi_mod._endpoint_collector = MagicMock()
+
+        async def mock_app(scope, receive, send):
+            raise RuntimeError("original app error")
+
+        async def mock_send(msg):
+            # Simulate the client connection dropping while we try to emit the 500.
+            raise OSError("broken pipe")
+
+        middleware = ServiceEventsFastAPIMiddleware(mock_app)
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/broken",
+            "headers": [],
+            "query_string": b"",
+        }
+
+        # The original RuntimeError must surface, NOT the OSError from send().
+        with self.assertRaises(RuntimeError) as ctx:
+            await middleware(scope, AsyncMock(), mock_send)
+        self.assertEqual(str(ctx.exception), "original app error")
+
+        # Operation context is still cleared despite the send failure.
+        mock_clear_op.assert_called_once()
+
+    @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.fastapi_instrumentation.clear_current_operation")
+    @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.fastapi_instrumentation.set_current_operation")
     async def test_middleware_clears_operation(self, mock_set_op, mock_clear_op):
         """clear_current_operation is always called in the finally block."""
 

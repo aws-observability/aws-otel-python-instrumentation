@@ -270,21 +270,29 @@ class ServiceEventsFastAPIMiddleware:
             exception = exc
             status_code = 500
 
-            # If response hasn't started, send a 500 error response
+            # If response hasn't started, send a 500 error response. Crash-safety: these
+            # sends are best-effort and guarded — if send() itself raises (client
+            # disconnect, broken pipe, ASGI shutdown mid-error), that must NOT replace the
+            # original application exception, so the failure is swallowed and the original
+            # exc still propagates via the bare `raise` below. Telemetry must never alter
+            # which exception the host application sees.
             if not response_started:
-                await send(
-                    {
-                        "type": "http.response.start",
-                        "status": 500,
-                        "headers": [(b"content-type", b"text/plain")],
-                    }
-                )
-                await send(
-                    {
-                        "type": "http.response.body",
-                        "body": b"Internal Server Error",
-                    }
-                )
+                try:
+                    await send(
+                        {
+                            "type": "http.response.start",
+                            "status": 500,
+                            "headers": [(b"content-type", b"text/plain")],
+                        }
+                    )
+                    await send(
+                        {
+                            "type": "http.response.body",
+                            "body": b"Internal Server Error",
+                        }
+                    )
+                except Exception:  # pylint: disable=broad-exception-caught
+                    pass
 
             # Re-raise to maintain error propagation
             raise
