@@ -9,18 +9,54 @@ on:
     # paths:
     #   - "**/*.py"
     #   - "**/*.pyi"
+  # TEMP: pull_request trigger added to validate the runtime-API gate on PR 767's own
+  # checks. Remove this trigger before merging — the pull_request event runs the
+  # workflow file from the PR head (untrusted), which is unsafe in steady state.
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
 
 concurrency:
   group: claude-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  claude-review:
+  # Gate via runtime API call rather than the webhook's author_association field.
+  # Reason: when org membership visibility is set to PRIVATE (the default for
+  # aws-observability), the webhook delivers author_association=NONE even for
+  # actual MEMBER users, causing the legacy gate to skip every fork PR from the
+  # team. The REST API returns the correct permission regardless of visibility.
+  check-author:
     if: >-
       !github.event.pull_request.draft &&
-      !contains(github.event.pull_request.title, '[skip-claude]') &&
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
-               github.event.pull_request.author_association)
+      !contains(github.event.pull_request.title, '[skip-claude]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      is_trusted: ${{ steps.check.outputs.is_trusted }}
+    steps:
+      - id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const author = context.payload.pull_request.user.login;
+            try {
+              const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: author,
+              });
+              const trusted = ['admin', 'maintain', 'write'].includes(data.permission);
+              core.info(`User ${author}: permission=${data.permission}, trusted=${trusted}`);
+              core.setOutput('is_trusted', trusted ? 'true' : 'false');
+            } catch (e) {
+              core.warning(`Failed to check permission for ${author}: ${e.message}`);
+              core.setOutput('is_trusted', 'false');
+            }
+
+  claude-review:
+    needs: check-author
+    if: needs.check-author.outputs.is_trusted == 'true'
     timeout-minutes: 30
     runs-on: ubuntu-latest
     permissions:
