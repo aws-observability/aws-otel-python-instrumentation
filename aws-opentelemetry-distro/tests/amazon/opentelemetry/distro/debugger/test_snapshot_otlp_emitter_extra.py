@@ -88,6 +88,61 @@ class TestEnsureInitialized(unittest.TestCase):
         emitter._init_failed = True
         self.assertFalse(emitter._ensure_initialized())
 
+    @mock.patch.dict(os.environ, {"OTEL_SERVICE_NAME": "my-service"})
+    @mock.patch.object(emitter_module, "BatchLogRecordProcessor")
+    @mock.patch.object(emitter_module, "OTLPLogExporter")
+    def test_default_resource_picks_up_service_name_from_env(self, _mock_exporter, _mock_processor):
+        # Regression: default resource must run OTel detectors so OTEL_SERVICE_NAME
+        # propagates onto OTLP-exported LogRecords. Resource.get_empty() skipped them.
+        emitter = SnapshotOtlpEmitter()
+        self.assertTrue(emitter._ensure_initialized())
+        self.assertEqual(emitter._logger_provider.resource.attributes.get("service.name"), "my-service")
+
+    @mock.patch.object(emitter_module, "BatchLogRecordProcessor")
+    @mock.patch.object(emitter_module, "OTLPLogExporter")
+    def test_explicit_resource_is_preserved(self, _mock_exporter, _mock_processor):
+        from opentelemetry.sdk.resources import Resource
+
+        explicit = Resource.create({"service.name": "explicit-service"})
+        emitter = SnapshotOtlpEmitter(resource=explicit)
+        self.assertTrue(emitter._ensure_initialized())
+        self.assertEqual(emitter._logger_provider.resource.attributes.get("service.name"), "explicit-service")
+
+    @mock.patch.dict(
+        os.environ,
+        {
+            "OTEL_SERVICE_NAME": "env-service",
+            "OTEL_RESOURCE_ATTRIBUTES": "deployment.environment.name=ec2:my-asg,custom.tag=hello",
+        },
+    )
+    @mock.patch.object(emitter_module, "BatchLogRecordProcessor")
+    @mock.patch.object(emitter_module, "OTLPLogExporter")
+    def test_default_resource_merges_otel_resource_attributes_env(self, _mock_exporter, _mock_processor):
+        # Regression: OTEL_RESOURCE_ATTRIBUTES values must reach the OTLP-exported
+        # resource alongside OTEL_SERVICE_NAME. Resource.get_empty() bypassed both.
+        emitter = SnapshotOtlpEmitter()
+        self.assertTrue(emitter._ensure_initialized())
+        attrs = emitter._logger_provider.resource.attributes
+        self.assertEqual(attrs.get("service.name"), "env-service")
+        self.assertEqual(attrs.get("deployment.environment.name"), "ec2:my-asg")
+        self.assertEqual(attrs.get("custom.tag"), "hello")
+
+    @mock.patch.dict(
+        os.environ,
+        {
+            "OTEL_SERVICE_NAME": "explicit-wins",
+            "OTEL_RESOURCE_ATTRIBUTES": "service.name=from-env-attrs",
+        },
+    )
+    @mock.patch.object(emitter_module, "BatchLogRecordProcessor")
+    @mock.patch.object(emitter_module, "OTLPLogExporter")
+    def test_otel_service_name_takes_precedence_over_resource_attributes(self, _mock_exporter, _mock_processor):
+        # OTEL_SERVICE_NAME wins over service.name in OTEL_RESOURCE_ATTRIBUTES,
+        # per the OTel resource spec. Confirm we don't accidentally invert that.
+        emitter = SnapshotOtlpEmitter()
+        self.assertTrue(emitter._ensure_initialized())
+        self.assertEqual(emitter._logger_provider.resource.attributes.get("service.name"), "explicit-wins")
+
 
 class TestShutdownAndReset(unittest.TestCase):
     """Tests for shutdown and reset lifecycle."""
