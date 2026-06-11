@@ -15,11 +15,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Gate via runtime API call rather than the webhook's author_association field.
-  # Reason: when org membership visibility is set to PRIVATE (the default for
-  # aws-observability), the webhook delivers author_association=NONE even for
-  # actual MEMBER users, causing the legacy gate to skip every fork PR from the
-  # team. The REST API returns the correct permission regardless of visibility.
   check-author:
     if: >-
       !github.event.pull_request.draft &&
