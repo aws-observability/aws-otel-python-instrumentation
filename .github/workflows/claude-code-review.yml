@@ -9,11 +9,6 @@ on:
     # paths:
     #   - "**/*.py"
     #   - "**/*.pyi"
-  # TEMP: pull_request trigger added to validate the runtime-API gate on PR 767's own
-  # checks. Remove this trigger before merging — the pull_request event runs the
-  # workflow file from the PR head (untrusted), which is unsafe in steady state.
-  pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
 
 concurrency:
   group: claude-review-${{ github.event.pull_request.number }}
