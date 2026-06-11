@@ -41,9 +41,11 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _export_unsampled_span_for_lambda,
     _fetch_logs_header,
     _init_logging,
+    _init_serviceevents,
     _is_application_signals_enabled,
     _is_application_signals_runtime_enabled,
     _is_defer_to_workers_enabled,
+    _is_serviceevents_enabled,
     _is_wsgi_master_process,
     _parse_config_string,
     is_enhanced_code_attributes,
@@ -331,6 +333,115 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", None)
         self.assertFalse(_is_application_signals_enabled())
+
+    def test_is_serviceevents_enabled_follows_app_signals_when_unset(self):
+        # Unset OTEL_AWS_SERVICE_EVENTS_ENABLED → follow OTEL_AWS_APPLICATION_SIGNALS_ENABLED
+        with patch.dict(
+            os.environ,
+            {"OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "true"},
+            clear=True,
+        ):
+            self.assertTrue(_is_serviceevents_enabled())
+
+        with patch.dict(
+            os.environ,
+            {"OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "false"},
+            clear=True,
+        ):
+            self.assertFalse(_is_serviceevents_enabled())
+
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(_is_serviceevents_enabled())
+
+    def test_is_serviceevents_enabled_explicit_override(self):
+        # Explicit true forces ServiceEvents on even when App Signals is off
+        with patch.dict(
+            os.environ,
+            {
+                "OTEL_AWS_SERVICE_EVENTS_ENABLED": "true",
+                "OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "false",
+            },
+            clear=True,
+        ):
+            self.assertTrue(_is_serviceevents_enabled())
+
+        # Explicit false forces ServiceEvents off even when App Signals is on
+        with patch.dict(
+            os.environ,
+            {
+                "OTEL_AWS_SERVICE_EVENTS_ENABLED": "false",
+                "OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "true",
+            },
+            clear=True,
+        ):
+            self.assertFalse(_is_serviceevents_enabled())
+
+    def test_is_serviceevents_enabled_disabled_on_lambda(self):
+        # Lambda always disables ServiceEvents, regardless of the other flags
+        with patch.dict(
+            os.environ,
+            {
+                "AWS_LAMBDA_FUNCTION_NAME": "my-fn",
+                "OTEL_AWS_SERVICE_EVENTS_ENABLED": "true",
+                "OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "true",
+            },
+            clear=True,
+        ):
+            self.assertFalse(_is_serviceevents_enabled())
+
+    @patch("amazon.opentelemetry.distro.serviceevents.get_serviceevents_instrumentation")
+    def test_init_serviceevents_backfills_endpoints_when_app_signals_enabled(self, mock_get_inst):
+        mock_get_inst.return_value = None  # short-circuit after the policy check
+
+        with patch.dict(
+            os.environ,
+            {
+                "OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "true",
+                "OTEL_AWS_OTLP_LOGS_ENDPOINT": "",
+                "OTEL_AWS_OTLP_METRICS_ENDPOINT": "",
+            },
+            clear=True,
+        ):
+            _init_serviceevents()
+
+        config = mock_get_inst.call_args[0][0]
+        self.assertEqual(config.logs_endpoint, "http://localhost:4316/v1/logs")
+        self.assertEqual(config.metrics_endpoint, "http://localhost:4316/v1/metrics")
+
+    @patch("amazon.opentelemetry.distro.serviceevents.get_serviceevents_instrumentation")
+    def test_init_serviceevents_refuses_force_enabled_without_endpoints(self, mock_get_inst):
+        # Force-enabled ServiceEvents with App Signals off and no endpoints → skip init
+        with patch.dict(
+            os.environ,
+            {
+                "OTEL_AWS_SERVICE_EVENTS_ENABLED": "true",
+                "OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "false",
+            },
+            clear=True,
+        ):
+            _init_serviceevents()
+
+        mock_get_inst.assert_not_called()
+
+    @patch("amazon.opentelemetry.distro.serviceevents.get_serviceevents_instrumentation")
+    def test_init_serviceevents_honors_explicit_endpoints_when_force_enabled(self, mock_get_inst):
+        mock_get_inst.return_value = None
+
+        with patch.dict(
+            os.environ,
+            {
+                "OTEL_AWS_SERVICE_EVENTS_ENABLED": "true",
+                "OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "false",
+                "OTEL_AWS_OTLP_LOGS_ENDPOINT": "http://custom:9999/v1/logs",
+                "OTEL_AWS_OTLP_METRICS_ENDPOINT": "http://custom:9999/v1/metrics",
+            },
+            clear=True,
+        ):
+            _init_serviceevents()
+
+        config = mock_get_inst.call_args[0][0]
+        self.assertEqual(config.logs_endpoint, "http://custom:9999/v1/logs")
+        self.assertEqual(config.metrics_endpoint, "http://custom:9999/v1/metrics")
 
     def test_customize_sampler(self):
         mock_sampler: Sampler = MagicMock()

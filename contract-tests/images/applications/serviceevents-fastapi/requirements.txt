@@ -1,0 +1,4 @@
+typing-extensions==4.12.2
+fastapi
+uvicorn
+python-dateutil
