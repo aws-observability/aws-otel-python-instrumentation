@@ -22,3 +22,10 @@ precision = 2
 omit =
     */tests/*
     */pip-build-env-*/*
+    ; Dynamic Instrumentation line-breakpoint engines are mutually version-exclusive:
+    ; the bytecode engine only runs on Python 3.9-3.11 and sys.monitoring only on 3.12+.
+    ; Since 3.10-3.13 share this config, one engine is always dead code here and cannot
+    ; reach the line threshold. Each engine is unit-tested on its native version and both
+    ; are validated end-to-end by the DI contract tests.
+    */distro/debugger/instrumentation_engine/_bytecode_injection_engine.py
+    */distro/debugger/instrumentation_engine/_sys_monitoring_engine.py
