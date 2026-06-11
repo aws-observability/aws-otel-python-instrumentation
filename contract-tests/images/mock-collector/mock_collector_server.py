@@ -38,6 +38,7 @@ def _create_http_handler(logs_collector: MockCollectorLogsService, metrics_colle
         return raw
 
     class OtlpHttpHandler(BaseHTTPRequestHandler):
+        # do_POST is the required BaseHTTPRequestHandler dispatch method name (external API contract).
         def do_POST(self):  # pylint: disable=invalid-name
             if self.path == "/v1/logs":
                 body = _read_body(self)
@@ -89,7 +90,8 @@ def main() -> None:
     mock_collector_server.start()
     atexit.register(mock_collector_server.stop, None)
 
-    # HTTP server on port 4316 (OTLP HTTP /v1/logs and /v1/metrics for the DI snapshot emitter)
+    # HTTP server on port 4316 (OTLP HTTP /v1/logs and /v1/metrics for the
+    # Dynamic Instrumentation snapshot emitter and the ServiceEvents emitter)
     handler_class = _create_http_handler(logs_collector, metrics_collector)
     http_server = HTTPServer(("0.0.0.0", 4316), handler_class)
     http_thread = threading.Thread(target=http_server.serve_forever, daemon=True)

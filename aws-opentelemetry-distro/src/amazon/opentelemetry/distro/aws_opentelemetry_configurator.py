@@ -227,6 +227,78 @@ def _initialize_components():
     if logging_enabled.strip().lower() == "true":
         _init_logging(log_exporters, resource)
 
+    # Initialize ServiceEvents instrumentation
+    _init_serviceevents(resource)
+
+
+def _init_serviceevents(resource=None):
+    """Initialize ServiceEvents instrumentation if enabled.
+
+    Args:
+        resource: OTel Resource object from AWS detectors (EC2/ECS/EKS).
+                  Used to extract platform attributes for serviceevents telemetry.
+    """
+    try:
+        if not _is_serviceevents_enabled():
+            return
+
+        # Lazy imports: defer the serviceevents package (and its optional deps) until enabled,
+        # and avoid an import cycle with this configurator module.
+        # pylint: disable=import-outside-toplevel
+        from amazon.opentelemetry.distro.serviceevents import ServiceEventsConfig, get_serviceevents_instrumentation
+        from amazon.opentelemetry.distro.serviceevents.models.resource_attributes import (
+            ResourceAttributes as ServiceEventsResourceAttributes,
+        )
+
+        # Extract resource attributes from OTel Resource
+        resource_attributes = (
+            ServiceEventsResourceAttributes.from_otel_resource(resource)
+            if resource
+            else ServiceEventsResourceAttributes()
+        )
+
+        # Build configuration from environment variables with resource attributes.
+        # `config.enabled` mirrors OTEL_AWS_SERVICE_EVENTS_ENABLED directly; the outer
+        # bundling gate above has already decided ServiceEvents should run, so flip
+        # the inner flag on regardless of whether the env var was set.
+        config = ServiceEventsConfig.from_env(resource_attributes=resource_attributes)
+        config.enabled = True
+
+        # Endpoint policy:
+        # - App Signals enabled: empty/null endpoints default to the 4316 App Signals receiver.
+        # - App Signals disabled + ServiceEvents force-enabled: endpoints are required; refuse to init.
+        as_enabled = _is_application_signals_enabled()
+        if not (config.logs_endpoint or "").strip() or not (config.metrics_endpoint or "").strip():
+            if as_enabled:
+                if not (config.logs_endpoint or "").strip():
+                    config.logs_endpoint = "http://localhost:4316/v1/logs"
+                if not (config.metrics_endpoint or "").strip():
+                    config.metrics_endpoint = "http://localhost:4316/v1/metrics"
+            else:
+                _logger.error(
+                    "ServiceEvents force-enabled (OTEL_AWS_SERVICE_EVENTS_ENABLED=true) without "
+                    "Application Signals, but OTEL_AWS_OTLP_LOGS_ENDPOINT / "
+                    "OTEL_AWS_OTLP_METRICS_ENDPOINT are unset or empty. Both are "
+                    "required in this mode. Skipping ServiceEvents initialization."
+                )
+                return
+
+        # Get or create singleton instrumentation instance
+        # If already initialized (e.g., by manual init), this will return existing instance
+        instrumentation = get_serviceevents_instrumentation(config)
+        if instrumentation is None:
+            _logger.warning("Failed to get ServiceEvents instrumentation instance")
+            return
+
+        # Initialize if not already initialized
+        instrumentation.initialize()
+
+        _logger.info("ServiceEvents instrumentation initialized")
+
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        # Don't fail the whole instrumentation if ServiceEvents fails
+        _logger.error("Failed to initialize ServiceEvents: %s", exc, exc_info=True)
+
 
 def _init_logging(
     exporters: dict[str, Type[LogRecordExporter]],
@@ -645,6 +717,23 @@ def _customize_resource(resource: Resource) -> Resource:
 
     custom_attributes = {AWS_LOCAL_SERVICE: service_name}
 
+    # Add CI/CD and VCS attributes only if they have real values
+    git_repo_url = os.environ.get("OTEL_AWS_SERVICE_EVENTS_GIT_REPO_URL", "")
+    if git_repo_url:
+        custom_attributes["vcs.repository.url.full"] = git_repo_url
+
+    git_commit_sha = os.environ.get("OTEL_AWS_SERVICE_EVENTS_GIT_COMMIT_SHA", "")
+    if git_commit_sha:
+        custom_attributes["vcs.ref.head.revision"] = git_commit_sha
+
+    deployment_url = os.environ.get("OTEL_AWS_SERVICE_EVENTS_DEPLOYMENT_URL", "")
+    if deployment_url:
+        custom_attributes["cicd.pipeline.run.url.full"] = deployment_url
+
+    deployment_timestamp = os.environ.get("OTEL_AWS_SERVICE_EVENTS_DEPLOYMENT_TIMESTAMP", "")
+    if deployment_timestamp:
+        custom_attributes["cicd.pipeline.run.timestamp"] = deployment_timestamp
+
     if is_agent_observability_enabled():
         # Add aws.service.type if it doesn't exist in the resource
         if resource and resource.attributes.get(AWS_SERVICE_TYPE) is None:
@@ -661,6 +750,18 @@ def _is_application_signals_enabled():
         ).lower()
         == "true"
     )
+
+
+def _is_serviceevents_enabled():
+    # ServiceEvents is bundled with Application Signals: on by default when App Signals is on,
+    # off by default when it isn't, and always off on Lambda regardless. An explicit
+    # OTEL_AWS_SERVICE_EVENTS_ENABLED value (true/false) overrides the bundling.
+    if _is_lambda_environment():
+        return False
+    explicit = os.environ.get("OTEL_AWS_SERVICE_EVENTS_ENABLED")
+    if explicit is not None and explicit.strip() != "":
+        return explicit.strip().lower() == "true"
+    return _is_application_signals_enabled()
 
 
 def _is_application_signals_runtime_enabled():

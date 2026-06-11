@@ -1,0 +1,50 @@
+name: ServiceEvents Contract Tests
+
+on:
+  # Run on demand. The serviceevents contract tests are also exercised on every PR
+  # via pr-build.yml (`pytest contract-tests/tests`); this standalone workflow lets
+  # maintainers run just the serviceevents suite (or `all`) against a chosen ref.
+  workflow_dispatch:
+    inputs:
+      test_scope:
+        description: 'Which contract tests to run'
+        required: false
+        type: choice
+        default: serviceevents
+        options:
+          - serviceevents
+          - all
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
+
+      - name: Build Wheel and Image Files
+        uses: ./.github/actions/artifacts_build
+        with:
+          image_uri_with_tag: serviceevents-contract-tests/3.10
+          push_image: false
+          load_image: true
+          # `load` can only materialise a single-platform image into the local Docker
+          # daemon; multi-platform builds produce a manifest list which buildx cannot load.
+          platforms: linux/amd64
+          python_version: "3.10"
+          package_name: aws-opentelemetry-distro
+          os: ubuntu-latest
+
+      - name: Set up and run contract tests with pytest
+        run: |
+          bash scripts/set-up-contract-tests.sh
+          pip install pytest
+          if [ "${{ inputs.test_scope }}" = "all" ]; then
+            pytest contract-tests/tests -v
+          else
+            pytest contract-tests/tests/test/amazon/serviceevents/ -v
+          fi
