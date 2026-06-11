@@ -108,6 +108,41 @@ class TestEnsureInitialized(unittest.TestCase):
         self.assertTrue(emitter._ensure_initialized())
         self.assertEqual(emitter._logger_provider.resource.attributes.get("service.name"), "explicit-service")
 
+    @mock.patch.dict(
+        os.environ,
+        {
+            "OTEL_SERVICE_NAME": "env-service",
+            "OTEL_RESOURCE_ATTRIBUTES": "deployment.environment.name=ec2:my-asg,custom.tag=hello",
+        },
+    )
+    @mock.patch.object(emitter_module, "BatchLogRecordProcessor")
+    @mock.patch.object(emitter_module, "OTLPLogExporter")
+    def test_default_resource_merges_otel_resource_attributes_env(self, _mock_exporter, _mock_processor):
+        # Regression: OTEL_RESOURCE_ATTRIBUTES values must reach the OTLP-exported
+        # resource alongside OTEL_SERVICE_NAME. Resource.get_empty() bypassed both.
+        emitter = SnapshotOtlpEmitter()
+        self.assertTrue(emitter._ensure_initialized())
+        attrs = emitter._logger_provider.resource.attributes
+        self.assertEqual(attrs.get("service.name"), "env-service")
+        self.assertEqual(attrs.get("deployment.environment.name"), "ec2:my-asg")
+        self.assertEqual(attrs.get("custom.tag"), "hello")
+
+    @mock.patch.dict(
+        os.environ,
+        {
+            "OTEL_SERVICE_NAME": "explicit-wins",
+            "OTEL_RESOURCE_ATTRIBUTES": "service.name=from-env-attrs",
+        },
+    )
+    @mock.patch.object(emitter_module, "BatchLogRecordProcessor")
+    @mock.patch.object(emitter_module, "OTLPLogExporter")
+    def test_otel_service_name_takes_precedence_over_resource_attributes(self, _mock_exporter, _mock_processor):
+        # OTEL_SERVICE_NAME wins over service.name in OTEL_RESOURCE_ATTRIBUTES,
+        # per the OTel resource spec. Confirm we don't accidentally invert that.
+        emitter = SnapshotOtlpEmitter()
+        self.assertTrue(emitter._ensure_initialized())
+        self.assertEqual(emitter._logger_provider.resource.attributes.get("service.name"), "explicit-wins")
+
 
 class TestShutdownAndReset(unittest.TestCase):
     """Tests for shutdown and reset lifecycle."""
