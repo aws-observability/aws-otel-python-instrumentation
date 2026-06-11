@@ -12,11 +12,11 @@ class TestPipSystemCertsPatches(TestCase):
     def setUp(self) -> None:
         # Reset the module-level guard before every test so each test exercises the
         # full code path.
-        _pip_system_certs_patches._patch_applied = False
+        _pip_system_certs_patches._patch_attempted = False
 
     def tearDown(self) -> None:
         # Leave the guard in a clean state for tests that follow.
-        _pip_system_certs_patches._patch_applied = False
+        _pip_system_certs_patches._patch_attempted = False
 
     @patch("amazon.opentelemetry.distro.patches._pip_system_certs_patches.version")
     def test_no_op_when_pip_system_certs_not_installed(self, mock_version):
@@ -38,7 +38,7 @@ class TestPipSystemCertsPatches(TestCase):
                 self.assertIs(botocore.httpsession.SSLContext, sentinel_class)
                 self.assertIs(urllib3.util.ssl_.SSLContext, sentinel_class)
 
-        self.assertTrue(_pip_system_certs_patches._patch_applied)
+        self.assertTrue(_pip_system_certs_patches._patch_attempted)
 
     @patch("amazon.opentelemetry.distro.patches._pip_system_certs_patches.version")
     def test_rebinds_stale_references_when_installed(self, mock_version):
@@ -120,8 +120,8 @@ class TestPipSystemCertsPatches(TestCase):
             else:
                 sys.modules["botocore.httpsession"] = saved
 
-        # Patch should still mark itself as applied even when one library is missing.
-        self.assertTrue(_pip_system_certs_patches._patch_applied)
+        # Patch should still mark itself as attempted even when one library is missing.
+        self.assertTrue(_pip_system_certs_patches._patch_attempted)
         # urllib3 path should still have been considered.
         self.assertTrue(hasattr(urllib3.util.ssl_, "SSLContext"))
 
@@ -143,4 +143,4 @@ class TestPipSystemCertsPatches(TestCase):
             else:
                 sys.modules["urllib3.util.ssl_"] = saved
 
-        self.assertTrue(_pip_system_certs_patches._patch_applied)
+        self.assertTrue(_pip_system_certs_patches._patch_attempted)

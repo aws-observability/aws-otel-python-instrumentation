@@ -12,7 +12,7 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
-- fix(otlp-aws-exporter): avoid `RecursionError` when `pip_system_certs` replaces `ssl.SSLContext` on Python 3.12 by rebinding stale `botocore`/`urllib3` SSL context references and caching credentials in `AwsAuthSession`
+- fix(otlp-aws-exporter): avoid `RecursionError` when `pip_system_certs` replaces `ssl.SSLContext` (truststore injection) by rebinding stale `botocore`/`urllib3` SSL context references and caching credentials in `AwsAuthSession`
 - feat: support environment-configured endpoint visibility for HTTP operation names
   ([#718](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/718))
 - fix(lambda-layer): Standardize CompactConsoleLogRecordExporter output with CloudWatch OTLP backend schema.
