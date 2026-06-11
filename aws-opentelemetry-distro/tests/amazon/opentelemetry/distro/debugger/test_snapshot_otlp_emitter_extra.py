@@ -88,6 +88,26 @@ class TestEnsureInitialized(unittest.TestCase):
         emitter._init_failed = True
         self.assertFalse(emitter._ensure_initialized())
 
+    @mock.patch.dict(os.environ, {"OTEL_SERVICE_NAME": "my-service"})
+    @mock.patch.object(emitter_module, "BatchLogRecordProcessor")
+    @mock.patch.object(emitter_module, "OTLPLogExporter")
+    def test_default_resource_picks_up_service_name_from_env(self, _mock_exporter, _mock_processor):
+        # Regression: default resource must run OTel detectors so OTEL_SERVICE_NAME
+        # propagates onto OTLP-exported LogRecords. Resource.get_empty() skipped them.
+        emitter = SnapshotOtlpEmitter()
+        self.assertTrue(emitter._ensure_initialized())
+        self.assertEqual(emitter._logger_provider.resource.attributes.get("service.name"), "my-service")
+
+    @mock.patch.object(emitter_module, "BatchLogRecordProcessor")
+    @mock.patch.object(emitter_module, "OTLPLogExporter")
+    def test_explicit_resource_is_preserved(self, _mock_exporter, _mock_processor):
+        from opentelemetry.sdk.resources import Resource
+
+        explicit = Resource.create({"service.name": "explicit-service"})
+        emitter = SnapshotOtlpEmitter(resource=explicit)
+        self.assertTrue(emitter._ensure_initialized())
+        self.assertEqual(emitter._logger_provider.resource.attributes.get("service.name"), "explicit-service")
+
 
 class TestShutdownAndReset(unittest.TestCase):
     """Tests for shutdown and reset lifecycle."""
