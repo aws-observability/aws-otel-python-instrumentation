@@ -1,0 +1,4 @@
+typing-extensions==4.12.2
+django==5.1.14
+uwsgi
+python-dateutil
