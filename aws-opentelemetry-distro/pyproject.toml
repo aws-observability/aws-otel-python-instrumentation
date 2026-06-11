@@ -89,6 +89,13 @@ dependencies = [
   "urllib3 >= 2.7.0; python_version >= '3.10'",
   "protobuf == 6.33.5",
   "pyyaml == 6.0.3",
+  # Used by Dynamic Instrumentation to parse ISO-8601 timestamps from polled configurations
+  # (debugger/_data_models.py). Required on all supported Python versions, hence a core dependency.
+  "python-dateutil >= 2.7.0",
+  # Used by Dynamic Instrumentation's bytecode-injection engine for line-level instrumentation on
+  # Python 3.9-3.11 (3.12+ uses the built-in sys.monitoring instead, so the marker excludes it there).
+  # A core dependency so `pip install aws-opentelemetry-distro` gives a fully working feature with no extras.
+  "bytecode; python_version >= '3.9' and python_version < '3.12'",
 ]
 
 [project.optional-dependencies]

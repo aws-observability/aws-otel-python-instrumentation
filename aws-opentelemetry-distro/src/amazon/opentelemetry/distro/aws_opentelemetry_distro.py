@@ -73,6 +73,7 @@ from amazon.opentelemetry.distro._utils import (
     is_installed,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import APPLICATION_SIGNALS_ENABLED_CONFIG
+from amazon.opentelemetry.distro.debugger.debugger import initialize_debugger
 from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_instrumentation_patches
 from opentelemetry import propagate
 from opentelemetry.distro import OpenTelemetryDistro
@@ -100,6 +101,7 @@ from opentelemetry.sdk.environment_variables import (
     OTEL_EXPORTER_OTLP_PROTOCOL,
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
 )
+from opentelemetry.trace import get_tracer_provider
 from opentelemetry.util._importlib_metadata import EntryPoint, entry_points
 
 _logger: Logger = getLogger(__name__)
@@ -236,6 +238,19 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
 
         if kwargs.get("apply_patches", True):
             apply_instrumentation_patches()
+
+        # Attempt debugger initialization; no-op unless the user opts in via
+        # OTEL_AWS_DYNAMIC_INSTRUMENTATION_ENABLED=true.
+        AwsOpenTelemetryDistro._initialize_debugger()
+
+    @staticmethod
+    def _initialize_debugger():
+        """Initialize debugger with the configured tracer provider."""
+        try:
+            tracer_provider = get_tracer_provider()
+            initialize_debugger(tracer_provider)
+        except Exception as exception:  # pylint: disable=broad-exception-caught
+            _logger.debug("Debugger initialization skipped: %s", exception)
 
     def load_instrumentor(self, entry_point: EntryPoint, **kwargs):
         """Mutual exclusion between AWS native and third-party agentic instrumentors.
