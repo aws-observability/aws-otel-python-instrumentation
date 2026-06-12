@@ -109,9 +109,14 @@ _logger: Logger = getLogger(__name__)
 _load._logger.setLevel(LEVELS.get(os.environ.get(OTEL_PYTHON_LOG_LEVEL, "error").lower(), ERROR))
 
 
-# When set to "true", opt in to AWS agentic instrumentors over third-party ones (e.g. OpenInference),
-# even if both are installed. By default, auto-detection prefers third-party when present.
-AWS_AGENTIC_INSTRUMENTATION_OPT_IN = "AWS_AGENTIC_INSTRUMENTATION_OPT_IN"
+# Controls AWS native agentic instrumentors when AGENT_OBSERVABILITY_ENABLED=true.
+# This switch only governs the aws_* side; third-party instrumentors are never disabled
+# by ADOT — uninstall them or use OTEL_PYTHON_DISABLED_INSTRUMENTATIONS to opt out.
+# Values:
+#   "auto" (default, also when unset): load aws_* unless a same-library third-party is registered.
+#   "enabled" : load all aws_* unconditionally.
+#   "disabled": skip all aws_*.
+AWS_AGENTIC_INSTRUMENTATION = "AWS_AGENTIC_INSTRUMENTATION"
 
 # Maps third-party instrumentor entry point names to their AWS native equivalents.
 # Used for mutual exclusion: only one side instruments each library at a time.
@@ -253,14 +258,13 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             _logger.debug("Debugger initialization skipped: %s", exception)
 
     def load_instrumentor(self, entry_point: EntryPoint, **kwargs):
-        """Mutual exclusion between AWS native and third-party agentic instrumentors.
+        """Skip AWS native agentic instrumentors that should not load.
 
         When agent observability is enabled:
         - Skip ADOT-owned dists that duplicate an aws_* entry point (e.g. openai-agents-v2).
-        - Auto-detect: if a third-party instrumentor is registered for the same library,
-          skip the AWS native one. If not, skip the third-party one.
-        - AWS_AGENTIC_INSTRUMENTATION_OPT_IN=true overrides auto-detection and forces
-          AWS native instrumentors, skipping third-party ones.
+        - AWS_AGENTIC_INSTRUMENTATION (auto/enabled/disabled) governs the aws_* side only.
+          See the constant docstring for semantics. Third-party instrumentors are never
+          touched here.
         """
         if is_agent_observability_enabled() and self._should_skip_instrumentor(entry_point):
             return
@@ -271,21 +275,33 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
         if entry_point.dist and entry_point.dist.name in _ADOT_OWNED_DISTS:
             return True
 
-        prefer_native = os.environ.get(AWS_AGENTIC_INSTRUMENTATION_OPT_IN, "false").lower() == "true"
+        is_native = entry_point.name in _THIRDPARTY_TO_AWS_NATIVE.values()
+        if not is_native:
+            return False
+
+        mode = os.environ.get(AWS_AGENTIC_INSTRUMENTATION, "auto").lower()
+        if mode not in ("auto", "enabled", "disabled"):
+            _logger.warning(
+                "Unknown %s=%r — falling back to 'auto'. Valid values: auto, enabled, disabled.",
+                AWS_AGENTIC_INSTRUMENTATION,
+                mode,
+            )
+            mode = "auto"
+
+        if mode == "enabled":
+            return False
+        if mode == "disabled":
+            _logger.debug("Skipping %s: AWS_AGENTIC_INSTRUMENTATION=disabled", entry_point.name)
+            return True
+
+        # mode == "auto": skip the native side if a same-library third-party is registered.
         third_party_names = {
             ep.name
             for ep in entry_points(group="opentelemetry_instrumentor")
             if not (ep.dist and ep.dist.name in _ADOT_OWNED_DISTS)
         }
-
-        if entry_point.name in _THIRDPARTY_TO_AWS_NATIVE.values() and not prefer_native:
-            for tp_name, aws_name in _THIRDPARTY_TO_AWS_NATIVE.items():
-                if entry_point.name == aws_name and tp_name in third_party_names:
-                    _logger.debug("Skipping %s: third-party %s is registered", aws_name, tp_name)
-                    return True
-
-        if entry_point.name in _THIRDPARTY_TO_AWS_NATIVE and prefer_native:
-            _logger.debug("Skipping third-party %s: AWS native preferred", entry_point.name)
-            return True
-
+        for tp_name, aws_name in _THIRDPARTY_TO_AWS_NATIVE.items():
+            if entry_point.name == aws_name and tp_name in third_party_names:
+                _logger.debug("Skipping %s: third-party %s is registered", aws_name, tp_name)
+                return True
         return False
