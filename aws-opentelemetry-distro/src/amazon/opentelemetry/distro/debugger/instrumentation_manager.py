@@ -64,6 +64,14 @@ class InstrumentationManager:
         # Build a Resource with service name and environment for the LoggerProvider
         resource = self._build_resource(service, environment)
         self._snapshot_emitter = SnapshotOtlpEmitter(resource=resource)
+        # Eagerly initialize from this (well-behaved user) thread. Lazy init from a
+        # sys.monitoring PY_RETURN callback can hit
+        # ``RuntimeError("cannot schedule new futures after interpreter shutdown")``
+        # because ``BatchLogRecordProcessor`` spawns a daemon worker on construction.
+        try:
+            self._snapshot_emitter.initialize()
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.debug("Snapshot emitter eager initialization deferred", exc_info=True)
         set_snapshot_emitter(self._snapshot_emitter)
 
         # Status reporter (will be set later by debugger.py)
@@ -415,6 +423,43 @@ class InstrumentationManager:
             bp_set.code_object = getattr(original_callable, "__code__", None)
             bp_set.is_instrumented = True
 
+            # Enable function-entry instrumentation via the engine when we have a
+            # function-level breakpoint (line 0 — the PROBE case, or a function-level
+            # BREAKPOINT). The setattr-based wrapper above only fires when the caller
+            # looks up the module attribute at call time. Frameworks like Django
+            # (URLPattern.callback) and Flask (view_functions) capture the original
+            # function object at import time and dispatch through that stale reference,
+            # bypassing the wrapper entirely. The engine hooks the underlying code
+            # object via sys.monitoring PY_START / PY_RETURN, which fires regardless
+            # of which Python-level reference invokes it.
+            if (
+                self._engine
+                and bp_set.code_object
+                and 0 in bp_set.breakpoints
+                and hasattr(self._engine, "enable_function_entry")
+            ):
+                try:
+                    fn_bp = bp_set.breakpoints[0]
+                    self._engine.enable_function_entry(
+                        code=bp_set.code_object,
+                        func=original_callable,
+                        function_key=bp_set.function_key,
+                        module_name=bp_set.module,
+                        qualified_name=bp_set.function_name,
+                        capture_config=fn_bp.capture_config,
+                        location_hash=fn_bp.config_id,
+                        instrumentation_type=fn_bp.instrumentation_type,
+                    )
+                except Exception as exception:  # pylint: disable=broad-exception-caught
+                    logger.warning(
+                        "Failed to enable function-entry hook for %s: %s. "
+                        "Falling back to module-attribute wrapper only — framework-bypass "
+                        "patterns (Django URL resolver, captured refs) will not be intercepted.",
+                        bp_set.function_key,
+                        exception,
+                        exc_info=True,
+                    )
+
             # Enable line breakpoints if engine is available and there are line breakpoints
             if self._engine and bp_set.line_numbers and bp_set.code_object:
                 try:
@@ -533,6 +578,22 @@ class InstrumentationManager:
                         exc_info=True,
                     )
                     # Don't re-raise - continue with function restoration
+
+            # Disable function-entry hook on the original code object.
+            if (
+                self._engine
+                and bp_set.code_object
+                and hasattr(self._engine, "disable_function_entry")
+            ):
+                try:
+                    self._engine.disable_function_entry(bp_set.code_object)
+                except Exception as exception:  # pylint: disable=broad-exception-caught
+                    logger.warning(
+                        "Failed to disable function-entry hook for %s: %s",
+                        func_key,
+                        exception,
+                        exc_info=True,
+                    )
 
             # Restore original function
             if bp_set.is_instrumented:

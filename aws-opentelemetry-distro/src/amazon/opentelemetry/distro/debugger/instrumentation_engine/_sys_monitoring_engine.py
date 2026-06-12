@@ -64,6 +64,19 @@ class SysMonitoringEngine(InstrumentationEngine):
         self._capture_configs: Dict[tuple, CaptureConfig] = {}
         # Callback for hit count tracking
         self._hit_count_callback = None
+
+        # Function-entry instrumentation tracking (PROBE / function-level BREAKPOINT).
+        # Hooks PY_START + PY_RETURN on the code object so the instrumentation fires
+        # regardless of which reference invokes it — the caller's binding (module
+        # attribute, framework registry, decorator capture) is irrelevant.
+        # Maps code_id -> dict with the per-function metadata the handlers need.
+        self._function_entries: Dict[int, Dict[str, Any]] = {}
+        # Per-thread LIFO stack of in-progress entry frames keyed by code_id.
+        # PY_START pushes; PY_RETURN pops and emits.
+        self._tls = threading.local()
+        # Re-entrancy guard so a snapshot built from inside a callback cannot
+        # itself trigger another snapshot via PY_START on the helper code path.
+        self._reentrancy_guard = threading.local()
         self._lock = threading.RLock()
 
     def initialize(self, hit_count_callback=None):
@@ -101,6 +114,17 @@ class SysMonitoringEngine(InstrumentationEngine):
 
             # Register LINE event callback
             sys.monitoring.register_callback(self.tool_id, sys.monitoring.events.LINE, self._line_event_handler)
+
+            # Register PY_START/PY_RETURN callbacks for function-entry instrumentation.
+            # These coexist with LINE on the same tool_id — events are armed per code
+            # object via set_local_events, so a code object only fires the events it
+            # has been individually configured for.
+            sys.monitoring.register_callback(
+                self.tool_id, sys.monitoring.events.PY_START, self._py_start_handler
+            )
+            sys.monitoring.register_callback(
+                self.tool_id, sys.monitoring.events.PY_RETURN, self._py_return_handler
+            )
 
             self._initialized = True
             self._hit_count_callback = hit_count_callback
@@ -234,6 +258,369 @@ class SysMonitoringEngine(InstrumentationEngine):
                 exc,
                 exc_info=True,
             )
+
+    def enable_function_entry(  # pylint: disable=too-many-arguments
+        self,
+        code: CodeType,
+        func: FunctionType,
+        function_key: str,
+        module_name: str,
+        qualified_name: str,
+        capture_config: Optional[CaptureConfig] = None,
+        location_hash: Optional[str] = None,
+        instrumentation_type: Optional[str] = None,
+    ) -> bool:
+        """
+        Hook PY_START + PY_RETURN on a code object for function-entry instrumentation.
+
+        Unlike module-attribute replacement (setattr), this binds to the code object
+        the interpreter actually executes, so it survives stale references — Django's
+        URL resolver, Flask's view_functions, decorators capturing the function,
+        ``from x import y``, and any other pattern that holds a direct reference.
+
+        Args:
+            code: Code object of the function — the actual hook target.
+            func: Function object — used for ``inspect.signature`` and as a
+                  fallback when the snapshot needs the original callable.
+            function_key: ``module.qualname`` for snapshot routing / hit-count keys.
+            module_name: Module name (component of the snapshot's CodeUnit).
+            qualified_name: Qualified function name (component of MethodName).
+            capture_config: Controls argument / return / stack capture.
+            location_hash: LocationHash to attach to the emitted snapshot.
+            instrumentation_type: ``"PROBE"`` or ``"BREAKPOINT"`` — surfaced as
+                                  ``aws.di.instrumentation_type`` on the snapshot.
+
+        Returns:
+            True on success, False if the engine isn't initialized or the hook
+            could not be installed (state is left unchanged on failure).
+        """
+        if not self._initialized:
+            logger.warning("SysMonitoringEngine not initialized, cannot enable function entry")
+            return False
+
+        try:
+            code_id = id(code)
+            with self._lock:
+                self._function_entries[code_id] = {
+                    "func": func,
+                    "function_key": function_key,
+                    "module_name": module_name,
+                    "qualified_name": qualified_name,
+                    "capture_config": capture_config,
+                    "location_hash": location_hash,
+                    "instrumentation_type": instrumentation_type,
+                }
+                # Combine with any existing events on this code object (LINE may
+                # already be armed for line-level breakpoints on the same function).
+                existing = sys.monitoring.get_local_events(self.tool_id, code)
+                sys.monitoring.set_local_events(
+                    self.tool_id,
+                    code,
+                    existing | sys.monitoring.events.PY_START | sys.monitoring.events.PY_RETURN,
+                )
+                logger.debug(
+                    "Enabled function entry for %s (code_id=%s, type=%s)",
+                    function_key,
+                    code_id,
+                    instrumentation_type,
+                )
+                return True
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Failed to enable function entry for %s: %s", function_key, exc, exc_info=True)
+            # Best-effort rollback so we don't leave a half-armed entry behind.
+            self._function_entries.pop(id(code), None)
+            return False
+
+    def suppress_function_entry_for_thread(self) -> None:
+        """
+        Mark the current thread as 'inside the FunctionWrapper'.
+
+        Called by ``FunctionWrapper`` before invoking ``original_func`` so the
+        PY_START / PY_RETURN handlers skip — preventing double-emission when the
+        caller went through the module attribute (wrapper path) instead of via a
+        stale reference (engine path).
+        """
+        self._reentrancy_guard.active = True
+
+    def release_function_entry_suppression(self) -> None:
+        """Counterpart to ``suppress_function_entry_for_thread``."""
+        self._reentrancy_guard.active = False
+
+    def disable_function_entry(self, code: CodeType) -> None:
+        """Tear down PY_START / PY_RETURN hooks for a code object."""
+        if not self._initialized:
+            return
+        try:
+            code_id = id(code)
+            with self._lock:
+                if code_id not in self._function_entries:
+                    return
+                # Drop only PY_START/PY_RETURN — preserve LINE if it was set.
+                existing = sys.monitoring.get_local_events(self.tool_id, code)
+                remaining = existing & ~(
+                    sys.monitoring.events.PY_START | sys.monitoring.events.PY_RETURN
+                )
+                try:
+                    sys.monitoring.set_local_events(self.tool_id, code, remaining)
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    logger.warning(
+                        "Failed to clear PY_START/PY_RETURN for %s: %s", code.co_name, exc
+                    )
+                self._function_entries.pop(code_id, None)
+                logger.debug("Disabled function entry for %s", code.co_name)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Failed to disable function entry for %s: %s", code.co_name, exc, exc_info=True)
+
+    def _py_start_handler(self, code: CodeType, instruction_offset: int):
+        """
+        Called on every function entry for code objects with PY_START armed.
+
+        CRITICAL: Must NOT raise. Returns ``sys.monitoring.DISABLE`` to suppress
+        future PY_START callbacks for code objects we don't track (one-time
+        training cost; the interpreter's callback dispatch then skips them).
+        """
+        try:
+            entry = self._function_entries.get(id(code))
+            if entry is None:
+                return sys.monitoring.DISABLE
+
+            # Re-entrancy guard: if we're already inside the engine emitting a
+            # snapshot, the helper code we run (serialization, OTel resource
+            # lookup, etc.) must not trigger more snapshots. CPython's GIL means
+            # a single thread cannot be in two PY_START callbacks at once, but
+            # the helper code may invoke other instrumented functions.
+            if getattr(self._reentrancy_guard, "active", False):
+                return None
+
+            stack = getattr(self._tls, "stack", None)
+            if stack is None:
+                stack = []
+                self._tls.stack = stack
+
+            entry_context = self._capture_entry_arguments(code, entry.get("capture_config"))
+            stack.append(
+                {
+                    "code_id": id(code),
+                    "start_ns": time.time_ns(),
+                    "entry_context": entry_context,
+                }
+            )
+            return None
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Critical error in PY_START handler for %s: %s", code.co_name, exc, exc_info=True)
+            return None
+
+    def _py_return_handler(self, code: CodeType, instruction_offset: int, retval: Any):
+        """
+        Called on every function return for code objects with PY_RETURN armed.
+
+        Pairs with ``_py_start_handler`` via the per-thread LIFO stack: pops the
+        matching entry frame, computes duration, captures return value, and emits
+        the function-entry snapshot.
+        """
+        try:
+            entry = self._function_entries.get(id(code))
+            if entry is None:
+                return sys.monitoring.DISABLE
+
+            if getattr(self._reentrancy_guard, "active", False):
+                return None
+
+            stack = getattr(self._tls, "stack", None)
+            if not stack:
+                # No matching PY_START — the caller entered the function before
+                # the hook was armed (e.g. a generator's .send() after creation,
+                # which we don't yet support). Skip silently rather than emit a
+                # malformed snapshot.
+                return None
+
+            # Pop the most recent matching frame. Generators/coroutines can
+            # interleave PY_START/PY_RETURN across threads in non-LIFO order,
+            # but for plain sync calls (the only case we currently support) the
+            # top-of-stack always matches.
+            frame_info = None
+            for i in range(len(stack) - 1, -1, -1):
+                if stack[i]["code_id"] == id(code):
+                    frame_info = stack.pop(i)
+                    break
+            if frame_info is None:
+                return None
+
+            self._reentrancy_guard.active = True
+            try:
+                self._handle_function_entry(code, entry, frame_info, retval, thrown=None)
+            finally:
+                self._reentrancy_guard.active = False
+            return None
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Critical error in PY_RETURN handler for %s: %s", code.co_name, exc, exc_info=True)
+            return None
+
+    def _capture_entry_arguments(
+        self, code: CodeType, capture_config: Optional[CaptureConfig]
+    ) -> Optional[CapturedContext]:
+        """
+        Capture function arguments from the calling frame.
+
+        sys.monitoring callbacks don't receive the executing frame; we walk the
+        call stack to find the frame whose ``f_code is code``. This mirrors how
+        ``_get_local_vars`` recovers locals for line-level breakpoints.
+        """
+        if capture_config is None or capture_config.capture_arguments is None:
+            return None
+
+        frame = inspect.currentframe()
+        try:
+            target_frame = None
+            while frame is not None:
+                if frame.f_code is code:
+                    target_frame = frame
+                    break
+                frame = frame.f_back
+            if target_frame is None:
+                return None
+
+            # Argument names are co_varnames[: co_argcount + co_kwonlyargcount].
+            arg_count = code.co_argcount + code.co_kwonlyargcount
+            arg_names = code.co_varnames[:arg_count]
+            args_dict = {
+                name: target_frame.f_locals[name]
+                for name in arg_names
+                if name in target_frame.f_locals
+            }
+
+            if not args_dict:
+                return None
+
+            # Apply capture_arguments filter: [] means all, ["a","b"] means subset.
+            if capture_config.capture_arguments:
+                args_dict = {
+                    k: v for k, v in args_dict.items() if k in capture_config.capture_arguments
+                }
+                if not args_dict:
+                    return None
+
+            serializer = SnapshotSerializer(
+                max_fields=capture_config.max_fields_per_object or DEFAULT_MAX_FIELDS_PER_OBJECT,
+                max_string_length=capture_config.max_string_length or DEFAULT_MAX_STRING_LENGTH,
+                max_depth=capture_config.max_object_depth or 3,
+                max_collection_size=capture_config.max_collection_width or 10,
+            )
+            return CapturedContext(arguments=serializer.serialize_variables(args_dict))
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.warning("Failed to capture entry arguments: %s", exc)
+            return None
+        finally:
+            del frame
+
+    def _handle_function_entry(  # pylint: disable=too-many-locals
+        self,
+        code: CodeType,
+        entry: Dict[str, Any],
+        frame_info: Dict[str, Any],
+        retval: Any,
+        thrown: Optional[Exception],
+    ) -> None:
+        """Build and emit the function-entry snapshot."""
+        try:
+            function_key = entry["function_key"]
+            capture_config = entry.get("capture_config")
+
+            # Hit-count rate limit (key = function_key:0 for function-level).
+            if self._hit_count_callback is not None:
+                if not self._hit_count_callback(f"{function_key}:0"):
+                    return
+
+            duration_ns = time.time_ns() - frame_info["start_ns"]
+            entry_context = frame_info.get("entry_context")
+
+            return_context = None
+            if capture_config is not None and (capture_config.capture_return or thrown is not None):
+                return_context = CapturedContext()
+                if thrown is None and retval is not None and capture_config.capture_return:
+                    serializer = SnapshotSerializer(
+                        max_fields=capture_config.max_fields_per_object or DEFAULT_MAX_FIELDS_PER_OBJECT,
+                        max_string_length=capture_config.max_string_length or DEFAULT_MAX_STRING_LENGTH,
+                        max_depth=capture_config.max_object_depth or 3,
+                        max_collection_size=capture_config.max_collection_width or 10,
+                    )
+                    return_context.return_value = serializer.serialize(retval)
+
+            module_name = entry["module_name"]
+            qualified_name = entry["qualified_name"]
+            method_name = qualified_name.split(".")[-1]
+            class_part = ".".join(qualified_name.split(".")[:-1]) if "." in qualified_name else None
+            class_name_fq = f"{module_name}.{class_part}" if class_part else module_name
+
+            instrumentation = InstrumentationDetails(
+                location=InstrumentationLocation(
+                    code_unit=module_name,
+                    class_name=class_name_fq,
+                    method_name=method_name,
+                    line_number=0,  # 0 = function-level per spec
+                    file_path=getattr(code, "co_filename", None),
+                    language="python",
+                ),
+            )
+
+            # Trace context (read-only — never start a span here).
+            trace_ctx = None
+            try:
+                from opentelemetry import trace as otel_trace  # pylint: disable=import-outside-toplevel
+
+                span = otel_trace.get_current_span()
+                if span and span.get_span_context().is_valid:
+                    sctx = span.get_span_context()
+                    trace_ctx = TraceContext(
+                        trace_id=format(sctx.trace_id, "032x"),
+                        span_id=format(sctx.span_id, "016x"),
+                    )
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
+
+            current_thread = threading.current_thread()
+            thread_info = ThreadInfo(id=threading.get_ident(), name=current_thread.name)
+
+            stack = None
+            if capture_config is not None and capture_config.capture_stack_trace:
+                stack = capture_stack_frames(capture_config.max_stack_frames)
+
+            captures = Captures(entry=entry_context, return_context=return_context)
+
+            duration_ms = duration_ns // 1_000_000 if duration_ns else None
+
+            snapshot = Snapshot(
+                timestamp=int(time.time() * 1000),
+                duration=duration_ms,
+                service=self._get_service_name(),
+                environment=self._get_environment(),
+                location_hash=entry.get("location_hash"),
+                instrumentation=instrumentation,
+                trace=trace_ctx,
+                thread=thread_info,
+                stack=stack,
+                captures=captures,
+                instrumentation_type=entry.get("instrumentation_type"),
+            )
+
+            try:
+                # pylint: disable=import-outside-toplevel
+                from amazon.opentelemetry.distro.debugger._function_wrapper import get_snapshot_emitter
+
+                emitter = get_snapshot_emitter()
+                if emitter is not None:
+                    emitter.emit_snapshot(snapshot)
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
+
+            logger.debug(
+                "Created function-entry snapshot for %s (duration=%sns, type=%s)",
+                function_key,
+                duration_ns,
+                entry.get("instrumentation_type"),
+            )
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Error handling function entry for %s: %s", code.co_name, exc, exc_info=True)
 
     def _line_event_handler(self, code: CodeType, line_number: int):
         """
@@ -491,9 +878,13 @@ class SysMonitoringEngine(InstrumentationEngine):
                 self._location_hashes.clear()
                 self._capture_configs.clear()
 
-                # Always try to unregister callback and free tool if we own it
+                self._function_entries.clear()
+
+                # Always try to unregister callbacks and free tool if we own it
                 if sys.monitoring.get_tool(self.tool_id) == _TOOL_NAME:
                     sys.monitoring.register_callback(self.tool_id, sys.monitoring.events.LINE, None)
+                    sys.monitoring.register_callback(self.tool_id, sys.monitoring.events.PY_START, None)
+                    sys.monitoring.register_callback(self.tool_id, sys.monitoring.events.PY_RETURN, None)
                     try:
                         sys.monitoring.free_tool_id(self.tool_id)
                         logger.debug("Freed tool ID %s", self.tool_id)

@@ -523,6 +523,19 @@ class FunctionWrapper:
                 except Exception as exc:
                     logger.warning("Failed to capture entry context: %s", exc)
 
+            # Suppress engine PY_START/PY_RETURN for the duration of original_func
+            # so we don't double-emit when the caller went through the wrapper
+            # (module-attribute path) and the engine has the same code armed for
+            # the framework-bypass case.
+            engine_for_suppression = None
+            if mgr is not None:
+                engine_for_suppression = getattr(mgr, "_engine", None)
+            if engine_for_suppression is not None:
+                try:
+                    engine_for_suppression.suppress_function_entry_for_thread()
+                except Exception:
+                    engine_for_suppression = None
+
             # Call original function
             result = None
             thrown = None
@@ -537,6 +550,11 @@ class FunctionWrapper:
                     pass
                 raise
             finally:
+                if engine_for_suppression is not None:
+                    try:
+                        engine_for_suppression.release_function_entry_suppression()
+                    except Exception:
+                        pass
                 # Build and emit snapshot — only for function-level breakpoints
                 if has_function_level_bp:
                     try:
@@ -638,6 +656,17 @@ class FunctionWrapper:
                 except Exception as exc:
                     logger.warning("Failed to capture entry context: %s", exc)
 
+            # Suppress engine PY_START/PY_RETURN while the wrapper is in flight
+            # (see sync wrapper for full rationale on double-emit prevention).
+            engine_for_suppression = None
+            if mgr is not None:
+                engine_for_suppression = getattr(mgr, "_engine", None)
+            if engine_for_suppression is not None:
+                try:
+                    engine_for_suppression.suppress_function_entry_for_thread()
+                except Exception:
+                    engine_for_suppression = None
+
             # Call original async function
             result = None
             thrown = None
@@ -652,6 +681,11 @@ class FunctionWrapper:
                     pass
                 raise
             finally:
+                if engine_for_suppression is not None:
+                    try:
+                        engine_for_suppression.release_function_entry_suppression()
+                    except Exception:
+                        pass
                 if has_function_level_bp:
                     try:
                         duration_ns = time.time_ns() - start_ns
