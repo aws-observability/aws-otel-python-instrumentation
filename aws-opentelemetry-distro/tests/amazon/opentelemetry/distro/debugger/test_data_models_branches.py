@@ -122,15 +122,17 @@ class TestFromApiConfigInvalidInstrumentationType(unittest.TestCase):
 
 
 class TestFromApiConfigProbeRules(unittest.TestCase):
-    """Covers PROBE-specific branches: missing name (354-357), ExpiresAt ignored (456), MaxHits ignored (483)."""
+    """Covers PROBE-specific branches: optional name, ExpiresAt ignored, MaxHits ignored."""
 
-    def test_probe_missing_instrumentation_name_returns_none(self):
+    def test_probe_missing_instrumentation_name_defaults_to_empty(self):
         api_config = {
             "Location": _location(line_number=0),
             "InstrumentationType": "PROBE",
             "LocationHash": "h",
         }
-        self.assertIsNone(BreakpointConfiguration.from_api_config(api_config))
+        config = BreakpointConfiguration.from_api_config(api_config)
+        self.assertIsNotNone(config)
+        self.assertEqual(config.instrumentation_name, "")
 
     def test_probe_ignores_expires_at_and_max_hits(self):
         api_config = {
