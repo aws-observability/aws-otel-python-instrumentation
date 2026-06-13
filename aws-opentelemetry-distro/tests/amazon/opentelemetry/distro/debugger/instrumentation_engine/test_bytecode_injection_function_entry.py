@@ -229,25 +229,28 @@ class TestEnableFunctionEntry(unittest.TestCase):
         self.assertIsNotNone(snapshot.captures.return_context)
 
     # ------------------------------------------------------------------
-    # Decorator unwrapping (the "@login_required problem").
+    # Decorator unwrapping ("@login_required problem") — the BFS lives in
+    # the shared _undecorate module; engine-level smoke tests confirm the
+    # engine integrates with it correctly. Detailed coverage for the BFS
+    # itself lives in test_undecorate.py.
     # ------------------------------------------------------------------
-    def test_undecorated_resolves_through_functools_wraps(self):
-        """``_undecorated`` finds the inner user function under @functools.wraps."""
-        resolved = BytecodeInjectionEngine._undecorated(_decorated_view, "_decorated_view")
-        # _decorated_view is the wrapper; its __code__.co_name is "wrapper".
-        # The inner user function has co_name "_decorated_view".
-        self.assertIs(resolved, _decorated_view.__wrapped__)
-        self.assertEqual(resolved.__code__.co_name, "_decorated_view")
-
-    def test_undecorated_returns_input_when_already_resolved(self):
-        # If co_name matches, it returns the input unchanged
-        resolved = BytecodeInjectionEngine._undecorated(_module_target, "_module_target")
-        self.assertIs(resolved, _module_target)
-
-    def test_undecorated_handles_partial(self):
-        p = partial(_module_target_with_kwargs, b=99)
-        resolved = BytecodeInjectionEngine._undecorated(p, "_module_target_with_kwargs")
-        self.assertIs(resolved, _module_target_with_kwargs)
+    def test_engine_instruments_inner_view_under_functools_wraps(self):
+        """Enabling on a decorated view should rewrite the INNER function's bytecode."""
+        original_inner_code = _decorated_view.__wrapped__.__code__
+        ok = self.engine.enable_function_entry(
+            code=_decorated_view.__code__,
+            func=_decorated_view,
+            function_key=f"{__name__}._decorated_view",
+            module_name=__name__,
+            qualified_name="_decorated_view",
+            capture_config=None,
+            location_hash="h-dec",
+            instrumentation_type="PROBE",
+        )
+        self.assertTrue(ok)
+        # The inner function's __code__ has been replaced (rewrite happened
+        # there, not on the wrapper).
+        self.assertIsNot(_decorated_view.__wrapped__.__code__, original_inner_code)
 
     # ------------------------------------------------------------------
     # Generators / async-generators must be skipped.
@@ -268,24 +271,6 @@ class TestEnableFunctionEntry(unittest.TestCase):
     # ------------------------------------------------------------------
     # Reentrancy guard — wrapper path skips the engine handler.
     # ------------------------------------------------------------------
-    def test_suppression_skips_emission(self):
-        self.engine.enable_function_entry(
-            code=_module_target.__code__,
-            func=_module_target,
-            function_key=f"{__name__}._module_target",
-            module_name=__name__,
-            qualified_name="_module_target",
-            capture_config=None,
-            location_hash="h",
-            instrumentation_type="PROBE",
-        )
-        self.engine.suppress_function_entry_for_thread()
-        try:
-            _module_target(5)
-        finally:
-            self.engine.release_function_entry_suppression()
-        self.assertEqual(self._mock_emitter.emit_snapshot.call_count, 0)
-
     # ------------------------------------------------------------------
     # Disable restores original bytecode.
     # ------------------------------------------------------------------
@@ -476,15 +461,3 @@ class TestEnableFunctionEntry(unittest.TestCase):
 import unittest.mock  # noqa: E402
 
 
-@pytest.mark.skipif(
-    not ((3, 9) <= sys.version_info < (3, 12)),
-    reason="BytecodeInjectionEngine only runs on Python 3.9-3.11",
-)
-class TestSuppressionInterface(unittest.TestCase):
-    """Suppression toggle works without enable_function_entry."""
-
-    def test_suppression_methods_are_idempotent(self):
-        engine = BytecodeInjectionEngine()
-        engine.suppress_function_entry_for_thread()
-        engine.release_function_entry_suppression()
-        engine.release_function_entry_suppression()  # release without suppress is safe

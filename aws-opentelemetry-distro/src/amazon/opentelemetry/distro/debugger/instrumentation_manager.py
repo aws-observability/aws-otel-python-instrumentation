@@ -408,57 +408,96 @@ class InstrumentationManager:
             if 0 in bp_set.breakpoints:
                 location_hash = bp_set.breakpoints[0].config_id
 
-            # Wrap function
-            original, wrapped = self._wrapper.instrument_function(
-                module_name=bp_set.module,
-                function_name=bp_set.function_name,
-                capture_config=bp_set.capture_config,
-                location_hash=location_hash,
-                manager=self,
-            )
+            # Routing decision: try the engine FIRST for function-level breakpoints
+            # (line 0 — PROBE or function-level BREAKPOINT). If the engine accepts,
+            # the bytecode rewrite handles every call site correctly via __code__
+            # mutation; we don't need the legacy setattr wrapper at all.
+            #
+            # If the engine refuses (generator, no __code__, runtime not supported,
+            # bytecode lib unavailable), fall back to the wrapper. The wrapper is
+            # only correct for callers that look up module.attr at call time —
+            # framework-bypass patterns (Django URLPattern.callback, Flask
+            # view_functions) won't see it — but it's the best we can do for a
+            # function with no usable __code__.
+            engine_accepted = False
+            original_callable = None
+            target_func = None
+            target_code = None
 
-            original_callable = original.__func__ if isinstance(original, (staticmethod, classmethod)) else original
-            bp_set.original_function = original
-            bp_set.wrapped_function = wrapped
-            bp_set.code_object = getattr(original_callable, "__code__", None)
-            bp_set.is_instrumented = True
-
-            # Enable function-entry instrumentation via the engine when we have a
-            # function-level breakpoint (line 0 — the PROBE case, or a function-level
-            # BREAKPOINT). The setattr-based wrapper above only fires when the caller
-            # looks up the module attribute at call time. Frameworks like Django
-            # (URLPattern.callback) and Flask (view_functions) capture the original
-            # function object at import time and dispatch through that stale reference,
-            # bypassing the wrapper entirely. The engine hooks the underlying code
-            # object via sys.monitoring PY_START / PY_RETURN, which fires regardless
-            # of which Python-level reference invokes it.
-            if (
-                self._engine
-                and bp_set.code_object
-                and 0 in bp_set.breakpoints
-                and hasattr(self._engine, "enable_function_entry")
+            if self._engine and 0 in bp_set.breakpoints and hasattr(
+                self._engine, "enable_function_entry"
             ):
+                # Discover the function ourselves so we can hand it to the engine
+                # without going through _wrapper.instrument_function (which would
+                # also setattr a wrapper, defeating the whole point of the engine
+                # path). FunctionWrapper._discover_function is a pure read.
                 try:
-                    fn_bp = bp_set.breakpoints[0]
-                    self._engine.enable_function_entry(
-                        code=bp_set.code_object,
-                        func=original_callable,
-                        function_key=bp_set.function_key,
-                        module_name=bp_set.module,
-                        qualified_name=bp_set.function_name,
-                        capture_config=fn_bp.capture_config,
-                        location_hash=fn_bp.config_id,
-                        instrumentation_type=fn_bp.instrumentation_type,
+                    discovered = FunctionWrapper._discover_function(
+                        bp_set.module, bp_set.function_name
                     )
+                    # _discover_function returns either a Callable or a MethodInfo
+                    # for class methods; in both cases the underlying function
+                    # carries the __code__ we need to rewrite.
+                    if hasattr(discovered, "method"):
+                        target_func = discovered.method
+                    else:
+                        target_func = discovered
+                    target_code = getattr(target_func, "__code__", None)
                 except Exception as exception:  # pylint: disable=broad-exception-caught
-                    logger.warning(
-                        "Failed to enable function-entry hook for %s: %s. "
-                        "Falling back to module-attribute wrapper only — framework-bypass "
-                        "patterns (Django URL resolver, captured refs) will not be intercepted.",
+                    logger.debug(
+                        "Engine-path discovery failed for %s: %s — falling back to wrapper",
                         bp_set.function_key,
                         exception,
-                        exc_info=True,
                     )
+
+                if target_func is not None and target_code is not None:
+                    try:
+                        fn_bp = bp_set.breakpoints[0]
+                        engine_accepted = bool(
+                            self._engine.enable_function_entry(
+                                code=target_code,
+                                func=target_func,
+                                function_key=bp_set.function_key,
+                                module_name=bp_set.module,
+                                qualified_name=bp_set.function_name,
+                                capture_config=fn_bp.capture_config,
+                                location_hash=fn_bp.config_id,
+                                instrumentation_type=fn_bp.instrumentation_type,
+                            )
+                        )
+                    except Exception as exception:  # pylint: disable=broad-exception-caught
+                        logger.warning(
+                            "Engine refused function-entry hook for %s: %s — falling back to wrapper",
+                            bp_set.function_key,
+                            exception,
+                            exc_info=True,
+                        )
+
+            if engine_accepted:
+                # Engine owns the function. Record metadata for later disable.
+                # No setattr — frameworks that captured the function reference
+                # at import time pick up the rewritten bytecode automatically.
+                bp_set.original_function = target_func
+                bp_set.wrapped_function = target_func  # same object; bytecode is what changed
+                bp_set.code_object = target_code
+                bp_set.is_instrumented = True
+            else:
+                # Fallback: wrap function via setattr. Only correct for callers
+                # that look up module.attr at call time.
+                original, wrapped = self._wrapper.instrument_function(
+                    module_name=bp_set.module,
+                    function_name=bp_set.function_name,
+                    capture_config=bp_set.capture_config,
+                    location_hash=location_hash,
+                    manager=self,
+                )
+                original_callable = (
+                    original.__func__ if isinstance(original, (staticmethod, classmethod)) else original
+                )
+                bp_set.original_function = original
+                bp_set.wrapped_function = wrapped
+                bp_set.code_object = getattr(original_callable, "__code__", None)
+                bp_set.is_instrumented = True
 
             # Enable line breakpoints if engine is available and there are line breakpoints
             if self._engine and bp_set.line_numbers and bp_set.code_object:

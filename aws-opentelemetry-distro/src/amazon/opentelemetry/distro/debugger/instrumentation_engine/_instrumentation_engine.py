@@ -103,20 +103,6 @@ class InstrumentationEngine(ABC):
         ``enable_function_entry``.
         """
 
-    def suppress_function_entry_for_thread(self) -> None:
-        """
-        Suppress function-entry callbacks on the current thread.
-
-        Called by ``FunctionWrapper`` before invoking the original function from
-        the wrapper path so the engine's entry handlers (which would otherwise
-        produce a duplicate snapshot) skip while the wrapper is in flight.
-
-        Default implementation is a no-op.
-        """
-
-    def release_function_entry_suppression(self) -> None:
-        """Counterpart to ``suppress_function_entry_for_thread``."""
-
     @abstractmethod
     def disable_breakpoints_for_function(self, code: CodeType, func: FunctionType) -> None:
         """

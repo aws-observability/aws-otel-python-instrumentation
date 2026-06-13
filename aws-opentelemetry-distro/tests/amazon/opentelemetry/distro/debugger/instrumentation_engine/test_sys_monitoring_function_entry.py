@@ -181,25 +181,6 @@ class TestEnableFunctionEntry(unittest.TestCase):
     # ------------------------------------------------------------------
     # Reentrancy guard prevents double-emission via the wrapper path.
     # ------------------------------------------------------------------
-    def test_suppression_skips_emission(self):
-        self.engine.enable_function_entry(
-            code=_module_target.__code__,
-            func=_module_target,
-            function_key=f"{__name__}._module_target",
-            module_name=__name__,
-            qualified_name="_module_target",
-            capture_config=None,
-            location_hash="h",
-            instrumentation_type="PROBE",
-        )
-        self.engine.suppress_function_entry_for_thread()
-        try:
-            _module_target(5)
-        finally:
-            self.engine.release_function_entry_suppression()
-
-        self.assertEqual(self._mock_emitter.emit_snapshot.call_count, 0)
-
     # ------------------------------------------------------------------
     # Disable is a clean teardown.
     # ------------------------------------------------------------------
@@ -260,13 +241,3 @@ class TestEnableFunctionEntry(unittest.TestCase):
         self.assertFalse(ok)
 
 
-@pytest.mark.skipif(sys.version_info < (3, 12), reason="sys.monitoring requires Python 3.12+")
-class TestSuppressionInterface(unittest.TestCase):
-    """``suppress_function_entry_for_thread`` works without enable_function_entry."""
-
-    def test_suppression_methods_are_idempotent(self):
-        engine = SysMonitoringEngine()
-        # Don't initialize — suppression is a TLS toggle and should still flip.
-        engine.suppress_function_entry_for_thread()
-        engine.release_function_entry_suppression()
-        engine.release_function_entry_suppression()  # release without suppress is safe

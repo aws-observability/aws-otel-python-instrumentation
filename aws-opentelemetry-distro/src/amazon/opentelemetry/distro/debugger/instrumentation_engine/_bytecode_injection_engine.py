@@ -37,6 +37,7 @@ from amazon.opentelemetry.distro.debugger._snapshot_models import (
 from amazon.opentelemetry.distro.debugger._snapshot_serializer import SnapshotSerializer
 from amazon.opentelemetry.distro.debugger._stack_utils import capture_stack_frames
 from amazon.opentelemetry.distro.debugger.instrumentation_engine._instrumentation_engine import InstrumentationEngine
+from amazon.opentelemetry.distro.debugger.instrumentation_engine._undecorate import undecorated
 
 logger = logging.getLogger(__name__)
 
@@ -366,7 +367,12 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             # ``func.__wrapped__``. Without this, we'd rewrite the wrapper's
             # bytecode (the auth check) — instrumentation would fire but at
             # the wrong layer.
-            target_func = self._undecorated(func, qualified_name.split(".")[-1])
+            # Use the shared undecorated() helper — walks __wrapped__,
+            # partial.func/args/keywords, closure cells, __dict__, __slots__,
+            # and a bounded dir() sweep. Disambiguates same-named helpers via
+            # co_filename when available.
+            target_path = getattr(code, "co_filename", None)
+            target_func = undecorated(func, qualified_name.split(".")[-1], target_path)
             target_code = target_func.__code__ if hasattr(target_func, "__code__") else code
 
             # Skip generators / async-generators / iterable-coroutines. Their
@@ -493,21 +499,6 @@ class BytecodeInjectionEngine(InstrumentationEngine):
                 logger.debug("Disabled function entry for %s", entry.get("function_key"))
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error("Failed to disable function entry: %s", exc, exc_info=True)
-
-    def suppress_function_entry_for_thread(self) -> None:
-        """
-        Mark the current thread as 'inside the FunctionWrapper' so the
-        injected entry/exit handlers skip — preventing double-emission when
-        the caller went through the legacy wrapper path (module attribute)
-        instead of via a stale reference.
-
-        Called by ``FunctionWrapper`` before invoking ``original_func``.
-        """
-        self._reentrancy_guard.active = True
-
-    def release_function_entry_suppression(self) -> None:
-        """Counterpart to ``suppress_function_entry_for_thread``."""
-        self._reentrancy_guard.active = False
 
     def _function_entry_handler(
         self, entry: Dict[str, Any], local_vars: dict
@@ -645,165 +636,35 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             logger.warning("Failed to build entry context: %s", exc)
             return None
 
-    def _handle_function_entry(  # pylint: disable=too-many-locals
+    def _handle_function_entry(
         self,
         entry: Dict[str, Any],
         frame_info: Dict[str, Any],
         retval: Any,
     ) -> None:
-        """Build and emit the function-entry snapshot. Mirrors SysMonitoringEngine."""
+        """Build and emit the function-entry snapshot via the shared factory."""
         try:
             function_key = entry["function_key"]
-            capture_config = entry.get("capture_config")
 
             # Hit-count rate limit (key = function_key:0 for function-level).
             if self._hit_count_callback is not None:
                 if not self._hit_count_callback(f"{function_key}:0"):
                     return
 
-            duration_ns = time.time_ns() - frame_info["start_ns"]
-            entry_context = frame_info.get("entry_context")
-
-            return_context = None
-            if capture_config is not None and capture_config.capture_return and retval is not None:
-                serializer = SnapshotSerializer(
-                    max_fields=capture_config.max_fields_per_object or DEFAULT_MAX_FIELDS_PER_OBJECT,
-                    max_string_length=capture_config.max_string_length or DEFAULT_MAX_STRING_LENGTH,
-                    max_depth=capture_config.max_object_depth or 3,
-                    max_collection_size=capture_config.max_collection_width or 10,
-                )
-                return_context = CapturedContext()
-                return_context.return_value = serializer.serialize(retval)
-
-            module_name = entry["module_name"]
-            qualified_name = entry["qualified_name"]
-            method_name = qualified_name.split(".")[-1]
-            class_part = ".".join(qualified_name.split(".")[:-1]) if "." in qualified_name else None
-            class_name_fq = f"{module_name}.{class_part}" if class_part else module_name
-            file_path = getattr(entry["original_code"], "co_filename", None)
-
-            instrumentation = InstrumentationDetails(
-                location=InstrumentationLocation(
-                    code_unit=module_name,
-                    class_name=class_name_fq,
-                    method_name=method_name,
-                    line_number=0,  # 0 = function-level per spec
-                    file_path=file_path,
-                    language="python",
-                ),
+            # pylint: disable=import-outside-toplevel
+            from amazon.opentelemetry.distro.debugger._snapshot_factory import (
+                build_function_entry_snapshot,
+                emit_snapshot,
             )
 
-            current_thread = threading.current_thread()
-            thread_info = ThreadInfo(id=threading.get_ident(), name=current_thread.name)
-
-            # Trace context (read-only — never start a span here). Mirrors
-            # SysMonitoringEngine so snapshots correlate with the active span.
-            trace_ctx = None
-            try:
-                from opentelemetry import trace as otel_trace  # pylint: disable=import-outside-toplevel
-
-                span = otel_trace.get_current_span()
-                if span and span.get_span_context().is_valid:
-                    sctx = span.get_span_context()
-                    trace_ctx = TraceContext(
-                        trace_id=format(sctx.trace_id, "032x"),
-                        span_id=format(sctx.span_id, "016x"),
-                    )
-            except Exception:  # pylint: disable=broad-exception-caught
-                pass
-
-            # Stack trace (only when configured — stack walk is expensive).
-            stack = None
-            if capture_config is not None and capture_config.capture_stack_trace:
-                stack = capture_stack_frames(capture_config.max_stack_frames)
-
-            captures = Captures(entry=entry_context, return_context=return_context)
-
-            duration_ms = duration_ns // 1_000_000 if duration_ns else None
-
-            snapshot = Snapshot(
-                timestamp=int(time.time() * 1000),
-                duration=duration_ms,
-                service=self._get_service_name(),
-                environment=self._get_environment(),
-                location_hash=entry.get("location_hash"),
-                instrumentation=instrumentation,
-                trace=trace_ctx,
-                thread=thread_info,
-                stack=stack,
-                captures=captures,
-                instrumentation_type=entry.get("instrumentation_type"),
+            snapshot = build_function_entry_snapshot(
+                entry=entry,
+                frame_info=frame_info,
+                retval=retval,
             )
-
-            try:
-                # pylint: disable=import-outside-toplevel
-                from amazon.opentelemetry.distro.debugger._function_wrapper import get_snapshot_emitter
-
-                emitter = get_snapshot_emitter()
-                if emitter is not None:
-                    emitter.emit_snapshot(snapshot)
-            except Exception:  # pylint: disable=broad-exception-caught
-                pass
+            emit_snapshot(snapshot)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error("Error handling function entry for %s: %s", entry.get("function_key"), exc, exc_info=True)
-
-    @staticmethod
-    def _undecorated(f: Any, expected_name: str, max_depth: int = 10) -> Any:
-        """
-        BFS over ``__wrapped__`` / ``partial.func`` / closure cells to find the
-        innermost user function under ``functools.wraps`` decorators.
-
-        Port of Datadog's algorithm at ``ddtrace/internal/utils/inspection.py:42-100``.
-        Matches on ``co_name`` so we resolve to the function whose source name
-        agrees with the user's declaration — not, e.g., a sibling helper that
-        happens to live in the same closure.
-
-        Returns ``f`` itself if no inner match is found.
-        """
-        # Accept FunctionType or partial as input. Other callables (built-ins,
-        # bound methods, classes) are returned unchanged because they have no
-        # __wrapped__ / closure / partial.func chain to traverse.
-        if not isinstance(f, (FunctionType, partial)):
-            return f
-        if isinstance(f, FunctionType) and f.__code__.co_name == expected_name:
-            return f
-        seen = {id(f)}
-        q: deque = deque([f])
-        depth = 0
-        while q and depth < max_depth:
-            depth += 1
-            level_size = len(q)
-            for _ in range(level_size):
-                g = q.popleft()
-                # __wrapped__ chain (set by functools.wraps)
-                wrapped = getattr(g, "__wrapped__", None)
-                if wrapped is not None and id(wrapped) not in seen:
-                    seen.add(id(wrapped))
-                    if isinstance(wrapped, FunctionType) and wrapped.__code__.co_name == expected_name:
-                        return wrapped
-                    q.append(wrapped)
-                # functools.partial wraps a callable in .func
-                if isinstance(g, partial):
-                    inner = g.func
-                    if id(inner) not in seen and isinstance(inner, FunctionType):
-                        seen.add(id(inner))
-                        if inner.__code__.co_name == expected_name:
-                            return inner
-                        q.append(inner)
-                # closure cells — captures the inner user function for plain
-                # decorators that don't use functools.wraps
-                if isinstance(g, FunctionType):
-                    for cell in (g.__closure__ or ()):
-                        try:
-                            obj = cell.cell_contents
-                        except ValueError:
-                            continue
-                        if isinstance(obj, FunctionType) and id(obj) not in seen:
-                            seen.add(id(obj))
-                            if obj.__code__.co_name == expected_name:
-                                return obj
-                            q.append(obj)
-        return f
 
     def _create_code_with_function_entry_exit(
         self, code: CodeType, entry: Dict[str, Any]
