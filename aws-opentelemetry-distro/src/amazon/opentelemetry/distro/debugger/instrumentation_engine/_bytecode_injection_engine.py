@@ -660,6 +660,27 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             current_thread = threading.current_thread()
             thread_info = ThreadInfo(id=threading.get_ident(), name=current_thread.name)
 
+            # Trace context (read-only — never start a span here). Mirrors
+            # SysMonitoringEngine so snapshots correlate with the active span.
+            trace_ctx = None
+            try:
+                from opentelemetry import trace as otel_trace  # pylint: disable=import-outside-toplevel
+
+                span = otel_trace.get_current_span()
+                if span and span.get_span_context().is_valid:
+                    sctx = span.get_span_context()
+                    trace_ctx = TraceContext(
+                        trace_id=format(sctx.trace_id, "032x"),
+                        span_id=format(sctx.span_id, "016x"),
+                    )
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
+
+            # Stack trace (only when configured — stack walk is expensive).
+            stack = None
+            if capture_config is not None and capture_config.capture_stack_trace:
+                stack = capture_stack_frames(capture_config.max_stack_frames)
+
             captures = Captures(entry=entry_context, return_context=return_context)
 
             duration_ms = duration_ns // 1_000_000 if duration_ns else None
@@ -671,9 +692,9 @@ class BytecodeInjectionEngine(InstrumentationEngine):
                 environment=self._get_environment(),
                 location_hash=entry.get("location_hash"),
                 instrumentation=instrumentation,
-                trace=None,
+                trace=trace_ctx,
                 thread=thread_info,
-                stack=None,
+                stack=stack,
                 captures=captures,
                 instrumentation_type=entry.get("instrumentation_type"),
             )
