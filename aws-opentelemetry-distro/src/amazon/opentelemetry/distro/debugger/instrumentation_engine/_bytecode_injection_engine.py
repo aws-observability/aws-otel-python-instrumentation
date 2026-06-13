@@ -13,9 +13,11 @@ import logging
 import sys
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
+from functools import partial
 from types import CodeType, FunctionType
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from amazon.opentelemetry.distro._utils import IS_BYTECODE_INSTALLED
 from amazon.opentelemetry.distro.debugger._data_models import (
@@ -42,6 +44,18 @@ logger = logging.getLogger(__name__)
 _HANDLER_NAME = "_breakpoint_handler"
 # Global name for the locals() builtin injected into function globals
 _LOCALS_NAME = "_breakpoint_locals"
+
+# Global names used by the function-entry/exit injection (PROBE / function-level
+# BREAKPOINT). Distinct from the line-level breakpoint handler so both can
+# coexist on the same function via a single combined bytecode rewrite.
+_ENTRY_HANDLER_NAME = "_di_function_entry_handler"
+_EXIT_HANDLER_NAME = "_di_function_exit_handler"
+
+# Temp local-variable name used by the exit injection to stash the return value
+# across the handler call. Resolved against ``code.co_varnames`` at injection
+# time and made unique if it collides with a user local. Mirrors Datadog's
+# ddtrace.internal.wrapping.context approach.
+_RETVAL_LOCAL_NAME = "__otel_di_retval__"
 
 # Import bytecode classes if available
 if IS_BYTECODE_INSTALLED:
@@ -89,6 +103,21 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         self._location_hashes: Dict[tuple, str] = {}
         # Maps (function_key, line_number) to CaptureConfig for filtering captured data
         self._capture_configs: Dict[tuple, CaptureConfig] = {}
+
+        # Function-entry instrumentation state (PROBE / function-level BREAKPOINT).
+        # Mirrors SysMonitoringEngine for behavioral parity. Keyed by id(func) —
+        # the bytecode rewrite mutates that function's __code__ in place, so
+        # every existing reference (Django URLPattern.callback, Flask
+        # view_functions, decorator closures, framework registries) executes
+        # the new bytecode on its next call without registry traversal.
+        # Per Datadog ddtrace.internal.wrapping.context.
+        self._function_entries: Dict[int, Dict[str, Any]] = {}
+        # Per-thread LIFO stack pairs PY_START-equivalent entry callbacks with
+        # PY_RETURN-equivalent exit callbacks across recursion / nested calls.
+        self._tls = threading.local()
+        # Reentrancy guard so a snapshot built from inside a handler cannot
+        # itself recursively trigger another snapshot via the wrapper path.
+        self._reentrancy_guard = threading.local()
 
         if not IS_BYTECODE_INSTALLED:
             logger.warning(
@@ -256,6 +285,638 @@ class BytecodeInjectionEngine(InstrumentationEngine):
 
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error("Error disabling breakpoints for %s: %s", code.co_name, exc, exc_info=True)
+
+    # ------------------------------------------------------------------
+    # Function-entry instrumentation (PROBE / function-level BREAKPOINT)
+    # ------------------------------------------------------------------
+    # Mirrors SysMonitoringEngine.enable_function_entry for behavioral parity
+    # across Python versions. The interception layer is the function's __code__
+    # object: we rewrite it via ``func.__code__ = new_code``. Because
+    # ``__code__`` is read off the FunctionType at every call dispatch (CPython
+    # data model), every existing reference (Django ``URLPattern.callback``,
+    # Flask ``view_functions[endpoint]``, decorator closures, framework
+    # registries) executes the rewritten bytecode on its next invocation —
+    # without any registry traversal. This is the same architecture Datadog
+    # ships in production via ``ddtrace.internal.wrapping.context``.
+
+    def enable_function_entry(  # pylint: disable=too-many-arguments
+        self,
+        code: CodeType,
+        func: FunctionType,
+        function_key: str,
+        module_name: str,
+        qualified_name: str,
+        capture_config: Optional[CaptureConfig] = None,
+        location_hash: Optional[str] = None,
+        instrumentation_type: Optional[str] = None,
+    ) -> bool:
+        """
+        Inject function-entry/exit bytecode hooks into a function.
+
+        Walks ``func.__wrapped__`` / ``partial.func`` / closure cells to find
+        the user's underlying function under ``functools.wraps`` decorators
+        (Django ``@login_required``, ``@cache_page``, custom ``@wraps`` decorators)
+        before rewriting bytecode — otherwise we'd instrument the auth/cache
+        check rather than the user code.
+
+        Args:
+            code: Code object of the function (the immediate target — may be
+                a wrapper if the function is decorated; ``_undecorated`` tries
+                to resolve to the inner function first).
+            func: Function object — used for ``__code__`` rewrite, decorator
+                resolution, and as a key into ``_function_entries``.
+            function_key: ``module.qualname`` for snapshot routing / hit-count keys.
+            module_name: Module name (component of the snapshot's CodeUnit).
+            qualified_name: Qualified function name (component of MethodName).
+            capture_config: Controls argument / return / stack capture.
+            location_hash: LocationHash to attach to the emitted snapshot.
+            instrumentation_type: ``"PROBE"`` or ``"BREAKPOINT"`` — surfaced
+                as ``aws.di.instrumentation_type`` on the snapshot.
+
+        Returns:
+            True on success, False if the engine isn't initialized, the target
+            is a generator/async-generator (we don't instrument those — see
+            below), or the bytecode rewrite failed.
+        """
+        if not self._initialized:
+            logger.warning("BytecodeInjectionEngine not initialized, cannot enable function entry")
+            return False
+
+        if not IS_BYTECODE_INSTALLED:
+            logger.warning("bytecode library not available, cannot enable function entry for %s", function_key)
+            return False
+
+        try:
+            # Resolve through @functools.wraps / partial / closure cells to the
+            # user function. If the user wrote @login_required at the route,
+            # ``func`` is the wrapper; the actual view body is reachable via
+            # ``func.__wrapped__``. Without this, we'd rewrite the wrapper's
+            # bytecode (the auth check) — instrumentation would fire but at
+            # the wrong layer.
+            target_func = self._undecorated(func, qualified_name.split(".")[-1])
+            target_code = target_func.__code__ if hasattr(target_func, "__code__") else code
+
+            # Skip generators / async-generators / iterable-coroutines. Their
+            # exit point is YIELD_VALUE (not RETURN_VALUE), and instrumenting
+            # YIELD_VALUE would corrupt the .send() value protocol. Regular
+            # async functions (CO_COROUTINE without CO_ASYNC_GENERATOR) only
+            # hit RETURN_VALUE on coroutine completion — they're safe.
+            generator_flags = (
+                inspect.CO_GENERATOR | inspect.CO_ASYNC_GENERATOR | inspect.CO_ITERABLE_COROUTINE
+            )
+            if target_code.co_flags & generator_flags:
+                logger.debug(
+                    "Skipping function-entry injection for generator/async-generator %s",
+                    function_key,
+                )
+                return False
+
+            # Build new bytecode outside the lock — pure function over `code`.
+            new_code = self._create_code_with_function_entry_exit(target_code, function_key)
+            if new_code is None:
+                logger.warning("Failed to inject function entry/exit bytecode for %s", function_key)
+                return False
+
+            with self._lock:
+                func_id = id(target_func)
+                self._function_entries[func_id] = {
+                    "func": target_func,
+                    "function_key": function_key,
+                    "module_name": module_name,
+                    "qualified_name": qualified_name,
+                    "capture_config": capture_config,
+                    "location_hash": location_hash,
+                    "instrumentation_type": instrumentation_type,
+                    "original_code": target_code,
+                }
+
+                target_func.__code__ = new_code
+                # Make handlers + locals reachable via LOAD_GLOBAL in the
+                # injected bytecode. ``self._function_entry_handler`` is a
+                # bound method — the bytecode CALL passes only the explicit
+                # args (function_key + locals_dict on entry; function_key +
+                # retval on exit).
+                target_func.__globals__[_ENTRY_HANDLER_NAME] = self._function_entry_handler
+                target_func.__globals__[_EXIT_HANDLER_NAME] = self._function_exit_handler
+                # Reuse the locals builtin global (same as line breakpoints).
+                target_func.__globals__[_LOCALS_NAME] = locals
+
+                logger.debug(
+                    "Enabled function entry for %s (func_id=%s, code_id=%s, type=%s)",
+                    function_key,
+                    func_id,
+                    id(target_code),
+                    instrumentation_type,
+                )
+                return True
+
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Failed to enable function entry for %s: %s", function_key, exc, exc_info=True)
+            return False
+
+    def disable_function_entry(self, code: CodeType, func: Optional[FunctionType] = None) -> None:
+        """
+        Tear down the function-entry hook installed for a function.
+
+        Restores the function's original bytecode via ``func.__code__ =
+        original_code``. The caller passes ``func`` so we can look up by
+        ``id(func)`` directly (the engine's tracking-dict key); ``code`` is
+        kept in the signature for API symmetry with
+        ``disable_breakpoints_for_function`` and is unused here.
+
+        Once restored, every stale reference (registries, decorator closures)
+        immediately dispatches back to the uninstrumented code on next call —
+        the same property that made the install transparent.
+        """
+        if not self._initialized:
+            return
+        try:
+            with self._lock:
+                # Primary lookup: by id(func) when caller provides it.
+                target_func_id = None
+                if func is not None and id(func) in self._function_entries:
+                    target_func_id = id(func)
+                else:
+                    # Fallback: scan for an entry whose function's __code__ has
+                    # the same id as `code`. This handles callers that only
+                    # have a code reference (e.g., the line-level path's call
+                    # site that mirrors disable_breakpoints_for_function's
+                    # signature). Note: the entry's func.__code__ is the
+                    # REWRITTEN code after enable, so we also accept matches
+                    # against entry["original_code"].
+                    for func_id, entry in self._function_entries.items():
+                        entry_func = entry.get("func")
+                        if entry_func is None:
+                            continue
+                        if (
+                            entry_func.__code__ is code
+                            or entry.get("original_code") is code
+                        ):
+                            target_func_id = func_id
+                            break
+                if target_func_id is None:
+                    return
+                entry = self._function_entries.pop(target_func_id)
+                target_func = entry["func"]
+                try:
+                    target_func.__code__ = entry["original_code"]
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    logger.warning(
+                        "Failed to restore __code__ for %s: %s",
+                        entry.get("function_key"),
+                        exc,
+                    )
+                logger.debug("Disabled function entry for %s", entry.get("function_key"))
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Failed to disable function entry: %s", exc, exc_info=True)
+
+    def suppress_function_entry_for_thread(self) -> None:
+        """
+        Mark the current thread as 'inside the FunctionWrapper' so the
+        injected entry/exit handlers skip — preventing double-emission when
+        the caller went through the legacy wrapper path (module attribute)
+        instead of via a stale reference.
+
+        Called by ``FunctionWrapper`` before invoking ``original_func``.
+        """
+        self._reentrancy_guard.active = True
+
+    def release_function_entry_suppression(self) -> None:
+        """Counterpart to ``suppress_function_entry_for_thread``."""
+        self._reentrancy_guard.active = False
+
+    def _function_entry_handler(self, function_key: str, local_vars: dict) -> None:
+        """
+        Bytecode-injected callback at function entry.
+
+        Captures arguments (filtered by capture_config), pushes a per-thread
+        frame onto ``self._tls.stack`` with the start time. The companion
+        ``_function_exit_handler`` pops that frame and emits the snapshot.
+
+        CRITICAL: must never raise — the injected bytecode does not catch.
+        """
+        try:
+            # Re-entrancy guard — wrapper path is in flight, skip.
+            if getattr(self._reentrancy_guard, "active", False):
+                return
+
+            # Look up the entry. The handler is the SAME bound method for every
+            # instrumented function; we need function_key to disambiguate.
+            entry = self._find_entry_by_key(function_key)
+            if entry is None:
+                return
+
+            capture_config = entry.get("capture_config")
+            entry_context = self._build_entry_context(local_vars, capture_config)
+
+            stack = getattr(self._tls, "stack", None)
+            if stack is None:
+                stack = []
+                self._tls.stack = stack
+            stack.append(
+                {
+                    "function_key": function_key,
+                    "start_ns": time.time_ns(),
+                    "entry_context": entry_context,
+                }
+            )
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Critical error in entry handler for %s: %s", function_key, exc, exc_info=True)
+
+    def _function_exit_handler(self, function_key: str, retval: Any) -> None:
+        """
+        Bytecode-injected callback before each RETURN_VALUE.
+
+        Pops the matching entry frame, computes duration, builds the
+        function-entry snapshot, and emits via the global emitter.
+
+        CRITICAL: must never raise. The injected bytecode discards this
+        function's return value via POP_TOP and re-pushes the user's retval
+        from the temp local before the original RETURN_VALUE — so we don't
+        need to return retval here.
+        """
+        try:
+            if getattr(self._reentrancy_guard, "active", False):
+                return
+
+            entry = self._find_entry_by_key(function_key)
+            if entry is None:
+                return
+
+            stack = getattr(self._tls, "stack", None)
+            if not stack:
+                return
+
+            # Pop the most recent frame matching this function_key. Recursive
+            # calls through the same function will produce nested frames; the
+            # LIFO scan handles them correctly.
+            frame_info = None
+            for i in range(len(stack) - 1, -1, -1):
+                if stack[i]["function_key"] == function_key:
+                    frame_info = stack.pop(i)
+                    break
+            if frame_info is None:
+                return
+
+            self._reentrancy_guard.active = True
+            try:
+                self._handle_function_entry(entry, frame_info, retval)
+            finally:
+                self._reentrancy_guard.active = False
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Critical error in exit handler for %s: %s", function_key, exc, exc_info=True)
+
+    def _find_entry_by_key(self, function_key: str) -> Optional[Dict[str, Any]]:
+        """Lookup the registered entry by function_key. Lock-free read.
+
+        ``self._function_entries`` is keyed by ``id(func)`` for fast disable,
+        but the injected bytecode only knows ``function_key``. We linear-scan
+        — this is fine because the dict typically has a few dozen entries
+        and the read is O(1) per probe. CPython dict iteration is GIL-atomic.
+        """
+        try:
+            for entry in self._function_entries.values():
+                if entry.get("function_key") == function_key:
+                    return entry
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+        return None
+
+    @staticmethod
+    def _build_entry_context(
+        local_vars: dict, capture_config: Optional[CaptureConfig]
+    ) -> Optional[CapturedContext]:
+        """
+        Filter ``local_vars`` (which is the full ``locals()`` dict captured by
+        injected bytecode) by ``capture_config.capture_arguments`` and serialize.
+        """
+        if capture_config is None or capture_config.capture_arguments is None:
+            return None
+        try:
+            args_dict = local_vars
+            if capture_config.capture_arguments:
+                args_dict = {k: v for k, v in args_dict.items() if k in capture_config.capture_arguments}
+            if not args_dict:
+                return None
+            serializer = SnapshotSerializer(
+                max_fields=capture_config.max_fields_per_object or DEFAULT_MAX_FIELDS_PER_OBJECT,
+                max_string_length=capture_config.max_string_length or DEFAULT_MAX_STRING_LENGTH,
+                max_depth=capture_config.max_object_depth or 3,
+                max_collection_size=capture_config.max_collection_width or 10,
+            )
+            return CapturedContext(arguments=serializer.serialize_variables(args_dict))
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.warning("Failed to build entry context: %s", exc)
+            return None
+
+    def _handle_function_entry(  # pylint: disable=too-many-locals
+        self,
+        entry: Dict[str, Any],
+        frame_info: Dict[str, Any],
+        retval: Any,
+    ) -> None:
+        """Build and emit the function-entry snapshot. Mirrors SysMonitoringEngine."""
+        try:
+            function_key = entry["function_key"]
+            capture_config = entry.get("capture_config")
+
+            # Hit-count rate limit (key = function_key:0 for function-level).
+            if self._hit_count_callback is not None:
+                if not self._hit_count_callback(f"{function_key}:0"):
+                    return
+
+            duration_ns = time.time_ns() - frame_info["start_ns"]
+            entry_context = frame_info.get("entry_context")
+
+            return_context = None
+            if capture_config is not None and capture_config.capture_return and retval is not None:
+                serializer = SnapshotSerializer(
+                    max_fields=capture_config.max_fields_per_object or DEFAULT_MAX_FIELDS_PER_OBJECT,
+                    max_string_length=capture_config.max_string_length or DEFAULT_MAX_STRING_LENGTH,
+                    max_depth=capture_config.max_object_depth or 3,
+                    max_collection_size=capture_config.max_collection_width or 10,
+                )
+                return_context = CapturedContext()
+                return_context.return_value = serializer.serialize(retval)
+
+            module_name = entry["module_name"]
+            qualified_name = entry["qualified_name"]
+            method_name = qualified_name.split(".")[-1]
+            class_part = ".".join(qualified_name.split(".")[:-1]) if "." in qualified_name else None
+            class_name_fq = f"{module_name}.{class_part}" if class_part else module_name
+            file_path = getattr(entry["original_code"], "co_filename", None)
+
+            instrumentation = InstrumentationDetails(
+                location=InstrumentationLocation(
+                    code_unit=module_name,
+                    class_name=class_name_fq,
+                    method_name=method_name,
+                    line_number=0,  # 0 = function-level per spec
+                    file_path=file_path,
+                    language="python",
+                ),
+            )
+
+            current_thread = threading.current_thread()
+            thread_info = ThreadInfo(id=threading.get_ident(), name=current_thread.name)
+
+            captures = Captures(entry=entry_context, return_context=return_context)
+
+            duration_ms = duration_ns // 1_000_000 if duration_ns else None
+
+            snapshot = Snapshot(
+                timestamp=int(time.time() * 1000),
+                duration=duration_ms,
+                service=self._get_service_name(),
+                environment=self._get_environment(),
+                location_hash=entry.get("location_hash"),
+                instrumentation=instrumentation,
+                trace=None,
+                thread=thread_info,
+                stack=None,
+                captures=captures,
+                instrumentation_type=entry.get("instrumentation_type"),
+            )
+
+            try:
+                # pylint: disable=import-outside-toplevel
+                from amazon.opentelemetry.distro.debugger._function_wrapper import get_snapshot_emitter
+
+                emitter = get_snapshot_emitter()
+                if emitter is not None:
+                    emitter.emit_snapshot(snapshot)
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Error handling function entry for %s: %s", entry.get("function_key"), exc, exc_info=True)
+
+    @staticmethod
+    def _undecorated(f: Any, expected_name: str, max_depth: int = 10) -> Any:
+        """
+        BFS over ``__wrapped__`` / ``partial.func`` / closure cells to find the
+        innermost user function under ``functools.wraps`` decorators.
+
+        Port of Datadog's algorithm at ``ddtrace/internal/utils/inspection.py:42-100``.
+        Matches on ``co_name`` so we resolve to the function whose source name
+        agrees with the user's declaration — not, e.g., a sibling helper that
+        happens to live in the same closure.
+
+        Returns ``f`` itself if no inner match is found.
+        """
+        # Accept FunctionType or partial as input. Other callables (built-ins,
+        # bound methods, classes) are returned unchanged because they have no
+        # __wrapped__ / closure / partial.func chain to traverse.
+        if not isinstance(f, (FunctionType, partial)):
+            return f
+        if isinstance(f, FunctionType) and f.__code__.co_name == expected_name:
+            return f
+        seen = {id(f)}
+        q: deque = deque([f])
+        depth = 0
+        while q and depth < max_depth:
+            depth += 1
+            level_size = len(q)
+            for _ in range(level_size):
+                g = q.popleft()
+                # __wrapped__ chain (set by functools.wraps)
+                wrapped = getattr(g, "__wrapped__", None)
+                if wrapped is not None and id(wrapped) not in seen:
+                    seen.add(id(wrapped))
+                    if isinstance(wrapped, FunctionType) and wrapped.__code__.co_name == expected_name:
+                        return wrapped
+                    q.append(wrapped)
+                # functools.partial wraps a callable in .func
+                if isinstance(g, partial):
+                    inner = g.func
+                    if id(inner) not in seen and isinstance(inner, FunctionType):
+                        seen.add(id(inner))
+                        if inner.__code__.co_name == expected_name:
+                            return inner
+                        q.append(inner)
+                # closure cells — captures the inner user function for plain
+                # decorators that don't use functools.wraps
+                if isinstance(g, FunctionType):
+                    for cell in (g.__closure__ or ()):
+                        try:
+                            obj = cell.cell_contents
+                        except ValueError:
+                            continue
+                        if isinstance(obj, FunctionType) and id(obj) not in seen:
+                            seen.add(id(obj))
+                            if obj.__code__.co_name == expected_name:
+                                return obj
+                            q.append(obj)
+        return f
+
+    def _create_code_with_function_entry_exit(
+        self, code: CodeType, function_key: str
+    ) -> Optional[CodeType]:
+        """
+        Driver: rewrite a code object's bytecode to call the entry handler
+        AFTER the leading RESUME (3.11) / at offset 0 (3.9/3.10), and the
+        exit handler before every RETURN_VALUE.
+        """
+        try:
+            bc = Bytecode.from_code(code)
+
+            # Pick a non-colliding temp local for the exit pattern.
+            retval_local = _RETVAL_LOCAL_NAME
+            while retval_local in code.co_varnames:
+                retval_local = "_" + retval_local
+
+            entry_instrs = self._create_function_entry_instructions(function_key)
+            exit_instrs = self._create_function_exit_instructions(function_key, retval_local)
+            if entry_instrs is None or exit_instrs is None:
+                return None
+
+            new_instrs: List[Any] = []
+            entry_inserted = False
+
+            for instr in bc:
+                # Entry: directly after RESUME on 3.11 (verifier expects RESUME
+                # at offset 0). On 3.9/3.10 there is no RESUME — we insert
+                # before the first instruction.
+                if (
+                    not entry_inserted
+                    and sys.version_info >= (3, 11)
+                    and isinstance(instr, Instr)
+                    and instr.name == "RESUME"
+                ):
+                    new_instrs.append(instr)
+                    new_instrs.extend(entry_instrs)
+                    entry_inserted = True
+                    continue
+
+                # Exit: BEFORE each RETURN_VALUE.
+                if isinstance(instr, Instr) and instr.name == "RETURN_VALUE":
+                    new_instrs.extend(exit_instrs)
+                    new_instrs.append(instr)
+                    continue
+
+                new_instrs.append(instr)
+
+            # Fallback for 3.9/3.10 where there is no RESUME — prepend.
+            if not entry_inserted:
+                new_instrs = list(entry_instrs) + new_instrs
+
+            new_bc = bc.copy()
+            new_bc.clear()
+            new_bc.extend(new_instrs)
+            return new_bc.to_code()
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Error injecting entry/exit bytecode for %s: %s", code.co_name, exc, exc_info=True)
+            return None
+
+    def _create_function_entry_instructions(self, function_key: str) -> Optional[list]:
+        """Dispatch to the version-specific entry-instruction builder."""
+        try:
+            if sys.version_info >= (3, 11):
+                return self._create_function_entry_instructions_py311(function_key)
+            if sys.version_info >= (3, 9):
+                return self._create_function_entry_instructions_py39_py310(function_key)
+            logger.error("Unsupported Python version for entry injection: %s", sys.version_info)
+            return None
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Error creating entry instructions: %s", exc, exc_info=True)
+            return None
+
+    def _create_function_exit_instructions(self, function_key: str, retval_local: str) -> Optional[list]:
+        """Dispatch to the version-specific exit-instruction builder."""
+        try:
+            if sys.version_info >= (3, 11):
+                return self._create_function_exit_instructions_py311(function_key, retval_local)
+            if sys.version_info >= (3, 9):
+                return self._create_function_exit_instructions_py39_py310(function_key, retval_local)
+            logger.error("Unsupported Python version for exit injection: %s", sys.version_info)
+            return None
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Error creating exit instructions: %s", exc, exc_info=True)
+            return None
+
+    @staticmethod
+    def _create_function_entry_instructions_py311(function_key: str) -> list:
+        """
+        Python 3.11 entry pattern. Equivalent to::
+
+            _di_function_entry_handler(function_key, locals())
+
+        Mirrors the existing line-breakpoint pattern at line 535 of this file
+        (PUSH_NULL + LOAD_GLOBAL + LOAD_CONST + LOAD_GLOBAL + PRECALL/CALL pairs
+        + POP_TOP), with the line_number argument dropped.
+        """
+        return [
+            Instr("PUSH_NULL"),
+            Instr("LOAD_GLOBAL", (False, _ENTRY_HANDLER_NAME)),
+            Instr("LOAD_CONST", function_key),
+            Instr("LOAD_GLOBAL", (True, _LOCALS_NAME)),  # builtin: pre-pushes NULL
+            Instr("PRECALL", 0),
+            Instr("CALL", 0),  # locals() -> dict
+            Instr("PRECALL", 2),
+            Instr("CALL", 2),  # entry_handler(fk, dict) -> None
+            Instr("POP_TOP"),
+        ]
+
+    @staticmethod
+    def _create_function_entry_instructions_py39_py310(function_key: str) -> list:
+        """
+        Python 3.9/3.10 entry pattern. No PRECALL, no PUSH_NULL — uses
+        ``CALL_FUNCTION``. Equivalent to::
+
+            _di_function_entry_handler(function_key, locals())
+        """
+        return [
+            Instr("LOAD_GLOBAL", _ENTRY_HANDLER_NAME),
+            Instr("LOAD_CONST", function_key),
+            Instr("LOAD_GLOBAL", _LOCALS_NAME),
+            Instr("CALL_FUNCTION", 0),  # locals() -> dict
+            Instr("CALL_FUNCTION", 2),  # entry_handler(fk, dict) -> None
+            Instr("POP_TOP"),
+        ]
+
+    @staticmethod
+    def _create_function_exit_instructions_py311(function_key: str, retval_local: str) -> list:
+        """
+        Python 3.11 exit pattern. Inserted BEFORE each RETURN_VALUE.
+
+        Stack discipline (TOS shown, top is right):
+
+        - on entry to the injected sequence: ``[..., retval]``
+        - after STORE_FAST: ``[...]`` (retval stashed in ``retval_local``)
+        - we build the call frame ``[..., NULL, handler, fk, retval]`` and
+          invoke ``handler(fk, retval)`` -> None
+        - POP_TOP discards the handler return; ``LOAD_FAST`` re-pushes retval
+        - the ORIGINAL ``RETURN_VALUE`` (which follows our injected sequence)
+          consumes retval as it would have without injection
+
+        We use the temp-local pattern instead of ``COPY 1`` + stack juggling
+        because the call frame requires ``NULL, handler, fk, retval`` in that
+        order — copying with ``COPY 1`` and then rotating with ``SWAP n`` is
+        fragile across Python versions. This is what Datadog uses.
+        """
+        return [
+            Instr("STORE_FAST", retval_local),
+            Instr("PUSH_NULL"),
+            Instr("LOAD_GLOBAL", (False, _EXIT_HANDLER_NAME)),
+            Instr("LOAD_CONST", function_key),
+            Instr("LOAD_FAST", retval_local),
+            Instr("PRECALL", 2),
+            Instr("CALL", 2),  # exit_handler(fk, retval) -> None
+            Instr("POP_TOP"),  # discard handler return
+            Instr("LOAD_FAST", retval_local),  # restore retval to TOS for RETURN_VALUE
+        ]
+
+    @staticmethod
+    def _create_function_exit_instructions_py39_py310(function_key: str, retval_local: str) -> list:
+        """Python 3.9/3.10 exit pattern. No PRECALL/PUSH_NULL on these versions."""
+        return [
+            Instr("STORE_FAST", retval_local),
+            Instr("LOAD_GLOBAL", _EXIT_HANDLER_NAME),
+            Instr("LOAD_CONST", function_key),
+            Instr("LOAD_FAST", retval_local),
+            Instr("CALL_FUNCTION", 2),  # exit_handler(fk, retval) -> None
+            Instr("POP_TOP"),
+            Instr("LOAD_FAST", retval_local),
+        ]
 
     @staticmethod
     def _get_service_name():

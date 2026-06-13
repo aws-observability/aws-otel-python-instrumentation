@@ -232,16 +232,13 @@ class FunctionWrapper:
                 setattr(current_obj, method_name, original_func)
                 logger.debug("Successfully restored class method: %s.%s", module_name, function_name)
             else:
-                # Get the current (wrapped) function before restoring
-                wrapped_func = getattr(module, function_name, None)
-
-                # Module-level function restoration
+                # Module-level function restoration. Framework-level reference
+                # patching (Flask ``view_functions`` walker, etc.) is no longer
+                # needed — the bytecode / sys.monitoring engine path mutates
+                # ``func.__code__`` in place when restoring, so framework
+                # registries automatically pick up the original bytecode.
                 setattr(module, function_name, original_func)
                 logger.debug("Successfully restored function: %s.%s", module_name, function_name)
-
-                # Restore framework-level references back to the original function
-                if wrapped_func is not None:
-                    FunctionWrapper._patch_framework_references(module, wrapped_func, original_func)
 
             return True
         except Exception as exception:
@@ -799,15 +796,12 @@ class FunctionWrapper:
                 setattr(module, function_name, new_func)
                 logger.debug("Successfully replaced function %s.%s", module_name, function_name)
 
-                # Patch framework-level references that hold direct function references.
-                # Frameworks like Flask register route handlers at import time via decorators
-                # (e.g., @app.route). These store a direct reference to the original function
-                # object in internal data structures (e.g., Flask's app.view_functions dict).
-                # Simply replacing the module-level name via setattr does NOT update these
-                # internal references, so the framework continues calling the original
-                # unwrapped function, bypassing DI instrumentation entirely.
-                if original_func is not None:
-                    FunctionWrapper._patch_framework_references(module, original_func, new_func)
+                # The bytecode/sys.monitoring engine path mutates ``func.__code__``
+                # in place, so framework registries (Flask ``view_functions``,
+                # Django ``URLPattern.callback``, decorator closures, ``from x
+                # import y`` references) automatically pick up the new bytecode.
+                # No framework-specific walker needed — see _bytecode_injection_engine.py
+                # and _sys_monitoring_engine.py for the architectural rationale.
 
         except ImportError as exception:
             logger.error("Failed to import module '%s' for replacement: %s", module_name, exception)
@@ -815,122 +809,6 @@ class FunctionWrapper:
         except AttributeError as exception:
             logger.error("Cannot replace function '%s' in module '%s': %s", function_name, module_name, exception)
             raise
-
-    @staticmethod
-    def _patch_framework_references(module, original_func: Callable, new_func: Callable) -> None:
-        """
-        Patch framework-level references that hold direct pointers to the original function.
-
-        When frameworks like Flask use decorators (e.g., @app.route) at import time,
-        they store direct references to the function object. Replacing the module-level
-        name via setattr does not update these internal references. This method scans
-        for known framework patterns and patches them.
-
-        Currently supports:
-        - Flask: patches app.view_functions entries that reference the original function
-
-        Args:
-            module: The module object containing the function
-            original_func: The original function that was replaced
-            new_func: The new wrapper function
-        """
-        try:
-            # Flask: patch view_functions on any Flask app instances in the module
-            FunctionWrapper._patch_flask_view_functions(module, original_func, new_func)
-        except Exception as exc:
-            # Never let framework patching failures break instrumentation
-            logger.debug("Framework reference patching encountered an error: %s", exc)
-
-    @staticmethod
-    def _patch_flask_view_functions(module, original_func: Callable, new_func: Callable) -> None:
-        """
-        Patch Flask app.view_functions entries that reference the original function.
-
-        Flask's @app.route() decorator stores the view function in app.view_functions
-        at import time. When DI replaces the function on the module, Flask still calls
-        the original. This method finds and patches those references.
-
-        Args:
-            module: The module object that may contain Flask app instances
-            original_func: The original function to find in view_functions
-            new_func: The new wrapper function to replace it with
-        """
-        try:
-            try:
-                from flask import Flask  # pylint: disable=import-outside-toplevel
-            except ImportError:
-                return  # Flask not installed, nothing to patch
-
-            func_name = getattr(original_func, "__name__", "unknown")
-            func_module = getattr(original_func, "__module__", None)
-
-            # Scan module attributes for Flask app instances
-            for attr_name in dir(module):
-                try:
-                    attr = getattr(module, attr_name, None)
-                    if attr is None or not isinstance(attr, Flask):
-                        continue
-                    FunctionWrapper._patch_single_flask_app(
-                        attr, attr_name, original_func, new_func, func_name, func_module
-                    )
-                except Exception as exc:
-                    logger.warning("Error checking module attribute '%s' for Flask app: %s", attr_name, exc)
-                    continue
-
-        except Exception as exc:
-            logger.warning("Error patching Flask view_functions: %s", exc)
-
-    @staticmethod
-    def _patch_single_flask_app(flask_app, app_name, original_func, new_func, func_name, func_module=None):
-        """Patch view_functions in a single Flask app instance."""
-        view_functions = getattr(flask_app, "view_functions", None)
-        if not view_functions or not isinstance(view_functions, dict):
-            logger.debug("Flask app '%s' has no view_functions dict", app_name)
-            return
-
-        patched_count = 0
-        for endpoint, view_func in view_functions.items():
-            if view_func is original_func:
-                view_functions[endpoint] = new_func
-                patched_count += 1
-                logger.debug("Patched Flask view_functions[%s] to use DI wrapper", endpoint)
-
-        if patched_count > 0:
-            logger.debug(
-                "Patched %d Flask route(s) for function '%s' on app '%s'",
-                patched_count,
-                func_name,
-                app_name,
-            )
-            return
-
-        # Identity check failed — try name+module-based matching. functools.wraps
-        # (used by OTel's Flask instrumentation) preserves __module__, so requiring
-        # both name and module avoids accidentally patching a same-named view from
-        # a different module. If the original has no __module__, fall back to
-        # name-only matching.
-        def _matches(vf):
-            if getattr(vf, "__name__", None) != func_name:
-                return False
-            if func_module is None:
-                return True
-            return getattr(vf, "__module__", None) == func_module
-
-        matching_endpoints = [ep for ep, vf in view_functions.items() if _matches(vf)]
-        if matching_endpoints:
-            logger.debug(
-                "Flask app '%s' has endpoint(s) %s with name '%s' (module '%s') but identity "
-                "mismatch (original_func id=%d, view_func id=%d). Patching by name+module.",
-                app_name,
-                matching_endpoints,
-                func_name,
-                func_module,
-                id(original_func),
-                id(view_functions[matching_endpoints[0]]),
-            )
-            for ep in matching_endpoints:
-                view_functions[ep] = new_func
-                logger.debug("Patched Flask view_functions[%s] by name+module match", ep)
 
     @staticmethod
     def _get_qualified_name(original_func: Callable) -> str:

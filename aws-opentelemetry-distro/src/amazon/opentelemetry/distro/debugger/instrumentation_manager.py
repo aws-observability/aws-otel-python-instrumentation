@@ -586,7 +586,13 @@ class InstrumentationManager:
                 and hasattr(self._engine, "disable_function_entry")
             ):
                 try:
-                    self._engine.disable_function_entry(bp_set.code_object)
+                    # Pass func as well — BytecodeInjectionEngine keys its
+                    # function-entry state by id(func), not id(code).
+                    original = bp_set.original_function
+                    original_callable = (
+                        original.__func__ if isinstance(original, (staticmethod, classmethod)) else original
+                    )
+                    self._engine.disable_function_entry(bp_set.code_object, func=original_callable)
                 except Exception as exception:  # pylint: disable=broad-exception-caught
                     logger.warning(
                         "Failed to disable function-entry hook for %s: %s",

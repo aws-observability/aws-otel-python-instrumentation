@@ -90,9 +90,14 @@ class InstrumentationEngine(ABC):
         """
         return False
 
-    def disable_function_entry(self, code: CodeType) -> None:
+    def disable_function_entry(self, code: CodeType, func: Optional[FunctionType] = None) -> None:
         """
-        Tear down function-entry instrumentation for a code object.
+        Tear down function-entry instrumentation for a code object / function.
+
+        ``func`` is optional for engines that key state by ``id(code)``
+        (SysMonitoringEngine), but required for engines that key by
+        ``id(func)`` (BytecodeInjectionEngine — because the same code object
+        on a re-bound function would otherwise be ambiguous).
 
         Default implementation is a no-op for engines that don't implement
         ``enable_function_entry``.

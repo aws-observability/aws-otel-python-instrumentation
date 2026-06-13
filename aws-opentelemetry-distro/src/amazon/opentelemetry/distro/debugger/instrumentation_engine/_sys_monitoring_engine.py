@@ -346,8 +346,14 @@ class SysMonitoringEngine(InstrumentationEngine):
         """Counterpart to ``suppress_function_entry_for_thread``."""
         self._reentrancy_guard.active = False
 
-    def disable_function_entry(self, code: CodeType) -> None:
-        """Tear down PY_START / PY_RETURN hooks for a code object."""
+    def disable_function_entry(self, code: CodeType, func: Optional[FunctionType] = None) -> None:
+        """Tear down PY_START / PY_RETURN hooks for a code object.
+
+        ``func`` is unused on this engine — sys.monitoring keys state by
+        ``id(code)`` directly. The parameter is in the signature for API
+        symmetry with BytecodeInjectionEngine.
+        """
+        del func  # unused
         if not self._initialized:
             return
         try:
