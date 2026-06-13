@@ -756,9 +756,6 @@ class FunctionWrapper:
                 setattr(current_obj, method_name, new_func)
                 logger.debug("Successfully replaced class method %s.%s", module_name, function_name)
             else:
-                # Get the original function before replacing (for framework patching)
-                original_func = getattr(module, function_name, None)
-
                 # Module-level function replacement
                 if not hasattr(module, function_name):
                     raise AttributeError(f"Function '{function_name}' not found in " f"module '{module_name}'")

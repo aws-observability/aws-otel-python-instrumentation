@@ -59,6 +59,8 @@ def _matches(code: CodeType, name: str, target: Optional[Path]) -> bool:
     return candidate is not None and candidate == target
 
 
+# pylint: disable=too-many-branches,too-many-statements
+# pylint: disable=too-many-branches,too-many-statements,too-many-locals
 def undecorated(func: Any, name: str, path: Optional[str] = None) -> Any:
     """
     Return the innermost function whose ``co_name`` matches ``name`` (and
@@ -153,14 +155,14 @@ def undecorated(func: Any, name: str, path: Optional[str] = None) -> Any:
         # This is bounded by the object's attribute count (typically O(10)).
         try:
             attrs = dir(obj)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
             attrs = ()
         for attr in attrs:
             if attr.startswith("__") and attr.endswith("__"):
                 continue
             try:
                 value = getattr(obj, attr)
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001  # pylint: disable=broad-exception-caught
                 continue
             if callable(value) and id(value) not in seen:
                 seen.add(id(value))

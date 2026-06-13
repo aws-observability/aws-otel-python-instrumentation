@@ -18,7 +18,6 @@ reference (Django ``URLPattern.callback``, Flask ``view_functions[endpoint]``,
 import functools
 import sys
 import unittest
-from functools import partial
 
 import pytest
 
@@ -69,6 +68,7 @@ def _login_required(view_func):
     @functools.wraps(view_func)
     def wrapper(request, *args, **kwargs):
         return view_func(request, *args, **kwargs)
+
     return wrapper
 
 
@@ -105,6 +105,7 @@ class TestEnableFunctionEntry(unittest.TestCase):
     def tearDown(self):
         # Restore the previous emitter
         from amazon.opentelemetry.distro.debugger import _function_wrapper as fw
+
         fw.set_snapshot_emitter(self._prev_emitter)
 
         # Disable every active function-entry hook BEFORE cleanup() (which
@@ -417,9 +418,7 @@ class TestEnableFunctionEntry(unittest.TestCase):
         self.assertEqual(_module_target(4), 8)
 
         self.assertEqual(self._mock_emitter.emit_snapshot.call_count, 3)
-        hashes = [
-            call.args[0].location_hash for call in self._mock_emitter.emit_snapshot.call_args_list
-        ]
+        hashes = [call.args[0].location_hash for call in self._mock_emitter.emit_snapshot.call_args_list]
         self.assertEqual(hashes, ["h-ok", "h-raise", "h-ok"])
 
     def test_recursive_function_emits_snapshot_per_call(self):
@@ -459,5 +458,3 @@ class TestEnableFunctionEntry(unittest.TestCase):
 
 # Import unittest.mock at module scope so tearDown can use it
 import unittest.mock  # noqa: E402
-
-

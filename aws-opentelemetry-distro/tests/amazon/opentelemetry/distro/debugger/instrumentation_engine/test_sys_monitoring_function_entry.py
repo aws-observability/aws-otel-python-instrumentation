@@ -21,9 +21,7 @@ from amazon.opentelemetry.distro.debugger._data_models import CaptureConfig
 
 if sys.version_info >= (3, 12):
     # pylint: disable=import-error,wrong-import-position
-    from amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine import (
-        SysMonitoringEngine,
-    )
+    from amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine import SysMonitoringEngine
 else:  # pragma: no cover
     SysMonitoringEngine = None  # type: ignore[assignment]
 
@@ -85,7 +83,6 @@ class TestEnableFunctionEntry(unittest.TestCase):
     # ------------------------------------------------------------------
     def test_fires_when_invoked_via_stale_module_reference(self):
         """A reference captured BEFORE instrumentation still triggers PY_START."""
-        captured = []
         local_ref = _module_target  # capture before enable
 
         self.engine.enable_function_entry(
@@ -128,7 +125,10 @@ class TestEnableFunctionEntry(unittest.TestCase):
             location_hash="hash",
             instrumentation_type="PROBE",
         )
-        replacement = lambda v: "REPLACED"  # different code object
+
+        def replacement(v):  # different code object than _module_target
+            return "REPLACED"
+
         sys.modules[__name__]._module_target = replacement
         try:
             self.assertEqual(replacement(99), "REPLACED")
@@ -239,5 +239,3 @@ class TestEnableFunctionEntry(unittest.TestCase):
             qualified_name="x",
         )
         self.assertFalse(ok)
-
-

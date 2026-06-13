@@ -18,17 +18,21 @@ def _login_required(view_func):
     @functools.wraps(view_func)
     def wrapper(request, *args, **kwargs):
         return view_func(request, *args, **kwargs)
+
     return wrapper
 
 
 def _double_decorator(view_func):
     """Two layers of decoration to verify multi-level traversal."""
+
     @functools.wraps(view_func)
     def outer(*args, **kwargs):
         return view_func(*args, **kwargs)
+
     @functools.wraps(outer)
     def outermost(*args, **kwargs):
         return outer(*args, **kwargs)
+
     return outermost
 
 
@@ -44,8 +48,10 @@ def _double_decorated(request):
 
 def _plain_decorator(fn):
     """Decorator that does NOT use functools.wraps — only closure capture."""
+
     def wrapper(*args, **kwargs):
         return fn(*args, **kwargs)
+
     # Intentionally do NOT call functools.wraps here.
     return wrapper
 
@@ -80,14 +86,14 @@ class TestUndecorated(unittest.TestCase):
 
     def test_filename_disambiguates_same_named_helpers(self):
         """If two same-named functions exist in different files, file path wins."""
+
         # Build a doppelganger inline in this file
         def _module_target(value):  # shadows the module-level one
             return value + 1000
+
         # Pass the module-level function's filename — BFS should prefer it
         # over the inline shadow.
-        resolved = undecorated(
-            _module_target, "_module_target", _module_target.__code__.co_filename
-        )
+        resolved = undecorated(_module_target, "_module_target", _module_target.__code__.co_filename)
         # Both functions live in the same file (this test file), so either
         # match is acceptable; this primarily verifies the path-arg path
         # doesn't crash. The disambiguation across files is exercised by

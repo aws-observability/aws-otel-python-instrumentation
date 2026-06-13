@@ -1,15 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""
-Instrumentation Manager - Central coordinator for atomic breakpoint management.
-
-This module provides the InstrumentationManager class that handles:
-- Grouping breakpoint configurations by function
-- Determining configuration changes
-- Managing atomic updates with state preservation
-- Thread-safe operations with comprehensive error handling
-"""
+"""Instrumentation Manager - Central coordinator for atomic breakpoint management."""
 
 import importlib.util
 import logging
@@ -368,6 +360,84 @@ class InstrumentationManager:
             logger.error("Error getting unchanged breakpoints: %s", exception, exc_info=True)
             return set()
 
+    def _enable_line_breakpoints(self, bp_set: FunctionBreakpointSet, original_callable: Any) -> None:
+        """Enable line-level breakpoints via the engine; failures don't abort wrapping."""
+        if not (self._engine and bp_set.line_numbers and bp_set.code_object):
+            if not self._engine and bp_set.line_numbers:
+                logger.debug(
+                    "No engine available for line breakpoints in %s",
+                    bp_set.function_key,
+                )
+            return
+        try:
+            line_location_hashes = {}
+            line_capture_configs = {}
+            for line_num, bp_config in bp_set.breakpoints.items():
+                if line_num > 0:
+                    line_location_hashes[line_num] = bp_config.config_id
+                    line_capture_configs[line_num] = bp_config.capture_config
+
+            self._engine.enable_breakpoints_for_function(
+                code=bp_set.code_object,
+                func=original_callable,
+                line_numbers=bp_set.line_numbers,
+                function_key=bp_set.function_key,
+                line_location_hashes=line_location_hashes,
+                line_capture_configs=line_capture_configs,
+            )
+            logger.debug("Enabled %d line breakpoints for %s", len(bp_set.line_numbers), bp_set.function_key)
+        except Exception as exception:  # pylint: disable=broad-exception-caught
+            logger.warning(
+                "Failed to enable line breakpoints for %s: %s",
+                bp_set.function_key,
+                exception,
+                exc_info=True,
+            )
+
+    def _try_engine_routing(self, bp_set: FunctionBreakpointSet):
+        """Route function-level (line 0) probes through the engine when supported.
+
+        Returns (target_func, target_code) on success, (None, None) on refusal.
+        """
+        if not (self._engine and 0 in bp_set.breakpoints and hasattr(self._engine, "enable_function_entry")):
+            return None, None
+
+        try:
+            discovered = FunctionWrapper._discover_function(bp_set.module, bp_set.function_name)
+        except Exception as exception:  # pylint: disable=broad-exception-caught
+            logger.debug("Engine-path discovery failed for %s: %s", bp_set.function_key, exception)
+            return None, None
+
+        target_func = discovered.method if hasattr(discovered, "method") else discovered
+        target_code = getattr(target_func, "__code__", None)
+        if target_func is None or target_code is None:
+            return None, None
+
+        fn_bp = bp_set.breakpoints[0]
+        try:
+            accepted = bool(
+                self._engine.enable_function_entry(
+                    code=target_code,
+                    func=target_func,
+                    function_key=bp_set.function_key,
+                    module_name=bp_set.module,
+                    qualified_name=bp_set.function_name,
+                    capture_config=fn_bp.capture_config,
+                    location_hash=fn_bp.config_id,
+                    instrumentation_type=fn_bp.instrumentation_type,
+                )
+            )
+        except Exception as exception:  # pylint: disable=broad-exception-caught
+            logger.warning(
+                "Engine refused function-entry hook for %s: %s",
+                bp_set.function_key,
+                exception,
+                exc_info=True,
+            )
+            return None, None
+
+        return (target_func, target_code) if accepted else (None, None)
+
     def _apply_function(self, bp_set: FunctionBreakpointSet):  # pylint: disable=too-many-branches,too-many-statements
         """
         Apply function wrapper (no line breakpoints yet - Phase 5).
@@ -408,82 +478,15 @@ class InstrumentationManager:
             if 0 in bp_set.breakpoints:
                 location_hash = bp_set.breakpoints[0].config_id
 
-            # Routing decision: try the engine FIRST for function-level breakpoints
-            # (line 0 — PROBE or function-level BREAKPOINT). If the engine accepts,
-            # the bytecode rewrite handles every call site correctly via __code__
-            # mutation; we don't need the legacy setattr wrapper at all.
-            #
-            # If the engine refuses (generator, no __code__, runtime not supported,
-            # bytecode lib unavailable), fall back to the wrapper. The wrapper is
-            # only correct for callers that look up module.attr at call time —
-            # framework-bypass patterns (Django URLPattern.callback, Flask
-            # view_functions) won't see it — but it's the best we can do for a
-            # function with no usable __code__.
-            engine_accepted = False
-            original_callable = None
-            target_func = None
-            target_code = None
-
-            if self._engine and 0 in bp_set.breakpoints and hasattr(
-                self._engine, "enable_function_entry"
-            ):
-                # Discover the function ourselves so we can hand it to the engine
-                # without going through _wrapper.instrument_function (which would
-                # also setattr a wrapper, defeating the whole point of the engine
-                # path). FunctionWrapper._discover_function is a pure read.
-                try:
-                    discovered = FunctionWrapper._discover_function(
-                        bp_set.module, bp_set.function_name
-                    )
-                    # _discover_function returns either a Callable or a MethodInfo
-                    # for class methods; in both cases the underlying function
-                    # carries the __code__ we need to rewrite.
-                    if hasattr(discovered, "method"):
-                        target_func = discovered.method
-                    else:
-                        target_func = discovered
-                    target_code = getattr(target_func, "__code__", None)
-                except Exception as exception:  # pylint: disable=broad-exception-caught
-                    logger.debug(
-                        "Engine-path discovery failed for %s: %s — falling back to wrapper",
-                        bp_set.function_key,
-                        exception,
-                    )
-
-                if target_func is not None and target_code is not None:
-                    try:
-                        fn_bp = bp_set.breakpoints[0]
-                        engine_accepted = bool(
-                            self._engine.enable_function_entry(
-                                code=target_code,
-                                func=target_func,
-                                function_key=bp_set.function_key,
-                                module_name=bp_set.module,
-                                qualified_name=bp_set.function_name,
-                                capture_config=fn_bp.capture_config,
-                                location_hash=fn_bp.config_id,
-                                instrumentation_type=fn_bp.instrumentation_type,
-                            )
-                        )
-                    except Exception as exception:  # pylint: disable=broad-exception-caught
-                        logger.warning(
-                            "Engine refused function-entry hook for %s: %s — falling back to wrapper",
-                            bp_set.function_key,
-                            exception,
-                            exc_info=True,
-                        )
-
-            if engine_accepted:
-                # Engine owns the function. Record metadata for later disable.
-                # No setattr — frameworks that captured the function reference
-                # at import time pick up the rewritten bytecode automatically.
+            # Engine path first for function-level (line 0); fall back to setattr.
+            target_func, target_code = self._try_engine_routing(bp_set)
+            if target_func is not None and target_code is not None:
                 bp_set.original_function = target_func
-                bp_set.wrapped_function = target_func  # same object; bytecode is what changed
+                bp_set.wrapped_function = target_func
                 bp_set.code_object = target_code
                 bp_set.is_instrumented = True
+                original_callable = target_func
             else:
-                # Fallback: wrap function via setattr. Only correct for callers
-                # that look up module.attr at call time.
                 original, wrapped = self._wrapper.instrument_function(
                     module_name=bp_set.module,
                     function_name=bp_set.function_name,
@@ -491,50 +494,13 @@ class InstrumentationManager:
                     location_hash=location_hash,
                     manager=self,
                 )
-                original_callable = (
-                    original.__func__ if isinstance(original, (staticmethod, classmethod)) else original
-                )
+                original_callable = original.__func__ if isinstance(original, (staticmethod, classmethod)) else original
                 bp_set.original_function = original
                 bp_set.wrapped_function = wrapped
                 bp_set.code_object = getattr(original_callable, "__code__", None)
                 bp_set.is_instrumented = True
 
-            # Enable line breakpoints if engine is available and there are line breakpoints
-            if self._engine and bp_set.line_numbers and bp_set.code_object:
-                try:
-                    # Build location hash and capture config mappings for line-level breakpoints
-                    # Only for line-level breakpoints (line_num > 0), not method-level (line_num == 0)
-                    line_location_hashes = {}
-                    line_capture_configs = {}
-                    for line_num, bp_config in bp_set.breakpoints.items():
-                        if line_num > 0:  # Only line-level breakpoints need hash in events
-                            line_location_hashes[line_num] = bp_config.config_id
-                            line_capture_configs[line_num] = bp_config.capture_config
-
-                    self._engine.enable_breakpoints_for_function(
-                        code=bp_set.code_object,
-                        func=original_callable,
-                        line_numbers=bp_set.line_numbers,
-                        function_key=bp_set.function_key,
-                        line_location_hashes=line_location_hashes,
-                        line_capture_configs=line_capture_configs,
-                    )
-                    logger.debug("Enabled %d line breakpoints for %s", len(bp_set.line_numbers), bp_set.function_key)
-                except Exception as exception:  # pylint: disable=broad-exception-caught
-                    logger.warning(
-                        "Failed to enable line breakpoints for %s: %s. "
-                        "Function wrapping will continue, but line breakpoints will not work.",
-                        bp_set.function_key,
-                        exception,
-                        exc_info=True,
-                    )
-                    # Don't re-raise - function wrapping still works without line breakpoints
-            elif not self._engine and bp_set.line_numbers:
-                logger.debug(
-                    "No engine available for line breakpoints in %s. "
-                    "Function wrapping will work, but line breakpoints will not.",
-                    bp_set.function_key,
-                )
+            self._enable_line_breakpoints(bp_set, original_callable)
 
             # Restore/create states for each breakpoint (including function-level line 0)
             for line_num in bp_set.breakpoints.keys():
@@ -619,11 +585,7 @@ class InstrumentationManager:
                     # Don't re-raise - continue with function restoration
 
             # Disable function-entry hook on the original code object.
-            if (
-                self._engine
-                and bp_set.code_object
-                and hasattr(self._engine, "disable_function_entry")
-            ):
+            if self._engine and bp_set.code_object and hasattr(self._engine, "disable_function_entry"):
                 try:
                     # Pass func as well — BytecodeInjectionEngine keys its
                     # function-entry state by id(func), not id(code).

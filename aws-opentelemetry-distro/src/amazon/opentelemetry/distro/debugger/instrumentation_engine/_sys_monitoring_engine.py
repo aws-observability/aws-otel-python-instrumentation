@@ -29,6 +29,7 @@ from amazon.opentelemetry.distro.debugger._snapshot_models import (
 from amazon.opentelemetry.distro.debugger._snapshot_serializer import SnapshotSerializer
 from amazon.opentelemetry.distro.debugger._stack_utils import capture_stack_frames
 from amazon.opentelemetry.distro.debugger.instrumentation_engine._instrumentation_engine import InstrumentationEngine
+from amazon.opentelemetry.distro.debugger.instrumentation_engine._undecorate import undecorated
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ class SysMonitoringEngine(InstrumentationEngine):
     """
 
     def __init__(self):
+        super().__init__()
         self.tool_id = sys.monitoring.DEBUGGER_ID
         self._initialized = False
 
@@ -119,12 +121,8 @@ class SysMonitoringEngine(InstrumentationEngine):
             # These coexist with LINE on the same tool_id — events are armed per code
             # object via set_local_events, so a code object only fires the events it
             # has been individually configured for.
-            sys.monitoring.register_callback(
-                self.tool_id, sys.monitoring.events.PY_START, self._py_start_handler
-            )
-            sys.monitoring.register_callback(
-                self.tool_id, sys.monitoring.events.PY_RETURN, self._py_return_handler
-            )
+            sys.monitoring.register_callback(self.tool_id, sys.monitoring.events.PY_START, self._py_start_handler)
+            sys.monitoring.register_callback(self.tool_id, sys.monitoring.events.PY_RETURN, self._py_return_handler)
 
             self._initialized = True
             self._hit_count_callback = hit_count_callback
@@ -303,10 +301,6 @@ class SysMonitoringEngine(InstrumentationEngine):
             # arm PY_START on the user's function (not the auth/cache wrapper).
             # Shared with the bytecode engine — same algorithm, same
             # behavior across Python versions.
-            from amazon.opentelemetry.distro.debugger.instrumentation_engine._undecorate import (  # pylint: disable=import-outside-toplevel
-                undecorated,
-            )
-
             target_func = undecorated(
                 func,
                 qualified_name.split(".")[-1],
@@ -363,15 +357,11 @@ class SysMonitoringEngine(InstrumentationEngine):
                     return
                 # Drop only PY_START/PY_RETURN — preserve LINE if it was set.
                 existing = sys.monitoring.get_local_events(self.tool_id, code)
-                remaining = existing & ~(
-                    sys.monitoring.events.PY_START | sys.monitoring.events.PY_RETURN
-                )
+                remaining = existing & ~(sys.monitoring.events.PY_START | sys.monitoring.events.PY_RETURN)
                 try:
                     sys.monitoring.set_local_events(self.tool_id, code, remaining)
                 except Exception as exc:  # pylint: disable=broad-exception-caught
-                    logger.warning(
-                        "Failed to clear PY_START/PY_RETURN for %s: %s", code.co_name, exc
-                    )
+                    logger.warning("Failed to clear PY_START/PY_RETURN for %s: %s", code.co_name, exc)
                 self._function_entries.pop(code_id, None)
                 logger.debug("Disabled function entry for %s", code.co_name)
         except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -403,7 +393,7 @@ class SysMonitoringEngine(InstrumentationEngine):
                 stack = []
                 self._tls.stack = stack
 
-            entry_context = self._capture_entry_arguments(code, entry.get("capture_config"))
+            entry_context = SysMonitoringEngine._capture_entry_arguments(code, entry.get("capture_config"))
             stack.append(
                 {
                     "code_id": id(code),
@@ -445,9 +435,9 @@ class SysMonitoringEngine(InstrumentationEngine):
             # but for plain sync calls (the only case we currently support) the
             # top-of-stack always matches.
             frame_info = None
-            for i in range(len(stack) - 1, -1, -1):
-                if stack[i]["code_id"] == id(code):
-                    frame_info = stack.pop(i)
+            for idx in range(len(stack) - 1, -1, -1):
+                if stack[idx]["code_id"] == id(code):
+                    frame_info = stack.pop(idx)
                     break
             if frame_info is None:
                 return None
@@ -462,8 +452,9 @@ class SysMonitoringEngine(InstrumentationEngine):
             logger.error("Critical error in PY_RETURN handler for %s: %s", code.co_name, exc, exc_info=True)
             return None
 
+    @staticmethod
     def _capture_entry_arguments(
-        self, code: CodeType, capture_config: Optional[CaptureConfig]
+        code: CodeType, capture_config: Optional[CaptureConfig]
     ) -> Optional[CapturedContext]:
         """
         Capture function arguments from the calling frame.
@@ -489,20 +480,14 @@ class SysMonitoringEngine(InstrumentationEngine):
             # Argument names are co_varnames[: co_argcount + co_kwonlyargcount].
             arg_count = code.co_argcount + code.co_kwonlyargcount
             arg_names = code.co_varnames[:arg_count]
-            args_dict = {
-                name: target_frame.f_locals[name]
-                for name in arg_names
-                if name in target_frame.f_locals
-            }
+            args_dict = {name: target_frame.f_locals[name] for name in arg_names if name in target_frame.f_locals}
 
             if not args_dict:
                 return None
 
             # Apply capture_arguments filter: [] means all, ["a","b"] means subset.
             if capture_config.capture_arguments:
-                args_dict = {
-                    k: v for k, v in args_dict.items() if k in capture_config.capture_arguments
-                }
+                args_dict = {k: v for k, v in args_dict.items() if k in capture_config.capture_arguments}
                 if not args_dict:
                     return None
 
