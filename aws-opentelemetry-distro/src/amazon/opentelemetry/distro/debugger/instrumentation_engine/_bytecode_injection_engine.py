@@ -45,24 +45,37 @@ _HANDLER_NAME = "_breakpoint_handler"
 # Global name for the locals() builtin injected into function globals
 _LOCALS_NAME = "_breakpoint_locals"
 
-# Global names used by the function-entry/exit injection (PROBE / function-level
-# BREAKPOINT). Distinct from the line-level breakpoint handler so both can
-# coexist on the same function via a single combined bytecode rewrite.
-_ENTRY_HANDLER_NAME = "_di_function_entry_handler"
-_EXIT_HANDLER_NAME = "_di_function_exit_handler"
+# Function-entry/exit handlers are baked into the rewritten code's co_consts
+# via LOAD_CONST(self._function_*_handler) — no __globals__ name lookup, so we
+# don't need module-level _ENTRY/_EXIT/_EXCEPTION_HANDLER_NAME constants here.
+# (The line-level breakpoint engine still uses LOAD_GLOBAL via _HANDLER_NAME
+# above — it's a separate code path that this refactor leaves untouched.)
 
-# Temp local-variable name used by the exit injection to stash the return value
-# across the handler call. Resolved against ``code.co_varnames`` at injection
-# time and made unique if it collides with a user local. Mirrors Datadog's
-# ddtrace.internal.wrapping.context approach.
+# Temp local-variable names used by the entry/exit injection. Resolved
+# against ``code.co_varnames`` at injection time and made unique if they
+# collide with a user local.
+#
+# ``_RETVAL_LOCAL_NAME`` stashes the return value across the exit-handler
+# call so the original ``RETURN_VALUE`` opcode still sees it on TOS.
+#
+# ``_START_NS_LOCAL_NAME`` / ``_ENTRY_CTX_LOCAL_NAME`` carry the entry
+# handler's outputs (start time + serialized arguments) directly into the
+# exit handler via the function's own frame slots — eliminating the need
+# for a per-thread LIFO stack and the recursion-correctness bugs that come
+# with scanning it.
 _RETVAL_LOCAL_NAME = "__otel_di_retval__"
+_START_NS_LOCAL_NAME = "__otel_di_start_ns__"
+_ENTRY_CTX_LOCAL_NAME = "__otel_di_entry_ctx__"
 
 # Import bytecode classes if available
 if IS_BYTECODE_INSTALLED:
-    from bytecode import Bytecode, Instr
+    from bytecode import Bytecode, Instr, Label, TryBegin, TryEnd
 else:
     Bytecode = None  # type: ignore[misc, assignment]
     Instr = None  # type: ignore[misc, assignment]
+    Label = None  # type: ignore[misc, assignment]
+    TryBegin = None  # type: ignore[misc, assignment]
+    TryEnd = None  # type: ignore[misc, assignment]
 
 
 @dataclass
@@ -371,34 +384,45 @@ class BytecodeInjectionEngine(InstrumentationEngine):
                 )
                 return False
 
+            # Build the entry dict FIRST. The same object is then both:
+            #   - registered in self._function_entries[func_id], and
+            #   - baked into the rewritten code's co_consts via LOAD_CONST
+            # so the injected handlers receive it as a positional argument
+            # with zero lookup. Identity (not copy) matters: when
+            # disable_function_entry pops it from the registry, the
+            # bytecode-baked reference still points at the same dict, so
+            # adding ``entry["disabled"] = True`` would let zombie callers
+            # short-circuit instantly. (We don't expose that flag yet — but
+            # the dict-identity invariant is what makes it possible later.)
+            entry = {
+                "func": target_func,
+                "function_key": function_key,
+                "module_name": module_name,
+                "qualified_name": qualified_name,
+                "capture_config": capture_config,
+                "location_hash": location_hash,
+                "instrumentation_type": instrumentation_type,
+                "original_code": target_code,
+            }
+
             # Build new bytecode outside the lock — pure function over `code`.
-            new_code = self._create_code_with_function_entry_exit(target_code, function_key)
+            new_code = self._create_code_with_function_entry_exit(target_code, entry)
             if new_code is None:
                 logger.warning("Failed to inject function entry/exit bytecode for %s", function_key)
                 return False
 
             with self._lock:
                 func_id = id(target_func)
-                self._function_entries[func_id] = {
-                    "func": target_func,
-                    "function_key": function_key,
-                    "module_name": module_name,
-                    "qualified_name": qualified_name,
-                    "capture_config": capture_config,
-                    "location_hash": location_hash,
-                    "instrumentation_type": instrumentation_type,
-                    "original_code": target_code,
-                }
+                self._function_entries[func_id] = entry
 
                 target_func.__code__ = new_code
-                # Make handlers + locals reachable via LOAD_GLOBAL in the
-                # injected bytecode. ``self._function_entry_handler`` is a
-                # bound method — the bytecode CALL passes only the explicit
-                # args (function_key + locals_dict on entry; function_key +
-                # retval on exit).
-                target_func.__globals__[_ENTRY_HANDLER_NAME] = self._function_entry_handler
-                target_func.__globals__[_EXIT_HANDLER_NAME] = self._function_exit_handler
-                # Reuse the locals builtin global (same as line breakpoints).
+                # Handlers are baked into co_consts via LOAD_CONST in the
+                # rewritten bytecode (see _create_function_*_instructions_*).
+                # No __globals__ pollution, no shared-globals teardown to
+                # untangle on disable. The ``locals`` builtin still lives on
+                # __globals__ for the LOAD_GLOBAL in entry instructions —
+                # ensure it's there in case some pathological module shadowed
+                # the builtin.
                 target_func.__globals__[_LOCALS_NAME] = locals
 
                 logger.debug(
@@ -485,102 +509,114 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         """Counterpart to ``suppress_function_entry_for_thread``."""
         self._reentrancy_guard.active = False
 
-    def _function_entry_handler(self, function_key: str, local_vars: dict) -> None:
+    def _function_entry_handler(
+        self, entry: Dict[str, Any], local_vars: dict
+    ) -> tuple:
         """
         Bytecode-injected callback at function entry.
 
-        Captures arguments (filtered by capture_config), pushes a per-thread
-        frame onto ``self._tls.stack`` with the start time. The companion
-        ``_function_exit_handler`` pops that frame and emits the snapshot.
+        Returns ``(start_ns, entry_context)`` — the injected bytecode
+        ``UNPACK_SEQUENCE 2`` + ``STORE_FAST``s these into per-frame locals
+        so the matching exit/exception handler can consume them via
+        ``LOAD_FAST`` directly. No per-thread LIFO stack, no recursion-
+        correctness drift: each invocation has its own frame slots.
+
+        On the suppression path (or any failure), returns ``(0, None)`` —
+        the exit handler treats ``start_ns == 0`` as "skip this snapshot".
 
         CRITICAL: must never raise — the injected bytecode does not catch.
         """
         try:
-            # Re-entrancy guard — wrapper path is in flight, skip.
             if getattr(self._reentrancy_guard, "active", False):
-                return
-
-            # Look up the entry. The handler is the SAME bound method for every
-            # instrumented function; we need function_key to disambiguate.
-            entry = self._find_entry_by_key(function_key)
-            if entry is None:
-                return
-
+                return (0, None)
             capture_config = entry.get("capture_config")
             entry_context = self._build_entry_context(local_vars, capture_config)
-
-            stack = getattr(self._tls, "stack", None)
-            if stack is None:
-                stack = []
-                self._tls.stack = stack
-            stack.append(
-                {
-                    "function_key": function_key,
-                    "start_ns": time.time_ns(),
-                    "entry_context": entry_context,
-                }
-            )
+            return (time.time_ns(), entry_context)
         except Exception as exc:  # pylint: disable=broad-exception-caught
-            logger.error("Critical error in entry handler for %s: %s", function_key, exc, exc_info=True)
+            logger.error(
+                "Critical error in entry handler for %s: %s",
+                entry.get("function_key"),
+                exc,
+                exc_info=True,
+            )
+            return (0, None)
 
-    def _function_exit_handler(self, function_key: str, retval: Any) -> None:
+    def _function_exit_handler(
+        self,
+        entry: Dict[str, Any],
+        retval: Any,
+        start_ns: int,
+        entry_context: Optional[CapturedContext],
+    ) -> None:
         """
         Bytecode-injected callback before each RETURN_VALUE.
 
-        Pops the matching entry frame, computes duration, builds the
-        function-entry snapshot, and emits via the global emitter.
+        Reads ``start_ns`` and ``entry_context`` from the frame's own locals
+        (LOAD_FAST in the injected bytecode), so there's no TLS scan and no
+        cross-call ambiguity even under recursion or concurrent calls.
 
-        CRITICAL: must never raise. The injected bytecode discards this
-        function's return value via POP_TOP and re-pushes the user's retval
-        from the temp local before the original RETURN_VALUE — so we don't
-        need to return retval here.
+        ``start_ns == 0`` means the entry handler bailed (suppression /
+        error) — skip the snapshot entirely.
+
+        CRITICAL: must never raise.
         """
         try:
             if getattr(self._reentrancy_guard, "active", False):
                 return
-
-            entry = self._find_entry_by_key(function_key)
-            if entry is None:
+            if start_ns == 0:
                 return
-
-            stack = getattr(self._tls, "stack", None)
-            if not stack:
-                return
-
-            # Pop the most recent frame matching this function_key. Recursive
-            # calls through the same function will produce nested frames; the
-            # LIFO scan handles them correctly.
-            frame_info = None
-            for i in range(len(stack) - 1, -1, -1):
-                if stack[i]["function_key"] == function_key:
-                    frame_info = stack.pop(i)
-                    break
-            if frame_info is None:
-                return
-
+            frame_info = {"start_ns": start_ns, "entry_context": entry_context}
             self._reentrancy_guard.active = True
             try:
                 self._handle_function_entry(entry, frame_info, retval)
             finally:
                 self._reentrancy_guard.active = False
         except Exception as exc:  # pylint: disable=broad-exception-caught
-            logger.error("Critical error in exit handler for %s: %s", function_key, exc, exc_info=True)
+            logger.error(
+                "Critical error in exit handler for %s: %s",
+                entry.get("function_key"),
+                exc,
+                exc_info=True,
+            )
 
-    def _find_entry_by_key(self, function_key: str) -> Optional[Dict[str, Any]]:
-        """Lookup the registered entry by function_key. Lock-free read.
+    def _function_exception_handler(
+        self,
+        entry: Dict[str, Any],
+        start_ns: int,
+        entry_context: Optional[CapturedContext],
+    ) -> None:
+        """
+        Bytecode-injected callback when the user function raises.
 
-        ``self._function_entries`` is keyed by ``id(func)`` for fast disable,
-        but the injected bytecode only knows ``function_key``. We linear-scan
-        — this is fine because the dict typically has a few dozen entries
-        and the read is O(1) per probe. CPython dict iteration is GIL-atomic.
+        Reads ``start_ns`` and ``entry_context`` from frame locals (same as
+        the normal exit path), builds a snapshot with ``retval=None``, then
+        the injected ``RERAISE`` propagates the original exception unchanged.
+
+        ``start_ns == 0`` means the entry handler bailed — skip the snapshot.
+
+        CRITICAL: must never raise.
         """
         try:
-            for entry in self._function_entries.values():
-                if entry.get("function_key") == function_key:
-                    return entry
-        except Exception:  # pylint: disable=broad-exception-caught
-            pass
-        return None
+            if getattr(self._reentrancy_guard, "active", False):
+                return
+            if start_ns == 0:
+                return
+            frame_info = {"start_ns": start_ns, "entry_context": entry_context}
+            self._reentrancy_guard.active = True
+            try:
+                # retval=None for the exception path — capture_return will
+                # serialize None on this snapshot, distinguishing it from a
+                # successful call that returned None.
+                self._handle_function_entry(entry, frame_info, None)
+            finally:
+                self._reentrancy_guard.active = False
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error(
+                "Critical error in exception handler for %s: %s",
+                entry.get("function_key"),
+                exc,
+                exc_info=True,
+            )
 
     @staticmethod
     def _build_entry_context(
@@ -770,33 +806,70 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         return f
 
     def _create_code_with_function_entry_exit(
-        self, code: CodeType, function_key: str
+        self, code: CodeType, entry: Dict[str, Any]
     ) -> Optional[CodeType]:
         """
-        Driver: rewrite a code object's bytecode to call the entry handler
-        AFTER the leading RESUME (3.11) / at offset 0 (3.9/3.10), and the
-        exit handler before every RETURN_VALUE.
+        Driver: rewrite a code object so that
+            - the entry handler runs after the leading RESUME (3.11+) /
+              at offset 0 (3.9/3.10),
+            - the exit handler runs before every RETURN_VALUE,
+            - any exception escaping the body routes to the exception handler
+              (which emits a snapshot with retval=None) and then RERAISEs.
+
+        Without the exception path, an exception in the user function would
+        skip the exit handler entirely, leaving a frame on ``_tls.stack`` that
+        the next sibling call would (incorrectly) pop, attributing wrong
+        duration AND dropping the snapshot for the failure path. The
+        ``bytecode`` library renders ``TryBegin``/``TryEnd`` as
+        ``co_exceptiontable`` entries on 3.11+ and as ``SETUP_FINALLY`` on
+        3.9/3.10, so one driver covers both runtimes.
+
+        Caveat: this v1 wraps the entire body in ONE try/except region. If the
+        user function contains its own ``try:`` block, 3.11+ forbids nested
+        TryBegin/TryEnd; the rewrite would fail at ``bc.to_code()`` time. The
+        outer ``except`` in this method catches that and returns None (i.e. we
+        skip injection rather than crash). A future iteration can interleave
+        our try region around user try blocks; defer until needed.
         """
         try:
             bc = Bytecode.from_code(code)
 
-            # Pick a non-colliding temp local for the exit pattern.
-            retval_local = _RETVAL_LOCAL_NAME
-            while retval_local in code.co_varnames:
-                retval_local = "_" + retval_local
+            # Allocate three non-colliding frame slots:
+            #   retval_local — stash the return value across the exit handler
+            #   start_ns_local — int returned by the entry handler
+            #   entry_ctx_local — CapturedContext returned by the entry handler
+            # These eliminate the per-thread LIFO stack: each invocation has
+            # its own frame slots, so recursion + concurrency are correct
+            # without any cross-call state.
+            retval_local = self._unique_local(code, _RETVAL_LOCAL_NAME)
+            start_ns_local = self._unique_local(
+                code, _START_NS_LOCAL_NAME, taken={retval_local}
+            )
+            entry_ctx_local = self._unique_local(
+                code, _ENTRY_CTX_LOCAL_NAME, taken={retval_local, start_ns_local}
+            )
 
-            entry_instrs = self._create_function_entry_instructions(function_key)
-            exit_instrs = self._create_function_exit_instructions(function_key, retval_local)
-            if entry_instrs is None or exit_instrs is None:
+            entry_instrs = self._create_function_entry_instructions(
+                entry, start_ns_local, entry_ctx_local
+            )
+            exit_instrs = self._create_function_exit_instructions(
+                entry, retval_local, start_ns_local, entry_ctx_local
+            )
+            exception_tail = self._create_function_exception_instructions(
+                entry, start_ns_local, entry_ctx_local
+            )
+            if entry_instrs is None or exit_instrs is None or exception_tail is None:
                 return None
 
+            except_label = Label()
             new_instrs: List[Any] = []
             entry_inserted = False
+            current_try_begin = None  # active TryBegin we'll close with TryEnd
 
             for instr in bc:
-                # Entry: directly after RESUME on 3.11 (verifier expects RESUME
-                # at offset 0). On 3.9/3.10 there is no RESUME — we insert
-                # before the first instruction.
+                # Entry: directly after RESUME on 3.11+ (verifier expects
+                # RESUME at offset 0). On 3.9/3.10 there is no RESUME — we
+                # prepend at the bottom of this loop.
                 if (
                     not entry_inserted
                     and sys.version_info >= (3, 11)
@@ -805,20 +878,46 @@ class BytecodeInjectionEngine(InstrumentationEngine):
                 ):
                     new_instrs.append(instr)
                     new_instrs.extend(entry_instrs)
+                    # Open the try region AFTER entry instrs — entry-handler
+                    # failures should NOT route to the exception tail.
+                    current_try_begin = TryBegin(except_label, push_lasti=False)
+                    new_instrs.append(current_try_begin)
                     entry_inserted = True
                     continue
 
-                # Exit: BEFORE each RETURN_VALUE.
+                # Exit: BEFORE each RETURN_VALUE. Close the try region first
+                # so the exit handler runs OUTSIDE the try (we don't want
+                # exit-handler failures to recursively route to the exception
+                # tail and double-emit).
                 if isinstance(instr, Instr) and instr.name == "RETURN_VALUE":
+                    if current_try_begin is not None:
+                        new_instrs.append(TryEnd(current_try_begin))
+                        current_try_begin = None
                     new_instrs.extend(exit_instrs)
                     new_instrs.append(instr)
                     continue
 
                 new_instrs.append(instr)
 
-            # Fallback for 3.9/3.10 where there is no RESUME — prepend.
+            # Fallback for 3.9/3.10 where there is no RESUME — prepend entry
+            # instructions, then open the try region.
             if not entry_inserted:
-                new_instrs = list(entry_instrs) + new_instrs
+                current_try_begin = TryBegin(except_label, push_lasti=False)
+                new_instrs = list(entry_instrs) + [current_try_begin] + new_instrs
+
+            # Close any still-open try region (e.g. if the function had no
+            # explicit RETURN_VALUE — defensive, since the compiler always
+            # appends an implicit None return).
+            if current_try_begin is not None:
+                new_instrs.append(TryEnd(current_try_begin))
+
+            # Append the exception handler block + RERAISE. Control reaches
+            # `except_label` only when an exception propagates out of the body
+            # — the handler emits a snapshot with retval=None and then the
+            # RERAISE inside ``exception_tail`` propagates the original
+            # exception unchanged.
+            new_instrs.append(except_label)
+            new_instrs.extend(exception_tail)
 
             new_bc = bc.copy()
             new_bc.clear()
@@ -828,26 +927,80 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             logger.error("Error injecting entry/exit bytecode for %s: %s", code.co_name, exc, exc_info=True)
             return None
 
-    def _create_function_entry_instructions(self, function_key: str) -> Optional[list]:
+    @staticmethod
+    def _unique_local(code: CodeType, base: str, taken: Optional[Set[str]] = None) -> str:
+        """Return a name that doesn't collide with ``code.co_varnames`` or ``taken``."""
+        existing = set(code.co_varnames)
+        if taken:
+            existing = existing | taken
+        name = base
+        while name in existing:
+            name = "_" + name
+        return name
+
+    def _create_function_entry_instructions(
+        self, entry: Dict[str, Any], start_ns_local: str, entry_ctx_local: str
+    ) -> Optional[list]:
         """Dispatch to the version-specific entry-instruction builder."""
         try:
             if sys.version_info >= (3, 11):
-                return self._create_function_entry_instructions_py311(function_key)
+                return self._create_function_entry_instructions_py311(
+                    entry, self._function_entry_handler, start_ns_local, entry_ctx_local
+                )
             if sys.version_info >= (3, 9):
-                return self._create_function_entry_instructions_py39_py310(function_key)
+                return self._create_function_entry_instructions_py39_py310(
+                    entry, self._function_entry_handler, start_ns_local, entry_ctx_local
+                )
             logger.error("Unsupported Python version for entry injection: %s", sys.version_info)
             return None
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error("Error creating entry instructions: %s", exc, exc_info=True)
             return None
 
-    def _create_function_exit_instructions(self, function_key: str, retval_local: str) -> Optional[list]:
+    def _create_function_exception_instructions(
+        self, entry: Dict[str, Any], start_ns_local: str, entry_ctx_local: str
+    ) -> Optional[list]:
+        """Dispatch to the version-specific exception-tail builder."""
+        try:
+            if sys.version_info >= (3, 11):
+                return self._create_function_exception_instructions_py311(
+                    entry, self._function_exception_handler, start_ns_local, entry_ctx_local
+                )
+            if sys.version_info >= (3, 9):
+                return self._create_function_exception_instructions_py39_py310(
+                    entry, self._function_exception_handler, start_ns_local, entry_ctx_local
+                )
+            logger.error("Unsupported Python version for exception injection: %s", sys.version_info)
+            return None
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Error creating exception instructions: %s", exc, exc_info=True)
+            return None
+
+    def _create_function_exit_instructions(
+        self,
+        entry: Dict[str, Any],
+        retval_local: str,
+        start_ns_local: str,
+        entry_ctx_local: str,
+    ) -> Optional[list]:
         """Dispatch to the version-specific exit-instruction builder."""
         try:
             if sys.version_info >= (3, 11):
-                return self._create_function_exit_instructions_py311(function_key, retval_local)
+                return self._create_function_exit_instructions_py311(
+                    entry,
+                    retval_local,
+                    self._function_exit_handler,
+                    start_ns_local,
+                    entry_ctx_local,
+                )
             if sys.version_info >= (3, 9):
-                return self._create_function_exit_instructions_py39_py310(function_key, retval_local)
+                return self._create_function_exit_instructions_py39_py310(
+                    entry,
+                    retval_local,
+                    self._function_exit_handler,
+                    start_ns_local,
+                    entry_ctx_local,
+                )
             logger.error("Unsupported Python version for exit injection: %s", sys.version_info)
             return None
         except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -855,88 +1008,139 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             return None
 
     @staticmethod
-    def _create_function_entry_instructions_py311(function_key: str) -> list:
+    def _create_function_entry_instructions_py311(
+        entry: Dict[str, Any], handler, start_ns_local: str, entry_ctx_local: str
+    ) -> list:
         """
         Python 3.11 entry pattern. Equivalent to::
 
-            _di_function_entry_handler(function_key, locals())
+            handler(entry, locals())
 
-        Mirrors the existing line-breakpoint pattern at line 535 of this file
-        (PUSH_NULL + LOAD_GLOBAL + LOAD_CONST + LOAD_GLOBAL + PRECALL/CALL pairs
-        + POP_TOP), with the line_number argument dropped.
+        ``handler`` is the engine's bound method ``self._function_entry_handler``;
+        ``entry`` is the same dict object stored in
+        ``self._function_entries[func_id]``. BOTH go into ``co_consts`` via
+        ``LOAD_CONST`` — no ``__globals__`` lookups, no globals pollution, and
+        the rewrite carries the engine identity inside the function itself
+        (a sufficient ``is_wrapped`` check is just ``handler in code.co_consts``).
         """
         return [
             Instr("PUSH_NULL"),
-            Instr("LOAD_GLOBAL", (False, _ENTRY_HANDLER_NAME)),
-            Instr("LOAD_CONST", function_key),
+            Instr("LOAD_CONST", handler),  # bound method, baked into co_consts
+            Instr("LOAD_CONST", entry),
             Instr("LOAD_GLOBAL", (True, _LOCALS_NAME)),  # builtin: pre-pushes NULL
             Instr("PRECALL", 0),
             Instr("CALL", 0),  # locals() -> dict
             Instr("PRECALL", 2),
-            Instr("CALL", 2),  # entry_handler(fk, dict) -> None
-            Instr("POP_TOP"),
+            Instr("CALL", 2),  # handler(entry, locals_dict) -> (start_ns, entry_context)
+            # Tuple is on TOS — unpack into two frame locals so the exit/exception
+            # handler can read them via LOAD_FAST without any TLS scan.
+            Instr("UNPACK_SEQUENCE", 2),
+            Instr("STORE_FAST", start_ns_local),
+            Instr("STORE_FAST", entry_ctx_local),
         ]
 
     @staticmethod
-    def _create_function_entry_instructions_py39_py310(function_key: str) -> list:
-        """
-        Python 3.9/3.10 entry pattern. No PRECALL, no PUSH_NULL — uses
-        ``CALL_FUNCTION``. Equivalent to::
-
-            _di_function_entry_handler(function_key, locals())
-        """
+    def _create_function_entry_instructions_py39_py310(
+        entry: Dict[str, Any], handler, start_ns_local: str, entry_ctx_local: str
+    ) -> list:
+        """Python 3.9/3.10 entry pattern. No PRECALL, no PUSH_NULL."""
         return [
-            Instr("LOAD_GLOBAL", _ENTRY_HANDLER_NAME),
-            Instr("LOAD_CONST", function_key),
+            Instr("LOAD_CONST", handler),
+            Instr("LOAD_CONST", entry),
             Instr("LOAD_GLOBAL", _LOCALS_NAME),
             Instr("CALL_FUNCTION", 0),  # locals() -> dict
-            Instr("CALL_FUNCTION", 2),  # entry_handler(fk, dict) -> None
-            Instr("POP_TOP"),
+            Instr("CALL_FUNCTION", 2),  # handler(entry, locals_dict) -> (start_ns, entry_context)
+            Instr("UNPACK_SEQUENCE", 2),
+            Instr("STORE_FAST", start_ns_local),
+            Instr("STORE_FAST", entry_ctx_local),
         ]
 
     @staticmethod
-    def _create_function_exit_instructions_py311(function_key: str, retval_local: str) -> list:
+    def _create_function_exit_instructions_py311(
+        entry: Dict[str, Any],
+        retval_local: str,
+        handler,
+        start_ns_local: str,
+        entry_ctx_local: str,
+    ) -> list:
         """
         Python 3.11 exit pattern. Inserted BEFORE each RETURN_VALUE.
 
         Stack discipline (TOS shown, top is right):
 
         - on entry to the injected sequence: ``[..., retval]``
-        - after STORE_FAST: ``[...]`` (retval stashed in ``retval_local``)
-        - we build the call frame ``[..., NULL, handler, fk, retval]`` and
-          invoke ``handler(fk, retval)`` -> None
+        - STORE_FAST stashes retval in ``retval_local``
+        - we build the call frame
+          ``[..., NULL, handler, entry, retval, start_ns, entry_ctx]``
+          and invoke ``handler(entry, retval, start_ns, entry_ctx) -> None``
         - POP_TOP discards the handler return; ``LOAD_FAST`` re-pushes retval
-        - the ORIGINAL ``RETURN_VALUE`` (which follows our injected sequence)
-          consumes retval as it would have without injection
-
-        We use the temp-local pattern instead of ``COPY 1`` + stack juggling
-        because the call frame requires ``NULL, handler, fk, retval`` in that
-        order — copying with ``COPY 1`` and then rotating with ``SWAP n`` is
-        fragile across Python versions. This is what Datadog uses.
+        - the ORIGINAL ``RETURN_VALUE`` consumes retval as if uninjected
         """
         return [
             Instr("STORE_FAST", retval_local),
             Instr("PUSH_NULL"),
-            Instr("LOAD_GLOBAL", (False, _EXIT_HANDLER_NAME)),
-            Instr("LOAD_CONST", function_key),
+            Instr("LOAD_CONST", handler),
+            Instr("LOAD_CONST", entry),
             Instr("LOAD_FAST", retval_local),
-            Instr("PRECALL", 2),
-            Instr("CALL", 2),  # exit_handler(fk, retval) -> None
-            Instr("POP_TOP"),  # discard handler return
-            Instr("LOAD_FAST", retval_local),  # restore retval to TOS for RETURN_VALUE
+            Instr("LOAD_FAST", start_ns_local),
+            Instr("LOAD_FAST", entry_ctx_local),
+            Instr("PRECALL", 4),
+            Instr("CALL", 4),  # handler(entry, retval, start_ns, entry_ctx) -> None
+            Instr("POP_TOP"),
+            Instr("LOAD_FAST", retval_local),  # restore retval for RETURN_VALUE
         ]
 
     @staticmethod
-    def _create_function_exit_instructions_py39_py310(function_key: str, retval_local: str) -> list:
-        """Python 3.9/3.10 exit pattern. No PRECALL/PUSH_NULL on these versions."""
+    def _create_function_exit_instructions_py39_py310(
+        entry: Dict[str, Any],
+        retval_local: str,
+        handler,
+        start_ns_local: str,
+        entry_ctx_local: str,
+    ) -> list:
+        """Python 3.9/3.10 exit pattern."""
         return [
             Instr("STORE_FAST", retval_local),
-            Instr("LOAD_GLOBAL", _EXIT_HANDLER_NAME),
-            Instr("LOAD_CONST", function_key),
+            Instr("LOAD_CONST", handler),
+            Instr("LOAD_CONST", entry),
             Instr("LOAD_FAST", retval_local),
-            Instr("CALL_FUNCTION", 2),  # exit_handler(fk, retval) -> None
+            Instr("LOAD_FAST", start_ns_local),
+            Instr("LOAD_FAST", entry_ctx_local),
+            Instr("CALL_FUNCTION", 4),  # handler(entry, retval, start_ns, entry_ctx) -> None
             Instr("POP_TOP"),
             Instr("LOAD_FAST", retval_local),
+        ]
+
+    @staticmethod
+    def _create_function_exception_instructions_py311(
+        entry: Dict[str, Any], handler, start_ns_local: str, entry_ctx_local: str
+    ) -> list:
+        """Python 3.11+ exception-tail. Calls ``handler(entry, start_ns, entry_ctx)`` then RERAISEs."""
+        return [
+            Instr("PUSH_NULL"),
+            Instr("LOAD_CONST", handler),
+            Instr("LOAD_CONST", entry),
+            Instr("LOAD_FAST", start_ns_local),
+            Instr("LOAD_FAST", entry_ctx_local),
+            Instr("PRECALL", 3),
+            Instr("CALL", 3),  # handler(entry, start_ns, entry_ctx) -> None
+            Instr("POP_TOP"),
+            Instr("RERAISE", 0),
+        ]
+
+    @staticmethod
+    def _create_function_exception_instructions_py39_py310(
+        entry: Dict[str, Any], handler, start_ns_local: str, entry_ctx_local: str
+    ) -> list:
+        """Python 3.9/3.10 exception-tail."""
+        return [
+            Instr("LOAD_CONST", handler),
+            Instr("LOAD_CONST", entry),
+            Instr("LOAD_FAST", start_ns_local),
+            Instr("LOAD_FAST", entry_ctx_local),
+            Instr("CALL_FUNCTION", 3),  # handler(entry, start_ns, entry_ctx) -> None
+            Instr("POP_TOP"),
+            Instr("RERAISE", 0),
         ]
 
     @staticmethod

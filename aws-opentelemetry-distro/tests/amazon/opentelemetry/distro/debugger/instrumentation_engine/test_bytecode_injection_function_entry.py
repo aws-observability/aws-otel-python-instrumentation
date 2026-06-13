@@ -51,6 +51,18 @@ def _module_generator(n):
         yield i * 2
 
 
+def _module_target_that_raises(value):
+    """Target that always raises — used to validate exception-path coverage."""
+    raise ValueError(f"intentional: {value}")
+
+
+def _module_recursive_factorial(n):
+    """Self-recursive target — used to validate frame-local state isolation."""
+    if n <= 1:
+        return 1
+    return n * _module_recursive_factorial(n - 1)
+
+
 # A typical Django-style decorator: produces a wrapper function whose __code__
 # is NOT the user view's __code__. Used to verify _undecorated traversal.
 def _login_required(view_func):
@@ -335,6 +347,115 @@ class TestEnableFunctionEntry(unittest.TestCase):
         )
         _module_target(1)
         self.assertEqual(self._mock_emitter.emit_snapshot.call_count, 0)
+
+    # ------------------------------------------------------------------
+    # Exception-path coverage (the real bug fix).
+    # ------------------------------------------------------------------
+    def test_exception_in_user_code_emits_snapshot_and_reraises(self):
+        """Exception escaping the function still fires a snapshot and propagates.
+
+        Without the try/except wrapper around the injected body, an exception
+        would skip the exit handler entirely and the snapshot for the failure
+        path (the one the user cares about most) would be dropped silently.
+        """
+        self.engine.enable_function_entry(
+            code=_module_target_that_raises.__code__,
+            func=_module_target_that_raises,
+            function_key=f"{__name__}._module_target_that_raises",
+            module_name=__name__,
+            qualified_name="_module_target_that_raises",
+            capture_config=CaptureConfig(capture_arguments=[], capture_return=False),
+            location_hash="hash-exc",
+            instrumentation_type="PROBE",
+        )
+
+        # The original ValueError must propagate unchanged.
+        with self.assertRaises(ValueError) as ctx:
+            _module_target_that_raises(7)
+        self.assertEqual(str(ctx.exception), "intentional: 7")
+
+        # AND a snapshot was emitted for the exception path.
+        self.assertEqual(self._mock_emitter.emit_snapshot.call_count, 1)
+        snapshot = self._mock_emitter.emit_snapshot.call_args[0][0]
+        self.assertEqual(snapshot.location_hash, "hash-exc")
+        self.assertEqual(snapshot.instrumentation_type, "PROBE")
+
+    def test_repeated_exceptions_emit_one_snapshot_each(self):
+        """5 raises => 5 snapshots and no cross-call state to drift.
+
+        Each invocation owns its own frame slots (start_ns + entry_context),
+        so repeated exceptions can't accumulate state — that property used to
+        require a per-thread LIFO stack scan; now it falls out of CPython's
+        per-call frame allocation.
+        """
+        self.engine.enable_function_entry(
+            code=_module_target_that_raises.__code__,
+            func=_module_target_that_raises,
+            function_key=f"{__name__}._module_target_that_raises",
+            module_name=__name__,
+            qualified_name="_module_target_that_raises",
+            capture_config=None,
+            location_hash="h",
+            instrumentation_type="PROBE",
+        )
+        for v in range(5):
+            with self.assertRaises(ValueError):
+                _module_target_that_raises(v)
+        self.assertEqual(self._mock_emitter.emit_snapshot.call_count, 5)
+
+    def test_normal_then_exception_then_normal_attributes_correctly(self):
+        """Mixed normal + exception calls don't cross-contaminate frames."""
+        self.engine.enable_function_entry(
+            code=_module_target.__code__,
+            func=_module_target,
+            function_key=f"{__name__}._module_target",
+            module_name=__name__,
+            qualified_name="_module_target",
+            capture_config=None,
+            location_hash="h-ok",
+            instrumentation_type="PROBE",
+        )
+        self.engine.enable_function_entry(
+            code=_module_target_that_raises.__code__,
+            func=_module_target_that_raises,
+            function_key=f"{__name__}._module_target_that_raises",
+            module_name=__name__,
+            qualified_name="_module_target_that_raises",
+            capture_config=None,
+            location_hash="h-raise",
+            instrumentation_type="PROBE",
+        )
+        # 1 normal, 1 raise, 1 normal — interleaved through different functions.
+        self.assertEqual(_module_target(3), 6)
+        with self.assertRaises(ValueError):
+            _module_target_that_raises(99)
+        self.assertEqual(_module_target(4), 8)
+
+        self.assertEqual(self._mock_emitter.emit_snapshot.call_count, 3)
+        hashes = [
+            call.args[0].location_hash for call in self._mock_emitter.emit_snapshot.call_args_list
+        ]
+        self.assertEqual(hashes, ["h-ok", "h-raise", "h-ok"])
+
+    def test_recursive_function_emits_snapshot_per_call(self):
+        """factorial(5) recurses 5x; each invocation must emit independently.
+
+        Frame-local state (start_ns + entry_context per CPython frame)
+        guarantees recursion correctness without any cross-call coordination.
+        """
+        self.engine.enable_function_entry(
+            code=_module_recursive_factorial.__code__,
+            func=_module_recursive_factorial,
+            function_key=f"{__name__}._module_recursive_factorial",
+            module_name=__name__,
+            qualified_name="_module_recursive_factorial",
+            capture_config=None,
+            location_hash="h-rec",
+            instrumentation_type="PROBE",
+        )
+        self.assertEqual(_module_recursive_factorial(5), 120)
+        # 5 invocations: factorial(5) -> factorial(4) -> ... -> factorial(1)
+        self.assertEqual(self._mock_emitter.emit_snapshot.call_count, 5)
 
     # ------------------------------------------------------------------
     # Negative path — engine not initialized.
