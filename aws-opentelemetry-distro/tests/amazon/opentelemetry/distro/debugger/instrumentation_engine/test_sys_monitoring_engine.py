@@ -42,8 +42,15 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
             self.engine.initialize(hit_count_callback=self.callback)
 
             mock_use_tool.assert_called_once_with(sys.monitoring.DEBUGGER_ID, _TOOL_NAME)
-            mock_register.assert_called_once_with(
+            self.assertEqual(mock_register.call_count, 3)
+            mock_register.assert_any_call(
                 sys.monitoring.DEBUGGER_ID, sys.monitoring.events.LINE, self.engine._line_event_handler
+            )
+            mock_register.assert_any_call(
+                sys.monitoring.DEBUGGER_ID, sys.monitoring.events.PY_START, self.engine._py_start_handler
+            )
+            mock_register.assert_any_call(
+                sys.monitoring.DEBUGGER_ID, sys.monitoring.events.PY_RETURN, self.engine._py_return_handler
             )
 
             self.assertTrue(self.engine._initialized)
@@ -84,8 +91,19 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
                 self.engine.initialize(hit_count_callback=self.callback)
 
                 mock_use_tool.assert_not_called()
-                mock_register.assert_called_once_with(
+                self.assertEqual(mock_register.call_count, 3)
+                mock_register.assert_any_call(
                     sys.monitoring.DEBUGGER_ID, sys.monitoring.events.LINE, self.engine._line_event_handler
+                )
+                mock_register.assert_any_call(
+                    sys.monitoring.DEBUGGER_ID,
+                    sys.monitoring.events.PY_START,
+                    self.engine._py_start_handler,
+                )
+                mock_register.assert_any_call(
+                    sys.monitoring.DEBUGGER_ID,
+                    sys.monitoring.events.PY_RETURN,
+                    self.engine._py_return_handler,
                 )
 
             self.assertTrue(self.engine._initialized)

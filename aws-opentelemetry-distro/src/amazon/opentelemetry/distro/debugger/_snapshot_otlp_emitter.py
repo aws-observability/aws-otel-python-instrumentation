@@ -58,6 +58,23 @@ class SnapshotOtlpEmitter:
         self._init_failed = False
         self._lock = threading.Lock()
 
+    def initialize(self) -> bool:
+        """
+        Eagerly initialize the LoggerProvider and EventLogger.
+
+        Should be called once at SDK startup (from a normal user thread), not
+        lazily from a callback. ``BatchLogRecordProcessor`` spawns a daemon
+        worker thread on construction, and ``Resource.create()`` does a chain
+        of imports / resource detection that can hit
+        ``RuntimeError("cannot schedule new futures after interpreter
+        shutdown")`` when invoked from a ``sys.monitoring`` callback thread.
+
+        Returns:
+            True on success (or already initialized), False if initialization
+            failed (subsequent ``emit_snapshot`` calls will then no-op).
+        """
+        return self._ensure_initialized()
+
     def _ensure_initialized(self):
         """Lazily initialize the LoggerProvider and EventLogger on first use.
 
