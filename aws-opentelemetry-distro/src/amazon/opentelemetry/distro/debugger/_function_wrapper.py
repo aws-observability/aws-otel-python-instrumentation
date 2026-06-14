@@ -232,11 +232,7 @@ class FunctionWrapper:
                 setattr(current_obj, method_name, original_func)
                 logger.debug("Successfully restored class method: %s.%s", module_name, function_name)
             else:
-                # Module-level function restoration. Framework-level reference
-                # patching (Flask ``view_functions`` walker, etc.) is no longer
-                # needed — the bytecode / sys.monitoring engine path mutates
-                # ``func.__code__`` in place when restoring, so framework
-                # registries automatically pick up the original bytecode.
+                # Module-level function restoration
                 setattr(module, function_name, original_func)
                 logger.debug("Successfully restored function: %s.%s", module_name, function_name)
 
@@ -520,10 +516,7 @@ class FunctionWrapper:
                 except Exception as exc:
                     logger.warning("Failed to capture entry context: %s", exc)
 
-            # Call original function. The wrapper path and the engine path
-            # are now mutually exclusive at registration time (manager picks
-            # one), so no engine-suppression bracketing is needed here — the
-            # engine never has the same code armed when this wrapper is live.
+            # Call original function
             result = None
             thrown = None
             thrown_caller_stack = None
@@ -638,8 +631,7 @@ class FunctionWrapper:
                 except Exception as exc:
                     logger.warning("Failed to capture entry context: %s", exc)
 
-            # Wrapper and engine paths are mutually exclusive at registration
-            # time — no engine-suppression bracketing needed.
+            # Call original async function
             result = None
             thrown = None
             thrown_caller_stack = None

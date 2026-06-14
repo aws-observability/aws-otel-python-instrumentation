@@ -76,13 +76,10 @@ class SnapshotOtlpEmitter:
         return self._ensure_initialized()
 
     def _ensure_initialized(self):
-        """Initialize the LoggerProvider and EventLogger.
+        """Lazily initialize the LoggerProvider and EventLogger on first use.
 
-        Idempotent and thread-safe. Uses double-checked locking to avoid
-        contention on the hot path. Called eagerly from ``initialize()`` and
-        defensively from ``emit_snapshot`` so callers that forgot to init
-        explicitly still get a working emitter as long as they're on a
-        well-behaved thread.
+        Uses double-checked locking to be thread-safe without contention on the
+        common path (already initialized).
         """
         if self._event_logger is not None:
             return True

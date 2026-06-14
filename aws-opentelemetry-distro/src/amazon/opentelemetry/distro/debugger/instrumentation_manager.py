@@ -1,7 +1,15 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Instrumentation Manager - Central coordinator for atomic breakpoint management."""
+"""
+Instrumentation Manager - Central coordinator for atomic breakpoint management.
+
+This module provides the InstrumentationManager class that handles:
+- Grouping breakpoint configurations by function
+- Determining configuration changes
+- Managing atomic updates with state preservation
+- Thread-safe operations with comprehensive error handling
+"""
 
 import importlib.util
 import logging

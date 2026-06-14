@@ -42,9 +42,6 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
             self.engine.initialize(hit_count_callback=self.callback)
 
             mock_use_tool.assert_called_once_with(sys.monitoring.DEBUGGER_ID, _TOOL_NAME)
-            # Three callbacks must be wired: LINE (line-level breakpoints) plus
-            # PY_START + PY_RETURN (function-entry instrumentation that survives
-            # framework stale-reference patterns like Django's URL resolver).
             self.assertEqual(mock_register.call_count, 3)
             mock_register.assert_any_call(
                 sys.monitoring.DEBUGGER_ID, sys.monitoring.events.LINE, self.engine._line_event_handler
@@ -94,7 +91,6 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
                 self.engine.initialize(hit_count_callback=self.callback)
 
                 mock_use_tool.assert_not_called()
-                # Three callbacks rebind on reinit: LINE + PY_START + PY_RETURN.
                 self.assertEqual(mock_register.call_count, 3)
                 mock_register.assert_any_call(
                     sys.monitoring.DEBUGGER_ID, sys.monitoring.events.LINE, self.engine._line_event_handler
