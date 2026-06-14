@@ -25,13 +25,13 @@ logger = logging.getLogger(__name__)
 
 # Default capture configuration limits
 DEFAULT_MAX_HITS = 100
-DEFAULT_MAX_STRING_LENGTH = 100
-DEFAULT_MAX_COLLECTION_WIDTH = 10
+DEFAULT_MAX_STRING_LENGTH = 255
+DEFAULT_MAX_COLLECTION_WIDTH = 20
 DEFAULT_MAX_COLLECTION_DEPTH = 3
 DEFAULT_MAX_STACK_FRAMES = 20
 DEFAULT_MAX_STACK_TRACE_SIZE = 200
 DEFAULT_MAX_OBJECT_DEPTH = 3
-DEFAULT_MAX_FIELDS_PER_OBJECT = 10
+DEFAULT_MAX_FIELDS_PER_OBJECT = 20
 DEFAULT_RETURN_ATTRIBUTE_NAME = "aws.di.return_value"
 
 # Validation ranges
@@ -51,16 +51,19 @@ class CaptureConfig:
     Configuration for parameter and return value capture.
 
     Attributes:
-        capture_args: Whether to capture function arguments as span attributes
-        capture_return: Whether to capture return value as span attribute
-        capture_stack_trace: Whether to capture stack trace as span attribute
-        arg_mappings: Dictionary mapping parameter names to custom attribute names
-        return_attribute_name: Custom attribute name for return value
-        max_value_length: Maximum length for string representation of captured values
-        max_number_of_attributes: Maximum number of function arguments to capture
-        max_number_of_stack_frames: Maximum number of stack frames to capture
-        max_size_of_stack_trace: Maximum total size of stack trace
-        capture_args_list: Optional list of specific arguments to capture
+        capture_return: Whether to capture the return value
+        capture_stack_trace: Whether to capture the stack trace
+        capture_arguments: Arguments to capture (None=don't capture, []=all, [names]=named only)
+        capture_locals: Locals to capture (None=don't capture, []=all, [names]=named only)
+        arg_mappings: Maps parameter names to custom attribute names
+        return_attribute_name: Custom attribute name for the return value
+        max_string_length: Maximum length for captured string values (truncated beyond this)
+        max_collection_width: Maximum number of elements captured per collection
+        max_collection_depth: Maximum nesting depth for captured collections
+        max_stack_frames: Maximum number of stack frames to capture
+        max_stack_trace_size: Maximum total size of the captured stack trace
+        max_object_depth: Maximum nesting depth for captured objects
+        max_fields_per_object: Maximum number of fields captured per object
     """
 
     capture_return: bool = False
