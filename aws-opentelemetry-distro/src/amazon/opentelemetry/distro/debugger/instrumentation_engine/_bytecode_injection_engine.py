@@ -150,6 +150,128 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         """Check if bytecode injection is supported (Python 3.9-3.11)."""
         return (3, 9) <= sys.version_info < (3, 12) and IS_BYTECODE_INSTALLED
 
+    # Function-entry instrumentation (PROBE / function-level BREAKPOINT).
+    # Rewrites ``func.__code__`` so every existing reference picks up
+    # the new bytecode on next invocation.
+
+    def enable_function_entry(  # pylint: disable=too-many-arguments
+        self,
+        code: CodeType,
+        func: FunctionType,
+        function_key: str,
+        module_name: str,
+        qualified_name: str,
+        capture_config: Optional[CaptureConfig] = None,
+        location_hash: Optional[str] = None,
+        instrumentation_type: Optional[str] = None,
+    ) -> bool:
+        """Inject function-entry/exit hooks. Returns True on success."""
+        if not self._initialized:
+            logger.warning("BytecodeInjectionEngine not initialized, cannot enable function entry")
+            return False
+        if not IS_BYTECODE_INSTALLED:
+            logger.warning("bytecode library not available, cannot enable function entry for %s", function_key)
+            return False
+
+        try:
+            target_func, target_code = self._resolve_target(code, func, qualified_name)
+            if self._is_generator_code(target_code):
+                logger.debug(
+                    "Skipping function-entry injection for generator/async-generator %s",
+                    function_key,
+                )
+                return False
+
+            entry = {
+                "func": target_func,
+                "function_key": function_key,
+                "module_name": module_name,
+                "qualified_name": qualified_name,
+                "capture_config": capture_config,
+                "location_hash": location_hash,
+                "instrumentation_type": instrumentation_type,
+                "original_code": target_code,
+            }
+
+            new_code = self._create_code_with_function_entry_exit(target_code, entry)
+            if new_code is None:
+                logger.warning("Failed to inject function entry/exit bytecode for %s", function_key)
+                return False
+
+            self._install_rewrite(target_func, target_code, new_code, entry)
+            return True
+
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Failed to enable function entry for %s: %s", function_key, exc, exc_info=True)
+            return False
+
+    @staticmethod
+    def _resolve_target(code: CodeType, func: FunctionType, qualified_name: str):
+        target_path = getattr(code, "co_filename", None)
+        target_func = undecorated(func, qualified_name.split(".")[-1], target_path)
+        target_code = target_func.__code__ if hasattr(target_func, "__code__") else code
+        return target_func, target_code
+
+    @staticmethod
+    def _is_generator_code(code: CodeType) -> bool:
+        flags = _CO_GENERATOR | _CO_ASYNC_GENERATOR | _CO_ITERABLE_COROUTINE
+        return bool(code.co_flags & flags)
+
+    def _install_rewrite(
+        self,
+        target_func: FunctionType,
+        target_code: CodeType,
+        new_code: CodeType,
+        entry: Dict[str, Any],
+    ) -> None:
+        with self._lock:
+            func_id = id(target_func)
+            self._function_entries[func_id] = entry
+            target_func.__code__ = new_code
+            target_func.__globals__[_LOCALS_NAME] = locals
+            logger.debug(
+                "Enabled function entry for %s (func_id=%s, code_id=%s, type=%s)",
+                entry.get("function_key"),
+                func_id,
+                id(target_code),
+                entry.get("instrumentation_type"),
+            )
+
+    def disable_function_entry(self, code: CodeType, func: Optional[FunctionType] = None) -> None:
+        """Tear down function-entry hook and restore original bytecode."""
+        if not self._initialized:
+            return
+        try:
+            with self._lock:
+                target_func_id = None
+                if func is not None and id(func) in self._function_entries:
+                    target_func_id = id(func)
+                else:
+                    # Fallback: scan by code identity (matches rewritten
+                    # ``func.__code__`` or stored ``original_code``).
+                    for func_id, entry in self._function_entries.items():
+                        entry_func = entry.get("func")
+                        if entry_func is None:
+                            continue
+                        if entry_func.__code__ is code or entry.get("original_code") is code:
+                            target_func_id = func_id
+                            break
+                if target_func_id is None:
+                    return
+                entry = self._function_entries.pop(target_func_id)
+                target_func = entry["func"]
+                try:
+                    target_func.__code__ = entry["original_code"]
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    logger.warning(
+                        "Failed to restore __code__ for %s: %s",
+                        entry.get("function_key"),
+                        exc,
+                    )
+                logger.debug("Disabled function entry for %s", entry.get("function_key"))
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Failed to disable function entry: %s", exc, exc_info=True)
+
     def enable_breakpoints_for_function(
         self,
         code: CodeType,
@@ -283,128 +405,6 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error("Error disabling breakpoints for %s: %s", code.co_name, exc, exc_info=True)
 
-    # Function-entry instrumentation (PROBE / function-level BREAKPOINT).
-    # Mirrors SysMonitoringEngine. Rewrites ``func.__code__`` so every
-    # existing reference picks up the new bytecode on next invocation.
-
-    def enable_function_entry(  # pylint: disable=too-many-arguments
-        self,
-        code: CodeType,
-        func: FunctionType,
-        function_key: str,
-        module_name: str,
-        qualified_name: str,
-        capture_config: Optional[CaptureConfig] = None,
-        location_hash: Optional[str] = None,
-        instrumentation_type: Optional[str] = None,
-    ) -> bool:
-        """Inject function-entry/exit hooks. Returns True on success."""
-        if not self._initialized:
-            logger.warning("BytecodeInjectionEngine not initialized, cannot enable function entry")
-            return False
-        if not IS_BYTECODE_INSTALLED:
-            logger.warning("bytecode library not available, cannot enable function entry for %s", function_key)
-            return False
-
-        try:
-            target_func, target_code = self._resolve_target(code, func, qualified_name)
-            if self._is_generator_code(target_code):
-                logger.debug(
-                    "Skipping function-entry injection for generator/async-generator %s",
-                    function_key,
-                )
-                return False
-
-            entry = {
-                "func": target_func,
-                "function_key": function_key,
-                "module_name": module_name,
-                "qualified_name": qualified_name,
-                "capture_config": capture_config,
-                "location_hash": location_hash,
-                "instrumentation_type": instrumentation_type,
-                "original_code": target_code,
-            }
-
-            new_code = self._create_code_with_function_entry_exit(target_code, entry)
-            if new_code is None:
-                logger.warning("Failed to inject function entry/exit bytecode for %s", function_key)
-                return False
-
-            self._install_rewrite(target_func, target_code, new_code, entry)
-            return True
-
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            logger.error("Failed to enable function entry for %s: %s", function_key, exc, exc_info=True)
-            return False
-
-    @staticmethod
-    def _resolve_target(code: CodeType, func: FunctionType, qualified_name: str):
-        target_path = getattr(code, "co_filename", None)
-        target_func = undecorated(func, qualified_name.split(".")[-1], target_path)
-        target_code = target_func.__code__ if hasattr(target_func, "__code__") else code
-        return target_func, target_code
-
-    @staticmethod
-    def _is_generator_code(code: CodeType) -> bool:
-        flags = _CO_GENERATOR | _CO_ASYNC_GENERATOR | _CO_ITERABLE_COROUTINE
-        return bool(code.co_flags & flags)
-
-    def _install_rewrite(
-        self,
-        target_func: FunctionType,
-        target_code: CodeType,
-        new_code: CodeType,
-        entry: Dict[str, Any],
-    ) -> None:
-        with self._lock:
-            func_id = id(target_func)
-            self._function_entries[func_id] = entry
-            target_func.__code__ = new_code
-            target_func.__globals__[_LOCALS_NAME] = locals
-            logger.debug(
-                "Enabled function entry for %s (func_id=%s, code_id=%s, type=%s)",
-                entry.get("function_key"),
-                func_id,
-                id(target_code),
-                entry.get("instrumentation_type"),
-            )
-
-    def disable_function_entry(self, code: CodeType, func: Optional[FunctionType] = None) -> None:
-        """Tear down function-entry hook and restore original bytecode."""
-        if not self._initialized:
-            return
-        try:
-            with self._lock:
-                target_func_id = None
-                if func is not None and id(func) in self._function_entries:
-                    target_func_id = id(func)
-                else:
-                    # Fallback: scan by code identity (matches rewritten
-                    # ``func.__code__`` or stored ``original_code``).
-                    for func_id, entry in self._function_entries.items():
-                        entry_func = entry.get("func")
-                        if entry_func is None:
-                            continue
-                        if entry_func.__code__ is code or entry.get("original_code") is code:
-                            target_func_id = func_id
-                            break
-                if target_func_id is None:
-                    return
-                entry = self._function_entries.pop(target_func_id)
-                target_func = entry["func"]
-                try:
-                    target_func.__code__ = entry["original_code"]
-                except Exception as exc:  # pylint: disable=broad-exception-caught
-                    logger.warning(
-                        "Failed to restore __code__ for %s: %s",
-                        entry.get("function_key"),
-                        exc,
-                    )
-                logger.debug("Disabled function entry for %s", entry.get("function_key"))
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            logger.error("Failed to disable function entry: %s", exc, exc_info=True)
-
     def _function_entry_handler(self, entry: Dict[str, Any], local_vars: dict) -> tuple:
         """Entry callback. Returns ``(start_ns, entry_context)``; ``(0, None)`` to skip."""
         try:
@@ -536,7 +536,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             bc = Bytecode.from_code(code)
             new_bc = bc.copy()
             new_bc.clear()
-            new_bc.extend(self._weave_into_body(bc, instrs))
+            new_bc.extend(self._wrap_body_with_handlers(bc, instrs))
             return new_bc.to_code()
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error("Error injecting entry/exit bytecode for %s: %s", code.co_name, exc, exc_info=True)
@@ -567,36 +567,42 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         entry: Dict[str, Any],
         slots: "BytecodeInjectionEngine._LocalSlots",
     ) -> "Optional[BytecodeInjectionEngine._InjectionInstrs]":
-        entry_instrs = self._create_function_entry_instructions(entry, slots.start_ns, slots.entry_ctx)
-        exit_instrs = self._create_function_exit_instructions(entry, slots.retval, slots.start_ns, slots.entry_ctx)
-        exception_tail = self._create_function_exception_instructions(entry, slots.start_ns, slots.entry_ctx)
-        if entry_instrs is None or exit_instrs is None or exception_tail is None:
+        entry_builder = FunctionEntryBytecode.select_entry()
+        exit_builder = FunctionEntryBytecode.select_exit()
+        exception_builder = FunctionEntryBytecode.select_exception()
+        if not (entry_builder and exit_builder and exception_builder):
+            logger.error("Unsupported Python version for function-entry injection: %s", sys.version_info)
             return None
-        return BytecodeInjectionEngine._InjectionInstrs(
-            entry=entry_instrs,
-            exit=exit_instrs,
-            exception_tail=exception_tail,
-            except_label=Label(),
-        )
+        try:
+            return BytecodeInjectionEngine._InjectionInstrs(
+                entry=entry_builder(entry, self._function_entry_handler, slots.start_ns, slots.entry_ctx),
+                exit=exit_builder(entry, slots.retval, self._function_exit_handler, slots.start_ns, slots.entry_ctx),
+                exception_tail=exception_builder(
+                    entry, self._function_exception_handler, slots.start_ns, slots.entry_ctx
+                ),
+                except_label=Label(),
+            )
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Error building injection instructions: %s", exc, exc_info=True)
+            return None
 
     @staticmethod
-    def _weave_into_body(
+    def _wrap_body_with_handlers(
         bc: "Bytecode",
         instrs: "BytecodeInjectionEngine._InjectionInstrs",
     ) -> list:
-        """Splice entry/exit/exception around the user body.
+        """Wrap the user body with our entry, exit, and exception handlers.
 
         3.11+: insert entry AFTER the leading RESUME. 3.9/3.10: prepend
         and rely on SETUP_FINALLY for exception routing.
 
         On 3.11+, CPython's zero-cost exception model forbids nesting
-        TryBegin pseudo-instructions: the bytecode library raises
+        TryBegin pseudo-instructions — the bytecode library raises
         "TryBegin pseudo instructions cannot be nested" if our outer
-        region encloses any user-owned try/except. Mirroring Datadog's
-        ddtrace.internal.wrapping.context approach, we instead emit a
-        chain of *disjoint* TryBegin/TryEnd segments that all target
-        the same except_label — pausing our region across user-owned
-        try blocks and re-opening it afterwards.
+        region encloses any user-owned try/except. We work around this
+        by emitting a chain of *disjoint* TryBegin/TryEnd segments that
+        all target the same except_label, pausing our region across any
+        user-owned try blocks and re-opening it afterwards.
         """
         new_instrs: List[Any] = []
         entry_inserted = False
@@ -682,49 +688,6 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         while name in existing:
             name = "_" + name
         return name
-
-    def _create_function_entry_instructions(
-        self, entry: Dict[str, Any], start_ns_local: str, entry_ctx_local: str
-    ) -> Optional[list]:
-        builder = FunctionEntryBytecode.select_entry()
-        if builder is None:
-            logger.error("Unsupported Python version for entry injection: %s", sys.version_info)
-            return None
-        try:
-            return builder(entry, self._function_entry_handler, start_ns_local, entry_ctx_local)
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            logger.error("Error creating entry instructions: %s", exc, exc_info=True)
-            return None
-
-    def _create_function_exception_instructions(
-        self, entry: Dict[str, Any], start_ns_local: str, entry_ctx_local: str
-    ) -> Optional[list]:
-        builder = FunctionEntryBytecode.select_exception()
-        if builder is None:
-            logger.error("Unsupported Python version for exception injection: %s", sys.version_info)
-            return None
-        try:
-            return builder(entry, self._function_exception_handler, start_ns_local, entry_ctx_local)
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            logger.error("Error creating exception instructions: %s", exc, exc_info=True)
-            return None
-
-    def _create_function_exit_instructions(
-        self,
-        entry: Dict[str, Any],
-        retval_local: str,
-        start_ns_local: str,
-        entry_ctx_local: str,
-    ) -> Optional[list]:
-        builder = FunctionEntryBytecode.select_exit()
-        if builder is None:
-            logger.error("Unsupported Python version for exit injection: %s", sys.version_info)
-            return None
-        try:
-            return builder(entry, retval_local, self._function_exit_handler, start_ns_local, entry_ctx_local)
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            logger.error("Error creating exit instructions: %s", exc, exc_info=True)
-            return None
 
     @staticmethod
     def _get_service_name():
