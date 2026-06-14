@@ -567,9 +567,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         """Pick three non-colliding local names so recursion stays correct."""
         retval = self._unique_local(code, _RETVAL_LOCAL_NAME)
         start_ns = self._unique_local(code, _START_NS_LOCAL_NAME, taken={retval})
-        entry_ctx = self._unique_local(
-            code, _ENTRY_CTX_LOCAL_NAME, taken={retval, start_ns}
-        )
+        entry_ctx = self._unique_local(code, _ENTRY_CTX_LOCAL_NAME, taken={retval, start_ns})
         return BytecodeInjectionEngine._LocalSlots(retval=retval, start_ns=start_ns, entry_ctx=entry_ctx)
 
     def _build_injection_instrs(
@@ -578,12 +576,8 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         slots: "BytecodeInjectionEngine._LocalSlots",
     ) -> "Optional[BytecodeInjectionEngine._InjectionInstrs]":
         entry_instrs = self._create_function_entry_instructions(entry, slots.start_ns, slots.entry_ctx)
-        exit_instrs = self._create_function_exit_instructions(
-            entry, slots.retval, slots.start_ns, slots.entry_ctx
-        )
-        exception_tail = self._create_function_exception_instructions(
-            entry, slots.start_ns, slots.entry_ctx
-        )
+        exit_instrs = self._create_function_exit_instructions(entry, slots.retval, slots.start_ns, slots.entry_ctx)
+        exception_tail = self._create_function_exception_instructions(entry, slots.start_ns, slots.entry_ctx)
         if entry_instrs is None or exit_instrs is None or exception_tail is None:
             return None
         return BytecodeInjectionEngine._InjectionInstrs(
@@ -638,9 +632,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         if not entry_inserted:
             # 3.9/3.10: prepend entry. Pre-3.11 has no exception-table
             # markers, so simple wrap-and-close logic is sufficient.
-            new_instrs = list(instrs.entry) + [
-                TryBegin(instrs.except_label, push_lasti=False)
-            ] + new_instrs
+            new_instrs = list(instrs.entry) + [TryBegin(instrs.except_label, push_lasti=False)] + new_instrs
             new_instrs.append(TryEnd(new_instrs[len(instrs.entry)]))
             new_instrs.append(instrs.except_label)
             new_instrs.extend(instrs.exception_tail)
@@ -705,9 +697,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         builder = (
             create_function_entry_instructions_py311
             if sys.version_info >= (3, 11)
-            else create_function_entry_instructions_py39_py310
-            if sys.version_info >= (3, 9)
-            else None
+            else create_function_entry_instructions_py39_py310 if sys.version_info >= (3, 9) else None
         )
         if builder is None:
             logger.error("Unsupported Python version for entry injection: %s", sys.version_info)
@@ -724,9 +714,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         builder = (
             create_function_exception_instructions_py311
             if sys.version_info >= (3, 11)
-            else create_function_exception_instructions_py39_py310
-            if sys.version_info >= (3, 9)
-            else None
+            else create_function_exception_instructions_py39_py310 if sys.version_info >= (3, 9) else None
         )
         if builder is None:
             logger.error("Unsupported Python version for exception injection: %s", sys.version_info)
@@ -747,17 +735,13 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         builder = (
             create_function_exit_instructions_py311
             if sys.version_info >= (3, 11)
-            else create_function_exit_instructions_py39_py310
-            if sys.version_info >= (3, 9)
-            else None
+            else create_function_exit_instructions_py39_py310 if sys.version_info >= (3, 9) else None
         )
         if builder is None:
             logger.error("Unsupported Python version for exit injection: %s", sys.version_info)
             return None
         try:
-            return builder(
-                entry, retval_local, self._function_exit_handler, start_ns_local, entry_ctx_local
-            )
+            return builder(entry, retval_local, self._function_exit_handler, start_ns_local, entry_ctx_local)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error("Error creating exit instructions: %s", exc, exc_info=True)
             return None
@@ -1000,9 +984,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         builder = (
             create_breakpoint_instructions_py311
             if sys.version_info >= (3, 11)
-            else create_breakpoint_instructions_py39_py310
-            if sys.version_info >= (3, 9)
-            else None
+            else create_breakpoint_instructions_py39_py310 if sys.version_info >= (3, 9) else None
         )
         if builder is None:
             logger.error("Unsupported Python version: %s", sys.version_info)

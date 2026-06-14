@@ -453,9 +453,7 @@ class SysMonitoringEngine(InstrumentationEngine):
             return None
 
     @staticmethod
-    def _capture_entry_arguments(
-        code: CodeType, capture_config: Optional[CaptureConfig]
-    ) -> Optional[CapturedContext]:
+    def _capture_entry_arguments(code: CodeType, capture_config: Optional[CaptureConfig]) -> Optional[CapturedContext]:
         """
         Capture function arguments from the calling frame.
 

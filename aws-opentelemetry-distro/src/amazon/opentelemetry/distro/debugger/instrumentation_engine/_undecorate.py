@@ -124,7 +124,7 @@ def undecorated(func: Any, name: str, path: Optional[str] = None) -> Any:
         # Closure cells — captures the inner user function for plain decorators
         # that don't use functools.wraps.
         if isinstance(obj, FunctionType):
-            for cell in (obj.__closure__ or ()):
+            for cell in obj.__closure__ or ():
                 try:
                     cell_obj = cell.cell_contents
                 except ValueError:

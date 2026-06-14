@@ -17,9 +17,6 @@ from typing import Any, Callable, Dict, Optional, Set
 class InstrumentationEngine(ABC):
     """Abstract base class for instrumentation engines."""
 
-    def __init__(self) -> None:
-        self._supports_function_entry: bool = False
-
     @abstractmethod
     def initialize(self, hit_count_callback: Optional[Callable[[str], bool]] = None) -> None:
         """
@@ -54,10 +51,6 @@ class InstrumentationEngine(ABC):
             line_location_hashes: Optional mapping of line_number -> location_hash for span events
             line_capture_configs: Optional mapping of line_number -> CaptureConfig for capture filtering
         """
-
-    def supports_function_entry(self) -> bool:
-        """True if this engine implements ``enable_function_entry``."""
-        return getattr(self, "_supports_function_entry", False)
 
     def enable_function_entry(  # pylint: disable=too-many-arguments
         self,

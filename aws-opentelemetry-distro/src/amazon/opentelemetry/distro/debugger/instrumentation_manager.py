@@ -407,7 +407,7 @@ class InstrumentationManager:
 
         Returns (target_func, target_code) on success, (None, None) on refusal.
         """
-        if not (self._engine and 0 in bp_set.breakpoints and hasattr(self._engine, "enable_function_entry")):
+        if not (self._engine and 0 in bp_set.breakpoints):
             return None, None
 
         try:
@@ -593,7 +593,7 @@ class InstrumentationManager:
                     # Don't re-raise - continue with function restoration
 
             # Disable function-entry hook on the original code object.
-            if self._engine and bp_set.code_object and hasattr(self._engine, "disable_function_entry"):
+            if self._engine and bp_set.code_object:
                 try:
                     # Pass func as well — BytecodeInjectionEngine keys its
                     # function-entry state by id(func), not id(code).
