@@ -38,6 +38,7 @@ from amazon.opentelemetry.distro.debugger._stack_utils import capture_stack_fram
 from amazon.opentelemetry.distro.debugger.instrumentation_engine._bytecode_templates import (
     FunctionEntryBytecode,
     LineBreakpointBytecode,
+    _FunctionEntryContextManager,
 )
 from amazon.opentelemetry.distro.debugger.instrumentation_engine._instrumentation_engine import InstrumentationEngine
 from amazon.opentelemetry.distro.debugger.instrumentation_engine._undecorate import undecorated
@@ -549,6 +550,11 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         exit: list
         exception_tail: list
         except_label: Any
+        # Pre-3.11 only: synthesized CM baked as LOAD_CONST + the spliced
+        # head/return-prelude. None on 3.11+.
+        cm: Any = None
+        cm_head: Optional[list] = None
+        cm_return_splice: Optional[list] = None
 
     def _allocate_local_slots(self, code: CodeType) -> "BytecodeInjectionEngine._LocalSlots":
         """Pick three non-colliding local names so recursion stays correct."""
@@ -562,20 +568,54 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         entry: Dict[str, Any],
         slots: "BytecodeInjectionEngine._LocalSlots",
     ) -> "Optional[BytecodeInjectionEngine._InjectionInstrs]":
-        entry_builder = FunctionEntryBytecode.select_entry()
-        exit_builder = FunctionEntryBytecode.select_exit()
-        exception_builder = FunctionEntryBytecode.select_exception()
-        if not (entry_builder and exit_builder and exception_builder):
-            logger.error("Unsupported Python version for function-entry injection: %s", sys.version_info)
-            return None
         try:
+            except_label = Label()
+            if sys.version_info >= (3, 11):
+                entry_builder = FunctionEntryBytecode.select_entry()
+                exit_builder = FunctionEntryBytecode.select_exit()
+                exception_builder = FunctionEntryBytecode.select_exception()
+                if not (entry_builder and exit_builder and exception_builder):
+                    logger.error(
+                        "Unsupported Python version for function-entry injection: %s",
+                        sys.version_info,
+                    )
+                    return None
+                return BytecodeInjectionEngine._InjectionInstrs(
+                    entry=entry_builder(entry, self._function_entry_handler, slots.start_ns, slots.entry_ctx),
+                    exit=exit_builder(
+                        entry, slots.retval, self._function_exit_handler, slots.start_ns, slots.entry_ctx
+                    ),
+                    exception_tail=exception_builder(
+                        entry, self._function_exception_handler, slots.start_ns, slots.entry_ctx
+                    ),
+                    except_label=except_label,
+                )
+
+            # Pre-3.11: SETUP_WITH-based wrapping. Bake a single CM as
+            # LOAD_CONST. The CM owns the entry/exit/exception callbacks
+            # and stashes (start_ns, entry_ctx) in a ContextVar, so the
+            # local slots used by the 3.11 path aren't needed here.
+            templates = FunctionEntryBytecode.select_pre311()
+            if templates is None:
+                logger.error(
+                    "Unsupported Python version for function-entry injection: %s",
+                    sys.version_info,
+                )
+                return None
+            cm = _FunctionEntryContextManager(
+                entry=entry,
+                entry_handler=self._function_entry_handler,
+                exit_handler=self._function_exit_handler,
+                exception_handler=self._function_exception_handler,
+            )
             return BytecodeInjectionEngine._InjectionInstrs(
-                entry=entry_builder(entry, self._function_entry_handler, slots.start_ns, slots.entry_ctx),
-                exit=exit_builder(entry, slots.retval, self._function_exit_handler, slots.start_ns, slots.entry_ctx),
-                exception_tail=exception_builder(
-                    entry, self._function_exception_handler, slots.start_ns, slots.entry_ctx
-                ),
-                except_label=Label(),
+                entry=[],
+                exit=[],
+                exception_tail=templates["exception"](),
+                except_label=except_label,
+                cm=cm,
+                cm_head=templates["setup"](cm, except_label),
+                cm_return_splice=templates["return_"](cm),
             )
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error("Error building injection instructions: %s", exc, exc_info=True)
@@ -623,10 +663,22 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             new_instrs.append(instr)
 
         if not entry_inserted:
-            # 3.9/3.10: prepend entry. Pre-3.11 has no exception-table
-            # markers, so simple wrap-and-close logic is sufficient.
-            new_instrs = list(instrs.entry) + [TryBegin(instrs.except_label, push_lasti=False)] + new_instrs
-            new_instrs.append(TryEnd(new_instrs[len(instrs.entry)]))
+            # 3.9/3.10: SETUP_WITH-based wrapping driven by a synthesized
+            # context manager baked as LOAD_CONST. Walk the original body
+            # and splice the return prelude (POP_BLOCK + cm.__return__)
+            # before each RETURN_VALUE; emit cm_head at the very top and
+            # the WITH_EXCEPT_START + RERAISE tail after the except label.
+            assert (
+                instrs.cm_head is not None and instrs.cm_return_splice is not None
+            ), "pre-3.11 path requires cm_head and cm_return_splice on _InjectionInstrs"
+            cm_body: List[Any] = []
+            for orig in bc:
+                if isinstance(orig, Instr) and orig.name == "RETURN_VALUE":
+                    cm_body.extend(instrs.cm_return_splice)
+                    cm_body.append(orig)
+                    continue
+                cm_body.append(orig)
+            new_instrs = list(instrs.cm_head) + cm_body
             new_instrs.append(instrs.except_label)
             new_instrs.extend(instrs.exception_tail)
             return new_instrs
@@ -636,28 +688,28 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         first_try_begin = TryBegin(instrs.except_label, push_lasti=False)
         last_try_begin = first_try_begin
 
-        i = 0
-        while i < len(new_instrs):
-            item = new_instrs[i]
+        idx = 0
+        while idx < len(new_instrs):
+            item = new_instrs[idx]
             if isinstance(item, TryBegin) and last_try_begin is not None:
                 # User region opens — close ours just before it.
-                new_instrs.insert(i, TryEnd(last_try_begin))
+                new_instrs.insert(idx, TryEnd(last_try_begin))
                 last_try_begin = None
-                i += 2  # skip the TryEnd we inserted and the user's TryBegin
+                idx += 2  # skip the TryEnd we inserted and the user's TryBegin
                 continue
             if isinstance(item, TryEnd) and last_try_begin is None:
                 # User region closes — re-open ours immediately after,
                 # but only if there's another real instruction following
                 # (otherwise the segment would be empty).
-                j = i + 1
-                while j < len(new_instrs) and not isinstance(new_instrs[j], TryBegin):
-                    if isinstance(new_instrs[j], Instr):
+                jdx = idx + 1
+                while jdx < len(new_instrs) and not isinstance(new_instrs[jdx], TryBegin):
+                    if isinstance(new_instrs[jdx], Instr):
                         last_try_begin = TryBegin(instrs.except_label, push_lasti=False)
-                        new_instrs.insert(i + 1, last_try_begin)
-                        i += 1  # account for inserted TryBegin
+                        new_instrs.insert(idx + 1, last_try_begin)
+                        idx += 1  # account for inserted TryBegin
                         break
-                    j += 1
-            i += 1
+                    jdx += 1
+            idx += 1
 
         # Open the leading wrapper region right after the entry splice
         # (entry block sits at indices 1..len(entry) just past RESUME).
