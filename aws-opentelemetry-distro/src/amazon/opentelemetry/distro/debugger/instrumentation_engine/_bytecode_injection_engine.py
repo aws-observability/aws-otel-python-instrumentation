@@ -34,19 +34,11 @@ from amazon.opentelemetry.distro.debugger._snapshot_models import (
 )
 from amazon.opentelemetry.distro.debugger._snapshot_serializer import SnapshotSerializer
 from amazon.opentelemetry.distro.debugger._stack_utils import capture_stack_frames
-from amazon.opentelemetry.distro.debugger.instrumentation_engine._function_entry_bytecode import (
-    create_function_entry_instructions_py39_py310,
-    create_function_entry_instructions_py311,
-    create_function_exception_instructions_py39_py310,
-    create_function_exception_instructions_py311,
-    create_function_exit_instructions_py39_py310,
-    create_function_exit_instructions_py311,
+from amazon.opentelemetry.distro.debugger.instrumentation_engine._bytecode_templates import (
+    FunctionEntryBytecode,
+    LineBreakpointBytecode,
 )
 from amazon.opentelemetry.distro.debugger.instrumentation_engine._instrumentation_engine import InstrumentationEngine
-from amazon.opentelemetry.distro.debugger.instrumentation_engine._line_breakpoint_bytecode import (
-    create_breakpoint_instructions_py39_py310,
-    create_breakpoint_instructions_py311,
-)
 from amazon.opentelemetry.distro.debugger.instrumentation_engine._undecorate import undecorated
 
 logger = logging.getLogger(__name__)
@@ -694,11 +686,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
     def _create_function_entry_instructions(
         self, entry: Dict[str, Any], start_ns_local: str, entry_ctx_local: str
     ) -> Optional[list]:
-        builder = (
-            create_function_entry_instructions_py311
-            if sys.version_info >= (3, 11)
-            else create_function_entry_instructions_py39_py310 if sys.version_info >= (3, 9) else None
-        )
+        builder = FunctionEntryBytecode.select_entry()
         if builder is None:
             logger.error("Unsupported Python version for entry injection: %s", sys.version_info)
             return None
@@ -711,11 +699,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
     def _create_function_exception_instructions(
         self, entry: Dict[str, Any], start_ns_local: str, entry_ctx_local: str
     ) -> Optional[list]:
-        builder = (
-            create_function_exception_instructions_py311
-            if sys.version_info >= (3, 11)
-            else create_function_exception_instructions_py39_py310 if sys.version_info >= (3, 9) else None
-        )
+        builder = FunctionEntryBytecode.select_exception()
         if builder is None:
             logger.error("Unsupported Python version for exception injection: %s", sys.version_info)
             return None
@@ -732,11 +716,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         start_ns_local: str,
         entry_ctx_local: str,
     ) -> Optional[list]:
-        builder = (
-            create_function_exit_instructions_py311
-            if sys.version_info >= (3, 11)
-            else create_function_exit_instructions_py39_py310 if sys.version_info >= (3, 9) else None
-        )
+        builder = FunctionEntryBytecode.select_exit()
         if builder is None:
             logger.error("Unsupported Python version for exit injection: %s", sys.version_info)
             return None
@@ -981,11 +961,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         Returns:
             List of bytecode.Instr objects, or None on error
         """
-        builder = (
-            create_breakpoint_instructions_py311
-            if sys.version_info >= (3, 11)
-            else create_breakpoint_instructions_py39_py310 if sys.version_info >= (3, 9) else None
-        )
+        builder = LineBreakpointBytecode.select()
         if builder is None:
             logger.error("Unsupported Python version: %s", sys.version_info)
             return None
