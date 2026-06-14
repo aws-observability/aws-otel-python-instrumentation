@@ -23,6 +23,7 @@ from amazon.opentelemetry.distro.debugger._data_models import (
     DEFAULT_MAX_STRING_LENGTH,
     CaptureConfig,
 )
+from amazon.opentelemetry.distro.debugger._snapshot_factory import build_function_entry_snapshot, emit_snapshot
 from amazon.opentelemetry.distro.debugger._snapshot_models import (
     CapturedContext,
     Captures,
@@ -205,38 +206,6 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             logger.error("Failed to enable function entry for %s: %s", function_key, exc, exc_info=True)
             return False
 
-    @staticmethod
-    def _resolve_target(code: CodeType, func: FunctionType, qualified_name: str):
-        target_path = getattr(code, "co_filename", None)
-        target_func = undecorated(func, qualified_name.split(".")[-1], target_path)
-        target_code = target_func.__code__ if hasattr(target_func, "__code__") else code
-        return target_func, target_code
-
-    @staticmethod
-    def _is_generator_code(code: CodeType) -> bool:
-        flags = _CO_GENERATOR | _CO_ASYNC_GENERATOR | _CO_ITERABLE_COROUTINE
-        return bool(code.co_flags & flags)
-
-    def _install_rewrite(
-        self,
-        target_func: FunctionType,
-        target_code: CodeType,
-        new_code: CodeType,
-        entry: Dict[str, Any],
-    ) -> None:
-        with self._lock:
-            func_id = id(target_func)
-            self._function_entries[func_id] = entry
-            target_func.__code__ = new_code
-            target_func.__globals__[_LOCALS_NAME] = locals
-            logger.debug(
-                "Enabled function entry for %s (func_id=%s, code_id=%s, type=%s)",
-                entry.get("function_key"),
-                func_id,
-                id(target_code),
-                entry.get("instrumentation_type"),
-            )
-
     def disable_function_entry(self, code: CodeType, func: Optional[FunctionType] = None) -> None:
         """Tear down function-entry hook and restore original bytecode."""
         if not self._initialized:
@@ -271,6 +240,38 @@ class BytecodeInjectionEngine(InstrumentationEngine):
                 logger.debug("Disabled function entry for %s", entry.get("function_key"))
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error("Failed to disable function entry: %s", exc, exc_info=True)
+
+    @staticmethod
+    def _resolve_target(code: CodeType, func: FunctionType, qualified_name: str):
+        target_path = getattr(code, "co_filename", None)
+        target_func = undecorated(func, qualified_name.split(".")[-1], target_path)
+        target_code = target_func.__code__ if hasattr(target_func, "__code__") else code
+        return target_func, target_code
+
+    @staticmethod
+    def _is_generator_code(code: CodeType) -> bool:
+        flags = _CO_GENERATOR | _CO_ASYNC_GENERATOR | _CO_ITERABLE_COROUTINE
+        return bool(code.co_flags & flags)
+
+    def _install_rewrite(
+        self,
+        target_func: FunctionType,
+        target_code: CodeType,
+        new_code: CodeType,
+        entry: Dict[str, Any],
+    ) -> None:
+        with self._lock:
+            func_id = id(target_func)
+            self._function_entries[func_id] = entry
+            target_func.__code__ = new_code
+            target_func.__globals__[_LOCALS_NAME] = locals
+            logger.debug(
+                "Enabled function entry for %s (func_id=%s, code_id=%s, type=%s)",
+                entry.get("function_key"),
+                func_id,
+                id(target_code),
+                entry.get("instrumentation_type"),
+            )
 
     def enable_breakpoints_for_function(
         self,
@@ -510,12 +511,6 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             if self._hit_count_callback is not None:
                 if not self._hit_count_callback(f"{function_key}:0"):
                     return
-
-            # pylint: disable=import-outside-toplevel
-            from amazon.opentelemetry.distro.debugger._snapshot_factory import (
-                build_function_entry_snapshot,
-                emit_snapshot,
-            )
 
             snapshot = build_function_entry_snapshot(
                 entry=entry,
