@@ -535,13 +535,20 @@ class BytecodeInjectionEngine(InstrumentationEngine):
     ) -> list:
         """Splice entry/exit/exception around the user body.
 
-        3.11+: insert entry AFTER the leading RESUME. 3.9/3.10: prepend.
-        Close the try region BEFORE each RETURN_VALUE; append exception
-        tail at the end so escaping exceptions route through it.
+        3.11+: insert entry AFTER the leading RESUME. 3.9/3.10: prepend
+        and rely on SETUP_FINALLY for exception routing.
+
+        On 3.11+, CPython's zero-cost exception model forbids nesting
+        TryBegin pseudo-instructions: the bytecode library raises
+        "TryBegin pseudo instructions cannot be nested" if our outer
+        region encloses any user-owned try/except. Mirroring Datadog's
+        ddtrace.internal.wrapping.context approach, we instead emit a
+        chain of *disjoint* TryBegin/TryEnd segments that all target
+        the same except_label — pausing our region across user-owned
+        try blocks and re-opening it afterwards.
         """
         new_instrs: List[Any] = []
         entry_inserted = False
-        current_try_begin = None
 
         for instr in bc:
             if (
@@ -552,26 +559,66 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             ):
                 new_instrs.append(instr)
                 new_instrs.extend(instrs.entry)
-                current_try_begin = TryBegin(instrs.except_label, push_lasti=False)
-                new_instrs.append(current_try_begin)
                 entry_inserted = True
                 continue
+            # Prefix each RETURN_VALUE with the exit splice; don't close
+            # the wrapper's try region here. The disjoint-segment walk
+            # below handles try-region bookkeeping.
             if isinstance(instr, Instr) and instr.name == "RETURN_VALUE":
-                if current_try_begin is not None:
-                    new_instrs.append(TryEnd(current_try_begin))
-                    current_try_begin = None
                 new_instrs.extend(instrs.exit)
                 new_instrs.append(instr)
                 continue
             new_instrs.append(instr)
 
         if not entry_inserted:
-            # 3.9/3.10: prepend entry and open the try region.
-            current_try_begin = TryBegin(instrs.except_label, push_lasti=False)
-            new_instrs = list(instrs.entry) + [current_try_begin] + new_instrs
+            # 3.9/3.10: prepend entry. Pre-3.11 has no exception-table
+            # markers, so simple wrap-and-close logic is sufficient.
+            new_instrs = list(instrs.entry) + [
+                TryBegin(instrs.except_label, push_lasti=False)
+            ] + new_instrs
+            new_instrs.append(TryEnd(new_instrs[len(instrs.entry)]))
+            new_instrs.append(instrs.except_label)
+            new_instrs.extend(instrs.exception_tail)
+            return new_instrs
 
-        if current_try_begin is not None:
-            new_instrs.append(TryEnd(current_try_begin))
+        # 3.11+: walk the spliced body and emit disjoint try segments
+        # that step around any user-owned TryBegin/TryEnd pairs.
+        first_try_begin = TryBegin(instrs.except_label, push_lasti=False)
+        last_try_begin = first_try_begin
+
+        i = 0
+        while i < len(new_instrs):
+            item = new_instrs[i]
+            if isinstance(item, TryBegin) and last_try_begin is not None:
+                # User region opens — close ours just before it.
+                new_instrs.insert(i, TryEnd(last_try_begin))
+                last_try_begin = None
+                i += 2  # skip the TryEnd we inserted and the user's TryBegin
+                continue
+            if isinstance(item, TryEnd) and last_try_begin is None:
+                # User region closes — re-open ours immediately after,
+                # but only if there's another real instruction following
+                # (otherwise the segment would be empty).
+                j = i + 1
+                while j < len(new_instrs) and not isinstance(new_instrs[j], TryBegin):
+                    if isinstance(new_instrs[j], Instr):
+                        last_try_begin = TryBegin(instrs.except_label, push_lasti=False)
+                        new_instrs.insert(i + 1, last_try_begin)
+                        i += 1  # account for inserted TryBegin
+                        break
+                    j += 1
+            i += 1
+
+        # Open the leading wrapper region right after the entry splice
+        # (entry block sits at indices 1..len(entry) just past RESUME).
+        # Inserting at index 0 is also valid; placing it after entry
+        # keeps entry-handler exceptions from being re-routed through
+        # the exception_tail.
+        insert_at = 1 + len(instrs.entry)  # past RESUME + entry
+        new_instrs.insert(insert_at, first_try_begin)
+
+        if last_try_begin is not None:
+            new_instrs.append(TryEnd(last_try_begin))
 
         new_instrs.append(instrs.except_label)
         new_instrs.extend(instrs.exception_tail)
