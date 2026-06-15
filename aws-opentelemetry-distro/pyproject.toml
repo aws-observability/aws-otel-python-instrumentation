@@ -46,7 +46,6 @@ dependencies = [
   "opentelemetry-instrumentation-aiopg == 0.63b1",
   "opentelemetry-instrumentation-asgi == 0.63b1",
   "opentelemetry-instrumentation-asyncpg == 0.63b1",
-  "opentelemetry-instrumentation-boto == 0.63b1",
   "opentelemetry-instrumentation-boto3sqs == 0.63b1",
   "opentelemetry-instrumentation-botocore == 0.63b1",
   "opentelemetry-instrumentation-celery == 0.63b1",
