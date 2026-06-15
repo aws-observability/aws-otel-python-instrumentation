@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "AWS OpenTelemetry Python Distro"
 readme = "README.rst"
 license = {text = "Apache-2.0"}
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [
   { name = "Amazon Web Services" },
 ]
@@ -18,7 +18,6 @@ classifiers = [
   "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
@@ -92,9 +91,9 @@ dependencies = [
   # (debugger/_data_models.py). Required on all supported Python versions, hence a core dependency.
   "python-dateutil >= 2.7.0",
   # Used by Dynamic Instrumentation's bytecode-injection engine for line-level instrumentation on
-  # Python 3.9-3.11 (3.12+ uses the built-in sys.monitoring instead, so the marker excludes it there).
+  # Python 3.10-3.11 (3.12+ uses the built-in sys.monitoring instead, so the marker excludes it there).
   # A core dependency so `pip install aws-opentelemetry-distro` gives a fully working feature with no extras.
-  "bytecode; python_version >= '3.9' and python_version < '3.12'",
+  "bytecode; python_version >= '3.10' and python_version < '3.12'",
 ]
 
 [project.optional-dependencies]

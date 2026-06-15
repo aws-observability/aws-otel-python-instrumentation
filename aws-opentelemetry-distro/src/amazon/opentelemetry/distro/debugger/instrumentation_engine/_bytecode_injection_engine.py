@@ -5,7 +5,7 @@
 Bytecode injection engine for live debugger.
 
 This module handles the injection of breakpoint calls into Python functions
-using bytecode injection for Python 3.9-3.11.
+using bytecode injection for Python 3.10-3.11.
 """
 
 import inspect
@@ -69,7 +69,7 @@ class InjectionState:
 
 class BytecodeInjectionEngine(InstrumentationEngine):
     """
-    Bytecode injection engine for line-level debugging on Python 3.9-3.11.
+    Bytecode injection engine for line-level debugging on Python 3.10-3.11.
 
     Safety guarantees:
     - Never crashes the application (comprehensive exception handling)
@@ -93,7 +93,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         if not IS_BYTECODE_INSTALLED:
             logger.warning(
                 "bytecode library not available. "
-                "Debugger will not function on Python 3.9-3.11. "
+                "Debugger will not function on Python 3.10-3.11. "
                 "Install with: pip install bytecode"
             )
 
@@ -121,8 +121,8 @@ class BytecodeInjectionEngine(InstrumentationEngine):
 
     @staticmethod
     def supports_runtime() -> bool:
-        """Check if bytecode injection is supported (Python 3.9-3.11)."""
-        return (3, 9) <= sys.version_info < (3, 12) and IS_BYTECODE_INSTALLED
+        """Check if bytecode injection is supported (Python 3.10-3.11)."""
+        return (3, 10) <= sys.version_info < (3, 12) and IS_BYTECODE_INSTALLED
 
     def enable_breakpoints_for_function(
         self,
@@ -494,8 +494,8 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         try:
             if sys.version_info >= (3, 11):
                 return self._create_breakpoint_instructions_py311(function_key, line_number)
-            if sys.version_info >= (3, 9):
-                return self._create_breakpoint_instructions_py39_py310(function_key, line_number)
+            if sys.version_info >= (3, 10):
+                return self._create_breakpoint_instructions_py310(function_key, line_number)
             logger.error("Unsupported Python version: %s", sys.version_info)
             return None
         except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -537,14 +537,14 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         ]
 
     @staticmethod
-    def _create_breakpoint_instructions_py39_py310(function_key: str, line_number: int) -> list:
+    def _create_breakpoint_instructions_py310(function_key: str, line_number: int) -> list:
         """
-        Create Python 3.9/3.10-specific breakpoint instructions.
+        Create Python 3.10-specific breakpoint instructions.
 
         Generates bytecode that calls:
         _breakpoint_handler(function_key, line_number, locals())
 
-        Python 3.9/3.10 calling convention:
+        Python 3.10 calling convention:
         - LOAD_GLOBAL (load _breakpoint_handler)
         - LOAD_CONST (load arguments)
         - LOAD_GLOBAL + CALL_FUNCTION (call locals())

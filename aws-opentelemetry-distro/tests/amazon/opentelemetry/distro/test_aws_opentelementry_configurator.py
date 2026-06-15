@@ -129,7 +129,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        # Explicitly shut down meter provider to avoid I/O errors on Python 3.9 with gevent
+        # Explicitly shut down meter provider to avoid I/O errors with gevent
         # This ensures ConsoleMetricExporter is properly closed before Python cleanup
         try:
             meter_provider = get_meter_provider()
