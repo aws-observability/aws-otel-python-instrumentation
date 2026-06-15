@@ -351,7 +351,7 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
 
         # No span context — snapshot should still be created, hit count called
         with mock.patch(
-            "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+            "amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine.get_snapshot_emitter"
         ) as mock_get_writer:
             mock_writer = mock.MagicMock()
             mock_get_writer.return_value = mock_writer
@@ -386,7 +386,7 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
         )
 
         with mock.patch(
-            "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+            "amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine.get_snapshot_emitter"
         ) as mock_get_writer:
             mock_writer = mock.MagicMock()
             mock_get_writer.return_value = mock_writer
@@ -442,7 +442,7 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
         )
 
         with mock.patch(
-            "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+            "amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine.get_snapshot_emitter"
         ) as mock_get_writer:
             mock_writer = mock.MagicMock()
             mock_get_writer.return_value = mock_writer
@@ -496,7 +496,7 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
         )
 
         with mock.patch(
-            "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+            "amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine.get_snapshot_emitter"
         ) as mock_get_writer:
             mock_writer = mock.MagicMock()
             mock_get_writer.return_value = mock_writer
@@ -654,7 +654,7 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
         )
 
         with mock.patch(
-            "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+            "amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine.get_snapshot_emitter"
         ) as mock_get_writer:
             mock_writer = mock.MagicMock()
             mock_get_writer.return_value = mock_writer
@@ -693,7 +693,7 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
         )
 
         with mock.patch(
-            "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+            "amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine.get_snapshot_emitter"
         ) as mock_get_writer:
             mock_writer = mock.MagicMock()
             mock_get_writer.return_value = mock_writer
@@ -726,7 +726,7 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
         )
 
         with mock.patch(
-            "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+            "amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine.get_snapshot_emitter"
         ) as mock_get_writer:
             mock_writer = mock.MagicMock()
             mock_get_writer.return_value = mock_writer
@@ -761,7 +761,7 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
         )
 
         with mock.patch(
-            "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+            "amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine.get_snapshot_emitter"
         ) as mock_get_writer:
             mock_writer = mock.MagicMock()
             mock_get_writer.return_value = mock_writer

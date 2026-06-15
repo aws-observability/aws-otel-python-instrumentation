@@ -181,7 +181,7 @@ class TestBytecodeInjectionEngine(InstrumentationEngineTestBase):
         tracer, exporter = self._create_test_tracer()
 
         with unittest.mock.patch(
-            "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+            "amazon.opentelemetry.distro.debugger.instrumentation_engine._bytecode_injection_engine.get_snapshot_emitter"  # noqa: E501
         ) as mock_get_writer:
             mock_writer = Mock()
             mock_get_writer.return_value = mock_writer
@@ -231,7 +231,7 @@ class TestBytecodeInjectionEngine(InstrumentationEngineTestBase):
 
                 # Execute and verify function still works correctly
                 with unittest.mock.patch(
-                    "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+                    "amazon.opentelemetry.distro.debugger.instrumentation_engine._bytecode_injection_engine.get_snapshot_emitter"  # noqa: E501
                 ) as mock_get_writer:
                     mock_writer = Mock()
                     mock_get_writer.return_value = mock_writer
@@ -260,7 +260,7 @@ class TestBytecodeInjectionEngine(InstrumentationEngineTestBase):
         self.callback.return_value = True
 
         with unittest.mock.patch(
-            "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+            "amazon.opentelemetry.distro.debugger.instrumentation_engine._bytecode_injection_engine.get_snapshot_emitter"  # noqa: E501
         ) as mock_get_writer:
             mock_writer = Mock()
             mock_get_writer.return_value = mock_writer
@@ -414,7 +414,7 @@ class TestBytecodeInjectionEngine(InstrumentationEngineTestBase):
         self.engine._capture_configs[("test.func", 10)] = capture_config
 
         with unittest.mock.patch(
-            "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+            "amazon.opentelemetry.distro.debugger.instrumentation_engine._bytecode_injection_engine.get_snapshot_emitter"  # noqa: E501
         ) as mock_get_writer:
             mock_writer = Mock()
             mock_get_writer.return_value = mock_writer
@@ -440,7 +440,7 @@ class TestBytecodeInjectionEngine(InstrumentationEngineTestBase):
         self.engine._capture_configs[("test.func", 10)] = capture_config
 
         with unittest.mock.patch(
-            "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+            "amazon.opentelemetry.distro.debugger.instrumentation_engine._bytecode_injection_engine.get_snapshot_emitter"  # noqa: E501
         ) as mock_get_writer:
             mock_writer = Mock()
             mock_get_writer.return_value = mock_writer
@@ -460,7 +460,7 @@ class TestBytecodeInjectionEngine(InstrumentationEngineTestBase):
         self.engine._capture_configs[("test.func", 10)] = capture_config
 
         with unittest.mock.patch(
-            "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+            "amazon.opentelemetry.distro.debugger.instrumentation_engine._bytecode_injection_engine.get_snapshot_emitter"  # noqa: E501
         ) as mock_get_writer:
             mock_writer = Mock()
             mock_get_writer.return_value = mock_writer
@@ -482,7 +482,7 @@ class TestBytecodeInjectionEngine(InstrumentationEngineTestBase):
         self.engine._capture_configs[("test.func", 10)] = capture_config
 
         with unittest.mock.patch(
-            "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+            "amazon.opentelemetry.distro.debugger.instrumentation_engine._bytecode_injection_engine.get_snapshot_emitter"  # noqa: E501
         ) as mock_get_writer:
             mock_writer = Mock()
             mock_get_writer.return_value = mock_writer

@@ -807,9 +807,6 @@ class SysMonitoringEngine(InstrumentationEngine):
 
             # Emit snapshot (rate limit already checked at top of handler)
             try:
-                # pylint: disable=import-outside-toplevel
-                from amazon.opentelemetry.distro.debugger._function_wrapper import get_snapshot_emitter
-
                 emitter = get_snapshot_emitter()
                 if emitter:
                     emitter.emit_snapshot(snapshot)

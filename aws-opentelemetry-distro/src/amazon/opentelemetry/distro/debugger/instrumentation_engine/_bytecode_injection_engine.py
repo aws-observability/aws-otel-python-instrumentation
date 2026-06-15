@@ -65,7 +65,11 @@ _FUNCTION_HANDLER_NAME = "_function_event_handler"
 # yet; they fall through to the sync wrapper and only fire on the
 # generator-construction call.
 _DECLINE_BYTECODE_REWRITE_MASK = (
-    inspect.CO_GENERATOR | inspect.CO_COROUTINE | inspect.CO_ASYNC_GENERATOR | inspect.CO_ITERABLE_COROUTINE
+    # pylint: disable=no-member
+    inspect.CO_GENERATOR
+    | inspect.CO_COROUTINE
+    | inspect.CO_ASYNC_GENERATOR
+    | inspect.CO_ITERABLE_COROUTINE
 )
 
 # Import bytecode classes if available
@@ -637,9 +641,6 @@ class BytecodeInjectionEngine(InstrumentationEngine):
 
             # Emit snapshot (rate limit already checked at top of handler)
             try:
-                # pylint: disable=import-outside-toplevel
-                from amazon.opentelemetry.distro.debugger._function_wrapper import get_snapshot_emitter
-
                 emitter = get_snapshot_emitter()
                 if emitter:
                     emitter.emit_snapshot(snapshot)
@@ -1114,9 +1115,6 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             return None
 
         try:
-            # pylint: disable=import-outside-toplevel
-            from bytecode import Label
-
             bc = Bytecode.from_code(code)
 
             # Allocate three uniquely-named local slots. Pre-init them to None
