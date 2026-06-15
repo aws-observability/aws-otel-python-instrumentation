@@ -7,7 +7,10 @@ import urllib.request
 
 os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
 
-_OTEL_SCHEMA_BASE = "https://opentelemetry.io/docs/specs/semconv"
+_OTEL_SEMCONV_VERSION = "v1.41.0"
+_OTEL_SCHEMA_BASE = (
+    f"https://raw.githubusercontent.com/open-telemetry/semantic-conventions/{_OTEL_SEMCONV_VERSION}/docs"
+)
 _SCHEMA_CACHE: dict = {}
 
 
