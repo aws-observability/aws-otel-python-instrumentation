@@ -592,11 +592,13 @@ class TestAwsOpenTelemetryDistro(TestCase):
         mock_super.assert_called_once_with(ep)
 
     def test_unknown_mode_falls_back_to_auto(self):
-        """An unrecognized value should warn and behave like auto."""
+        """An unrecognized value should warn (with the raw casing) and behave like auto."""
         ep = self._make_ep("aws_langchain", "aws-opentelemetry-distro")
         third_party = [self._make_ep("langchain", "openinference-instrumentation-langchain")]
-        mock_super = self._load_instrumentor_with_agent(ep, third_party_eps=third_party, mode="bogus")
+        with self.assertLogs("amazon.opentelemetry.distro.aws_opentelemetry_distro", level="WARNING") as cm:
+            mock_super = self._load_instrumentor_with_agent(ep, third_party_eps=third_party, mode="BoGuS")
         mock_super.assert_not_called()
+        self.assertTrue(any("'BoGuS'" in line for line in cm.output), cm.output)
 
     def test_mode_value_is_case_insensitive(self):
         """Values like ENABLED / Disabled / Auto should be accepted."""

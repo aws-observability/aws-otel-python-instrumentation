@@ -279,12 +279,13 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
         if not is_native:
             return False
 
-        mode = os.environ.get(AWS_AGENTIC_INSTRUMENTATION, "auto").lower()
+        raw_mode = os.environ.get(AWS_AGENTIC_INSTRUMENTATION, "auto")
+        mode = raw_mode.lower()
         if mode not in ("auto", "enabled", "disabled"):
             _logger.warning(
                 "Unknown %s=%r — falling back to 'auto'. Valid values: auto, enabled, disabled.",
                 AWS_AGENTIC_INSTRUMENTATION,
-                mode,
+                raw_mode,
             )
             mode = "auto"
 
