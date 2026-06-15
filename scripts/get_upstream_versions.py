@@ -9,10 +9,11 @@ import sys
 
 import requests
 
-# AWS-specific packages with independent versioning
-AWS_DEPS = [
+# Packages with independent versioning (not tied to opentelemetry-python or contrib)
+INDEPENDENT_DEPS = [
     "opentelemetry-sdk-extension-aws",
     "opentelemetry-propagator-aws-xray",
+    "opentelemetry-instrumentation-openai-agents-v2",
 ]
 
 
@@ -44,10 +45,10 @@ def get_latest_otel_versions():
         sys.exit(1)
 
 
-def get_latest_aws_versions():
-    """Get latest versions of AWS dependencies using pip."""
+def get_latest_independent_versions():
+    """Get latest versions of independently-versioned dependencies using pip."""
     versions = {}
-    for dep in AWS_DEPS:
+    for dep in INDEPENDENT_DEPS:
         try:
             result = subprocess.run(["pip", "index", "versions", dep], capture_output=True, text=True, check=True)
             # Parse output like "package (1.2.3)" from first line
@@ -63,13 +64,12 @@ def get_latest_aws_versions():
 
 def main():
     otel_python_version, otel_contrib_version = get_latest_otel_versions()
-    aws_versions = get_latest_aws_versions()
+    independent_versions = get_latest_independent_versions()
 
     print(f"OTEL_PYTHON_VERSION={otel_python_version}")
     print(f"OTEL_CONTRIB_VERSION={otel_contrib_version}")
 
-    # Print AWS dependency versions
-    for dep, version in aws_versions.items():
+    for dep, version in independent_versions.items():
         env_name = dep.replace("-", "_").upper() + "_VERSION"
         print(f"{env_name}={version}")
 
@@ -79,8 +79,7 @@ def main():
             output_file.write(f"otel_python_version={otel_python_version}\n")
             output_file.write(f"otel_contrib_version={otel_contrib_version}\n")
 
-            # Write AWS dependency versions
-            for dep, version in aws_versions.items():
+            for dep, version in independent_versions.items():
                 env_name = dep.replace("-", "_").lower() + "_version"
                 output_file.write(f"{env_name}={version}\n")
 
