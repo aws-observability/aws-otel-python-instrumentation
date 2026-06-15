@@ -1131,23 +1131,25 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             taken.add(retval_slot)
 
             handler_label = Label()
-            prologue = self._build_function_prologue(function_key, start_ns_slot, entry_ctx_slot, retval_slot)
+            prologue = self._build_function_prologue_39_310(function_key, start_ns_slot, entry_ctx_slot, retval_slot)
             prologue.append(Instr("SETUP_FINALLY", handler_label))
-            prologue.extend(self._build_function_entry_call(function_key, start_ns_slot, entry_ctx_slot))
+            prologue.extend(self._build_function_entry_call_39_310(function_key, start_ns_slot, entry_ctx_slot))
 
             # Walk user instructions; replace RETURN_VALUE with exit-call sequence.
             new_instructions = list(prologue)
             for instr in bc:
                 if hasattr(instr, "name") and instr.name == "RETURN_VALUE":
                     new_instructions.extend(
-                        self._build_function_exit_call(function_key, start_ns_slot, entry_ctx_slot, retval_slot)
+                        self._build_function_exit_call_39_310(function_key, start_ns_slot, entry_ctx_slot, retval_slot)
                     )
                 else:
                     new_instructions.append(instr)
 
             # Append unwind handler at end.
             new_instructions.append(handler_label)
-            new_instructions.extend(self._build_function_unwind_call(function_key, start_ns_slot, entry_ctx_slot))
+            new_instructions.extend(
+                self._build_function_unwind_call_39_310(function_key, start_ns_slot, entry_ctx_slot)
+            )
 
             new_bc = bc.copy()
             new_bc.clear()
@@ -1158,16 +1160,23 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             logger.error("Error wrapping function %s with function-level hooks: %s", code.co_name, exc, exc_info=True)
             return None
 
+    # Bytecode template helpers, paired by event family. Each family has a
+    # 3.9/3.10 builder (uses LOAD_GLOBAL with a string arg + CALL_FUNCTION;
+    # SETUP_FINALLY-based exception path) and a 3.11 builder (uses
+    # LOAD_GLOBAL with a (push_null, name) tuple arg + PRECALL/CALL pair;
+    # PEP 657 exception_table-based exception path).
+
+    # ---- prologue: pre-init the three injected slots to None so the unwind
+    # hook's LOAD_FAST is safe even if the entry hook crashes before storing.
+
     @staticmethod
-    def _build_function_prologue(
+    def _build_function_prologue_39_310(
         function_key: str,
         start_ns_slot: str,
         entry_ctx_slot: str,
         retval_slot: str,
     ) -> list:
-        """Pre-init the three injected slots to None so unwind LOAD_FAST is safe
-        even if the entry hook crashes before storing them. function_key is
-        unused but accepted for symmetry with the other builders."""
+        """function_key is unused but accepted for symmetry with the other builders."""
         del function_key
         return [
             Instr("LOAD_CONST", None),
@@ -1179,8 +1188,21 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         ]
 
     @staticmethod
-    def _build_function_entry_call(function_key: str, start_ns_slot: str, entry_ctx_slot: str) -> list:
-        """Emit: tup = handler(function_key, "entry", locals()); start_ns, entry_ctx = tup."""
+    def _build_function_prologue_311(start_ns_slot: str, entry_ctx_slot: str, retval_slot: str) -> list:
+        return [
+            Instr("LOAD_CONST", None),
+            Instr("STORE_FAST", start_ns_slot),
+            Instr("LOAD_CONST", None),
+            Instr("STORE_FAST", entry_ctx_slot),
+            Instr("LOAD_CONST", None),
+            Instr("STORE_FAST", retval_slot),
+        ]
+
+    # ---- entry call: tup = handler(function_key, "entry", locals());
+    # start_ns, entry_ctx = tup.
+
+    @staticmethod
+    def _build_function_entry_call_39_310(function_key: str, start_ns_slot: str, entry_ctx_slot: str) -> list:
         return [
             Instr("LOAD_GLOBAL", _FUNCTION_HANDLER_NAME),
             Instr("LOAD_CONST", function_key),
@@ -1194,15 +1216,37 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         ]
 
     @staticmethod
-    def _build_function_exit_call(
+    def _build_function_entry_call_311(function_key: str, start_ns_slot: str, entry_ctx_slot: str) -> list:
+        """LOAD_GLOBAL takes a TUPLE oparg (push_null: bool, name: str); the
+        True flag pushes NULL implicitly so no separate PUSH_NULL is needed
+        for the locals() builtin call."""
+        return [
+            Instr("PUSH_NULL"),
+            Instr("LOAD_GLOBAL", (False, _FUNCTION_HANDLER_NAME)),
+            Instr("LOAD_CONST", function_key),
+            Instr("LOAD_CONST", "entry"),
+            Instr("LOAD_GLOBAL", (True, _LOCALS_NAME)),
+            Instr("PRECALL", 0),
+            Instr("CALL", 0),
+            Instr("PRECALL", 3),
+            Instr("CALL", 3),
+            Instr("UNPACK_SEQUENCE", 2),
+            Instr("STORE_FAST", start_ns_slot),
+            Instr("STORE_FAST", entry_ctx_slot),
+        ]
+
+    # ---- exit call: replace RETURN_VALUE with store retval, call exit hook,
+    # reload retval, RETURN_VALUE.
+
+    @staticmethod
+    def _build_function_exit_call_39_310(
         function_key: str,
         start_ns_slot: str,
         entry_ctx_slot: str,
         retval_slot: str,
     ) -> list:
-        """Replace RETURN_VALUE with: store retval, call exit hook, POP_BLOCK,
-        re-load retval, RETURN_VALUE. POP_BLOCK must come BEFORE the final
-        RETURN_VALUE so the SETUP_FINALLY block is unwound on the normal path."""
+        """POP_BLOCK must come BEFORE the final RETURN_VALUE so the
+        SETUP_FINALLY block is unwound on the normal path."""
         return [
             Instr("STORE_FAST", retval_slot),
             Instr("LOAD_GLOBAL", _FUNCTION_HANDLER_NAME),
@@ -1219,7 +1263,34 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         ]
 
     @staticmethod
-    def _build_function_unwind_call(function_key: str, start_ns_slot: str, entry_ctx_slot: str) -> list:
+    def _build_function_exit_call_311(
+        function_key: str,
+        start_ns_slot: str,
+        entry_ctx_slot: str,
+        retval_slot: str,
+    ) -> list:
+        """No POP_BLOCK on 3.11 — protected regions live in co_exceptiontable,
+        not on a runtime block stack."""
+        return [
+            Instr("STORE_FAST", retval_slot),
+            Instr("PUSH_NULL"),
+            Instr("LOAD_GLOBAL", (False, _FUNCTION_HANDLER_NAME)),
+            Instr("LOAD_CONST", function_key),
+            Instr("LOAD_CONST", "exit"),
+            Instr("LOAD_FAST", retval_slot),
+            Instr("LOAD_FAST", start_ns_slot),
+            Instr("LOAD_FAST", entry_ctx_slot),
+            Instr("PRECALL", 5),
+            Instr("CALL", 5),
+            Instr("POP_TOP"),
+            Instr("LOAD_FAST", retval_slot),
+            Instr("RETURN_VALUE"),
+        ]
+
+    # ---- unwind call: handler body — call unwind hook then re-raise.
+
+    @staticmethod
+    def _build_function_unwind_call_39_310(function_key: str, start_ns_slot: str, entry_ctx_slot: str) -> list:
         """SETUP_FINALLY handler body: call unwind hook then RERAISE.
 
         3.9: RERAISE has no oparg.
@@ -1240,78 +1311,8 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             instrs.append(Instr("RERAISE"))
         return instrs
 
-    # Function-level instrumentation bytecode rewrite (3.11).
-    #
-    # 3.11 removed SETUP_FINALLY / block stack: protected regions are described
-    # by PEP 657's co_exceptiontable. The high-level bytecode API forbids
-    # nested TryBegin, so we use a "splice walk": every time a user TryBegin is
-    # encountered we close our outer protected region with a TryEnd before it,
-    # and on the matching user TryEnd we reopen a fresh outer TryBegin after.
-    # The resulting layout is N adjacent (never nested) outer regions all
-    # targeting one shared except-label foot.
-
     @staticmethod
-    def _build_function_prologue_311(start_ns_slot: str, entry_ctx_slot: str, retval_slot: str) -> list:
-        """Pre-init the three injected slots to None so unwind LOAD_FAST is safe
-        even if the entry hook crashes before storing them."""
-        return [
-            Instr("LOAD_CONST", None),
-            Instr("STORE_FAST", start_ns_slot),
-            Instr("LOAD_CONST", None),
-            Instr("STORE_FAST", entry_ctx_slot),
-            Instr("LOAD_CONST", None),
-            Instr("STORE_FAST", retval_slot),
-        ]
-
-    @staticmethod
-    def _build_function_entry_call_311(function_key: str, start_ns_slot: str, entry_ctx_slot: str) -> list:
-        """3.11 calling convention: PUSH_NULL + LOAD_GLOBAL((push_null, name))
-        + args + PRECALL n + CALL n. LOAD_GLOBAL takes a TUPLE oparg
-        (push_null: bool, name: str); the True flag pushes NULL implicitly so
-        no separate PUSH_NULL is needed for the locals() builtin call."""
-        return [
-            Instr("PUSH_NULL"),
-            Instr("LOAD_GLOBAL", (False, _FUNCTION_HANDLER_NAME)),
-            Instr("LOAD_CONST", function_key),
-            Instr("LOAD_CONST", "entry"),
-            Instr("LOAD_GLOBAL", (True, _LOCALS_NAME)),
-            Instr("PRECALL", 0),
-            Instr("CALL", 0),
-            Instr("PRECALL", 3),
-            Instr("CALL", 3),
-            Instr("UNPACK_SEQUENCE", 2),
-            Instr("STORE_FAST", start_ns_slot),
-            Instr("STORE_FAST", entry_ctx_slot),
-        ]
-
-    @staticmethod
-    def _build_function_exit_call_311(
-        function_key: str,
-        start_ns_slot: str,
-        entry_ctx_slot: str,
-        retval_slot: str,
-    ) -> list:
-        """Replace RETURN_VALUE with: store retval, call exit hook, reload
-        retval, RETURN_VALUE. No POP_BLOCK on 3.11 — protected regions live in
-        co_exceptiontable, not on a runtime block stack."""
-        return [
-            Instr("STORE_FAST", retval_slot),
-            Instr("PUSH_NULL"),
-            Instr("LOAD_GLOBAL", (False, _FUNCTION_HANDLER_NAME)),
-            Instr("LOAD_CONST", function_key),
-            Instr("LOAD_CONST", "exit"),
-            Instr("LOAD_FAST", retval_slot),
-            Instr("LOAD_FAST", start_ns_slot),
-            Instr("LOAD_FAST", entry_ctx_slot),
-            Instr("PRECALL", 5),
-            Instr("CALL", 5),
-            Instr("POP_TOP"),
-            Instr("LOAD_FAST", retval_slot),
-            Instr("RETURN_VALUE"),
-        ]
-
-    @staticmethod
-    def _build_function_unwind_foot_311(function_key: str, start_ns_slot: str, entry_ctx_slot: str) -> list:
+    def _build_function_unwind_call_311(function_key: str, start_ns_slot: str, entry_ctx_slot: str) -> list:
         """Shared except-label foot for the N adjacent outer protected regions.
 
         With push_lasti=True the handler is entered with stack [..., lasti, exc].
@@ -1438,7 +1439,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
 
             # Handler label + foot.
             new_instructions.append(handler_label)
-            new_instructions.extend(self._build_function_unwind_foot_311(function_key, start_ns_slot, entry_ctx_slot))
+            new_instructions.extend(self._build_function_unwind_call_311(function_key, start_ns_slot, entry_ctx_slot))
 
             new_bc = bc.copy()
             new_bc.clear()
