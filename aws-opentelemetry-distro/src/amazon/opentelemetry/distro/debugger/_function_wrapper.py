@@ -95,6 +95,30 @@ def set_snapshot_emitter(emitter):
     _snapshot_emitter = emitter
 
 
+class _FlaskPatcher:
+    """Patches Flask app.view_functions entries that reference the original function."""
+
+    name = "flask"
+
+    def patch(self, module, original_func: Callable, new_func: Callable) -> None:
+        FunctionWrapper._patch_flask_view_functions(module, original_func, new_func)
+
+
+class _DjangoPatcher:
+    """Patches Django URLPattern.callback entries reachable from the resolver tree."""
+
+    name = "django"
+
+    def patch(self, module, original_func: Callable, new_func: Callable) -> None:
+        FunctionWrapper._patch_django_url_patterns(module, original_func, new_func)
+
+
+# Registry the dispatcher iterates. Adding a new framework: write a small
+# class with ``name`` and ``patch(module, original, new)``, and append an
+# instance here.
+_FRAMEWORK_PATCHERS = (_FlaskPatcher(), _DjangoPatcher())
+
+
 class FunctionWrapper:
     """
     Handles runtime modification of function objects with comprehensive error handling.
@@ -802,17 +826,12 @@ class FunctionWrapper:
             original_func: The original function that was replaced
             new_func: The new wrapper function
         """
-        try:
-            # Flask: patch view_functions on any Flask app instances in the module
-            FunctionWrapper._patch_flask_view_functions(module, original_func, new_func)
-        except Exception as exc:
-            # Never let framework patching failures break instrumentation
-            logger.debug("Flask reference patching encountered an error: %s", exc)
-        try:
-            # Django: patch URLPattern.callback in the resolver tree
-            FunctionWrapper._patch_django_url_patterns(module, original_func, new_func)
-        except Exception as exc:
-            logger.debug("Django reference patching encountered an error: %s", exc)
+        for patcher in _FRAMEWORK_PATCHERS:
+            try:
+                patcher.patch(module, original_func, new_func)
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                # Never let framework patching failures break instrumentation.
+                logger.debug("%s reference patching encountered an error: %s", patcher.name, exc)
 
     @staticmethod
     def _patch_flask_view_functions(module, original_func: Callable, new_func: Callable) -> None:
@@ -847,11 +866,11 @@ class FunctionWrapper:
                         attr, attr_name, original_func, new_func, func_name, func_module
                     )
                 except Exception as exc:
-                    logger.warning("Error checking module attribute '%s' for Flask app: %s", attr_name, exc)
+                    logger.debug("Error checking module attribute '%s' for Flask app: %s", attr_name, exc)
                     continue
 
         except Exception as exc:
-            logger.warning("Error patching Flask view_functions: %s", exc)
+            logger.debug("Error patching Flask view_functions: %s", exc)
 
     @staticmethod
     def _patch_single_flask_app(flask_app, app_name, original_func, new_func, func_name, func_module=None):
@@ -938,7 +957,11 @@ class FunctionWrapper:
 
             func_name = getattr(original_func, "__name__", "unknown")
             func_module = getattr(original_func, "__module__", None)
+            # Track resolver and pattern ids separately. The same URLPattern
+            # can be reached from both the get_resolver(None) walk and the
+            # module-scan fallback; pattern dedup avoids a no-op double write.
             visited: set = set()
+            visited_patterns: set = set()
 
             # Authoritative source: Django's root resolver (the same instance the
             # framework dispatches through at request time).
@@ -958,6 +981,7 @@ class FunctionWrapper:
                     URLPattern,
                     URLResolver,
                     visited,
+                    visited_patterns,
                 )
 
             # Belt-and-suspenders: scan the passed-in module for top-level
@@ -970,7 +994,9 @@ class FunctionWrapper:
                     continue
                 try:
                     if isinstance(attr, URLPattern):
-                        FunctionWrapper._maybe_patch_pattern(attr, original_func, new_func, func_name, func_module)
+                        FunctionWrapper._maybe_patch_pattern(
+                            attr, original_func, new_func, func_name, func_module, visited_patterns
+                        )
                     elif isinstance(attr, URLResolver):
                         FunctionWrapper._patch_single_resolver(
                             attr,
@@ -982,12 +1008,13 @@ class FunctionWrapper:
                             URLPattern,
                             URLResolver,
                             visited,
+                            visited_patterns,
                         )
                     elif isinstance(attr, (list, tuple)) and attr_name == "urlpatterns":
                         for item in attr:
                             if isinstance(item, URLPattern):
                                 FunctionWrapper._maybe_patch_pattern(
-                                    item, original_func, new_func, func_name, func_module
+                                    item, original_func, new_func, func_name, func_module, visited_patterns
                                 )
                             elif isinstance(item, URLResolver):
                                 FunctionWrapper._patch_single_resolver(
@@ -1000,6 +1027,7 @@ class FunctionWrapper:
                                     URLPattern,
                                     URLResolver,
                                     visited,
+                                    visited_patterns,
                                 )
                 except Exception as exc:  # pylint: disable=broad-exception-caught
                     logger.debug("Error checking module attribute '%s' for Django patterns: %s", attr_name, exc)
@@ -1019,10 +1047,13 @@ class FunctionWrapper:
         url_pattern_cls,
         url_resolver_cls,
         visited: set,
+        visited_patterns: set,
     ) -> None:
         """Recursively walk a URLResolver, patching matching URLPattern.callback
         entries and descending through ``include()``-nested children. ``visited``
-        protects against cycles (id(resolver))."""
+        protects against resolver cycles (``id(resolver)``); ``visited_patterns``
+        prevents double-patching the same URLPattern when reachable from both
+        the get_resolver(None) walk and the module-scan fallback."""
         if id(resolver) in visited:
             return
         visited.add(id(resolver))
@@ -1035,7 +1066,9 @@ class FunctionWrapper:
         for item in patterns:
             try:
                 if isinstance(item, url_pattern_cls):
-                    FunctionWrapper._maybe_patch_pattern(item, original_func, new_func, func_name, func_module)
+                    FunctionWrapper._maybe_patch_pattern(
+                        item, original_func, new_func, func_name, func_module, visited_patterns
+                    )
                 elif isinstance(item, url_resolver_cls):
                     FunctionWrapper._patch_single_resolver(
                         item,
@@ -1047,23 +1080,29 @@ class FunctionWrapper:
                         url_pattern_cls,
                         url_resolver_cls,
                         visited,
+                        visited_patterns,
                     )
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 logger.debug("Error walking pattern in resolver '%s': %s", resolver_label, exc)
                 continue
 
     @staticmethod
-    def _maybe_patch_pattern(
+    def _maybe_patch_pattern(  # pylint: disable=too-many-arguments
         pattern,
         original_func: Callable,
         new_func: Callable,
         func_name: str,
         func_module,
+        visited_patterns: set,
     ) -> None:
         """Patch a single URLPattern.callback if it matches by identity, or by
         ``__name__`` + ``__module__`` (handles ``functools.wraps``-preserving
         decorators like ``@login_required`` and OTel auto-instrumentation
-        wrappers)."""
+        wrappers). Skips patterns already visited so multiple discovery roots
+        don't double-patch."""
+        if id(pattern) in visited_patterns:
+            return
+        visited_patterns.add(id(pattern))
         try:
             cb = getattr(pattern, "callback", None)
         except Exception as exc:  # pylint: disable=broad-exception-caught

@@ -55,6 +55,18 @@ def _configure_django_if_needed():
         return False
 
 
+def _isolated_from_get_resolver():
+    """Context manager that forces ``django.urls.get_resolver`` to raise.
+
+    Tests that exercise the module-scan fallback path of
+    ``_patch_django_url_patterns`` use this to make the path under test
+    explicit: with this active, the patcher's ``get_resolver(None)``
+    attempt fails and discovery falls through to scanning the passed-in
+    module. Without it, these tests would silently rely on the dummy
+    ROOT_URLCONF being unimportable, which is opaque and brittle."""
+    return patch("django.urls.get_resolver", side_effect=RuntimeError("test isolation: get_resolver disabled"))
+
+
 class TestDjangoUrlPatternsPatching(unittest.TestCase):
     """Tests for _patch_django_url_patterns and its integration."""
 
@@ -82,7 +94,8 @@ class TestDjangoUrlPatternsPatching(unittest.TestCase):
         urlpattern = path("my-view/", original)
         mod = _make_module(self.module_name, urlpatterns=[urlpattern])
 
-        FunctionWrapper._patch_django_url_patterns(mod, original, wrapper)
+        with _isolated_from_get_resolver():
+            FunctionWrapper._patch_django_url_patterns(mod, original, wrapper)
 
         self.assertIs(urlpattern.callback, wrapper)
 
@@ -108,7 +121,8 @@ class TestDjangoUrlPatternsPatching(unittest.TestCase):
         urlpattern = path("orders/", otel_wrapped)
         mod = _make_module(self.module_name, urlpatterns=[urlpattern])
 
-        FunctionWrapper._patch_django_url_patterns(mod, original, di_wrapper)
+        with _isolated_from_get_resolver():
+            FunctionWrapper._patch_django_url_patterns(mod, original, di_wrapper)
 
         self.assertIs(urlpattern.callback, di_wrapper)
 
@@ -136,7 +150,8 @@ class TestDjangoUrlPatternsPatching(unittest.TestCase):
         mod = _make_module(self.module_name, some_func=original, x=42, y="hello")
 
         # Should not raise
-        FunctionWrapper._patch_django_url_patterns(mod, original, wrapper)
+        with _isolated_from_get_resolver():
+            FunctionWrapper._patch_django_url_patterns(mod, original, wrapper)
 
     def test_patch_django_function_not_in_url_patterns(self):
         """When function is not a registered view, urlpatterns is unchanged."""
@@ -156,7 +171,8 @@ class TestDjangoUrlPatternsPatching(unittest.TestCase):
         urlpattern = path("other/", other_view)
         mod = _make_module(self.module_name, urlpatterns=[urlpattern])
 
-        FunctionWrapper._patch_django_url_patterns(mod, original, wrapper)
+        with _isolated_from_get_resolver():
+            FunctionWrapper._patch_django_url_patterns(mod, original, wrapper)
 
         # other_view should be unchanged
         self.assertIs(urlpattern.callback, other_view)
@@ -257,7 +273,8 @@ class TestDjangoUrlPatternsPatching(unittest.TestCase):
         urlpattern = path("decorated/", decorator_wrapper)
         mod = _make_module(self.module_name, urlpatterns=[urlpattern])
 
-        FunctionWrapper._patch_django_url_patterns(mod, my_view, wrapper)
+        with _isolated_from_get_resolver():
+            FunctionWrapper._patch_django_url_patterns(mod, my_view, wrapper)
 
         self.assertIs(urlpattern.callback, wrapper)
 
@@ -289,7 +306,8 @@ class TestDjangoUrlPatternsPatching(unittest.TestCase):
         urlpattern = path("cbv/", cbv_callable)
         mod = _make_module(self.module_name, urlpatterns=[urlpattern])
 
-        FunctionWrapper._patch_django_url_patterns(mod, original, wrapper)
+        with _isolated_from_get_resolver():
+            FunctionWrapper._patch_django_url_patterns(mod, original, wrapper)
 
         # The as_view closure is NOT replaced — closure's __name__ is 'view'.
         self.assertIs(urlpattern.callback, cbv_callable)
@@ -316,7 +334,8 @@ class TestDjangoUrlPatternsPatching(unittest.TestCase):
         mod = _make_module(self.module_name, broken_resolver=broken_resolver)
 
         # Should not raise.
-        FunctionWrapper._patch_django_url_patterns(mod, original, wrapper)
+        with _isolated_from_get_resolver():
+            FunctionWrapper._patch_django_url_patterns(mod, original, wrapper)
 
     def test_patch_django_get_resolver_unconfigured_swallowed(self):
         """When get_resolver(None) raises (e.g. ImproperlyConfigured before
