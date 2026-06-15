@@ -59,34 +59,34 @@ class TestEndpointResolution(unittest.TestCase):
 
 
 class TestEnsureInitialized(unittest.TestCase):
-    """Tests for lazy initialization in _ensure_initialized."""
+    """Tests for lazy initialization in initialize."""
 
     @mock.patch.object(emitter_module, "BatchLogRecordProcessor")
     @mock.patch.object(emitter_module, "OTLPLogExporter")
     def test_initialization_succeeds_and_is_cached(self, mock_exporter, mock_processor):
         emitter = SnapshotOtlpEmitter(logs_endpoint="http://localhost:4316/v1/logs")
-        self.assertTrue(emitter._ensure_initialized())
+        self.assertTrue(emitter.initialize())
         self.assertIsNotNone(emitter._event_logger)
         # Exporter created with the resolved endpoint.
         mock_exporter.assert_called_once_with(endpoint="http://localhost:4316/v1/logs")
 
         # Second call short-circuits without rebuilding the exporter.
-        self.assertTrue(emitter._ensure_initialized())
+        self.assertTrue(emitter.initialize())
         mock_exporter.assert_called_once()
 
     @mock.patch.object(emitter_module, "OTLPLogExporter", side_effect=RuntimeError("boom"))
     def test_initialization_failure_is_permanent(self, mock_exporter):
         emitter = SnapshotOtlpEmitter()
-        self.assertFalse(emitter._ensure_initialized())
+        self.assertFalse(emitter.initialize())
         self.assertTrue(emitter._init_failed)
         # Subsequent calls short-circuit on the failure flag without retrying.
-        self.assertFalse(emitter._ensure_initialized())
+        self.assertFalse(emitter.initialize())
         mock_exporter.assert_called_once()
 
     def test_init_failed_flag_short_circuits(self):
         emitter = SnapshotOtlpEmitter()
         emitter._init_failed = True
-        self.assertFalse(emitter._ensure_initialized())
+        self.assertFalse(emitter.initialize())
 
     @mock.patch.dict(os.environ, {"OTEL_SERVICE_NAME": "my-service"})
     @mock.patch.object(emitter_module, "BatchLogRecordProcessor")
@@ -95,7 +95,7 @@ class TestEnsureInitialized(unittest.TestCase):
         # Regression: default resource must run OTel detectors so OTEL_SERVICE_NAME
         # propagates onto OTLP-exported LogRecords. Resource.get_empty() skipped them.
         emitter = SnapshotOtlpEmitter()
-        self.assertTrue(emitter._ensure_initialized())
+        self.assertTrue(emitter.initialize())
         self.assertEqual(emitter._logger_provider.resource.attributes.get("service.name"), "my-service")
 
     @mock.patch.object(emitter_module, "BatchLogRecordProcessor")
@@ -105,7 +105,7 @@ class TestEnsureInitialized(unittest.TestCase):
 
         explicit = Resource.create({"service.name": "explicit-service"})
         emitter = SnapshotOtlpEmitter(resource=explicit)
-        self.assertTrue(emitter._ensure_initialized())
+        self.assertTrue(emitter.initialize())
         self.assertEqual(emitter._logger_provider.resource.attributes.get("service.name"), "explicit-service")
 
     @mock.patch.dict(
@@ -121,7 +121,7 @@ class TestEnsureInitialized(unittest.TestCase):
         # Regression: OTEL_RESOURCE_ATTRIBUTES values must reach the OTLP-exported
         # resource alongside OTEL_SERVICE_NAME. Resource.get_empty() bypassed both.
         emitter = SnapshotOtlpEmitter()
-        self.assertTrue(emitter._ensure_initialized())
+        self.assertTrue(emitter.initialize())
         attrs = emitter._logger_provider.resource.attributes
         self.assertEqual(attrs.get("service.name"), "env-service")
         self.assertEqual(attrs.get("deployment.environment.name"), "ec2:my-asg")
@@ -140,7 +140,7 @@ class TestEnsureInitialized(unittest.TestCase):
         # OTEL_SERVICE_NAME wins over service.name in OTEL_RESOURCE_ATTRIBUTES,
         # per the OTel resource spec. Confirm we don't accidentally invert that.
         emitter = SnapshotOtlpEmitter()
-        self.assertTrue(emitter._ensure_initialized())
+        self.assertTrue(emitter.initialize())
         self.assertEqual(emitter._logger_provider.resource.attributes.get("service.name"), "explicit-wins")
 
 

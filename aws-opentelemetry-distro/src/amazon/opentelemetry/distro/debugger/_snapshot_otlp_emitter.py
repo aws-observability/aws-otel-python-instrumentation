@@ -59,25 +59,19 @@ class SnapshotOtlpEmitter:
         self._lock = threading.Lock()
 
     def initialize(self) -> bool:
-        """Eagerly initialize the LoggerProvider and EventLogger.
+        """Initialize the LoggerProvider and EventLogger if not already done.
 
-        Should be called once at SDK startup from a normal user thread, NOT
-        lazily from a callback. ``BatchLogRecordProcessor`` spawns a daemon
-        worker thread on construction, and ``Resource.create()`` chains
-        imports / resource detection that can raise
-        ``RuntimeError("cannot schedule new futures after interpreter
-        shutdown")`` when invoked from a ``sys.monitoring`` callback thread.
+        Idempotent and thread-safe via double-checked locking. Call once
+        eagerly at SDK startup from a normal user thread; `emit_snapshot` also
+        calls this lazily on first use as a backstop. The eager call exists
+        because ``BatchLogRecordProcessor`` spawns a daemon worker on
+        construction and ``Resource.create()`` chains imports / resource
+        detection — both can raise ``RuntimeError("cannot schedule new futures
+        after interpreter shutdown")`` when invoked from a ``sys.monitoring``
+        callback thread during shutdown.
 
-        Returns True on success or already-initialized; False on failure
-        (in which case subsequent ``emit_snapshot`` calls will no-op).
-        """
-        return self._ensure_initialized()
-
-    def _ensure_initialized(self):
-        """Lazily initialize the LoggerProvider and EventLogger on first use.
-
-        Uses double-checked locking to be thread-safe without contention on the
-        common path (already initialized).
+        Returns True on success or already-initialized; False on failure (in
+        which case subsequent ``emit_snapshot`` calls will no-op).
         """
         if self._event_logger is not None:
             return True
@@ -120,7 +114,7 @@ class SnapshotOtlpEmitter:
             snapshot: Snapshot object with captured data
             config: Optional BreakpointConfiguration for instrumentation_type attribute
         """
-        if not self._ensure_initialized():
+        if not self.initialize():
             return
 
         try:
