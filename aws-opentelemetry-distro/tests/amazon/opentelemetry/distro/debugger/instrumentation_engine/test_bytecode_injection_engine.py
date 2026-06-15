@@ -498,8 +498,8 @@ class TestBytecodeInjectionEngine(InstrumentationEngineTestBase):
 
 
 @unittest.skipIf(
-    not ((3, 9) <= sys.version_info < (3, 11)),
-    "Function-level bytecode rewrite supported on Python 3.9-3.10 only (3.11 lands in a follow-up commit)",
+    not ((3, 9) <= sys.version_info < (3, 12)),
+    "Function-level bytecode rewrite supported on Python 3.9-3.11 only",
 )
 class TestBytecodeInjectionEngineFunctionLevel(unittest.TestCase):
     """End-to-end tests for function-level instrumentation via bytecode rewrite."""

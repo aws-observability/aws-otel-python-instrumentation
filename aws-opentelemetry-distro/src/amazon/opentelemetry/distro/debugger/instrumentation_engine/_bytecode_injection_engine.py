@@ -58,10 +58,13 @@ _REFUSAL_MASK = inspect.CO_GENERATOR | inspect.CO_COROUTINE | inspect.CO_ASYNC_G
 
 # Import bytecode classes if available
 if IS_BYTECODE_INSTALLED:
-    from bytecode import Bytecode, Instr
+    from bytecode import Bytecode, Instr, Label, TryBegin, TryEnd
 else:
     Bytecode = None  # type: ignore[misc, assignment]
     Instr = None  # type: ignore[misc, assignment]
+    Label = None  # type: ignore[misc, assignment]
+    TryBegin = None  # type: ignore[misc, assignment]
+    TryEnd = None  # type: ignore[misc, assignment]
 
 
 @dataclass
@@ -310,12 +313,6 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             return False
         if self._is_unsupported_code(code):
             logger.debug("Refusing function-level instrumentation for %s (generator/coroutine)", function_key)
-            return False
-        if sys.version_info >= (3, 11):
-            logger.debug(
-                "BytecodeInjectionEngine 3.11 function-level support not in this commit; refusing %s",
-                function_key,
-            )
             return False
 
         # Resolve past decorator wrappers (functools.wraps, partial, closures)
@@ -1070,9 +1067,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
                 RERAISE   (no oparg on 3.9; RERAISE 0 on 3.10)
         """
         if sys.version_info >= (3, 11):
-            # 3.11 path is intentionally unimplemented in this commit; the engine
-            # caller (enable_function_level_instrumentation) refuses before reaching here.
-            return None
+            return self._create_code_with_function_wrap_311(code, function_key)
         if not (3, 9) <= sys.version_info < (3, 11):
             return None
 
@@ -1202,6 +1197,223 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         else:
             instrs.append(Instr("RERAISE"))
         return instrs
+
+    # Function-level instrumentation bytecode rewrite (3.11).
+    #
+    # 3.11 removed SETUP_FINALLY / block stack: protected regions are described
+    # by PEP 657's co_exceptiontable. The high-level bytecode API forbids
+    # nested TryBegin, so we use a "splice walk": every time a user TryBegin is
+    # encountered we close our outer protected region with a TryEnd before it,
+    # and on the matching user TryEnd we reopen a fresh outer TryBegin after.
+    # The resulting layout is N adjacent (never nested) outer regions all
+    # targeting one shared except-label foot.
+
+    @staticmethod
+    def _build_function_prologue_311(start_ns_slot: str, entry_ctx_slot: str, retval_slot: str) -> list:
+        """Pre-init the three injected slots to None so unwind LOAD_FAST is safe
+        even if the entry hook crashes before storing them."""
+        return [
+            Instr("LOAD_CONST", None),
+            Instr("STORE_FAST", start_ns_slot),
+            Instr("LOAD_CONST", None),
+            Instr("STORE_FAST", entry_ctx_slot),
+            Instr("LOAD_CONST", None),
+            Instr("STORE_FAST", retval_slot),
+        ]
+
+    @staticmethod
+    def _build_function_entry_call_311(function_key: str, start_ns_slot: str, entry_ctx_slot: str) -> list:
+        """3.11 calling convention: PUSH_NULL + LOAD_GLOBAL((push_null, name))
+        + args + PRECALL n + CALL n. LOAD_GLOBAL takes a TUPLE oparg
+        (push_null: bool, name: str); the True flag pushes NULL implicitly so
+        no separate PUSH_NULL is needed for the locals() builtin call."""
+        return [
+            Instr("PUSH_NULL"),
+            Instr("LOAD_GLOBAL", (False, _FUNCTION_HANDLER_NAME)),
+            Instr("LOAD_CONST", function_key),
+            Instr("LOAD_CONST", "entry"),
+            Instr("LOAD_GLOBAL", (True, _LOCALS_NAME)),
+            Instr("PRECALL", 0),
+            Instr("CALL", 0),
+            Instr("PRECALL", 3),
+            Instr("CALL", 3),
+            Instr("UNPACK_SEQUENCE", 2),
+            Instr("STORE_FAST", start_ns_slot),
+            Instr("STORE_FAST", entry_ctx_slot),
+        ]
+
+    @staticmethod
+    def _build_function_exit_call_311(
+        function_key: str,
+        start_ns_slot: str,
+        entry_ctx_slot: str,
+        retval_slot: str,
+    ) -> list:
+        """Replace RETURN_VALUE with: store retval, call exit hook, reload
+        retval, RETURN_VALUE. No POP_BLOCK on 3.11 — protected regions live in
+        co_exceptiontable, not on a runtime block stack."""
+        return [
+            Instr("STORE_FAST", retval_slot),
+            Instr("PUSH_NULL"),
+            Instr("LOAD_GLOBAL", (False, _FUNCTION_HANDLER_NAME)),
+            Instr("LOAD_CONST", function_key),
+            Instr("LOAD_CONST", "exit"),
+            Instr("LOAD_FAST", retval_slot),
+            Instr("LOAD_FAST", start_ns_slot),
+            Instr("LOAD_FAST", entry_ctx_slot),
+            Instr("PRECALL", 5),
+            Instr("CALL", 5),
+            Instr("POP_TOP"),
+            Instr("LOAD_FAST", retval_slot),
+            Instr("RETURN_VALUE"),
+        ]
+
+    @staticmethod
+    def _build_function_unwind_foot_311(function_key: str, start_ns_slot: str, entry_ctx_slot: str) -> list:
+        """Shared except-label foot for the N adjacent outer protected regions.
+
+        With push_lasti=True the handler is entered with stack [..., lasti, exc].
+        We must:
+          1. PUSH_EXC_INFO so the hook's sys.exc_info() call sees the live
+             exception (without this, sys.exc_info() returns the prior frame's
+             exception state and the captured throwable comes back None).
+             Stack after: [..., lasti, prev_exc, exc].
+          2. Call our unwind hook on top of that state (POP_TOP the result).
+          3. RERAISE 0 — pops exc from TOS and reraises. Frame unwinds and the
+             runtime cleans up remaining stack items (prev_exc, lasti).
+
+        We don't preserve lasti for f_lasti restoration — the exception object
+        already carries its own traceback chain, which is what the hook reads."""
+        return [
+            Instr("PUSH_EXC_INFO"),  # [..., lasti, prev_exc, exc]; sys.exc_info -> exc
+            Instr("PUSH_NULL"),
+            Instr("LOAD_GLOBAL", (False, _FUNCTION_HANDLER_NAME)),
+            Instr("LOAD_CONST", function_key),
+            Instr("LOAD_CONST", "unwind"),
+            Instr("LOAD_FAST", start_ns_slot),
+            Instr("LOAD_FAST", entry_ctx_slot),
+            Instr("PRECALL", 4),
+            Instr("CALL", 4),
+            Instr("POP_TOP"),  # discard hook return -> [..., lasti, prev_exc, exc]
+            Instr("RERAISE", 0),  # pop exc, reraise; runtime unwinds remaining stack
+        ]
+
+    def _create_code_with_function_wrap_311(  # pylint: disable=too-many-locals,too-many-statements
+        self,
+        code: CodeType,
+        function_key: str,
+    ) -> Optional[tuple]:
+        """3.11 function-level rewrite via PEP 657 exception_table.
+
+        Algorithm:
+          1. Allocate three unique local slots (start_ns, entry_ctx, retval).
+          2. Insert prologue + entry-call AFTER the preamble (RESUME 0 plus any
+             COPY_FREE_VARS / MAKE_CELL) so closures and free-vars are set up
+             before our entry hook fires.
+          3. Open an outer TryBegin(handler_label, push_lasti=True).
+          4. Splice-walk the user instruction stream: on every user TryBegin
+             close our outer region with TryEnd before it; on the matching
+             user TryEnd reopen with a fresh TryBegin after it. This produces
+             N adjacent (never nested) outer regions all targeting one shared
+             handler label.
+          5. Replace each user RETURN_VALUE with the exit-call sequence
+             (store retval, call exit hook, reload retval, RETURN_VALUE).
+          6. Close the final outer region with TryEnd, append the handler
+             label, and emit the unwind foot (POP_TOP lasti, call unwind hook,
+             RERAISE 1).
+          7. Build via Bytecode.to_code(compute_exception_stack_depths=True).
+
+        Returns (new_code, (start_ns_slot, entry_ctx_slot, retval_slot)) on
+        success, None on refusal/failure.
+        """
+        try:
+            bc = Bytecode.from_code(code)
+
+            # Allocate three uniquely-named local slots, pre-inited to None.
+            taken: Set[str] = set()
+            start_ns_slot = self._unique_local_name(code, "_di_start_ns", taken)
+            taken.add(start_ns_slot)
+            entry_ctx_slot = self._unique_local_name(code, "_di_entry_ctx", taken)
+            taken.add(entry_ctx_slot)
+            retval_slot = self._unique_local_name(code, "_di_retval", taken)
+            taken.add(retval_slot)
+
+            # Find preamble end: skip past RESUME and any COPY_FREE_VARS /
+            # MAKE_CELL so our entry hook fires only after closures are armed.
+            preamble_end = 0
+            for idx, instr in enumerate(bc):
+                if isinstance(instr, Instr) and instr.name in (
+                    "RESUME",
+                    "COPY_FREE_VARS",
+                    "MAKE_CELL",
+                ):
+                    preamble_end = idx + 1
+
+            handler_label = Label()
+
+            new_instructions: list = []
+
+            # Copy preamble unchanged.
+            new_instructions.extend(bc[:preamble_end])
+
+            # Prologue + entry call (must run after preamble, before outer
+            # protected region opens — entry-hook failure is logged by the
+            # handler itself; pre-inited None slots keep the unwind path safe
+            # if the entry call itself raises after store).
+            new_instructions.extend(self._build_function_prologue_311(start_ns_slot, entry_ctx_slot, retval_slot))
+            new_instructions.extend(self._build_function_entry_call_311(function_key, start_ns_slot, entry_ctx_slot))
+
+            # Open outer protected region.
+            current_outer_begin = TryBegin(handler_label, push_lasti=True)
+            new_instructions.append(current_outer_begin)
+
+            # Splice-walk body: maintain "outer is open" invariant by closing
+            # our outer region before each user TryBegin and reopening after
+            # the matching user TryEnd. Replace RETURN_VALUE with exit-call
+            # sequence. Each TryEnd needs a reference to the matching
+            # TryBegin — for outer closes we pass our current_outer_begin;
+            # user TryEnd objects already carry their own back-reference and
+            # are passed through unchanged.
+            for instr in bc[preamble_end:]:
+                if isinstance(instr, TryBegin):
+                    # Close outer before user try, then emit user TryBegin.
+                    new_instructions.append(TryEnd(current_outer_begin))
+                    new_instructions.append(instr)
+                elif isinstance(instr, TryEnd):
+                    # Pass user TryEnd through, then reopen outer.
+                    new_instructions.append(instr)
+                    current_outer_begin = TryBegin(handler_label, push_lasti=True)
+                    new_instructions.append(current_outer_begin)
+                elif isinstance(instr, Instr) and instr.name == "RETURN_VALUE":
+                    new_instructions.extend(
+                        self._build_function_exit_call_311(function_key, start_ns_slot, entry_ctx_slot, retval_slot)
+                    )
+                else:
+                    new_instructions.append(instr)
+
+            # Close the final outer protected region.
+            new_instructions.append(TryEnd(current_outer_begin))
+
+            # Handler label + foot.
+            new_instructions.append(handler_label)
+            new_instructions.extend(self._build_function_unwind_foot_311(function_key, start_ns_slot, entry_ctx_slot))
+
+            new_bc = bc.copy()
+            new_bc.clear()
+            new_bc.extend(new_instructions)
+            return (
+                new_bc.to_code(compute_exception_stack_depths=True),
+                (start_ns_slot, entry_ctx_slot, retval_slot),
+            )
+
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.debug(
+                "Error wrapping function %s with 3.11 function-level hooks: %s",
+                code.co_name,
+                exc,
+                exc_info=True,
+            )
+            return None
 
     def cleanup(self) -> None:
         """
