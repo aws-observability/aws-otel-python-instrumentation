@@ -95,30 +95,6 @@ def set_snapshot_emitter(emitter):
     _snapshot_emitter = emitter
 
 
-class _FlaskPatcher:
-    """Patches Flask app.view_functions entries that reference the original function."""
-
-    name = "flask"
-
-    def patch(self, module, original_func: Callable, new_func: Callable) -> None:
-        FunctionWrapper._patch_flask_view_functions(module, original_func, new_func)
-
-
-class _DjangoPatcher:
-    """Patches Django URLPattern.callback entries reachable from the resolver tree."""
-
-    name = "django"
-
-    def patch(self, module, original_func: Callable, new_func: Callable) -> None:
-        FunctionWrapper._patch_django_url_patterns(module, original_func, new_func)
-
-
-# Registry the dispatcher iterates. Adding a new framework: write a small
-# class with ``name`` and ``patch(module, original, new)``, and append an
-# instance here.
-_FRAMEWORK_PATCHERS = (_FlaskPatcher(), _DjangoPatcher())
-
-
 class FunctionWrapper:
     """
     Handles runtime modification of function objects with comprehensive error handling.
@@ -826,12 +802,17 @@ class FunctionWrapper:
             original_func: The original function that was replaced
             new_func: The new wrapper function
         """
-        for patcher in _FRAMEWORK_PATCHERS:
-            try:
-                patcher.patch(module, original_func, new_func)
-            except Exception as exc:  # pylint: disable=broad-exception-caught
-                # Never let framework patching failures break instrumentation.
-                logger.debug("%s reference patching encountered an error: %s", patcher.name, exc)
+        try:
+            # Flask: patch view_functions on any Flask app instances in the module
+            FunctionWrapper._patch_flask_view_functions(module, original_func, new_func)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            # Never let framework patching failures break instrumentation.
+            logger.debug("flask reference patching encountered an error: %s", exc)
+        try:
+            # Django: patch URLPattern.callback in the resolver tree
+            FunctionWrapper._patch_django_url_patterns(module, original_func, new_func)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.debug("django reference patching encountered an error: %s", exc)
 
     @staticmethod
     def _patch_flask_view_functions(module, original_func: Callable, new_func: Callable) -> None:
