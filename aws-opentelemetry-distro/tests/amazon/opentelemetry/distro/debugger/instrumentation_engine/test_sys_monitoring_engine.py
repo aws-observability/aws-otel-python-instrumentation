@@ -776,5 +776,95 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
                 self.assertNotIn("/site-packages/opentelemetry/", frame["file_path"])
 
 
+@unittest.skipIf(sys.version_info < (3, 12), "SysMonitoringEngine requires Python 3.12+")
+class TestSysMonitoringEngineFunctionLevelRecursion(unittest.TestCase):
+    """Regression: PROBE on a recursive function on 3.12+ must report a
+    correct duration for every frame, not just the innermost.
+
+    The original implementation keyed start_ns by (code_id, thread_id), so
+    each recursive call clobbered the outer frame's stamp. Per-thread LIFO
+    of (code_id, start_ns) tuples preserves nested-frame durations."""
+
+    def setUp(self):
+        # pylint: disable=import-outside-toplevel
+        from amazon.opentelemetry.distro.debugger._function_wrapper import set_snapshot_emitter
+
+        self.engine = _sys_monitoring_engine.SysMonitoringEngine()
+        self.engine.initialize()
+        self.snapshots = []
+
+        class _FakeEmitter:
+            def emit_snapshot(_self, snap):  # noqa: N805
+                self.snapshots.append(snap)
+
+        set_snapshot_emitter(_FakeEmitter())
+
+    def tearDown(self):
+        try:
+            self.engine.cleanup()
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+
+    def test_recursive_calls_each_get_their_own_duration(self):
+        """fib(5) makes 15 nested calls; every snapshot must carry a duration
+        (could be 0ms for a fast call, but the field must be populated, i.e.
+        no frame got duration=None which is the symptom of a clobbered stamp)."""
+
+        def fib(n):
+            if n < 2:
+                return n
+            return fib(n - 1) + fib(n - 2)
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=fib.__code__,
+            func=fib,
+            function_key="m.fib",
+            module_name="m",
+            qualified_name="fib",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+            instrumentation_type="PROBE",
+        )
+        self.assertTrue(ok)
+        self.assertEqual(fib(5), 5)
+        # fib(5) emits 15 snapshots (one per call). Every snapshot must have
+        # a non-None duration — None would indicate start_ns was 0, which is
+        # the symptom of the recursion clobber bug.
+        self.assertEqual(len(self.snapshots), 15)
+        for snap in self.snapshots:
+            self.assertIsNotNone(snap.duration, "every recursive frame must record duration")
+
+    def test_nested_calls_have_increasing_durations(self):
+        """A recursive function with sleep at each level: outer frames must
+        report durations ≥ inner frames'. The test is empirical proof the
+        per-thread stack pops in LIFO order."""
+        import time as _time  # pylint: disable=import-outside-toplevel
+
+        def slow(n):
+            _time.sleep(0.01)
+            if n > 1:
+                return slow(n - 1) + 1
+            return 0
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=slow.__code__,
+            func=slow,
+            function_key="m.slow",
+            module_name="m",
+            qualified_name="slow",
+            instrumentation_type="PROBE",
+        )
+        self.assertTrue(ok)
+        slow(4)
+        self.assertEqual(len(self.snapshots), 4)
+        # Snapshots emitted in PY_RETURN order: innermost first, outermost last.
+        durations = [s.duration for s in self.snapshots]
+        for d in durations:
+            self.assertIsNotNone(d, "every frame must record duration")
+        # Each successive snapshot is for a frame one level outer, so its
+        # duration must be at least as long as the previous frame's.
+        for inner, outer in zip(durations, durations[1:]):
+            self.assertGreaterEqual(outer, inner, f"outer frame duration {outer}ms < inner {inner}ms")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -114,6 +114,9 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         self._location_hashes: Dict[tuple, str] = {}
         # Maps (function_key, line_number) to CaptureConfig for filtering captured data
         self._capture_configs: Dict[tuple, CaptureConfig] = {}
+        # Maps (function_key, 0) to "PROBE" or "BREAKPOINT" for function-level
+        # snapshots. O(1) lookup in the hot _handle_function_event path.
+        self._instrumentation_types: Dict[tuple, str] = {}
 
         if not IS_BYTECODE_INSTALLED:
             logger.warning(
@@ -281,6 +284,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
                 config_keys_to_remove = [key for key in self._capture_configs if key[0] == function_key]
                 for key in config_keys_to_remove:
                     del self._capture_configs[key]
+                self._instrumentation_types.pop((function_key, 0), None)
 
                 # Clean up state
                 del self._injection_states[func_id]
@@ -387,6 +391,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
                     self._location_hashes[(function_key, 0)] = location_hash
                 else:
                     self._location_hashes.pop((function_key, 0), None)
+                self._instrumentation_types[(function_key, 0)] = instrumentation_type or "PROBE"
 
                 logger.debug("Armed function-level instrumentation for %s", function_key)
                 return True
@@ -405,10 +410,36 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             return
         try:
             with self._lock:
+                # State is keyed by id(real_user_func). The manager passes us
+                # the wrapper that getattr(module, name) returned, so on a
+                # decorated function id(func) != id(real_user_func). Fall
+                # back to scanning by function_key recorded at enable time.
                 func_id = id(func)
                 state = self._injection_states.get(func_id)
                 if state is None or state.function_metadata is None:
-                    return  # not armed for function-level
+                    for sid, candidate in self._injection_states.items():
+                        if candidate.function_metadata is not None:
+                            md = candidate.function_metadata
+                            qualname = md.get("qualified_name")
+                            if (
+                                qualname
+                                and md.get("file_path") == code.co_filename
+                                and candidate.original_code.co_name == qualname.rsplit(".", 1)[-1]
+                            ):
+                                # Probabilistic match — for the manager's call
+                                # contract, the wrapper's resolved-code lookup
+                                # uses qualified_name as co_name. Defensive: we
+                                # only match if the wrapper points at the same
+                                # globals object as the candidate's function_ref.
+                                if (
+                                    candidate.function_ref is not None
+                                    and candidate.function_ref.__globals__ is func.__globals__
+                                ):
+                                    func_id = sid
+                                    state = candidate
+                                    break
+                    if state is None or state.function_metadata is None:
+                        return  # not armed for function-level
 
                 function_key = state.function_key
                 try:
@@ -419,6 +450,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
 
                 self._capture_configs.pop((function_key, 0), None)
                 self._location_hashes.pop((function_key, 0), None)
+                self._instrumentation_types.pop((function_key, 0), None)
                 state.function_metadata = None
 
                 # If no line-BPs armed for this func, drop the InjectionState.
@@ -748,13 +780,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         capture_config = self._capture_configs.get((function_key, 0))
         location_hash = self._location_hashes.get((function_key, 0))
 
-        # Resolve the function-level instrumentation_type from per-state
-        # metadata; fall back to PROBE which is the common function-level case.
-        instrumentation_type = "PROBE"
-        for state in self._injection_states.values():
-            if state.function_key == function_key and state.function_metadata:
-                instrumentation_type = state.function_metadata.get("instrumentation_type") or "PROBE"
-                break
+        instrumentation_type = self._instrumentation_types.get((function_key, 0), "PROBE")
 
         method_name = function_key.split(".")[-1]
         module_parts = function_key.split(".")
@@ -1456,6 +1482,9 @@ class BytecodeInjectionEngine(InstrumentationEngine):
 
                 # Clear all state
                 self._injection_states.clear()
+                self._location_hashes.clear()
+                self._capture_configs.clear()
+                self._instrumentation_types.clear()
 
                 logger.debug(
                     "BytecodeInjectionEngine cleaned up: %d functions restored, %d failed", restored_count, failed_count

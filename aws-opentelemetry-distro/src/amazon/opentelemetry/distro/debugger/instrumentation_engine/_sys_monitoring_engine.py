@@ -73,10 +73,12 @@ class SysMonitoringEngine(InstrumentationEngine):
         self._instrumentation_types: Dict[tuple, str] = {}
         # Callback for hit count tracking
         self._hit_count_callback = None
-        # Per-call start_ns stash, keyed by (code_id, thread_id). Set on
-        # PY_START, popped on PY_RETURN / PY_UNWIND, used to compute
-        # aws.di.duration_ms in the snapshot.
-        self._call_start_ns: Dict[tuple, int] = {}
+        # Per-thread LIFO stack of (code_id, start_ns) tuples. PY_START
+        # pushes; PY_RETURN / PY_UNWIND pops. Frame-scoped so recursion on
+        # the same thread does not clobber outer-frame stamps. Lives on
+        # threading.local() so a thread's stack vanishes when the thread
+        # dies (no cross-thread cleanup needed).
+        self._call_start_stack = threading.local()
         # Re-entrancy guard for our own snapshot-building code. If the
         # serializer runs a user __repr__ that calls back into another
         # instrumented function, this short-circuits the inner call.
@@ -238,11 +240,10 @@ class SysMonitoringEngine(InstrumentationEngine):
                 self._capture_configs.pop((code_id, 0), None)
                 self._location_hashes.pop((code_id, 0), None)
                 self._instrumentation_types.pop((code_id, 0), None)
-                # Drain in-flight PY_START stamps for this code across all threads.
-                # Once we strip PY_START/PY_RETURN above, already-running frames may
-                # never get a PY_RETURN — these entries would leak otherwise.
-                for stale_key in [k for k in self._call_start_ns if k[0] == code_id]:
-                    self._call_start_ns.pop(stale_key, None)
+                # No cross-thread stamp sweep needed: per-thread call stack
+                # entries that get orphaned by a disable will be popped on
+                # their thread's next PY_RETURN/PY_UNWIND or die with the
+                # thread.
                 line_set = self._breakpoints.get(code_id)
                 if line_set is not None:
                     line_set.discard(0)
@@ -255,6 +256,25 @@ class SysMonitoringEngine(InstrumentationEngine):
             logger.error(
                 "Failed to disable function-level instrumentation for %s: %s", code.co_name, exc, exc_info=True
             )
+
+    def _get_call_stack(self) -> list:
+        """Return this thread's LIFO of (code_id, start_ns) tuples,
+        creating it on first access."""
+        stack = getattr(self._call_start_stack, "frames", None)
+        if stack is None:
+            stack = []
+            self._call_start_stack.frames = stack
+        return stack
+
+    def _pop_matching_start_ns(self, code_id: int) -> int:
+        """Pop and return the most recent start_ns whose code_id matches.
+        Tolerates skipped events (e.g., disarmed mid-flight) by walking
+        down the stack until we find our frame or run out."""
+        stack = self._get_call_stack()
+        for i in range(len(stack) - 1, -1, -1):
+            if stack[i][0] == code_id:
+                return stack.pop(i)[1]
+        return 0
 
     def _function_start_event_handler(self, code: CodeType, instruction_offset: int):
         """PY_START callback. Records call start_ns; no snapshot yet.
@@ -270,7 +290,7 @@ class SysMonitoringEngine(InstrumentationEngine):
             return sys.monitoring.DISABLE
         try:
             self._reentrancy_guard.active = True
-            self._call_start_ns[(code_id, threading.get_ident())] = time.time_ns()
+            self._get_call_stack().append((code_id, time.time_ns()))
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error("Error in PY_START handler for %s: %s", code.co_name, exc, exc_info=True)
         finally:
@@ -282,7 +302,7 @@ class SysMonitoringEngine(InstrumentationEngine):
         code_id = id(code)
         # Pop unconditionally so reentrancy short-circuit or disable-mid-flight
         # cannot orphan the start_ns stamp written by PY_START.
-        start_ns = self._call_start_ns.pop((code_id, threading.get_ident()), 0)
+        start_ns = self._pop_matching_start_ns(code_id)
         if getattr(self._reentrancy_guard, "active", False):
             return
         if code_id not in self._function_keys or 0 not in self._breakpoints.get(code_id, ()):
@@ -306,12 +326,15 @@ class SysMonitoringEngine(InstrumentationEngine):
         """
         del instruction_offset
         code_id = id(code)
-        # Pop unconditionally so reentrancy short-circuit or disable-mid-flight
-        # cannot orphan the start_ns stamp written by PY_START.
-        start_ns = self._call_start_ns.pop((code_id, threading.get_ident()), 0)
-        if getattr(self._reentrancy_guard, "active", False):
-            return
+        # Cheap membership check FIRST so PY_UNWIND on uninstrumented code
+        # (which fires globally on every Python exception in the process)
+        # is one dict miss + return.
         if code_id not in self._function_keys or 0 not in self._breakpoints.get(code_id, ()):
+            return
+        # Pop AFTER membership check so we don't disturb stacks of other
+        # threads' instrumented calls when uninstrumented code raises.
+        start_ns = self._pop_matching_start_ns(code_id)
+        if getattr(self._reentrancy_guard, "active", False):
             return
         try:
             self._reentrancy_guard.active = True
@@ -592,11 +615,9 @@ class SysMonitoringEngine(InstrumentationEngine):
                 # was armed on this code.
                 self._instrumentation_types.pop((code_id, 0), None)
 
-                # Drain in-flight PY_START stamps across all threads. We just
-                # popped _function_keys, so PY_RETURN/PY_UNWIND will short-circuit
-                # on the membership guard before reaching the pop.
-                for stale_key in [k for k in self._call_start_ns if k[0] == code_id]:
-                    self._call_start_ns.pop(stale_key, None)
+                # No cross-thread stamp sweep needed: per-thread call stack
+                # entries die with their thread or get popped on the thread's
+                # next PY_RETURN/PY_UNWIND.
 
                 logger.debug("Disabled all breakpoints for %s", function_key or code.co_name)
 
@@ -864,7 +885,9 @@ class SysMonitoringEngine(InstrumentationEngine):
                 self._location_hashes.clear()
                 self._capture_configs.clear()
                 self._instrumentation_types.clear()
-                self._call_start_ns.clear()
+                # _call_start_stack is a threading.local — its per-thread
+                # state vanishes when each thread terminates. Nothing to
+                # clear from this thread.
 
                 # Always try to unregister callback and free tool if we own it
                 if sys.monitoring.get_tool(self.tool_id) == _TOOL_NAME:

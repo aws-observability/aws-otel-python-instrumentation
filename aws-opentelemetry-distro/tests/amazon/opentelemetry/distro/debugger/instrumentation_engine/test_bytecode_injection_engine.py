@@ -736,6 +736,43 @@ class TestBytecodeInjectionEngineFunctionLevel(unittest.TestCase):
         # Snapshot reports the underlying function name, not the decorator.
         self.assertEqual(self.snapshots[0].instrumentation.location.method_name, "my_view")
 
+    def test_function_level_disable_after_decorated_enable_restores_inner(self):
+        """Regression: enable_function_level_instrumentation redirects through
+        @functools.wraps to instrument the inner function. disable must find
+        the same state even though the manager passes back the wrapper."""
+        import functools  # pylint: disable=import-outside-toplevel
+
+        def auth_required(view):
+            @functools.wraps(view)
+            def wrapper(request):
+                return view(request)
+
+            return wrapper
+
+        @auth_required
+        def my_view(request):  # pylint: disable=unused-argument
+            return "ok"
+
+        original_inner_code = my_view.__wrapped__.__code__
+        ok = self.engine.enable_function_level_instrumentation(
+            code=my_view.__code__,
+            func=my_view,
+            function_key="m.my_view",
+            module_name="m",
+            qualified_name="my_view",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
+        self.assertIsNot(my_view.__wrapped__.__code__, original_inner_code, "inner code should be patched")
+
+        # Manager passes the wrapper back on disable. Engine must resolve
+        # through the decorator and find the state keyed by id(my_view).
+        self.engine.disable_function_level_instrumentation(code=my_view.__code__, func=my_view)
+
+        self.assertIs(my_view.__wrapped__.__code__, original_inner_code, "inner code must be restored on disable")
+        # State must be removed.
+        self.assertEqual(len(self.engine._injection_states), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
