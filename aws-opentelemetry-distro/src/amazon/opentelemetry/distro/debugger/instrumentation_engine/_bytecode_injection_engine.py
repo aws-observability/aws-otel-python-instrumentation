@@ -52,9 +52,18 @@ _LOCALS_NAME = "_breakpoint_locals"
 # event dispatcher injected into function globals.
 _FUNCTION_HANDLER_NAME = "_function_event_handler"
 
-# Refused on function-level instrumentation: rewriting these would corrupt
-# .send()/.throw()/await semantics. Async support lands in a follow-up.
-_REFUSAL_MASK = inspect.CO_GENERATOR | inspect.CO_COROUTINE | inspect.CO_ASYNC_GENERATOR | inspect.CO_ITERABLE_COROUTINE
+# Code-flag mask the bytecode-rewrite path declines to instrument: rewriting
+# these in place would corrupt .send() / .throw() / await semantics. The
+# manager observes the False return from enable_function_level_instrumentation
+# and routes these through _function_wrapper.instrument_function instead,
+# which has dedicated coroutine support via _create_async_wrapper. So async
+# functions ARE instrumented end-to-end — just not by the bytecode engine.
+# Plain generators and async generators don't have a dedicated wrapper path
+# yet; they fall through to the sync wrapper and only fire on the
+# generator-construction call.
+_DECLINE_BYTECODE_REWRITE_MASK = (
+    inspect.CO_GENERATOR | inspect.CO_COROUTINE | inspect.CO_ASYNC_GENERATOR | inspect.CO_ITERABLE_COROUTINE
+)
 
 # Import bytecode classes if available
 if IS_BYTECODE_INSTALLED:
@@ -153,11 +162,17 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         return (3, 9) <= sys.version_info < (3, 12) and IS_BYTECODE_INSTALLED
 
     @staticmethod
-    def _is_unsupported_code(code: CodeType) -> bool:
-        """Refuse generators, coroutines, and async generators for function-level
-        instrumentation. Wrapping their bodies with try/finally would corrupt
-        .send()/.throw()/await semantics."""
-        return bool(code.co_flags & _REFUSAL_MASK)
+    def _should_decline_bytecode_rewrite(code: CodeType) -> bool:
+        """True if this code object's body cannot safely be rewritten by the
+        bytecode-injection path: generators, coroutines, async generators,
+        and iterable coroutines.
+
+        A False return from enable_function_level_instrumentation is the
+        manager's cue to fall back to _function_wrapper.instrument_function,
+        which DOES support coroutines via _create_async_wrapper. So an
+        ``async def`` function is still instrumented end-to-end; just not
+        by this engine."""
+        return bool(code.co_flags & _DECLINE_BYTECODE_REWRITE_MASK)
 
     def enable_breakpoints_for_function(
         self,
@@ -315,8 +330,13 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         """
         if not self._initialized:
             return False
-        if self._is_unsupported_code(code):
-            logger.debug("Refusing function-level instrumentation for %s (generator/coroutine)", function_key)
+        if self._should_decline_bytecode_rewrite(code):
+            # The manager will fall back to _function_wrapper.instrument_function,
+            # which has a working coroutine path. Return False, not raise.
+            logger.debug(
+                "Engine declines bytecode rewrite for %s; manager will route through wrapper instead",
+                function_key,
+            )
             return False
 
         # Resolve past decorator wrappers (functools.wraps, partial, closures)

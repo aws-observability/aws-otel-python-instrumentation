@@ -578,6 +578,40 @@ class TestApplyFunction(unittest.TestCase):
         self.assertIn(state_key, bp_set.states)
         self.assertEqual(bp_set.states[state_key].location_hash, "probe-1")
 
+    def test_engine_decline_falls_back_to_setattr_wrapper(self):
+        """Contract: when the bytecode engine returns False from
+        enable_function_level_instrumentation (the case for any code object
+        in _DECLINE_BYTECODE_REWRITE_MASK — generators, coroutines, async
+        generators), _apply_function MUST fall through to
+        FunctionWrapper.instrument_function so the wrapper's coroutine
+        path can still wire up async PROBEs.
+
+        This locks down the wrapper-fallback half of the contract that
+        TestBytecodeInjectionEngineFunctionLevel only verifies on the
+        engine half (asserting the engine returns False)."""
+        manager = _make_manager()
+        # Engine declines (as it would for any async/generator code).
+        manager._engine.enable_function_level_instrumentation.return_value = False
+        manager._wrapper.instrument_function.return_value = (_real_target_function, mock.MagicMock())
+
+        probe = _make_config(
+            instrumentation_type="PROBE", method_name=_real_target_function.__name__, location_hash="probe-async"
+        )
+        bp_set = self._make_set([probe])
+
+        # FunctionWrapper._discover_function is called by _instrument_function_level
+        # to find the live callable in the module — patch it to return our real
+        # function so we can exercise the engine-declines branch deterministically.
+        with mock.patch.object(im_module.FunctionWrapper, "_discover_function", return_value=_real_target_function):
+            manager._apply_function(bp_set)
+
+        # Engine was asked first.
+        manager._engine.enable_function_level_instrumentation.assert_called_once()
+        # Wrapper fallback fired; bp_set is instrumented via setattr path.
+        manager._wrapper.instrument_function.assert_called_once()
+        self.assertTrue(bp_set.is_instrumented)
+        self.assertIs(bp_set.original_function, _real_target_function)
+
     def test_line_level_enables_engine_breakpoints(self):
         manager = _make_manager()
         manager._wrapper.instrument_function.return_value = (_real_target_function, mock.MagicMock())

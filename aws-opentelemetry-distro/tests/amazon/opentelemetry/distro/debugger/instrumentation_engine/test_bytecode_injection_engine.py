@@ -582,32 +582,50 @@ class TestBytecodeInjectionEngineFunctionLevel(unittest.TestCase):
         self.assertEqual(throwable.message, "bad: 7")
         self.assertGreater(len(throwable.stacktrace), 0)
 
-    def test_function_level_refuses_generator(self):
+    def test_engine_declines_generator_so_manager_can_fall_back_to_wrapper(self):
+        """The bytecode engine cannot safely rewrite a generator's body
+        (would corrupt .send()/.throw()), so it returns False. The manager
+        observes this and routes to _function_wrapper.instrument_function,
+        which is responsible for the actual generator handling."""
+
         def gen():
             yield 1
 
         ok = self.engine.enable_function_level_instrumentation(
             code=gen.__code__, func=gen, function_key="m.gen", module_name="m", qualified_name="gen"
         )
-        self.assertFalse(ok)
+        self.assertFalse(ok, "engine must decline so manager can fall back")
+        # Engine should NOT have patched the generator's __code__.
+        self.assertNotIn(id(gen), self.engine._injection_states)
 
-    def test_function_level_refuses_coroutine(self):
+    def test_engine_declines_coroutine_so_manager_can_fall_back_to_wrapper(self):
+        """Coroutines are instrumented end-to-end via the wrapper's
+        _create_async_wrapper path. The engine declines so the manager falls
+        back. This test asserts the engine half of that contract; the
+        wrapper-fallback half lives in test_function_wrapper / manager tests."""
+
         async def coro():
             return 1
 
         ok = self.engine.enable_function_level_instrumentation(
             code=coro.__code__, func=coro, function_key="m.coro", module_name="m", qualified_name="coro"
         )
-        self.assertFalse(ok)
+        self.assertFalse(ok, "engine must decline so manager can route through async wrapper")
+        self.assertNotIn(id(coro), self.engine._injection_states)
 
-    def test_function_level_refuses_async_generator(self):
+    def test_engine_declines_async_generator_so_manager_can_fall_back_to_wrapper(self):
+        """Async generators (`async def f(): yield`) are declined for the
+        same reason as plain generators — rewriting their body breaks
+        .asend()/.athrow(). Manager routes to wrapper."""
+
         async def agen():
             yield 1
 
         ok = self.engine.enable_function_level_instrumentation(
             code=agen.__code__, func=agen, function_key="m.agen", module_name="m", qualified_name="agen"
         )
-        self.assertFalse(ok)
+        self.assertFalse(ok, "engine must decline so manager can fall back")
+        self.assertNotIn(id(agen), self.engine._injection_states)
 
     def test_function_level_disable_restores_original(self):
         """After disable, the original code object is restored and no snapshots fire."""
