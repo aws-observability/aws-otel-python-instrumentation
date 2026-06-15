@@ -51,6 +51,9 @@ def should_add_application_signals_dimensions() -> bool:
 
 
 IS_BOTOCORE_INSTALLED: bool = is_installed("botocore")
+# The 'bytecode' package is an optional dependency (the 'debugger' extra), installed only on
+# Python 3.9-3.11. Dynamic Instrumentation's bytecode-injection engine guards on this flag.
+IS_BYTECODE_INSTALLED: bool = is_installed("bytecode")
 
 
 def get_aws_session():
