@@ -12,6 +12,7 @@ _logger: Logger = getLogger(__name__)
 
 AGENT_OBSERVABILITY_ENABLED = "AGENT_OBSERVABILITY_ENABLED"
 OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS = "OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS"
+AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT = "AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT"
 
 
 def is_installed(req: str) -> bool:
@@ -39,12 +40,20 @@ def is_agent_observability_enabled() -> bool:
     return os.environ.get(AGENT_OBSERVABILITY_ENABLED, "false").lower() == "true"
 
 
+def is_genai_content_extraction_opted_out() -> bool:
+    """Has the user opted out of GenAI content extraction from spans?"""
+    return os.environ.get(AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT, "false").lower() == "true"
+
+
 def should_add_application_signals_dimensions() -> bool:
     """Should Service and Environment Application Signals dimensions be added to EMF logs?"""
     return os.environ.get(OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS, "true").lower() == "true"
 
 
 IS_BOTOCORE_INSTALLED: bool = is_installed("botocore")
+# The 'bytecode' package is an optional dependency (the 'debugger' extra), installed only on
+# Python 3.9-3.11. Dynamic Instrumentation's bytecode-injection engine guards on this flag.
+IS_BYTECODE_INSTALLED: bool = is_installed("bytecode")
 
 
 def get_aws_session():

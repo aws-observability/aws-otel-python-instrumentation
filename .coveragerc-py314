@@ -17,3 +17,8 @@ omit =
     */instrumentation/crewai/*
     */tests/*
     */pip-build-env-*/*
+    ; Dynamic Instrumentation line-breakpoint engines are version-exclusive (bytecode for
+    ; 3.9-3.11, sys.monitoring for 3.12+). Excluded from the coverage gate; each is unit-tested
+    ; on its native version and both are validated by the DI contract tests.
+    */distro/debugger/instrumentation_engine/_bytecode_injection_engine.py
+    */distro/debugger/instrumentation_engine/_sys_monitoring_engine.py

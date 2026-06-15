@@ -16,6 +16,10 @@ ruamel.yaml==0.17.21
 pyyaml==6.0.3
 flaky==3.7.0
 botocore~=1.0
+# Needed so lint can resolve `import bytecode` in the DI bytecode-injection engine. It is a core
+# runtime dependency (see pyproject.toml) installed on Python 3.9-3.11, but the lint env does not
+# install the distro package itself, so it must be listed here too.
+bytecode>=0.13.0
 flask>=2.0.0
 fastapi>=0.68.0
 starlette>=0.14.2
