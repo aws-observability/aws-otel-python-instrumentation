@@ -37,14 +37,34 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
         """Test initialization, tool registration, and callback registration."""
         with mock.patch("sys.monitoring.use_tool_id") as mock_use_tool, mock.patch(
             "sys.monitoring.register_callback"
-        ) as mock_register:
+        ) as mock_register, mock.patch("sys.monitoring.set_events") as mock_set_events:
 
             self.engine.initialize(hit_count_callback=self.callback)
 
             mock_use_tool.assert_called_once_with(sys.monitoring.DEBUGGER_ID, _TOOL_NAME)
-            mock_register.assert_called_once_with(
+            # Four event callbacks: LINE for line BPs; PY_START / PY_RETURN / PY_UNWIND
+            # for function-level (PROBE / function-level BREAKPOINT).
+            mock_register.assert_any_call(
                 sys.monitoring.DEBUGGER_ID, sys.monitoring.events.LINE, self.engine._line_event_handler
             )
+            mock_register.assert_any_call(
+                sys.monitoring.DEBUGGER_ID,
+                sys.monitoring.events.PY_START,
+                self.engine._function_start_event_handler,
+            )
+            mock_register.assert_any_call(
+                sys.monitoring.DEBUGGER_ID,
+                sys.monitoring.events.PY_RETURN,
+                self.engine._function_return_event_handler,
+            )
+            mock_register.assert_any_call(
+                sys.monitoring.DEBUGGER_ID,
+                sys.monitoring.events.PY_UNWIND,
+                self.engine._function_unwind_event_handler,
+            )
+            self.assertEqual(mock_register.call_count, 4)
+            # PY_UNWIND is set globally (not local-event-capable on 3.12-3.14).
+            mock_set_events.assert_called_once_with(sys.monitoring.DEBUGGER_ID, sys.monitoring.events.PY_UNWIND)
 
             self.assertTrue(self.engine._initialized)
             self.assertEqual(self.engine._hit_count_callback, self.callback)
@@ -84,9 +104,26 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
                 self.engine.initialize(hit_count_callback=self.callback)
 
                 mock_use_tool.assert_not_called()
-                mock_register.assert_called_once_with(
+                # All four callbacks must rebind to the fresh engine instance after fork.
+                mock_register.assert_any_call(
                     sys.monitoring.DEBUGGER_ID, sys.monitoring.events.LINE, self.engine._line_event_handler
                 )
+                mock_register.assert_any_call(
+                    sys.monitoring.DEBUGGER_ID,
+                    sys.monitoring.events.PY_START,
+                    self.engine._function_start_event_handler,
+                )
+                mock_register.assert_any_call(
+                    sys.monitoring.DEBUGGER_ID,
+                    sys.monitoring.events.PY_RETURN,
+                    self.engine._function_return_event_handler,
+                )
+                mock_register.assert_any_call(
+                    sys.monitoring.DEBUGGER_ID,
+                    sys.monitoring.events.PY_UNWIND,
+                    self.engine._function_unwind_event_handler,
+                )
+                self.assertEqual(mock_register.call_count, 4)
 
             self.assertTrue(self.engine._initialized)
             self.assertEqual(self.engine._hit_count_callback, self.callback)

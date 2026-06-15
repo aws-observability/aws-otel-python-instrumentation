@@ -497,5 +497,245 @@ class TestBytecodeInjectionEngine(InstrumentationEngineTestBase):
                 self.assertNotIn("/site-packages/opentelemetry/", frame["file_path"])
 
 
+@unittest.skipIf(
+    not ((3, 9) <= sys.version_info < (3, 11)),
+    "Function-level bytecode rewrite supported on Python 3.9-3.10 only (3.11 lands in a follow-up commit)",
+)
+class TestBytecodeInjectionEngineFunctionLevel(unittest.TestCase):
+    """End-to-end tests for function-level instrumentation via bytecode rewrite."""
+
+    def setUp(self):
+        # pylint: disable=import-outside-toplevel
+        from amazon.opentelemetry.distro.debugger._function_wrapper import set_snapshot_emitter
+        from amazon.opentelemetry.distro.debugger.instrumentation_engine._bytecode_injection_engine import (
+            BytecodeInjectionEngine,
+        )
+
+        self._set_emitter = set_snapshot_emitter
+        self.engine = BytecodeInjectionEngine()
+        self.engine.initialize()
+        self.snapshots = []
+
+        class _FakeEmitter:
+            def emit_snapshot(_self, snap):  # noqa: N805
+                self.snapshots.append(snap)
+
+        self._set_emitter(_FakeEmitter())
+
+    def tearDown(self):
+        try:
+            self.engine.cleanup()
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+
+    def test_function_level_basic_return(self):
+        """Arming a function emits an entry+exit snapshot with serialized return value."""
+
+        def add(x, y):
+            return x + y
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=add.__code__,
+            func=add,
+            function_key="m.add",
+            module_name="m",
+            qualified_name="add",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+            location_hash="hash-add",
+            instrumentation_type="PROBE",
+        )
+        self.assertTrue(ok)
+        self.assertEqual(add(2, 3), 5)
+        self.assertEqual(len(self.snapshots), 1)
+        snap = self.snapshots[0]
+        self.assertEqual(snap.instrumentation_type, "PROBE")
+        self.assertIsNotNone(snap.captures.return_context)
+        self.assertEqual(snap.captures.return_context.return_value.value, "5")
+
+    def test_function_level_throwable_capture(self):
+        """The PR #770 regression-fix: an instrumented function that raises must
+        produce a snapshot whose return_context.throwable is fully populated."""
+
+        def boom(x):
+            raise ValueError(f"bad: {x}")
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=boom.__code__,
+            func=boom,
+            function_key="m.boom",
+            module_name="m",
+            qualified_name="boom",
+            capture_config=CaptureConfig(capture_locals=[]),
+            location_hash="hash-boom",
+            instrumentation_type="PROBE",
+        )
+        self.assertTrue(ok)
+        with self.assertRaises(ValueError) as ctx:
+            boom(7)
+        self.assertEqual(str(ctx.exception), "bad: 7")  # original exception preserved
+        self.assertEqual(len(self.snapshots), 1)
+        snap = self.snapshots[0]
+        self.assertIsNotNone(snap.captures.return_context)
+        throwable = snap.captures.return_context.throwable
+        self.assertIsNotNone(throwable)
+        self.assertEqual(throwable.type, "ValueError")
+        self.assertEqual(throwable.message, "bad: 7")
+        self.assertGreater(len(throwable.stacktrace), 0)
+
+    def test_function_level_refuses_generator(self):
+        def gen():
+            yield 1
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=gen.__code__, func=gen, function_key="m.gen", module_name="m", qualified_name="gen"
+        )
+        self.assertFalse(ok)
+
+    def test_function_level_refuses_coroutine(self):
+        async def coro():
+            return 1
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=coro.__code__, func=coro, function_key="m.coro", module_name="m", qualified_name="coro"
+        )
+        self.assertFalse(ok)
+
+    def test_function_level_refuses_async_generator(self):
+        async def agen():
+            yield 1
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=agen.__code__, func=agen, function_key="m.agen", module_name="m", qualified_name="agen"
+        )
+        self.assertFalse(ok)
+
+    def test_function_level_disable_restores_original(self):
+        """After disable, the original code object is restored and no snapshots fire."""
+
+        def f(x):
+            return x * 10
+
+        original_code = f.__code__
+        ok = self.engine.enable_function_level_instrumentation(
+            code=f.__code__,
+            func=f,
+            function_key="m.f",
+            module_name="m",
+            qualified_name="f",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
+        f(1)  # generates one snapshot
+        self.assertEqual(len(self.snapshots), 1)
+        self.snapshots.clear()
+
+        self.engine.disable_function_level_instrumentation(code=original_code, func=f)
+        self.assertIs(f.__code__, original_code)
+        self.assertEqual(f(2), 20)
+        self.assertEqual(len(self.snapshots), 0)
+
+    def test_function_level_kwonly_and_varargs(self):
+        """Argument-shape parity: positional + var-args + kwonly + var-kwargs all callable."""
+
+        def f(a, b=10, *args, c, d=20, **kwargs):  # pylint: disable=unused-argument
+            return (a, b, args, c, d, sorted(kwargs.items()))
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=f.__code__,
+            func=f,
+            function_key="m.f",
+            module_name="m",
+            qualified_name="f",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
+        result = f(1, 2, 3, 4, c=5, d=6, e=7, fld=8)
+        self.assertEqual(result, (1, 2, (3, 4), 5, 6, [("e", 7), ("fld", 8)]))
+        self.assertEqual(len(self.snapshots), 1)
+
+    def test_function_level_recursion(self):
+        """Recursive call: every entry/exit pair must fire correctly."""
+
+        def fib(n):
+            if n < 2:
+                return n
+            return fib(n - 1) + fib(n - 2)
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=fib.__code__,
+            func=fib,
+            function_key="m.fib",
+            module_name="m",
+            qualified_name="fib",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
+        self.assertEqual(fib(5), 5)
+        # fib(5) makes 15 calls (1+2+3+5+...). Each emits 1 snapshot.
+        self.assertEqual(len(self.snapshots), 15)
+
+    def test_function_level_throwable_inside_user_try(self):
+        """User's own try/except suppresses the exception → unwind hook does NOT
+        fire (function returns normally), but exit hook captures the return."""
+
+        def safe(x):
+            try:
+                if x < 0:
+                    raise KeyError("nope")
+            except KeyError:
+                return -1
+            return x
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=safe.__code__,
+            func=safe,
+            function_key="m.safe",
+            module_name="m",
+            qualified_name="safe",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
+        self.assertEqual(safe(-1), -1)
+        self.assertEqual(safe(7), 7)
+        self.assertEqual(len(self.snapshots), 2)
+        # The user's try/except caught their KeyError, so unwind never fired:
+        # neither snapshot should have a throwable.
+        for snap in self.snapshots:
+            self.assertTrue(
+                snap.captures.return_context is None or snap.captures.return_context.throwable is None,
+                "exit hook fired but throwable was unexpectedly populated",
+            )
+
+    def test_function_level_undecorate_resolves_wrapped_function(self):
+        """A @functools.wraps decorator hides the real function — engine must
+        instrument the underlying user code, not the wrapper."""
+        import functools  # pylint: disable=import-outside-toplevel
+
+        def auth_required(view):
+            @functools.wraps(view)
+            def wrapper(request):
+                return view(request)
+
+            return wrapper
+
+        @auth_required
+        def my_view(request):
+            return f"view: {request}"
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=my_view.__code__,  # this is the wrapper's code
+            func=my_view,  # this is the wrapper
+            function_key="m.my_view",
+            module_name="m",
+            qualified_name="my_view",  # but the user function's co_name is "my_view"
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
+        my_view("hi")
+        self.assertEqual(len(self.snapshots), 1)
+        # Snapshot reports the underlying function name, not the decorator.
+        self.assertEqual(self.snapshots[0].instrumentation.location.method_name, "my_view")
+
+
 if __name__ == "__main__":
     unittest.main()

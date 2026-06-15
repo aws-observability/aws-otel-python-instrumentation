@@ -64,6 +64,14 @@ class InstrumentationManager:
         # Build a Resource with service name and environment for the LoggerProvider
         resource = self._build_resource(service, environment)
         self._snapshot_emitter = SnapshotOtlpEmitter(resource=resource)
+        # Eagerly initialize from this (well-behaved user) thread. Lazy init from a
+        # sys.monitoring PY_RETURN callback can hit
+        # ``RuntimeError("cannot schedule new futures after interpreter shutdown")``
+        # because ``BatchLogRecordProcessor`` spawns a daemon worker on construction.
+        try:
+            self._snapshot_emitter.initialize()
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.debug("Snapshot emitter eager initialization deferred", exc_info=True)
         set_snapshot_emitter(self._snapshot_emitter)
 
         # Status reporter (will be set later by debugger.py)
@@ -89,7 +97,7 @@ class InstrumentationManager:
             if service:
                 attrs["service.name"] = service
             if environment:
-                attrs["deployment.environment"] = environment
+                attrs["deployment.environment.name"] = environment
             return Resource.create(attrs) if attrs else None
         except Exception:  # pylint: disable=broad-exception-caught
             return None
@@ -360,6 +368,51 @@ class InstrumentationManager:
             logger.error("Error getting unchanged breakpoints: %s", exception, exc_info=True)
             return set()
 
+    def _instrument_function_level(self, bp_set: FunctionBreakpointSet):
+        """Arm function-level (line=0) instrumentation via the engine.
+
+        Returns (target_func, target_code) on success, (None, None) on refusal
+        or when no function-level breakpoint is configured.
+        """
+        if not (self._engine and 0 in bp_set.breakpoints):
+            return None, None
+
+        try:
+            discovered = FunctionWrapper._discover_function(bp_set.module, bp_set.function_name)
+        except Exception as exception:  # pylint: disable=broad-exception-caught
+            logger.debug("Function discovery failed for %s: %s", bp_set.function_key, exception)
+            return None, None
+
+        target_func = discovered.method if hasattr(discovered, "method") else discovered
+        target_code = getattr(target_func, "__code__", None)
+        if target_func is None or target_code is None:
+            return None, None
+
+        fn_bp = bp_set.breakpoints[0]
+        try:
+            accepted = bool(
+                self._engine.enable_function_level_instrumentation(
+                    code=target_code,
+                    func=target_func,
+                    function_key=bp_set.function_key,
+                    module_name=bp_set.module,
+                    qualified_name=bp_set.function_name,
+                    capture_config=fn_bp.capture_config,
+                    location_hash=fn_bp.config_id,
+                    instrumentation_type=fn_bp.instrumentation_type,
+                )
+            )
+        except Exception as exception:  # pylint: disable=broad-exception-caught
+            logger.warning(
+                "Engine refused function-level hook for %s: %s",
+                bp_set.function_key,
+                exception,
+                exc_info=True,
+            )
+            return None, None
+
+        return (target_func, target_code) if accepted else (None, None)
+
     def _apply_function(self, bp_set: FunctionBreakpointSet):  # pylint: disable=too-many-branches,too-many-statements
         """
         Apply function wrapper (no line breakpoints yet - Phase 5).
@@ -400,20 +453,31 @@ class InstrumentationManager:
             if 0 in bp_set.breakpoints:
                 location_hash = bp_set.breakpoints[0].config_id
 
-            # Wrap function
-            original, wrapped = self._wrapper.instrument_function(
-                module_name=bp_set.module,
-                function_name=bp_set.function_name,
-                capture_config=bp_set.capture_config,
-                location_hash=location_hash,
-                manager=self,
-            )
-
-            original_callable = original.__func__ if isinstance(original, (staticmethod, classmethod)) else original
-            bp_set.original_function = original
-            bp_set.wrapped_function = wrapped
-            bp_set.code_object = getattr(original_callable, "__code__", None)
-            bp_set.is_instrumented = True
+            # Function-level (line=0): engine only, no setattr wrapper. The
+            # engine fires PY_START / PY_RETURN / PY_UNWIND natively, which
+            # captures exception flow correctly without a Python-level wrapper.
+            target_func, target_code = self._instrument_function_level(bp_set)
+            if target_func is not None and target_code is not None:
+                bp_set.original_function = target_func
+                bp_set.wrapped_function = target_func
+                bp_set.code_object = target_code
+                bp_set.is_instrumented = True
+                original_callable = target_func
+            else:
+                # Line-only breakpoints (or engine refused): use the setattr
+                # wrapper so line BPs land span-events on a known parent span.
+                original, wrapped = self._wrapper.instrument_function(
+                    module_name=bp_set.module,
+                    function_name=bp_set.function_name,
+                    capture_config=bp_set.capture_config,
+                    location_hash=location_hash,
+                    manager=self,
+                )
+                original_callable = original.__func__ if isinstance(original, (staticmethod, classmethod)) else original
+                bp_set.original_function = original
+                bp_set.wrapped_function = wrapped
+                bp_set.code_object = getattr(original_callable, "__code__", None)
+                bp_set.is_instrumented = True
 
             # Enable line breakpoints if engine is available and there are line breakpoints
             if self._engine and bp_set.line_numbers and bp_set.code_object:
@@ -533,6 +597,23 @@ class InstrumentationManager:
                         exc_info=True,
                     )
                     # Don't re-raise - continue with function restoration
+
+            # Disable function-level (line=0) engine hook if it was armed.
+            # No-op when only line BPs were configured; engine clears state by code_id.
+            if self._engine and bp_set.code_object and bp_set.original_function:
+                try:
+                    original = bp_set.original_function
+                    original_callable = (
+                        original.__func__ if isinstance(original, (staticmethod, classmethod)) else original
+                    )
+                    self._engine.disable_function_level_instrumentation(code=bp_set.code_object, func=original_callable)
+                except Exception as exception:  # pylint: disable=broad-exception-caught
+                    logger.warning(
+                        "Failed to disable function-level hook for %s: %s",
+                        func_key,
+                        exception,
+                        exc_info=True,
+                    )
 
             # Restore original function
             if bp_set.is_instrumented:

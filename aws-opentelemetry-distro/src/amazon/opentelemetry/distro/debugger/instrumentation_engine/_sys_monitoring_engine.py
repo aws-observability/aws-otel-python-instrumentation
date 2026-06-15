@@ -9,6 +9,7 @@ import logging
 import sys
 import threading
 import time
+import traceback
 from types import CodeType, FunctionType
 from typing import Any, Dict, Optional, Set
 
@@ -17,18 +18,22 @@ from amazon.opentelemetry.distro.debugger._data_models import (
     DEFAULT_MAX_STRING_LENGTH,
     CaptureConfig,
 )
+from amazon.opentelemetry.distro.debugger._function_wrapper import get_snapshot_emitter
 from amazon.opentelemetry.distro.debugger._snapshot_models import (
     CapturedContext,
+    CapturedThrowable,
     Captures,
     InstrumentationDetails,
     InstrumentationLocation,
     Snapshot,
+    StackFrame,
     ThreadInfo,
     TraceContext,
 )
 from amazon.opentelemetry.distro.debugger._snapshot_serializer import SnapshotSerializer
 from amazon.opentelemetry.distro.debugger._stack_utils import capture_stack_frames
 from amazon.opentelemetry.distro.debugger.instrumentation_engine._instrumentation_engine import InstrumentationEngine
+from opentelemetry import trace as otel_trace
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +67,20 @@ class SysMonitoringEngine(InstrumentationEngine):
         self._location_hashes: Dict[tuple, str] = {}
         # Maps (code_id, line_number) to CaptureConfig for filtering captured data
         self._capture_configs: Dict[tuple, CaptureConfig] = {}
+        # Maps (code_id, 0) to "PROBE" or "BREAKPOINT". Function-level
+        # instrumentation can be either; line-level (line>0) is always
+        # BREAKPOINT and bypasses this dict.
+        self._instrumentation_types: Dict[tuple, str] = {}
         # Callback for hit count tracking
         self._hit_count_callback = None
+        # Per-call start_ns stash, keyed by (code_id, thread_id). Set on
+        # PY_START, popped on PY_RETURN / PY_UNWIND, used to compute
+        # aws.di.duration_ms in the snapshot.
+        self._call_start_ns: Dict[tuple, int] = {}
+        # Re-entrancy guard for our own snapshot-building code. If the
+        # serializer runs a user __repr__ that calls back into another
+        # instrumented function, this short-circuits the inner call.
+        self._reentrancy_guard = threading.local()
         self._lock = threading.RLock()
 
     def initialize(self, hit_count_callback=None):
@@ -99,8 +116,25 @@ class SysMonitoringEngine(InstrumentationEngine):
             else:
                 logger.debug("Reusing existing %s sys.monitoring registration", _TOOL_NAME)
 
-            # Register LINE event callback
+            # Register LINE event callback (line-level breakpoints).
             sys.monitoring.register_callback(self.tool_id, sys.monitoring.events.LINE, self._line_event_handler)
+
+            # Register function-entry callbacks (PROBE / function-level BREAKPOINT).
+            # PY_START / PY_RETURN are armed per-code-object via set_local_events
+            # in enable_function_level_instrumentation. PY_UNWIND must be set GLOBALLY (it isn't
+            # local-event-capable on 3.12-3.14, see CPython gh-142186); the
+            # _function_unwind_event_handler filters by code via the existing _function_keys
+            # dict so the cost on uninstrumented frames is one dict lookup.
+            sys.monitoring.register_callback(
+                self.tool_id, sys.monitoring.events.PY_START, self._function_start_event_handler
+            )
+            sys.monitoring.register_callback(
+                self.tool_id, sys.monitoring.events.PY_RETURN, self._function_return_event_handler
+            )
+            sys.monitoring.register_callback(
+                self.tool_id, sys.monitoring.events.PY_UNWIND, self._function_unwind_event_handler
+            )
+            sys.monitoring.set_events(self.tool_id, sys.monitoring.events.PY_UNWIND)
 
             self._initialized = True
             self._hit_count_callback = hit_count_callback
@@ -109,6 +143,333 @@ class SysMonitoringEngine(InstrumentationEngine):
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error("Failed to initialize SysMonitoringEngine: %s", exc, exc_info=True)
             self.cleanup()
+
+    # Function-entry instrumentation (PROBE / function-level BREAKPOINT).
+    # Arms PY_START / PY_RETURN per-code-object via set_local_events; the
+    # global PY_UNWIND from initialize() covers the exception path. Per-call
+    # event dispatch goes through _function_start_event_handler / _function_return_event_handler /
+    # _function_unwind_event_handler, which look up config in the existing _function_keys
+    # / _capture_configs / _location_hashes / _instrumentation_types dicts
+    # using (code_id, 0) — line=0 marks function-level (matches manager's
+    # bp_set.breakpoints[0] convention).
+
+    def enable_function_level_instrumentation(  # pylint: disable=too-many-arguments
+        self,
+        code: CodeType,
+        func: FunctionType,
+        function_key: str,
+        module_name: str,
+        qualified_name: str,
+        capture_config: Optional[CaptureConfig] = None,
+        location_hash: Optional[str] = None,
+        instrumentation_type: Optional[str] = None,
+    ) -> bool:
+        """
+        Arm function-entry instrumentation on a code object.
+
+        Tells sys.monitoring to fire PY_START / PY_RETURN events on this
+        specific code object, and stashes the customer's config in the
+        engine's per-(code_id, 0) state so handlers can build a snapshot
+        when those events fire.
+
+        Returns True on success, False if the engine isn't initialized.
+        """
+        del func, module_name, qualified_name  # commit 4 wires undecorate
+        if not self._initialized:
+            logger.warning("SysMonitoringEngine not initialized, cannot enable function-level instrumentation")
+            return False
+        try:
+            code_id = id(code)
+            with self._lock:
+                # Combine PY_START | PY_RETURN with whatever LINE events may
+                # already be armed for this code (line BPs and function-level
+                # PROBE can coexist on the same function).
+                existing = sys.monitoring.get_local_events(self.tool_id, code)
+                sys.monitoring.set_local_events(
+                    self.tool_id,
+                    code,
+                    existing | sys.monitoring.events.PY_START | sys.monitoring.events.PY_RETURN,
+                )
+                self._function_keys[code_id] = function_key
+                if code_id not in self._breakpoints:
+                    self._breakpoints[code_id] = set()
+                self._breakpoints[code_id].add(0)
+                if capture_config is not None:
+                    self._capture_configs[(code_id, 0)] = capture_config
+                if location_hash:
+                    self._location_hashes[(code_id, 0)] = location_hash
+                self._instrumentation_types[(code_id, 0)] = instrumentation_type or "PROBE"
+                logger.debug("Enabled function-level instrumentation for %s", function_key)
+            return True
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Failed to enable function-level instrumentation for %s: %s", function_key, exc, exc_info=True)
+            return False
+
+    def disable_function_level_instrumentation(self, code: CodeType, func: Optional[FunctionType] = None) -> None:
+        """
+        Disarm function-entry instrumentation on a code object.
+
+        Drops PY_START | PY_RETURN from this code's local-events mask
+        while preserving LINE if line BPs remain. Clears the engine's
+        per-(code_id, 0) state. PY_UNWIND stays globally armed in
+        initialize() — the unwind handler filters by code, so deleting
+        the entries here is sufficient to stop emitting unwind snapshots
+        for this function.
+        """
+        del func  # not needed for sys.monitoring (events are bound to code)
+        if not self._initialized:
+            return
+        try:
+            code_id = id(code)
+            with self._lock:
+                # Drop PY_START | PY_RETURN; keep LINE (and anything else).
+                existing = sys.monitoring.get_local_events(self.tool_id, code)
+                remaining = existing & ~(sys.monitoring.events.PY_START | sys.monitoring.events.PY_RETURN)
+                try:
+                    sys.monitoring.set_local_events(self.tool_id, code, remaining)
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    logger.warning(
+                        "Failed to clear PY_START/PY_RETURN for %s: %s",
+                        code.co_name,
+                        exc,
+                    )
+
+                # Clear function-level state at line=0.
+                self._capture_configs.pop((code_id, 0), None)
+                self._location_hashes.pop((code_id, 0), None)
+                self._instrumentation_types.pop((code_id, 0), None)
+                # Drain in-flight PY_START stamps for this code across all threads.
+                # Once we strip PY_START/PY_RETURN above, already-running frames may
+                # never get a PY_RETURN — these entries would leak otherwise.
+                for stale_key in [k for k in self._call_start_ns if k[0] == code_id]:
+                    self._call_start_ns.pop(stale_key, None)
+                line_set = self._breakpoints.get(code_id)
+                if line_set is not None:
+                    line_set.discard(0)
+                    # If no line BPs remain either, drop the code-level entries.
+                    if not line_set:
+                        self._breakpoints.pop(code_id, None)
+                        self._function_keys.pop(code_id, None)
+                logger.debug("Disabled function-level instrumentation for %s", code.co_name)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error(
+                "Failed to disable function-level instrumentation for %s: %s", code.co_name, exc, exc_info=True
+            )
+
+    def _function_start_event_handler(self, code: CodeType, instruction_offset: int):
+        """PY_START callback. Records call start_ns; no snapshot yet.
+
+        The snapshot is built on PY_RETURN / PY_UNWIND so it can include
+        the return value or exception.
+        """
+        del instruction_offset
+        if getattr(self._reentrancy_guard, "active", False):
+            return
+        code_id = id(code)
+        if code_id not in self._function_keys or 0 not in self._breakpoints.get(code_id, ()):
+            return sys.monitoring.DISABLE
+        try:
+            self._reentrancy_guard.active = True
+            self._call_start_ns[(code_id, threading.get_ident())] = time.time_ns()
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Error in PY_START handler for %s: %s", code.co_name, exc, exc_info=True)
+        finally:
+            self._reentrancy_guard.active = False
+
+    def _function_return_event_handler(self, code: CodeType, instruction_offset: int, retval: Any):
+        """PY_RETURN callback. Builds and emits a normal-return snapshot."""
+        del instruction_offset
+        code_id = id(code)
+        # Pop unconditionally so reentrancy short-circuit or disable-mid-flight
+        # cannot orphan the start_ns stamp written by PY_START.
+        start_ns = self._call_start_ns.pop((code_id, threading.get_ident()), 0)
+        if getattr(self._reentrancy_guard, "active", False):
+            return
+        if code_id not in self._function_keys or 0 not in self._breakpoints.get(code_id, ()):
+            return sys.monitoring.DISABLE
+        try:
+            self._reentrancy_guard.active = True
+            self._handle_function_level_instrumentation(code, retval=retval, thrown=None, start_ns=start_ns)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Error in PY_RETURN handler for %s: %s", code.co_name, exc, exc_info=True)
+        finally:
+            self._reentrancy_guard.active = False
+
+    def _function_unwind_event_handler(self, code: CodeType, instruction_offset: int, exception: BaseException):
+        """PY_UNWIND callback. Builds and emits an exception-path snapshot.
+
+        Globally armed (PY_UNWIND isn't local-event-capable on 3.12-3.14),
+        so we filter by code first. The third arg IS the live BaseException;
+        do NOT call sys.exc_info() here — CPython nulls the current exception
+        around the callback. Cannot return DISABLE on PY_UNWIND (raises
+        ValueError); just return None for non-ours codes.
+        """
+        del instruction_offset
+        code_id = id(code)
+        # Pop unconditionally so reentrancy short-circuit or disable-mid-flight
+        # cannot orphan the start_ns stamp written by PY_START.
+        start_ns = self._call_start_ns.pop((code_id, threading.get_ident()), 0)
+        if getattr(self._reentrancy_guard, "active", False):
+            return
+        if code_id not in self._function_keys or 0 not in self._breakpoints.get(code_id, ()):
+            return
+        try:
+            self._reentrancy_guard.active = True
+            self._handle_function_level_instrumentation(code, retval=None, thrown=exception, start_ns=start_ns)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Error in PY_UNWIND handler for %s: %s", code.co_name, exc, exc_info=True)
+        finally:
+            self._reentrancy_guard.active = False
+
+    def _handle_function_level_instrumentation(
+        self,
+        code: CodeType,
+        retval: Any,
+        thrown: Optional[BaseException],
+        start_ns: int,
+    ) -> None:
+        """Build and emit a snapshot for a function-level event.
+
+        Called from PY_RETURN (thrown=None) and PY_UNWIND (retval=None,
+        thrown=<exc>). Mutually exclusive: exactly one of retval / thrown
+        is meaningful per call.
+        """
+        try:
+            code_id = id(code)
+            function_key = self._function_keys.get(code_id, code.co_name)
+            breakpoint_key = f"{function_key}:0"
+
+            # Rate limit before doing any expensive work.
+            if self._hit_count_callback and not self._hit_count_callback(breakpoint_key):
+                return
+
+            capture_config = self._capture_configs.get((code_id, 0))
+            location_hash = self._location_hashes.get((code_id, 0))
+            instrumentation_type = self._instrumentation_types.get((code_id, 0), "PROBE")
+
+            # Capture user locals from the calling user frame.
+            local_vars: Dict[str, Any] = {}
+            if capture_config and capture_config.capture_arguments is not None:
+                local_vars = self._get_local_vars(code)
+
+            serializer = SnapshotSerializer(
+                max_fields=(capture_config.max_fields_per_object if capture_config else DEFAULT_MAX_FIELDS_PER_OBJECT),
+                max_string_length=capture_config.max_string_length if capture_config else DEFAULT_MAX_STRING_LENGTH,
+                max_depth=capture_config.max_object_depth if capture_config else 3,
+                max_collection_size=capture_config.max_collection_width if capture_config else 10,
+            )
+
+            # Filter args by capture_arguments list (None = skip args, [] = all).
+            args_captured: Dict[str, Any] = {}
+            if capture_config and capture_config.capture_arguments is not None and local_vars:
+                wanted = capture_config.capture_arguments
+                filtered = local_vars if not wanted else {k: v for k, v in local_vars.items() if k in wanted}
+                args_captured = serializer.serialize_variables(filtered)
+
+            entry_context = CapturedContext(arguments=args_captured if args_captured else None)
+
+            # Build return_context only when there is something to capture.
+            return_context: Optional[CapturedContext] = None
+            if thrown is not None:
+                # Exception path. Always build a context so the consumer
+                # can detect the exception even if capture_return is False.
+                return_context = CapturedContext(throwable=self._build_throwable(thrown))
+            elif capture_config and capture_config.capture_return and retval is not None:
+                return_context = CapturedContext(return_value=serializer.serialize(retval))
+
+            captures = Captures(entry=entry_context, return_context=return_context)
+
+            method_name = function_key.split(".")[-1]
+            module_parts = function_key.split(".")
+            code_unit = ".".join(module_parts[:-1]) if len(module_parts) > 1 else function_key
+            instrumentation = InstrumentationDetails(
+                location=InstrumentationLocation(
+                    code_unit=code_unit,
+                    class_name=code_unit,
+                    method_name=method_name,
+                    file_path=code.co_filename,
+                    line_number=0,
+                    language="python",
+                ),
+            )
+
+            # OTel trace context.
+            trace_context: Optional[TraceContext] = None
+            try:
+                span = otel_trace.get_current_span()
+                ctx = span.get_span_context()
+                if ctx.is_valid:
+                    trace_context = TraceContext(
+                        trace_id=format(ctx.trace_id, "032x"),
+                        span_id=format(ctx.span_id, "016x"),
+                    )
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
+
+            current_thread = threading.current_thread()
+            thread = ThreadInfo(id=threading.get_ident(), name=current_thread.name)
+
+            stack = None
+            if capture_config and capture_config.capture_stack_trace:
+                stack = capture_stack_frames(capture_config.max_stack_frames)
+
+            duration_ms = (time.time_ns() - start_ns) // 1_000_000 if start_ns else 0
+
+            snapshot = Snapshot(
+                timestamp=int(time.time() * 1000),
+                duration=duration_ms,
+                location_hash=location_hash or None,
+                service=self._get_service_name(),
+                environment=self._get_environment(),
+                instrumentation=instrumentation,
+                trace=trace_context,
+                thread=thread,
+                stack=stack,
+                captures=captures,
+                instrumentation_type=instrumentation_type,
+            )
+
+            # Emit via the global snapshot emitter (set up by debugger init).
+            try:
+                emitter = get_snapshot_emitter()
+                if emitter:
+                    emitter.emit_snapshot(snapshot)
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
+
+            logger.debug(
+                "Emitted %s snapshot for %s (duration_ms=%d, exc=%s)",
+                instrumentation_type,
+                function_key,
+                duration_ms,
+                type(thrown).__name__ if thrown else None,
+            )
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("Error handling function-level instrumentation: %s", exc, exc_info=True)
+
+    @staticmethod
+    def _build_throwable(thrown: BaseException) -> CapturedThrowable:
+        """Build a CapturedThrowable from a live exception.
+
+        Walks ``thrown.__traceback__`` (do NOT call sys.exc_info() inside
+        a sys.monitoring callback — CPython nulls the current exception
+        around the call).
+        """
+        frames: list = []
+        tb = thrown.__traceback__
+        if tb is not None:
+            try:
+                extracted = traceback.extract_tb(tb)
+                frames = [
+                    StackFrame(file_name=f.filename, function=f.name, line_number=f.lineno or 0) for f in extracted
+                ]
+            except Exception:  # pylint: disable=broad-exception-caught
+                frames = []
+        return CapturedThrowable(
+            type=type(thrown).__name__,
+            message=str(thrown) or "",
+            stacktrace=frames,
+        )
 
     def enable_breakpoints_for_function(
         self,
@@ -221,9 +582,21 @@ class SysMonitoringEngine(InstrumentationEngine):
                 function_key = self._function_keys.pop(code_id, None)
 
                 # Clean up location hashes and capture configs for all lines
+                # (line=0 is included if function-level was also armed).
                 for line_num in line_numbers:
                     self._location_hashes.pop((code_id, line_num), None)
                     self._capture_configs.pop((code_id, line_num), None)
+
+                # _instrumentation_types is keyed at (code_id, 0) only and is NOT
+                # iterated above; clear it explicitly in case function-level
+                # was armed on this code.
+                self._instrumentation_types.pop((code_id, 0), None)
+
+                # Drain in-flight PY_START stamps across all threads. We just
+                # popped _function_keys, so PY_RETURN/PY_UNWIND will short-circuit
+                # on the membership guard before reaching the pop.
+                for stale_key in [k for k in self._call_start_ns if k[0] == code_id]:
+                    self._call_start_ns.pop(stale_key, None)
 
                 logger.debug("Disabled all breakpoints for %s", function_key or code.co_name)
 
@@ -490,10 +863,22 @@ class SysMonitoringEngine(InstrumentationEngine):
                 self._function_keys.clear()
                 self._location_hashes.clear()
                 self._capture_configs.clear()
+                self._instrumentation_types.clear()
+                self._call_start_ns.clear()
 
                 # Always try to unregister callback and free tool if we own it
                 if sys.monitoring.get_tool(self.tool_id) == _TOOL_NAME:
                     sys.monitoring.register_callback(self.tool_id, sys.monitoring.events.LINE, None)
+                    sys.monitoring.register_callback(self.tool_id, sys.monitoring.events.PY_START, None)
+                    sys.monitoring.register_callback(self.tool_id, sys.monitoring.events.PY_RETURN, None)
+                    sys.monitoring.register_callback(self.tool_id, sys.monitoring.events.PY_UNWIND, None)
+                    # Disarm global PY_UNWIND. LINE / PY_START / PY_RETURN
+                    # were armed per-code via set_local_events and release
+                    # automatically when the code is GC'd.
+                    try:
+                        sys.monitoring.set_events(self.tool_id, sys.monitoring.events.NO_EVENTS)
+                    except Exception as exc:  # pylint: disable=broad-exception-caught
+                        logger.warning("Failed to clear global events: %s", exc)
                     try:
                         sys.monitoring.free_tool_id(self.tool_id)
                         logger.debug("Freed tool ID %s", self.tool_id)
