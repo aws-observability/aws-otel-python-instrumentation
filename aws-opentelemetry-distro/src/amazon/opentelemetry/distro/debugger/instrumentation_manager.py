@@ -26,6 +26,9 @@ from amazon.opentelemetry.distro.debugger._function_wrapper import FunctionWrapp
 from amazon.opentelemetry.distro.debugger._snapshot_otlp_emitter import SnapshotOtlpEmitter
 from amazon.opentelemetry.distro.debugger._status_reporter import ConfigurationStatus, ErrorCause
 from amazon.opentelemetry.distro.debugger.instrumentation_engine._instrumentation_engine import InstrumentationEngine
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.semconv._incubating.attributes.deployment_attributes import DEPLOYMENT_ENVIRONMENT_NAME
+from opentelemetry.semconv.resource import ResourceAttributes
 
 logger = logging.getLogger(__name__)
 
@@ -91,13 +94,12 @@ class InstrumentationManager:
     def _build_resource(service, environment):
         """Build a Resource with service name and environment for the OTLP LoggerProvider."""
         try:
-            from opentelemetry.sdk.resources import Resource  # pylint: disable=import-outside-toplevel
-
             attrs = {}
             if service:
-                attrs["service.name"] = service
+                attrs[ResourceAttributes.SERVICE_NAME] = service
             if environment:
-                attrs["deployment.environment.name"] = environment
+                attrs[DEPLOYMENT_ENVIRONMENT_NAME] = environment
+                attrs[ResourceAttributes.DEPLOYMENT_ENVIRONMENT] = environment
             return Resource.create(attrs) if attrs else None
         except Exception:  # pylint: disable=broad-exception-caught
             return None

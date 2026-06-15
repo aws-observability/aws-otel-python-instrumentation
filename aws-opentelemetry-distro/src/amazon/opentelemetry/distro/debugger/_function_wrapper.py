@@ -46,6 +46,9 @@ from amazon.opentelemetry.distro.debugger._snapshot_models import (
 )
 from amazon.opentelemetry.distro.debugger._snapshot_serializer import SnapshotSerializer
 from amazon.opentelemetry.distro.debugger._stack_utils import capture_stack_frames, is_internal_frame
+from opentelemetry import trace as otel_trace
+from opentelemetry.semconv._incubating.attributes.deployment_attributes import DEPLOYMENT_ENVIRONMENT_NAME
+from opentelemetry.semconv.resource import ResourceAttributes
 
 logger = logging.getLogger(__name__)
 
@@ -875,7 +878,7 @@ class FunctionWrapper:
             for pair in os.environ.get("OTEL_RESOURCE_ATTRIBUTES", "").split(","):
                 if "=" in pair:
                     key, value = pair.split("=", 1)
-                    if key.strip() == "service.name":
+                    if key.strip() == ResourceAttributes.SERVICE_NAME:
                         service_name = value.strip()
                         break
 
@@ -884,10 +887,10 @@ class FunctionWrapper:
             if "=" in pair:
                 key, value = pair.split("=", 1)
                 key = key.strip()
-                if key == "deployment.environment.name":
+                if key == DEPLOYMENT_ENVIRONMENT_NAME:
                     environment = value.strip()
                     break
-                if key == "deployment.environment" and not environment:
+                if key == ResourceAttributes.DEPLOYMENT_ENVIRONMENT and not environment:
                     environment = value.strip()
 
         # Build instrumentation details per v1 spec
@@ -951,8 +954,6 @@ class FunctionWrapper:
     def _get_trace_context() -> Optional[TraceContext]:
         """Read the current OTel trace/span IDs without creating a new span."""
         try:
-            from opentelemetry import trace as otel_trace  # pylint: disable=import-outside-toplevel
-
             span = otel_trace.get_current_span()
             if span and span.get_span_context().is_valid:
                 ctx = span.get_span_context()

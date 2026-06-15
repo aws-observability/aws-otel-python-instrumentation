@@ -41,6 +41,9 @@ from amazon.opentelemetry.distro.debugger._stack_utils import capture_stack_fram
 from amazon.opentelemetry.distro.debugger.instrumentation_engine._instrumentation_engine import InstrumentationEngine
 from amazon.opentelemetry.distro.debugger.instrumentation_engine._undecorate import undecorated
 from opentelemetry import trace as otel_trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.semconv._incubating.attributes.deployment_attributes import DEPLOYMENT_ENVIRONMENT_NAME
+from opentelemetry.semconv.resource import ResourceAttributes
 
 logger = logging.getLogger(__name__)
 
@@ -498,12 +501,9 @@ class BytecodeInjectionEngine(InstrumentationEngine):
     @staticmethod
     def _get_service_name():
         try:
-            from opentelemetry import trace as otel_trace  # pylint: disable=import-outside-toplevel
-            from opentelemetry.sdk.trace import TracerProvider  # pylint: disable=import-outside-toplevel
-
             provider = otel_trace.get_tracer_provider()
             if isinstance(provider, TracerProvider) and hasattr(provider, "resource"):
-                return provider.resource.attributes.get("service.name")
+                return provider.resource.attributes.get(ResourceAttributes.SERVICE_NAME)
         except Exception:  # pylint: disable=broad-exception-caught
             pass
         return None
@@ -511,12 +511,10 @@ class BytecodeInjectionEngine(InstrumentationEngine):
     @staticmethod
     def _get_environment():
         try:
-            from opentelemetry import trace as otel_trace  # pylint: disable=import-outside-toplevel
-            from opentelemetry.sdk.trace import TracerProvider  # pylint: disable=import-outside-toplevel
-
             provider = otel_trace.get_tracer_provider()
             if isinstance(provider, TracerProvider) and hasattr(provider, "resource"):
-                return provider.resource.attributes.get("deployment.environment.name")
+                attrs = provider.resource.attributes
+                return attrs.get(DEPLOYMENT_ENVIRONMENT_NAME) or attrs.get(ResourceAttributes.DEPLOYMENT_ENVIRONMENT)
         except Exception:  # pylint: disable=broad-exception-caught
             pass
         return None
@@ -605,8 +603,6 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             # Read current OTel trace context
             trace_ctx = None
             try:
-                from opentelemetry import trace as otel_trace  # pylint: disable=import-outside-toplevel
-
                 span = otel_trace.get_current_span()
                 if span and span.get_span_context().is_valid:
                     ctx = span.get_span_context()

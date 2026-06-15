@@ -133,6 +133,7 @@ class TestBuildResource(unittest.TestCase):
         self.assertIsNotNone(resource)
         self.assertEqual(resource.attributes.get("service.name"), "svc")
         self.assertEqual(resource.attributes.get("deployment.environment.name"), "prod")
+        self.assertEqual(resource.attributes.get("deployment.environment"), "prod")
 
     def test_returns_resource_with_only_service(self):
         resource = InstrumentationManager._build_resource("svc", "")

@@ -34,6 +34,9 @@ from amazon.opentelemetry.distro.debugger._snapshot_serializer import SnapshotSe
 from amazon.opentelemetry.distro.debugger._stack_utils import capture_stack_frames
 from amazon.opentelemetry.distro.debugger.instrumentation_engine._instrumentation_engine import InstrumentationEngine
 from opentelemetry import trace as otel_trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.semconv._incubating.attributes.deployment_attributes import DEPLOYMENT_ENVIRONMENT_NAME
+from opentelemetry.semconv.resource import ResourceAttributes
 
 logger = logging.getLogger(__name__)
 
@@ -675,12 +678,9 @@ class SysMonitoringEngine(InstrumentationEngine):
     def _get_service_name() -> Optional[str]:
         """Get service name from OTel resource."""
         try:
-            from opentelemetry import trace as otel_trace  # pylint: disable=import-outside-toplevel
-            from opentelemetry.sdk.trace import TracerProvider  # pylint: disable=import-outside-toplevel
-
             provider = otel_trace.get_tracer_provider()
             if isinstance(provider, TracerProvider) and hasattr(provider, "resource"):
-                return provider.resource.attributes.get("service.name")
+                return provider.resource.attributes.get(ResourceAttributes.SERVICE_NAME)
         except Exception:  # pylint: disable=broad-exception-caught
             pass
         return None
@@ -689,12 +689,10 @@ class SysMonitoringEngine(InstrumentationEngine):
     def _get_environment() -> Optional[str]:
         """Get deployment environment from OTel resource."""
         try:
-            from opentelemetry import trace as otel_trace  # pylint: disable=import-outside-toplevel
-            from opentelemetry.sdk.trace import TracerProvider  # pylint: disable=import-outside-toplevel
-
             provider = otel_trace.get_tracer_provider()
             if isinstance(provider, TracerProvider) and hasattr(provider, "resource"):
-                return provider.resource.attributes.get("deployment.environment.name")
+                attrs = provider.resource.attributes
+                return attrs.get(DEPLOYMENT_ENVIRONMENT_NAME) or attrs.get(ResourceAttributes.DEPLOYMENT_ENVIRONMENT)
         except Exception:  # pylint: disable=broad-exception-caught
             pass
         return None
@@ -775,8 +773,6 @@ class SysMonitoringEngine(InstrumentationEngine):
             # Read current OTel trace context
             trace_ctx = None
             try:
-                from opentelemetry import trace as otel_trace  # pylint: disable=import-outside-toplevel
-
                 span = otel_trace.get_current_span()
                 if span and span.get_span_context().is_valid:
                     ctx = span.get_span_context()
