@@ -906,7 +906,7 @@ class FunctionWrapper:
                 logger.debug("Patched Flask view_functions[%s] by name+module match", ep)
 
     @staticmethod
-    def _patch_django_url_patterns(  # pylint: disable=too-many-branches
+    def _patch_django_url_patterns(  # pylint: disable=too-many-branches,too-many-nested-blocks
         module, original_func: Callable, new_func: Callable
     ) -> None:
         """
