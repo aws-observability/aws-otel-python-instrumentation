@@ -553,8 +553,8 @@ class TestBytecodeInjectionEngineFunctionLevel(unittest.TestCase):
         self.assertEqual(snap.captures.return_context.return_value.value, "5")
 
     def test_function_level_throwable_capture(self):
-        """The PR #770 regression-fix: an instrumented function that raises must
-        produce a snapshot whose return_context.throwable is fully populated."""
+        """An instrumented function that raises must produce a snapshot whose
+        return_context.throwable is fully populated."""
 
         def boom(x):
             raise ValueError(f"bad: {x}")
