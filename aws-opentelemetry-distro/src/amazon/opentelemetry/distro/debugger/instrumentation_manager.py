@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+# pylint: disable=too-many-lines
 
 """
 Instrumentation Manager - Central coordinator for atomic breakpoint management.
@@ -415,7 +416,9 @@ class InstrumentationManager:
 
         return (target_func, target_code) if accepted else (None, None)
 
-    def _apply_function(self, bp_set: FunctionBreakpointSet):  # pylint: disable=too-many-branches,too-many-statements
+    def _apply_function(  # pylint: disable=too-many-branches,too-many-statements,too-many-locals
+        self, bp_set: FunctionBreakpointSet
+    ):
         """
         Apply function wrapper (no line breakpoints yet - Phase 5).
 

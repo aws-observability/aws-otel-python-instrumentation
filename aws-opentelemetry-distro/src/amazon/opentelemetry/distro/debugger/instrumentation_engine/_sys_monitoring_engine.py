@@ -274,9 +274,9 @@ class SysMonitoringEngine(InstrumentationEngine):
         Tolerates skipped events (e.g., disarmed mid-flight) by walking
         down the stack until we find our frame or run out."""
         stack = self._get_call_stack()
-        for i in range(len(stack) - 1, -1, -1):
-            if stack[i][0] == code_id:
-                return stack.pop(i)[1]
+        for idx in range(len(stack) - 1, -1, -1):
+            if stack[idx][0] == code_id:
+                return stack.pop(idx)[1]
         return 0
 
     def _function_start_event_handler(self, code: CodeType, instruction_offset: int):
@@ -287,7 +287,7 @@ class SysMonitoringEngine(InstrumentationEngine):
         """
         del instruction_offset
         if getattr(self._reentrancy_guard, "active", False):
-            return
+            return None
         code_id = id(code)
         if code_id not in self._function_keys or 0 not in self._breakpoints.get(code_id, ()):
             return sys.monitoring.DISABLE
@@ -298,6 +298,7 @@ class SysMonitoringEngine(InstrumentationEngine):
             logger.error("Error in PY_START handler for %s: %s", code.co_name, exc, exc_info=True)
         finally:
             self._reentrancy_guard.active = False
+        return None
 
     def _function_return_event_handler(self, code: CodeType, instruction_offset: int, retval: Any):
         """PY_RETURN callback. Builds and emits a normal-return snapshot."""
@@ -307,7 +308,7 @@ class SysMonitoringEngine(InstrumentationEngine):
         # cannot orphan the start_ns stamp written by PY_START.
         start_ns = self._pop_matching_start_ns(code_id)
         if getattr(self._reentrancy_guard, "active", False):
-            return
+            return None
         if code_id not in self._function_keys or 0 not in self._breakpoints.get(code_id, ()):
             return sys.monitoring.DISABLE
         try:
@@ -317,6 +318,7 @@ class SysMonitoringEngine(InstrumentationEngine):
             logger.error("Error in PY_RETURN handler for %s: %s", code.co_name, exc, exc_info=True)
         finally:
             self._reentrancy_guard.active = False
+        return None
 
     def _function_unwind_event_handler(self, code: CodeType, instruction_offset: int, exception: BaseException):
         """PY_UNWIND callback. Builds and emits an exception-path snapshot.
@@ -347,7 +349,7 @@ class SysMonitoringEngine(InstrumentationEngine):
         finally:
             self._reentrancy_guard.active = False
 
-    def _handle_function_level_instrumentation(
+    def _handle_function_level_instrumentation(  # pylint: disable=too-many-locals,too-many-statements
         self,
         code: CodeType,
         retval: Any,

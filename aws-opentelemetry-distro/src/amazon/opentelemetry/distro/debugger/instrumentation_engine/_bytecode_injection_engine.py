@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+# pylint: disable=too-many-lines
 
 """
 Bytecode injection engine for live debugger.
@@ -315,7 +316,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.error("Error disabling breakpoints for %s: %s", code.co_name, exc, exc_info=True)
 
-    def enable_function_level_instrumentation(  # pylint: disable=too-many-arguments,too-many-locals
+    def enable_function_level_instrumentation(  # pylint: disable=too-many-arguments,too-many-locals,too-many-branches
         self,
         code: CodeType,
         func: FunctionType,
@@ -427,7 +428,9 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             logger.error("Error arming function-level instrumentation for %s: %s", function_key, exc, exc_info=True)
             return False
 
-    def disable_function_level_instrumentation(self, code: CodeType, func: Optional[FunctionType] = None) -> None:
+    def disable_function_level_instrumentation(  # pylint: disable=too-many-branches
+        self, code: CodeType, func: Optional[FunctionType] = None
+    ) -> None:
         """Disarm function-level instrumentation. Restores the original
         __code__ and prunes function-level config entries; preserves any
         line-level BP state armed independently on the same function."""
@@ -1076,10 +1079,10 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         existing = set(code.co_varnames) | set(code.co_freevars) | set(code.co_cellvars) | taken
         if base not in existing:
             return base
-        i = 1
-        while f"{base}_{i}" in existing:
-            i += 1
-        return f"{base}_{i}"
+        suffix = 1
+        while f"{base}_{suffix}" in existing:
+            suffix += 1
+        return f"{base}_{suffix}"
 
     def _create_code_with_function_wrap(  # pylint: disable=too-many-locals
         self,

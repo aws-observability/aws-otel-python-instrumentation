@@ -58,6 +58,7 @@ def _matches(code: CodeType, name: str, target: Optional[Path]) -> bool:
     return candidate is not None and candidate == target
 
 
+# pylint: disable=too-many-locals,too-many-branches
 def undecorated(func: Any, name: str, path: Optional[str] = None) -> Any:
     """Return the innermost function whose ``co_name`` matches ``name`` (and
     ``co_filename`` matches ``path`` when provided).
