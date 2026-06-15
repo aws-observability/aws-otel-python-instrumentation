@@ -7,7 +7,12 @@ import urllib.request
 
 os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
 
-_OTEL_SCHEMA_BASE = "https://opentelemetry.io/docs/specs/semconv"
+# The OTel GenAI semantic conventions (and their JSON Schemas) moved out of
+# opentelemetry.io into the dedicated open-telemetry/semantic-conventions-genai
+# repository; the old opentelemetry.io/docs/specs/semconv/gen-ai/*.json URLs now
+# 404. The relocated repo does not yet publish tagged releases, so we pin to the
+# raw files on the default branch.
+_OTEL_SCHEMA_BASE = "https://raw.githubusercontent.com/open-telemetry/semantic-conventions-genai/main/docs"
 _SCHEMA_CACHE: dict = {}
 
 
