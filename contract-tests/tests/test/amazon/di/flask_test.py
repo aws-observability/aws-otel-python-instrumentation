@@ -459,3 +459,33 @@ class DIFlaskCaptureLimitsTest(DITestInfrastructure):
         size = large_list_arg.get("size")
         self.assertIsNotNone(size, "Captured collection should report original size")
         self.assertEqual(size, 50, "Original collection size should be 50")
+
+    def test_string_value_truncated_at_user_supplied_limit_below_maximum(self) -> None:
+        """Function-level capture must honor a user-supplied limit below the maximum.
+
+        The config requests MaxStringLength=10 (well within range) and the input is
+        100 chars. The captured value must be truncated to exactly 10 -- not the
+        maximum (255) -- proving the function path uses the per-config limit rather
+        than a fixed serializer.
+        """
+        self.send_request("GET", "limits-small-string")
+        logs = self.wait_for_snapshots(min_count=1)
+        log = self.logs_for_method(logs, "process_small_limit_string")[0]
+
+        body = self.body(log)
+        captures = body.get("captures", {})
+        entry = captures.get("entry", {})
+        arguments = entry.get("arguments", {})
+        small_string_arg = arguments.get("small_limit_string", {})
+
+        self.assertIsNotNone(small_string_arg, "Expected 'small_limit_string' argument to be captured")
+
+        captured_value = small_string_arg.get("value")
+        self.assertIsNotNone(captured_value, "Captured string value should not be None")
+        self.assertEqual(
+            len(captured_value),
+            10,
+            f"String should be truncated at the user-supplied limit of 10, but was {len(captured_value)}.",
+        )
+        self.assertTrue(small_string_arg.get("truncated", False), "Captured string should be marked as truncated")
+        self.assertEqual(small_string_arg.get("size"), 100, "Captured string should report original size of 100")

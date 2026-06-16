@@ -29,7 +29,9 @@ from enum import Enum
 from typing import Any, Callable, Optional, Tuple, Type, Union
 
 from amazon.opentelemetry.distro.debugger._data_models import (
+    DEFAULT_MAX_COLLECTION_WIDTH,
     DEFAULT_MAX_FIELDS_PER_OBJECT,
+    DEFAULT_MAX_OBJECT_DEPTH,
     DEFAULT_MAX_STRING_LENGTH,
     CaptureConfig,
 )
@@ -113,8 +115,8 @@ class FunctionWrapper:
         return SnapshotSerializer(
             max_fields=capture_config.max_fields_per_object if capture_config else DEFAULT_MAX_FIELDS_PER_OBJECT,
             max_string_length=capture_config.max_string_length if capture_config else DEFAULT_MAX_STRING_LENGTH,
-            max_depth=capture_config.max_object_depth if capture_config else 3,
-            max_collection_size=capture_config.max_collection_width if capture_config else 10,
+            max_depth=capture_config.max_object_depth if capture_config else DEFAULT_MAX_OBJECT_DEPTH,
+            max_collection_size=capture_config.max_collection_width if capture_config else DEFAULT_MAX_COLLECTION_WIDTH,
         )
 
     def instrument_function(  # pylint: disable=too-many-arguments
