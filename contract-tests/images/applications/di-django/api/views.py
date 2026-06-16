@@ -14,7 +14,6 @@ import time
 
 from django.http import HttpResponse, JsonResponse
 
-
 # ---------------------------------------------------------------------------
 # Target functions (defined before configs so we can inspect line numbers)
 # ---------------------------------------------------------------------------

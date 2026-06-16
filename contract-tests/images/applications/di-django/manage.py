@@ -13,10 +13,7 @@ def main():
     # Start the mock DI API + register configs BEFORE Django boots so the DI
     # poller's first /list-instrumentation-configurations call (after Django
     # imports) finds them ready.
-    from api.di_configs import (  # pylint: disable=import-outside-toplevel
-        BREAKPOINT_CONFIGS,
-        PROBE_CONFIGS,
-    )
+    from api.di_configs import BREAKPOINT_CONFIGS, PROBE_CONFIGS  # pylint: disable=import-outside-toplevel
     from mock_di_api import (  # pylint: disable=import-outside-toplevel
         set_breakpoint_configs,
         set_probe_configs,
@@ -35,6 +32,12 @@ def main():
             "available on your PYTHONPATH environment variable? Did you "
             "forget to activate a virtual environment?"
         ) from exc
+
+    # Emit the readiness marker the contract-test harness waits on
+    # (DITestInfrastructure.get_application_wait_pattern() == "Ready").
+    # Django's runserver banner never prints "Ready", so without this the
+    # wait_for_logs() in setUp() times out before any request is sent.
+    print("Ready", flush=True)
     execute_from_command_line(sys.argv)
 
 
