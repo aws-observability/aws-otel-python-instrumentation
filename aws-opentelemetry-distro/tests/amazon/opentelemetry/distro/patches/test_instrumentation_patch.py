@@ -198,7 +198,9 @@ class TestInstrumentationPatch(TestCase):
         )
 
         # Bedrock AgentCore
-        self.assertFalse("bedrock-agentcore" in _BOTOCORE_EXTENSIONS, "Upstream has added a Bedrock AgentCore extension")
+        self.assertFalse(
+            "bedrock-agentcore" in _BOTOCORE_EXTENSIONS, "Upstream has added a Bedrock AgentCore extension"
+        )
 
         # Bedrock AgentCore Control
         self.assertFalse(
