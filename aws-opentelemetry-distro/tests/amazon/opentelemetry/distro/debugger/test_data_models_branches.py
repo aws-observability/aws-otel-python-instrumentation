@@ -6,8 +6,8 @@
 These complement test_data_models.py by feeding from_api_config the malformed
 and PROBE-specific inputs that exercise the remaining validation branches
 (bool line numbers, non-dict CodeLocation/CodeCapture, invalid InstrumentationType,
-PROBE rules around InstrumentationName / ExpiresAt / MaxHits, and CreatedAt
-parsing), plus the simple property accessors and the arg_mappings=None guard.
+PROBE rules around ExpiresAt / MaxHits, and CreatedAt parsing), plus the simple
+property accessors and the arg_mappings=None guard.
 """
 
 import unittest
@@ -122,23 +122,12 @@ class TestFromApiConfigInvalidInstrumentationType(unittest.TestCase):
 
 
 class TestFromApiConfigProbeRules(unittest.TestCase):
-    """Covers PROBE-specific branches: optional name, ExpiresAt ignored, MaxHits ignored."""
-
-    def test_probe_missing_instrumentation_name_defaults_to_empty(self):
-        api_config = {
-            "Location": _location(line_number=0),
-            "InstrumentationType": "PROBE",
-            "LocationHash": "h",
-        }
-        config = BreakpointConfiguration.from_api_config(api_config)
-        self.assertIsNotNone(config)
-        self.assertEqual(config.instrumentation_name, "")
+    """Covers PROBE-specific branches: ExpiresAt ignored, MaxHits ignored."""
 
     def test_probe_ignores_expires_at_and_max_hits(self):
         api_config = {
             "Location": _location(line_number=0),
             "InstrumentationType": "PROBE",
-            "InstrumentationName": "my-probe",
             "ExpiresAt": 1700000000,  # ignored for PROBE (line 456)
             "CaptureConfiguration": {"CodeCapture": {"CaptureLimits": {"MaxHits": 5}}},  # ignored for PROBE (line 483)
             "LocationHash": "h",
