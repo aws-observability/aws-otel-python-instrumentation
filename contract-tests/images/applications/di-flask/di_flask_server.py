@@ -227,7 +227,6 @@ PROBE_CONFIGS = [
     # PROBE on compute_total
     {
         "InstrumentationType": "PROBE",
-        "InstrumentationName": "compute-total-probe",
         "SignalType": "SNAPSHOT",
         "Location": {
             "CodeLocation": {
@@ -249,7 +248,6 @@ PROBE_CONFIGS = [
     # PROBE on shared_function (coexists with BREAKPOINT)
     {
         "InstrumentationType": "PROBE",
-        "InstrumentationName": "shared-function-probe",
         "SignalType": "SNAPSHOT",
         "Location": {
             "CodeLocation": {
