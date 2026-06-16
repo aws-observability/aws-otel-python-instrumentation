@@ -178,7 +178,6 @@ class BreakpointConfiguration:
         capture_config: Configuration for data capture
         config_id: Unique identifier from API
         instrumentation_type: Type of instrumentation ("PROBE" or "BREAKPOINT")
-        instrumentation_name: Optional name for the instrumentation (defaults to "" if absent)
         expires_at: Optional expiration timestamp (ignored for PROBE)
         max_hits: Maximum hits before breakpoint is disabled (ignored for PROBE)
         attribute_filters: List of attribute filter objects
@@ -190,7 +189,6 @@ class BreakpointConfiguration:
     capture_config: CaptureConfig
     config_id: str
     instrumentation_type: str = "BREAKPOINT"  # "PROBE" or "BREAKPOINT"
-    instrumentation_name: Optional[str] = None
     expires_at: Optional[datetime] = None
     max_hits: int = DEFAULT_MAX_HITS
     attribute_filters: List[Dict[str, Any]] = field(default_factory=list)
@@ -363,8 +361,6 @@ class BreakpointConfiguration:
                 )
                 instrumentation_type = "BREAKPOINT"
 
-            instrumentation_name = breakpoint_config.get("InstrumentationName") or ""
-
             # Parse line number safely - 0 or missing means function-level only, >0 means line-level
             # For PROBE: Always force line_number to 0 (function-level only)
             line_number = safe_int(location.get("LineNumber"), 0)
@@ -497,7 +493,6 @@ class BreakpointConfiguration:
                 capture_config=capture_config,
                 config_id=config_id,
                 instrumentation_type=instrumentation_type,
-                instrumentation_name=instrumentation_name,
                 expires_at=expires_at,
                 max_hits=max_hits,
                 attribute_filters=attribute_filters,
