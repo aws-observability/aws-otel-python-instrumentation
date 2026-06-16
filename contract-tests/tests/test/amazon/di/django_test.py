@@ -273,33 +273,34 @@ class DIDjangoHitLimitTest(DITestInfrastructure):
         return "Ready"
 
     def test_breakpoint_generates_snapshots_up_to_limit(self) -> None:
-        """BREAKPOINT generates snapshots up to (max_hits - 1)."""
+        """BREAKPOINT generates a snapshot for each hit up to and including max_hits."""
+        self.send_request("GET", "limited")
         self.send_request("GET", "limited")
         self.send_request("GET", "limited")
 
-        logs = self.wait_for_snapshots(min_count=2)
+        logs = self.wait_for_snapshots(min_count=3)
         limited_logs = self.logs_for_method(logs, "limited_function")
-        self.assertEqual(len(limited_logs), 2, "Expected exactly 2 snapshots (MaxHits=3 allows 2)")
+        self.assertEqual(len(limited_logs), 3, "Expected exactly 3 snapshots (MaxHits=3 allows 3)")
 
     def test_breakpoint_disabled_after_hit_limit(self) -> None:
         """BREAKPOINT stops generating snapshots after hit limit is reached."""
         self.send_request("GET", "limited")
         self.send_request("GET", "limited")
+        self.send_request("GET", "limited")
 
-        logs = self.wait_for_snapshots(min_count=2)
+        logs = self.wait_for_snapshots(min_count=3)
         initial_count = len(self.logs_for_method(logs, "limited_function"))
-        self.assertEqual(initial_count, 2)
+        self.assertEqual(initial_count, 3)
 
         self.send_request("GET", "limited")
-        self.send_request("GET", "limited")
-        time.sleep(2)
+        time.sleep(5)
 
         final_logs = self._peek_snapshots()
         final_count = len(self.logs_for_method(final_logs, "limited_function"))
         self.assertEqual(
             final_count,
-            2,
-            f"Expected 2 snapshots (MaxHits=3), but got {final_count}. "
+            3,
+            f"Expected 3 snapshots (MaxHits=3), but got {final_count}. "
             "BREAKPOINT should be disabled after hitting limit.",
         )
 
