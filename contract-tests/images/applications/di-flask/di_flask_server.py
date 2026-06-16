@@ -55,8 +55,8 @@ assert _CALCULATE_SUM_LINE is not None, "Could not find 'result = a + b' in calc
 def limited_function(x):
     """Target function with hit limit (MaxHits=3).
 
-    MaxHits=3 means: allow 2 snapshots, disable at 3rd hit.
-    (The check is hit_count >= max_hits, so hit 1&2 pass, hit 3 is blocked.)
+    MaxHits=3 means: allow 3 snapshots, disable on the 4th hit.
+    (The check is hit_count > max_hits, so hits 1-3 pass, hit 4 is blocked.)
     """
     return x * 10
 
