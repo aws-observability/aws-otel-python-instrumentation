@@ -6,29 +6,27 @@ import time
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
+from amazon.opentelemetry.distro.serviceevents import python_monitor_impl as impl
 from amazon.opentelemetry.distro.serviceevents.python_monitor import (
     PythonServiceEventsMonitor,
     _ServiceEventsMonitorState,
 )
 from amazon.opentelemetry.distro.serviceevents.python_monitor_impl import (
-    _adaptive_sample_cache,
+    _CALL_PATH_TRUNCATION_SENTINEL,
+    _MAX_CALL_PATH_ENTRIES,
     _call_counters,
     _call_counters_lock,
     _call_stack,
     _current_operation,
-    _hot_operations,
-    _hot_operations_lock,
     _increment_call_counter,
     _should_sample,
     get_call_stack,
     get_current_operation,
     get_sampling_mode,
-    mark_operation_hot,
     reset_after_fork,
     set_current_operation,
     set_sampling_mode,
     set_sampling_thresholds,
-    tick_hot_operations,
 )
 
 
@@ -38,6 +36,9 @@ class TestServiceEventsMonitorState(TestCase):
     def setUp(self):
         """Reset the singleton instance before each test."""
         _ServiceEventsMonitorState._instance = None
+        # Reset the process-wide active-investigation count so a leaked begin from another test
+        # can't disable (or, when high, mask) the hot-path gate exercised below.
+        impl._investigation_active_count = 0
 
     def test_singleton_pattern(self):
         """Test that get_instance returns the same instance."""
@@ -113,6 +114,71 @@ class TestServiceEventsMonitorState(TestCase):
         state.clear_investigation_data()
         state.clear_investigation_data()
         self.assertIsNone(state.peek_investigation_data())
+
+    def test_call_path_capped_with_truncation_sentinel(self):
+        """record_call_path_entry caps the path and appends one sentinel on overflow (keep-first)."""
+        state = _ServiceEventsMonitorState.get_instance()
+        state.begin_investigation()
+
+        # Record well past the cap; every real frame has a non-zero duration so is_partial would be
+        # False if the cap never fired.
+        for i in range(_MAX_CALL_PATH_ENTRIES + 50):
+            caller = None if i == 0 else f"func-{i - 1}"
+            state.record_call_path_entry(f"func-{i}", caller, 1000)
+
+        inv_data = state.get_investigation_data()
+        self.assertIsNotNone(inv_data)
+        call_path = inv_data["call_path"]
+
+        # Keep-first: MAX real frames + exactly one sentinel, regardless of overflow size.
+        self.assertEqual(len(call_path), _MAX_CALL_PATH_ENTRIES + 1)
+
+        # A below-cap frame is a normal entry.
+        self.assertEqual(call_path[0]["function_name"], "func-0")
+        self.assertEqual(call_path[_MAX_CALL_PATH_ENTRIES - 1]["function_name"], f"func-{_MAX_CALL_PATH_ENTRIES - 1}")
+        self.assertEqual(call_path[_MAX_CALL_PATH_ENTRIES - 1]["duration_ns"], 1000)
+
+        # The overflow frame is the sentinel with duration_ns=0 (trips is_partial downstream).
+        sentinel = call_path[_MAX_CALL_PATH_ENTRIES]
+        self.assertEqual(sentinel["function_name"], _CALL_PATH_TRUNCATION_SENTINEL)
+        self.assertIsNone(sentinel["caller_function_name"])
+        self.assertEqual(sentinel["duration_ns"], 0)
+
+        # is_partial parity: at least one zero-duration frame is present.
+        self.assertTrue(any(e["duration_ns"] == 0 for e in call_path))
+
+    # ───── active-count gate on record_call_path_entry (JS/Java parity) ──
+
+    def test_record_call_path_entry_noop_when_no_investigation_active(self):
+        """With no begin_investigation(), the active-count gate keeps record_call_path_entry from
+        touching the ContextVar at all — it's a no-op and creates no data."""
+        state = _ServiceEventsMonitorState.get_instance()
+        # setUp reset the count to 0; no begin_investigation() here.
+        self.assertEqual(impl._investigation_active_count, 0)
+
+        state.record_call_path_entry("func-a", None, 1000)
+
+        self.assertIsNone(state.peek_investigation_data())
+
+    def test_begin_get_balance_active_count(self):
+        """begin_investigation increments and get/clear decrements, so the count nets to zero per
+        request — and a re-entrant begin in the same context doesn't double-count."""
+        state = _ServiceEventsMonitorState.get_instance()
+
+        state.begin_investigation()
+        self.assertEqual(impl._investigation_active_count, 1)
+
+        # Re-entrant begin (nested-dispatch analogue) must NOT increment again.
+        state.begin_investigation()
+        self.assertEqual(impl._investigation_active_count, 1)
+
+        # The single consume decrements back to zero.
+        state.get_investigation_data()
+        self.assertEqual(impl._investigation_active_count, 0)
+
+        # A redundant clear with nothing present is a no-op (clamped, never negative).
+        state.clear_investigation_data()
+        self.assertEqual(impl._investigation_active_count, 0)
 
 
 class TestPythonServiceEventsMonitor(TestCase):
@@ -289,7 +355,7 @@ class TestPythonServiceEventsMonitor(TestCase):
         with _call_counters_lock:
             _call_counters.clear()
 
-        for mode in ("always", "never", "adaptive"):
+        for mode in ("always", "never"):
             set_sampling_mode(mode)
             with PythonServiceEventsMonitor(f"skip_func_{mode}"):
                 pass
@@ -428,147 +494,28 @@ class TestCrashSafety(TestCase):
         self.assertEqual(_call_stack.get(), [])
 
 
-class TestAdaptiveSampling(TestCase):
-    """Test the adaptive sampling mode and hot operation tracking."""
+class TestSamplingModes(TestCase):
+    """Test the always/never/auto sampling modes and validation."""
 
     def setUp(self):
         """Reset state before each test."""
         _ServiceEventsMonitorState._instance = None
         _call_stack.set([])
         _current_operation.set(None)
-        _adaptive_sample_cache.set(None)
-        with _hot_operations_lock:
-            _hot_operations.clear()
         set_sampling_mode("always")
 
     def tearDown(self):
         """Restore sampling mode after each test."""
         set_sampling_mode("always")
         _current_operation.set(None)
-        _adaptive_sample_cache.set(None)
-        with _hot_operations_lock:
-            _hot_operations.clear()
-
-    def test_adaptive_no_sampling_for_cold_operation(self):
-        """In adaptive mode, non-hot operations should not be sampled."""
-        set_sampling_mode("adaptive")
-        _current_operation.set("endpoint-123")
-
-        self.assertFalse(_should_sample(1))
-
-    def test_adaptive_samples_hot_operation(self):
-        """In adaptive mode, hot operations should be sampled."""
-        set_sampling_mode("adaptive")
-        _current_operation.set("endpoint-123")
-        mark_operation_hot("endpoint-123")
-
-        self.assertTrue(_should_sample(1))
-
-    def test_adaptive_does_not_sample_different_operation(self):
-        """In adaptive mode, only the hot operation gets sampled."""
-        set_sampling_mode("adaptive")
-        mark_operation_hot("endpoint-123")
-        _current_operation.set("endpoint-456")
-
-        self.assertFalse(_should_sample(1))
-
-    def test_adaptive_caches_result_per_request(self):
-        """Second call should use cached result without checking hot operations."""
-        set_sampling_mode("adaptive")
-        _current_operation.set("endpoint-123")
-        mark_operation_hot("endpoint-123")
-
-        # First call: checks hot operations, caches True
-        self.assertTrue(_should_sample(1))
-
-        # Remove from hot operations (simulating expiry between calls)
-        with _hot_operations_lock:
-            _hot_operations.clear()
-
-        # Second call: returns cached True despite operation no longer being hot
-        self.assertTrue(_should_sample(2))
-
-    def test_adaptive_cache_cleared_with_operation(self):
-        """Cache should be cleared when operation context is cleared."""
-        set_sampling_mode("adaptive")
-        _current_operation.set("endpoint-123")
-        mark_operation_hot("endpoint-123")
-
-        self.assertTrue(_should_sample(1))
-
-        # Clear operation (simulating end of request)
-        from amazon.opentelemetry.distro.serviceevents.python_monitor_impl import clear_current_operation
-
-        clear_current_operation()
-
-        # Set new operation context (new request)
-        _current_operation.set("endpoint-456")
-        self.assertFalse(_should_sample(2))
-
-    def test_adaptive_no_operation_context(self):
-        """Without operation context, adaptive mode should not sample."""
-        set_sampling_mode("adaptive")
-        # No operation set
-        self.assertFalse(_should_sample(1))
-
-    def test_mark_operation_hot(self):
-        """Marking an operation hot should add it to the hot operations dict."""
-        mark_operation_hot("endpoint-123")
-        self.assertIn("endpoint-123", _hot_operations)
-        self.assertEqual(_hot_operations["endpoint-123"], 100)
-
-    def test_mark_operation_hot_resets_countdown(self):
-        """Re-marking a hot operation should reset the countdown."""
-        mark_operation_hot("endpoint-123")
-        # Simulate some ticks
-        for _ in range(50):
-            tick_hot_operations()
-        self.assertEqual(_hot_operations["endpoint-123"], 50)
-
-        # Re-mark should reset to full
-        mark_operation_hot("endpoint-123")
-        self.assertEqual(_hot_operations["endpoint-123"], 100)
-
-    def test_tick_hot_operations_decrements(self):
-        """Each tick should decrement the countdown."""
-        mark_operation_hot("endpoint-123")
-        tick_hot_operations()
-        self.assertEqual(_hot_operations["endpoint-123"], 99)
-
-    def test_tick_hot_operations_removes_expired(self):
-        """Operations should be removed after countdown reaches 0."""
-        mark_operation_hot("endpoint-123")
-        for _ in range(100):
-            tick_hot_operations()
-        self.assertNotIn("endpoint-123", _hot_operations)
-
-    def test_tick_hot_operations_multiple(self):
-        """Multiple hot operations should be tracked independently."""
-        mark_operation_hot("endpoint-A")
-        for _ in range(50):
-            tick_hot_operations()
-        mark_operation_hot("endpoint-B")
-
-        # A has 50 remaining, B has 100
-        self.assertEqual(_hot_operations["endpoint-A"], 50)
-        self.assertEqual(_hot_operations["endpoint-B"], 100)
-
-        for _ in range(50):
-            tick_hot_operations()
-
-        # A should be removed, B has 50 remaining
-        self.assertNotIn("endpoint-A", _hot_operations)
-        self.assertEqual(_hot_operations["endpoint-B"], 50)
 
     def test_existing_modes_unchanged(self):
         """Existing sampling modes should work as before."""
         _current_operation.set("endpoint-123")
-        mark_operation_hot("endpoint-123")
 
         set_sampling_mode("always")
         self.assertTrue(_should_sample(1))
 
-        _adaptive_sample_cache.set(None)  # Clear cache between mode switches
         set_sampling_mode("never")
         self.assertFalse(_should_sample(1))
 
@@ -577,68 +524,10 @@ class TestAdaptiveSampling(TestCase):
         with self.assertRaises(ValueError):
             set_sampling_mode("invalid")
 
-    @patch("amazon.opentelemetry.distro.serviceevents.python_monitor_impl.time.perf_counter_ns")
-    def test_adaptive_monitor_records_timing_for_hot_operation(self, mock_time):
-        """In adaptive mode, hot operations should have real duration in call_path."""
-        set_sampling_mode("adaptive")
-        _current_operation.set("endpoint-123")
-        mark_operation_hot("endpoint-123")
-        mock_time.side_effect = [1000000000, 1100000000]  # 100ms
-
-        state = _ServiceEventsMonitorState.get_instance()
-        state.begin_investigation()
-
-        with PythonServiceEventsMonitor("test_func"):
-            pass
-
-        inv_data = state.get_investigation_data()
-        self.assertIsNotNone(inv_data)
-        self.assertEqual(len(inv_data["call_path"]), 1)
-        entry = inv_data["call_path"][0]
-        self.assertEqual(entry["duration_ns"], 100_000_000)
-
-    def test_adaptive_monitor_no_timing_for_cold_operation(self):
-        """In adaptive mode, cold operations should have duration_ns=0 in call_path."""
-        set_sampling_mode("adaptive")
-        _current_operation.set("endpoint-cold")
-
-        state = _ServiceEventsMonitorState.get_instance()
-        state.begin_investigation()
-
-        with PythonServiceEventsMonitor("test_func"):
-            pass
-
-        inv_data = state.get_investigation_data()
-        self.assertIsNotNone(inv_data)
-        self.assertEqual(len(inv_data["call_path"]), 1)
-        entry = inv_data["call_path"][0]
-        self.assertEqual(entry["duration_ns"], 0)
-
-    @patch("amazon.opentelemetry.distro.serviceevents.python_monitor_impl.time.perf_counter_ns")
-    def test_adaptive_cache_reset_on_set_operation(self, mock_time):
-        """Setting operation resets adaptive cache to prevent cache poisoning.
-
-        Regression test: If a monitored function runs before the Flask before_request
-        hook sets the operation (e.g., WSGI middleware), _should_sample() caches
-        False (no operation -> not hot). Without cache reset, all subsequent functions
-        in the same request also get False even after the operation is set.
-        """
-        mock_time.side_effect = [1000, 2000]  # start, end times
-        set_sampling_mode("adaptive")
-        operation = "GET /endpoint-hot"
-        mark_operation_hot(operation)
-
-        # Simulate middleware running BEFORE operation is set
-        # _should_sample() caches False because operation is None
-        self.assertFalse(_should_sample(1))
-        self.assertFalse(_adaptive_sample_cache.get())  # Cache poisoned to False
-
-        # Simulate before_request hook setting operation
-        # This must reset the cache so _should_sample() re-evaluates
-        set_current_operation(operation)
-
-        # Now _should_sample() should re-evaluate and find the hot operation
-        self.assertTrue(_should_sample(1))
+    def test_removed_adaptive_mode_rejected(self):
+        """The removed 'adaptive' mode is no longer valid and must be rejected."""
+        with self.assertRaises(ValueError):
+            set_sampling_mode("adaptive")
 
 
 class TestSamplingThresholds(TestCase):
@@ -651,7 +540,6 @@ class TestSamplingThresholds(TestCase):
             tier2_threshold=1000,
             tier2_rate=10,
             tier3_rate=100,
-            hot_endpoint_cycles=100,
         )
         set_sampling_mode("auto")
 
@@ -662,7 +550,6 @@ class TestSamplingThresholds(TestCase):
             tier2_threshold=1000,
             tier2_rate=10,
             tier3_rate=100,
-            hot_endpoint_cycles=100,
         )
         set_sampling_mode("always")
 
@@ -684,22 +571,22 @@ class TestSamplingThresholds(TestCase):
         self.assertTrue(_should_sample(100))
         self.assertFalse(_should_sample(101))
 
-    def test_set_sampling_thresholds_hot_endpoint_cycles(self):
-        """Test that custom hot_endpoint_cycles is applied when marking operations hot."""
-        set_sampling_thresholds(hot_endpoint_cycles=3)
-        mark_operation_hot("ep-123")
-        with _hot_operations_lock:
-            self.assertEqual(_hot_operations["ep-123"], 3)
+    def test_zero_rate_samples_none_in_tier_without_crashing(self):
+        """A non-positive tier rate (only reachable via the unvalidated test-config hook) must
+        degrade to 'sample none in this tier' rather than raise ZeroDivisionError. Mirrors Java/JS."""
+        set_sampling_thresholds(tier1_threshold=100, tier2_threshold=1000, tier2_rate=0, tier3_rate=0)
+        # tier1 unaffected by the rates.
+        self.assertTrue(_should_sample(1))
+        # tier2 (100 < n <= 1000) and tier3 (n > 1000): zero rate → no crash, sample none.
+        self.assertFalse(_should_sample(500))
+        self.assertFalse(_should_sample(5000))
 
     def test_default_thresholds_unchanged_without_call(self):
         """Test that defaults match the original hardcoded values."""
-        from amazon.opentelemetry.distro.serviceevents import python_monitor_impl as impl
-
         self.assertEqual(impl._sample_tier1_threshold, 100)
         self.assertEqual(impl._sample_tier2_threshold, 1000)
         self.assertEqual(impl._sample_tier2_rate, 10)
         self.assertEqual(impl._sample_tier3_rate, 100)
-        self.assertEqual(impl._HOT_ENDPOINT_CYCLES, 100)
 
 
 class TestHistogramWiringIntegration(TestCase):
@@ -897,7 +784,6 @@ class TestSamplingAwareHistogramWiring(TestCase):
         set_sampling_mode("always")
         _call_stack.set([])
         _current_operation.set(None)
-        _adaptive_sample_cache.set(None)
 
         from opentelemetry.sdk.metrics import MeterProvider
         from opentelemetry.sdk.metrics.export import InMemoryMetricReader
@@ -935,7 +821,6 @@ class TestSamplingAwareHistogramWiring(TestCase):
         self._meter_provider.shutdown()
         _ServiceEventsMonitorState._instance = None
         set_sampling_mode("always")
-        _adaptive_sample_cache.set(None)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -1060,11 +945,8 @@ class TestModuleStateFunctions(TestCase):
         _ServiceEventsMonitorState._instance = None
         _call_stack.set([])
         _current_operation.set(None)
-        _adaptive_sample_cache.set(None)
         with _call_counters_lock:
             _call_counters.clear()
-        with _hot_operations_lock:
-            _hot_operations.clear()
         set_sampling_mode("always")
 
     def tearDown(self):
@@ -1072,11 +954,8 @@ class TestModuleStateFunctions(TestCase):
         set_sampling_mode("always")
         _call_stack.set([])
         _current_operation.set(None)
-        _adaptive_sample_cache.set(None)
         with _call_counters_lock:
             _call_counters.clear()
-        with _hot_operations_lock:
-            _hot_operations.clear()
 
     def test_get_sampling_mode_returns_current_mode(self):
         """get_sampling_mode reflects the mode set via set_sampling_mode."""
@@ -1109,10 +988,8 @@ class TestModuleStateFunctions(TestCase):
         set_sampling_mode("never")
         with _call_counters_lock:
             _call_counters["fork_func"] = 7
-        mark_operation_hot("fork-op")
         _call_stack.set(["frame"])
         _current_operation.set("GET /forked")
-        _adaptive_sample_cache.set(True)
 
         state = _ServiceEventsMonitorState.get_instance()
         state.begin_investigation()
@@ -1122,15 +999,12 @@ class TestModuleStateFunctions(TestCase):
 
         # Sampling mode falls back to the default "always".
         self.assertEqual(get_sampling_mode(), "always")
-        # Counters and hot operations are emptied.
+        # Counters are emptied.
         with _call_counters_lock:
             self.assertEqual(_call_counters, {})
-        with _hot_operations_lock:
-            self.assertEqual(_hot_operations, {})
         # Thread-local state is reset.
         self.assertEqual(_call_stack.get(), [])
         self.assertIsNone(_current_operation.get())
-        self.assertIsNone(_adaptive_sample_cache.get())
         # The singleton's identity is preserved, only its investigation data cleared.
         self.assertIs(_ServiceEventsMonitorState.get_instance(), state)
         self.assertIsNone(state.peek_investigation_data())
@@ -1154,7 +1028,6 @@ class TestMonitorEdgeBranches(TestCase):
         _ServiceEventsMonitorState._instance = None
         _call_stack.set([])
         _current_operation.set(None)
-        _adaptive_sample_cache.set(None)
         set_sampling_mode("always")
 
     def tearDown(self):

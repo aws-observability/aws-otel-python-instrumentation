@@ -375,6 +375,63 @@ class TestServiceEventsModes(TestCase):
         inst.shutdown()
 
 
+class TestSamplingModeActivation(TestCase):
+    """Verify startup applies the configured sampling mode through ServiceEventsInstrumentation.
+
+    Regression coverage for two bugs: (1) a `!= "auto"` guard that left auto mode inert because
+    the module default is "always", and (2) an invalid mode (e.g. the removed "adaptive" left in
+    a stale env var) aborting all of ServiceEvents init instead of falling back to the default.
+    """
+
+    def setUp(self):
+        # Neutralize atexit registration (see TestServiceEventsInstrumentation.setUp).
+        patcher = patch("amazon.opentelemetry.distro.serviceevents.serviceevents_instrumentation.atexit")
+        self.mock_atexit = patcher.start()
+        self.addCleanup(patcher.stop)
+        # Restore the module-level sampling mode after each test so state doesn't leak.
+        from amazon.opentelemetry.distro.serviceevents.python_monitor import set_sampling_mode
+
+        self.addCleanup(set_sampling_mode, "always")
+
+    def _init_with_mode(self, mode):
+        config = ServiceEventsConfig(
+            enabled=True,
+            function_instrument_enabled=True,
+            logs_endpoint="http://localhost:4318/v1/logs",
+            sampling_mode=mode,
+        )
+        inst = ServiceEventsInstrumentation(config)
+        inst.initialize()
+        return inst
+
+    def test_auto_mode_actually_activates(self):
+        """sampling_mode='auto' must reach the monitor — not be skipped by a guard."""
+        from amazon.opentelemetry.distro.serviceevents.python_monitor import get_sampling_mode
+
+        inst = self._init_with_mode("auto")
+        self.assertTrue(inst._initialized)
+        self.assertEqual(get_sampling_mode(), "auto")
+        inst.shutdown()
+
+    def test_never_mode_activates(self):
+        from amazon.opentelemetry.distro.serviceevents.python_monitor import get_sampling_mode
+
+        inst = self._init_with_mode("never")
+        self.assertEqual(get_sampling_mode(), "never")
+        inst.shutdown()
+
+    def test_invalid_mode_falls_back_without_aborting_init(self):
+        """A stale/removed mode (e.g. 'adaptive') logs a warning and leaves the default in place,
+        rather than raising and aborting the whole ServiceEvents init."""
+        from amazon.opentelemetry.distro.serviceevents.python_monitor import get_sampling_mode
+
+        inst = self._init_with_mode("adaptive")
+        # Init must still complete (collectors/emitter wired), unlike the old ValueError abort.
+        self.assertTrue(inst._initialized)
+        self.assertEqual(get_sampling_mode(), "always")
+        inst.shutdown()
+
+
 class TestGetServiceEventsInstrumentation(TestCase):
     """Test the get_serviceevents_instrumentation singleton accessor."""
 

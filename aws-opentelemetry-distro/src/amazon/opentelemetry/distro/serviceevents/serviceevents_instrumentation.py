@@ -195,14 +195,28 @@ class ServiceEventsInstrumentation:
             self.monitor_state = _ServiceEventsMonitorState.get_instance()
             logger.debug("ServiceEvents monitor state initialized")
 
-            # Configure sampling mode from config
-            if self.config.sampling_mode != "auto":
-                # Lazy import to avoid import-time coupling with python_monitor.
-                # pylint: disable=import-outside-toplevel
-                from amazon.opentelemetry.distro.serviceevents.python_monitor import set_sampling_mode
+            # Configure sampling mode from config. Applied unconditionally: the module-level
+            # default is "always", so "auto" only takes effect if we actually call the setter
+            # (a prior `!= "auto"` guard left auto-mode inert). An unrecognized value — e.g. the
+            # removed "adaptive" left in a stale env var — is logged and left at the current
+            # default instead of aborting ServiceEvents init (mirrors the Java bridge, which
+            # silently retains the default on an invalid mode).
+            # Lazy import to avoid import-time coupling with python_monitor.
+            # pylint: disable=import-outside-toplevel
+            from amazon.opentelemetry.distro.serviceevents.python_monitor import (
+                get_sampling_mode,
+                set_sampling_mode,
+            )
 
+            try:
                 set_sampling_mode(self.config.sampling_mode)
-                logger.info("ServiceEvents sampling mode set to: %s", self.config.sampling_mode)
+            except ValueError:
+                logger.warning(
+                    "ServiceEvents: invalid sampling mode '%s'; falling back to '%s'",
+                    self.config.sampling_mode,
+                    get_sampling_mode(),
+                )
+            logger.info("ServiceEvents sampling mode set to: %s", get_sampling_mode())
 
             # Configure sampling thresholds from config
             # Lazy import to avoid import-time coupling with python_monitor.
@@ -214,7 +228,6 @@ class ServiceEventsInstrumentation:
                 tier2_threshold=self.config.sample_tier2_threshold,
                 tier2_rate=self.config.sample_tier2_rate,
                 tier3_rate=self.config.sample_tier3_rate,
-                hot_endpoint_cycles=self.config.hot_endpoint_cycles,
             )
 
             # Initialize OTLP emitter when either `output_file` (local-testing
