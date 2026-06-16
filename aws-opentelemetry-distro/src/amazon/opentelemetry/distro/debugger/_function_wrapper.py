@@ -796,6 +796,8 @@ class FunctionWrapper:
 
         Currently supports:
         - Flask: patches app.view_functions entries that reference the original function
+        - Django: patches URLPattern.callback entries (incl. include()-nested resolvers)
+          that reference the original function
         - FastAPI: patches APIRoute.endpoint / APIRoute.dependant.call on app.router.routes
 
         Args:
@@ -803,14 +805,23 @@ class FunctionWrapper:
             original_func: The original function that was replaced
             new_func: The new wrapper function
         """
+        # Each framework patcher runs in its own try/except so a failure in one
+        # never prevents the others from running.
         try:
             # Flask: patch view_functions on any Flask app instances in the module
             FunctionWrapper._patch_flask_view_functions(module, original_func, new_func)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.debug("flask reference patching encountered an error: %s", exc)
+        try:
+            # Django: patch URLPattern.callback in the resolver tree
+            FunctionWrapper._patch_django_url_patterns(module, original_func, new_func)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.debug("django reference patching encountered an error: %s", exc)
+        try:
             # FastAPI: patch route table entries on any FastAPI app instances in the module
             FunctionWrapper._patch_fastapi_routes(module, original_func, new_func)
-        except Exception as exc:
-            # Never let framework patching failures break instrumentation
-            logger.debug("Framework reference patching encountered an error: %s", exc)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.debug("fastapi reference patching encountered an error: %s", exc)
 
     @staticmethod
     def _patch_flask_view_functions(module, original_func: Callable, new_func: Callable) -> None:
@@ -845,11 +856,11 @@ class FunctionWrapper:
                         attr, attr_name, original_func, new_func, func_name, func_module
                     )
                 except Exception as exc:
-                    logger.warning("Error checking module attribute '%s' for Flask app: %s", attr_name, exc)
+                    logger.debug("Error checking module attribute '%s' for Flask app: %s", attr_name, exc)
                     continue
 
         except Exception as exc:
-            logger.warning("Error patching Flask view_functions: %s", exc)
+            logger.debug("Error patching Flask view_functions: %s", exc)
 
     @staticmethod
     def _patch_single_flask_app(flask_app, app_name, original_func, new_func, func_name, func_module=None):
@@ -902,6 +913,214 @@ class FunctionWrapper:
             for ep in matching_endpoints:
                 view_functions[ep] = new_func
                 logger.debug("Patched Flask view_functions[%s] by name+module match", ep)
+
+    @staticmethod
+    def _patch_django_url_patterns(  # pylint: disable=too-many-branches,too-many-nested-blocks
+        module, original_func: Callable, new_func: Callable
+    ) -> None:
+        """
+        Patch Django URLPattern.callback entries that reference the original function.
+
+        Django's ``path('foo/', views.foo)`` stores ``views.foo`` directly on
+        ``URLPattern.callback`` at module-import time. When DI replaces
+        ``views.foo`` on its module, the URL resolver tree still holds the
+        pre-wrap reference, so requests bypass the DI wrapper. This method
+        finds and patches those references.
+
+        Discovery walks Django's authoritative resolver via ``get_resolver(None)``
+        (the same root resolver Django uses at request time). It also scans the
+        passed-in module for top-level ``urlpatterns`` / ``URLPattern`` /
+        ``URLResolver`` attributes as a defensive belt-and-suspenders pass for
+        unconfigured / test-only contexts.
+
+        Args:
+            module: The module object that may contain Django URL config
+            original_func: The original function to find on URLPattern.callback
+            new_func: The new wrapper function to replace it with
+        """
+        try:
+            try:
+                # pylint: disable=import-outside-toplevel
+                from django.urls import URLPattern, URLResolver, get_resolver
+            except ImportError:
+                return  # Django not installed, nothing to patch
+
+            func_name = getattr(original_func, "__name__", "unknown")
+            func_module = getattr(original_func, "__module__", None)
+            # Track resolver and pattern ids separately. The same URLPattern
+            # can be reached from both the get_resolver(None) walk and the
+            # module-scan fallback; pattern dedup avoids a no-op double write.
+            visited: set = set()
+            visited_patterns: set = set()
+
+            # Authoritative source: Django's root resolver (the same instance the
+            # framework dispatches through at request time).
+            try:
+                root_resolver = get_resolver(None)
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                logger.debug("Django get_resolver(None) failed (likely unconfigured): %s", exc)
+                root_resolver = None
+            if root_resolver is not None:
+                FunctionWrapper._patch_single_resolver(
+                    root_resolver,
+                    "<root>",
+                    original_func,
+                    new_func,
+                    func_name,
+                    func_module,
+                    URLPattern,
+                    URLResolver,
+                    visited,
+                    visited_patterns,
+                )
+
+            # Belt-and-suspenders: scan the passed-in module for top-level
+            # patterns/resolvers (covers configured-but-not-yet-resolved cases).
+            for attr_name in dir(module):
+                try:
+                    attr = getattr(module, attr_name, None)
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    logger.debug("Error reading module attribute '%s' for Django scan: %s", attr_name, exc)
+                    continue
+                try:
+                    if isinstance(attr, URLPattern):
+                        FunctionWrapper._maybe_patch_pattern(
+                            attr, original_func, new_func, func_name, func_module, visited_patterns
+                        )
+                    elif isinstance(attr, URLResolver):
+                        FunctionWrapper._patch_single_resolver(
+                            attr,
+                            attr_name,
+                            original_func,
+                            new_func,
+                            func_name,
+                            func_module,
+                            URLPattern,
+                            URLResolver,
+                            visited,
+                            visited_patterns,
+                        )
+                    elif isinstance(attr, (list, tuple)) and attr_name == "urlpatterns":
+                        for item in attr:
+                            if isinstance(item, URLPattern):
+                                FunctionWrapper._maybe_patch_pattern(
+                                    item, original_func, new_func, func_name, func_module, visited_patterns
+                                )
+                            elif isinstance(item, URLResolver):
+                                FunctionWrapper._patch_single_resolver(
+                                    item,
+                                    attr_name,
+                                    original_func,
+                                    new_func,
+                                    func_name,
+                                    func_module,
+                                    URLPattern,
+                                    URLResolver,
+                                    visited,
+                                    visited_patterns,
+                                )
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    logger.debug("Error checking module attribute '%s' for Django patterns: %s", attr_name, exc)
+                    continue
+
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.debug("Error patching Django URLPattern.callback: %s", exc)
+
+    @staticmethod
+    def _patch_single_resolver(  # pylint: disable=too-many-arguments
+        resolver,
+        resolver_label: str,
+        original_func: Callable,
+        new_func: Callable,
+        func_name: str,
+        func_module,
+        url_pattern_cls,
+        url_resolver_cls,
+        visited: set,
+        visited_patterns: set,
+    ) -> None:
+        """Recursively walk a URLResolver, patching matching URLPattern.callback
+        entries and descending through ``include()``-nested children. ``visited``
+        protects against resolver cycles (``id(resolver)``); ``visited_patterns``
+        prevents double-patching the same URLPattern when reachable from both
+        the get_resolver(None) walk and the module-scan fallback."""
+        if id(resolver) in visited:
+            return
+        visited.add(id(resolver))
+        try:
+            patterns = resolver.url_patterns  # @cached_property; may raise ImproperlyConfigured
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.debug("Error reading url_patterns on resolver '%s': %s", resolver_label, exc)
+            return
+
+        for item in patterns:
+            try:
+                if isinstance(item, url_pattern_cls):
+                    FunctionWrapper._maybe_patch_pattern(
+                        item, original_func, new_func, func_name, func_module, visited_patterns
+                    )
+                elif isinstance(item, url_resolver_cls):
+                    FunctionWrapper._patch_single_resolver(
+                        item,
+                        resolver_label,
+                        original_func,
+                        new_func,
+                        func_name,
+                        func_module,
+                        url_pattern_cls,
+                        url_resolver_cls,
+                        visited,
+                        visited_patterns,
+                    )
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                logger.debug("Error walking pattern in resolver '%s': %s", resolver_label, exc)
+                continue
+
+    @staticmethod
+    def _maybe_patch_pattern(  # pylint: disable=too-many-arguments
+        pattern,
+        original_func: Callable,
+        new_func: Callable,
+        func_name: str,
+        func_module,
+        visited_patterns: set,
+    ) -> None:
+        """Patch a single URLPattern.callback if it matches by identity, or by
+        ``__name__`` + ``__module__`` (handles ``functools.wraps``-preserving
+        decorators like ``@login_required`` and OTel auto-instrumentation
+        wrappers). Skips patterns already visited so multiple discovery roots
+        don't double-patch."""
+        if id(pattern) in visited_patterns:
+            return
+        visited_patterns.add(id(pattern))
+        try:
+            cb = getattr(pattern, "callback", None)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.debug("Error reading callback on URLPattern: %s", exc)
+            return
+        if cb is None:
+            return
+
+        if cb is original_func:
+            try:
+                pattern.callback = new_func
+                logger.debug("Patched Django URLPattern.callback (identity) for %s", func_name)
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                logger.debug("Error setting URLPattern.callback (identity): %s", exc)
+            return
+
+        # Identity miss — try name+module fallback. CBV closures created by
+        # View.as_view() have __name__ == 'view', not the user's view name,
+        # so they're naturally excluded from this match.
+        if getattr(cb, "__name__", None) != func_name:
+            return
+        if func_module is not None and getattr(cb, "__module__", None) != func_module:
+            return
+        try:
+            pattern.callback = new_func
+            logger.debug("Patched Django URLPattern.callback (name+module) for %s", func_name)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.debug("Error setting URLPattern.callback (name+module): %s", exc)
 
     @staticmethod
     def _patch_fastapi_routes(module, original_func: Callable, new_func: Callable) -> None:
