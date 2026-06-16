@@ -94,7 +94,7 @@ class MysqlClientTest(DatabaseContractTestBase):
         attributes_dict: Dict[str, AnyValue] = self._get_attributes_dict(attributes_list)
         self.assertTrue(attributes_dict.get("db.statement").string_value.startswith(command))
         self._assert_str_attribute(attributes_dict, "db.system", self.get_remote_service())
-        self._assert_str_attribute(attributes_dict, "db.name", "")
+        self._assert_str_attribute(attributes_dict, "db.name", DATABASE_NAME)
         self.assertTrue("net.peer.name" not in attributes_dict)
         self._assert_int_attribute(attributes_dict, "net.peer.port", self.get_database_port())
         self.assertTrue("server.address" not in attributes_dict)
