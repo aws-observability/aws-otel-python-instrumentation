@@ -200,6 +200,29 @@ class DITestInfrastructure(TestCase):
             self.fail(f"Timed out waiting for {min_count} snapshot(s). Found {len(logs)} after {timeout}s.")
         return logs
 
+    def wait_for_method_snapshots(self, method_name: str, min_count: int = 1, timeout: float = DI_WAIT_TIMEOUT) -> List:
+        """Poll until at least min_count snapshots for a specific method are present.
+
+        Unlike wait_for_snapshots (which returns as soon as ANY snapshot arrives),
+        this waits for the named method's snapshots specifically. Necessary because
+        the OTLP logs use a batch processor, so a given function's snapshot may flush
+        slightly later than another's.
+        """
+        start = time.time()
+        method_logs: List = []
+        while time.time() - start < timeout:
+            method_logs = self.logs_for_method(self._peek_snapshots(), method_name)
+            if len(method_logs) >= min_count:
+                return method_logs
+            time.sleep(DI_POLL_SLEEP)
+        method_logs = self.logs_for_method(self._peek_snapshots(), method_name)
+        if len(method_logs) < min_count:
+            self.fail(
+                f"Timed out waiting for {min_count} snapshot(s) for method '{method_name}'. "
+                f"Found {len(method_logs)} after {timeout}s."
+            )
+        return method_logs
+
     def logs_for_method(self, logs: List, method_name: str) -> List:
         """Filter snapshot LogRecords by aws.di.method_name attribute."""
         return [log for log in logs if self.attrs(log).get("aws.di.method_name") == method_name]
