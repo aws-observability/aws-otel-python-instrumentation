@@ -203,10 +203,7 @@ class ServiceEventsInstrumentation:
             # silently retains the default on an invalid mode).
             # Lazy import to avoid import-time coupling with python_monitor.
             # pylint: disable=import-outside-toplevel
-            from amazon.opentelemetry.distro.serviceevents.python_monitor import (
-                get_sampling_mode,
-                set_sampling_mode,
-            )
+            from amazon.opentelemetry.distro.serviceevents.python_monitor import get_sampling_mode, set_sampling_mode
 
             try:
                 set_sampling_mode(self.config.sampling_mode)
