@@ -88,6 +88,17 @@ def process_large_collection(large_list):
     return len(large_list)
 
 
+def process_small_limit_string(small_limit_string):
+    """BREAKPOINT target for small (below-max) string limit validation.
+
+    Config requests MaxStringLength=10 (well within range). The input string is
+    100 chars, so a function-level capture that honors the config should truncate
+    to exactly 10 -- proving the function path respects user-supplied limits rather
+    than always using the maximum.
+    """
+    return len(small_limit_string)
+
+
 # ---------------------------------------------------------------------------
 # Mock DI API configuration
 # ---------------------------------------------------------------------------
@@ -221,6 +232,28 @@ BREAKPOINT_CONFIGS = [
             }
         },
     },
+    # Breakpoint for small (below-max) string limit validation (MaxStringLength=10).
+    # Verifies the function-level path honors a user-supplied limit instead of the maximum.
+    {
+        "InstrumentationType": "BREAKPOINT",
+        "SignalType": "SNAPSHOT",
+        "Location": {
+            "CodeLocation": {
+                "Language": "Python",
+                "CodeUnit": "di_flask_server",
+                "MethodName": "process_small_limit_string",
+                "FilePath": "di_flask_server.py",
+            }
+        },
+        "LocationHash": "aabb000000000009",
+        "CaptureConfiguration": {
+            "CodeCapture": {
+                "CaptureReturn": True,
+                "CaptureArguments": ["small_limit_string"],
+                "CaptureLimits": {"MaxStringLength": 10},
+            }
+        },
+    },
 ]
 
 PROBE_CONFIGS = [
@@ -334,6 +367,14 @@ def limits_collection_endpoint():
     large_list = list(range(1, 51))
     result = process_large_collection(large_list)
     return jsonify({"status": "ok", "size": result})
+
+
+@app.route("/limits-small-string")
+def limits_small_string_endpoint():
+    """Endpoint that triggers small (below-max) string limit validation."""
+    small_limit_string = "B" * 100
+    result = process_small_limit_string(small_limit_string)
+    return jsonify({"status": "ok", "length": result})
 
 
 @app.route("/error")
