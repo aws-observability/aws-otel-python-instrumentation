@@ -27,12 +27,10 @@ from amazon.opentelemetry.distro.serviceevents.python_monitor_impl import (
     get_call_stack,
     get_current_operation,
     get_sampling_mode,
-    mark_operation_hot,
     reset_after_fork,
     set_current_operation,
     set_sampling_mode,
     set_sampling_thresholds,
-    tick_hot_operations,
 )
 
 # ============================================================================
@@ -54,7 +52,4 @@ __all__ = [
     # State management functions
     "reset_after_fork",
     "get_call_stack",
-    # Adaptive sampling functions
-    "mark_operation_hot",
-    "tick_hot_operations",
 ]

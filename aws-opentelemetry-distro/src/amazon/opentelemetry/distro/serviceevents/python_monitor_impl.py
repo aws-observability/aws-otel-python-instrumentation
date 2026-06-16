@@ -17,6 +17,16 @@ from typing import Dict, Optional
 
 from amazon.opentelemetry.distro.serviceevents.ast_transformation import get_function_info_unlocked
 
+# Hard cap on real call-path frames retained per request. The monitor records a frame for every
+# instrumented call (not just sampled ones), so under "auto"/"never" sampling a high-call-volume
+# request would otherwise grow this list without bound and could push a serialized IncidentSnapshot
+# past the 1 MB CloudWatch OTLP Logs limit. At ~150-250 B/frame, 1024 frames is ~256 KB — well under
+# the limit with room for the stack trace, yet far above any legitimate frame count. Java/JS match.
+_MAX_CALL_PATH_ENTRIES = 1024
+# Marker appended once when the cap is exceeded. duration_ns=0 also trips is_partial (computed from
+# timing in the incident collector).
+_CALL_PATH_TRUNCATION_SENTINEL = "<call_path_truncated>"
+
 # ============================================================================
 # Sampling Configuration
 # ============================================================================
@@ -25,18 +35,49 @@ _sample_tier1_threshold: int = 100
 _sample_tier2_threshold: int = 1000
 _sample_tier2_rate: int = 10
 _sample_tier3_rate: int = 100
-_HOT_ENDPOINT_CYCLES: int = 100
 
-_sampling_mode: str = "always"  # "auto", "always", "never", or "adaptive"
+_sampling_mode: str = "always"  # "auto", "always", or "never"
 _call_counters: Dict[str, int] = {}
 _call_counters_lock = threading.Lock()
 
+# Process-wide count of contexts with an active investigation. The monitor records a call_path
+# entry on EVERY instrumented function exit (not just sampled ones), which would otherwise pay a
+# ContextVar lookup on the hot path even when no incident investigation is in flight (the common
+# case). This counter lets record_call_path_entry skip that lookup when nothing is investigating —
+# mirroring the JS distro's _investigationActiveCount and the Java bridge's investigationActiveCount.
+# Reads on the hot path are lock-free (a plain int load is atomic under CPython); the infrequent
+# begin/clear writes take the lock to avoid lost updates. The counter is global (shared across
+# threads/contexts) while the investigation data itself is a per-context ContextVar, exactly like
+# JS's global counter + per-context AsyncLocalStorage: when ANY context is investigating, the hot
+# path does the ContextVar lookup and finds data only in the contexts that began one.
+_investigation_active_count: int = 0
+_investigation_active_lock = threading.Lock()
+
+
+def _increment_investigation_active() -> None:
+    """Increment the active-investigation count. Called only when begin_investigation actually
+    creates new data (so a double-begin in one context doesn't leak the count high)."""
+    global _investigation_active_count  # pylint: disable=global-statement
+    with _investigation_active_lock:
+        _investigation_active_count += 1
+
+
+def _decrement_investigation_active() -> None:
+    """Decrement the active-investigation count, clamped at zero. Clamping keeps an unbalanced clear
+    (e.g. a clear with no prior begin) from driving the count negative — a spuriously-high count
+    only costs an extra hot-path ContextVar lookup (degrades to pre-guard behavior), whereas a
+    negative count would wrongly disable call_path capture for a genuinely active investigation."""
+    global _investigation_active_count  # pylint: disable=global-statement
+    with _investigation_active_lock:
+        if _investigation_active_count > 0:
+            _investigation_active_count -= 1
+
 
 def set_sampling_mode(mode: str) -> None:
-    """Set sampling mode: 'always', 'never', 'auto', or 'adaptive'."""
+    """Set sampling mode: 'always', 'never', or 'auto'."""
     # Singleton module-level sampling state.
     global _sampling_mode  # pylint: disable=global-statement
-    if mode not in ("always", "never", "auto", "adaptive"):
+    if mode not in ("always", "never", "auto"):
         raise ValueError(f"Invalid sampling mode: '{mode}'")
     _sampling_mode = mode
 
@@ -51,17 +92,15 @@ def set_sampling_thresholds(
     tier2_threshold: int = 1000,
     tier2_rate: int = 10,
     tier3_rate: int = 100,
-    hot_endpoint_cycles: int = 100,
 ) -> None:
-    """Set sampling thresholds for auto/adaptive mode."""
+    """Set sampling thresholds for auto mode."""
     # Singleton module-level sampling state.
     global _sample_tier1_threshold, _sample_tier2_threshold  # pylint: disable=global-statement
-    global _sample_tier2_rate, _sample_tier3_rate, _HOT_ENDPOINT_CYCLES  # pylint: disable=global-statement
+    global _sample_tier2_rate, _sample_tier3_rate  # pylint: disable=global-statement
     _sample_tier1_threshold = tier1_threshold
     _sample_tier2_threshold = tier2_threshold
     _sample_tier2_rate = tier2_rate
     _sample_tier3_rate = tier3_rate
-    _HOT_ENDPOINT_CYCLES = hot_endpoint_cycles
 
 
 def _should_sample(total_calls: int) -> bool:  # pylint: disable=too-many-return-statements
@@ -70,16 +109,7 @@ def _should_sample(total_calls: int) -> bool:  # pylint: disable=too-many-return
         return True
     if _sampling_mode == "never":
         return False
-    if _sampling_mode == "adaptive":
-        # O(1) cached check - computed once per request, ~50ns per subsequent call
-        cached = _adaptive_sample_cache.get()
-        if cached is not None:
-            return cached
-        operation = _current_operation.get()
-        result = operation is not None and operation in _hot_operations
-        _adaptive_sample_cache.set(result)
-        return result
-    # AUTO: adaptive 3-tier sampling. Rates are "1-in-N"; a non-positive N is degenerate
+    # AUTO: 3-tier sampling. Rates are "1-in-N"; a non-positive N is degenerate
     # (it can only arrive via the internal test-config hook, which doesn't validate) and
     # would otherwise raise ZeroDivisionError on the modulo. Treat N <= 0 as "sample none
     # in this tier" so a misconfigured rate degrades gracefully instead of crashing the
@@ -117,10 +147,6 @@ _current_operation: ContextVar[Optional[str]] = ContextVar("serviceevents_operat
 def set_current_operation(operation: str):
     """Set the current operation (e.g., 'POST /users') for the request context."""
     _current_operation.set(operation)
-    # Reset adaptive sampling cache so it re-evaluates with the new operation.
-    # This prevents cache poisoning if _should_sample() was called before the
-    # operation was set (e.g., by monitored middleware running before before_request).
-    _adaptive_sample_cache.set(None)
 
 
 def get_current_operation() -> Optional[str]:
@@ -131,36 +157,6 @@ def get_current_operation() -> Optional[str]:
 def clear_current_operation():
     """Clear the current operation from the request context."""
     _current_operation.set(None)
-    _adaptive_sample_cache.set(None)
-
-
-# ============================================================================
-# Hot Operation Tracking (for "adaptive" sampling mode)
-# ============================================================================
-
-_hot_operations: Dict[str, int] = {}  # operation -> remaining flush cycles
-_hot_operations_lock = threading.Lock()
-
-# Per-request cache for adaptive sampling decision (cleared per request)
-_adaptive_sample_cache: ContextVar[Optional[bool]] = ContextVar("serviceevents_adaptive_cache", default=None)
-
-
-def mark_operation_hot(operation: str) -> None:
-    """Mark operation as hot after incident. Resets countdown to full cycle count."""
-    with _hot_operations_lock:
-        _hot_operations[operation] = _HOT_ENDPOINT_CYCLES
-
-
-def tick_hot_operations() -> None:
-    """Decrement hot operation counters. Called once per collector flush cycle."""
-    with _hot_operations_lock:
-        expired = []
-        for op in _hot_operations:
-            _hot_operations[op] -= 1
-            if _hot_operations[op] <= 0:
-                expired.append(op)
-        for op in expired:
-            del _hot_operations[op]
 
 
 def get_call_stack() -> list:
@@ -187,23 +183,24 @@ def reset_after_fork() -> None:
       re-wires.
     """
     # Singleton module-level sampling state.
-    global _sampling_mode  # pylint: disable=global-statement
+    global _sampling_mode, _investigation_active_count  # pylint: disable=global-statement
 
     # Reset sampling mode to default (always)
     _sampling_mode = "always"
+
+    # The child starts with no in-flight investigations; the singleton's investigation_data is
+    # cleared below, so the active count must drop to zero to match (avoids a leaked count
+    # forcing the post-fork hot path to keep doing ContextVar lookups for nothing).
+    with _investigation_active_lock:
+        _investigation_active_count = 0
 
     # Clear call counters
     with _call_counters_lock:
         _call_counters.clear()
 
-    # Clear hot operations
-    with _hot_operations_lock:
-        _hot_operations.clear()
-
     # Clear thread-local state
     _call_stack.set([])
     _current_operation.set(None)
-    _adaptive_sample_cache.set(None)
 
     # Clear the existing singleton's mutable state in place. The OTel
     # instrument (histogram) and its base attrs are intentionally left intact —
@@ -346,12 +343,19 @@ class _ServiceEventsMonitorState:
 
     def begin_investigation(self):
         """Start capturing investigation data for current request."""
+        # Increment the active count only when we actually create new data, so a re-entrant
+        # begin in the same context (the analogue of Java's nested servlet dispatch) doesn't
+        # leak the count high. Mirrors the Java bridge's create-only increment.
+        if self._investigation_data.get() is None:
+            _increment_investigation_active()
         self._investigation_data.set({"call_path": [], "exception": None, "start_time": time.time()})
 
     def get_investigation_data(self) -> Optional[dict]:
         """Get and clear investigation data."""
         data = self._investigation_data.get()
         self._investigation_data.set(None)
+        if data is not None:
+            _decrement_investigation_active()
         return data
 
     def peek_investigation_data(self) -> Optional[dict]:
@@ -369,6 +373,11 @@ class _ServiceEventsMonitorState:
         framework calls this unconditionally in its request-finalize path. Idempotent: a
         no-op when already cleared (e.g. an incident was collected this request).
         """
+        # Decrement only when data was actually present, so the unconditional finalize-path call
+        # (and the incident path, which already consumed via get_investigation_data) each net the
+        # count correctly — every begin pairs with exactly one decrement.
+        if self._investigation_data.get() is not None:
+            _decrement_investigation_active()
         self._investigation_data.set(None)
 
     def record_execution_flow(self, caller: Optional[str], callee: str):
@@ -391,15 +400,37 @@ class _ServiceEventsMonitorState:
             caller: Function name that called this one (None if entry point)
             duration_ns: Duration in nanoseconds
         """
+        # Hot-path gate: skip the ContextVar lookup entirely when no investigation is in flight
+        # anywhere (the common case). Mirrors the JS/Java active-count guards. A lock-free int read
+        # is enough — a stale 0 only happens in the instant before begin_investigation's locked
+        # increment publishes, which is the same context that hasn't recorded any frames yet.
+        if _investigation_active_count == 0:
+            return
         inv_data = self._investigation_data.get()
-        if inv_data is not None:
-            inv_data["call_path"].append(
+        if inv_data is None:
+            return
+        call_path = inv_data["call_path"]
+        size = len(call_path)
+        if size > _MAX_CALL_PATH_ENTRIES:
+            # Already at [MAX real frames + sentinel] — drop everything after.
+            return
+        if size == _MAX_CALL_PATH_ENTRIES:
+            # This frame overflows the cap: keep the first MAX, then a single truncation sentinel.
+            call_path.append(
                 {
-                    "function_name": function_name,
-                    "caller_function_name": caller,
-                    "duration_ns": duration_ns,
+                    "function_name": _CALL_PATH_TRUNCATION_SENTINEL,
+                    "caller_function_name": None,
+                    "duration_ns": 0,
                 }
             )
+            return
+        call_path.append(
+            {
+                "function_name": function_name,
+                "caller_function_name": caller,
+                "duration_ns": duration_ns,
+            }
+        )
 
 
 # ============================================================================
@@ -451,7 +482,7 @@ class PythonServiceEventsMonitor:
         """
         try:
             # The per-function call counter only drives AUTO-mode tiered sampling. Only AUTO
-            # reads it, so for every other mode (including the default "adaptive") skip the
+            # reads it, so for every other mode (including the default "always") skip the
             # lock acquisition and the unbounded counter-dict growth on this hot path.
             if _sampling_mode == "auto":
                 call_count = _increment_call_counter(self.function_name)

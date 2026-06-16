@@ -127,7 +127,6 @@ class TestServiceEventsConfig(TestCase):
         self.assertEqual(config.sample_tier2_threshold, 1000)
         self.assertEqual(config.sample_tier2_rate, 10)
         self.assertEqual(config.sample_tier3_rate, 100)
-        self.assertEqual(config.hot_endpoint_cycles, 100)
 
     @patch.dict(
         os.environ,
@@ -136,7 +135,6 @@ class TestServiceEventsConfig(TestCase):
             "OTEL_AWS_SERVICE_EVENTS_SAMPLE_TIER2_THRESHOLD": "500",
             "OTEL_AWS_SERVICE_EVENTS_SAMPLE_TIER2_RATE": "5",
             "OTEL_AWS_SERVICE_EVENTS_SAMPLE_TIER3_RATE": "50",
-            "OTEL_AWS_SERVICE_EVENTS_HOT_ENDPOINT_CYCLES": "200",
         },
     )
     def test_sampling_thresholds_env_is_ignored(self):
@@ -146,7 +144,6 @@ class TestServiceEventsConfig(TestCase):
         self.assertEqual(config.sample_tier2_threshold, 1000)
         self.assertEqual(config.sample_tier2_rate, 10)
         self.assertEqual(config.sample_tier3_rate, 100)
-        self.assertEqual(config.hot_endpoint_cycles, 100)
 
     # ─── Internal test-config hook (DEBUG_SE_TEST_CONFIG) ──
 
