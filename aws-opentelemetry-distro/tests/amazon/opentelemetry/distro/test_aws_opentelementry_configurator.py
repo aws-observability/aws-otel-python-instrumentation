@@ -629,7 +629,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         processors = tracer_provider._active_span_processor._span_processors
         baggage_processors = [p for p in processors if p.__class__.__name__ == "BaggageSpanProcessor"]
         self.assertEqual(len(baggage_processors), 1)
-        predicate = baggage_processors[0]._baggage_key_predicate
+        predicate = (lambda key: any(p(key) for p in baggage_processors[0]._predicates))
         self.assertTrue(predicate("session.id"))
         self.assertFalse(predicate("user.id"))
 
@@ -647,7 +647,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         processors = tracer_provider._active_span_processor._span_processors
         baggage_processors = [p for p in processors if p.__class__.__name__ == "BaggageSpanProcessor"]
         self.assertEqual(len(baggage_processors), 1)
-        predicate = baggage_processors[0]._baggage_key_predicate
+        predicate = (lambda key: any(p(key) for p in baggage_processors[0]._predicates))
         self.assertTrue(predicate("user.id"))
         self.assertTrue(predicate("request.id"))
         self.assertTrue(predicate("session.id"))
@@ -667,7 +667,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         added = [c.args[0] for c in mock_tracer_provider.add_span_processor.call_args_list]
         baggage_processors = [p for p in added if p.__class__.__name__ == "BaggageSpanProcessor"]
         self.assertEqual(len(baggage_processors), 1)
-        predicate = baggage_processors[0]._baggage_key_predicate
+        predicate = (lambda key: any(p(key) for p in baggage_processors[0]._predicates))
         self.assertFalse(predicate("any.key"))
 
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
@@ -684,7 +684,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         processors = tracer_provider._active_span_processor._span_processors
         baggage_processors = [p for p in processors if p.__class__.__name__ == "BaggageSpanProcessor"]
         self.assertEqual(len(baggage_processors), 1)
-        self.assertTrue(baggage_processors[0]._baggage_key_predicate("session.id"))
+        self.assertTrue(any(p("session.id") for p in baggage_processors[0]._predicates))
 
         # With custom baggage keys, session.id should still be present alongside them
         os.environ["OTEL_BAGGAGE_SPAN_ATTRIBUTE_KEYS"] = "custom.key"
@@ -692,7 +692,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         _customize_span_processors(tracer_provider2, Resource.get_empty(), MagicMock())
         processors2 = tracer_provider2._active_span_processor._span_processors
         baggage_processors2 = [p for p in processors2 if p.__class__.__name__ == "BaggageSpanProcessor"]
-        predicate2 = baggage_processors2[0]._baggage_key_predicate
+        predicate2 = (lambda key: any(p(key) for p in baggage_processors2[0]._predicates))
         self.assertTrue(predicate2("session.id"))
         self.assertTrue(predicate2("custom.key"))
 
