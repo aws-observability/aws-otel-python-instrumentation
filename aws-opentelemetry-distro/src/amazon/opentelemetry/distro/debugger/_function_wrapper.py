@@ -29,7 +29,9 @@ from enum import Enum
 from typing import Any, Callable, Optional, Tuple, Type, Union
 
 from amazon.opentelemetry.distro.debugger._data_models import (
+    DEFAULT_MAX_COLLECTION_WIDTH,
     DEFAULT_MAX_FIELDS_PER_OBJECT,
+    DEFAULT_MAX_OBJECT_DEPTH,
     DEFAULT_MAX_STRING_LENGTH,
     CaptureConfig,
 )
@@ -113,8 +115,8 @@ class FunctionWrapper:
         return SnapshotSerializer(
             max_fields=capture_config.max_fields_per_object if capture_config else DEFAULT_MAX_FIELDS_PER_OBJECT,
             max_string_length=capture_config.max_string_length if capture_config else DEFAULT_MAX_STRING_LENGTH,
-            max_depth=capture_config.max_object_depth if capture_config else 3,
-            max_collection_size=capture_config.max_collection_width if capture_config else 10,
+            max_depth=capture_config.max_object_depth if capture_config else DEFAULT_MAX_OBJECT_DEPTH,
+            max_collection_size=capture_config.max_collection_width if capture_config else DEFAULT_MAX_COLLECTION_WIDTH,
         )
 
     def instrument_function(  # pylint: disable=too-many-arguments
@@ -796,23 +798,30 @@ class FunctionWrapper:
         - Flask: patches app.view_functions entries that reference the original function
         - Django: patches URLPattern.callback entries (incl. include()-nested resolvers)
           that reference the original function
+        - FastAPI: patches APIRoute.endpoint / APIRoute.dependant.call on app.router.routes
 
         Args:
             module: The module object containing the function
             original_func: The original function that was replaced
             new_func: The new wrapper function
         """
+        # Each framework patcher runs in its own try/except so a failure in one
+        # never prevents the others from running.
         try:
             # Flask: patch view_functions on any Flask app instances in the module
             FunctionWrapper._patch_flask_view_functions(module, original_func, new_func)
         except Exception as exc:  # pylint: disable=broad-exception-caught
-            # Never let framework patching failures break instrumentation.
             logger.debug("flask reference patching encountered an error: %s", exc)
         try:
             # Django: patch URLPattern.callback in the resolver tree
             FunctionWrapper._patch_django_url_patterns(module, original_func, new_func)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.debug("django reference patching encountered an error: %s", exc)
+        try:
+            # FastAPI: patch route table entries on any FastAPI app instances in the module
+            FunctionWrapper._patch_fastapi_routes(module, original_func, new_func)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.debug("fastapi reference patching encountered an error: %s", exc)
 
     @staticmethod
     def _patch_flask_view_functions(module, original_func: Callable, new_func: Callable) -> None:
@@ -1112,6 +1121,131 @@ class FunctionWrapper:
             logger.debug("Patched Django URLPattern.callback (name+module) for %s", func_name)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.debug("Error setting URLPattern.callback (name+module): %s", exc)
+
+    @staticmethod
+    def _patch_fastapi_routes(module, original_func: Callable, new_func: Callable) -> None:
+        """
+        Patch FastAPI route table entries that reference the original function.
+
+        FastAPI's @app.get()/@app.post() decorators capture a direct reference to the
+        route handler at import time, storing it on each APIRoute as ``endpoint`` and
+        (via the pre-built Dependant) ``dependant.call``. The per-request dispatch path
+        invokes ``dependant.call``. Replacing the module-level name via setattr does NOT
+        update these references, so FastAPI keeps calling the original unwrapped handler.
+        This method finds and patches those references on any FastAPI app in the module.
+
+        Args:
+            module: The module object that may contain FastAPI app instances
+            original_func: The original function to find in the route table
+            new_func: The new wrapper function to replace it with
+        """
+        try:
+            try:
+                from fastapi import FastAPI  # pylint: disable=import-outside-toplevel
+            except ImportError:
+                return  # FastAPI not installed, nothing to patch
+
+            func_name = getattr(original_func, "__name__", "unknown")
+            func_module = getattr(original_func, "__module__", None)
+
+            # Scan module attributes for FastAPI app instances
+            for attr_name in dir(module):
+                try:
+                    attr = getattr(module, attr_name, None)
+                    if attr is None or not isinstance(attr, FastAPI):
+                        continue
+                    FunctionWrapper._patch_single_fastapi_app(
+                        attr, attr_name, original_func, new_func, func_name, func_module
+                    )
+                except Exception as exc:
+                    logger.warning("Error checking module attribute '%s' for FastAPI app: %s", attr_name, exc)
+                    continue
+
+        except Exception as exc:
+            logger.warning("Error patching FastAPI routes: %s", exc)
+
+    @staticmethod
+    def _patch_single_fastapi_app(  # pylint: disable=too-many-locals
+        fastapi_app, app_name, original_func, new_func, func_name, func_module=None
+    ):
+        """Patch route handler references in a single FastAPI app instance.
+
+        Rebinds both ``route.endpoint`` and ``route.dependant.call`` (the attribute the
+        dispatcher actually invokes). The pre-built Dependant remains valid because the
+        DI wrapper preserves the handler signature via functools.wraps, so no rebuild is
+        needed. ``app.include_router`` flattens sub-routers into ``app.router.routes``,
+        so iterating that list covers all routes.
+        """
+        router = getattr(fastapi_app, "router", None)
+        routes = getattr(router, "routes", None)
+        if not isinstance(routes, list):
+            logger.debug("FastAPI app '%s' has no router.routes list", app_name)
+            return
+
+        def _rebind(route) -> None:
+            route.endpoint = new_func
+            dependant = getattr(route, "dependant", None)
+            if dependant is not None and hasattr(dependant, "call"):
+                dependant.call = new_func
+
+        def _is_identity_match(route) -> bool:
+            if getattr(route, "endpoint", None) is original_func:
+                return True
+            dependant = getattr(route, "dependant", None)
+            return dependant is not None and getattr(dependant, "call", None) is original_func
+
+        # Identity match first. Guard each route independently so one bad route
+        # cannot abort patching of the others.
+        patched_count = 0
+        for route in routes:
+            try:
+                if getattr(route, "endpoint", None) is None:
+                    continue  # not an APIRoute (e.g. Mount/WebSocketRoute)
+                if _is_identity_match(route):
+                    _rebind(route)
+                    patched_count += 1
+                    logger.debug("Patched FastAPI route '%s' to use DI wrapper", getattr(route, "path", "?"))
+            except Exception as exc:
+                logger.warning("Error patching FastAPI route '%s': %s", getattr(route, "path", "?"), exc)
+                continue
+
+        if patched_count > 0:
+            logger.debug(
+                "Patched %d FastAPI route(s) for function '%s' on app '%s'",
+                patched_count,
+                func_name,
+                app_name,
+            )
+            return
+
+        # Identity check failed -- try name+module-based matching. functools.wraps
+        # (used by DI's own wrapper and by OTel instrumentation) preserves __module__,
+        # so requiring both name and module avoids patching a same-named handler from a
+        # different module. If the original has no __module__, fall back to name-only.
+        def _matches(endpoint):
+            if getattr(endpoint, "__name__", None) != func_name:
+                return False
+            if func_module is None:
+                return True
+            return getattr(endpoint, "__module__", None) == func_module
+
+        matching_routes = [r for r in routes if getattr(r, "endpoint", None) is not None and _matches(r.endpoint)]
+        if matching_routes:
+            logger.debug(
+                "FastAPI app '%s' has %d route(s) with name '%s' (module '%s') but identity "
+                "mismatch. Patching by name+module.",
+                app_name,
+                len(matching_routes),
+                func_name,
+                func_module,
+            )
+            for route in matching_routes:
+                try:
+                    _rebind(route)
+                    logger.debug("Patched FastAPI route '%s' by name+module match", getattr(route, "path", "?"))
+                except Exception as exc:
+                    logger.warning("Error patching FastAPI route '%s': %s", getattr(route, "path", "?"), exc)
+                    continue
 
     @staticmethod
     def _get_qualified_name(original_func: Callable) -> str:

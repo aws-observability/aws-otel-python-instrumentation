@@ -1,9 +1,15 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""DI contract tests for Flask application.
+"""DI contract tests for FastAPI application.
 
-Verifies that DI instruments functions, emits snapshots as OTLP LogRecords
-to the mock collector, and that attributes/body/trace context are populated.
+Mirrors flask_test.py to verify that DI instruments functions in a FastAPI
+process, emits snapshots as OTLP LogRecords to the mock collector, and that
+attributes/body/trace context are populated.
+
+In addition to the synchronous targets shared with the Flask suite, this file
+adds DIFastAPIAsyncTest, which verifies the async instrumentation path:
+DI must correctly wrap `async def` targets (await the coroutine and capture the
+awaited result) -- something the synchronous Flask app cannot exercise.
 
 All test classes follow the same OTLP-based pattern as the trace/metrics tests:
 - Snapshots are OTLP LogRecords queried from the mock collector via gRPC
@@ -12,12 +18,14 @@ All test classes follow the same OTLP-based pattern as the trace/metrics tests:
 """
 
 import time
+from typing import Dict
 
 from typing_extensions import override
 
 from amazon.di.di_contract_test_base import DITestInfrastructure
 
-_APP_IMAGE = "aws-application-signals-tests-di-flask-app"
+_APP_IMAGE = "aws-application-signals-tests-di-fastapi-app"
+_CODE_UNIT = "di_fastapi_server"
 
 
 # =============================================================================
@@ -25,7 +33,7 @@ _APP_IMAGE = "aws-application-signals-tests-di-flask-app"
 # =============================================================================
 
 
-class DIFlaskFunctionLevelTest(DITestInfrastructure):
+class DIFastAPIFunctionLevelTest(DITestInfrastructure):
     """Function-level breakpoint (line=0) produces a method-level snapshot."""
 
     __test__ = True
@@ -93,7 +101,7 @@ class DIFlaskFunctionLevelTest(DITestInfrastructure):
 # =============================================================================
 
 
-class DIFlaskProbeTest(DITestInfrastructure):
+class DIFastAPIProbeTest(DITestInfrastructure):
     """Test PROBE instrumentation (permanent, method-level only, no hit limit)."""
 
     __test__ = True
@@ -126,7 +134,7 @@ class DIFlaskProbeTest(DITestInfrastructure):
         logs = self.wait_for_snapshots(min_count=1)
         log = self.logs_for_method(logs, "compute_total")[0]
 
-        self.assert_snapshot_attr(log, "aws.di.code_unit", "di_flask_server")
+        self.assert_snapshot_attr(log, "aws.di.code_unit", _CODE_UNIT)
         self.assert_snapshot_attr(log, "aws.di.method_name", "compute_total")
 
     def test_probe_snapshot_has_trace_context(self) -> None:
@@ -188,7 +196,7 @@ class DIFlaskProbeTest(DITestInfrastructure):
 # =============================================================================
 
 
-class DIFlaskLineLevelTest(DITestInfrastructure):
+class DIFastAPILineLevelTest(DITestInfrastructure):
     """Test line-level BREAKPOINT instrumentation (lineNumber > 0).
 
     Line-level breakpoints capture local variables at a specific line,
@@ -266,7 +274,7 @@ class DIFlaskLineLevelTest(DITestInfrastructure):
 # =============================================================================
 
 
-class DIFlaskHitLimitTest(DITestInfrastructure):
+class DIFastAPIHitLimitTest(DITestInfrastructure):
     """Test BREAKPOINT hit limit behavior.
 
     BREAKPOINTs have a max_hits limit. With MaxHits=3, the check is
@@ -324,7 +332,7 @@ class DIFlaskHitLimitTest(DITestInfrastructure):
 # =============================================================================
 
 
-class DIFlaskCoexistenceTest(DITestInfrastructure):
+class DIFastAPICoexistenceTest(DITestInfrastructure):
     """Test PROBE and BREAKPOINT coexistence on the same function.
 
     Current DI merges PROBE+BREAKPOINT on the same function into a single
@@ -382,7 +390,7 @@ class DIFlaskCoexistenceTest(DITestInfrastructure):
 # =============================================================================
 
 
-class DIFlaskCaptureLimitsTest(DITestInfrastructure):
+class DIFastAPICaptureLimitsTest(DITestInfrastructure):
     """Tests that DI capture limits are enforced correctly.
 
     The breakpoint configs intentionally request limits above the allowed maximum
@@ -460,32 +468,188 @@ class DIFlaskCaptureLimitsTest(DITestInfrastructure):
         self.assertIsNotNone(size, "Captured collection should report original size")
         self.assertEqual(size, 50, "Original collection size should be 50")
 
-    def test_string_value_truncated_at_user_supplied_limit_below_maximum(self) -> None:
-        """Function-level capture must honor a user-supplied limit below the maximum.
 
-        The config requests MaxStringLength=10 (well within range) and the input is
-        100 chars. The captured value must be truncated to exactly 10 -- not the
-        maximum (255) -- proving the function path uses the per-config limit rather
-        than a fixed serializer.
-        """
-        self.send_request("GET", "limits-small-string")
+# =============================================================================
+# Async function instrumentation tests (FastAPI-specific coverage)
+# =============================================================================
+
+
+class DIFastAPIAsyncTest(DITestInfrastructure):
+    """Test DI instrumentation of `async def` target functions.
+
+    This is the coverage that Flask cannot provide: DI must wrap an async
+    function such that it awaits the coroutine and captures the awaited result,
+    rather than capturing an unawaited coroutine object. Both an async
+    function-level BREAKPOINT (process_data_async) and an async PROBE
+    (compute_total_async) are exercised.
+    """
+
+    __test__ = True
+
+    @override
+    @staticmethod
+    def get_application_image_name() -> str:
+        return _APP_IMAGE
+
+    @override
+    def get_application_wait_pattern(self) -> str:
+        return "Ready"
+
+    def test_async_function_level_snapshot_generated(self) -> None:
+        """Async function-level BREAKPOINT generates a method-level snapshot with captures."""
+        response = self.send_request("GET", "success-async")
+        self.assertEqual(200, response.status_code)
+        # The wrapper must await the coroutine and return the real result.
+        self.assertEqual(response.json().get("result"), 84)
+
         logs = self.wait_for_snapshots(min_count=1)
-        log = self.logs_for_method(logs, "process_small_limit_string")[0]
+        method_logs = self.logs_for_method(logs, "process_data_async")
+        self.assertGreater(len(method_logs), 0, "Expected snapshot for process_data_async (async BREAKPOINT)")
+
+        log = method_logs[0]
+        self.assert_snapshot_attr(log, "aws.di.instrumentation_level", "method")
+        self.assert_snapshot_attr(log, "aws.di.code_unit", _CODE_UNIT)
+        self.assert_body_has_entry_or_return(log)
+
+    def test_async_probe_creates_snapshot(self) -> None:
+        """Async PROBE captures arguments and the awaited return value."""
+        response = self.send_request("GET", "probe-async")
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(response.json().get("total"), 60)
+
+        logs = self.wait_for_snapshots(min_count=1)
+        probe_logs = self.logs_for_method(logs, "compute_total_async")
+        self.assertGreater(len(probe_logs), 0, "Expected snapshot for compute_total_async (async PROBE)")
+
+        log = probe_logs[0]
+        self.assert_snapshot_attr(log, "aws.di.instrumentation_level", "method")
 
         body = self.body(log)
         captures = body.get("captures", {})
         entry = captures.get("entry", {})
         arguments = entry.get("arguments", {})
-        small_string_arg = arguments.get("small_limit_string", {})
+        self.assertIn("items", arguments, "Expected 'items' argument to be captured")
 
-        self.assertIsNotNone(small_string_arg, "Expected 'small_limit_string' argument to be captured")
+        # The awaited result (not a coroutine object) should be captured.
+        return_value = captures.get("return", {}).get("return_value", {})
+        self.assertEqual(return_value.get("type"), "int")
+        self.assertEqual(return_value.get("value"), "60")
 
-        captured_value = small_string_arg.get("value")
-        self.assertIsNotNone(captured_value, "Captured string value should not be None")
-        self.assertEqual(
-            len(captured_value),
-            10,
-            f"String should be truncated at the user-supplied limit of 10, but was {len(captured_value)}.",
+    def test_async_snapshot_has_trace_context(self) -> None:
+        """Async snapshot carries trace context propagated through the async wrapper."""
+        self.send_request("GET", "success-async")
+        logs = self.wait_for_snapshots(min_count=1)
+        log = self.logs_for_method(logs, "process_data_async")[0]
+        self.assert_has_trace_context(log)
+
+
+# =============================================================================
+# Route-handler instrumentation (DI patches FastAPI's route table)
+# =============================================================================
+
+
+class DIFastAPIRouteHandlerTest(DITestInfrastructure):
+    """Verifies that DI instruments FastAPI route handlers directly.
+
+    FastAPI captures a direct reference to each route handler in its route table
+    (APIRoute.endpoint, and the dispatched APIRoute.dependant.call) when the
+    @app.get(...) decorator runs at import time. Replacing only the module-level
+    name would not reach those references, so DI also patches the FastAPI route
+    table (mirroring its Flask app.view_functions patch). As a result, a request
+    routed by FastAPI now goes through the DI wrapper and a snapshot is produced.
+
+    Traces are enabled here (OTLP gRPC to the mock collector) so the route-handler
+    SERVER span is observable during the run; the assertion itself is snapshot-based.
+    """
+
+    __test__ = True
+
+    @override
+    @staticmethod
+    def get_application_image_name() -> str:
+        return _APP_IMAGE
+
+    @override
+    def get_application_wait_pattern(self) -> str:
+        return "Ready"
+
+    @override
+    def get_application_extra_environment_variables(self) -> Dict[str, str]:
+        # Enable the OTel traces exporter so FastAPI per-request SERVER spans are
+        # exported to the mock collector (gRPC 4315). This makes the route-handler
+        # span observable; the test assertion remains snapshot-based.
+        return {
+            "OTEL_TRACES_EXPORTER": "otlp",
+            "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+            "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "http://collector:4315",
+        }
+
+    def test_route_handler_produces_snapshot(self) -> None:
+        """A route handler configured as a DI target produces a snapshot when hit via FastAPI."""
+        # Control: a plain (non-route-handler) instrumented function works, proving DI
+        # is active in this app/process and the mock collector is receiving snapshots.
+        control = self.send_request("GET", "success")
+        self.assertEqual(200, control.status_code)
+        self.wait_for_snapshots(min_count=1)
+
+        # Hit the route handler that is itself a DI target.
+        response = self.send_request("GET", "route-handler-target", params={"multiplier": 2})
+        self.assertEqual(200, response.status_code)
+        # The handler still runs normally (DI must never break the application).
+        self.assertEqual(response.json().get("result"), 42)
+
+        # Wait for the handler's own snapshot specifically (the OTLP batch processor may
+        # flush it slightly after the control function's snapshot).
+        handler_logs = self.wait_for_method_snapshots("route_handler_target", min_count=1)
+        self.assertGreater(
+            len(handler_logs),
+            0,
+            "Expected a snapshot for the FastAPI route handler 'route_handler_target' "
+            "(DI now patches FastAPI's route table).",
         )
-        self.assertTrue(small_string_arg.get("truncated", False), "Captured string should be marked as truncated")
-        self.assertEqual(small_string_arg.get("size"), 100, "Captured string should report original size of 100")
+
+        log = handler_logs[0]
+        self.assert_snapshot_attr(log, "aws.di.instrumentation_level", "method")
+        self.assert_snapshot_attr(log, "aws.di.code_unit", _CODE_UNIT)
+        self.assert_body_has_entry_or_return(log)
+
+        # The handler's argument should be captured.
+        body = self.body(log)
+        captures = body.get("captures", {})
+        entry = captures.get("entry", {})
+        arguments = entry.get("arguments", {})
+        self.assertIn("multiplier", arguments, "Expected 'multiplier' argument to be captured")
+
+
+class DIFastAPISyncRouteHandlerTest(DITestInfrastructure):
+    """Verifies DI instruments a SYNCHRONOUS FastAPI route handler.
+
+    FastAPI runs sync route handlers in a threadpool (vs async handlers on the
+    event loop), so this exercises a different dispatch path than the async
+    route-handler test while using the same route-table patch.
+    """
+
+    __test__ = True
+
+    @override
+    @staticmethod
+    def get_application_image_name() -> str:
+        return _APP_IMAGE
+
+    @override
+    def get_application_wait_pattern(self) -> str:
+        return "Ready"
+
+    def test_sync_route_handler_produces_snapshot(self) -> None:
+        resp = self.send_request("GET", "route-handler-target-sync", params={"multiplier": 2})
+        self.assertEqual(200, resp.status_code)
+        # The handler still runs normally (DI must never break the application).
+        self.assertEqual(resp.json().get("result"), 42)
+
+        handler_logs = self.wait_for_method_snapshots("route_handler_target_sync", min_count=1)
+        self.assertGreater(len(handler_logs), 0, "Expected a snapshot for the sync route handler")
+
+        log = handler_logs[0]
+        self.assert_snapshot_attr(log, "aws.di.instrumentation_level", "method")
+        self.assert_snapshot_attr(log, "aws.di.code_unit", _CODE_UNIT)
+        self.assert_body_has_entry_or_return(log)

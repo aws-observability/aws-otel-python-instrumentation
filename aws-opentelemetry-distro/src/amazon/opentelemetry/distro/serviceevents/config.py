@@ -207,19 +207,15 @@ class ServiceEventsConfig:
     # adds patterns to subtract from PACKAGES_INCLUDE.
     packages_exclude: List[str] = field(default_factory=list)  # OTEL_AWS_SERVICE_EVENTS_PACKAGES_EXCLUDE
 
-    # Sampling Mode: "adaptive" (hot endpoint), "auto" (tiered), "always" (100%), "never" (0%)
-    sampling_mode: str = "adaptive"  # OTEL_AWS_SERVICE_EVENTS_SAMPLING_MODE
+    # Sampling Mode: "auto" (tiered), "always" (100%), "never" (0%)
+    sampling_mode: str = "always"  # OTEL_AWS_SERVICE_EVENTS_SAMPLING_MODE
 
-    # Sampling Thresholds (for "auto" mode: 3-tier adaptive sampling). Internal: hardcoded, no env
+    # Sampling Thresholds (for "auto" mode: 3-tier sampling). Internal: hardcoded, no env
     # override (test hook may set them).
     sample_tier1_threshold: int = 100
     sample_tier2_threshold: int = 1000
     sample_tier2_rate: int = 10
     sample_tier3_rate: int = 100
-
-    # Adaptive sampling: number of collector flush cycles an endpoint stays "hot" after an incident.
-    # Internal: hardcoded, no env override.
-    hot_endpoint_cycles: int = 100
 
     # OTLP Export Settings. Empty here means "unset" — the 4316 default is applied
     # by the endpoint policy in aws_opentelemetry_configurator._init_serviceevents so it
@@ -405,7 +401,6 @@ class ServiceEventsConfig:
             sample_tier2_threshold=defaults.sample_tier2_threshold,
             sample_tier2_rate=defaults.sample_tier2_rate,
             sample_tier3_rate=defaults.sample_tier3_rate,
-            hot_endpoint_cycles=defaults.hot_endpoint_cycles,
             # OTLP Export Settings
             logs_endpoint=get_str("OTEL_AWS_OTLP_LOGS_ENDPOINT", defaults.logs_endpoint),
             metrics_endpoint=get_str("OTEL_AWS_OTLP_METRICS_ENDPOINT", defaults.metrics_endpoint),
