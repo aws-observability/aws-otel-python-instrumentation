@@ -108,12 +108,12 @@ def _resolve_route_template(scope) -> Optional[str]:
 
     At middleware entry ``scope["route"]`` is unset (routing happens inside the inner
     app), so the raw URL path is all that's available. But the per-request *operation*
-    (used for adaptive hot-endpoint sampling and incident correlation) and the endpoint
-    aggregation are both keyed on the route *template* (e.g. ``/users/{id}``). Without
-    resolving the template here, every distinct param value (``/users/1``, ``/users/2``)
-    would be a different operation, so adaptive sampling — which marks the *template*
-    hot — would never match, and FunctionCall sampling for param routes would silently
-    stay off.
+    (used for incident correlation) and the endpoint aggregation are both keyed on the
+    route *template* (e.g. ``/users/{id}``). Without resolving the template here, every
+    distinct param value (``/users/1``, ``/users/2``) would be a different operation, so
+    incident correlation and endpoint aggregation would shatter into per-value cardinality.
+    (Sampling does not depend on the operation: the default ``always`` mode samples every
+    call, and ``auto`` keys its tier counters on the function, not the route.)
 
     Starlette sets ``scope["app"]`` before the middleware stack runs, so its routes are
     available. We match the scope against them (the same matching the router does moments
