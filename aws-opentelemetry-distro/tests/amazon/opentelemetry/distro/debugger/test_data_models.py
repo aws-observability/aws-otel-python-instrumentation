@@ -41,6 +41,12 @@ class TestCaptureConfig(unittest.TestCase):
         self.assertEqual(config.max_object_depth, DEFAULT_MAX_OBJECT_DEPTH)
         self.assertEqual(config.max_fields_per_object, DEFAULT_MAX_FIELDS_PER_OBJECT)
 
+        # Lock the cross-SDK parity values (must match Java/JS defaults of 255/20/20)
+        # independently of the constant indirection above.
+        self.assertEqual(config.max_string_length, 255)
+        self.assertEqual(config.max_collection_width, 20)
+        self.assertEqual(config.max_fields_per_object, 20)
+
     def test_custom_values(self):
         """Test custom configuration values."""
         config = CaptureConfig(
@@ -501,6 +507,20 @@ class TestBreakpointConfiguration(unittest.TestCase):
                 "expected_defaults": {
                     "max_string_length": DEFAULT_MAX_STRING_LENGTH,
                     "max_collection_width": DEFAULT_MAX_COLLECTION_WIDTH,
+                },
+            },
+            "capture_limits_omitted_uses_parity_defaults": {
+                # CodeCapture present but CaptureLimits omitted -> defaults must match
+                # Java/JS (255/20/20). Literal assertions guard against re-divergence.
+                "api_config": {
+                    "Location": {"CodeLocation": {"Language": "python", "CodeUnit": "myapp", "MethodName": "func"}},
+                    "CaptureConfiguration": {"CodeCapture": {"CaptureReturn": True}},
+                    "LocationHash": "test",
+                },
+                "expected_defaults": {
+                    "max_string_length": 255,
+                    "max_collection_width": 20,
+                    "max_fields_per_object": 20,
                 },
             },
             "invalid_field_types": {
