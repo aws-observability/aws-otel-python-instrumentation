@@ -35,11 +35,7 @@ from amazon.opentelemetry.distro.serviceevents.models import (
     ResourceAttributes,
     TelemetryCorrelation,
 )
-from amazon.opentelemetry.distro.serviceevents.python_monitor import (
-    _ServiceEventsMonitorState,
-    mark_operation_hot,
-    tick_hot_operations,
-)
+from amazon.opentelemetry.distro.serviceevents.python_monitor import _ServiceEventsMonitorState
 from amazon.opentelemetry.distro.serviceevents.utils import get_instance_id
 from opentelemetry import trace
 
@@ -348,13 +344,6 @@ class IncidentSnapshotCollector(BaseCollector):
         if trigger_type is None:
             return None
 
-        # Mark operation hot for adaptive sampling BEFORE dedup checks.
-        # This ensures the hot state is refreshed on every error occurrence,
-        # not just when a snapshot passes dedup. Without this, the hot state
-        # expires after ~16.7 min while dedup blocks snapshots for up to 60 min,
-        # causing the next allowed snapshot to be partial again.
-        mark_operation_hot(operation)
-
         # Generate error hash for deduplication
         error_hash = self._generate_error_hash(route, exception)
 
@@ -446,9 +435,6 @@ class IncidentSnapshotCollector(BaseCollector):
 
     def collect(self):
         """Collect pending snapshots and export to console."""
-        # Countdown hot operation cycles for adaptive sampling
-        tick_hot_operations()
-
         # Clear batch-level hashes for new collection cycle
         with self._error_hashes_lock:
             self._current_batch_hashes.clear()
