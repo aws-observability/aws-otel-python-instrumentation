@@ -737,8 +737,8 @@ class TestFinalizeRequest(TestCase):
         self.assertEqual(call_kwargs["status_code"], 404)
 
     @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.django_instrumentation.clear_current_operation")
-    def test_matched_route_unaffected_by_sentinel(self, mock_clear):
-        """A normally-resolved request still records its real route, not the sentinel."""
+    def test_matched_route_unaffected_by_unmatched_label(self, mock_clear):
+        """A normally-resolved request still records its real route, not the unmatched label."""
         mock_ec = MagicMock()
         django_mod._endpoint_collector = mock_ec
 

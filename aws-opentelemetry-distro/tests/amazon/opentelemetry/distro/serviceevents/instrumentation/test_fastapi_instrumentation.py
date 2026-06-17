@@ -77,7 +77,7 @@ class TestGetRoutePattern(TestCase):
         self.assertIsNone(_resolve_route_template({"type": "http", "path": "/x"}))
 
     def test_resolve_route_template_returns_none_on_no_match(self):
-        """A path that matches no route resolves to None (caller then uses the sentinel)."""
+        """A path that matches no route resolves to None (caller then uses the unmatched label)."""
         from starlette.applications import Starlette  # pylint: disable=import-outside-toplevel
         from starlette.responses import PlainTextResponse  # pylint: disable=import-outside-toplevel
         from starlette.routing import Route  # pylint: disable=import-outside-toplevel

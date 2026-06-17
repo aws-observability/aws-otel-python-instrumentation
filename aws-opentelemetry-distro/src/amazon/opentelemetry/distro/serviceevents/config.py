@@ -188,6 +188,8 @@ class ServiceEventsConfig:
     # Example: "POST /api/checkout:500,GET /api/health:50,GET /api/reports:5000"
     # Django note: routes are matched WITHOUT a leading slash (e.g. "api/checkout"), to
     # mirror Application Signals. Write Django patterns slash-less, e.g. "POST api/checkout:500".
+    # Exception: unmatched/scanner requests (no route) are recorded with a leading-slash
+    # first-segment label (e.g. "/wp-admin"), so thresholds targeting them keep the slash.
     latency_thresholds: List[str] = field(default_factory=list)  # OTEL_AWS_SERVICE_EVENTS_LATENCY_THRESHOLDS
 
     # Incident Snapshot Request Payload Capture Settings. Hardcoded off — no longer a
@@ -200,6 +202,9 @@ class ServiceEventsConfig:
     # Django note: routes are recorded WITHOUT a leading slash (e.g. "api/users"), to mirror
     # Application Signals. Write Django patterns slash-less, e.g. "GET api/*"; Flask/FastAPI
     # routes carry the leading slash, so their patterns keep it, e.g. "GET /api/*".
+    # Exception: unmatched/scanner requests (no route) are recorded with a leading-slash
+    # first-segment label (e.g. "/wp-admin"), so filters targeting them keep the slash even
+    # on Django, e.g. "* /wp-admin".
     endpoint_include_patterns: List[str] = field(
         default_factory=list
     )  # OTEL_AWS_SERVICE_EVENTS_ENDPOINT_INCLUDE_PATTERNS
@@ -437,7 +442,9 @@ class ServiceEventsConfig:
 
         Django note: routes are recorded WITHOUT a leading slash (to mirror Application
         Signals), so Django thresholds must omit it, e.g. "GET api/users:500". Flask/FastAPI
-        routes carry the leading slash, e.g. "GET /api/users:500".
+        routes carry the leading slash, e.g. "GET /api/users:500". Exception: unmatched/scanner
+        requests (no route) are recorded with a leading-slash first-segment label (e.g.
+        "/wp-admin"), so thresholds targeting them keep the slash even on Django.
 
         Returns:
             List of (pattern, threshold_ms) tuples. Order matters - first match wins.
@@ -492,7 +499,9 @@ class ServiceEventsConfig:
 
         Django note: routes are recorded WITHOUT a leading slash (to mirror Application
         Signals), so Django patterns must omit it, e.g. "GET api/*". Flask/FastAPI routes
-        carry the leading slash, e.g. "GET /api/*".
+        carry the leading slash, e.g. "GET /api/*". Exception: unmatched/scanner requests
+        (no route) are recorded with a leading-slash first-segment label (e.g. "/wp-admin"),
+        so patterns targeting them keep the slash even on Django, e.g. "* /wp-admin".
 
         Args:
             route: The endpoint route (e.g., "/api/users" for Flask/FastAPI, "api/users" for Django)
