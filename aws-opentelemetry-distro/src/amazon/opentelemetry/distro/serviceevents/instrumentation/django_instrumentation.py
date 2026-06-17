@@ -17,7 +17,7 @@ import logging
 import time
 from typing import Any, Optional
 
-from amazon.opentelemetry.distro.serviceevents.instrumentation._constants import UNMATCHED_ROUTE
+from amazon.opentelemetry.distro.serviceevents.instrumentation._constants import unmatched_route_label
 from amazon.opentelemetry.distro.serviceevents.instrumentation.flask_instrumentation import (
     _extract_error_from_call_path,
 )
@@ -35,8 +35,8 @@ _incident_snapshot_collector = None
 _serviceevents_config = None
 
 # Django only calls process_view after a URL resolves to a view, so an unmatched 404 never
-# gets a route stored and _finalize_request falls back to the shared UNMATCHED_ROUTE sentinel
-# (see _constants for why the raw path is not used).
+# gets a route stored and _finalize_request falls back to the shared first-segment unmatched
+# label derived from the raw path (see _constants for the cardinality rationale).
 
 
 def _get_request_body(request) -> Optional[Any]:
@@ -81,21 +81,24 @@ def _get_request_body(request) -> Optional[Any]:
 
 def _get_route_pattern(request) -> str:
     """
-    Get the route pattern (e.g. /users/<int:id>/) from the Django request.
+    Get the route pattern (e.g. users/<int:id>/) from the Django request.
 
     Args:
         request: Django HttpRequest object
 
     Returns:
-        Route pattern string (e.g., "/users/<int:id>/")
+        Route pattern string (e.g., "users/<int:id>/")
     """
     # Try to get the route pattern from resolver_match (available after URL resolution)
     if hasattr(request, "resolver_match") and request.resolver_match is not None:
-        # resolver_match.route is the URL pattern (e.g., "users/<int:id>/")
+        # resolver_match.route is the URL pattern (e.g., "users/<int:id>/"). Django stores
+        # it without a leading slash by convention; return it verbatim so the operation
+        # label matches Application Signals, which derives the same value from span.name
+        # (the upstream OTel Django instrumentation also leaves it slash-less). Flask and
+        # FastAPI route patterns already carry a leading slash natively, so all three
+        # frameworks agree with App Signals without further normalization here.
         route = getattr(request.resolver_match, "route", None)
         if route:
-            if not route.startswith("/"):
-                route = "/" + route
             return route
 
     # Fallback to path_info
@@ -159,11 +162,13 @@ def _finalize_request(request, response, exception):  # pylint: disable=too-many
 
         # Get route and method from stored values (set in process_view). A missing
         # _serviceevents_route means process_view never ran — i.e. the URL matched no
-        # urlpattern (unmatched 404). Use a single sentinel for those instead of the raw
-        # path so scanner/bot traffic to nonexistent URLs can't explode metric cardinality.
+        # urlpattern (unmatched 404). Collapse those to the first path segment instead of
+        # the raw path so scanner/bot traffic to nonexistent URLs can't explode metric
+        # cardinality, matching Application Signals' unmatched-route handling.
         route = getattr(request, "_serviceevents_route", None)
         if route is None:
-            route = UNMATCHED_ROUTE
+            raw_path = getattr(request, "path_info", None) or getattr(request, "path", None)
+            route = unmatched_route_label(raw_path)
         method = getattr(request, "_serviceevents_method", request.method)
 
         # Extract error info if error occurred
