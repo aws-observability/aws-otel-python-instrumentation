@@ -7,9 +7,7 @@ from typing import Dict, Optional, Sequence
 from botocore.session import Session
 
 from amazon.opentelemetry.distro._utils import (
-    get_aws_region,
     get_aws_session,
-    get_sigv4_traces_service,
     is_agent_observability_enabled,
     is_genai_content_extraction_opted_out,
 )
@@ -37,8 +35,8 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
 
     def __init__(
         self,
-        aws_region: Optional[str] = None,
-        session: Optional[Session] = None,
+        aws_region: str,
+        session: Session,
         endpoint: Optional[str] = None,
         certificate_file: Optional[str] = None,
         client_key_file: Optional[str] = None,
@@ -49,14 +47,10 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
         logger_provider: Optional[LoggerProvider] = None,
         aws_service: Optional[str] = None,
     ):
-        # When instantiated by the OTel SDK via the "otlp/sigv4" entry point, no args are passed,
-        # so resolve region/session/service from the environment.
-        self._aws_region = aws_region or get_aws_region()
-        self._aws_service = aws_service or get_sigv4_traces_service() or "xray"
+        self._aws_region = aws_region
+        self._aws_service = aws_service or "xray"
         self._logger_provider = logger_provider
         self._llo_handler = None
-
-        session = session or get_aws_session()
 
         OTLPSpanExporter.__init__(
             self,
@@ -100,3 +94,28 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
             return SpanExportResult.FAILURE
 
         return super().export(spans)
+
+
+def create_aws_otlp_span_exporter(region: str, aws_service: str, endpoint: Optional[str] = None) -> OTLPSpanExporter:
+    """Create and configure the AWS OTLP span exporter."""
+    session = get_aws_session()
+    # Check if botocore is available before importing the AWS exporter
+    if not session:
+        _logger.warning("Sigv4 Auth requires botocore to be enabled")
+        return OTLPSpanExporter(endpoint=endpoint)
+
+    if is_agent_observability_enabled():
+        # Span exporter needs an instance of logger provider in ai agent
+        # observability case because we need to split input/output prompts
+        # from span attributes and send them to the logs pipeline per
+        # the new Gen AI semantic convention from OTel
+        # ref: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/
+        return OTLPAwsSpanExporter(
+            session=session,
+            endpoint=endpoint,
+            aws_region=region,
+            aws_service=aws_service,
+            logger_provider=get_logger_provider(),
+        )
+
+    return OTLPAwsSpanExporter(session=session, endpoint=endpoint, aws_region=region, aws_service=aws_service)

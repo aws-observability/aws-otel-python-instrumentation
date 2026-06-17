@@ -43,7 +43,7 @@ from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayR
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
 from amazon.opentelemetry.distro.scope_based_filtering_view import ScopeBasedRetainingView
 from opentelemetry._events import set_event_logger_provider
-from opentelemetry._logs import get_logger_provider, set_logger_provider
+from opentelemetry._logs import set_logger_provider
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -1029,20 +1029,12 @@ def _create_aws_otlp_exporter(endpoint: str, service: str, region: str):
         from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter import (
             OTLPAwsLogRecordExporter,
         )
-        from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
+        from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import (
+            create_aws_otlp_span_exporter,
+        )
 
         if service == XRAY_SERVICE:
-            if is_agent_observability_enabled():
-                # Span exporter needs an instance of logger provider in ai agent
-                # observability case because we need to split input/output prompts
-                # from span attributes and send them to the logs pipeline per
-                # the new Gen AI semantic convention from OTel
-                # ref: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/
-                return OTLPAwsSpanExporter(
-                    session=session, endpoint=endpoint, aws_region=region, logger_provider=get_logger_provider()
-                )
-
-            return OTLPAwsSpanExporter(session=session, endpoint=endpoint, aws_region=region)
+            return create_aws_otlp_span_exporter(region=region, aws_service=service, endpoint=endpoint)
 
         if service == LOGS_SERIVCE:
             return OTLPAwsLogRecordExporter(session=session, aws_region=region)

@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from amazon.opentelemetry.distro._utils import OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE, get_aws_session
 from amazon.opentelemetry.distro.exporter.otlp.aws.common._aws_http_headers import _OTLP_AWS_HTTP_HEADERS
 from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
+from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter_auto import AutoOTLPAwsSpanExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk._configuration import _import_exporters
 from opentelemetry.sdk._logs import LoggerProvider
@@ -20,22 +21,23 @@ OTLP_TRACES_SIGV4_EXPORTER = "otlp/sigv4"
 
 class TestOTLPAwsSpanExporter(TestCase):
     def test_import_exporters_resolves_otlp_sigv4_entry_point(self):
-        """Tests that the 'otlp/sigv4' entry point resolves to OTLPAwsSpanExporter."""
+        """Tests that the 'otlp/sigv4' entry point resolves to AutoOTLPAwsSpanExporter."""
         trace_exporters, _, _ = _import_exporters(
             trace_exporter_names=[OTLP_TRACES_SIGV4_EXPORTER],
             metric_exporter_names=[],
             log_exporter_names=[],
         )
 
-        self.assertIs(trace_exporters[OTLP_TRACES_SIGV4_EXPORTER], OTLPAwsSpanExporter)
+        self.assertIs(trace_exporters[OTLP_TRACES_SIGV4_EXPORTER], AutoOTLPAwsSpanExporter)
 
-    def test_init_zero_arg_resolves_from_environment(self):
-        """OTel SDK instantiates the entry point with no args; region/service resolve from env."""
+    def test_auto_exporter_resolves_from_environment(self):
+        """The entry point is constructed with no args; region/service resolve from env into the SigV4 session."""
         os.environ["AWS_REGION"] = "us-east-1"
         os.environ[OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE] = "aps"
         os.environ[OTEL_EXPORTER_OTLP_TRACES_ENDPOINT] = "https://collector.example.com/v1/traces"
         try:
-            exporter = OTLPAwsSpanExporter()
+            exporter = AutoOTLPAwsSpanExporter()
+            self.assertIsInstance(exporter, OTLPAwsSpanExporter)
             self.assertEqual(exporter._aws_region, "us-east-1")
             self.assertEqual(exporter._aws_service, "aps")
             self.assertEqual(exporter._session._service, "aps")
@@ -45,18 +47,31 @@ class TestOTLPAwsSpanExporter(TestCase):
             os.environ.pop(OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE, None)
             os.environ.pop(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, None)
 
-    def test_init_zero_arg_defaults_service_to_xray(self):
+    def test_auto_exporter_defaults_service_to_xray(self):
         """Without OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE, the signing service defaults to xray."""
         os.environ["AWS_REGION"] = "us-east-1"
         os.environ[OTEL_EXPORTER_OTLP_TRACES_ENDPOINT] = "https://collector.example.com/v1/traces"
         os.environ.pop(OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE, None)
         try:
-            exporter = OTLPAwsSpanExporter()
+            exporter = AutoOTLPAwsSpanExporter()
             self.assertEqual(exporter._aws_service, "xray")
             self.assertEqual(exporter._session._service, "xray")
         finally:
             os.environ.pop("AWS_REGION", None)
             os.environ.pop(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, None)
+
+    @patch(
+        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.get_aws_session",
+        return_value=None,
+    )
+    def test_auto_exporter_without_botocore_falls_back_to_unsigned(self, _mock_session):
+        """botocore is optional; without a session the entry point yields an unsigned OTLP exporter, not a crash."""
+        exporter = AutoOTLPAwsSpanExporter()
+
+        # Falls back to the base OTLP exporter (not the SigV4 AwsAuthSession variant).
+        self.assertNotIsInstance(exporter, OTLPAwsSpanExporter)
+        self.assertIsInstance(exporter, OTLPSpanExporter)
+        self.assertNotEqual(type(exporter._session).__name__, "AwsAuthSession")
 
     def test_init_with_logger_provider(self):
         # Test initialization with logger_provider
