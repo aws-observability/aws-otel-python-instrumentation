@@ -1170,11 +1170,16 @@ class FunctionWrapper:
     ):
         """Patch route handler references in a single FastAPI app instance.
 
-        Rebinds both ``route.endpoint`` and ``route.dependant.call`` (the attribute the
-        dispatcher actually invokes). The pre-built Dependant remains valid because the
-        DI wrapper preserves the handler signature via functools.wraps, so no rebuild is
-        needed. ``app.include_router`` flattens sub-routers into ``app.router.routes``,
-        so iterating that list covers all routes.
+        Rebinds ``route.endpoint``, ``route.dependant.call``, and — recursively —
+        every matching ``route.dependant.dependencies[*].call`` (the attributes the
+        dispatcher actually invokes). The last one matters for functions used as
+        ``Depends(...)`` sub-dependencies: the per-request solver calls those
+        directly, so rebinding only the top-level handler would leave a
+        sub-dependency breakpoint silently never firing. The pre-built Dependant
+        remains valid because the DI wrapper preserves the handler signature via
+        functools.wraps, so no rebuild is needed. ``app.include_router`` flattens
+        sub-routers into ``app.router.routes``, so iterating that list covers all
+        routes.
         """
         router = getattr(fastapi_app, "router", None)
         routes = getattr(router, "routes", None)
@@ -1182,17 +1187,41 @@ class FunctionWrapper:
             logger.debug("FastAPI app '%s' has no router.routes list", app_name)
             return
 
-        def _rebind(route) -> None:
-            route.endpoint = new_func
-            dependant = getattr(route, "dependant", None)
-            if dependant is not None and hasattr(dependant, "call"):
-                dependant.call = new_func
+        def _rebind_dependant(dependant, matches) -> int:
+            """Replace every matching ``call`` in a Dependant tree with new_func.
 
-        def _is_identity_match(route) -> bool:
-            if getattr(route, "endpoint", None) is original_func:
-                return True
-            dependant = getattr(route, "dependant", None)
-            return dependant is not None and getattr(dependant, "call", None) is original_func
+            FastAPI stores ``Depends(...)`` sub-dependency callables on
+            ``dependant.dependencies[*].call`` (recursively). The per-request
+            solver invokes those directly, so a function used only as a
+            sub-dependency is never reached by rebinding the top-level
+            ``dependant.call`` alone. Walks the whole tree and rebinds only the
+            references that match the target, so a route matched via one
+            sub-dependency does not have its unrelated calls clobbered.
+            Returns the number of references rebound.
+            """
+            if dependant is None:
+                return 0
+            count = 0
+            if matches(getattr(dependant, "call", None)):
+                dependant.call = new_func
+                count += 1
+            for sub in getattr(dependant, "dependencies", None) or []:
+                count += _rebind_dependant(sub, matches)
+            return count
+
+        def _rebind_route(route, matches) -> int:
+            """Rebind matching references on a route: its ``endpoint`` and every
+            matching ``call`` in its Dependant tree. Only references that match
+            are touched. Returns the number of references rebound."""
+            count = 0
+            if matches(getattr(route, "endpoint", None)):
+                route.endpoint = new_func
+                count += 1
+            count += _rebind_dependant(getattr(route, "dependant", None), matches)
+            return count
+
+        def _is_identity(func) -> bool:
+            return func is original_func
 
         # Identity match first. Guard each route independently so one bad route
         # cannot abort patching of the others.
@@ -1201,9 +1230,9 @@ class FunctionWrapper:
             try:
                 if getattr(route, "endpoint", None) is None:
                     continue  # not an APIRoute (e.g. Mount/WebSocketRoute)
-                if _is_identity_match(route):
-                    _rebind(route)
-                    patched_count += 1
+                rebound = _rebind_route(route, _is_identity)
+                if rebound:
+                    patched_count += rebound
                     logger.debug("Patched FastAPI route '%s' to use DI wrapper", getattr(route, "path", "?"))
             except Exception as exc:
                 logger.warning("Error patching FastAPI route '%s': %s", getattr(route, "path", "?"), exc)
@@ -1211,7 +1240,7 @@ class FunctionWrapper:
 
         if patched_count > 0:
             logger.debug(
-                "Patched %d FastAPI route(s) for function '%s' on app '%s'",
+                "Patched %d FastAPI reference(s) for function '%s' on app '%s'",
                 patched_count,
                 func_name,
                 app_name,
@@ -1223,29 +1252,36 @@ class FunctionWrapper:
         # so requiring both name and module avoids patching a same-named handler from a
         # different module. If the original has no __module__, fall back to name-only.
         def _matches(endpoint):
+            if endpoint is None:
+                return False
             if getattr(endpoint, "__name__", None) != func_name:
                 return False
             if func_module is None:
                 return True
             return getattr(endpoint, "__module__", None) == func_module
 
-        matching_routes = [r for r in routes if getattr(r, "endpoint", None) is not None and _matches(r.endpoint)]
-        if matching_routes:
+        fallback_count = 0
+        for route in routes:
+            try:
+                if getattr(route, "endpoint", None) is None:
+                    continue
+                rebound = _rebind_route(route, _matches)
+                if rebound:
+                    fallback_count += rebound
+                    logger.debug("Patched FastAPI route '%s' by name+module match", getattr(route, "path", "?"))
+            except Exception as exc:
+                logger.warning("Error patching FastAPI route '%s': %s", getattr(route, "path", "?"), exc)
+                continue
+
+        if fallback_count > 0:
             logger.debug(
-                "FastAPI app '%s' has %d route(s) with name '%s' (module '%s') but identity "
-                "mismatch. Patching by name+module.",
+                "FastAPI app '%s' had identity mismatch; patched %d reference(s) for '%s' (module '%s') "
+                "by name+module match.",
                 app_name,
-                len(matching_routes),
+                fallback_count,
                 func_name,
                 func_module,
             )
-            for route in matching_routes:
-                try:
-                    _rebind(route)
-                    logger.debug("Patched FastAPI route '%s' by name+module match", getattr(route, "path", "?"))
-                except Exception as exc:
-                    logger.warning("Error patching FastAPI route '%s': %s", getattr(route, "path", "?"), exc)
-                    continue
 
     @staticmethod
     def _get_qualified_name(original_func: Callable) -> str:
