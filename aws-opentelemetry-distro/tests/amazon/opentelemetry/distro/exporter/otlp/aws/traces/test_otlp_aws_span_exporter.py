@@ -1,19 +1,63 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from amazon.opentelemetry.distro._utils import get_aws_session
+from amazon.opentelemetry.distro._utils import OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE, get_aws_session
 from amazon.opentelemetry.distro.exporter.otlp.aws.common._aws_http_headers import _OTLP_AWS_HTTP_HEADERS
 from amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter import OTLPAwsSpanExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk._configuration import _import_exporters
 from opentelemetry.sdk._logs import LoggerProvider
+from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExportResult
 
+OTLP_TRACES_SIGV4_EXPORTER = "otlp/sigv4"
+
 
 class TestOTLPAwsSpanExporter(TestCase):
+    def test_import_exporters_resolves_otlp_sigv4_entry_point(self):
+        """Tests that the 'otlp/sigv4' entry point resolves to OTLPAwsSpanExporter."""
+        trace_exporters, _, _ = _import_exporters(
+            trace_exporter_names=[OTLP_TRACES_SIGV4_EXPORTER],
+            metric_exporter_names=[],
+            log_exporter_names=[],
+        )
+
+        self.assertIs(trace_exporters[OTLP_TRACES_SIGV4_EXPORTER], OTLPAwsSpanExporter)
+
+    def test_init_zero_arg_resolves_from_environment(self):
+        """OTel SDK instantiates the entry point with no args; region/service resolve from env."""
+        os.environ["AWS_REGION"] = "us-east-1"
+        os.environ[OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE] = "aps"
+        os.environ[OTEL_EXPORTER_OTLP_TRACES_ENDPOINT] = "https://collector.example.com/v1/traces"
+        try:
+            exporter = OTLPAwsSpanExporter()
+            self.assertEqual(exporter._aws_region, "us-east-1")
+            self.assertEqual(exporter._aws_service, "aps")
+            self.assertEqual(exporter._session._service, "aps")
+            self.assertEqual(exporter._session._aws_region, "us-east-1")
+        finally:
+            os.environ.pop("AWS_REGION", None)
+            os.environ.pop(OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE, None)
+            os.environ.pop(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, None)
+
+    def test_init_zero_arg_defaults_service_to_xray(self):
+        """Without OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE, the signing service defaults to xray."""
+        os.environ["AWS_REGION"] = "us-east-1"
+        os.environ[OTEL_EXPORTER_OTLP_TRACES_ENDPOINT] = "https://collector.example.com/v1/traces"
+        os.environ.pop(OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE, None)
+        try:
+            exporter = OTLPAwsSpanExporter()
+            self.assertEqual(exporter._aws_service, "xray")
+            self.assertEqual(exporter._session._service, "xray")
+        finally:
+            os.environ.pop("AWS_REGION", None)
+            os.environ.pop(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, None)
+
     def test_init_with_logger_provider(self):
         # Test initialization with logger_provider
         mock_logger_provider = MagicMock(spec=LoggerProvider)

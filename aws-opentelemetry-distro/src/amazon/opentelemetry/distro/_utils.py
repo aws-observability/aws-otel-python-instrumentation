@@ -13,6 +13,7 @@ _logger: Logger = getLogger(__name__)
 AGENT_OBSERVABILITY_ENABLED = "AGENT_OBSERVABILITY_ENABLED"
 OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS = "OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS"
 AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT = "AWS_GENAI_CONTENT_EXTRACTION_OPT_OUT"
+OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE = "OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE"
 
 
 def is_installed(req: str) -> bool:
@@ -38,6 +39,12 @@ def is_installed(req: str) -> bool:
 def is_agent_observability_enabled() -> bool:
     """Is the Agentic AI monitoring flag set to true?"""
     return os.environ.get(AGENT_OBSERVABILITY_ENABLED, "false").lower() == "true"
+
+
+def get_sigv4_traces_service() -> Optional[str]:
+    """Returns OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE value, or None if unset/blank."""
+    value = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_SIGV4_SERVICE, "").strip()
+    return value or None
 
 
 def is_genai_content_extraction_opted_out() -> bool:

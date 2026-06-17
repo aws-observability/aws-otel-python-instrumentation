@@ -6,7 +6,13 @@ from typing import Dict, Optional, Sequence
 
 from botocore.session import Session
 
-from amazon.opentelemetry.distro._utils import is_agent_observability_enabled, is_genai_content_extraction_opted_out
+from amazon.opentelemetry.distro._utils import (
+    get_aws_region,
+    get_aws_session,
+    get_sigv4_traces_service,
+    is_agent_observability_enabled,
+    is_genai_content_extraction_opted_out,
+)
 from amazon.opentelemetry.distro.exporter.otlp.aws.common._aws_http_headers import _OTLP_AWS_HTTP_HEADERS
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
 from amazon.opentelemetry.distro.llo_handler import LLOHandler
@@ -31,8 +37,8 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
 
     def __init__(
         self,
-        aws_region: str,
-        session: Session,
+        aws_region: Optional[str] = None,
+        session: Optional[Session] = None,
         endpoint: Optional[str] = None,
         certificate_file: Optional[str] = None,
         client_key_file: Optional[str] = None,
@@ -41,10 +47,16 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
         timeout: Optional[int] = None,
         compression: Optional[Compression] = None,
         logger_provider: Optional[LoggerProvider] = None,
+        aws_service: Optional[str] = None,
     ):
-        self._aws_region = aws_region
+        # When instantiated by the OTel SDK via the "otlp/sigv4" entry point, no args are passed,
+        # so resolve region/session/service from the environment.
+        self._aws_region = aws_region or get_aws_region()
+        self._aws_service = aws_service or get_sigv4_traces_service() or "xray"
         self._logger_provider = logger_provider
         self._llo_handler = None
+
+        session = session or get_aws_session()
 
         OTLPSpanExporter.__init__(
             self,
@@ -55,7 +67,7 @@ class OTLPAwsSpanExporter(OTLPSpanExporter):
             headers,
             timeout,
             compression,
-            session=AwsAuthSession(session=session, aws_region=self._aws_region, service="xray"),
+            session=AwsAuthSession(session=session, aws_region=self._aws_region, service=self._aws_service),
         )
         self._session.headers.update(_OTLP_AWS_HTTP_HEADERS)
 
