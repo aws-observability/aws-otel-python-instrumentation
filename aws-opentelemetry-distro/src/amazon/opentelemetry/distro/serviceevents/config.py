@@ -186,6 +186,8 @@ class ServiceEventsConfig:
     # Per-endpoint latency thresholds for latency-triggered incident snapshots
     # Format: "METHOD /route:threshold_ms,METHOD /route:threshold_ms,..."
     # Example: "POST /api/checkout:500,GET /api/health:50,GET /api/reports:5000"
+    # Django note: routes are matched WITHOUT a leading slash (e.g. "api/checkout"), to
+    # mirror Application Signals. Write Django patterns slash-less, e.g. "POST api/checkout:500".
     latency_thresholds: List[str] = field(default_factory=list)  # OTEL_AWS_SERVICE_EVENTS_LATENCY_THRESHOLDS
 
     # Incident Snapshot Request Payload Capture Settings. Hardcoded off — no longer a
@@ -195,6 +197,9 @@ class ServiceEventsConfig:
     # Endpoint Filtering - glob patterns in format "METHOD /route" or "* /route" or "METHOD *"
     # If include_patterns is set, only track matching endpoints; then exclude_patterns removes from that set
     # Example: "GET /api/*,POST /api/*" or "* /health,* /metrics"
+    # Django note: routes are recorded WITHOUT a leading slash (e.g. "api/users"), to mirror
+    # Application Signals. Write Django patterns slash-less, e.g. "GET api/*"; Flask/FastAPI
+    # routes carry the leading slash, so their patterns keep it, e.g. "GET /api/*".
     endpoint_include_patterns: List[str] = field(
         default_factory=list
     )  # OTEL_AWS_SERVICE_EVENTS_ENDPOINT_INCLUDE_PATTERNS
@@ -430,6 +435,10 @@ class ServiceEventsConfig:
             - "GET /api/*:100" - any GET to /api/* routes
             - "* *:200" - all endpoints (catch-all)
 
+        Django note: routes are recorded WITHOUT a leading slash (to mirror Application
+        Signals), so Django thresholds must omit it, e.g. "GET api/users:500". Flask/FastAPI
+        routes carry the leading slash, e.g. "GET /api/users:500".
+
         Returns:
             List of (pattern, threshold_ms) tuples. Order matters - first match wins.
         """
@@ -481,8 +490,12 @@ class ServiceEventsConfig:
         - "?" matches any single character
         - Format: "METHOD /route" (e.g., "GET /api/*", "* /health", "POST /api/users")
 
+        Django note: routes are recorded WITHOUT a leading slash (to mirror Application
+        Signals), so Django patterns must omit it, e.g. "GET api/*". Flask/FastAPI routes
+        carry the leading slash, e.g. "GET /api/*".
+
         Args:
-            route: The endpoint route (e.g., "/api/users")
+            route: The endpoint route (e.g., "/api/users" for Flask/FastAPI, "api/users" for Django)
             method: The HTTP method (e.g., "GET", "POST")
 
         Returns:

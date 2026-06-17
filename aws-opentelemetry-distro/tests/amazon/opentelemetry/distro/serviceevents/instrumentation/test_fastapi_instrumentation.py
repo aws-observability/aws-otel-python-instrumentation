@@ -6,7 +6,6 @@ from unittest import TestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import amazon.opentelemetry.distro.serviceevents.instrumentation.fastapi_instrumentation as fastapi_mod
-from amazon.opentelemetry.distro.serviceevents.instrumentation._constants import UNMATCHED_ROUTE
 from amazon.opentelemetry.distro.serviceevents.instrumentation.fastapi_instrumentation import (
     ServiceEventsFastAPIMiddleware,
     _get_request_body,
@@ -29,27 +28,28 @@ class TestGetRoutePattern(TestCase):
         result = _get_route_pattern(scope)
         self.assertEqual(result, "/api/users/{id}")
 
-    def test_get_route_pattern_unmatched_uses_sentinel(self):
+    def test_get_route_pattern_unmatched_uses_first_segment(self):
         """When no route object is set and the template can't be pre-resolved (no app
-        routes), collapse to the <unmatched> sentinel rather than the raw path, to bound
-        metric cardinality for scanner/bot traffic. Parity with Flask/Django."""
+        routes), collapse to the first path segment rather than the raw path, to bound
+        metric cardinality for scanner/bot traffic. Parity with Flask/Django and
+        Application Signals."""
         scope = {"path": "/api/users/42"}
         result = _get_route_pattern(scope)
-        self.assertEqual(result, UNMATCHED_ROUTE)
+        self.assertEqual(result, "/api")
 
-    def test_get_route_pattern_empty_scope_uses_sentinel(self):
-        """An empty scope (no route, no path, no app) yields the <unmatched> sentinel."""
+    def test_get_route_pattern_empty_scope_uses_root(self):
+        """An empty scope (no route, no path, no app) yields the root "/" label."""
         scope = {}
         result = _get_route_pattern(scope)
-        self.assertEqual(result, UNMATCHED_ROUTE)
+        self.assertEqual(result, "/")
 
-    def test_get_route_pattern_route_without_path_attr_uses_sentinel(self):
+    def test_get_route_pattern_route_without_path_attr_uses_first_segment(self):
         """A route object without a .path attribute (and no resolvable template) falls
-        through to the <unmatched> sentinel."""
+        through to the first-segment unmatched label."""
         route_obj = "not-a-route-object"  # has no .path attribute
         scope = {"route": route_obj, "path": "/fallback"}
         result = _get_route_pattern(scope)
-        self.assertEqual(result, UNMATCHED_ROUTE)
+        self.assertEqual(result, "/fallback")
 
     def test_get_route_pattern_preresolves_template_before_routing(self):
         """When scope['route'] is unset, the template is resolved from the app's routes
@@ -367,8 +367,8 @@ class TestFastAPIMiddleware(unittest.IsolatedAsyncioTestCase):
 
         middleware = ServiceEventsFastAPIMiddleware(mock_app)
         # A genuinely-matched request carries a resolved route object, so the recorded
-        # route is the template. (Unmatched requests now collapse to the <unmatched>
-        # sentinel — covered by the _get_route_pattern tests.)
+        # route is the template. (Unmatched requests now collapse to the first path
+        # segment — covered by the _get_route_pattern tests.)
         route_obj = MagicMock()
         route_obj.path = "/api/users"
         scope = {
