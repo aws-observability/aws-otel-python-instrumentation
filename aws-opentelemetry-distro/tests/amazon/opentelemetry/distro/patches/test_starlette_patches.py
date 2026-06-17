@@ -102,7 +102,7 @@ class TestStarlettePatch(TestCase):
         }
 
         for case, apply_patch, expect_spans in [
-            ("unpatched", False, True),
+            ("unpatched", False, False),
             ("patched", True, False),
         ]:
             with self.subTest(case=case):

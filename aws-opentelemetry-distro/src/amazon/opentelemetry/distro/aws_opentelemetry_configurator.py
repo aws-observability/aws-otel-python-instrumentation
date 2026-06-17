@@ -7,12 +7,12 @@
 import logging
 import os
 import re
+from importlib.metadata import version
 from logging import Logger, getLogger
 from pathlib import Path
 from typing import ClassVar, Dict, List, NamedTuple, Optional, Type, Union
 
 import yaml
-from importlib_metadata import version
 from typing_extensions import override
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE, AWS_SERVICE_TYPE

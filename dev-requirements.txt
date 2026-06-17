@@ -4,8 +4,7 @@ isort==5.12.0
 black==24.3.0
 httpretty==1.1.4
 mypy==0.931
-# TODO: pin to pytest>=9 once Python 3.9 is dropped from the test matrix.
-pytest>=7.1.3,<10
+pytest>=9
 readme-renderer==42.0
 bleach==4.1.0 # transient dependency for readme-renderer
 protobuf>=5.29.5
@@ -17,7 +16,7 @@ pyyaml==6.0.3
 flaky==3.7.0
 botocore~=1.0
 # Needed so lint can resolve `import bytecode` in the DI bytecode-injection engine. It is a core
-# runtime dependency (see pyproject.toml) installed on Python 3.9-3.11, but the lint env does not
+# runtime dependency (see pyproject.toml) installed on Python 3.10-3.11, but the lint env does not
 # install the distro package itself, so it must be listed here too.
 bytecode>=0.13.0
 flask>=2.0.0

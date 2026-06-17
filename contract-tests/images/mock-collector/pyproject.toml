@@ -7,12 +7,12 @@ name = "mock-collector"
 description = "Mock Collector used by contract tests for AWS OTEL Python Instrumentation"
 version = "1.0.0"
 license = "Apache-2.0"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 
 dependencies = [
     "grpcio ~= 1.76.0",
-    "opentelemetry-proto == 1.40.0",
-    "opentelemetry-sdk == 1.40.0",
+    "opentelemetry-proto == 1.42.1",
+    "opentelemetry-sdk == 1.42.1",
     "protobuf==6.33.5",
     "typing-extensions==4.15.0"
 ]

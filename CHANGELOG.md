@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- Nightly dependency update: OpenTelemetry 1.42.1/0.63b1
+  ([#762](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/762))
 - feat(agent-observability): add `AWS_AGENTIC_INSTRUMENTATION` (`auto`/`enabled`/`disabled`, case-insensitive) as an escape hatch over auto-detection when `AGENT_OBSERVABILITY_ENABLED=true`; the switch only governs AWS native instrumentors and never disables third-party ones
   ([#769](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/769))
 - fix(otlp-aws-exporter): avoid `RecursionError` when `pip_system_certs` replaces `ssl.SSLContext` (truststore injection) by rebinding stale `botocore`/`urllib3` SSL context references and caching credentials in `AwsAuthSession`
