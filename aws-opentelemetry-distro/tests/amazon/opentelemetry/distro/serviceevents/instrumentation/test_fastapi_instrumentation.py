@@ -398,7 +398,14 @@ class TestFastAPIMiddleware(unittest.IsolatedAsyncioTestCase):
     @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.fastapi_instrumentation.clear_current_operation")
     @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.fastapi_instrumentation.set_current_operation")
     async def test_middleware_processes_incident_on_500(self, mock_set_op, mock_clear_op):
-        """Status 500 triggers incident snapshot processing."""
+        """Status 500 triggers incident snapshot processing.
+
+        The app sends a 500 status WITHOUT raising and with no monitor-captured
+        exception, so no real error type is available. error_info is therefore None
+        (the breakdown is omitted), matching Java's `errorType != null` gate — a 500
+        without a captured exception produces no per-error breakdown. The incident
+        snapshot is still processed and the request is still recorded.
+        """
         mock_ec = MagicMock()
         mock_isc = MagicMock()
         fastapi_mod._endpoint_collector = mock_ec
@@ -423,9 +430,9 @@ class TestFastAPIMiddleware(unittest.IsolatedAsyncioTestCase):
         call_kwargs = mock_isc.process_potential_incident.call_args[1]
         self.assertEqual(call_kwargs["status_code"], 500)
 
-        # Error info should be passed to endpoint collector
+        # No exception was captured, so no error breakdown is produced (Java parity).
         ec_kwargs = mock_ec.record_request.call_args[1]
-        self.assertIsNotNone(ec_kwargs["error_info"])
+        self.assertIsNone(ec_kwargs["error_info"])
 
     @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.fastapi_instrumentation.clear_current_operation")
     @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.fastapi_instrumentation.set_current_operation")

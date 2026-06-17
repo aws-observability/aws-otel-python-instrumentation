@@ -133,15 +133,16 @@ class TestExtractErrorFromCallPath(TestCase):
         self.assertEqual(result["error_type"], "RuntimeError")
         self.assertEqual(result["function_name"], "my_func_123")
 
-    def test_extract_error_no_investigation_data(self):
-        """Returns default values when no investigation data exists."""
+    def test_extract_error_returns_none_when_no_error_type_captured(self):
+        """Returns None when no real error type can be resolved (no passed-in exception and
+        no monitor-captured one), matching Java's `errorType != null` gate. A 5xx with no
+        captured exception must NOT synthesize an "UnknownError" breakdown entry."""
         _ServiceEventsMonitorState.get_instance()
         # No begin_investigation call, so no inv data
 
         result = _extract_error_from_call_path(None, "/api/test", "GET")
 
-        self.assertEqual(result["error_type"], "UnknownError")
-        self.assertEqual(result["function_name"], "unknown")
+        self.assertIsNone(result)
 
     def test_extract_error_prefers_captured_exception_origin(self):
         """The function the monitor recorded as the thrower wins over call_path[0]."""

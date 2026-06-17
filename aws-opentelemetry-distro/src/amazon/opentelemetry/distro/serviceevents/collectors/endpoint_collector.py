@@ -149,10 +149,17 @@ class EndpointMetricCollector(BaseCollector):
             elif status_code >= 400:
                 agg["errors"] += 1
 
-            # Track error_breakdown if error occurred
-            if status_code >= 400 and error_info:
-                error_type = error_info.get("error_type", "UnknownError")
-                function_name = error_info.get("function_name", "unknown")
+            # Track error_breakdown only for faults (5xx), matching Java. A 4xx is
+            # still reflected in the aggregate "errors" counter above, but does not
+            # produce an EndpointErrorMetric breakdown data point.
+            if status_code >= 500 and error_info:
+                # error_info, when present, always carries both keys: the extractor
+                # (_extract_error_from_call_path) returns either None or a complete
+                # {error_type, function_name} dict. Index directly so no synthetic
+                # "UnknownError"/"unknown" default can silently resurface here — the
+                # very value the extractor's None return was added to eliminate.
+                error_type = error_info["error_type"]
+                function_name = error_info["function_name"]
 
                 # Create unique key for this error pattern
                 error_key = f"{error_type}:{function_name}"
