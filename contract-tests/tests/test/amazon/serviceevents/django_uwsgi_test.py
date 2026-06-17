@@ -37,6 +37,12 @@ class DjangoUwsgiServiceEventsTest(ServiceEventsContractTestBase):
     def get_application_start_timeout(self) -> int:
         return 60
 
+    @override
+    def route_label(self, path: str) -> str:
+        # Django routes are slash-less; ServiceEvents records them verbatim to match
+        # Application Signals (see DjangoServiceEventsTest.route_label).
+        return path
+
     # -------------------------------------------------------------------------
     # uWSGI aggregation helper
     # -------------------------------------------------------------------------
@@ -65,7 +71,7 @@ class DjangoUwsgiServiceEventsTest(ServiceEventsContractTestBase):
             response = self.send_request("GET", "success")
             self.assertEqual(200, response.status_code)
 
-        logs = self._wait_for_endpoint_count("GET", "/success", 3)
+        logs = self._wait_for_endpoint_count("GET", self.route_label("success"), 3)
         total_faults = sum(self.attrs(log).get("aws.service_events.request.faults", 0) for log in logs)
         self.assertEqual(total_faults, 0)
 
@@ -75,7 +81,7 @@ class DjangoUwsgiServiceEventsTest(ServiceEventsContractTestBase):
             response = self.send_request("GET", "fault")
             self.assertEqual(500, response.status_code)
 
-        logs = self._wait_for_endpoint_count("GET", "/fault", 2)
+        logs = self._wait_for_endpoint_count("GET", self.route_label("fault"), 2)
         total_faults = sum(self.attrs(log).get("aws.service_events.request.faults", 0) for log in logs)
         self.assertGreater(total_faults, 0, "Expected faults > 0")
 
@@ -95,4 +101,4 @@ class DjangoUwsgiServiceEventsTest(ServiceEventsContractTestBase):
 
         # Each uWSGI worker has its own collector; counts may split across multiple
         # EndpointSummary logs. Wait until total reaches 5.
-        self._wait_for_endpoint_count("GET", "/success", 5)
+        self._wait_for_endpoint_count("GET", self.route_label("success"), 5)

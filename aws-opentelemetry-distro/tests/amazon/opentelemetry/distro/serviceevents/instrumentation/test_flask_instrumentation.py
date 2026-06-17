@@ -5,7 +5,6 @@ from unittest import TestCase
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import amazon.opentelemetry.distro.serviceevents.instrumentation.flask_instrumentation as flask_mod
-from amazon.opentelemetry.distro.serviceevents.instrumentation._constants import UNMATCHED_ROUTE
 from amazon.opentelemetry.distro.serviceevents.instrumentation.flask_instrumentation import (
     _after_request_hook,
     _before_request_hook,
@@ -38,16 +37,16 @@ class TestGetRoutePattern(TestCase):
         result = _get_route_pattern(request)
         self.assertEqual(result, "/user_detail")
 
-    def test_get_route_pattern_unmatched_uses_sentinel(self):
-        """Unmatched requests (no url_rule, no endpoint) collapse to the <unmatched>
-        sentinel instead of the raw path, to bound metric cardinality for scanner/bot
-        traffic. Parity with the Django/FastAPI instrumentation."""
+    def test_get_route_pattern_unmatched_uses_first_segment(self):
+        """Unmatched requests (no url_rule, no endpoint) collapse to the first path
+        segment instead of the raw path, to bound metric cardinality for scanner/bot
+        traffic. Parity with the Django/FastAPI instrumentation and Application Signals."""
         request = MagicMock()
         request.url_rule = None
         request.endpoint = None
         request.path = "/wp-admin/setup-config.php"
         result = _get_route_pattern(request)
-        self.assertEqual(result, UNMATCHED_ROUTE)
+        self.assertEqual(result, "/wp-admin")
 
 
 class TestGetRequestBody(TestCase):

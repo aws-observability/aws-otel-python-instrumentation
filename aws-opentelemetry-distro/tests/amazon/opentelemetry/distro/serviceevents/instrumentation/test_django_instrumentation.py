@@ -20,12 +20,12 @@ class TestGetRoutePattern(TestCase):
     """Tests for _get_route_pattern."""
 
     def test_get_route_pattern_from_resolver_match(self):
-        """resolver_match.route is returned when available."""
+        """resolver_match.route is returned verbatim (slash-less, as Django stores it)."""
         request = MagicMock()
         request.resolver_match = MagicMock()
         request.resolver_match.route = "users/<int:id>"
         result = _get_route_pattern(request)
-        self.assertEqual(result, "/users/<int:id>")
+        self.assertEqual(result, "users/<int:id>")
 
     def test_get_route_pattern_from_path_info(self):
         """Falls back to path_info when resolver_match is None."""
@@ -44,13 +44,14 @@ class TestGetRoutePattern(TestCase):
         result = _get_route_pattern(request)
         self.assertEqual(result, "/api/users/42")
 
-    def test_get_route_pattern_adds_leading_slash(self):
-        """Leading slash is added if route doesn't start with one."""
+    def test_get_route_pattern_preserves_slashless_route(self):
+        """A slash-less Django route is returned as-is (no leading slash added), to
+        match Application Signals which derives the same value from span.name."""
         request = MagicMock()
         request.resolver_match = MagicMock()
         request.resolver_match.route = "api/orders"
         result = _get_route_pattern(request)
-        self.assertEqual(result, "/api/orders")
+        self.assertEqual(result, "api/orders")
 
 
 class TestGetRequestBody(TestCase):
@@ -404,7 +405,7 @@ class TestServiceEventsDjangoMiddleware(TestCase):
 
     @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.django_instrumentation.set_current_operation")
     def test_process_view_sets_operation_context(self, mock_set_operation):
-        """process_view calls set_current_operation with a METHOD /route string."""
+        """process_view calls set_current_operation with a "METHOD route" string."""
         mock_get_response = MagicMock()
         middleware = ServiceEventsDjangoMiddleware(mock_get_response)
         request = self._make_request()
@@ -412,9 +413,9 @@ class TestServiceEventsDjangoMiddleware(TestCase):
         middleware.process_view(request, MagicMock(), [], {})
 
         mock_set_operation.assert_called_once()
-        # The operation should be "METHOD /route"
+        # The operation should be "METHOD route" (Django route is slash-less, matching App Signals)
         call_args = mock_set_operation.call_args[0][0]
-        self.assertEqual(call_args, "GET /api/test")
+        self.assertEqual(call_args, "GET api/test")
 
     @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.django_instrumentation.set_current_operation")
     def test_process_view_begins_investigation(self, mock_set_operation):
@@ -503,7 +504,7 @@ class TestServiceEventsDjangoMiddleware(TestCase):
 
         self.assertIsNone(result)
         # Setup block ran before the trace capture failed, so route context was stored.
-        self.assertEqual(request._serviceevents_route, "/api/test")
+        self.assertEqual(request._serviceevents_route, "api/test")
 
     @patch(
         "amazon.opentelemetry.distro.serviceevents.instrumentation.django_instrumentation.set_current_operation",
@@ -561,8 +562,9 @@ class TestFinalizeRequest(TestCase):
         request.META = {}
         request._serviceevents_start_time = 1000000000
         request._serviceevents_skip = False
-        # Set serviceevents context attributes (normally set by process_view)
-        request._serviceevents_route = "/" + route if not route.startswith("/") else route
+        # Set serviceevents context attributes (normally set by process_view). The route is
+        # stored verbatim (Django routes are slash-less, matching App Signals).
+        request._serviceevents_route = route
         request._serviceevents_method = method
         request._serviceevents_path = path
         request._serviceevents_endpoint = view_name
@@ -588,7 +590,7 @@ class TestFinalizeRequest(TestCase):
 
         mock_ec.record_request.assert_called_once()
         call_kwargs = mock_ec.record_request.call_args[1]
-        self.assertEqual(call_kwargs["route"], "/api/test")
+        self.assertEqual(call_kwargs["route"], "api/test")
         self.assertEqual(call_kwargs["method"], "GET")
         self.assertEqual(call_kwargs["status_code"], 200)
         self.assertIsNone(call_kwargs["error_info"])
@@ -693,8 +695,9 @@ class TestFinalizeRequest(TestCase):
         mock_ec.record_request.assert_not_called()
 
     @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.django_instrumentation.clear_current_operation")
-    def test_unmatched_route_collapses_to_sentinel(self, mock_clear):
-        """An unmatched-route 404 (process_view never ran) records the sentinel, not the raw path."""
+    def test_unmatched_route_collapses_to_first_segment(self, mock_clear):
+        """An unmatched-route 404 (process_view never ran) records the first path segment,
+        not the full raw path — matching Application Signals."""
         mock_ec = MagicMock()
         django_mod._endpoint_collector = mock_ec
 
@@ -728,14 +731,14 @@ class TestFinalizeRequest(TestCase):
 
         mock_ec.record_request.assert_called_once()
         call_kwargs = mock_ec.record_request.call_args[1]
-        # Must be the collapsed sentinel, NOT the raw probed path.
-        self.assertEqual(call_kwargs["route"], "<unmatched>")
-        self.assertNotIn("wp-admin", call_kwargs["route"])
+        # Must be the collapsed first segment, NOT the full raw probed path.
+        self.assertEqual(call_kwargs["route"], "/wp-admin")
+        self.assertNotIn("setup-config.php", call_kwargs["route"])
         self.assertEqual(call_kwargs["status_code"], 404)
 
     @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.django_instrumentation.clear_current_operation")
-    def test_matched_route_unaffected_by_sentinel(self, mock_clear):
-        """A normally-resolved request still records its real route, not the sentinel."""
+    def test_matched_route_unaffected_by_unmatched_label(self, mock_clear):
+        """A normally-resolved request still records its real route, not the unmatched label."""
         mock_ec = MagicMock()
         django_mod._endpoint_collector = mock_ec
 
@@ -750,7 +753,7 @@ class TestFinalizeRequest(TestCase):
             _finalize_request(request, response, None)
 
         call_kwargs = mock_ec.record_request.call_args[1]
-        self.assertEqual(call_kwargs["route"], "/users/<int:id>")
+        self.assertEqual(call_kwargs["route"], "users/<int:id>")
 
     @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.django_instrumentation.clear_current_operation")
     def test_passes_correct_request_data(self, mock_clear):
