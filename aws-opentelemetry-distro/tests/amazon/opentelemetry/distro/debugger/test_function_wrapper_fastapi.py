@@ -227,9 +227,7 @@ class TestFastAPIRoutesPatching(unittest.TestCase):
         app = FastAPI()
 
         @app.get("/nested")
-        def nested_dependency(
-            dep: int = Depends(square_dependency), x: int = Depends(inner_dep)
-        ):
+        def nested_dependency(dep: int = Depends(square_dependency), x: int = Depends(inner_dep)):
             return {"result": dep + x}
 
         route = _route_for(app, "/nested")
@@ -242,8 +240,8 @@ class TestFastAPIRoutesPatching(unittest.TestCase):
         FunctionWrapper._patch_fastapi_routes(mod, square_dependency, wrapper)
 
         rebound_calls = [d.call for d in route.dependant.dependencies]
-        self.assertIn(wrapper, rebound_calls)          # target rebound
-        self.assertIn(inner_dep, rebound_calls)        # the other dep left intact
+        self.assertIn(wrapper, rebound_calls)  # target rebound
+        self.assertIn(inner_dep, rebound_calls)  # the other dep left intact
         self.assertNotIn(square_dependency, rebound_calls)
 
     # ------------------------------------------------------------------
