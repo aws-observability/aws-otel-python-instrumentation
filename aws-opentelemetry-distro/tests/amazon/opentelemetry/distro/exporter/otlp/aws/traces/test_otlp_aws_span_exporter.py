@@ -61,22 +61,20 @@ class TestOTLPAwsSpanExporter(TestCase):
             os.environ.pop(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, None)
 
     @patch(
-        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter.get_aws_session",
-        return_value=None,
+        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter_auto.IS_BOTOCORE_INSTALLED", False
     )
-    def test_auto_exporter_without_botocore_falls_back_to_unsigned(self, _mock_session):
-        """botocore is optional; without a session the entry point yields an unsigned OTLP exporter, not a crash."""
-        os.environ["AWS_REGION"] = "us-east-1"
-        try:
-            exporter = AutoOTLPAwsSpanExporter()
-        finally:
-            os.environ.pop("AWS_REGION", None)
+    def test_auto_exporter_without_botocore_falls_back_to_unsigned(self):
+        """botocore is optional; without it the entry point yields an unsigned OTLP exporter, not a crash."""
+        exporter = AutoOTLPAwsSpanExporter()
 
         # Falls back to the base OTLP exporter (not the SigV4 AwsAuthSession variant).
         self.assertNotIsInstance(exporter, OTLPAwsSpanExporter)
         self.assertIsInstance(exporter, OTLPSpanExporter)
         self.assertNotEqual(type(exporter._session).__name__, "AwsAuthSession")
 
+    @patch(
+        "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter_auto.IS_BOTOCORE_INSTALLED", True
+    )
     @patch(
         "amazon.opentelemetry.distro.exporter.otlp.aws.traces.otlp_aws_span_exporter_auto.get_aws_region",
         return_value=None,
