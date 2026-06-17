@@ -623,6 +623,42 @@ class TestFinalizeRequest(TestCase):
         self.assertIsNotNone(ec_kwargs["error_info"])
 
     @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.django_instrumentation.clear_current_operation")
+    def test_processes_500_without_exception_omits_error_info(self, mock_clear):
+        """A 500 response with no captured exception produces no error breakdown.
+
+        Django shares _extract_error_from_call_path with Flask/FastAPI. When a view
+        returns a 500 status WITHOUT raising (so _finalize_request gets exc=None) and
+        the monitor recorded no exception (fresh state, reset in setUp), there is no
+        real error type to attribute. The extractor must return None and the collector
+        must receive error_info=None — matching Java's `statusCode >= 500 && errorType
+        != null` gate. No synthetic "UnknownError" breakdown is produced. The request
+        is still recorded as a 500 and the incident is still processed.
+        """
+        mock_ec = MagicMock()
+        mock_isc = MagicMock()
+        django_mod._endpoint_collector = mock_ec
+        django_mod._incident_snapshot_collector = mock_isc
+
+        request = self._make_request(method="POST", path="/api/orders", route="api/orders", view_name="create_order")
+        response = MagicMock()
+        response.status_code = 500
+
+        with patch(
+            "amazon.opentelemetry.distro.serviceevents.instrumentation.django_instrumentation.time"
+        ) as mock_time:
+            mock_time.perf_counter_ns.return_value = 1050000000
+            # exc=None: the view returned a 500 status without raising.
+            _finalize_request(request, response, None)
+
+        # The request is still recorded as a 500 (the aggregate fault counter increments)...
+        ec_kwargs = mock_ec.record_request.call_args[1]
+        self.assertEqual(ec_kwargs["status_code"], 500)
+        # ...but with no captured exception type, no per-error breakdown is attributed.
+        self.assertIsNone(ec_kwargs["error_info"])
+        # The incident snapshot is still processed for the 500.
+        mock_isc.process_potential_incident.assert_called_once()
+
+    @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.django_instrumentation.clear_current_operation")
     def test_infers_500_from_exception(self, mock_clear):
         """When no response is provided, status 500 is inferred from exception."""
         mock_ec = MagicMock()
