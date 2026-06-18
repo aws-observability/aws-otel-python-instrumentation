@@ -202,7 +202,7 @@ jobs:
           platforms: linux/amd64
 
   # Contract tests, grouped into one collapsible block per Python version. Each call to the
-  # reusable workflow runs that version's supported shards (from contract-tests/shards.json), each
+  # reusable workflow runs that version's supported shards (from contract-tests/tests.json), each
   # building only its own application images (layer-cached per app+version) against that version.
   # DI is intentionally NOT here -- it runs solely in di-contract-tests.yml to avoid duplication.
   contract-tests:

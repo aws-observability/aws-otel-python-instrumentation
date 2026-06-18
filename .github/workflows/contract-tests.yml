@@ -4,7 +4,7 @@
 # Reusable workflow that runs the contract-test suite for a SINGLE Python version, sharded by
 # framework. It is called once per Python version by pr-build.yml, which makes the GitHub Actions
 # UI render a collapsible group per version (e.g. "contract-tests (3.14)") containing that version's
-# shards. The set of shards is read from contract-tests/shards.json and filtered to those that
+# shards. The set of shards is read from contract-tests/tests.json and filtered to those that
 # support the requested Python version, so unsupported (shard, version) combinations are omitted.
 #
 # DI is intentionally NOT covered here -- it runs solely in di-contract-tests.yml to avoid running
@@ -53,7 +53,7 @@ jobs:
                                      | if startswith("!") then "--ignore=" + $base + "/" + .[1:]
                                        else $base + "/" + . end ]
                                    | join(" ") ) } ]' \
-            contract-tests/shards.json)
+            contract-tests/tests.json)
           echo "shards=$shards" >> "$GITHUB_OUTPUT"
 
   contract-test:
