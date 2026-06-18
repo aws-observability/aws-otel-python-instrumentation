@@ -43,12 +43,10 @@ jobs:
 
       # Build only the DI application images, at the matrix Python version (genuine per-version
       # coverage), with layer caching. The operator image is not needed by contract tests.
-      - name: Build DI images (python ${{ matrix.python-version }})
+      - name: Set up DI images (python ${{ matrix.python-version }})
         env:
           CACHE_BACKEND: gha
-        run: bash scripts/build-contract-test-images.sh "${{ matrix.python-version }}" di
+        run: bash scripts/set-up-contract-tests.sh "${{ matrix.python-version }}" di
 
-      - name: Set up and run DI contract tests
-        run: |
-          bash scripts/run-contract-tests.sh
-          pytest contract-tests/tests/test/amazon/di/ -v
+      - name: Run DI contract tests
+        run: pytest contract-tests/tests/test/amazon/di/ -v

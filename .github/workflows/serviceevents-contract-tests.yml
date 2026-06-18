@@ -41,25 +41,21 @@ jobs:
           cd ./aws-opentelemetry-distro
           python -m build --outdir ../dist
 
-      # Build only the images the chosen scope needs (serviceevents group, or everything for `all`),
-      # with layer caching. The dist/ wheel keeps each Dockerfile's default Python base.
-      - name: Determine bake targets
-        id: targets
-        run: |
-          if [ "${{ inputs.test_scope }}" = "all" ]; then
-            echo "targets=default" >> "$GITHUB_OUTPUT"
-          else
-            echo "targets=serviceevents" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Build images
+      # Build only the images the chosen scope needs (the serviceevents group, or every image for
+      # `all` by passing no app names), with layer caching. The empty python version arg keeps each
+      # Dockerfile's default base.
+      - name: Set up images and host
         env:
           CACHE_BACKEND: gha
-        run: bash scripts/build-contract-test-images.sh "" ${{ steps.targets.outputs.targets }}
-
-      - name: Set up and run contract tests with pytest
         run: |
-          bash scripts/run-contract-tests.sh
+          if [ "${{ inputs.test_scope }}" = "all" ]; then
+            bash scripts/set-up-contract-tests.sh ""
+          else
+            bash scripts/set-up-contract-tests.sh "" serviceevents
+          fi
+
+      - name: Run contract tests with pytest
+        run: |
           if [ "${{ inputs.test_scope }}" = "all" ]; then
             pytest contract-tests/tests -v
           else
