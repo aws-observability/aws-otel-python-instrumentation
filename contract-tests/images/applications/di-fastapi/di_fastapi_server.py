@@ -95,6 +95,21 @@ def process_large_collection(large_list):
     return len(large_list)
 
 
+def _partial_base(prefix, value):
+    """Underlying function for the functools.partial target below."""
+    result = prefix + str(value)
+    return result
+
+
+# functools.partial target: a module-level name bound to a functools.partial. A partial has
+# no __qualname__/__name__, so the wrapper's old runtime-name key was "<module>.<anonymous>"
+# and missed the breakpoint set registered under "<module>.partial_target" -> silently
+# never fired. With the fix the wrapper keys off the configured name, so it fires.
+import functools  # noqa: E402
+
+partial_target = functools.partial(_partial_base, "hello:")
+
+
 async def process_data_async(value):
     """Async target for function-level BREAKPOINT instrumentation.
 
@@ -315,6 +330,30 @@ BREAKPOINT_CONFIGS = [
             }
         },
     },
+    # Function-level breakpoint on a functools.partial target. The configured
+    # MethodName "partial_target" must match the manager's registration key; the wrapper
+    # now keys its lookup off that configured name (a partial has no __qualname__/__name__),
+    # so the wrapper fires and a snapshot IS produced.
+    {
+        "InstrumentationType": "BREAKPOINT",
+        "SignalType": "SNAPSHOT",
+        "Location": {
+            "CodeLocation": {
+                "Language": "Python",
+                "CodeUnit": "di_fastapi_server",
+                "MethodName": "partial_target",
+                "FilePath": "di_fastapi_server.py",
+            }
+        },
+        "LocationHash": "aabb00000000000d",
+        "CaptureConfiguration": {
+            "CodeCapture": {
+                "CaptureReturn": True,
+                "CaptureArguments": ["value"],
+                "CaptureLimits": {"MaxStringLength": 255},
+            }
+        },
+    },
 ]
 
 PROBE_CONFIGS = [
@@ -494,6 +533,13 @@ def route_handler_target_sync(multiplier: int = 2):
     produced for this handler.
     """
     result = multiplier * 21
+    return {"status": "ok", "result": result}
+
+
+@app.get("/partial")
+async def partial_endpoint():
+    """Endpoint that triggers the functools.partial BREAKPOINT target."""
+    result = partial_target(9)
     return {"status": "ok", "result": result}
 
 

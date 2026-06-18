@@ -168,8 +168,15 @@ class FunctionWrapper:
                 # Regular function
                 original_func = discovered
 
-            # Create the instrumented wrapper
-            instrumented_func = self._create_wrapper(original_func, capture_config, module_name, location_hash, manager)
+            # Create the instrumented wrapper. Pass the configured function_name so the
+            # wrapper's runtime _active_functions lookup uses the SAME key the manager
+            # registered under (module.function_name). Without this, a target whose
+            # runtime __qualname__/__name__ differs from the configured name — e.g. a
+            # functools.partial, whose _get_qualified_name() yields "<anonymous>" — would
+            # compute a mismatched key, miss its breakpoint set, and silently never fire.
+            instrumented_func = self._create_wrapper(
+                original_func, capture_config, module_name, location_hash, manager, function_name
+            )
 
             # Re-apply the descriptor type so instance access binds correctly.
             if method_type == MethodType.STATIC:
@@ -440,6 +447,7 @@ class FunctionWrapper:
         module_name: str,
         location_hash: Optional[str] = None,
         manager=None,
+        function_name: Optional[str] = None,
     ) -> Callable:
         """
         Create instrumented wrapper that handles both sync and async functions.
@@ -450,13 +458,21 @@ class FunctionWrapper:
             module_name: Module name for snapshot metadata
             location_hash: Optional location hash for instrumentation ID
             manager: Optional InstrumentationManager for hit count checking
+            function_name: The configured target name (module-relative, e.g. "my_fn"
+                or "MyClass.method"). Used to build the runtime _active_functions key so
+                it matches the manager's registration key even when the target's runtime
+                __qualname__/__name__ differs (e.g. functools.partial → "<anonymous>").
 
         Returns:
             Instrumented wrapper function
         """
         if inspect.iscoroutinefunction(original_func):
-            return self._create_async_wrapper(original_func, capture_config, module_name, location_hash, manager)
-        return self._create_sync_wrapper(original_func, capture_config, module_name, location_hash, manager)
+            return self._create_async_wrapper(
+                original_func, capture_config, module_name, location_hash, manager, function_name
+            )
+        return self._create_sync_wrapper(
+            original_func, capture_config, module_name, location_hash, manager, function_name
+        )
 
     def _create_sync_wrapper(  # pylint: disable=too-many-arguments,too-many-statements
         self,
@@ -465,6 +481,7 @@ class FunctionWrapper:
         module_name: str,
         location_hash: Optional[str] = None,
         manager=None,
+        function_name: Optional[str] = None,
     ) -> Callable:
         """Create synchronous wrapper that produces Snapshots instead of Spans."""
         wrapper_self = self
@@ -477,7 +494,11 @@ class FunctionWrapper:
             # Check if all temporary breakpoints are disabled
             line0_breakpoint_key = None
             instr_type = None
-            qualified_name = FunctionWrapper._get_qualified_name(original_func)
+            # Prefer the configured target name for keying/snapshot metadata; fall back to
+            # runtime introspection. This keeps the _active_functions lookup key aligned
+            # with the manager's registration key for targets whose runtime name differs
+            # (e.g. functools.partial → "<anonymous>").
+            qualified_name = function_name or FunctionWrapper._get_qualified_name(original_func)
             # Defensive local snapshot of manager for clarity. The actual safety
             # against shutdown races is provided by the try/except below.
             mgr = manager
@@ -582,6 +603,7 @@ class FunctionWrapper:
         module_name: str,
         location_hash: Optional[str] = None,
         manager=None,
+        function_name: Optional[str] = None,
     ) -> Callable:
         """Create asynchronous wrapper that produces Snapshots instead of Spans."""
         wrapper_self = self
@@ -596,7 +618,10 @@ class FunctionWrapper:
             # Check if all temporary breakpoints are disabled
             line0_breakpoint_key = None
             instr_type = None
-            qualified_name = FunctionWrapper._get_qualified_name(original_func)
+            # As in the sync wrapper: prefer the configured name so the lookup key
+            # matches the manager's registration key for partials and other callables
+            # whose runtime __qualname__/__name__ is not the configured name.
+            qualified_name = function_name or FunctionWrapper._get_qualified_name(original_func)
             # Defensive local snapshot of manager for clarity. The actual safety
             # against shutdown races is provided by the try/except below.
             mgr = manager
@@ -799,6 +824,8 @@ class FunctionWrapper:
         - Django: patches URLPattern.callback entries (incl. include()-nested resolvers)
           that reference the original function
         - FastAPI: patches APIRoute.endpoint / APIRoute.dependant.call on app.router.routes
+        - Starlette (pure, non-FastAPI): rebuilds Route.app from new_func (FastAPI is skipped)
+        - aiohttp: rebinds the stored handler on app.router routes
 
         Args:
             module: The module object containing the function
@@ -822,6 +849,18 @@ class FunctionWrapper:
             FunctionWrapper._patch_fastapi_routes(module, original_func, new_func)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.debug("fastapi reference patching encountered an error: %s", exc)
+        try:
+            # Starlette (pure, non-FastAPI): patch Route.app on any Starlette app instances.
+            # FastAPI subclasses Starlette and is handled by _patch_fastapi_routes above, so
+            # this patcher explicitly skips FastAPI instances to avoid double-patching.
+            FunctionWrapper._patch_starlette_routes(module, original_func, new_func)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.debug("starlette reference patching encountered an error: %s", exc)
+        try:
+            # aiohttp: patch the stored handler on any aiohttp.web.Application instances.
+            FunctionWrapper._patch_aiohttp_routes(module, original_func, new_func)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.debug("aiohttp reference patching encountered an error: %s", exc)
 
     @staticmethod
     def _patch_flask_view_functions(module, original_func: Callable, new_func: Callable) -> None:
@@ -1282,6 +1321,215 @@ class FunctionWrapper:
                 func_name,
                 func_module,
             )
+
+    @staticmethod
+    def _patch_starlette_routes(module, original_func: Callable, new_func: Callable) -> None:
+        """
+        Patch Starlette route handlers that reference the original function.
+
+        Starlette's ``Route(path, endpoint)`` builds ``route.app = request_response(endpoint)``
+        at construction (import) time, capturing the ORIGINAL endpoint in a closure. The
+        per-request path invokes ``route.app`` — never ``route.endpoint`` — so replacing the
+        module-level name via setattr (or even rebinding ``route.endpoint``) does NOT reach the
+        live handler. To actually instrument it we must rebuild ``route.app`` from new_func.
+
+        FastAPI subclasses Starlette and is handled by ``_patch_fastapi_routes``; this method
+        explicitly SKIPS FastAPI instances so a working FastAPI app is never double-patched.
+
+        Args:
+            module: The module object that may contain Starlette app instances
+            original_func: The original function to find on route endpoints
+            new_func: The new wrapper function to rebuild the route app from
+        """
+        try:
+            try:
+                from starlette.applications import Starlette  # pylint: disable=import-outside-toplevel
+                from starlette.routing import Route, request_response  # pylint: disable=import-outside-toplevel
+            except ImportError:
+                return  # Starlette not installed, nothing to patch
+
+            # FastAPI is a Starlette subclass handled by its own patcher; skip it here.
+            try:
+                from fastapi import FastAPI  # pylint: disable=import-outside-toplevel
+            except ImportError:
+                FastAPI = None  # noqa: N806 — sentinel; not installed
+
+            func_name = getattr(original_func, "__name__", "unknown")
+            func_module = getattr(original_func, "__module__", None)
+
+            for attr_name in dir(module):
+                try:
+                    attr = getattr(module, attr_name, None)
+                    if attr is None or not isinstance(attr, Starlette):
+                        continue
+                    if FastAPI is not None and isinstance(attr, FastAPI):
+                        continue  # handled by _patch_fastapi_routes
+                    FunctionWrapper._patch_single_starlette_app(
+                        attr, attr_name, original_func, new_func, func_name, func_module, Route, request_response
+                    )
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    logger.warning("Error checking module attribute '%s' for Starlette app: %s", attr_name, exc)
+                    continue
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.warning("Error patching Starlette routes: %s", exc)
+
+    @staticmethod
+    def _patch_single_starlette_app(  # pylint: disable=too-many-arguments,too-many-locals
+        starlette_app, app_name, original_func, new_func, func_name, func_module, route_cls, request_response
+    ):
+        """Rebuild ``route.app`` for any Route whose endpoint matches, on one Starlette app.
+
+        Matches by identity first, then by name+module (mirroring the Flask/FastAPI/Django
+        patchers). Only function/method endpoints are rebuilt; class (ASGI) endpoints and
+        routes that carry per-route middleware are left untouched (rebuilding their ``app``
+        could drop the middleware stack — a deliberate safe no-op, logged at debug).
+        ``Mount``/sub-router routes are descended into recursively.
+        """
+        router = getattr(starlette_app, "router", None)
+        routes = getattr(router, "routes", None)
+        if not isinstance(routes, list):
+            logger.debug("Starlette app '%s' has no router.routes list", app_name)
+            return
+
+        def _matches(endpoint) -> bool:
+            if endpoint is original_func:
+                return True
+            if getattr(endpoint, "__name__", None) != func_name:
+                return False
+            if func_module is not None and getattr(endpoint, "__module__", None) != func_module:
+                return False
+            return True
+
+        def _walk(route_list, depth=0):
+            count = 0
+            if depth > 20:  # defensive: avoid pathological/cyclic mount nesting
+                return count
+            for route in route_list:
+                try:
+                    # Descend into Mount / sub-router routes.
+                    sub = getattr(getattr(route, "app", None), "routes", None) or getattr(route, "routes", None)
+                    if sub and not isinstance(route, route_cls):
+                        count += _walk(sub, depth + 1)
+                        continue
+                    endpoint = getattr(route, "endpoint", None)
+                    if endpoint is None or not _matches(endpoint):
+                        continue
+                    # Starlette applies per-route middleware INTO route.app at construction
+                    # time (and keeps no `middleware` attribute), so a plain route's app is the
+                    # ``request_response`` closure while a middleware-wrapped route's app is the
+                    # outermost middleware instance. Only rebuild when route.app is recognizably
+                    # the plain request_response closure — otherwise rebuilding would silently
+                    # drop the middleware stack. Skipping is a safe no-op (DI won't instrument
+                    # this particular handler), never a correctness change to the app.
+                    current_app = getattr(route, "app", None)
+                    is_plain_request_response = getattr(
+                        current_app, "__module__", None
+                    ) == "starlette.routing" and getattr(current_app, "__qualname__", "").startswith("request_response")
+                    if not is_plain_request_response:
+                        logger.debug(
+                            "Starlette route '%s' has a non-plain app (likely per-route middleware); "
+                            "skipping rebuild to avoid dropping it (DI will not instrument this handler).",
+                            getattr(route, "path", "?"),
+                        )
+                        continue
+                    route.endpoint = new_func
+                    route.app = request_response(new_func)
+                    count += 1
+                    logger.debug("Patched Starlette route '%s' to use DI wrapper", getattr(route, "path", "?"))
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    logger.warning("Error patching Starlette route '%s': %s", getattr(route, "path", "?"), exc)
+                    continue
+            return count
+
+        patched = _walk(routes)
+        if patched:
+            logger.debug("Patched %d Starlette route(s) for function '%s' on app '%s'", patched, func_name, app_name)
+
+    @staticmethod
+    def _patch_aiohttp_routes(module, original_func: Callable, new_func: Callable) -> None:
+        """
+        Patch aiohttp route handlers that reference the original function.
+
+        aiohttp's ``app.router.add_get(path, handler)`` (and ``@routes.get`` decorators)
+        store the handler on each resource's route as ``_handler``; the per-request path
+        invokes that stored handler, not the module-level name. Replacing the module name
+        via setattr does not reach it, so we rebind the stored handler directly.
+
+        Args:
+            module: The module object that may contain aiohttp Application instances
+            original_func: The original handler to find in the route table
+            new_func: The new wrapper function to rebind to
+        """
+        try:
+            try:
+                from aiohttp import web  # pylint: disable=import-outside-toplevel
+            except ImportError:
+                return  # aiohttp not installed, nothing to patch
+
+            func_name = getattr(original_func, "__name__", "unknown")
+            func_module = getattr(original_func, "__module__", None)
+
+            for attr_name in dir(module):
+                try:
+                    attr = getattr(module, attr_name, None)
+                    if attr is None or not isinstance(attr, web.Application):
+                        continue
+                    FunctionWrapper._patch_single_aiohttp_app(
+                        attr, attr_name, original_func, new_func, func_name, func_module
+                    )
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    logger.warning("Error checking module attribute '%s' for aiohttp app: %s", attr_name, exc)
+                    continue
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.warning("Error patching aiohttp routes: %s", exc)
+
+    @staticmethod
+    def _patch_single_aiohttp_app(  # pylint: disable=too-many-arguments,too-many-locals
+        aiohttp_app, app_name, original_func, new_func, func_name, func_module
+    ):
+        """Rebind the stored handler on matching aiohttp routes for one Application.
+
+        Iterates ``app.router.routes()`` and rebinds each route's handler (``_handler``,
+        accessed via the public ``route.handler`` property) when it matches by identity,
+        then by name+module (mirroring the other framework patchers).
+        """
+        router = getattr(aiohttp_app, "router", None)
+        if router is None:
+            logger.debug("aiohttp app '%s' has no router", app_name)
+            return
+
+        try:
+            routes = list(router.routes())
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.debug("aiohttp app '%s' router.routes() not iterable: %s", app_name, exc)
+            return
+
+        def _matches(handler) -> bool:
+            if handler is original_func:
+                return True
+            if getattr(handler, "__name__", None) != func_name:
+                return False
+            if func_module is not None and getattr(handler, "__module__", None) != func_module:
+                return False
+            return True
+
+        patched = 0
+        for route in routes:
+            try:
+                handler = getattr(route, "handler", None)
+                if handler is None or not _matches(handler):
+                    continue
+                # The route stores the handler on its resource entry as ``_handler``.
+                if hasattr(route, "_handler"):
+                    route._handler = new_func  # pylint: disable=protected-access
+                    patched += 1
+                    logger.debug("Patched aiohttp route handler '%s' to use DI wrapper", func_name)
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                logger.warning("Error patching aiohttp route for '%s': %s", func_name, exc)
+                continue
+
+        if patched:
+            logger.debug("Patched %d aiohttp route(s) for function '%s' on app '%s'", patched, func_name, app_name)
 
     @staticmethod
     def _get_qualified_name(original_func: Callable) -> str:
