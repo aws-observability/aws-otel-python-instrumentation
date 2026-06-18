@@ -1,196 +1,75 @@
 {
-  "comment": "Single source of truth for contract-test shards. Each shard is one suite: it lists the bake targets (app images) it builds, the pytest paths it runs, and the Python versions it supports. The pr-build contract-tests workflow filters this list per Python version so unsupported (shard, version) combinations are omitted entirely. DI is intentionally absent -- it runs only in di-contract-tests.yml.",
+  "comment": "Contract-test shards for pr-build. Each shard's `name` is the application image to build (contract-tests/images/applications/<name>/) AND the label shown in CI; `tests` are the pytest paths to run against it; `versions` are the Python versions it supports. pr-build runs one collapsible group per Python version, filtering to shards that support it. DI is intentionally absent -- it runs only in di-contract-tests.yml.",
   "shards": [
     {
       "name": "botocore",
-      "targets": "botocore",
-      "paths": "contract-tests/tests/test/amazon/botocore",
-      "versions": [
-        "3.10",
-        "3.11",
-        "3.12",
-        "3.13",
-        "3.14"
-      ]
+      "tests": "contract-tests/tests/test/amazon/botocore",
+      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "requests",
-      "targets": "requests",
-      "paths": "contract-tests/tests/test/amazon/requests",
-      "versions": [
-        "3.10",
-        "3.11",
-        "3.12",
-        "3.13",
-        "3.14"
-      ]
+      "tests": "contract-tests/tests/test/amazon/requests contract-tests/tests/test/amazon/misc/code_attributes_test.py",
+      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "django",
-      "targets": "django",
-      "paths": "contract-tests/tests/test/amazon/django",
-      "versions": [
-        "3.10",
-        "3.11",
-        "3.12",
-        "3.13",
-        "3.14"
-      ]
-    },
-    {
-      "name": "misc",
-      "targets": "django requests",
-      "paths": "contract-tests/tests/test/amazon/misc",
-      "versions": [
-        "3.10",
-        "3.11",
-        "3.12",
-        "3.13",
-        "3.14"
-      ]
-    },
-    {
-      "name": "runtime",
-      "targets": "django",
-      "paths": "contract-tests/tests/test/amazon/runtime",
-      "versions": [
-        "3.10",
-        "3.11",
-        "3.12",
-        "3.13",
-        "3.14"
-      ]
+      "tests": "contract-tests/tests/test/amazon/django contract-tests/tests/test/amazon/runtime contract-tests/tests/test/amazon/misc/configuration_test.py contract-tests/tests/test/amazon/misc/service_name_in_env_var_test.py contract-tests/tests/test/amazon/misc/service_name_in_resource_attributes_test.py contract-tests/tests/test/amazon/misc/unknown_service_name_test.py",
+      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "pymysql",
-      "targets": "pymysql",
-      "paths": "contract-tests/tests/test/amazon/pymysql",
-      "versions": [
-        "3.10",
-        "3.11",
-        "3.12",
-        "3.13",
-        "3.14"
-      ]
+      "tests": "contract-tests/tests/test/amazon/pymysql",
+      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "mysqlclient",
-      "targets": "mysqlclient",
-      "paths": "contract-tests/tests/test/amazon/mysqlclient",
-      "versions": [
-        "3.10",
-        "3.11",
-        "3.12",
-        "3.13",
-        "3.14"
-      ]
+      "tests": "contract-tests/tests/test/amazon/mysqlclient",
+      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "psycopg2",
-      "targets": "psycopg2",
-      "paths": "contract-tests/tests/test/amazon/psycopg2",
-      "versions": [
-        "3.10",
-        "3.11",
-        "3.12",
-        "3.13",
-        "3.14"
-      ]
+      "tests": "contract-tests/tests/test/amazon/psycopg2",
+      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "mysql-connector",
-      "targets": "mysql-connector",
-      "paths": "contract-tests/tests/test/amazon/mysql-connector",
-      "versions": [
-        "3.10",
-        "3.11",
-        "3.12",
-        "3.13",
-        "3.14"
-      ]
+      "tests": "contract-tests/tests/test/amazon/mysql-connector",
+      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "langchain",
-      "targets": "langchain",
-      "paths": "contract-tests/tests/test/amazon/gen_ai/langchain",
-      "versions": [
-        "3.10",
-        "3.11",
-        "3.12",
-        "3.13",
-        "3.14"
-      ]
+      "tests": "contract-tests/tests/test/amazon/gen_ai/langchain",
+      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "llamaindex",
-      "targets": "llamaindex",
-      "paths": "contract-tests/tests/test/amazon/gen_ai/llamaindex",
-      "versions": [
-        "3.10",
-        "3.11",
-        "3.12",
-        "3.13",
-        "3.14"
-      ]
+      "tests": "contract-tests/tests/test/amazon/gen_ai/llamaindex",
+      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "crewai",
-      "targets": "crewai",
-      "paths": "contract-tests/tests/test/amazon/gen_ai/crewai",
-      "versions": [
-        "3.10",
-        "3.11",
-        "3.12",
-        "3.13"
-      ]
+      "tests": "contract-tests/tests/test/amazon/gen_ai/crewai",
+      "versions": ["3.10", "3.11", "3.12", "3.13"]
     },
     {
       "name": "serviceevents-flask",
-      "targets": "serviceevents-flask",
-      "paths": "contract-tests/tests/test/amazon/serviceevents/flask_test.py",
-      "versions": [
-        "3.10",
-        "3.11",
-        "3.12",
-        "3.13",
-        "3.14"
-      ]
+      "tests": "contract-tests/tests/test/amazon/serviceevents/flask_test.py",
+      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "serviceevents-fastapi",
-      "targets": "serviceevents-fastapi",
-      "paths": "contract-tests/tests/test/amazon/serviceevents/fastapi_test.py",
-      "versions": [
-        "3.10",
-        "3.11",
-        "3.12",
-        "3.13",
-        "3.14"
-      ]
+      "tests": "contract-tests/tests/test/amazon/serviceevents/fastapi_test.py",
+      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "serviceevents-django",
-      "targets": "serviceevents-django",
-      "paths": "contract-tests/tests/test/amazon/serviceevents/django_test.py",
-      "versions": [
-        "3.10",
-        "3.11",
-        "3.12",
-        "3.13",
-        "3.14"
-      ]
+      "tests": "contract-tests/tests/test/amazon/serviceevents/django_test.py",
+      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "serviceevents-django-uwsgi",
-      "targets": "serviceevents-django-uwsgi",
-      "paths": "contract-tests/tests/test/amazon/serviceevents/django_uwsgi_test.py",
-      "versions": [
-        "3.10",
-        "3.11",
-        "3.12",
-        "3.13",
-        "3.14"
-      ]
+      "tests": "contract-tests/tests/test/amazon/serviceevents/django_uwsgi_test.py",
+      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     }
   ]
 }

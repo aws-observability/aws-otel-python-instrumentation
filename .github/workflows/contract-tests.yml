@@ -43,7 +43,7 @@ jobs:
           PYTHON_VERSION: ${{ inputs.python-version }}
         run: |
           shards=$(jq -c --arg py "$PYTHON_VERSION" \
-            '[.shards[] | select(.versions | index($py)) | {name, targets, paths}]' \
+            '[.shards[] | select(.versions | index($py)) | {name, tests}]' \
             contract-tests/shards.json)
           echo "shards=$shards" >> "$GITHUB_OUTPUT"
 
@@ -75,10 +75,10 @@ jobs:
           name: ${{ inputs.wheel-artifact-name }}
           path: dist
 
-      - name: Set up ${{ matrix.shard.name }} images (python ${{ inputs.python-version }})
+      - name: Set up ${{ matrix.shard.name }} image (python ${{ inputs.python-version }})
         env:
           CACHE_BACKEND: gha
-        run: bash scripts/set-up-contract-tests.sh "${{ inputs.python-version }}" ${{ matrix.shard.targets }}
+        run: bash scripts/set-up-contract-tests.sh "${{ inputs.python-version }}" ${{ matrix.shard.name }}
 
       - name: Run ${{ matrix.shard.name }} contract tests
-        run: pytest ${{ matrix.shard.paths }} -v
+        run: pytest ${{ matrix.shard.tests }} -v

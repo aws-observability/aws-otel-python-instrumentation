@@ -30,12 +30,15 @@ PYTHON_VERSION="${1:-}"
 shift || true
 APPS=("$@")
 
-# Expand the group names the dedicated DI / ServiceEvents workflows pass as a single token.
-if [ "${#APPS[@]}" -eq 1 ]; then
-  case "${APPS[0]}" in
-    di)            APPS=(di-django di-fastapi di-flask) ;;
-    serviceevents) APPS=(serviceevents-django serviceevents-django-uwsgi serviceevents-fastapi serviceevents-flask) ;;
-  esac
+# Expand the group names the dedicated DI / ServiceEvents workflows pass as a single token into
+# the matching application directories (e.g. "di" -> every applications/di-*). Derived from the
+# directories so new di-*/serviceevents-* apps are picked up without editing this script.
+if [ "${#APPS[@]}" -eq 1 ] && { [ "${APPS[0]}" = "di" ] || [ "${APPS[0]}" = "serviceevents" ]; }; then
+  prefix="${APPS[0]}"
+  APPS=()
+  for dir in contract-tests/images/applications/"${prefix}"-*/; do
+    [ -f "${dir}Dockerfile" ] && APPS+=("$(basename "$dir")")
+  done
 fi
 
 # Default to every application image (flat apps + the one-level-deeper gen_ai apps).
