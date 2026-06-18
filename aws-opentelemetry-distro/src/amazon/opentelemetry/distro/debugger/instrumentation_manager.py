@@ -72,7 +72,7 @@ class InstrumentationManager:
         # Failed configuration tracking: location_hash -> error_cause
         # Prevents retrying the same broken config on every poll cycle.
         # Entries are cleared when the config is removed from the incoming list.
-        self._failed_configs: Dict[str, str] = {}
+        self._failed_configs: Dict[str, ErrorCause] = {}
 
         # Thread safety
         self._lock = RLock()
