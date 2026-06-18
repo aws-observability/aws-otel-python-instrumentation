@@ -5,97 +5,192 @@
       "name": "botocore",
       "targets": "botocore",
       "paths": "contract-tests/tests/test/amazon/botocore",
-      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
+      "versions": [
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14"
+      ]
     },
     {
       "name": "requests",
       "targets": "requests",
       "paths": "contract-tests/tests/test/amazon/requests",
-      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
+      "versions": [
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14"
+      ]
     },
     {
       "name": "django",
       "targets": "django",
       "paths": "contract-tests/tests/test/amazon/django",
-      "versions": ["3.10", "3.11", "3.12", "3.13"]
+      "versions": [
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14"
+      ]
     },
     {
       "name": "misc",
       "targets": "django requests",
       "paths": "contract-tests/tests/test/amazon/misc",
-      "versions": ["3.10", "3.11", "3.12", "3.13"]
+      "versions": [
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14"
+      ]
     },
     {
       "name": "runtime",
       "targets": "django",
       "paths": "contract-tests/tests/test/amazon/runtime",
-      "versions": ["3.10", "3.11", "3.12", "3.13"]
+      "versions": [
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14"
+      ]
     },
     {
       "name": "pymysql",
       "targets": "pymysql",
       "paths": "contract-tests/tests/test/amazon/pymysql",
-      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
+      "versions": [
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14"
+      ]
     },
     {
       "name": "mysqlclient",
       "targets": "mysqlclient",
       "paths": "contract-tests/tests/test/amazon/mysqlclient",
-      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
+      "versions": [
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14"
+      ]
     },
     {
       "name": "psycopg2",
       "targets": "psycopg2",
       "paths": "contract-tests/tests/test/amazon/psycopg2",
-      "versions": ["3.10", "3.11", "3.12"]
+      "versions": [
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14"
+      ]
     },
     {
       "name": "mysql-connector",
       "targets": "mysql-connector",
       "paths": "contract-tests/tests/test/amazon/mysql-connector",
-      "versions": ["3.10", "3.11", "3.12"]
+      "versions": [
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14"
+      ]
     },
     {
       "name": "langchain",
       "targets": "langchain",
       "paths": "contract-tests/tests/test/amazon/gen_ai/langchain",
-      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
+      "versions": [
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14"
+      ]
     },
     {
       "name": "llamaindex",
       "targets": "llamaindex",
       "paths": "contract-tests/tests/test/amazon/gen_ai/llamaindex",
-      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
+      "versions": [
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14"
+      ]
     },
     {
       "name": "crewai",
       "targets": "crewai",
       "paths": "contract-tests/tests/test/amazon/gen_ai/crewai",
-      "versions": ["3.10", "3.11", "3.12", "3.13"]
+      "versions": [
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13"
+      ]
     },
     {
       "name": "serviceevents-flask",
       "targets": "serviceevents-flask",
       "paths": "contract-tests/tests/test/amazon/serviceevents/flask_test.py",
-      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
+      "versions": [
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14"
+      ]
     },
     {
       "name": "serviceevents-fastapi",
       "targets": "serviceevents-fastapi",
       "paths": "contract-tests/tests/test/amazon/serviceevents/fastapi_test.py",
-      "versions": ["3.10", "3.11", "3.12", "3.13"]
+      "versions": [
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14"
+      ]
     },
     {
       "name": "serviceevents-django",
       "targets": "serviceevents-django",
       "paths": "contract-tests/tests/test/amazon/serviceevents/django_test.py",
-      "versions": ["3.10", "3.11", "3.12", "3.13"]
+      "versions": [
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14"
+      ]
     },
     {
       "name": "serviceevents-django-uwsgi",
       "targets": "serviceevents-django-uwsgi",
       "paths": "contract-tests/tests/test/amazon/serviceevents/django_uwsgi_test.py",
-      "versions": ["3.10", "3.11", "3.12", "3.13"]
+      "versions": [
+        "3.10",
+        "3.11",
+        "3.12",
+        "3.13",
+        "3.14"
+      ]
     }
   ]
 }
