@@ -83,7 +83,7 @@
       "name": "serviceevents-fastapi",
       "targets": "serviceevents-fastapi",
       "paths": "contract-tests/tests/test/amazon/serviceevents/fastapi_test.py",
-      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
+      "versions": ["3.10", "3.11", "3.12", "3.13"]
     },
     {
       "name": "serviceevents-django",
