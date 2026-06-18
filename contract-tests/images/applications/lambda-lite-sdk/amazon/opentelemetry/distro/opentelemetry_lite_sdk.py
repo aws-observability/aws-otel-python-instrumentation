@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 from opentelemetry import context as context_api
 from opentelemetry import trace as trace_api
+from opentelemetry import version as otel_version
 from opentelemetry.trace import SpanKind
 from opentelemetry.trace.status import Status, StatusCode
 from opentelemetry.util import types
@@ -40,9 +41,10 @@ def _build_lambda_resource():
     otel_service_name = os.environ.get("OTEL_SERVICE_NAME", "")
     if otel_service_name:
         attrs["service.name"] = otel_service_name
+
     attrs["telemetry.sdk.language"] = "python"
     attrs["telemetry.sdk.name"] = "opentelemetry"
-    attrs["telemetry.sdk.version"] = "1.40.0"
+    attrs["telemetry.sdk.version"] = otel_version.__version__
     return attrs
 
 
@@ -483,6 +485,11 @@ def _encode_any_value(value):
         return _encode_tag(3, _VARINT) + _encode_varint(value)
     if isinstance(value, float):
         return _encode_tag(4, _FIXED64) + struct.pack("<d", value)
+    if isinstance(value, (list, tuple)):
+        array_buf = b""
+        for item in value:
+            array_buf += _encode_bytes_field(1, _encode_any_value(item))
+        return _encode_bytes_field(5, array_buf)
     return _encode_string_field(1, str(value))
 
 
@@ -530,7 +537,10 @@ def _encode_span_otlp(span):
         buf += _encode_string_field(3, str(ctx.trace_state))
     if span.parent:
         buf += _encode_bytes_field(4, span.parent.span_id.to_bytes(8, "big"))
-    buf += _encode_fixed32_field(16, int(ctx.trace_flags) | 0x100)
+    flags = int(ctx.trace_flags) | 0x100
+    if span.parent and span.parent.is_remote:
+        flags |= 0x200
+    buf += _encode_fixed32_field(16, flags)
     buf += _encode_string_field(5, span.name)
     buf += _encode_varint_field(6, _span_kind_to_otlp(span.kind))
     buf += _encode_fixed64_field(7, span.start_time)
@@ -641,6 +651,8 @@ class UdpSpanExporter:
         self._app_signals_enabled = os.environ.get("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "false").lower() == "true"
 
     def export(self, spans):
+        if not spans:
+            return True
         try:
             if self._app_signals_enabled:
                 for span in spans:
