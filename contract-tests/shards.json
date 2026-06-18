@@ -32,9 +32,15 @@
       "versions": ["3.10", "3.11", "3.12"]
     },
     {
-      "name": "gen_ai",
-      "targets": "langchain llamaindex",
-      "paths": "contract-tests/tests/test/amazon/gen_ai/langchain contract-tests/tests/test/amazon/gen_ai/llamaindex",
+      "name": "langchain",
+      "targets": "langchain",
+      "paths": "contract-tests/tests/test/amazon/gen_ai/langchain",
+      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    },
+    {
+      "name": "llamaindex",
+      "targets": "llamaindex",
+      "paths": "contract-tests/tests/test/amazon/gen_ai/llamaindex",
       "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
