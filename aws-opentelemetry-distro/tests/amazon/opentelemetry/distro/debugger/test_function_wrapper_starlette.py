@@ -189,6 +189,15 @@ class TestStarletteRoutesPatching(unittest.TestCase):
         app = Starlette(routes=[route])
         app_before = route.app
 
+        # Pin that this route IS the matched target (endpoint identity holds), so the test
+        # exercises "matched-but-middleware → safe skip" rather than passing because the
+        # route simply didn't match.
+        self.assertIs(route.endpoint, handler)
+        # And the middleware-wrapped app is genuinely NOT the plain request_response closure
+        # over the endpoint — i.e. the skip is driven by the structural detection, not by a
+        # name check that could drift.
+        self.assertFalse(FunctionWrapper._starlette_app_wraps_endpoint(route.app, handler))
+
         async def wrapper(request):
             return JSONResponse({})
 
@@ -197,8 +206,9 @@ class TestStarletteRoutesPatching(unittest.TestCase):
 
         mod = _make_module(self.module_name, app=app, handler=handler)
         FunctionWrapper._patch_starlette_routes(mod, handler, wrapper)
-        # route.app NOT rebuilt (middleware preserved).
+        # route.app NOT rebuilt (middleware preserved) and endpoint left intact.
         self.assertIs(route.app, app_before)
+        self.assertIs(route.endpoint, handler)
 
     def test_patch_starlette_no_starlette_app_is_noop(self):
         """A module with no Starlette app instance is a safe no-op."""
@@ -207,6 +217,48 @@ class TestStarletteRoutesPatching(unittest.TestCase):
         mod = _make_module(self.module_name, x=1, y="z")
         # Should not raise.
         FunctionWrapper._patch_starlette_routes(mod, original, wrapper)
+
+    def test_starlette_app_wraps_endpoint_detection(self):
+        """The structural plain-app detection recognizes async and sync endpoints, and
+        rejects middleware-wrapped apps — independent of any closure function name."""
+        try:
+            from starlette.middleware import Middleware
+            from starlette.responses import JSONResponse
+            from starlette.routing import Route
+        except ImportError:
+            self.skipTest("Starlette not installed")
+
+        async def async_handler(request):
+            return JSONResponse({})
+
+        def sync_handler(request):
+            return JSONResponse({})
+
+        # Async endpoint: captured directly in the request_response closure -> True.
+        async_route = Route("/a", async_handler)
+        self.assertTrue(FunctionWrapper._starlette_app_wraps_endpoint(async_route.app, async_handler))
+
+        # Sync endpoint: wrapped in functools.partial(run_in_threadpool, endpoint) -> True.
+        sync_route = Route("/s", sync_handler)
+        self.assertTrue(FunctionWrapper._starlette_app_wraps_endpoint(sync_route.app, sync_handler))
+
+        # Wrong endpoint must not match the closure.
+        self.assertFalse(FunctionWrapper._starlette_app_wraps_endpoint(async_route.app, sync_handler))
+
+        # Middleware-wrapped app (no __closure__) -> False.
+        class _NoopMW:
+            def __init__(self, app):
+                self.app = app
+
+            async def __call__(self, scope, receive, send):
+                await self.app(scope, receive, send)
+
+        mw_route = Route("/m", async_handler, middleware=[Middleware(_NoopMW)])
+        self.assertFalse(FunctionWrapper._starlette_app_wraps_endpoint(mw_route.app, async_handler))
+
+        # Non-closure values are safe (return False, never raise).
+        self.assertFalse(FunctionWrapper._starlette_app_wraps_endpoint(None, async_handler))
+        self.assertFalse(FunctionWrapper._starlette_app_wraps_endpoint(object(), async_handler))
 
 
 if __name__ == "__main__":

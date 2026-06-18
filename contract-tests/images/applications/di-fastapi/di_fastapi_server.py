@@ -11,6 +11,7 @@ exercises the async instrumentation path with `async def` target functions
 cannot cover.
 """
 
+import functools
 import inspect
 import logging
 import time
@@ -105,8 +106,6 @@ def _partial_base(prefix, value):
 # no __qualname__/__name__, so the wrapper's old runtime-name key was "<module>.<anonymous>"
 # and missed the breakpoint set registered under "<module>.partial_target" -> silently
 # never fired. With the fix the wrapper keys off the configured name, so it fires.
-import functools  # noqa: E402
-
 partial_target = functools.partial(_partial_base, "hello:")
 
 

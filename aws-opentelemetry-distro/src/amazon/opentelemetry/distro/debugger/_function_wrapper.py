@@ -1415,20 +1415,30 @@ class FunctionWrapper:
                     if endpoint is None or not _matches(endpoint):
                         continue
                     # Starlette applies per-route middleware INTO route.app at construction
-                    # time (and keeps no `middleware` attribute), so a plain route's app is the
-                    # ``request_response`` closure while a middleware-wrapped route's app is the
-                    # outermost middleware instance. Only rebuild when route.app is recognizably
-                    # the plain request_response closure — otherwise rebuilding would silently
-                    # drop the middleware stack. Skipping is a safe no-op (DI won't instrument
-                    # this particular handler), never a correctness change to the app.
-                    current_app = getattr(route, "app", None)
-                    is_plain_request_response = getattr(
-                        current_app, "__module__", None
-                    ) == "starlette.routing" and getattr(current_app, "__qualname__", "").startswith("request_response")
-                    if not is_plain_request_response:
-                        logger.debug(
-                            "Starlette route '%s' has a non-plain app (likely per-route middleware); "
-                            "skipping rebuild to avoid dropping it (DI will not instrument this handler).",
+                    # time (and keeps no `middleware` attribute): a plain route's app is the
+                    # ``request_response`` closure that directly captures the endpoint, while a
+                    # middleware-wrapped route's app is the outermost middleware instance. We
+                    # only rebuild when route.app is the plain closure over THIS endpoint —
+                    # otherwise rebuilding would silently drop the middleware stack. Skipping is
+                    # a safe no-op (DI won't instrument this handler), never a correctness change.
+                    #
+                    # Detect structurally (not by the closure's function name, which a future
+                    # Starlette could rename): is the route's live function captured in
+                    # route.app's closure cells — directly (async endpoints) or inside a
+                    # functools.partial's args (sync endpoints wrapped via run_in_threadpool)?
+                    # That is the condition under which `request_response(new_func)` is a
+                    # faithful rebuild. Accept either the matched endpoint or original_func: in
+                    # the name+module fallback path route.endpoint may have been externally
+                    # swapped while route.app still closes over original_func.
+                    route_app = getattr(route, "app", None)
+                    if not (
+                        FunctionWrapper._starlette_app_wraps_endpoint(route_app, endpoint)
+                        or FunctionWrapper._starlette_app_wraps_endpoint(route_app, original_func)
+                    ):
+                        logger.warning(
+                            "Starlette route '%s' app does not plainly wrap the endpoint (per-route "
+                            "middleware, or an unrecognized Starlette internal); skipping rebuild to "
+                            "avoid dropping it. DI will not instrument this handler.",
                             getattr(route, "path", "?"),
                         )
                         continue
@@ -1444,6 +1454,33 @@ class FunctionWrapper:
         patched = _walk(routes)
         if patched:
             logger.debug("Patched %d Starlette route(s) for function '%s' on app '%s'", patched, func_name, app_name)
+
+    @staticmethod
+    def _starlette_app_wraps_endpoint(route_app, endpoint) -> bool:
+        """Return True iff ``route_app`` is the plain Starlette request_response closure
+        that captures ``endpoint`` — so rebuilding via request_response(new_func) is faithful.
+
+        Detection is structural, not name-based, so a future Starlette rename of the inner
+        closure does not silently classify every plain route as "non-plain" (which would
+        re-introduce the never-fires bug). Starlette's ``request_response`` closes over the
+        endpoint: directly for async endpoints, and inside a ``functools.partial`` (the
+        run_in_threadpool wrapper) for sync endpoints. A middleware-wrapped route.app is a
+        middleware instance with no ``__closure__`` and so returns False.
+        """
+        closure = getattr(route_app, "__closure__", None)
+        if not closure:
+            return False
+        for cell in closure:
+            try:
+                value = cell.cell_contents
+            except Exception:  # pylint: disable=broad-exception-caught
+                continue
+            if value is endpoint:
+                return True
+            # Sync endpoints are wrapped in functools.partial(run_in_threadpool, endpoint).
+            if isinstance(value, functools.partial) and endpoint in value.args:
+                return True
+        return False
 
     @staticmethod
     def _patch_aiohttp_routes(module, original_func: Callable, new_func: Callable) -> None:
@@ -1489,9 +1526,10 @@ class FunctionWrapper:
     ):
         """Rebind the stored handler on matching aiohttp routes for one Application.
 
-        Iterates ``app.router.routes()`` and rebinds each route's handler (``_handler``,
-        accessed via the public ``route.handler`` property) when it matches by identity,
-        then by name+module (mirroring the other framework patchers).
+        Iterates ``app.router.routes()`` and, when a route matches by identity then by
+        name+module (mirroring the other framework patchers), rebinds its handler. The match
+        reads the public read-only ``route.handler`` property; the rebind writes the backing
+        ``route._handler`` attribute directly because aiohttp exposes no public setter.
         """
         router = getattr(aiohttp_app, "router", None)
         if router is None:
@@ -1519,11 +1557,22 @@ class FunctionWrapper:
                 handler = getattr(route, "handler", None)
                 if handler is None or not _matches(handler):
                     continue
-                # The route stores the handler on its resource entry as ``_handler``.
+                # Asymmetry by necessity: aiohttp exposes the handler read-only via the public
+                # ``route.handler`` property (used above to match), but provides no public setter,
+                # so the rebind must write the backing ``_handler`` attribute directly. If a future
+                # aiohttp renames that backing attribute, the match would succeed but the write
+                # target would be missing — warn (instead of silently no-op'ing) so that becomes
+                # observable rather than a silent never-fires.
                 if hasattr(route, "_handler"):
                     route._handler = new_func  # pylint: disable=protected-access
                     patched += 1
                     logger.debug("Patched aiohttp route handler '%s' to use DI wrapper", func_name)
+                else:
+                    logger.warning(
+                        "aiohttp route matched handler '%s' but has no writable `_handler` attribute "
+                        "(aiohttp internals may have changed); DI will not instrument this handler.",
+                        func_name,
+                    )
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 logger.warning("Error patching aiohttp route for '%s': %s", func_name, exc)
                 continue
