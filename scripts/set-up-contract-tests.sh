@@ -2,28 +2,20 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Builds the contract-test application images and prepares the host to run the pytest suite.
-# After running this, invoke `pytest contract-tests/tests` (or a subset).
-#
 # Usage: set-up-contract-tests.sh [PYTHON_VERSION] [APP ...]
-#   PYTHON_VERSION  Optional python base image tag (e.g. 3.13) to build the app images against.
-#                   When empty, each Dockerfile keeps its own default base.
-#   APP             Optional application image names to build (e.g. botocore requests), or one of
-#                   the group names "di" / "serviceevents". When omitted, every app image is built.
-#
-# Env:
-#   CACHE_BACKEND   Set to "gha" in CI to enable GitHub Actions buildx layer caching (scoped per
-#                   app + python version). Empty (local) disables caching.
+#   $1   optional python base for the app images (empty = each Dockerfile's default).
+#   $2.. optional app images to build, or a group "di"/"serviceevents" (empty = all).
+#   Env CACHE_BACKEND=gha enables buildx GHA layer caching.
 
 # Fail fast
 set -e
 
 # Check script is running in contract-tests
-current_path=$(pwd)
+current_path=`pwd`
 current_dir="${current_path##*/}"
 if [ "$current_dir" != "aws-otel-python-instrumentation" ]; then
   echo "Please run from aws-otel-python-instrumentation dir"
-  exit 1
+  exit
 fi
 
 PYTHON_VERSION="${1:-}"
@@ -65,21 +57,21 @@ python3 -m pip install mysql-connector-python
 # since Otel-Instrumentation running in container that install psycopg2 from source
 python3 -m pip install sqlalchemy psycopg2-binary
 
-# Find and store aws_opentelemetry_distro whl file (passed to each app image as the DISTRO build-arg)
-distro_whls=(dist/aws_opentelemetry_distro-*-py3-none-any.whl)
-if [ ! -f "${distro_whls[0]}" ]; then
-  echo "Could not find aws_opentelemetry_distro whl file in dist dir."
-  exit 1
-fi
-DISTRO="$(basename "${distro_whls[0]}")"
-
-# Create mock-collector image (fixed python base, no DISTRO/PYTHON_VERSION build-args)
+# Create mock-collector image
 mock_cache=()
 if [ "$CACHE_BACKEND" = "gha" ]; then
   mock_cache=(--cache-from "type=gha,scope=contract-mock-collector" --cache-to "type=gha,mode=max,scope=contract-mock-collector")
 fi
 docker buildx build contract-tests/images/mock-collector --load \
   -t aws-application-signals-mock-collector-python "${mock_cache[@]}"
+
+# Find and store aws_opentelemetry_distro whl file
+distro_whls=(dist/aws_opentelemetry_distro-*-py3-none-any.whl)
+if [ ! -f "${distro_whls[0]}" ]; then
+  echo "Could not find aws_opentelemetry_distro whl file in dist dir."
+  exit 1
+fi
+DISTRO="$(basename "${distro_whls[0]}")"
 
 # Create application images
 for app in "${APPS[@]}"; do
