@@ -42,8 +42,17 @@ jobs:
         env:
           PYTHON_VERSION: ${{ inputs.python-version }}
         run: |
-          shards=$(jq -c --arg py "$PYTHON_VERSION" \
-            '[.shards[] | select(.versions | index($py)) | {name, tests}]' \
+          # For each shard supporting this python version, emit {name, pytest_args} where pytest_args
+          # expands each `tests` entry to a base-relative path ("!x" -> "--ignore=<base>/x").
+          shards=$(jq -c --arg py "$PYTHON_VERSION" '
+            .test_base as $base
+            | [ .shards[]
+                | select(.versions | index($py))
+                | { name,
+                    pytest_args: ( [ .tests[]
+                                     | if startswith("!") then "--ignore=" + $base + "/" + .[1:]
+                                       else $base + "/" + . end ]
+                                   | join(" ") ) } ]' \
             contract-tests/shards.json)
           echo "shards=$shards" >> "$GITHUB_OUTPUT"
 
@@ -81,4 +90,4 @@ jobs:
         run: bash scripts/set-up-contract-tests.sh "${{ inputs.python-version }}" ${{ matrix.shard.name }}
 
       - name: Run ${{ matrix.shard.name }} contract tests
-        run: pytest ${{ matrix.shard.tests }} -v
+        run: pytest ${{ matrix.shard.pytest_args }} -v
