@@ -451,6 +451,29 @@ class InstrumentationManager:
                     "Function wrapping will work, but line breakpoints will not.",
                     bp_set.function_key,
                 )
+            elif self._engine and bp_set.line_numbers and bp_set.code_object is None:
+                # The target resolved to a callable with no __code__ (e.g. a callable-class
+                # instance or a functools.partial used as the target), so the line engine
+                # cannot be armed. Previously this was skipped silently and the config still
+                # reported READY -- indistinguishable from "waiting for traffic". Surface a
+                # non-silent error for the LINE-level configs so the misconfiguration is
+                # visible. A co-located function-level (line 0) breakpoint, if any, is left to
+                # proceed below; only the line-level configs are marked errored.
+                for line_num, bp_config in bp_set.breakpoints.items():
+                    if line_num > 0 and bp_config.config_id:
+                        self._failed_configs[bp_config.config_id] = ErrorCause.LINE_NOT_EXECUTABLE
+                        self._report_immediate(
+                            bp_config.config_id,
+                            bp_config.instrumentation_type,
+                            ConfigurationStatus.ERROR,
+                            ErrorCause.LINE_NOT_EXECUTABLE,
+                        )
+                logger.warning(
+                    "Cannot set line breakpoints for %s: target has no __code__ object "
+                    "(e.g. a callable-class instance or functools.partial). Reported "
+                    "LINE_NOT_EXECUTABLE for the line-level configuration(s).",
+                    bp_set.function_key,
+                )
 
             # Restore/create states for each breakpoint (including function-level line 0)
             for line_num in bp_set.breakpoints.keys():
@@ -785,9 +808,12 @@ class InstrumentationManager:
                             succeeded.append(func_key)
                             logger.debug("Successfully updated function %s", func_key)
 
-                            # Report READY immediately for each config in the updated function
+                            # Report READY immediately for each config in the updated function.
+                            # Skip configs that _apply_function already marked failed (e.g. a
+                            # line-level breakpoint on a target with no __code__), so the ERROR
+                            # status it reported is not overwritten by a misleading READY.
                             for bp in new_bp_set.breakpoints.values():
-                                if bp.config_id:
+                                if bp.config_id and bp.config_id not in self._failed_configs:
                                     self._report_immediate(
                                         bp.config_id, bp.instrumentation_type, ConfigurationStatus.READY
                                     )
@@ -799,9 +825,10 @@ class InstrumentationManager:
                             succeeded.append(func_key)
                             logger.debug("Successfully added function %s", func_key)
 
-                            # Report READY immediately for each config in the new function
+                            # Report READY immediately for each config in the new function.
+                            # Skip configs that _apply_function already marked failed (see above).
                             for bp in new_bp_set.breakpoints.values():
-                                if bp.config_id:
+                                if bp.config_id and bp.config_id not in self._failed_configs:
                                     self._report_immediate(
                                         bp.config_id, bp.instrumentation_type, ConfigurationStatus.READY
                                     )

@@ -192,6 +192,16 @@ class TestPullAndReportStatuses(unittest.TestCase):
             reporter._pull_and_report_statuses(is_initial_report=True)
         mock_send.assert_not_called()
 
+    def test_initial_report_skips_ready_for_failed_config(self):
+        # A config the manager could not bind (in _failed_configs) keeps its ERROR status;
+        # the initial sweep must not promote it to READY.
+        manager = _make_manager({"mod.func": {"k0": _state("hash-failed", hit_count=0)}})
+        manager._failed_configs = {"hash-failed": "LINE_NOT_EXECUTABLE"}
+        reporter = StatusReporter(client=_make_client(), manager=manager)
+        with mock.patch.object(reporter, "_send_report") as mock_send:
+            reporter._pull_and_report_statuses(is_initial_report=True)
+        mock_send.assert_not_called()
+
     def test_periodic_report_emits_active_for_recent_hit(self):
         state = _state("hash-active", hit_count=5, hit_in_last_period=True)
         reporter = self._reporter_with_states({"k0": state})
