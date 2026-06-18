@@ -1,0 +1,59 @@
+{
+  "comment": "Single source of truth for contract-test shards. Each shard lists the bake targets (app images) it builds, the pytest paths it runs, and the Python versions it supports. The pr-build contract-tests workflow filters this list per Python version so unsupported (shard, version) combinations are omitted entirely. DI is intentionally absent -- it runs only in di-contract-tests.yml.",
+  "shards": [
+    {
+      "name": "botocore",
+      "targets": "botocore",
+      "paths": "contract-tests/tests/test/amazon/botocore",
+      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    },
+    {
+      "name": "requests",
+      "targets": "requests",
+      "paths": "contract-tests/tests/test/amazon/requests",
+      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    },
+    {
+      "name": "web",
+      "targets": "django requests",
+      "paths": "contract-tests/tests/test/amazon/django contract-tests/tests/test/amazon/misc contract-tests/tests/test/amazon/runtime",
+      "versions": ["3.10", "3.11", "3.12", "3.13"]
+    },
+    {
+      "name": "db-pure",
+      "targets": "pymysql mysqlclient",
+      "paths": "contract-tests/tests/test/amazon/pymysql contract-tests/tests/test/amazon/mysqlclient",
+      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    },
+    {
+      "name": "db-native",
+      "targets": "psycopg2 mysql-connector",
+      "paths": "contract-tests/tests/test/amazon/psycopg2 contract-tests/tests/test/amazon/mysql-connector",
+      "versions": ["3.10", "3.11", "3.12"]
+    },
+    {
+      "name": "gen_ai",
+      "targets": "langchain llamaindex",
+      "paths": "contract-tests/tests/test/amazon/gen_ai/langchain contract-tests/tests/test/amazon/gen_ai/llamaindex",
+      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    },
+    {
+      "name": "crewai",
+      "targets": "crewai",
+      "paths": "contract-tests/tests/test/amazon/gen_ai/crewai",
+      "versions": ["3.10", "3.11", "3.12", "3.13"]
+    },
+    {
+      "name": "serviceevents-asgi",
+      "targets": "serviceevents-flask serviceevents-fastapi",
+      "paths": "contract-tests/tests/test/amazon/serviceevents/flask_test.py contract-tests/tests/test/amazon/serviceevents/fastapi_test.py",
+      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    },
+    {
+      "name": "serviceevents-web",
+      "targets": "serviceevents-django serviceevents-django-uwsgi",
+      "paths": "contract-tests/tests/test/amazon/serviceevents/django_test.py contract-tests/tests/test/amazon/serviceevents/django_uwsgi_test.py",
+      "versions": ["3.10", "3.11", "3.12", "3.13"]
+    }
+  ]
+}

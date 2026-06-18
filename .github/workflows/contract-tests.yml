@@ -1,0 +1,86 @@
+## Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+## SPDX-License-Identifier: Apache-2.0
+
+# Reusable workflow that runs the contract-test suite for a SINGLE Python version, sharded by
+# framework. It is called once per Python version by pr-build.yml, which makes the GitHub Actions
+# UI render a collapsible group per version (e.g. "contract-tests (3.14)") containing that version's
+# shards. The set of shards is read from contract-tests/shards.json and filtered to those that
+# support the requested Python version, so unsupported (shard, version) combinations are omitted.
+#
+# DI is intentionally NOT covered here -- it runs solely in di-contract-tests.yml to avoid running
+# its suite twice per PR. This workflow uses no secrets, so it is safe for forked-repo PRs.
+name: Contract Tests
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        required: true
+        type: string
+        description: "Python version to build the application images against and test."
+      wheel-artifact-name:
+        required: false
+        type: string
+        default: distro-wheel
+        description: "Name of the uploaded distro wheel artifact to download and install into the app images."
+
+permissions:
+  contents: read
+
+jobs:
+  # Emit the JSON array of shards that support inputs.python-version (drives the matrix below).
+  compute-shards:
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.filter.outputs.shards }}
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
+
+      - name: Select shards supporting Python ${{ inputs.python-version }}
+        id: filter
+        env:
+          PYTHON_VERSION: ${{ inputs.python-version }}
+        run: |
+          shards=$(jq -c --arg py "$PYTHON_VERSION" \
+            '[.shards[] | select(.versions | index($py)) | {name, targets, paths}]' \
+            contract-tests/shards.json)
+          echo "shards=$shards" >> "$GITHUB_OUTPUT"
+
+  contract-test:
+    needs: compute-shards
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
+      matrix:
+        shard: ${{ fromJSON(needs.compute-shards.outputs.shards) }}
+    name: ${{ matrix.shard.name }}
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 #3.11.1
+
+      # Host interpreter that runs pytest. It only talks to the app containers over the network, so
+      # it is fixed and independent of the version under test (avoids host-side install issues on
+      # newer interpreters).
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c #v6.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Download distro wheel
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
+        with:
+          name: ${{ inputs.wheel-artifact-name }}
+          path: dist
+
+      - name: Build ${{ matrix.shard.name }} images (python ${{ inputs.python-version }})
+        env:
+          CACHE_BACKEND: gha
+        run: bash scripts/build-contract-test-images.sh "${{ inputs.python-version }}" ${{ matrix.shard.targets }}
+
+      - name: Run ${{ matrix.shard.name }} contract tests
+        run: |
+          bash scripts/run-contract-tests.sh
+          pytest ${{ matrix.shard.paths }} -v
