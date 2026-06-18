@@ -1,5 +1,5 @@
 {
-  "comment": "Single source of truth for contract-test shards. Each shard lists the bake targets (app images) it builds, the pytest paths it runs, and the Python versions it supports. The pr-build contract-tests workflow filters this list per Python version so unsupported (shard, version) combinations are omitted entirely. DI is intentionally absent -- it runs only in di-contract-tests.yml.",
+  "comment": "Single source of truth for contract-test shards. Each shard is one suite: it lists the bake targets (app images) it builds, the pytest paths it runs, and the Python versions it supports. The pr-build contract-tests workflow filters this list per Python version so unsupported (shard, version) combinations are omitted entirely. DI is intentionally absent -- it runs only in di-contract-tests.yml.",
   "shards": [
     {
       "name": "botocore",
@@ -14,21 +14,45 @@
       "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
-      "name": "web",
-      "targets": "django requests",
-      "paths": "contract-tests/tests/test/amazon/django contract-tests/tests/test/amazon/misc contract-tests/tests/test/amazon/runtime",
+      "name": "django",
+      "targets": "django",
+      "paths": "contract-tests/tests/test/amazon/django",
       "versions": ["3.10", "3.11", "3.12", "3.13"]
     },
     {
-      "name": "db-pure",
-      "targets": "pymysql mysqlclient",
-      "paths": "contract-tests/tests/test/amazon/pymysql contract-tests/tests/test/amazon/mysqlclient",
+      "name": "misc",
+      "targets": "django requests",
+      "paths": "contract-tests/tests/test/amazon/misc",
+      "versions": ["3.10", "3.11", "3.12", "3.13"]
+    },
+    {
+      "name": "runtime",
+      "targets": "django",
+      "paths": "contract-tests/tests/test/amazon/runtime",
+      "versions": ["3.10", "3.11", "3.12", "3.13"]
+    },
+    {
+      "name": "pymysql",
+      "targets": "pymysql",
+      "paths": "contract-tests/tests/test/amazon/pymysql",
       "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
-      "name": "db-native",
-      "targets": "psycopg2 mysql-connector",
-      "paths": "contract-tests/tests/test/amazon/psycopg2 contract-tests/tests/test/amazon/mysql-connector",
+      "name": "mysqlclient",
+      "targets": "mysqlclient",
+      "paths": "contract-tests/tests/test/amazon/mysqlclient",
+      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    },
+    {
+      "name": "psycopg2",
+      "targets": "psycopg2",
+      "paths": "contract-tests/tests/test/amazon/psycopg2",
+      "versions": ["3.10", "3.11", "3.12"]
+    },
+    {
+      "name": "mysql-connector",
+      "targets": "mysql-connector",
+      "paths": "contract-tests/tests/test/amazon/mysql-connector",
       "versions": ["3.10", "3.11", "3.12"]
     },
     {
@@ -50,15 +74,27 @@
       "versions": ["3.10", "3.11", "3.12", "3.13"]
     },
     {
-      "name": "serviceevents-asgi",
-      "targets": "serviceevents-flask serviceevents-fastapi",
-      "paths": "contract-tests/tests/test/amazon/serviceevents/flask_test.py contract-tests/tests/test/amazon/serviceevents/fastapi_test.py",
+      "name": "serviceevents-flask",
+      "targets": "serviceevents-flask",
+      "paths": "contract-tests/tests/test/amazon/serviceevents/flask_test.py",
       "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
-      "name": "serviceevents-web",
-      "targets": "serviceevents-django serviceevents-django-uwsgi",
-      "paths": "contract-tests/tests/test/amazon/serviceevents/django_test.py contract-tests/tests/test/amazon/serviceevents/django_uwsgi_test.py",
+      "name": "serviceevents-fastapi",
+      "targets": "serviceevents-fastapi",
+      "paths": "contract-tests/tests/test/amazon/serviceevents/fastapi_test.py",
+      "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    },
+    {
+      "name": "serviceevents-django",
+      "targets": "serviceevents-django",
+      "paths": "contract-tests/tests/test/amazon/serviceevents/django_test.py",
+      "versions": ["3.10", "3.11", "3.12", "3.13"]
+    },
+    {
+      "name": "serviceevents-django-uwsgi",
+      "targets": "serviceevents-django-uwsgi",
+      "paths": "contract-tests/tests/test/amazon/serviceevents/django_uwsgi_test.py",
       "versions": ["3.10", "3.11", "3.12", "3.13"]
     }
   ]
