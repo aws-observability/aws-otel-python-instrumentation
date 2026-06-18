@@ -31,7 +31,7 @@ The steps to add a new test for a library or framework are:
 # How to run the tests locally?
 
 Pre-requirements:
-* Have `docker` installed and running - verify by running the `docker` command.
+* Have `docker` (with `buildx`) installed and running - verify by running the `docker` command.
 
 Steps:
 * From `aws-otel-python-instrumentation` dir, execute:
@@ -40,3 +40,21 @@ Steps:
 ./scripts/set-up-contract-tests.sh
 pytest contract-tests/tests
 ```
+
+`set-up-contract-tests.sh` is a thin wrapper that builds the application images
+(`build-contract-test-images.sh`, via `docker buildx bake`) and then prepares the host
+(`run-contract-tests.sh` - installs test deps and the `mock_collector`/`contract_tests` wheels).
+You can run those two steps directly, and you can build/run a subset:
+
+```sh
+# Build only some images (bake targets/groups), optionally against a specific Python base:
+./scripts/build-contract-test-images.sh 3.13 botocore requests   # build on python:3.13
+./scripts/build-contract-test-images.sh "" serviceevents          # group, default Python bases
+./scripts/run-contract-tests.sh
+pytest contract-tests/tests/test/amazon/botocore -v
+```
+
+Passing a Python version builds every selected application image against `python:<version>`
+(the default keeps each Dockerfile's own base). Available bake targets are the application names
+(e.g. `botocore`, `django`, `crewai`) plus the `di` and `serviceevents` groups; see
+`contract-tests/images/docker-bake.hcl`.

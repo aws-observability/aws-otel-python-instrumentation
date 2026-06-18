@@ -26,23 +26,40 @@ jobs:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
 
-      - name: Build Wheel and Image Files
-        uses: ./.github/actions/artifacts_build
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 #3.11.1
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c #v6.0.0
         with:
-          image_uri_with_tag: serviceevents-contract-tests/3.10
-          push_image: false
-          load_image: true
-          # `load` can only materialise a single-platform image into the local Docker
-          # daemon; multi-platform builds produce a manifest list which buildx cannot load.
-          platforms: linux/amd64
-          python_version: "3.10"
-          package_name: aws-opentelemetry-distro
-          os: ubuntu-latest
+          python-version: '3.12'
+
+      # Build the universal distro wheel that the application images install.
+      - name: Build distro wheel
+        run: |
+          pip install --upgrade pip setuptools wheel packaging build
+          rm -rf ./dist/*
+          cd ./aws-opentelemetry-distro
+          python -m build --outdir ../dist
+
+      # Build only the images the chosen scope needs (serviceevents group, or everything for `all`),
+      # with layer caching. The dist/ wheel keeps each Dockerfile's default Python base.
+      - name: Determine bake targets
+        id: targets
+        run: |
+          if [ "${{ inputs.test_scope }}" = "all" ]; then
+            echo "targets=default" >> "$GITHUB_OUTPUT"
+          else
+            echo "targets=serviceevents" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build images
+        env:
+          CACHE_BACKEND: gha
+        run: bash scripts/build-contract-test-images.sh "" ${{ steps.targets.outputs.targets }}
 
       - name: Set up and run contract tests with pytest
         run: |
-          bash scripts/set-up-contract-tests.sh
-          pip install pytest
+          bash scripts/run-contract-tests.sh
           if [ "${{ inputs.test_scope }}" = "all" ]; then
             pytest contract-tests/tests -v
           else

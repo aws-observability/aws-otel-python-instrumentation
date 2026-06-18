@@ -1,84 +1,29 @@
 #!/bin/bash
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+#
+# Backward-compatible orchestrator for the contract-test setup. Kept for local dev, the README
+# flow, and callers such as main-build.yml. It now delegates to two focused scripts:
+#   1. build-contract-test-images.sh — builds the application + mock-collector docker images.
+#   2. run-contract-tests.sh         — installs host deps and the mock_collector/contract_tests wheels.
+# After running this, invoke `pytest contract-tests/tests` (or a subset).
+#
+# Usage: set-up-contract-tests.sh [PYTHON_VERSION]
+#   PYTHON_VERSION  Optional. Builds every application image against this python base (e.g. 3.13).
+#                   When omitted, each Dockerfile keeps its own default base (previous behavior).
+#                   Previously this positional arg was silently ignored; it is now honored.
 
-# Fail fast
 set -e
 
-# Check script is running in contract-tests
-current_path=`pwd`
+# Check the script is running from the repository root.
+current_path=$(pwd)
 current_dir="${current_path##*/}"
 if [ "$current_dir" != "aws-otel-python-instrumentation" ]; then
   echo "Please run from aws-otel-python-instrumentation dir"
-  exit
-fi
-
-# Remove old whl files (excluding distro whl)
-rm -rf dist/mock_collector*
-rm -rf dist/contract_tests*
-
-# Install python dependency for contract-test
-python3 -m pip install pytest
-python3 -m pip install pymysql
-python3 -m pip install cryptography
-python3 -m pip install mysql-connector-python
-
-# To be clear, install binary for psycopg2 have no negative influence on otel here
-# since Otel-Instrumentation running in container that install psycopg2 from source
-python3 -m pip install sqlalchemy psycopg2-binary
-
-# Create mock-collector image
-cd contract-tests/images/mock-collector
-docker build . -t aws-application-signals-mock-collector-python
-if [ $? = 1 ]; then
-  echo "Docker build for mock collector failed"
   exit 1
 fi
 
-# Find and store aws_opentelemetry_distro whl file
-cd ../../../dist
-DISTRO=(aws_opentelemetry_distro-*-py3-none-any.whl)
-if [ "$DISTRO" = "aws_opentelemetry_distro-*-py3-none-any.whl" ]; then
- echo "Could not find aws_opentelemetry_distro whl file in dist dir."
- exit 1
-fi
+PYTHON_VERSION="${1:-}"
 
-# Create application images
-cd ..
-for dir in contract-tests/images/applications/*
-do
-  if [ -f "${dir}/Dockerfile" ]; then
-    application="${dir##*/}"
-    docker build . -t aws-application-signals-tests-${application}-app -f ${dir}/Dockerfile --build-arg="DISTRO=${DISTRO}"
-    if [ $? = 1 ]; then
-      echo "Docker build for ${application} application failed"
-      exit 1
-    fi
-  fi
-  for subdir in ${dir}/*/
-  do
-    if [ -f "${subdir}Dockerfile" ]; then
-      application="${subdir%/}"
-      application="${application##*/}"
-      docker build . -t aws-application-signals-tests-${application}-app -f ${subdir}Dockerfile --build-arg="DISTRO=${DISTRO}"
-      if [ $? = 1 ]; then
-        echo "Docker build for ${application} application failed"
-        exit 1
-      fi
-    fi
-  done
-done
-
-# Build and install mock-collector
-cd contract-tests/images/mock-collector
-python3 -m build --outdir ../../../dist
-cd ../../../dist
-python3 -m pip install mock_collector-1.0.0-py3-none-any.whl --force-reinstall
-
-# Build and install contract-tests
-cd ../contract-tests/tests
-python3 -m build --outdir ../../dist
-cd ../../dist
-# --force-reinstall causes `ERROR: No matching distribution found for mock-collector==1.0.0`, but uninstalling and reinstalling works pretty reliably.
-python3 -m pip uninstall contract-tests -y
-python3 -m pip install contract_tests-1.0.0-py3-none-any.whl
+bash scripts/build-contract-test-images.sh "$PYTHON_VERSION"
+bash scripts/run-contract-tests.sh
