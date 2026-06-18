@@ -15,7 +15,9 @@ each test that needs module-level discovery.
 """
 
 import asyncio
+import os
 import sys
+import tempfile
 import threading
 import types
 import unittest
@@ -964,6 +966,128 @@ class TestClassMethodInstrumentation(_SnapshotEmitterFixture):
         self.assertIn("not found", str(caught.exception))
         self.assertIn("inherited from", str(caught.exception))
         self.assertNotIn("method", D.__dict__)
+
+
+# ===========================================================================
+# `from module import func` alias redirection (_patch_module_aliases)
+# ===========================================================================
+class TestModuleAliasRedirect(unittest.TestCase):
+    """Method-level install must redirect `from x import f` aliases in other app modules.
+
+    `from module import func` copies the function object into the importing module's
+    namespace; setattr on the defining module does not update that copy. These tests
+    verify the alias is redirected on install, restored on uninstall, and that the
+    scan is bounded (defining module, stdlib, and site-packages are never touched)
+    and never raises on an un-writable namespace.
+    """
+
+    @staticmethod
+    def _make_module(name, origin):
+        module = types.ModuleType(name)
+        module.__file__ = origin
+        module.__spec__ = types.SimpleNamespace(origin=origin, name=name)
+        sys.modules[name] = module
+        return module
+
+    def setUp(self):
+        # App-like file origins (outside stdlib / site-packages) so the modules
+        # classify as application code that the alias scan is willing to rewrite.
+        app_dir = os.path.join(tempfile.gettempdir(), "di_alias_unit_app")
+
+        def _orig(price_cents, discount_percent):
+            return price_cents - (price_cents * discount_percent // 100)
+
+        _orig.__module__ = "di_alias_defining_mod"
+        self.original = _orig
+
+        self.defining = self._make_module("di_alias_defining_mod", os.path.join(app_dir, "pricing.py"))
+        self.defining.apply_discount = _orig
+
+        # Consumer that did `from di_alias_defining_mod import apply_discount` (two aliases).
+        self.consumer = self._make_module("di_alias_consumer_mod", os.path.join(app_dir, "server.py"))
+        self.consumer.apply_discount = _orig
+        self.consumer.aliased_again = _orig
+
+        # A stdlib-like and a site-packages-like module that (pathologically) also
+        # reference the same object -- these must NOT be rewritten.
+        self.stdlike = self._make_module(
+            "di_alias_stdlike_mod", os.path.join(os.path.realpath(sys.prefix), "lib", "python3.x", "stdlike.py")
+        )
+        self.stdlike.apply_discount = _orig
+        self.sitelike = self._make_module(
+            "di_alias_sitelike_mod", os.path.join(app_dir, "site-packages", "third_party_pkg", "__init__.py")
+        )
+        self.sitelike.apply_discount = _orig
+
+        for name in (
+            "di_alias_defining_mod",
+            "di_alias_consumer_mod",
+            "di_alias_stdlike_mod",
+            "di_alias_sitelike_mod",
+        ):
+            self.addCleanup(lambda n=name: sys.modules.pop(n, None))
+
+    def test_install_redirects_alias_in_consumer_module(self):
+        def wrapper(*args, **kwargs):
+            return "wrapped"
+
+        rebound = FunctionWrapper._patch_module_aliases(self.defining, self.original, wrapper)
+
+        self.assertGreaterEqual(rebound, 2, "Both consumer aliases should be redirected")
+        self.assertIs(self.consumer.apply_discount, wrapper)
+        self.assertIs(self.consumer.aliased_again, wrapper)
+
+    def test_defining_module_is_not_rewritten(self):
+        def wrapper(*args, **kwargs):
+            return "wrapped"
+
+        FunctionWrapper._patch_module_aliases(self.defining, self.original, wrapper)
+        # The defining module's own attribute is owned by the caller (setattr happens
+        # separately); the alias scan must skip the defining module.
+        self.assertIs(self.defining.apply_discount, self.original)
+
+    def test_stdlib_and_site_packages_modules_are_not_touched(self):
+        def wrapper(*args, **kwargs):
+            return "wrapped"
+
+        FunctionWrapper._patch_module_aliases(self.defining, self.original, wrapper)
+        self.assertIs(self.stdlike.apply_discount, self.original, "stdlib-like module must be untouched")
+        self.assertIs(self.sitelike.apply_discount, self.original, "site-packages-like module must be untouched")
+
+    def test_restore_reverts_aliases(self):
+        def wrapper(*args, **kwargs):
+            return "wrapped"
+
+        FunctionWrapper._patch_module_aliases(self.defining, self.original, wrapper)
+        # Restore (swap args): redirect the wrapper references back to the original.
+        FunctionWrapper._patch_module_aliases(self.defining, wrapper, self.original)
+        self.assertIs(self.consumer.apply_discount, self.original)
+        self.assertIs(self.consumer.aliased_again, self.original)
+
+    def test_unwritable_namespace_does_not_raise(self):
+        class _Frozen(types.ModuleType):
+            def __setattr__(self, key, value):
+                if key == "apply_discount":
+                    raise RuntimeError("read-only")
+                super().__setattr__(key, value)
+
+        frozen = _Frozen("di_alias_frozen_mod")
+        object.__setattr__(frozen, "__file__", os.path.join(tempfile.gettempdir(), "di_alias_unit_app", "frozen.py"))
+        object.__setattr__(
+            frozen, "__spec__", types.SimpleNamespace(origin=frozen.__file__, name="di_alias_frozen_mod")
+        )
+        object.__setattr__(frozen, "apply_discount", self.original)
+        sys.modules["di_alias_frozen_mod"] = frozen
+        self.addCleanup(lambda: sys.modules.pop("di_alias_frozen_mod", None))
+
+        def wrapper(*args, **kwargs):
+            return "wrapped"
+
+        # Must not raise even though one module's setattr fails; other modules still rebind.
+        rebound = FunctionWrapper._patch_module_aliases(self.defining, self.original, wrapper)
+        self.assertIs(self.consumer.apply_discount, wrapper)
+        self.assertIs(frozen.apply_discount, self.original, "frozen module attribute should be unchanged")
+        self.assertGreaterEqual(rebound, 2)
 
 
 if __name__ == "__main__":

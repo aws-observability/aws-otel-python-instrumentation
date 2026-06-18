@@ -105,6 +105,12 @@ def process_small_limit_string(small_limit_string):
 
 from mock_di_api import set_breakpoint_configs, set_probe_configs, start_mock_api  # noqa: E402
 
+# Import a target function via `from module import func` so the executing call site
+# (the /from-import route below) holds a bare-name alias in THIS module's namespace
+# rather than in the defining module. A method-level breakpoint on
+# pricing_service.apply_discount must redirect this alias for instrumentation to fire.
+from pricing_service import apply_discount  # noqa: E402
+
 BREAKPOINT_CONFIGS = [
     # Function-level breakpoint on process_data
     {
@@ -254,6 +260,31 @@ BREAKPOINT_CONFIGS = [
             }
         },
     },
+    # Function-level breakpoint on apply_discount, which is DEFINED in pricing_service
+    # but CALLED via a `from pricing_service import apply_discount` bare-name alias in
+    # di_flask_server. The call site resolves the importing module's alias, so a
+    # method-level install must redirect that alias (not just the defining module's
+    # attribute) for this snapshot to be produced. CodeUnit is the defining module.
+    {
+        "InstrumentationType": "BREAKPOINT",
+        "SignalType": "SNAPSHOT",
+        "Location": {
+            "CodeLocation": {
+                "Language": "Python",
+                "CodeUnit": "pricing_service",
+                "MethodName": "apply_discount",
+                "FilePath": "pricing_service.py",
+            }
+        },
+        "LocationHash": "aabb00000000000a",
+        "CaptureConfiguration": {
+            "CodeCapture": {
+                "CaptureReturn": True,
+                "CaptureArguments": ["price_cents", "discount_percent"],
+                "CaptureLimits": {"MaxStringLength": 255},
+            }
+        },
+    },
 ]
 
 PROBE_CONFIGS = [
@@ -375,6 +406,17 @@ def limits_small_string_endpoint():
     small_limit_string = "B" * 100
     result = process_small_limit_string(small_limit_string)
     return jsonify({"status": "ok", "length": result})
+
+
+@app.route("/from-import")
+def from_import_endpoint():
+    """Endpoint that calls a function reached via `from pricing_service import apply_discount`.
+
+    The call uses the bare imported name, so the method-level breakpoint on
+    pricing_service.apply_discount only fires if the alias in this module is redirected.
+    """
+    result = apply_discount(1999, 15)
+    return jsonify({"status": "ok", "final_cents": result})
 
 
 @app.route("/error")
