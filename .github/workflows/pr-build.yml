@@ -220,7 +220,7 @@ jobs:
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
-      # Install every interpreter the lambda-layer tox envlist targets (py3.10-3.12). With a single
+      # Install every interpreter the lambda-layer tox envlist targets (py3.10-3.14). With a single
       # '3.x', tox silently SKIPs the missing versions (skip_missing_interpreters=True), so only the
       # latest would actually run. The last listed version is the default used by `pip install tox`.
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c #v6.0.0
@@ -229,6 +229,8 @@ jobs:
             3.10
             3.11
             3.12
+            3.13
+            3.14
       - name: Build sample lambda function
         working-directory: lambda-layer/sample-apps
         run: ./package-lambda-function.sh
