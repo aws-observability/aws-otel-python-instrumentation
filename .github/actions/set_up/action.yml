@@ -46,7 +46,10 @@ runs:
         path: |
           .tox
           ~/.cache/pip
-        key: v7-build-tox-cache-${{ inputs.python_version }}-${{ inputs.package_name }}-${{ inputs.os }}-${{ hashFiles('tox.ini', 'dev-requirements.txt') }}
+        # Hashing distro source paths in addition to tox.ini / dev-requirements.txt
+        # ensures src-only PRs miss the cache and pick up freshly built wheels
+        # instead of reusing the previously cached install.
+        key: v7-build-tox-cache-${{ inputs.python_version }}-${{ inputs.package_name }}-${{ inputs.os }}-${{ hashFiles('tox.ini', 'dev-requirements.txt', 'aws-opentelemetry-distro/src/**', 'aws-opentelemetry-distro/pyproject.toml') }}
 
     - name: Run unit tests/benchmarks with tox
       if: ${{ inputs.run_unit_tests == 'true' }}
