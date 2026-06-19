@@ -24,9 +24,10 @@ module path substrings ``trace_exporter`` / ``_log_exporter`` /
 Per-signal signing service resolution (highest priority first):
     1. ``AWS_SIGV4_SERVICE`` (explicit user override; applies to all signals)
     2. Inferred from the matched signal's OTLP endpoint URL:
-       - ``https://xray.<region>.amazonaws.com/v1/traces`` -> ``xray``
-       - ``https://logs.<region>.amazonaws.com/v1/logs``   -> ``logs``
-       - host contains ``cloudwatch``                       -> ``cloudwatch``
+       - ``https://xray.<region>.amazonaws.com/v1/traces``         -> ``xray``
+       - ``https://logs.<region>.amazonaws.com/v1/logs``           -> ``logs``
+       - ``https://monitoring.<region>.amazonaws.com/v1/metrics``  -> ``monitoring``
+       - host contains ``cloudwatch``                              -> ``cloudwatch``
     3. No service resolved -> the factory returns an unsigned session and
        logs a warning, instead of silently signing under a default service
        that the AWS endpoint may reject.
@@ -76,9 +77,11 @@ _SIGNAL_TABLE: Tuple[Tuple[str, str, str], ...] = (
 # AWS endpoint.
 _AWS_TRACES_OTLP_ENDPOINT_PATTERN = re.compile(r"https://xray\.([a-z0-9-]+)\.amazonaws\.com/v1/traces$")
 _AWS_LOGS_OTLP_ENDPOINT_PATTERN = re.compile(r"https://logs\.([a-z0-9-]+)\.amazonaws\.com/v1/logs$")
+_AWS_METRICS_OTLP_ENDPOINT_PATTERN = re.compile(r"https://monitoring\.([a-z0-9-]+)\.amazonaws\.com/v1/metrics$")
 _INFERENCE_RULES = (
     (lambda endpoint, host: bool(_AWS_TRACES_OTLP_ENDPOINT_PATTERN.match(endpoint)), "xray"),
     (lambda endpoint, host: bool(_AWS_LOGS_OTLP_ENDPOINT_PATTERN.match(endpoint)), "logs"),
+    (lambda endpoint, host: bool(_AWS_METRICS_OTLP_ENDPOINT_PATTERN.match(endpoint)), "monitoring"),
     (lambda endpoint, host: "cloudwatch" in host, "cloudwatch"),
 )
 

@@ -110,6 +110,30 @@ class TestAwsSigV4SessionFactory(TestCase):
         self.assertEqual(session._service, "cloudwatch")
 
     @patch(f"{_PROVIDER_MODULE}.IS_BOTOCORE_INSTALLED", True)
+    @patch(f"{_PROVIDER_MODULE}._detect_signal_from_stack", return_value="metrics")
+    def test_metrics_endpoint_monitoring_pattern_resolves_monitoring(self, _mock_signal):
+        """Anchored metrics URL pattern matches CloudWatch's monitoring OTLP endpoint."""
+        os.environ["AWS_REGION"] = "us-west-2"
+        os.environ[_METRICS_ENDPOINT] = "https://monitoring.us-west-2.amazonaws.com/v1/metrics"
+
+        session = aws_sigv4_session()
+
+        # pylint: disable=protected-access
+        self.assertEqual(session._service, "monitoring")
+
+    @patch(f"{_PROVIDER_MODULE}.IS_BOTOCORE_INSTALLED", True)
+    @patch(f"{_PROVIDER_MODULE}._detect_signal_from_stack", return_value="metrics")
+    def test_metrics_endpoint_wrong_path_falls_back_to_unsigned(self, _mock_signal):
+        """Anchored monitoring rule requires exactly /v1/metrics; other paths must not match."""
+        os.environ["AWS_REGION"] = "us-west-2"
+        os.environ[_METRICS_ENDPOINT] = "https://monitoring.us-west-2.amazonaws.com/wrong/path"
+
+        session = aws_sigv4_session()
+
+        self.assertNotIsInstance(session, AwsAuthSession)
+        self.assertIsInstance(session, requests.Session)
+
+    @patch(f"{_PROVIDER_MODULE}.IS_BOTOCORE_INSTALLED", True)
     @patch(f"{_PROVIDER_MODULE}._detect_signal_from_stack", return_value="traces")
     def test_other_signals_endpoint_is_ignored(self, _mock_signal):
         """When the signal is traces, only the traces endpoint should be consulted.
