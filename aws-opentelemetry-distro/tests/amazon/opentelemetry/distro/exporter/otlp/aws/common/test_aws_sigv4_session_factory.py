@@ -109,17 +109,16 @@ class TestAwsSigV4SessionFactory(TestCase):
         # pylint: disable=protected-access
         self.assertEqual(session._service, "cloudwatch")
 
-    @patch(f"{_PROVIDER_MODULE}.IS_BOTOCORE_INSTALLED", True)
-    @patch(f"{_PROVIDER_MODULE}._detect_signal_from_stack", return_value="metrics")
-    def test_metrics_endpoint_monitoring_pattern_resolves_monitoring(self, _mock_signal):
+    def test_metrics_endpoint_monitoring_pattern_resolves_monitoring(self):
         """Anchored metrics URL pattern matches CloudWatch's monitoring OTLP endpoint."""
-        os.environ["AWS_REGION"] = "us-west-2"
+        # pylint: disable=import-outside-toplevel
+        from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_sigv4_session_factory import (
+            _infer_signing_service_from_endpoint,
+        )
+
         os.environ[_METRICS_ENDPOINT] = "https://monitoring.us-west-2.amazonaws.com/v1/metrics"
 
-        session = aws_sigv4_session()
-
-        # pylint: disable=protected-access
-        self.assertEqual(session._service, "monitoring")
+        self.assertEqual(_infer_signing_service_from_endpoint("metrics"), "monitoring")
 
     @patch(f"{_PROVIDER_MODULE}.IS_BOTOCORE_INSTALLED", True)
     @patch(f"{_PROVIDER_MODULE}._detect_signal_from_stack", return_value="metrics")
