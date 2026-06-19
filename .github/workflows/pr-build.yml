@@ -189,7 +189,7 @@ jobs:
           trivyignore-file: .github/trivy/pr-build.trivyignore.yaml
           platforms: linux/amd64
 
-  unit-test:
+  unit-tests:
     runs-on: ubuntu-latest
     needs: build-wheel
     strategy:
@@ -277,7 +277,7 @@ jobs:
 
   all-pr-checks-pass:
     runs-on: ubuntu-latest
-    needs: [static-code-checks, lint, spotless, unit-test, build-wheel, build-and-scan-image, contract-tests, build-lambda]
+    needs: [static-code-checks, lint, spotless, unit-tests, build-wheel, build-and-scan-image, contract-tests, build-lambda]
     if: always()
     steps:
       - name: Checkout to get workflow file
