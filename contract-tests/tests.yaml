@@ -1,0 +1,139 @@
+#   name     - the application image to build AND the CI job label. Resolves to
+#              contract-tests/images/applications/<name>/Dockerfile.
+#   paths    - pytest paths to run, relative to test_base.
+#   versions - the Python versions this entry runs on. Omit one the framework can't support.
+test_base: contract-tests/tests/test/amazon
+tests:
+  - name: botocore
+    paths:
+      - botocore
+    versions:
+      - "3.10"
+      - "3.11"
+      - "3.12"
+      - "3.13"
+      - "3.14"
+  - name: requests
+    paths:
+      - requests
+      - misc/code_attributes_test.py
+    versions:
+      - "3.10"
+      - "3.11"
+      - "3.12"
+      - "3.13"
+      - "3.14"
+  - name: django
+    # misc/ is split by app image: code_attributes_test uses the requests image (in the requests
+    # entry); the rest use the django image, listed explicitly here.
+    paths:
+      - django
+      - runtime
+      - misc/configuration_test.py
+      - misc/service_name_in_env_var_test.py
+      - misc/service_name_in_resource_attributes_test.py
+      - misc/unknown_service_name_test.py
+    versions:
+      - "3.10"
+      - "3.11"
+      - "3.12"
+      - "3.13"
+      - "3.14"
+  - name: pymysql
+    paths:
+      - pymysql
+    versions:
+      - "3.10"
+      - "3.11"
+      - "3.12"
+      - "3.13"
+      - "3.14"
+  - name: mysqlclient
+    paths:
+      - mysqlclient
+    versions:
+      - "3.10"
+      - "3.11"
+      - "3.12"
+      - "3.13"
+      - "3.14"
+  - name: psycopg2
+    paths:
+      - psycopg2
+    versions:
+      - "3.10"
+      - "3.11"
+      - "3.12"
+      - "3.13"
+      - "3.14"
+  - name: mysql-connector
+    paths:
+      - mysql-connector
+    versions:
+      - "3.10"
+      - "3.11"
+      - "3.12"
+      - "3.13"
+      - "3.14"
+  - name: langchain
+    paths:
+      - gen_ai/langchain
+    versions:
+      - "3.10"
+      - "3.11"
+      - "3.12"
+      - "3.13"
+      - "3.14"
+  - name: llamaindex
+    paths:
+      - gen_ai/llamaindex
+    versions:
+      - "3.10"
+      - "3.11"
+      - "3.12"
+      - "3.13"
+      - "3.14"
+  - name: crewai
+    paths:
+      - gen_ai/crewai
+    versions:
+      - "3.10"
+      - "3.11"
+      - "3.12"
+      - "3.13"
+  - name: serviceevents-flask
+    paths:
+      - serviceevents/flask_test.py
+    versions:
+      - "3.10"
+      - "3.11"
+      - "3.12"
+      - "3.13"
+      - "3.14"
+  - name: serviceevents-fastapi
+    paths:
+      - serviceevents/fastapi_test.py
+    versions:
+      - "3.10"
+      - "3.11"
+      - "3.12"
+      - "3.13"
+      - "3.14"
+  - name: serviceevents-django
+    paths:
+      - serviceevents/django_test.py
+    versions:
+      - "3.10"
+      - "3.11"
+      - "3.12"
+      - "3.13"
+      - "3.14"
+  - name: serviceevents-django-uwsgi
+    paths:
+      - serviceevents/django_uwsgi_test.py
+    versions:
+      - "3.10"
+      - "3.11"
+      - "3.12"
+      - "3.13"
+      - "3.14"
