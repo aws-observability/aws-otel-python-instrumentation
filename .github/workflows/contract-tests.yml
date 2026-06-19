@@ -71,8 +71,6 @@ jobs:
           path: dist
 
       - name: Set up and run ${{ matrix.test.name }} contract tests (python ${{ inputs.python-version }})
-        env:
-          CACHE_BACKEND: gha
         run: |
           bash scripts/set-up-contract-tests.sh "${{ inputs.python-version }}" ${{ matrix.test.name }}
           pytest ${{ matrix.test.pytest_args }} -v

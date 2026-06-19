@@ -50,7 +50,7 @@ python3 -m pip install sqlalchemy psycopg2-binary
 
 # Create mock-collector image
 mock_cache=()
-if [ "$CACHE_BACKEND" = "gha" ]; then
+if [ "$GITHUB_ACTIONS" = "true" ]; then
   mock_cache=(--cache-from "type=gha,scope=contract-mock-collector" --cache-to "type=gha,mode=max,scope=contract-mock-collector")
 fi
 docker buildx build contract-tests/images/mock-collector --load \
@@ -77,7 +77,7 @@ for app in "${APPS[@]}"; do
   [ -n "$PYTHON_VERSION" ] && build_args+=(--build-arg "PYTHON_VERSION=${PYTHON_VERSION}")
 
   cache=()
-  if [ "$CACHE_BACKEND" = "gha" ]; then
+  if [ "$GITHUB_ACTIONS" = "true" ]; then
     scope="contract-${app}-py${PYTHON_VERSION}"
     cache=(--cache-from "type=gha,scope=${scope}" --cache-to "type=gha,mode=max,scope=${scope}")
   fi

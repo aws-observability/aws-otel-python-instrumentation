@@ -33,8 +33,6 @@ jobs:
           os: ubuntu-latest
 
       - name: Set up images and host
-        env:
-          CACHE_BACKEND: gha
         run: |
           if [ "${{ inputs.test_scope }}" = "all" ]; then
             bash scripts/set-up-contract-tests.sh ""
