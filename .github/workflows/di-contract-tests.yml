@@ -20,6 +20,9 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
+        # One framework per job: each builds only its di-<suite> image and runs only that test file,
+        # so the 78 DI tests (each gated on a fixed ~15s debugger-poll wait) run in parallel.
+        suite: ["django", "fastapi", "flask"]
       fail-fast: false
 
     steps:
@@ -41,12 +44,12 @@ jobs:
           cd ./aws-opentelemetry-distro
           python -m build --outdir ../dist
 
-      # Build only the DI application images, at the matrix Python version (genuine per-version
-      # coverage), with layer caching. The operator image is not needed by contract tests.
-      - name: Set up DI images (python ${{ matrix.python-version }})
+      # Build only this suite's DI application image, at the matrix Python version (genuine
+      # per-version coverage), with layer caching. The operator image is not needed by contract tests.
+      - name: Set up di-${{ matrix.suite }} image (python ${{ matrix.python-version }})
         env:
           CACHE_BACKEND: gha
-        run: bash scripts/set-up-contract-tests.sh "${{ matrix.python-version }}" di
+        run: bash scripts/set-up-contract-tests.sh "${{ matrix.python-version }}" di-${{ matrix.suite }}
 
-      - name: Run DI contract tests
-        run: pytest contract-tests/tests/test/amazon/di/ -v
+      - name: Run di-${{ matrix.suite }} contract tests
+        run: pytest contract-tests/tests/test/amazon/di/${{ matrix.suite }}_test.py -v
