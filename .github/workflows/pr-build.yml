@@ -166,6 +166,29 @@ jobs:
           pip install tox
           tox
 
+  build-and-scan-image:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
+
+      - name: Build and scan operator image
+        uses: ./.github/actions/artifacts_build
+        with:
+          image_uri_with_tag: pr-build/${{ matrix.python-version }}
+          push_image: false
+          load_image: true
+          python_version: ${{ matrix.python-version }}
+          package_name: aws-opentelemetry-distro
+          os: ubuntu-latest
+          run_unit_tests: false
+          trivyignore-file: .github/trivy/pr-build.trivyignore.yaml
+          platforms: linux/amd64
+
   unit-test:
     runs-on: ubuntu-latest
     needs: build-wheel
@@ -195,29 +218,6 @@ jobs:
           os: ubuntu-latest
           run_unit_tests: true
           wheel_path: ${{ steps.wheel.outputs.path }}
-
-  build-and-scan-image:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
-      matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-    steps:
-      - name: Checkout Repo @ SHA - ${{ github.sha }}
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
-
-      - name: Build and scan operator image
-        uses: ./.github/actions/artifacts_build
-        with:
-          image_uri_with_tag: pr-build/${{ matrix.python-version }}
-          push_image: false
-          load_image: true
-          python_version: ${{ matrix.python-version }}
-          package_name: aws-opentelemetry-distro
-          os: ubuntu-latest
-          run_unit_tests: false
-          trivyignore-file: .github/trivy/pr-build.trivyignore.yaml
-          platforms: linux/amd64
 
   contract-tests:
     needs: build-wheel
