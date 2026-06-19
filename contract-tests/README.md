@@ -31,7 +31,7 @@ The steps to add a new test for a library or framework are:
 # How to run the tests locally?
 
 Pre-requirements:
-* Have `docker` (with `buildx`) installed and running - verify by running the `docker` command.
+* Have `docker` installed and running - verify by running the `docker` command.
 
 Steps:
 * From `aws-otel-python-instrumentation` dir, execute:
@@ -40,19 +40,3 @@ Steps:
 ./scripts/set-up-contract-tests.sh
 pytest contract-tests/tests
 ```
-
-`set-up-contract-tests.sh` builds the application images and prepares the host (installs test deps
-and the `mock_collector`/`contract_tests` wheels). With no arguments it builds every image; you can
-also build a subset and/or target a specific Python base:
-
-```sh
-# set-up-contract-tests.sh [PYTHON_VERSION] [APP ...]
-./scripts/set-up-contract-tests.sh 3.13 botocore requests   # build named apps on python:3.13
-./scripts/set-up-contract-tests.sh "" serviceevents          # build the serviceevents group, default bases
-pytest contract-tests/tests/test/amazon/botocore -v
-```
-
-Passing a Python version builds every selected application image against `python:<version>` (the
-default keeps each Dockerfile's own base). `APP` is one or more application image names (e.g.
-`botocore`, `django`, `crewai`) or the convenience group names `di` / `serviceevents`. Set
-`CACHE_BACKEND=gha` to enable GitHub Actions buildx layer caching (used in CI).

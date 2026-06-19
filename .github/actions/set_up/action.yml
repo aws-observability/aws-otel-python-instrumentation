@@ -29,8 +29,6 @@ runs:
       with:
         python-version: ${{ inputs.python_version }}
 
-    # When a prebuilt wheel is provided, point tox's distro install at it (resolved to an absolute
-    # path so it works regardless of each tox env's changedir). No effect when wheel_path is empty.
     - name: Use prebuilt distro wheel
       if: ${{ inputs.wheel_path != '' }}
       shell: bash

@@ -111,9 +111,6 @@ runs:
         platforms: ${{ inputs.platforms }}
         tags: ${{ inputs.image_uri_with_tag }}
         load: ${{ inputs.load_image }}
-        # Cache layers across runs so the slow Rust cp-utility stage (cargo audit/test/install) and
-        # the distro install are not rebuilt cold every time. mode=max caches intermediate build
-        # stages too. GitHub Actions cache uses GITHUB_TOKEN, so this is safe for forked-repo PRs.
         cache-from: type=gha,scope=operator-image
         cache-to: type=gha,scope=operator-image,mode=max
 

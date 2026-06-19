@@ -1,5 +1,4 @@
 {
-  "comment": "Contract tests for pr-build. `name` is the application image to build (contract-tests/images/applications/<name>/) AND the CI label. `paths` is a list of pytest paths relative to test_base; a leading '!' marks an --ignore (exclude). `versions` are the supported Python versions. pr-build runs one collapsible group per Python version, filtering to entries that support it. DI is intentionally absent -- it runs only in di-contract-tests.yml.",
   "test_base": "contract-tests/tests/test/amazon",
   "tests": [
     {
