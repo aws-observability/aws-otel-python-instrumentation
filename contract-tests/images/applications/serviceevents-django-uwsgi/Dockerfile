@@ -1,4 +1,5 @@
-FROM python:3.10
+ARG PYTHON_VERSION=3.10
+FROM python:${PYTHON_VERSION}
 WORKDIR /serviceevents-django-uwsgi
 COPY ./dist/$DISTRO /serviceevents-django-uwsgi
 COPY ./contract-tests/images/applications/serviceevents-django-uwsgi /serviceevents-django-uwsgi
