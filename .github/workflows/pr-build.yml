@@ -122,10 +122,6 @@ jobs:
           
           echo "No github.event usage found in run steps"
 
-  # Unit tests are the only part of the old `build` matrix that genuinely varies by Python
-  # version, so they get the full 3.10-3.14 matrix here. No Docker, no contract tests. They install
-  # the single prebuilt wheel (the same artifact the contract images use) rather than building the
-  # distro from source per leg.
   unit-test:
     runs-on: ubuntu-latest
     needs: build-wheel
@@ -156,8 +152,6 @@ jobs:
           run_unit_tests: true
           wheel_path: ${{ steps.wheel.outputs.path }}
 
-  # Build the universal (py3-none-any) distro wheel exactly once and share it with the contract
-  # shards, which COPY it into their application images. The wheel does not vary by Python version.
   build-wheel:
     runs-on: ubuntu-latest
     steps:
@@ -179,9 +173,6 @@ jobs:
           path: dist/aws_opentelemetry_distro-*-py3-none-any.whl
           retention-days: 1
 
-  # Build the operator image (root Dockerfile) once and Trivy-scan it. The base and the Rust
-  # cp-utility are Python-version independent, and contract tests do not use this image, so it is
-  # decoupled from the contract path. Layer caching (in the action) keeps the slow Rust stage warm.
   scan-image:
     runs-on: ubuntu-latest
     steps:
@@ -201,10 +192,6 @@ jobs:
           trivyignore-file: .github/trivy/pr-build.trivyignore.yaml
           platforms: linux/amd64
 
-  # Contract tests, grouped into one collapsible block per Python version. Each call to the
-  # reusable workflow runs that version's supported shards (from contract-tests/tests.json), each
-  # building only its own application images (layer-cached per app+version) against that version.
-  # DI is intentionally NOT here -- it runs solely in di-contract-tests.yml to avoid duplication.
   contract-tests:
     needs: build-wheel
     strategy:
@@ -220,9 +207,6 @@ jobs:
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
-      # Install every interpreter the lambda-layer tox envlist targets (py3.10-3.14). With a single
-      # '3.x', tox silently SKIPs the missing versions (skip_missing_interpreters=True), so only the
-      # latest would actually run. The last listed version is the default used by `pip install tox`.
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c #v6.0.0
         with:
           python-version: |

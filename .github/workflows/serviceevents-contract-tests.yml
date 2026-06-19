@@ -1,9 +1,6 @@
 name: ServiceEvents Contract Tests
 
 on:
-  # Run on demand. The serviceevents contract tests are also exercised on every PR
-  # via pr-build.yml (`pytest contract-tests/tests`); this standalone workflow lets
-  # maintainers run just the serviceevents suite (or `all`) against a chosen ref.
   workflow_dispatch:
     inputs:
       test_scope:
@@ -33,7 +30,6 @@ jobs:
         with:
           python-version: '3.12'
 
-      # Build the universal distro wheel that the application images install.
       - name: Build distro wheel
         run: |
           pip install --upgrade pip setuptools wheel packaging build
@@ -41,9 +37,6 @@ jobs:
           cd ./aws-opentelemetry-distro
           python -m build --outdir ../dist
 
-      # Build only the images the chosen scope needs (the serviceevents group, or every image for
-      # `all` by passing no app names), with layer caching. The empty python version arg keeps each
-      # Dockerfile's default base.
       - name: Set up images and host
         env:
           CACHE_BACKEND: gha

@@ -1,14 +1,6 @@
 ## Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 ## SPDX-License-Identifier: Apache-2.0
 
-# Reusable workflow that runs the contract-test suite for a SINGLE Python version, sharded by
-# framework. It is called once per Python version by pr-build.yml, which makes the GitHub Actions
-# UI render a collapsible group per version (e.g. "contract-tests (3.14)") containing that version's
-# shards. The set of shards is read from contract-tests/tests.json and filtered to those that
-# support the requested Python version, so unsupported (shard, version) combinations are omitted.
-#
-# DI is intentionally NOT covered here -- it runs solely in di-contract-tests.yml to avoid running
-# its suite twice per PR. This workflow uses no secrets, so it is safe for forked-repo PRs.
 name: Contract Tests
 
 on:
@@ -28,42 +20,39 @@ permissions:
   contents: read
 
 jobs:
-  # Emit the JSON array of shards that support inputs.python-version (drives the matrix below).
-  compute-shards:
+  select-tests:
     runs-on: ubuntu-latest
     outputs:
-      shards: ${{ steps.filter.outputs.shards }}
+      tests: ${{ steps.filter.outputs.tests }}
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
 
-      - name: Select shards supporting Python ${{ inputs.python-version }}
+      - name: Select tests supporting Python ${{ inputs.python-version }}
         id: filter
         env:
           PYTHON_VERSION: ${{ inputs.python-version }}
         run: |
-          # For each shard supporting this python version, emit {name, pytest_args} where pytest_args
-          # expands each `tests` entry to a base-relative path ("!x" -> "--ignore=<base>/x").
-          shards=$(jq -c --arg py "$PYTHON_VERSION" '
+          tests=$(jq -c --arg py "$PYTHON_VERSION" '
             .test_base as $base
-            | [ .shards[]
+            | [ .tests[]
                 | select(.versions | index($py))
                 | { name,
-                    pytest_args: ( [ .tests[]
+                    pytest_args: ( [ .paths[]
                                      | if startswith("!") then "--ignore=" + $base + "/" + .[1:]
                                        else $base + "/" + . end ]
                                    | join(" ") ) } ]' \
             contract-tests/tests.json)
-          echo "shards=$shards" >> "$GITHUB_OUTPUT"
+          echo "tests=$tests" >> "$GITHUB_OUTPUT"
 
   contract-test:
-    needs: compute-shards
+    needs: select-tests
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
       matrix:
-        shard: ${{ fromJSON(needs.compute-shards.outputs.shards) }}
-    name: ${{ matrix.shard.name }}
+        test: ${{ fromJSON(needs.select-tests.outputs.tests) }}
+    name: ${{ matrix.test.name }}
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
@@ -71,9 +60,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 #3.11.1
 
-      # Host interpreter that runs pytest. It only talks to the app containers over the network, so
-      # it is fixed and independent of the version under test (avoids host-side install issues on
-      # newer interpreters).
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c #v6.0.0
         with:
           python-version: '3.12'
@@ -84,10 +70,10 @@ jobs:
           name: ${{ inputs.wheel-artifact-name }}
           path: dist
 
-      - name: Set up ${{ matrix.shard.name }} image (python ${{ inputs.python-version }})
+      - name: Set up ${{ matrix.test.name }} image (python ${{ inputs.python-version }})
         env:
           CACHE_BACKEND: gha
-        run: bash scripts/set-up-contract-tests.sh "${{ inputs.python-version }}" ${{ matrix.shard.name }}
+        run: bash scripts/set-up-contract-tests.sh "${{ inputs.python-version }}" ${{ matrix.test.name }}
 
-      - name: Run ${{ matrix.shard.name }} contract tests
-        run: pytest ${{ matrix.shard.pytest_args }} -v
+      - name: Run ${{ matrix.test.name }} contract tests
+        run: pytest ${{ matrix.test.pytest_args }} -v

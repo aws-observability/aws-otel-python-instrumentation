@@ -1,11 +1,6 @@
 #!/bin/bash
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-#
-# Usage: set-up-contract-tests.sh [PYTHON_VERSION] [APP ...]
-#   $1   optional python base for the app images (empty = each Dockerfile's default).
-#   $2.. optional app images to build, or a group "di"/"serviceevents" (empty = all).
-#   Env CACHE_BACKEND=gha enables buildx GHA layer caching.
 
 # Fail fast
 set -e
@@ -22,9 +17,6 @@ PYTHON_VERSION="${1:-}"
 shift || true
 APPS=("$@")
 
-# Expand the group names the dedicated DI / ServiceEvents workflows pass as a single token into
-# the matching application directories (e.g. "di" -> every applications/di-*). Derived from the
-# directories so new di-*/serviceevents-* apps are picked up without editing this script.
 if [ "${#APPS[@]}" -eq 1 ] && { [ "${APPS[0]}" = "di" ] || [ "${APPS[0]}" = "serviceevents" ]; }; then
   prefix="${APPS[0]}"
   APPS=()
@@ -33,7 +25,6 @@ if [ "${#APPS[@]}" -eq 1 ] && { [ "${APPS[0]}" = "di" ] || [ "${APPS[0]}" = "ser
   done
 fi
 
-# Default to every application image (flat apps + the one-level-deeper gen_ai apps).
 if [ "${#APPS[@]}" -eq 0 ]; then
   for dir in contract-tests/images/applications/*/; do
     [ -f "${dir}Dockerfile" ] && APPS+=("$(basename "$dir")")
@@ -82,7 +73,6 @@ for app in "${APPS[@]}"; do
     exit 1
   fi
 
-  # Inject PYTHON_VERSION only when requested, so the empty case keeps each Dockerfile's native base.
   build_args=(--build-arg "DISTRO=${DISTRO}")
   [ -n "$PYTHON_VERSION" ] && build_args+=(--build-arg "PYTHON_VERSION=${PYTHON_VERSION}")
 

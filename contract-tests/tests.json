@@ -1,75 +1,75 @@
 {
-  "comment": "Contract-test shards for pr-build. `name` is the application image to build (contract-tests/images/applications/<name>/) AND the CI label. `tests` is a list of pytest paths relative to contract-tests/tests/test/amazon/; a leading '!' marks an --ignore (exclude). `versions` are the supported Python versions. pr-build runs one collapsible group per Python version, filtering to shards that support it. DI is intentionally absent -- it runs only in di-contract-tests.yml.",
+  "comment": "Contract tests for pr-build. `name` is the application image to build (contract-tests/images/applications/<name>/) AND the CI label. `paths` is a list of pytest paths relative to test_base; a leading '!' marks an --ignore (exclude). `versions` are the supported Python versions. pr-build runs one collapsible group per Python version, filtering to entries that support it. DI is intentionally absent -- it runs only in di-contract-tests.yml.",
   "test_base": "contract-tests/tests/test/amazon",
-  "shards": [
+  "tests": [
     {
       "name": "botocore",
-      "tests": ["botocore"],
+      "paths": ["botocore"],
       "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "requests",
-      "tests": ["requests", "misc/code_attributes_test.py"],
+      "paths": ["requests", "misc/code_attributes_test.py"],
       "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "django",
-      "tests": ["django", "runtime", "misc", "!misc/code_attributes_test.py"],
+      "paths": ["django", "runtime", "misc", "!misc/code_attributes_test.py"],
       "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "pymysql",
-      "tests": ["pymysql"],
+      "paths": ["pymysql"],
       "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "mysqlclient",
-      "tests": ["mysqlclient"],
+      "paths": ["mysqlclient"],
       "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "psycopg2",
-      "tests": ["psycopg2"],
+      "paths": ["psycopg2"],
       "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "mysql-connector",
-      "tests": ["mysql-connector"],
+      "paths": ["mysql-connector"],
       "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "langchain",
-      "tests": ["gen_ai/langchain"],
+      "paths": ["gen_ai/langchain"],
       "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "llamaindex",
-      "tests": ["gen_ai/llamaindex"],
+      "paths": ["gen_ai/llamaindex"],
       "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "crewai",
-      "tests": ["gen_ai/crewai"],
+      "paths": ["gen_ai/crewai"],
       "versions": ["3.10", "3.11", "3.12", "3.13"]
     },
     {
       "name": "serviceevents-flask",
-      "tests": ["serviceevents/flask_test.py"],
+      "paths": ["serviceevents/flask_test.py"],
       "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "serviceevents-fastapi",
-      "tests": ["serviceevents/fastapi_test.py"],
+      "paths": ["serviceevents/fastapi_test.py"],
       "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "serviceevents-django",
-      "tests": ["serviceevents/django_test.py"],
+      "paths": ["serviceevents/django_test.py"],
       "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     },
     {
       "name": "serviceevents-django-uwsgi",
-      "tests": ["serviceevents/django_uwsgi_test.py"],
+      "paths": ["serviceevents/django_uwsgi_test.py"],
       "versions": ["3.10", "3.11", "3.12", "3.13", "3.14"]
     }
   ]
