@@ -36,10 +36,9 @@ jobs:
           package_name: aws-opentelemetry-distro
           os: ubuntu-latest
 
-      - name: Set up di-${{ matrix.suite }} image (python ${{ matrix.python-version }})
+      - name: Set up and run di-${{ matrix.suite }} contract tests
         env:
           CACHE_BACKEND: gha
-        run: bash scripts/set-up-contract-tests.sh "${{ matrix.python-version }}" di-${{ matrix.suite }}
-
-      - name: Run di-${{ matrix.suite }} contract tests
-        run: pytest contract-tests/tests/test/amazon/di/${{ matrix.suite }}_test.py -v
+        run: |
+          bash scripts/set-up-contract-tests.sh "${{ matrix.python-version }}" di-${{ matrix.suite }}
+          pytest contract-tests/tests/test/amazon/di/${{ matrix.suite }}_test.py -v
