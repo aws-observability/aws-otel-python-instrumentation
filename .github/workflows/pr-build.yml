@@ -179,10 +179,10 @@ jobs:
           path: dist/aws_opentelemetry_distro-*-py3-none-any.whl
           retention-days: 1
 
-  # Build the operator image (root Dockerfile) once and scan it. The base and the Rust cp-utility
-  # are Python-version independent, and contract tests do not use this image, so it is decoupled
-  # from the contract path. Layer caching (in the action) keeps the slow Rust stage warm across runs.
-  operator-image:
+  # Build the operator image (root Dockerfile) once and Trivy-scan it. The base and the Rust
+  # cp-utility are Python-version independent, and contract tests do not use this image, so it is
+  # decoupled from the contract path. Layer caching (in the action) keeps the slow Rust stage warm.
+  scan-image:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
@@ -289,7 +289,7 @@ jobs:
 
   all-pr-checks-pass:
     runs-on: ubuntu-latest
-    needs: [static-code-checks, lint, spotless, unit-test, build-wheel, operator-image, contract-tests, build-lambda]
+    needs: [static-code-checks, lint, spotless, unit-test, build-wheel, scan-image, contract-tests, build-lambda]
     if: always()
     steps:
       - name: Checkout to get workflow file
