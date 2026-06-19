@@ -12,12 +12,12 @@ from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_sigv4_session_fact
     AWS_SIGV4_SERVICE,
     aws_sigv4_session,
 )
+from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_ENDPOINT as _GENERIC_ENDPOINT
+from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_LOGS_ENDPOINT as _LOGS_ENDPOINT
+from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_METRICS_ENDPOINT as _METRICS_ENDPOINT
+from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_TRACES_ENDPOINT as _TRACES_ENDPOINT
 from opentelemetry.util._importlib_metadata import entry_points
 
-_TRACES_ENDPOINT = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
-_LOGS_ENDPOINT = "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
-_METRICS_ENDPOINT = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"
-_GENERIC_ENDPOINT = "OTEL_EXPORTER_OTLP_ENDPOINT"
 _PROVIDER_MODULE = "amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_sigv4_session_factory"
 
 

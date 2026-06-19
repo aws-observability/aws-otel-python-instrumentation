@@ -47,11 +47,16 @@ import requests
 from amazon.opentelemetry.distro._utils import IS_BOTOCORE_INSTALLED, get_aws_region, get_aws_session
 from amazon.opentelemetry.distro.exporter.otlp.aws.common._aws_http_headers import _OTLP_AWS_HTTP_HEADERS
 from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_auth_session import AwsAuthSession
+from opentelemetry.sdk.environment_variables import (
+    OTEL_EXPORTER_OTLP_ENDPOINT,
+    OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
+    OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
+    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
+)
 
 _logger = logging.getLogger(__name__)
 
 AWS_SIGV4_SERVICE = "AWS_SIGV4_SERVICE"
-_GENERIC_OTLP_ENDPOINT_ENV = "OTEL_EXPORTER_OTLP_ENDPOINT"
 
 # Signal -> (endpoint env, module-path substring used to detect the calling
 # OTLP HTTP exporter on the stack). Substrings match the upstream OTel layout:
@@ -59,9 +64,9 @@ _GENERIC_OTLP_ENDPOINT_ENV = "OTEL_EXPORTER_OTLP_ENDPOINT"
 #   opentelemetry.exporter.otlp.proto.http._log_exporter
 #   opentelemetry.exporter.otlp.proto.http.metric_exporter
 _SIGNAL_TABLE: Tuple[Tuple[str, str, str], ...] = (
-    ("traces", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "trace_exporter"),
-    ("logs", "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "log_exporter"),
-    ("metrics", "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "metric_exporter"),
+    ("traces", OTEL_EXPORTER_OTLP_TRACES_ENDPOINT, "trace_exporter"),
+    ("logs", OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, "log_exporter"),
+    ("metrics", OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, "metric_exporter"),
 )
 
 # Endpoint-URL rules mapped to SigV4 signing service names. First match wins.
@@ -179,7 +184,7 @@ def _infer_signing_service_from_endpoint(signal: Optional[str]) -> Optional[str]
                 endpoint = os.environ.get(env_name, "").strip()
                 break
     if not endpoint:
-        endpoint = os.environ.get(_GENERIC_OTLP_ENDPOINT_ENV, "").strip()
+        endpoint = os.environ.get(OTEL_EXPORTER_OTLP_ENDPOINT, "").strip()
     if not endpoint:
         return None
 
