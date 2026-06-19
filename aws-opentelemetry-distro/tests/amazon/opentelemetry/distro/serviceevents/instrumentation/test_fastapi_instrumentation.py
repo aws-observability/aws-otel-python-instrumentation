@@ -6,7 +6,6 @@ from unittest import TestCase
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import amazon.opentelemetry.distro.serviceevents.instrumentation.fastapi_instrumentation as fastapi_mod
-from amazon.opentelemetry.distro.serviceevents.instrumentation._constants import UNMATCHED_ROUTE
 from amazon.opentelemetry.distro.serviceevents.instrumentation.fastapi_instrumentation import (
     ServiceEventsFastAPIMiddleware,
     _get_request_body,
@@ -29,27 +28,28 @@ class TestGetRoutePattern(TestCase):
         result = _get_route_pattern(scope)
         self.assertEqual(result, "/api/users/{id}")
 
-    def test_get_route_pattern_unmatched_uses_sentinel(self):
+    def test_get_route_pattern_unmatched_uses_first_segment(self):
         """When no route object is set and the template can't be pre-resolved (no app
-        routes), collapse to the <unmatched> sentinel rather than the raw path, to bound
-        metric cardinality for scanner/bot traffic. Parity with Flask/Django."""
+        routes), collapse to the first path segment rather than the raw path, to bound
+        metric cardinality for scanner/bot traffic. Parity with Flask/Django and
+        Application Signals."""
         scope = {"path": "/api/users/42"}
         result = _get_route_pattern(scope)
-        self.assertEqual(result, UNMATCHED_ROUTE)
+        self.assertEqual(result, "/api")
 
-    def test_get_route_pattern_empty_scope_uses_sentinel(self):
-        """An empty scope (no route, no path, no app) yields the <unmatched> sentinel."""
+    def test_get_route_pattern_empty_scope_uses_root(self):
+        """An empty scope (no route, no path, no app) yields the root "/" label."""
         scope = {}
         result = _get_route_pattern(scope)
-        self.assertEqual(result, UNMATCHED_ROUTE)
+        self.assertEqual(result, "/")
 
-    def test_get_route_pattern_route_without_path_attr_uses_sentinel(self):
+    def test_get_route_pattern_route_without_path_attr_uses_first_segment(self):
         """A route object without a .path attribute (and no resolvable template) falls
-        through to the <unmatched> sentinel."""
+        through to the first-segment unmatched label."""
         route_obj = "not-a-route-object"  # has no .path attribute
         scope = {"route": route_obj, "path": "/fallback"}
         result = _get_route_pattern(scope)
-        self.assertEqual(result, UNMATCHED_ROUTE)
+        self.assertEqual(result, "/fallback")
 
     def test_get_route_pattern_preresolves_template_before_routing(self):
         """When scope['route'] is unset, the template is resolved from the app's routes
@@ -77,7 +77,7 @@ class TestGetRoutePattern(TestCase):
         self.assertIsNone(_resolve_route_template({"type": "http", "path": "/x"}))
 
     def test_resolve_route_template_returns_none_on_no_match(self):
-        """A path that matches no route resolves to None (caller then uses the sentinel)."""
+        """A path that matches no route resolves to None (caller then uses the unmatched label)."""
         from starlette.applications import Starlette  # pylint: disable=import-outside-toplevel
         from starlette.responses import PlainTextResponse  # pylint: disable=import-outside-toplevel
         from starlette.routing import Route  # pylint: disable=import-outside-toplevel
@@ -367,8 +367,8 @@ class TestFastAPIMiddleware(unittest.IsolatedAsyncioTestCase):
 
         middleware = ServiceEventsFastAPIMiddleware(mock_app)
         # A genuinely-matched request carries a resolved route object, so the recorded
-        # route is the template. (Unmatched requests now collapse to the <unmatched>
-        # sentinel — covered by the _get_route_pattern tests.)
+        # route is the template. (Unmatched requests now collapse to the first path
+        # segment — covered by the _get_route_pattern tests.)
         route_obj = MagicMock()
         route_obj.path = "/api/users"
         scope = {
@@ -398,7 +398,14 @@ class TestFastAPIMiddleware(unittest.IsolatedAsyncioTestCase):
     @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.fastapi_instrumentation.clear_current_operation")
     @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.fastapi_instrumentation.set_current_operation")
     async def test_middleware_processes_incident_on_500(self, mock_set_op, mock_clear_op):
-        """Status 500 triggers incident snapshot processing."""
+        """Status 500 triggers incident snapshot processing.
+
+        The app sends a 500 status WITHOUT raising and with no monitor-captured
+        exception, so no real error type is available. error_info is therefore None
+        (the breakdown is omitted), matching Java's `errorType != null` gate — a 500
+        without a captured exception produces no per-error breakdown. The incident
+        snapshot is still processed and the request is still recorded.
+        """
         mock_ec = MagicMock()
         mock_isc = MagicMock()
         fastapi_mod._endpoint_collector = mock_ec
@@ -423,9 +430,9 @@ class TestFastAPIMiddleware(unittest.IsolatedAsyncioTestCase):
         call_kwargs = mock_isc.process_potential_incident.call_args[1]
         self.assertEqual(call_kwargs["status_code"], 500)
 
-        # Error info should be passed to endpoint collector
+        # No exception was captured, so no error breakdown is produced (Java parity).
         ec_kwargs = mock_ec.record_request.call_args[1]
-        self.assertIsNotNone(ec_kwargs["error_info"])
+        self.assertIsNone(ec_kwargs["error_info"])
 
     @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.fastapi_instrumentation.clear_current_operation")
     @patch("amazon.opentelemetry.distro.serviceevents.instrumentation.fastapi_instrumentation.set_current_operation")

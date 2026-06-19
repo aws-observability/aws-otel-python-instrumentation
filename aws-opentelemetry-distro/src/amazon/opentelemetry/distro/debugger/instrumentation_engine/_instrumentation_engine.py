@@ -6,7 +6,7 @@ Abstract base class for instrumentation engines.
 
 This module provides a common interface for different instrumentation mechanisms:
 - SysMonitoringEngine (Python 3.12+)
-- BytecodeInjectionEngine (Python 3.9-3.11)
+- BytecodeInjectionEngine (Python 3.10-3.11)
 """
 
 from abc import ABC, abstractmethod

@@ -3596,7 +3596,6 @@ autoevals
 keyrings-codeartifact
 lpips
 ldapdomaindump
-opentelemetry-instrumentation-boto
 suds-py3
 appengine-python-standard
 litellm-proxy-extras

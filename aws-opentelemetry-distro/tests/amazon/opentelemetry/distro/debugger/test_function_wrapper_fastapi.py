@@ -165,6 +165,86 @@ class TestFastAPIRoutesPatching(unittest.TestCase):
         self.assertIs(route.dependant.call, other_call)
 
     # ------------------------------------------------------------------
+    # Depends() sub-dependency patching (regression: sub-dependency
+    # breakpoints silently never fired because only the top-level
+    # dependant.call was rebound, never dependant.dependencies[*].call)
+    # ------------------------------------------------------------------
+
+    def test_patch_fastapi_routes_sub_dependency(self):
+        """A function used as a Depends() sub-dependency is rebound on dependant.dependencies[*].call.
+
+        The per-request solver invokes the sub-dependency via
+        route.dependant.dependencies[i].call, not the top-level endpoint, so
+        rebinding only endpoint/dependant.call would leave it pointing at the
+        original (the breakpoint would silently never fire).
+        """
+        try:
+            from fastapi import Depends, FastAPI
+        except ImportError:
+            self.skipTest("FastAPI not installed")
+
+        def square_dependency(value: int = 7) -> int:
+            return value * value
+
+        app = FastAPI()
+
+        @app.get("/dep")
+        def decorators_dependency(dep: int = Depends(square_dependency)):
+            return {"result": dep}
+
+        route = _route_for(app, "/dep")
+        sub_calls = [d.call for d in route.dependant.dependencies]
+        # Precondition: the solver currently points at the ORIGINAL sub-dependency.
+        self.assertIn(square_dependency, sub_calls)
+
+        wrapper = lambda value=7: value * value  # noqa: E731
+        wrapper.__name__ = square_dependency.__name__
+        wrapper.__module__ = square_dependency.__module__
+
+        mod = _make_module(self.module_name, app=app, square_dependency=square_dependency)
+
+        FunctionWrapper._patch_fastapi_routes(mod, square_dependency, wrapper)
+
+        rebound_calls = [d.call for d in route.dependant.dependencies]
+        self.assertIn(wrapper, rebound_calls)
+        self.assertNotIn(square_dependency, rebound_calls)
+        # The route's own endpoint (a different function) must not be clobbered.
+        self.assertIsNot(route.endpoint, wrapper)
+
+    def test_patch_fastapi_routes_only_target_sub_dependency_rebound(self):
+        """With two Depends() on a route, only the targeted sub-dependency is rebound."""
+        try:
+            from fastapi import Depends, FastAPI
+        except ImportError:
+            self.skipTest("FastAPI not installed")
+
+        def square_dependency(value: int = 7) -> int:
+            return value * value
+
+        def inner_dep() -> int:
+            return 1
+
+        app = FastAPI()
+
+        @app.get("/nested")
+        def nested_dependency(dep: int = Depends(square_dependency), x: int = Depends(inner_dep)):
+            return {"result": dep + x}
+
+        route = _route_for(app, "/nested")
+        wrapper = lambda value=7: value * value  # noqa: E731
+        wrapper.__name__ = square_dependency.__name__
+        wrapper.__module__ = square_dependency.__module__
+
+        mod = _make_module(self.module_name, app=app, square_dependency=square_dependency)
+
+        FunctionWrapper._patch_fastapi_routes(mod, square_dependency, wrapper)
+
+        rebound_calls = [d.call for d in route.dependant.dependencies]
+        self.assertIn(wrapper, rebound_calls)  # target rebound
+        self.assertIn(inner_dep, rebound_calls)  # the other dep left intact
+        self.assertNotIn(square_dependency, rebound_calls)
+
+    # ------------------------------------------------------------------
     # Integration: _replace_function_in_module with FastAPI patching
     # ------------------------------------------------------------------
 

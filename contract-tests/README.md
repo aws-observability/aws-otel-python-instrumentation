@@ -40,3 +40,16 @@ Steps:
 ./scripts/set-up-contract-tests.sh
 pytest contract-tests/tests
 ```
+
+## Building a subset of images
+
+`set-up-contract-tests.sh` builds every application image by default, or just the ones you name:
+
+```sh
+./scripts/set-up-contract-tests.sh [PYTHON_VERSION] [APP ...]
+
+# example: build only botocore on python:3.13
+./scripts/set-up-contract-tests.sh 3.13 botocore
+```
+
+Leave `PYTHON_VERSION` empty (`""`) to use each Dockerfile's default base.

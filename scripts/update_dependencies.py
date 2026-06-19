@@ -32,7 +32,6 @@ CONTRIB_DEPS = [
     "opentelemetry-instrumentation-aiopg",
     "opentelemetry-instrumentation-asgi",
     "opentelemetry-instrumentation-asyncpg",
-    "opentelemetry-instrumentation-boto",
     "opentelemetry-instrumentation-boto3sqs",
     "opentelemetry-instrumentation-botocore",
     "opentelemetry-instrumentation-celery",

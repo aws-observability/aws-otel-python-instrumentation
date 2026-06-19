@@ -8,8 +8,8 @@ inputs:
     required: false
     description: "AWS Region, required only if push_image is true"
   image_uri_with_tag:
-    required: true
-    description: "Image URI with Tag"
+    required: false
+    description: "Image URI with Tag, required only if build_image is true"
   image_registry:
     required: false
     description: "Image Registry, required only if push_image is true"
@@ -17,10 +17,12 @@ inputs:
     required: false
     description: "IAM Role used for pushing to snapshot ecr, required only if push_image is true"
   push_image:
-    required: true
+    required: false
+    default: 'false'
     description: "Whether push image to ECR"
   load_image:
-    required: true
+    required: false
+    default: 'false'
     description: "Whether load the image for the following use, only load in PR build"
   python_version:
     required: true
@@ -31,6 +33,14 @@ inputs:
   os:
     required: true
     description: "The os"
+  run_unit_tests:
+    required: false
+    default: 'true'
+    description: "Whether to run unit tests during setup. Set to false when unit tests run in a separate job."
+  build_image:
+    required: false
+    default: 'true'
+    description: "Whether to build and scan the operator image. Set to false for wheel-only callers (e.g. contract tests, which don't use the operator image)."
   trivyignore-file:
     required: false
     default: ''
@@ -45,10 +55,10 @@ runs:
   using: "composite"
   steps:
     - name: Action verification
-      if: ${{ (inputs.load_image == false || inputs.load_image == 'false') && (inputs.push_image == false || inputs.push_image == 'false') }}
+      if: ${{ (inputs.build_image == true || inputs.build_image == 'true') && (inputs.load_image == false || inputs.load_image == 'false') && (inputs.push_image == false || inputs.push_image == 'false') }}
       shell: bash
       run: |
-        echo "At least one of push_image or load_image must be true" 
+        echo "At least one of push_image or load_image must be true"
         exit 1
 
     - name: Set up
@@ -57,7 +67,7 @@ runs:
         python_version: ${{ inputs.python_version }}
         package_name: ${{ inputs.package_name }}
         os: ${{ inputs.os }}
-        run_unit_tests: true
+        run_unit_tests: ${{ inputs.run_unit_tests }}
 
     - name: Configure AWS Credentials
       if: ${{ inputs.push_image == true || inputs.push_image == 'true' }}
@@ -76,6 +86,7 @@ runs:
         python -m build --outdir ../dist
 
     - name: Set up QEMU
+      if: ${{ inputs.build_image == true || inputs.build_image == 'true' }}
       uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 #3.6.0
 
     - name: Set up Docker Buildx
@@ -99,6 +110,7 @@ runs:
       run: docker logout public.ecr.aws
 
     - name: Build and push image according to input
+      if: ${{ inputs.build_image == true || inputs.build_image == 'true' }}
       uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #6.18.0
       with:
         push: ${{ inputs.push_image }}
@@ -107,8 +119,11 @@ runs:
         platforms: ${{ inputs.platforms }}
         tags: ${{ inputs.image_uri_with_tag }}
         load: ${{ inputs.load_image }}
+        cache-from: type=gha,scope=operator-image
+        cache-to: type=gha,scope=operator-image,mode=max
 
     - name: Perform image scan
+      if: ${{ inputs.build_image == true || inputs.build_image == 'true' }}
       uses: ./.github/actions/image_scan
       with:
         image-ref: ${{ inputs.image_uri_with_tag }}

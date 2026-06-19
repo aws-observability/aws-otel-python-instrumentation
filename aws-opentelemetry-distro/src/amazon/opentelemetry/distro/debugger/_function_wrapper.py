@@ -244,6 +244,9 @@ class FunctionWrapper:
                 # Restore framework-level references back to the original function
                 if wrapped_func is not None:
                     FunctionWrapper._patch_framework_references(module, wrapped_func, original_func)
+                    # Symmetrically restore any `from <module> import <func>` aliases we redirected
+                    # at install time, so deleting the breakpoint returns the app to its prior state.
+                    FunctionWrapper._patch_module_aliases(module, wrapped_func, original_func)
 
             return True
         except Exception as exception:
@@ -776,6 +779,17 @@ class FunctionWrapper:
                 # unwrapped function, bypassing DI instrumentation entirely.
                 if original_func is not None:
                     FunctionWrapper._patch_framework_references(module, original_func, new_func)
+                    # Also redirect plain `from <module> import <func>` aliases held in other
+                    # application modules (the bare-name call site keeps a reference to the
+                    # original function, which setattr on the defining module does not update).
+                    alias_count = FunctionWrapper._patch_module_aliases(module, original_func, new_func)
+                    if alias_count:
+                        logger.debug(
+                            "DI: redirected %d module-level alias(es) of %s.%s",
+                            alias_count,
+                            module_name,
+                            function_name,
+                        )
 
         except ImportError as exception:
             logger.error("Failed to import module '%s' for replacement: %s", module_name, exception)
@@ -822,6 +836,173 @@ class FunctionWrapper:
             FunctionWrapper._patch_fastapi_routes(module, original_func, new_func)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.debug("fastapi reference patching encountered an error: %s", exc)
+
+    # Dotted package-tree prefixes whose namespaces we never rewrite: the ADOT/OpenTelemetry SDK
+    # itself must be left untouched (correctness + safety). Matched with ``startswith`` so the
+    # whole subtree (``opentelemetry.trace`` etc.) is skipped. The trailing dot is required so a
+    # first-party app module merely *beginning* with these letters is not eaten.
+    _ALIAS_SKIP_PACKAGE_PREFIXES = (
+        "amazon.opentelemetry.",
+        "opentelemetry.",
+    )
+    # Top-level package names (and their subtrees) we never rewrite. Matched on the first dotted
+    # component so ``wrapt``/``wrapt.decorators`` are skipped but a first-party ``wraptools`` /
+    # ``pytest_fixtures`` is not. wrapt is the wrapper library DI builds on; pytest/_pytest are the
+    # test harness.
+    _ALIAS_SKIP_TOP_LEVEL = (
+        "wrapt",
+        "_pytest",
+        "pytest",
+    )
+
+    @staticmethod
+    def _stdlib_lib_dirs() -> tuple:
+        """Realpath'd standard-library ``lib`` directories (computed once per alias scan).
+
+        Resolving ``sys.prefix``/``sys.base_prefix`` involves filesystem syscalls, so it is
+        hoisted out of the per-module loop in ``_patch_module_aliases`` and passed in.
+        """
+        dirs = []
+        for prefix in (sys.prefix, sys.base_prefix):
+            if not prefix:
+                continue
+            dirs.append(os.path.realpath(os.path.join(prefix, "lib")) + os.sep)
+        return tuple(dirs)
+
+    @staticmethod
+    def _is_application_module(module, stdlib_lib_dirs: tuple = ()) -> bool:
+        """
+        Heuristic: a module whose ``from x import f`` aliases we are willing to rewrite.
+
+        Excludes the standard library, site-packages / third-party dependencies, frozen and
+        built-in (C extension) modules, and the ADOT/OTel SDK itself. This bounds the alias
+        rebind to first-party application code — the only place a ``from x import f`` alias is a
+        legitimate, intended instrumentation target.
+
+        ``stdlib_lib_dirs`` is the precomputed result of ``_stdlib_lib_dirs()``; pass it from the
+        caller's loop to avoid repeating ``realpath(sys.prefix)`` syscalls per module. When empty
+        it is computed on demand (kept for standalone/test callers).
+
+        Path matching is structural: ``site-packages``/``dist-packages`` are matched as real path
+        *components* (not substrings), so an app whose path merely contains that text (e.g.
+        ``/srv/my-site-packages/app.py``) is correctly treated as application code.
+
+        Known coverage limitation (fail-safe — no rewrite, no crash): apps genuinely installed
+        under ``site-packages``/``dist-packages`` (e.g. ``pip install .``) or laid out under
+        ``<sys.prefix>/lib`` (some embedded/PyInstaller images) classify as non-application and
+        are NOT rewritten, so the alias redirect does not reach them.
+        """
+        try:
+            name = getattr(module, "__name__", "") or ""
+            # Skip by name: the SDK's own dotted package trees (subtree match, trailing dot
+            # required), and wrapt / pytest / _pytest matched on the FIRST dotted component so a
+            # first-party module whose name merely begins with those letters (``wraptools``,
+            # ``pytest_fixtures``) is still treated as application code.
+            if (
+                name.startswith(FunctionWrapper._ALIAS_SKIP_PACKAGE_PREFIXES)
+                or name.split(".", 1)[0] in FunctionWrapper._ALIAS_SKIP_TOP_LEVEL
+            ):
+                return False
+
+            spec = getattr(module, "__spec__", None)
+            # Prefer the loader's spec.origin; fall back to __file__ when the spec is missing or its
+            # origin is None/unusable (some loaders, dynamically-created modules) but __file__ still
+            # points at a real source path.
+            origin = (getattr(spec, "origin", None) if spec is not None else None) or getattr(module, "__file__", None)
+            # Built-in / frozen / namespace modules have no real file origin — skip them.
+            if not origin or origin in ("built-in", "frozen", "namespace"):
+                return False
+            origin = os.path.realpath(origin)
+
+            # Skip anything under installed packages. Match a real path *component* (not a
+            # substring) so an app whose path merely contains the text (``/srv/my-site-packages/``)
+            # is not misclassified as a third-party dependency.
+            origin_parts = origin.split(os.sep)
+            if "site-packages" in origin_parts or "dist-packages" in origin_parts:
+                return False
+            # Skip the standard library (under sys.prefix/lib but not the app's own tree).
+            for libdir in stdlib_lib_dirs or FunctionWrapper._stdlib_lib_dirs():
+                if origin.startswith(libdir):
+                    return False
+            return True
+        except Exception:  # pylint: disable=broad-exception-caught
+            # If we cannot classify the module confidently, do NOT touch it.
+            return False
+
+    @staticmethod
+    def _patch_module_aliases(defining_module, original_func: Callable, new_func: Callable) -> int:
+        """
+        Redirect module-level references to ``original_func`` in OTHER application modules.
+
+        ``from module import func`` copies the function object into the importing module's own
+        namespace. A later ``setattr(module, name, wrapper)`` on the defining module does NOT update
+        those copies, so callers using the bare name keep invoking the original (un-instrumented)
+        function. Frameworks (Flask/Django/FastAPI) are handled by ``_patch_framework_references``;
+        this handles plain module-level references generically.
+
+        Scope of the rewrite (important): this redirects EVERY module-level attribute that *is*
+        (identity) ``original_func`` in an application module — which covers ``from x import f``
+        call-site aliases, but also any deliberate module-level re-export or sentinel that holds the
+        same object. While a breakpoint is active, an ``x is some_sentinel`` / ``x in some_set``
+        identity comparison in user code against such a re-export would observe the wrapper (a
+        different object that delegates to the original). This window is bounded to the breakpoint's
+        active lifetime and is fully reverted by ``restore_function``. Python provides no way to
+        distinguish a call-site alias from a stored reference at the namespace level, so identity
+        match is the safe, behavior-preserving choice.
+
+        Safety properties (deliberate — this is a SAFETY-critical agent):
+          * Identity match only (``attr is original_func``) — never name-based guessing here.
+          * Application modules only (``_is_application_module``) — never stdlib/site-packages/SDK.
+          * Module-level attributes only — never reaches into dicts/registries/containers.
+          * Snapshots ``sys.modules`` and each module's ``vars()`` before iterating (no
+            "dict changed size during iteration" if another thread imports concurrently).
+          * Every ``setattr`` is individually guarded; one failure never aborts the rest.
+          * Never raises — returns the count of references redirected (for the non-silent signal).
+
+        References captured into local variables, closures, default arguments, or data structures
+        cannot be rebound by any name-based approach; those remain out of scope (use a line-level
+        breakpoint, whose ``sys.monitoring`` engine binds the code object directly).
+
+        Returns:
+            The number of module-level references redirected to ``new_func``.
+        """
+        rebound = 0
+        try:
+            defining_name = getattr(defining_module, "__name__", None)
+            stdlib_lib_dirs = FunctionWrapper._stdlib_lib_dirs()  # computed once for the whole scan
+            classification: dict = {}  # memoize _is_application_module per module-id for this scan
+            # Snapshot the module list so concurrent imports can't mutate it under us.
+            for mod_name, module in list(sys.modules.items()):
+                if module is None or module is defining_module:
+                    continue
+                is_app = classification.get(id(module))
+                if is_app is None:
+                    is_app = FunctionWrapper._is_application_module(module, stdlib_lib_dirs)
+                    classification[id(module)] = is_app
+                if not is_app:
+                    continue
+                try:
+                    attrs = list(vars(module).items())  # snapshot this module's namespace
+                except Exception:  # pylint: disable=broad-exception-caught
+                    continue
+                for attr_name, attr_value in attrs:
+                    # Identity match against the exact original function object.
+                    if attr_value is not original_func:
+                        continue
+                    try:
+                        setattr(module, attr_name, new_func)
+                        rebound += 1
+                        logger.debug(
+                            "DI: redirected alias %s.%s -> wrapper (defined in %s)",
+                            mod_name,
+                            attr_name,
+                            defining_name,
+                        )
+                    except Exception as exc:  # pylint: disable=broad-exception-caught
+                        logger.debug("DI: could not rebind alias %s.%s: %s", mod_name, attr_name, exc)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.debug("DI: module-alias patching encountered an error: %s", exc)
+        return rebound
 
     @staticmethod
     def _patch_flask_view_functions(module, original_func: Callable, new_func: Callable) -> None:
@@ -1170,11 +1351,16 @@ class FunctionWrapper:
     ):
         """Patch route handler references in a single FastAPI app instance.
 
-        Rebinds both ``route.endpoint`` and ``route.dependant.call`` (the attribute the
-        dispatcher actually invokes). The pre-built Dependant remains valid because the
-        DI wrapper preserves the handler signature via functools.wraps, so no rebuild is
-        needed. ``app.include_router`` flattens sub-routers into ``app.router.routes``,
-        so iterating that list covers all routes.
+        Rebinds ``route.endpoint``, ``route.dependant.call``, and — recursively —
+        every matching ``route.dependant.dependencies[*].call`` (the attributes the
+        dispatcher actually invokes). The last one matters for functions used as
+        ``Depends(...)`` sub-dependencies: the per-request solver calls those
+        directly, so rebinding only the top-level handler would leave a
+        sub-dependency breakpoint silently never firing. The pre-built Dependant
+        remains valid because the DI wrapper preserves the handler signature via
+        functools.wraps, so no rebuild is needed. ``app.include_router`` flattens
+        sub-routers into ``app.router.routes``, so iterating that list covers all
+        routes.
         """
         router = getattr(fastapi_app, "router", None)
         routes = getattr(router, "routes", None)
@@ -1182,17 +1368,41 @@ class FunctionWrapper:
             logger.debug("FastAPI app '%s' has no router.routes list", app_name)
             return
 
-        def _rebind(route) -> None:
-            route.endpoint = new_func
-            dependant = getattr(route, "dependant", None)
-            if dependant is not None and hasattr(dependant, "call"):
-                dependant.call = new_func
+        def _rebind_dependant(dependant, matches) -> int:
+            """Replace every matching ``call`` in a Dependant tree with new_func.
 
-        def _is_identity_match(route) -> bool:
-            if getattr(route, "endpoint", None) is original_func:
-                return True
-            dependant = getattr(route, "dependant", None)
-            return dependant is not None and getattr(dependant, "call", None) is original_func
+            FastAPI stores ``Depends(...)`` sub-dependency callables on
+            ``dependant.dependencies[*].call`` (recursively). The per-request
+            solver invokes those directly, so a function used only as a
+            sub-dependency is never reached by rebinding the top-level
+            ``dependant.call`` alone. Walks the whole tree and rebinds only the
+            references that match the target, so a route matched via one
+            sub-dependency does not have its unrelated calls clobbered.
+            Returns the number of references rebound.
+            """
+            if dependant is None:
+                return 0
+            count = 0
+            if matches(getattr(dependant, "call", None)):
+                dependant.call = new_func
+                count += 1
+            for sub in getattr(dependant, "dependencies", None) or []:
+                count += _rebind_dependant(sub, matches)
+            return count
+
+        def _rebind_route(route, matches) -> int:
+            """Rebind matching references on a route: its ``endpoint`` and every
+            matching ``call`` in its Dependant tree. Only references that match
+            are touched. Returns the number of references rebound."""
+            count = 0
+            if matches(getattr(route, "endpoint", None)):
+                route.endpoint = new_func
+                count += 1
+            count += _rebind_dependant(getattr(route, "dependant", None), matches)
+            return count
+
+        def _is_identity(func) -> bool:
+            return func is original_func
 
         # Identity match first. Guard each route independently so one bad route
         # cannot abort patching of the others.
@@ -1201,9 +1411,9 @@ class FunctionWrapper:
             try:
                 if getattr(route, "endpoint", None) is None:
                     continue  # not an APIRoute (e.g. Mount/WebSocketRoute)
-                if _is_identity_match(route):
-                    _rebind(route)
-                    patched_count += 1
+                rebound = _rebind_route(route, _is_identity)
+                if rebound:
+                    patched_count += rebound
                     logger.debug("Patched FastAPI route '%s' to use DI wrapper", getattr(route, "path", "?"))
             except Exception as exc:
                 logger.warning("Error patching FastAPI route '%s': %s", getattr(route, "path", "?"), exc)
@@ -1211,7 +1421,7 @@ class FunctionWrapper:
 
         if patched_count > 0:
             logger.debug(
-                "Patched %d FastAPI route(s) for function '%s' on app '%s'",
+                "Patched %d FastAPI reference(s) for function '%s' on app '%s'",
                 patched_count,
                 func_name,
                 app_name,
@@ -1223,29 +1433,36 @@ class FunctionWrapper:
         # so requiring both name and module avoids patching a same-named handler from a
         # different module. If the original has no __module__, fall back to name-only.
         def _matches(endpoint):
+            if endpoint is None:
+                return False
             if getattr(endpoint, "__name__", None) != func_name:
                 return False
             if func_module is None:
                 return True
             return getattr(endpoint, "__module__", None) == func_module
 
-        matching_routes = [r for r in routes if getattr(r, "endpoint", None) is not None and _matches(r.endpoint)]
-        if matching_routes:
+        fallback_count = 0
+        for route in routes:
+            try:
+                if getattr(route, "endpoint", None) is None:
+                    continue
+                rebound = _rebind_route(route, _matches)
+                if rebound:
+                    fallback_count += rebound
+                    logger.debug("Patched FastAPI route '%s' by name+module match", getattr(route, "path", "?"))
+            except Exception as exc:
+                logger.warning("Error patching FastAPI route '%s': %s", getattr(route, "path", "?"), exc)
+                continue
+
+        if fallback_count > 0:
             logger.debug(
-                "FastAPI app '%s' has %d route(s) with name '%s' (module '%s') but identity "
-                "mismatch. Patching by name+module.",
+                "FastAPI app '%s' had identity mismatch; patched %d reference(s) for '%s' (module '%s') "
+                "by name+module match.",
                 app_name,
-                len(matching_routes),
+                fallback_count,
                 func_name,
                 func_module,
             )
-            for route in matching_routes:
-                try:
-                    _rebind(route)
-                    logger.debug("Patched FastAPI route '%s' by name+module match", getattr(route, "path", "?"))
-                except Exception as exc:
-                    logger.warning("Error patching FastAPI route '%s': %s", getattr(route, "path", "?"), exc)
-                    continue
 
     @staticmethod
     def _get_qualified_name(original_func: Callable) -> str:

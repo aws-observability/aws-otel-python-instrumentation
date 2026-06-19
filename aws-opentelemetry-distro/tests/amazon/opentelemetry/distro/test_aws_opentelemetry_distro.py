@@ -774,7 +774,7 @@ class TestVersionCompatibilityCheck(TestCase):
             f"{self.MODULE_PATH}._get_version"
         ) as mock_version:
             mock_requires.return_value = [
-                'opentelemetry-api == 1.40.0 ; python_version >= "3.9"',
+                'opentelemetry-api == 1.40.0 ; python_version >= "3.10"',
                 "opentelemetry-sdk == 1.40.0",
             ]
             mock_version.side_effect = lambda pkg: "1.33.1"

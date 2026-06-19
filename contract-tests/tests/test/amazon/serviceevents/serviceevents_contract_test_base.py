@@ -542,19 +542,39 @@ class ServiceEventsContractTestBase(ServiceEventsTestInfrastructure):
 
     __test__ = False
 
+    def route_label(self, path: str) -> str:
+        """Expected route label for a registered path segment.
+
+        Flask and FastAPI route templates carry a leading slash natively, so the
+        default prepends one. Django stores routes slash-less by convention, and
+        ServiceEvents records them verbatim to match Application Signals (which
+        derives the operation from span.name). The Django test classes override
+        this to return the path unchanged.
+        """
+        return "/" + path
+
+    def operation_label(self, method: str, path: str) -> str:
+        """Expected ServiceEvents operation label ("METHOD route") for a path."""
+        return f"{method} {self.route_label(path)}"
+
     def test_endpoint_summary_success(self) -> None:
         for _ in range(3):
             response = self.send_request("GET", "success")
             self.assertEqual(200, response.status_code)
 
-        logs = self.wait_for_endpoint_summary("GET", "/success")
+        logs = self.wait_for_endpoint_summary("GET", self.route_label("success"))
         total_count = sum(self.attrs(log).get("aws.service_events.request.count", 0) for log in logs)
         total_faults = sum(self.attrs(log).get("aws.service_events.request.faults", 0) for log in logs)
         total_errors = sum(self.attrs(log).get("aws.service_events.request.errors", 0) for log in logs)
         self.assertGreaterEqual(total_count, 3)
         self.assertEqual(total_faults, 0)
         self.assertEqual(total_errors, 0)
-        self.assert_endpoint_summary(logs[0], method="GET", route="/success", operation="GET /success")
+        self.assert_endpoint_summary(
+            logs[0],
+            method="GET",
+            route=self.route_label("success"),
+            operation=self.operation_label("GET", "success"),
+        )
         # Verify resource attrs carry service.name and deployment.environment.name
         resource_attrs = {
             kv.key: self._any_value_to_python(kv.value) for kv in logs[0].resource_logs.resource.attributes
@@ -569,14 +589,14 @@ class ServiceEventsContractTestBase(ServiceEventsTestInfrastructure):
             response = self.send_request("GET", "fault")
             self.assertEqual(500, response.status_code)
 
-        logs = self.wait_for_endpoint_summary("GET", "/fault")
+        logs = self.wait_for_endpoint_summary("GET", self.route_label("fault"))
         total_faults = sum(self.attrs(log).get("aws.service_events.request.faults", 0) for log in logs)
         self.assertGreater(total_faults, 0, "Expected faults > 0")
 
     def test_endpoint_summary_duration(self) -> None:
         self.send_request("GET", "success")
 
-        logs = self.wait_for_endpoint_summary("GET", "/success")
+        logs = self.wait_for_endpoint_summary("GET", self.route_label("success"))
         self.assert_duration_structure(self.body(logs[0])["duration"])
 
     def test_function_call_records_exist(self) -> None:
@@ -610,7 +630,7 @@ class ServiceEventsContractTestBase(ServiceEventsTestInfrastructure):
             logs[0],
             trigger_type="exception",
             exception_type="ValueError",
-            operation="GET /exception",
+            operation=self.operation_label("GET", "exception"),
             status_code=500,
         )
         # Verify trace context present (trace_id and span_id are bytes in OTLP proto).
@@ -642,17 +662,18 @@ class ServiceEventsContractTestBase(ServiceEventsTestInfrastructure):
             response = self.send_request("GET", "exception")
             self.assertEqual(500, response.status_code)
 
+        expected_operation = self.operation_label("GET", "exception")
         data_points = self.wait_for_error_count_metric()
         matching = [
             dp
             for dp in data_points
-            if self.dp_attrs(dp).get("operation") == "GET /exception"
+            if self.dp_attrs(dp).get("operation") == expected_operation
             and self.dp_attrs(dp).get("exception") == "ValueError"
         ]
         self.assertGreater(
             len(matching),
             0,
-            "Expected a `count` data point with operation='GET /exception' and exception='ValueError'",
+            f"Expected a `count` data point with operation='{expected_operation}' and exception='ValueError'",
         )
         dp = matching[0]
         attrs = self.dp_attrs(dp)
@@ -660,7 +681,7 @@ class ServiceEventsContractTestBase(ServiceEventsTestInfrastructure):
         self.assertGreaterEqual(self.dp_value(dp), 1, "Expected error count >= 1")
 
         # The same per-exception-type breakdown surfaces in the EndpointSummary body.
-        summary_logs = self.wait_for_endpoint_summary("GET", "/exception")
+        summary_logs = self.wait_for_endpoint_summary("GET", self.route_label("exception"))
         breakdown = None
         for log in summary_logs:
             body = self.body(log)

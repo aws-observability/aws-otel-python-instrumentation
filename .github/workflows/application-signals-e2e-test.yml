@@ -46,17 +46,6 @@ jobs:
   # DEFAULT SETTING: {Python Version}, EC2, AMD64, AL2
   #
 
-  default-py39-amd64:
-    needs: [ upload-main-build ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
-    secrets: inherit
-    with:
-      aws-region: us-east-1
-      caller-workflow-name: 'main-build'
-      python-version: '3.9'
-      cpu-architecture: 'x86_64'
-      staging-wheel-name: ${{ inputs.staging-wheel-name }}
-
   default-py310-amd64:
     needs: [ upload-main-build ]
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
@@ -186,17 +175,17 @@ jobs:
 
   #
   # PACKAGED DISTRIBUTION PLATFORM COVERAGE
-  # DEFAULT SETTING: Python 3.9, {Platform}, AMD64, AL2
+  # DEFAULT SETTING: Python 3.10, {Platform}, AMD64, AL2
   #
 
-  asg-py39-amd64:
+  asg-py310-amd64:
     needs: [ upload-main-build ]
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-asg-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
       caller-workflow-name: 'main-build'
-      python-version: '3.9'
+      python-version: '3.10'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
   #
@@ -225,17 +214,17 @@ jobs:
 
   #
   # CPU ARCHITECTURE COVERAGE
-  # DEFAULT SETTING: Python 3.9, EC2, {CPU Architecture}, AL2
+  # DEFAULT SETTING: Python 3.10, EC2, {CPU Architecture}, AL2
   #
 
-  default-py39-arm64:
+  default-py310-arm64:
     needs: [ upload-main-build ]
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-default-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
       caller-workflow-name: 'main-build'
-      python-version: '3.9'
+      python-version: '3.10'
       cpu-architecture: 'arm64'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 

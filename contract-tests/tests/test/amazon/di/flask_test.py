@@ -89,6 +89,69 @@ class DIFlaskFunctionLevelTest(DITestInfrastructure):
 
 
 # =============================================================================
+# Function-level BREAKPOINT via `from module import func` alias
+# =============================================================================
+
+
+class DIFlaskFromImportAliasTest(DITestInfrastructure):
+    """Function-level breakpoint on a function reached via a `from x import f` alias.
+
+    ``apply_discount`` is DEFINED in ``pricing_service`` but CALLED via
+    ``from pricing_service import apply_discount`` (bare name) in ``di_flask_server``.
+    The executing call site therefore resolves the alias in the importing module's
+    namespace, not the defining module's attribute. A method-level install must
+    redirect that alias for the snapshot to be produced. This is a regression guard:
+    without the alias-redirect fix, instrumentation installs (config reports READY)
+    but never fires, so no snapshot is generated.
+    """
+
+    __test__ = True
+
+    @override
+    @staticmethod
+    def get_application_image_name() -> str:
+        return _APP_IMAGE
+
+    @override
+    def get_application_wait_pattern(self) -> str:
+        return "Ready"
+
+    def test_from_import_alias_snapshot_generated(self) -> None:
+        """A method-level snapshot is produced even though the call site uses a from-import alias."""
+        response = self.send_request("GET", "from-import")
+        self.assertEqual(200, response.status_code)
+
+        logs = self.wait_for_snapshots(min_count=1)
+        method_logs = self.logs_for_method(logs, "apply_discount")
+        self.assertGreater(
+            len(method_logs),
+            0,
+            "Expected a snapshot for apply_discount called via `from pricing_service import apply_discount`. "
+            "If absent, the method-level install did not redirect the importing module's alias.",
+        )
+
+        log = method_logs[0]
+        self.assert_snapshot_attr(log, "aws.di.instrumentation_level", "method")
+        self.assert_snapshot_attr(log, "aws.di.code_unit", "pricing_service")
+        self.assert_body_has_entry_or_return(log)
+
+    def test_from_import_alias_captures_arguments_and_return(self) -> None:
+        """The from-import alias snapshot captures the real entry args and return value."""
+        self.send_request("GET", "from-import")
+        logs = self.wait_for_snapshots(min_count=1)
+        log = self.logs_for_method(logs, "apply_discount")[0]
+
+        body = self.body(log)
+        captures = body.get("captures", {})
+        arguments = captures.get("entry", {}).get("arguments", {})
+        self.assertIn("price_cents", arguments, "Expected 'price_cents' argument to be captured")
+        self.assertIn("discount_percent", arguments, "Expected 'discount_percent' argument to be captured")
+        # apply_discount(1999, 15) -> 1999 - (1999*15//100=299) = 1700
+        return_value = captures.get("return", {}).get("return_value", {})
+        self.assertEqual(return_value.get("value"), "1700")
+
+
+# =============================================================================
 # PROBE instrumentation tests
 # =============================================================================
 

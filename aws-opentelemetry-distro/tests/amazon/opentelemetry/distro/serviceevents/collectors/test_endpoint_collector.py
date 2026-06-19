@@ -213,8 +213,13 @@ class TestEndpointMetricCollector(TestCase):
 
         self.assertEqual(len(collector._aggregations), 3)
 
-    def test_error_info_not_recorded_below_400(self):
-        """Test that error_info is not recorded for status codes below 400."""
+    def test_error_breakdown_not_recorded_below_500(self):
+        """error_breakdown is only populated for faults (5xx), matching Java.
+
+        Neither a 2xx nor a 4xx with error_info produces a breakdown entry; the
+        gate is status_code >= 500. (A 4xx still bumps the aggregate ``errors``
+        counter, asserted separately in test_4xx_increments_errors.)
+        """
         collector = EndpointMetricCollector(flush_interval_ms=10000)
 
         collector.record_request(
@@ -224,10 +229,41 @@ class TestEndpointMetricCollector(TestCase):
             duration_ns=10_000_000,
             error_info={"error_type": "ValueError", "function_name": "func_123"},
         )
+        collector.record_request(
+            route="/api/users",
+            method="GET",
+            status_code=404,
+            duration_ns=10_000_000,
+            error_info={"error_type": "NotFoundError", "function_name": "func_456"},
+        )
 
         operation = list(collector._aggregations.keys())[0]
         agg = collector._aggregations[operation]
-        # error_breakdown should be empty since status < 400
+        # error_breakdown should be empty since no request was a 5xx fault.
+        self.assertEqual(len(agg["error_breakdown"]), 0)
+
+    def test_error_breakdown_not_recorded_for_5xx_without_error_info(self):
+        """A 5xx with error_info=None produces no breakdown entry, matching Java.
+
+        The framework hook's _extract_error_from_call_path returns None when no real
+        error type was captured (e.g. a handler that returns a 500 status without
+        raising), so record_request is called with error_info=None. The request is
+        still counted as a fault, but no per-error breakdown is recorded — matching
+        Java's `statusCode >= 500 && errorType != null` gate.
+        """
+        collector = EndpointMetricCollector(flush_interval_ms=10000)
+
+        collector.record_request(
+            route="/api/users",
+            method="GET",
+            status_code=500,
+            duration_ns=10_000_000,
+            error_info=None,
+        )
+
+        operation = list(collector._aggregations.keys())[0]
+        agg = collector._aggregations[operation]
+        self.assertEqual(agg["faults"], 1)
         self.assertEqual(len(agg["error_breakdown"]), 0)
 
     def test_5xx_increments_faults(self):
@@ -406,8 +442,14 @@ class TestEndpointMetricCollector(TestCase):
         self.assertEqual(event.incident_count, 0)
         self.assertEqual(event.incidents_exemplar, [])
 
-    def test_error_metrics_emitted_per_error_type(self):
-        """collect() emits one EndpointErrorMetric per error type alongside the summary."""
+    def test_error_metrics_emitted_only_for_faults(self):
+        """collect() emits one EndpointErrorMetric per 5xx error type; 4xx is excluded.
+
+        Matches Java: the breakdown that feeds EndpointErrorMetric is gated on
+        status_code >= 500. A 4xx with error_info still increments the aggregate
+        ``errors`` counter on the EndpointSummary, but does not produce a breakdown
+        data point.
+        """
         emitter = MagicMock()
         collector = EndpointMetricCollector(
             flush_interval_ms=10000,
@@ -438,13 +480,12 @@ class TestEndpointMetricCollector(TestCase):
         # EndpointSummary emitted once.
         emitter.emit_endpoint_summary.assert_called_once()
 
-        # Per-error-type metrics emitted: one EndpointErrorMetric per error type.
+        # Only the 5xx fault produces an EndpointErrorMetric; the 4xx is excluded.
         emitter.emit_endpoint_error_metrics.assert_called_once()
         metrics = emitter.emit_endpoint_error_metrics.call_args[0][0]
         by_exception = {m.exception: m for m in metrics}
-        self.assertEqual(set(by_exception), {"RuntimeError", "ValueError"})
+        self.assertEqual(set(by_exception), {"RuntimeError"})
         self.assertEqual(by_exception["RuntimeError"].count, 3)
-        self.assertEqual(by_exception["ValueError"].count, 2)
         for metric in metrics:
             self.assertEqual(metric.telemetry_type, "EndpointErrorMetric")
 
