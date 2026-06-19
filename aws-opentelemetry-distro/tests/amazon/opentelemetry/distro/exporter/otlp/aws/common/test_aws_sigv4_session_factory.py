@@ -109,29 +109,17 @@ class TestAwsSigV4SessionFactory(TestCase):
         # pylint: disable=protected-access
         self.assertEqual(session._service, "cloudwatch")
 
-    def test_metrics_endpoint_monitoring_pattern_resolves_monitoring(self):
+    @patch(f"{_PROVIDER_MODULE}.IS_BOTOCORE_INSTALLED", True)
+    @patch(f"{_PROVIDER_MODULE}._detect_signal_from_stack", return_value="metrics")
+    def test_metrics_endpoint_monitoring_pattern_resolves_monitoring(self, _mock_signal):
         """Anchored metrics URL pattern matches CloudWatch's monitoring OTLP endpoint."""
-        # pylint: disable=import-outside-toplevel
-        from amazon.opentelemetry.distro.exporter.otlp.aws.common.aws_sigv4_session_factory import (
-            _AWS_METRICS_OTLP_ENDPOINT_PATTERN,
-            _infer_signing_service_from_endpoint,
-        )
+        os.environ["AWS_REGION"] = "us-west-2"
+        os.environ[_METRICS_ENDPOINT] = "https://monitoring.us-west-2.amazonaws.com/v1/metrics"
 
-        url = "https://monitoring.us-west-2.amazonaws.com/v1/metrics"
+        session = aws_sigv4_session()
 
-        # Sanity: regex itself must match (no Python-version surprise here)
-        self.assertIsNotNone(_AWS_METRICS_OTLP_ENDPOINT_PATTERN.match(url))
-
-        os.environ[_METRICS_ENDPOINT] = url
-
-        # Diagnostics for CI: surface the env name the helper consults so a future
-        # failure points straight at the discrepancy instead of "service is None".
-        result = _infer_signing_service_from_endpoint("metrics")
-        self.assertEqual(
-            result,
-            "monitoring",
-            f"env[{_METRICS_ENDPOINT}]={os.environ.get(_METRICS_ENDPOINT)!r}; " f"helper returned {result!r}",
-        )
+        # pylint: disable=protected-access
+        self.assertEqual(session._service, "monitoring")
 
     @patch(f"{_PROVIDER_MODULE}.IS_BOTOCORE_INSTALLED", True)
     @patch(f"{_PROVIDER_MODULE}._detect_signal_from_stack", return_value="metrics")

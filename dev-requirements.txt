@@ -23,3 +23,5 @@ flask>=2.0.0
 fastapi>=0.68.0
 starlette>=0.14.2
 django>=3.2
+# Bumping this comment forces a tox cache rebuild so newly built ADOT wheels
+# replace the previously cached install on PRs that change only src/.
