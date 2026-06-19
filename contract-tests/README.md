@@ -48,12 +48,11 @@ version and a list of app images, so you can build just what you need:
 
 ```sh
 # set-up-contract-tests.sh [PYTHON_VERSION] [APP ...]
-./scripts/set-up-contract-tests.sh "" botocore requests   # only these images, default Python base
-./scripts/set-up-contract-tests.sh 3.13 botocore          # build botocore on python:3.13
-./scripts/set-up-contract-tests.sh "" di                  # the "di" / "serviceevents" group shortcut
+# PYTHON_VERSION: empty ("") keeps each Dockerfile's default base; otherwise builds against python:<version>.
+# APP ...: application image names (e.g. botocore), or the group shortcut "di" / "serviceevents". Omit to build all.
+./scripts/set-up-contract-tests.sh "" botocore requests
+./scripts/set-up-contract-tests.sh 3.13 botocore
+./scripts/set-up-contract-tests.sh "" di
 ```
-
-* `PYTHON_VERSION` — empty (`""`) keeps each Dockerfile's default base; otherwise builds against `python:<version>`.
-* `APP ...` — application image names (e.g. `botocore`), or the group shortcut `di` / `serviceevents`. Omit to build all.
 
 Then run only the matching tests, e.g. `pytest contract-tests/tests/test/amazon/botocore`.
