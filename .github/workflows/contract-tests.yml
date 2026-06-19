@@ -33,16 +33,12 @@ jobs:
         env:
           PYTHON_VERSION: ${{ inputs.python-version }}
         run: |
-          tests=$(jq -c --arg py "$PYTHON_VERSION" '
+          tests=$(yq -o=json '.' contract-tests/tests.yaml | jq -c --arg py "$PYTHON_VERSION" '
             .test_base as $base
             | [ .tests[]
                 | select(.versions | index($py))
                 | { name,
-                    pytest_args: ( [ .paths[]
-                                     | if startswith("!") then "--ignore=" + $base + "/" + .[1:]
-                                       else $base + "/" + . end ]
-                                   | join(" ") ) } ]' \
-            contract-tests/tests.json)
+                    pytest_args: ([ .paths[] | $base + "/" + . ] | join(" ")) } ]')
           echo "tests=$tests" >> "$GITHUB_OUTPUT"
 
   contract-test:
