@@ -1090,5 +1090,85 @@ class TestModuleAliasRedirect(unittest.TestCase):
         self.assertGreaterEqual(rebound, 2)
 
 
+# ===========================================================================
+# _is_application_module classification (structural name/path matching)
+# ===========================================================================
+class TestIsApplicationModule(unittest.TestCase):
+    """Application-vs-non-application classification must be structural, not loose.
+
+    Regression guards for three false-negatives where legitimate first-party code was
+    misclassified as non-application (so its `from x import f` aliases were silently never
+    redirected): top-level name prefix matched as a bare string, ``site-packages`` matched as a
+    substring, and ``spec.origin`` taken without falling back to ``__file__``.
+    """
+
+    APP_ORIGIN = os.path.join(tempfile.gettempdir(), "di_isapp_unit", "server.py")
+
+    @staticmethod
+    def _module(name, *, spec_origin="__unset__", file_attr="__unset__"):
+        """Build a throwaway module with a controllable ``__spec__.origin`` and ``__file__``.
+
+        ``spec_origin``/``file_attr`` left at the sentinel mean "use APP_ORIGIN"; pass ``None`` to
+        omit/blank that attribute explicitly.
+        """
+        module = types.ModuleType(name)
+        file_attr = TestIsApplicationModule.APP_ORIGIN if file_attr == "__unset__" else file_attr
+        spec_origin = TestIsApplicationModule.APP_ORIGIN if spec_origin == "__unset__" else spec_origin
+        if file_attr is not None:
+            module.__file__ = file_attr
+        module.__spec__ = types.SimpleNamespace(origin=spec_origin, name=name)
+        return module
+
+    def _is_app(self, module):
+        return FunctionWrapper._is_application_module(module)
+
+    # --- Fix #3: top-level name matched on first dotted component, not bare prefix ----------
+    def test_app_names_beginning_with_skip_prefix_are_application(self):
+        for name in ("wraptools", "wrapt_helpers", "pytest_fixtures_local", "pytestutils"):
+            self.assertTrue(self._is_app(self._module(name)), f"{name} should be application code")
+
+    def test_skipped_packages_and_subtrees_still_excluded(self):
+        for name in (
+            "wrapt",
+            "wrapt.decorators",
+            "pytest",
+            "pytest.fixtures",
+            "_pytest",
+            "_pytest.config",
+            "opentelemetry.trace",
+            "amazon.opentelemetry.distro",
+        ):
+            self.assertFalse(self._is_app(self._module(name)), f"{name} must be excluded")
+
+    # --- Fix #1: site-packages/dist-packages matched as path components, not substrings -----
+    def test_app_path_containing_site_packages_substring_is_application(self):
+        for origin in (
+            os.path.join(tempfile.gettempdir(), "site-packages-demo", "myapp", "server.py"),
+            os.path.join(tempfile.gettempdir(), "my-site-packages", "app.py"),
+        ):
+            module = self._module("myapp", spec_origin=origin, file_attr=origin)
+            self.assertTrue(self._is_app(module), f"{origin} should be application code")
+
+    def test_real_site_and_dist_packages_components_still_excluded(self):
+        for origin in (
+            os.path.join(tempfile.gettempdir(), "venv", "lib", "python3.11", "site-packages", "foo", "__init__.py"),
+            os.path.join(tempfile.gettempdir(), "usr", "lib", "python3", "dist-packages", "bar.py"),
+        ):
+            module = self._module("foo", spec_origin=origin, file_attr=origin)
+            self.assertFalse(self._is_app(module), f"{origin} must be excluded")
+
+    # --- Fix #2b: fall back to __file__ when spec.origin is None ----------------------------
+    def test_falls_back_to_file_when_spec_origin_is_none(self):
+        module = self._module("myapp", spec_origin=None, file_attr=self.APP_ORIGIN)
+        self.assertTrue(
+            self._is_app(module),
+            "module with __spec__.origin=None but a valid __file__ should classify as application",
+        )
+
+    def test_no_usable_origin_anywhere_is_excluded(self):
+        module = self._module("myapp", spec_origin=None, file_attr=None)
+        self.assertFalse(self._is_app(module), "module with no usable origin must be excluded (fail-safe)")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -837,12 +837,19 @@ class FunctionWrapper:
         except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.debug("fastapi reference patching encountered an error: %s", exc)
 
-    # Module name prefixes whose namespaces we never rewrite. Standard library and the
-    # ADOT/OpenTelemetry SDK itself must be left untouched (correctness + safety): we only
-    # ever redirect plain `from x import f` aliases that live in *application* code.
-    _ALIAS_SKIP_PREFIXES = (
+    # Dotted package-tree prefixes whose namespaces we never rewrite: the ADOT/OpenTelemetry SDK
+    # itself must be left untouched (correctness + safety). Matched with ``startswith`` so the
+    # whole subtree (``opentelemetry.trace`` etc.) is skipped. The trailing dot is required so a
+    # first-party app module merely *beginning* with these letters is not eaten.
+    _ALIAS_SKIP_PACKAGE_PREFIXES = (
         "amazon.opentelemetry.",
         "opentelemetry.",
+    )
+    # Top-level package names (and their subtrees) we never rewrite. Matched on the first dotted
+    # component so ``wrapt``/``wrapt.decorators`` are skipped but a first-party ``wraptools`` /
+    # ``pytest_fixtures`` is not. wrapt is the wrapper library DI builds on; pytest/_pytest are the
+    # test harness.
+    _ALIAS_SKIP_TOP_LEVEL = (
         "wrapt",
         "_pytest",
         "pytest",
@@ -876,28 +883,43 @@ class FunctionWrapper:
         caller's loop to avoid repeating ``realpath(sys.prefix)`` syscalls per module. When empty
         it is computed on demand (kept for standalone/test callers).
 
-        Note: apps installed under ``site-packages``/``dist-packages`` (e.g. ``pip install .`` or
-        copied into the image's site-packages) classify as non-application and are NOT rewritten,
-        so the alias redirect does not reach them. This is fail-safe (no rewrite, no crash) but is
-        a known coverage limitation.
+        Path matching is structural: ``site-packages``/``dist-packages`` are matched as real path
+        *components* (not substrings), so an app whose path merely contains that text (e.g.
+        ``/srv/my-site-packages/app.py``) is correctly treated as application code.
+
+        Known coverage limitation (fail-safe — no rewrite, no crash): apps genuinely installed
+        under ``site-packages``/``dist-packages`` (e.g. ``pip install .``) or laid out under
+        ``<sys.prefix>/lib`` (some embedded/PyInstaller images) classify as non-application and
+        are NOT rewritten, so the alias redirect does not reach them.
         """
         try:
             name = getattr(module, "__name__", "") or ""
-            for prefix in FunctionWrapper._ALIAS_SKIP_PREFIXES:
-                if name == prefix or name.startswith(prefix):
-                    return False
+            # Skip by name: the SDK's own dotted package trees (subtree match, trailing dot
+            # required), and wrapt / pytest / _pytest matched on the FIRST dotted component so a
+            # first-party module whose name merely begins with those letters (``wraptools``,
+            # ``pytest_fixtures``) is still treated as application code.
+            if (
+                name.startswith(FunctionWrapper._ALIAS_SKIP_PACKAGE_PREFIXES)
+                or name.split(".", 1)[0] in FunctionWrapper._ALIAS_SKIP_TOP_LEVEL
+            ):
+                return False
 
             spec = getattr(module, "__spec__", None)
-            origin = getattr(spec, "origin", None) if spec is not None else getattr(module, "__file__", None)
+            # Prefer the loader's spec.origin; fall back to __file__ when the spec is missing or its
+            # origin is None/unusable (some loaders, dynamically-created modules) but __file__ still
+            # points at a real source path.
+            origin = (getattr(spec, "origin", None) if spec is not None else None) or getattr(module, "__file__", None)
             # Built-in / frozen / namespace modules have no real file origin — skip them.
             if not origin or origin in ("built-in", "frozen", "namespace"):
                 return False
             origin = os.path.realpath(origin)
 
-            # Skip anything under installed packages.
-            for marker in ("site-packages", "dist-packages"):
-                if marker in origin:
-                    return False
+            # Skip anything under installed packages. Match a real path *component* (not a
+            # substring) so an app whose path merely contains the text (``/srv/my-site-packages/``)
+            # is not misclassified as a third-party dependency.
+            origin_parts = origin.split(os.sep)
+            if "site-packages" in origin_parts or "dist-packages" in origin_parts:
+                return False
             # Skip the standard library (under sys.prefix/lib but not the app's own tree).
             for libdir in stdlib_lib_dirs or FunctionWrapper._stdlib_lib_dirs():
                 if origin.startswith(libdir):
