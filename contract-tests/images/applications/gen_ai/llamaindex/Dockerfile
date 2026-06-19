@@ -1,7 +1,8 @@
 # Meant to be run from aws-otel-python-instrumentation/contract-tests.
 # Assumes existence of dist/aws_opentelemetry_distro-<pkg_version>-py3-none-any.whl.
 # Assumes filename of aws_opentelemetry_distro-<pkg_version>-py3-none-any.whl is passed in as "DISTRO" arg.
-FROM python:3.12
+ARG PYTHON_VERSION=3.12
+FROM python:${PYTHON_VERSION}
 WORKDIR /llamaindex
 COPY ./dist/$DISTRO /llamaindex
 COPY ./contract-tests/images/applications/gen_ai/llamaindex /llamaindex

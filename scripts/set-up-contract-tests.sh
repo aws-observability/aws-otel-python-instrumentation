@@ -13,12 +13,33 @@ if [ "$current_dir" != "aws-otel-python-instrumentation" ]; then
   exit
 fi
 
+PYTHON_VERSION="${1:-}"
+shift || true
+APPS=("$@")
+
+if [ "${#APPS[@]}" -eq 1 ] && { [ "${APPS[0]}" = "di" ] || [ "${APPS[0]}" = "serviceevents" ]; }; then
+  prefix="${APPS[0]}"
+  APPS=()
+  for dir in contract-tests/images/applications/"${prefix}"-*/; do
+    [ -f "${dir}Dockerfile" ] && APPS+=("$(basename "$dir")")
+  done
+fi
+
+if [ "${#APPS[@]}" -eq 0 ]; then
+  for dir in contract-tests/images/applications/*/; do
+    [ -f "${dir}Dockerfile" ] && APPS+=("$(basename "$dir")")
+    for subdir in "${dir}"*/; do
+      [ -f "${subdir}Dockerfile" ] && APPS+=("$(basename "$subdir")")
+    done
+  done
+fi
+
 # Remove old whl files (excluding distro whl)
 rm -rf dist/mock_collector*
 rm -rf dist/contract_tests*
 
 # Install python dependency for contract-test
-python3 -m pip install pytest
+python3 -m pip install build pytest testcontainers typing_extensions
 python3 -m pip install pymysql
 python3 -m pip install cryptography
 python3 -m pip install mysql-connector-python
@@ -28,45 +49,41 @@ python3 -m pip install mysql-connector-python
 python3 -m pip install sqlalchemy psycopg2-binary
 
 # Create mock-collector image
-cd contract-tests/images/mock-collector
-docker build . -t aws-application-signals-mock-collector-python
-if [ $? = 1 ]; then
-  echo "Docker build for mock collector failed"
-  exit 1
+mock_cache=()
+if [ "$GITHUB_ACTIONS" = "true" ]; then
+  mock_cache=(--cache-from "type=gha,scope=contract-mock-collector" --cache-to "type=gha,mode=max,scope=contract-mock-collector")
 fi
+docker buildx build contract-tests/images/mock-collector --load \
+  -t aws-application-signals-mock-collector-python "${mock_cache[@]}"
 
 # Find and store aws_opentelemetry_distro whl file
-cd ../../../dist
-DISTRO=(aws_opentelemetry_distro-*-py3-none-any.whl)
-if [ "$DISTRO" = "aws_opentelemetry_distro-*-py3-none-any.whl" ]; then
- echo "Could not find aws_opentelemetry_distro whl file in dist dir."
- exit 1
+distro_whls=(dist/aws_opentelemetry_distro-*-py3-none-any.whl)
+if [ ! -f "${distro_whls[0]}" ]; then
+  echo "Could not find aws_opentelemetry_distro whl file in dist dir."
+  exit 1
 fi
+DISTRO="$(basename "${distro_whls[0]}")"
 
 # Create application images
-cd ..
-for dir in contract-tests/images/applications/*
-do
-  if [ -f "${dir}/Dockerfile" ]; then
-    application="${dir##*/}"
-    docker build . -t aws-application-signals-tests-${application}-app -f ${dir}/Dockerfile --build-arg="DISTRO=${DISTRO}"
-    if [ $? = 1 ]; then
-      echo "Docker build for ${application} application failed"
-      exit 1
-    fi
+for app in "${APPS[@]}"; do
+  dockerfile="contract-tests/images/applications/${app}/Dockerfile"
+  [ -f "$dockerfile" ] || dockerfile="contract-tests/images/applications/gen_ai/${app}/Dockerfile"
+  if [ ! -f "$dockerfile" ]; then
+    echo "Could not find Dockerfile for application ${app}"
+    exit 1
   fi
-  for subdir in ${dir}/*/
-  do
-    if [ -f "${subdir}Dockerfile" ]; then
-      application="${subdir%/}"
-      application="${application##*/}"
-      docker build . -t aws-application-signals-tests-${application}-app -f ${subdir}Dockerfile --build-arg="DISTRO=${DISTRO}"
-      if [ $? = 1 ]; then
-        echo "Docker build for ${application} application failed"
-        exit 1
-      fi
-    fi
-  done
+
+  build_args=(--build-arg "DISTRO=${DISTRO}")
+  [ -n "$PYTHON_VERSION" ] && build_args+=(--build-arg "PYTHON_VERSION=${PYTHON_VERSION}")
+
+  cache=()
+  if [ "$GITHUB_ACTIONS" = "true" ]; then
+    scope="contract-${app}-py${PYTHON_VERSION}"
+    cache=(--cache-from "type=gha,scope=${scope}" --cache-to "type=gha,mode=max,scope=${scope}")
+  fi
+
+  docker buildx build . --load -t "aws-application-signals-tests-${app}-app" \
+    -f "$dockerfile" "${build_args[@]}" "${cache[@]}"
 done
 
 # Build and install mock-collector
