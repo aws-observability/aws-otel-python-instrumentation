@@ -652,3 +652,193 @@ class TestUdpExporter(unittest.TestCase):
         exporter = UdpExporter(endpoint="127.0.0.1:2000")
         exporter.shutdown()
         mock_socket.close.assert_called_once()
+
+
+class TestLiteVsFullSdkParity(unittest.TestCase):
+    """Compare lite SDK OTLP output against the full OTel SDK to ensure no data loss."""
+
+    def _parse_otlp(self, data):
+        """Parse OTLP bytes into a normalized dict for comparison."""
+        from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+
+        req = ExportTraceServiceRequest()
+        req.ParseFromString(data)
+        spans = []
+        for rs in req.resource_spans:
+            resource = {kv.key: kv.value.string_value for kv in rs.resource.attributes}
+            for ss in rs.scope_spans:
+                scope_name = ss.scope.name
+                scope_version = ss.scope.version
+                for span in ss.spans:
+                    attrs = {}
+                    for kv in span.attributes:
+                        val = kv.value
+                        which = val.WhichOneof("value")
+                        if which == "string_value":
+                            attrs[kv.key] = val.string_value
+                        elif which == "int_value":
+                            attrs[kv.key] = val.int_value
+                        elif which == "double_value":
+                            attrs[kv.key] = val.double_value
+                        elif which == "bool_value":
+                            attrs[kv.key] = val.bool_value
+                    spans.append(
+                        {
+                            "name": span.name,
+                            "kind": span.kind,
+                            "status_code": span.status.code,
+                            "status_message": span.status.message,
+                            "attributes": attrs,
+                            "resource": resource,
+                            "scope_name": scope_name,
+                            "scope_version": scope_version,
+                            "has_parent": bool(span.parent_span_id),
+                            "events": [e.name for e in span.events],
+                        }
+                    )
+        return spans
+
+    def _create_full_sdk_spans(self):
+        """Create spans using the full OTel SDK and export to OTLP bytes."""
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExportResult, SpanExporter
+
+        collected = []
+
+        class CollectingExporter(SpanExporter):
+            def export(self, spans):
+                collected.extend(spans)
+                return SpanExportResult.SUCCESS
+
+        resource = Resource.create({"service.name": "test-service", "cloud.region": "us-west-2"})
+        provider = SdkTracerProvider(resource=resource)
+        provider.add_span_processor(SimpleSpanProcessor(CollectingExporter()))
+
+        tracer = provider.get_tracer("opentelemetry.instrumentation.aws_lambda", "0.1.0")
+        with tracer.start_as_current_span("handler", kind=SpanKind.SERVER) as server_span:
+            server_span.set_attribute("faas.invocation_id", "req-123")
+            server_span.set_attribute("http.status_code", 200)
+            server_span.set_attribute("score", 3.14)
+            server_span.set_attribute("is_cold_start", True)
+
+            botocore_tracer = provider.get_tracer("opentelemetry.instrumentation.botocore", "0.2.0")
+            with botocore_tracer.start_as_current_span("S3.ListBuckets", kind=SpanKind.CLIENT) as client_span:
+                client_span.set_attribute("rpc.service", "S3")
+                client_span.set_attribute("rpc.system", "aws-api")
+                client_span.set_attribute("rpc.method", "ListBuckets")
+
+        provider.shutdown()
+        return collected
+
+    def _create_lite_sdk_spans(self):
+        """Create equivalent spans using the lite SDK."""
+        lite_provider = TracerProvider(resource={"service.name": "test-service", "cloud.region": "us-west-2"})
+
+        tracer = lite_provider.get_tracer("opentelemetry.instrumentation.aws_lambda", "0.1.0")
+        with tracer.start_as_current_span("handler", kind=SpanKind.SERVER) as server_span:
+            server_span.set_attribute("faas.invocation_id", "req-123")
+            server_span.set_attribute("http.status_code", 200)
+            server_span.set_attribute("score", 3.14)
+            server_span.set_attribute("is_cold_start", True)
+
+            botocore_tracer = lite_provider.get_tracer("opentelemetry.instrumentation.botocore", "0.2.0")
+            with botocore_tracer.start_as_current_span("S3.ListBuckets", kind=SpanKind.CLIENT) as client_span:
+                client_span.set_attribute("rpc.service", "S3")
+                client_span.set_attribute("rpc.system", "aws-api")
+                client_span.set_attribute("rpc.method", "ListBuckets")
+
+        return [server_span, client_span]
+
+    def test_span_structure_matches_full_sdk(self):
+        """Verify lite SDK produces the same span structure as the full SDK."""
+        try:
+            from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider  # noqa: F401
+        except ImportError:
+            self.skipTest("Full OTel SDK not available")
+
+        full_sdk_spans = sorted(self._create_full_sdk_spans(), key=lambda s: s.name)
+        lite_spans = sorted(self._create_lite_sdk_spans(), key=lambda s: s.name)
+
+        self.assertEqual(len(full_sdk_spans), len(lite_spans))
+
+        for full_span, lite_span in zip(full_sdk_spans, lite_spans):
+            self.assertEqual(full_span.name, lite_span.name)
+            self.assertEqual(full_span.kind, lite_span.kind)
+            self.assertEqual(
+                dict(full_span.attributes),
+                lite_span.attributes,
+            )
+
+    def test_otlp_encoding_matches_full_sdk(self):
+        """Verify lite SDK OTLP output decodes to the same logical data as the full SDK."""
+        try:
+            from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest  # noqa: F401
+        except ImportError:
+            self.skipTest("protobuf library not available")
+
+        full_sdk_spans = sorted(self._create_full_sdk_spans(), key=lambda s: s.name)
+        lite_spans = sorted(self._create_lite_sdk_spans(), key=lambda s: s.name)
+
+        lite_otlp = _encode_export_trace_request(lite_spans)
+        lite_parsed = sorted(self._parse_otlp(lite_otlp), key=lambda s: s["name"])
+
+        self.assertEqual(len(lite_parsed), len(full_sdk_spans))
+
+        kind_map = {SpanKind.INTERNAL: 1, SpanKind.SERVER: 2, SpanKind.CLIENT: 3}
+        for full_span, lite_span_data in zip(full_sdk_spans, lite_parsed):
+            self.assertEqual(full_span.name, lite_span_data["name"])
+            self.assertEqual(kind_map[full_span.kind], lite_span_data["kind"])
+            self.assertEqual(lite_span_data["scope_name"], full_span.instrumentation_scope.name)
+            self.assertEqual(lite_span_data["scope_version"], full_span.instrumentation_scope.version)
+            for key, value in full_span.attributes.items():
+                self.assertIn(key, lite_span_data["attributes"])
+                self.assertEqual(value, lite_span_data["attributes"][key])
+
+    def test_resource_attributes_match_full_sdk(self):
+        """Verify resource attributes are encoded identically."""
+        try:
+            from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest  # noqa: F401
+        except ImportError:
+            self.skipTest("protobuf library not available")
+
+        lite_spans = self._create_lite_sdk_spans()
+        lite_otlp = _encode_export_trace_request(lite_spans)
+        lite_parsed = self._parse_otlp(lite_otlp)
+
+        self.assertEqual(lite_parsed[0]["resource"]["service.name"], "test-service")
+        self.assertEqual(lite_parsed[0]["resource"]["cloud.region"], "us-west-2")
+
+    def test_parent_child_relationship_matches_full_sdk(self):
+        """Verify parent-child span IDs are correctly encoded like the full SDK."""
+        try:
+            from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest  # noqa: F401
+        except ImportError:
+            self.skipTest("protobuf library not available")
+
+        lite_spans = self._create_lite_sdk_spans()
+        lite_otlp = _encode_export_trace_request(lite_spans)
+        lite_parsed = self._parse_otlp(lite_otlp)
+
+        server = lite_parsed[0]
+        client = lite_parsed[1]
+        self.assertFalse(server["has_parent"])
+        self.assertTrue(client["has_parent"])
+
+    def test_multi_scope_grouping_matches_full_sdk(self):
+        """Verify spans from different scopes are grouped correctly like the full SDK."""
+        try:
+            from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest  # noqa: F401
+        except ImportError:
+            self.skipTest("protobuf library not available")
+
+        lite_spans = self._create_lite_sdk_spans()
+        lite_otlp = _encode_export_trace_request(lite_spans)
+
+        req = ExportTraceServiceRequest()
+        req.ParseFromString(lite_otlp)
+
+        self.assertEqual(len(req.resource_spans), 1)
+        scope_names = {ss.scope.name for ss in req.resource_spans[0].scope_spans}
+        self.assertIn("opentelemetry.instrumentation.aws_lambda", scope_names)
+        self.assertIn("opentelemetry.instrumentation.botocore", scope_names)
