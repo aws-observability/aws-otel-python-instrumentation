@@ -249,6 +249,15 @@ class ServiceEventsConfig:
     # to opt in. Supported syntax: "foo.*" (prefix); bare "*" is rejected.
     packages_include: List[str] = field(default_factory=list)  # OTEL_AWS_SERVICE_EVENTS_PACKAGES_INCLUDE
 
+    # Endpoint-measurement mode. Default true: a single framework-agnostic span processor
+    # (EndpointServiceEventsSpanProcessor — the Python port of Java's ServiceEventsSpanProcessor)
+    # reads the request-boundary span OTel already produces and derives endpoint metrics + incident
+    # snapshots from span attributes, covering every OTel-instrumented framework for free. Set
+    # OTEL_AWS_SERVICE_EVENTS_USE_SPAN_PROCESSOR=false to fall back to the legacy per-framework hooks
+    # (Flask/FastAPI/Django). The legacy hooks are also used as an automatic fallback when the
+    # processor cannot be registered on the active tracer provider.
+    use_span_processor: bool = True  # OTEL_AWS_SERVICE_EVENTS_USE_SPAN_PROCESSOR
+
     # Resource attributes from OTel Resource detectors (cloud/host/container/k8s metadata)
     # Populated by OTel configurator when available, empty for manual init
     resource_attributes: ResourceAttributes = field(default_factory=ResourceAttributes)
@@ -422,6 +431,8 @@ class ServiceEventsConfig:
                 "OTEL_AWS_SERVICE_EVENTS_FUNCTION_INSTRUMENT_ENABLED", defaults.function_instrument_enabled
             ),
             packages_include=get_pattern_list("OTEL_AWS_SERVICE_EVENTS_PACKAGES_INCLUDE", defaults.packages_include),
+            # Endpoint-measurement mode: span processor (true, default) vs per-framework hooks (false)
+            use_span_processor=get_bool("OTEL_AWS_SERVICE_EVENTS_USE_SPAN_PROCESSOR", defaults.use_span_processor),
             # Resource attributes (from OTel Resource detectors)
             resource_attributes=resource_attributes if resource_attributes is not None else ResourceAttributes(),
         )

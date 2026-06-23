@@ -22,6 +22,8 @@ import time
 from typing import Any, Dict, Optional
 
 from opentelemetry._logs import LogRecord, SeverityNumber
+from opentelemetry.trace import INVALID_SPAN, NonRecordingSpan, SpanContext, TraceFlags
+from opentelemetry.trace.propagation import set_span_in_context
 
 logger = logging.getLogger(__name__)
 
@@ -246,29 +248,18 @@ class ServiceEventsOtlpEmitter:
 
         timestamp_ns = int(time.time() * 1e9)
 
-        # Trace context (IncidentSnapshot only)
-        trace_id = 0
-        span_id = 0
-        trace_flags = 0
-        if trace_context:
-            try:
-                tid = trace_context.get("trace_id", "")
-                sid = trace_context.get("span_id", "")
-                if tid:
-                    trace_id = int(tid, 16) if isinstance(tid, str) else int(tid)
-                if sid:
-                    span_id = int(sid, 16) if isinstance(sid, str) else int(sid)
-                if trace_id and span_id:
-                    trace_flags = 1  # SAMPLED
-            except (ValueError, TypeError):
-                pass
-
         log_record = LogRecord(
             timestamp=timestamp_ns,
             event_name=event_name,
-            trace_id=trace_id,
-            span_id=span_id,
-            trace_flags=trace_flags,
+            # Carry the intended trace correlation as an explicit context. When no valid
+            # correlation exists this is INVALID_SPAN, so the ids resolve to 0 and the OTLP
+            # encoder OMITS trace_id/span_id from the wire (matching Java/Node) rather than
+            # emitting present-but-empty fields. Passing an explicit context — instead of
+            # trace_id/span_id kwargs — also prevents LogRecord from defaulting to whatever
+            # ambient span happens to be active at emit time (its constructor does
+            # `trace_id or get_current_span().trace_id`), which would otherwise leak an
+            # unrelated span's id onto an incident that had no correlation of its own.
+            context=self._build_trace_context(trace_context),
             severity_number=SeverityNumber.UNSPECIFIED,
             attributes=attributes,
             body=body if body is not None else "",
@@ -279,6 +270,39 @@ class ServiceEventsOtlpEmitter:
         # Telemetry must never crash the host app; swallow any emit failure.
         except Exception:  # pylint: disable=broad-exception-caught
             logger.debug("Failed to emit OTLP log: %s", event_name, exc_info=True)
+
+    @staticmethod
+    def _build_trace_context(trace_context: Optional[Dict[str, str]]):
+        """Build the OTel Context to attach to an emitted LogRecord's trace correlation.
+
+        Returns a context carrying EXACTLY the supplied trace/span ids (as a NonRecordingSpan),
+        or a context carrying INVALID_SPAN when no valid correlation exists. The invalid case makes
+        LogRecord resolve trace_id/span_id to 0, which the OTLP encoder omits from the wire — so an
+        incident with no correlation has NO trace_id/span_id fields rather than empty ones. Only set
+        the SAMPLED flag when both ids are present.
+
+        `trace_context` carries 0x-prefixed hex strings (the collector's `_format_trace_id` /
+        `_format_span_id` output) but ints are tolerated too. A malformed value degrades to
+        INVALID_SPAN (omitted) rather than raising — telemetry must never crash the host app.
+        """
+        if trace_context:
+            try:
+                tid = trace_context.get("trace_id")
+                sid = trace_context.get("span_id")
+                trace_id = (int(tid, 16) if isinstance(tid, str) else int(tid)) if tid else 0
+                span_id = (int(sid, 16) if isinstance(sid, str) else int(sid)) if sid else 0
+                if trace_id and span_id:
+                    span_context = SpanContext(
+                        trace_id=trace_id,
+                        span_id=span_id,
+                        is_remote=False,
+                        trace_flags=TraceFlags(TraceFlags.SAMPLED),
+                    )
+                    return set_span_in_context(NonRecordingSpan(span_context))
+            except (ValueError, TypeError):
+                pass
+        # No valid correlation → carry INVALID_SPAN so the ids serialize as omitted, not empty.
+        return set_span_in_context(INVALID_SPAN)
 
     def _put_vcs_and_deployment_attrs(self, attrs: Dict[str, Any]) -> None:
         """Add VCS and deployment attributes if set."""

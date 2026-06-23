@@ -1,0 +1,262 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""
+Framework-agnostic endpoint span processor for ServiceEvents.
+
+This is the Python port of the Java agent's ``ServiceEventsSpanProcessor``. Instead of
+installing per-framework request hooks (Flask/FastAPI/Django), it reads the request-boundary
+span that OpenTelemetry's own instrumentation already produces and derives the same endpoint
+metric + incident telemetry from span attributes alone. Any framework OTel instruments for
+free (Starlette, Tornado, aiohttp, ...) is then covered without bespoke hook code.
+
+Mapping to the Java design (``ServiceEventsSpanProcessor.java``):
+
+* ``on_start`` fires the *begin signal* (``begin_investigation``). Java's ``onStart`` is a
+  no-op because its bytecode servlet advice seeds ``InvestigationData``; Python has no such
+  advice, so the processor itself seeds the per-request investigation context here. This is
+  mandatory for exception attribution on handler-swallowed 5xx (FastAPI/DRF global handlers
+  convert an exception to a 500 *before* the span records an ``exception`` event), where the
+  AST function-monitor's captured call-path is the only surviving record of the error.
+* ``on_end`` filters to the request boundary (SERVER or local-root), derives the operation
+  with the SHARED App Signals ``get_ingress_operation`` (span-name primary, first-path-segment
+  fallback) — byte-identical to Java line 202 and to the per-framework hooks for matched
+  routes — then drives the unchanged ``EndpointMetricCollector`` and ``IncidentSnapshotCollector``.
+
+The collectors are reused verbatim: both rebuild ``operation = f"{method} {route}"`` internally
+and hold the fault-only (``status >= 500 && error_info``) breakdown gate, so this processor
+passes scalar ``route``/``method`` and lets that shared layer do the rest.
+"""
+
+import logging
+from typing import Optional
+
+from amazon.opentelemetry.distro._aws_span_processing_util import (
+    INTERNAL_OPERATION,
+    UNKNOWN_OPERATION,
+    get_ingress_operation,
+    is_local_root,
+)
+from amazon.opentelemetry.distro.serviceevents.instrumentation.flask_instrumentation import (
+    _extract_error_from_call_path,
+)
+from amazon.opentelemetry.distro.serviceevents.python_monitor import (
+    _ServiceEventsMonitorState,
+    clear_current_operation,
+    set_current_operation,
+)
+from opentelemetry.context import Context
+from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
+from opentelemetry.semconv.trace import SpanAttributes
+from opentelemetry.trace import SpanKind
+
+logger = logging.getLogger(__name__)
+
+
+def _is_request_boundary(span) -> bool:
+    """True for the span that delimits an inbound request.
+
+    Matches Java's filter (``getKind() != SERVER && !isLocalRoot`` → skip): a SERVER span,
+    or any local-root span (parent is absent or remote). Internal/CLIENT/DB child spans —
+    the bulk of spans per request — are excluded.
+    """
+    return span.kind == SpanKind.SERVER or is_local_root(span)
+
+
+def _get_http_method(span: ReadableSpan) -> Optional[str]:
+    """HTTP method from the span: stable ``http.request.method`` first, legacy ``http.method``."""
+    attributes = span.attributes or {}
+    method = attributes.get(SpanAttributes.HTTP_REQUEST_METHOD)
+    if method is None:
+        method = attributes.get(SpanAttributes.HTTP_METHOD)
+    return method
+
+
+def _get_status_code(span: ReadableSpan) -> int:
+    """HTTP status from the span: stable ``http.response.status_code`` first, legacy ``http.status_code``.
+
+    Returns 0 when neither is present (mirrors Java's ``statusCode = 0`` default), which the
+    collectors treat as a non-fault, non-error.
+    """
+    attributes = span.attributes or {}
+    status = attributes.get(SpanAttributes.HTTP_RESPONSE_STATUS_CODE)
+    if status is None:
+        status = attributes.get(SpanAttributes.HTTP_STATUS_CODE)
+    try:
+        return int(status) if status is not None else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+class EndpointServiceEventsSpanProcessor(SpanProcessor):
+    """SpanProcessor that produces ServiceEvents endpoint + incident telemetry from spans.
+
+    Holds references to the same two collectors the per-framework hooks use, plus the
+    ServiceEvents config (for endpoint include/exclude filtering). Crash-safe by contract:
+    a telemetry failure must never disrupt application tracing, so ``on_start``/``on_end``
+    swallow every exception.
+    """
+
+    def __init__(self, endpoint_collector, incident_snapshot_collector, config):
+        self._endpoint_collector = endpoint_collector
+        self._incident_snapshot_collector = incident_snapshot_collector
+        self._config = config
+
+    # -- SpanProcessor interface ------------------------------------------------------------
+
+    def on_start(self, span: Span, parent_context: Optional[Context] = None) -> None:
+        """Begin investigation for the request-boundary span only.
+
+        This is the generic begin hook (the Python analogue of Java's bytecode servlet
+        advice). Gated to the request boundary because ``begin_investigation`` resets the
+        per-request call-path: firing it on a nested child span would wipe the call-path the
+        AST monitor is accumulating for exception attribution.
+        """
+        try:
+            if not _is_request_boundary(span):
+                return
+            _ServiceEventsMonitorState.get_instance().begin_investigation()
+        except Exception:  # pylint: disable=broad-exception-caught  # telemetry must never crash host app
+            logger.debug("ServiceEvents span processor on_start failed", exc_info=True)
+
+    def on_end(self, span: ReadableSpan) -> None:
+        """Record endpoint metric + potential incident from the request-boundary span."""
+        try:
+            if not _is_request_boundary(span):
+                return
+            # The request is ending. Whatever happens below (including the early returns),
+            # clear the per-request context so it can't leak onto the next request that
+            # reuses this worker thread — mirrors Java onEnd's finally block.
+            try:
+                self._process_request_span(span)
+            finally:
+                clear_current_operation()
+                _ServiceEventsMonitorState.get_instance().clear_investigation_data()
+        except Exception:  # pylint: disable=broad-exception-caught  # telemetry must never crash host app
+            logger.debug("ServiceEvents span processor on_end failed", exc_info=True)
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:  # pylint: disable=unused-argument
+        return True
+
+    def shutdown(self) -> None:
+        return None
+
+    # -- internals --------------------------------------------------------------------------
+
+    @staticmethod
+    def _route_from_operation(operation: Optional[str], method: str) -> Optional[str]:
+        """Back the route out of the App Signals operation so the unchanged collector
+        rebuilds the identical ``f"{method} {route}"`` operation.
+
+        Handles the three shapes ``get_ingress_operation`` can return for a request boundary:
+
+        * ``"{method} {route}"`` — the common case (span name is the HTTP semconv name, or the
+          first-segment generator prepended the method). Strip the ``"{method} "`` prefix.
+        * ``"{route}"`` — a bare path with no method prefix. ``_generate_ingress_operation``
+          only prepends the method from the *legacy* ``http.method`` key, so a span carrying
+          only the *stable* ``http.request.method`` plus an unmatched path yields a bare
+          ``/segment``. Use it verbatim as the route (the collector re-adds the method).
+        * ``InternalOperation`` / ``UnknownOperation`` / ``<lambda>/FunctionHandler`` / a bare
+          method — no resolvable route. Return None so the caller skips, matching Java.
+        """
+        if not operation:
+            return None
+        if operation in (INTERNAL_OPERATION, UNKNOWN_OPERATION):
+            return None
+        if operation == method:
+            # span name was just the bare HTTP method — no route.
+            return None
+        prefix = f"{method} "
+        if operation.startswith(prefix):
+            route = operation[len(prefix) :]
+            return route or None
+        if operation.startswith("/"):
+            # Bare path (stable-method + unmatched-path case): the collector re-prepends method.
+            return operation
+        # Anything else (e.g. a lambda "name/FunctionHandler") is not an HTTP route.
+        return None
+
+    def _process_request_span(self, span: ReadableSpan) -> None:
+        method = _get_http_method(span)
+        if not method:
+            # No HTTP method → not an inbound HTTP request boundary (e.g. a messaging
+            # consumer local-root). Java skips these too (method == null early return).
+            return
+
+        # Derive the operation exactly as Application Signals / the Java processor do:
+        # span name when valid, else "{method} {first-path-segment}". This is the single
+        # source of truth — we back the route out of it so the unchanged collectors rebuild
+        # the identical operation string (verified equal to the per-framework hooks for
+        # matched routes, and to App Signals' first-segment collapse for unmatched 404s).
+        operation = get_ingress_operation(None, span)
+        route = self._route_from_operation(operation, method)
+        if not route:
+            # operation is InternalOperation / UnknownOperation / a lambda handler / a bare
+            # method — no resolvable HTTP route on this span. Java skips it (route == null).
+            return
+
+        # Apply the user-configured endpoint include/exclude filters before recording —
+        # same gate the per-framework hooks and Java's EndpointFilter apply.
+        if self._config and not self._config.should_track_endpoint(route, method):
+            return
+
+        status_code = _get_status_code(span)
+
+        start_ns = span.start_time or 0
+        end_ns = span.end_time or start_ns
+        duration_ns = max(0, end_ns - start_ns)
+        duration_ms = duration_ns / 1_000_000.0
+
+        span_context = span.get_span_context()
+        trace_id = span_context.trace_id if span_context and span_context.is_valid else None
+        span_id = span_context.span_id if span_context and span_context.is_valid else None
+
+        # Error info from the AST monitor's captured call-path. _extract_error_from_call_path
+        # PEEKS (does not clear) so the incident collector can still consume the investigation
+        # data below. exception=None is correct: like Java, the original exception object is
+        # gone by span end; the captured type/origin live in the investigation data.
+        error_info = None
+        if status_code >= 400:
+            error_info = _extract_error_from_call_path(None, route, method)
+
+        # 1. Endpoint metric.
+        if self._endpoint_collector:
+            try:
+                self._endpoint_collector.record_request(
+                    route=route,
+                    method=method,
+                    status_code=status_code,
+                    duration_ns=duration_ns,
+                    error_info=error_info,
+                )
+            except Exception:  # pylint: disable=broad-exception-caught  # best-effort telemetry
+                logger.debug("ServiceEvents record_request failed", exc_info=True)
+
+        # Set current operation before the incident path so exemplar correlation matches
+        # the recorded aggregation key (mirrors Java onEnd line 241).
+        set_current_operation(operation)
+
+        # 2. Potential incident. exception=None: the trigger gate uses status_code >= 500,
+        # and exception detail is recovered from investigation data inside the collector
+        # (process_potential_incident → _collect_exception_info), exactly as Java does.
+        if self._incident_snapshot_collector:
+            try:
+                exemplar = self._incident_snapshot_collector.process_potential_incident(
+                    route=route,
+                    method=method,
+                    status_code=status_code,
+                    duration_ms=duration_ms,
+                    exception=None,
+                    request_data={
+                        "method": method,
+                        "headers": {},
+                        "args": {},
+                        "view_args": {},
+                        "trace_id": trace_id,
+                        "span_id": span_id,
+                    },
+                )
+                if exemplar and self._endpoint_collector:
+                    self._endpoint_collector.record_incident_exemplar(exemplar["operation"], exemplar)
+            except Exception:  # pylint: disable=broad-exception-caught  # best-effort telemetry
+                logger.debug("ServiceEvents process_potential_incident failed", exc_info=True)

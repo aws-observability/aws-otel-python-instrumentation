@@ -212,6 +212,11 @@ class TestServiceEventsInstrumentation(TestCase):
             function_instrument_enabled=True,
             packages_include=[],
             packages_exclude=[],
+            # Pin the legacy-hooks path: this test is about the (absent) function-instrumentation
+            # warning, not endpoint mode. With the default span processor on and no SDK provider in
+            # this unit test, registration would fail and emit the fallback warning — unrelated
+            # noise here. The fallback itself is covered by test_default_falls_back_to_hooks_*.
+            use_span_processor=False,
         )
         instrumentation = ServiceEventsInstrumentation(config)
         mock_state.get_instance.return_value = MagicMock()
@@ -847,3 +852,92 @@ class TestBuildLogOtlpExporterSigV4(TestCase):
         kwargs = mock_ctor.call_args.kwargs
         self.assertEqual(kwargs["aws_region"], "us-east-2")
         self.assertEqual(kwargs["endpoint"], "https://logs.us-east-2.amazonaws.com/v1/logs")
+
+
+class TestEndpointMeasurementMode(TestCase):
+    """Tests for the use_span_processor flag: span processor vs per-framework hooks."""
+
+    def setUp(self):
+        patcher = patch("amazon.opentelemetry.distro.serviceevents.serviceevents_instrumentation.atexit")
+        self.mock_atexit = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    @patch("amazon.opentelemetry.distro.serviceevents.serviceevents_instrumentation._ServiceEventsMonitorState")
+    @patch("amazon.opentelemetry.distro.serviceevents.serviceevents_instrumentation.install_ast_hooks")
+    def test_flag_off_uses_framework_hooks(self, _mock_ast, mock_state):
+        """Flag off: per-framework hooks installed, span processor NOT installed."""
+        mock_state.get_instance.return_value = MagicMock()
+        config = ServiceEventsConfig(enabled=True, function_instrument_enabled=False, use_span_processor=False)
+        self.assertFalse(config.use_span_processor)
+        inst = ServiceEventsInstrumentation(config)
+        with patch.object(inst, "_install_framework_hooks") as hooks, patch.object(
+            inst, "_install_endpoint_span_processor"
+        ) as proc:
+            inst.initialize()
+            hooks.assert_called_once()
+            proc.assert_not_called()
+
+    @patch("amazon.opentelemetry.distro.serviceevents.serviceevents_instrumentation._ServiceEventsMonitorState")
+    @patch("amazon.opentelemetry.distro.serviceevents.serviceevents_instrumentation.install_ast_hooks")
+    def test_default_uses_span_processor(self, _mock_ast, mock_state):
+        """Default (flag on): span processor installed, per-framework hooks NOT installed."""
+        mock_state.get_instance.return_value = MagicMock()
+        config = ServiceEventsConfig(enabled=True, function_instrument_enabled=False)
+        self.assertTrue(config.use_span_processor)
+        inst = ServiceEventsInstrumentation(config)
+        with patch.object(inst, "_install_framework_hooks") as hooks, patch.object(
+            inst, "_install_endpoint_span_processor", return_value=True
+        ) as proc:
+            inst.initialize()
+            proc.assert_called_once()
+            hooks.assert_not_called()
+
+    @patch("amazon.opentelemetry.distro.serviceevents.serviceevents_instrumentation._ServiceEventsMonitorState")
+    @patch("amazon.opentelemetry.distro.serviceevents.serviceevents_instrumentation.install_ast_hooks")
+    def test_default_falls_back_to_hooks_on_registration_failure(self, _mock_ast, mock_state):
+        """Flag on but registration fails: fall back to the per-framework hooks (no silent loss)."""
+        mock_state.get_instance.return_value = MagicMock()
+        config = ServiceEventsConfig(enabled=True, function_instrument_enabled=False)
+        inst = ServiceEventsInstrumentation(config)
+        with patch.object(inst, "_install_framework_hooks") as hooks, patch.object(
+            inst, "_install_endpoint_span_processor", return_value=False
+        ) as proc:
+            inst.initialize()
+            proc.assert_called_once()
+            hooks.assert_called_once()
+
+    def test_install_span_processor_registers_on_provider(self):
+        """_install_endpoint_span_processor adds a processor to a provider that supports it."""
+        config = ServiceEventsConfig(enabled=True, use_span_processor=True)
+        inst = ServiceEventsInstrumentation(config)
+        provider = MagicMock()  # has add_span_processor
+        with patch("opentelemetry.trace.get_tracer_provider", return_value=provider):
+            self.assertTrue(inst._install_endpoint_span_processor(MagicMock(), MagicMock()))
+        provider.add_span_processor.assert_called_once()
+        registered = provider.add_span_processor.call_args.args[0]
+        from amazon.opentelemetry.distro.serviceevents.processor.endpoint_span_processor import (
+            EndpointServiceEventsSpanProcessor,
+        )
+
+        self.assertIsInstance(registered, EndpointServiceEventsSpanProcessor)
+
+    def test_install_span_processor_noop_provider_returns_false(self):
+        """A provider without add_span_processor (NoOp API provider) does not crash; returns False."""
+        config = ServiceEventsConfig(enabled=True, use_span_processor=True)
+        inst = ServiceEventsInstrumentation(config)
+
+        class _NoOpProvider:
+            pass
+
+        with patch("opentelemetry.trace.get_tracer_provider", return_value=_NoOpProvider()):
+            # Must not raise, and must report failure so init falls back to the hooks.
+            self.assertFalse(inst._install_endpoint_span_processor(MagicMock(), MagicMock()))
+
+    def test_install_span_processor_swallows_errors(self):
+        """A failure registering the processor is swallowed (telemetry must not crash app); returns False."""
+        config = ServiceEventsConfig(enabled=True, use_span_processor=True)
+        inst = ServiceEventsInstrumentation(config)
+        provider = MagicMock()
+        provider.add_span_processor.side_effect = RuntimeError("provider down")
+        with patch("opentelemetry.trace.get_tracer_provider", return_value=provider):
+            self.assertFalse(inst._install_endpoint_span_processor(MagicMock(), MagicMock()))
