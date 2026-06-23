@@ -702,7 +702,7 @@ class TestLiteVsFullSdkParity(unittest.TestCase):
         """Create spans using the full OTel SDK and export to OTLP bytes."""
         from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider as SdkTracerProvider
-        from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExportResult, SpanExporter
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
 
         collected = []
 

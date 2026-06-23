@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-# pylint: disable=too-many-public-methods,no-self-use,import-outside-toplevel,broad-exception-caught
+# pylint: disable=too-many-public-methods,no-self-use,import-outside-toplevel,broad-exception-caught,too-many-locals
 import base64
 import logging
 import os
@@ -734,9 +734,7 @@ def configure_lite_mode():
         )
     )
 
-    enabled = set(
-        d.strip() for d in os.environ.get("OTEL_PYTHON_ENABLED_INSTRUMENTATIONS", "").split(",") if d.strip()
-    )
+    enabled = set(d.strip() for d in os.environ.get("OTEL_PYTHON_ENABLED_INSTRUMENTATIONS", "").split(",") if d.strip())
     disabled = set(
         d.strip() for d in os.environ.get("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", "").split(",") if d.strip()
     )
