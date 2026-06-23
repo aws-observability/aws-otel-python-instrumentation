@@ -734,6 +734,9 @@ def configure_lite_mode():
         )
     )
 
+    enabled = set(
+        d.strip() for d in os.environ.get("OTEL_PYTHON_ENABLED_INSTRUMENTATIONS", "").split(",") if d.strip()
+    )
     disabled = set(
         d.strip() for d in os.environ.get("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", "").split(",") if d.strip()
     )
@@ -786,6 +789,8 @@ def configure_lite_mode():
     }
 
     for name, path in _instrumentors.items():
+        if enabled and name not in enabled:
+            continue
         if name in disabled:
             continue
         module_path, class_name = path.rsplit(":", 1)
