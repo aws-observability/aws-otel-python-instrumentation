@@ -133,11 +133,11 @@ else
 fi
 
 # - Set the enabled instrumentations allowlist for lite mode.
-#   If OTEL_PYTHON_ENABLED_INSTRUMENTATIONS is set, only those libraries are instrumented.
+#   If AWS_LAMBDA_LITE_INSTRUMENTATIONS is set, only those libraries are instrumented.
 #   This is read by configure_lite_mode() in the lite SDK.
 
-if [ -z "${OTEL_PYTHON_ENABLED_INSTRUMENTATIONS}" ] && [ -z "${OTEL_PYTHON_DISABLED_INSTRUMENTATIONS}" ]; then
-    export OTEL_PYTHON_ENABLED_INSTRUMENTATIONS="botocore,requests,urllib3"
+if [ -z "${AWS_LAMBDA_LITE_INSTRUMENTATIONS}" ] && [ -z "${OTEL_PYTHON_DISABLED_INSTRUMENTATIONS}" ]; then
+    export AWS_LAMBDA_LITE_INSTRUMENTATIONS="botocore,requests,urllib3"
 fi
 
 # - The disabled list is used by the full SDK path (opentelemetry-instrument).

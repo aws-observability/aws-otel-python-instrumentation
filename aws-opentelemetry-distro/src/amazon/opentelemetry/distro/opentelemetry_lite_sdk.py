@@ -734,7 +734,7 @@ def configure_lite_mode():
         )
     )
 
-    enabled = set(d.strip() for d in os.environ.get("OTEL_PYTHON_ENABLED_INSTRUMENTATIONS", "").split(",") if d.strip())
+    enabled = set(d.strip() for d in os.environ.get("AWS_LAMBDA_LITE_INSTRUMENTATIONS", "").split(",") if d.strip())
     disabled = set(
         d.strip() for d in os.environ.get("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", "").split(",") if d.strip()
     )
