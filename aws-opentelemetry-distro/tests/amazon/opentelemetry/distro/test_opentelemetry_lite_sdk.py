@@ -842,3 +842,63 @@ class TestLiteVsFullSdkParity(unittest.TestCase):
         scope_names = {ss.scope.name for ss in req.resource_spans[0].scope_spans}
         self.assertIn("opentelemetry.instrumentation.aws_lambda", scope_names)
         self.assertIn("opentelemetry.instrumentation.botocore", scope_names)
+
+
+class TestAddCodeAttributesNoOpInLiteMode(unittest.TestCase):
+    """Tests that add_code_attributes_to_span is a no-op in lite mode."""
+
+    _LAMBDA_LAYER_DIR = os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "..", "lambda-layer", "src")
+    )
+    _HAS_LAMBDA_LAYER = os.path.isfile(os.path.join(_LAMBDA_LAYER_DIR, "otel_wrapper.py"))
+
+    def setUp(self):
+        if not self._HAS_LAMBDA_LAYER:
+            self.skipTest("lambda-layer/src not available")
+        import sys
+
+        sys.path.insert(0, self._LAMBDA_LAYER_DIR)
+
+    def tearDown(self):
+        import sys
+
+        if self._LAMBDA_LAYER_DIR in sys.path:
+            sys.path.remove(self._LAMBDA_LAYER_DIR)
+
+    @patch.dict(
+        "os.environ",
+        {
+            "AWS_LAMBDA_LITE_MODE": "true",
+            "AWS_LAMBDA_FUNCTION_NAME": "my-function",
+        },
+    )
+    def test_add_code_attributes_is_noop_in_lite_mode(self):
+        import importlib
+
+        import opentelemetry.instrumentation.aws_lambda as aws_lambda_mod
+
+        importlib.reload(aws_lambda_mod)
+
+        mock_span = MagicMock()
+        mock_func = MagicMock()
+        aws_lambda_mod.add_code_attributes_to_span(mock_span, mock_func)
+
+        mock_span.set_attribute.assert_not_called()
+
+    @patch.dict(
+        "os.environ",
+        {
+            "AWS_LAMBDA_LITE_MODE": "false",
+            "AWS_LAMBDA_FUNCTION_NAME": "my-function",
+        },
+    )
+    def test_add_code_attributes_not_noop_when_disabled(self):
+        import importlib
+
+        import opentelemetry.instrumentation.aws_lambda as aws_lambda_mod
+
+        importlib.reload(aws_lambda_mod)
+
+        from amazon.opentelemetry.distro.code_correlation import add_code_attributes_to_span
+
+        self.assertIs(aws_lambda_mod.add_code_attributes_to_span, add_code_attributes_to_span)
