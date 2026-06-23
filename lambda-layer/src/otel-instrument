@@ -111,8 +111,8 @@ if [ -z "${OTEL_LOGS_EXPORTER}" ]; then
         export OTEL_LOGS_EXPORTER="none";
 fi
 
-if [ -z "${AWS_LAMBDA_LITE_MODE}" ]; then
-    export AWS_LAMBDA_LITE_MODE="false";
+if [ -z "${OTEL_AWS_LAMBDA_FAST_START}" ]; then
+    export OTEL_AWS_LAMBDA_FAST_START="false";
 fi
 
 if [ -z "${OTEL_AWS_APPLICATION_SIGNALS_ENABLED}" ]; then
@@ -132,18 +132,10 @@ else
     export OTEL_RESOURCE_ATTRIBUTES="$LAMBDA_RESOURCE_ATTRIBUTES,$OTEL_RESOURCE_ATTRIBUTES";
 fi
 
-# - Set the enabled instrumentations allowlist for lite mode.
-#   If AWS_LAMBDA_LITE_INSTRUMENTATIONS is set, only those libraries are instrumented.
-#   This is read by configure_lite_mode() in the lite SDK.
-
-if [ -z "${AWS_LAMBDA_LITE_INSTRUMENTATIONS}" ] && [ -z "${OTEL_PYTHON_DISABLED_INSTRUMENTATIONS}" ]; then
-    export AWS_LAMBDA_LITE_INSTRUMENTATIONS="botocore,requests,urllib3"
-fi
-
 # - The disabled list is used by the full SDK path (opentelemetry-instrument).
-#   In lite mode, the enabled list is authoritative so we skip setting the disabled default.
+#   In lite mode, the enabled list is hardcoded in configure_lite_mode() so we skip setting the disabled default.
 
-if [ "$(echo "${AWS_LAMBDA_LITE_MODE}" | tr '[:upper:]' '[:lower:]')" != "true" ]; then
+if [ "$(echo "${OTEL_AWS_LAMBDA_FAST_START}" | tr '[:upper:]' '[:lower:]')" != "true" ]; then
     if [ -z ${OTEL_PYTHON_DISABLED_INSTRUMENTATIONS} ]; then
         export OTEL_PYTHON_DISABLED_INSTRUMENTATIONS="aio-pika,aiohttp-client,aiohttp-server,aiopg,asgi,asyncio,asyncpg,boto,boto3,cassandra,celery,confluent_kafka,dbapi,django,elasticsearch,falcon,fastapi,flask,grpc_client,grpc_server,grpc_aio_client,grpc_aio_server,httpx,jinja2,kafka,logging,mysql,mysqlclient,pika,psycopg,psycopg2,pymemcache,pymongo,pymysql,pyramid,redis,remoulade,requests,sklearn,sqlalchemy,sqlite3,starlette,system_metrics,threading,tornado,tortoiseorm,wsgi,openai_agents,aws_openai_agents,aws_crewai,aws_langchain,aws_mcp,aws_llama-index"
     fi
@@ -165,7 +157,7 @@ export _HANDLER="otel_wrapper.lambda_handler";
 # - Lite mode: skip full SDK bootstrap, use lite SDK configured in otel_wrapper.py
 # - Full mode: use standard opentelemetry-instrument path
 
-if [ "$(echo "${AWS_LAMBDA_LITE_MODE}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+if [ "$(echo "${OTEL_AWS_LAMBDA_FAST_START}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
     exec "$@"
 else
     exec python3 $LAMBDA_LAYER_PKGS_DIR/bin/opentelemetry-instrument "$@"

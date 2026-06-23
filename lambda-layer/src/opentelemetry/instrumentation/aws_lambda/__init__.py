@@ -92,7 +92,7 @@ from opentelemetry.trace import Span, SpanKind, TracerProvider, get_tracer, get_
 from opentelemetry.trace.status import Status, StatusCode
 
 # Import code correlation functionality (skip in lite mode to avoid SDK imports)
-if os.environ.get("AWS_LAMBDA_LITE_MODE", "false").lower() == "true":
+if os.environ.get("OTEL_AWS_LAMBDA_FAST_START", "false").lower() == "true":
 
     def add_code_attributes_to_span(span, func):
         pass

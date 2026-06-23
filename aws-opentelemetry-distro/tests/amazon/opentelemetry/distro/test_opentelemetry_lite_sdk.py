@@ -868,7 +868,7 @@ class TestAddCodeAttributesNoOpInLiteMode(unittest.TestCase):
     @patch.dict(
         "os.environ",
         {
-            "AWS_LAMBDA_LITE_MODE": "true",
+            "OTEL_AWS_LAMBDA_FAST_START": "true",
             "AWS_LAMBDA_FUNCTION_NAME": "my-function",
         },
     )
@@ -888,7 +888,7 @@ class TestAddCodeAttributesNoOpInLiteMode(unittest.TestCase):
     @patch.dict(
         "os.environ",
         {
-            "AWS_LAMBDA_LITE_MODE": "false",
+            "OTEL_AWS_LAMBDA_FAST_START": "false",
             "AWS_LAMBDA_FUNCTION_NAME": "my-function",
         },
     )

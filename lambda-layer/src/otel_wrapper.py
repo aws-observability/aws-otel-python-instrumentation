@@ -55,7 +55,7 @@ class HandlerError(Exception):
     pass
 
 
-if os.environ.get("AWS_LAMBDA_LITE_MODE", "false").lower() == "true":
+if os.environ.get("OTEL_AWS_LAMBDA_FAST_START", "false").lower() == "true":
     try:
         from amazon.opentelemetry.distro.opentelemetry_lite_sdk import configure_lite_mode
 
