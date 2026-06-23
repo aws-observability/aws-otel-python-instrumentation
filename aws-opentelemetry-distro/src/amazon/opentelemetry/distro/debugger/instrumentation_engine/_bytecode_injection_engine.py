@@ -6,7 +6,7 @@
 Bytecode injection engine for live debugger.
 
 This module handles the injection of breakpoint calls into Python functions
-using bytecode injection for Python 3.9-3.11.
+using bytecode injection for Python 3.10-3.11.
 """
 
 import inspect
@@ -21,7 +21,9 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from amazon.opentelemetry.distro._utils import IS_BYTECODE_INSTALLED
 from amazon.opentelemetry.distro.debugger._data_models import (
+    DEFAULT_MAX_COLLECTION_WIDTH,
     DEFAULT_MAX_FIELDS_PER_OBJECT,
+    DEFAULT_MAX_OBJECT_DEPTH,
     DEFAULT_MAX_STRING_LENGTH,
     CaptureConfig,
 )
@@ -107,7 +109,7 @@ class InjectionState:
 
 class BytecodeInjectionEngine(InstrumentationEngine):
     """
-    Bytecode injection engine for line-level debugging on Python 3.9-3.11.
+    Bytecode injection engine for line-level debugging on Python 3.10-3.11.
 
     Safety guarantees:
     - Never crashes the application (comprehensive exception handling)
@@ -138,7 +140,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         if not IS_BYTECODE_INSTALLED:
             logger.warning(
                 "bytecode library not available. "
-                "Debugger will not function on Python 3.9-3.11. "
+                "Debugger will not function on Python 3.10-3.11. "
                 "Install with: pip install bytecode"
             )
 
@@ -166,8 +168,8 @@ class BytecodeInjectionEngine(InstrumentationEngine):
 
     @staticmethod
     def supports_runtime() -> bool:
-        """Check if bytecode injection is supported (Python 3.9-3.11)."""
-        return (3, 9) <= sys.version_info < (3, 12) and IS_BYTECODE_INSTALLED
+        """Check if bytecode injection is supported (Python 3.10-3.11)."""
+        return (3, 10) <= sys.version_info < (3, 12) and IS_BYTECODE_INSTALLED
 
     @staticmethod
     def _should_decline_bytecode_rewrite(code: CodeType) -> bool:
@@ -559,8 +561,10 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             serializer = SnapshotSerializer(
                 max_fields=capture_config.max_fields_per_object if capture_config else DEFAULT_MAX_FIELDS_PER_OBJECT,
                 max_string_length=capture_config.max_string_length if capture_config else DEFAULT_MAX_STRING_LENGTH,
-                max_depth=capture_config.max_object_depth if capture_config else 3,
-                max_collection_size=capture_config.max_collection_width if capture_config else 10,
+                max_depth=capture_config.max_object_depth if capture_config else DEFAULT_MAX_OBJECT_DEPTH,
+                max_collection_size=(
+                    capture_config.max_collection_width if capture_config else DEFAULT_MAX_COLLECTION_WIDTH
+                ),
             )
 
             # Serialize local variables into CapturedValue map
@@ -997,8 +1001,8 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         try:
             if sys.version_info >= (3, 11):
                 return self._create_breakpoint_instructions_py311(function_key, line_number)
-            if sys.version_info >= (3, 9):
-                return self._create_breakpoint_instructions_py39_py310(function_key, line_number)
+            if sys.version_info >= (3, 10):
+                return self._create_breakpoint_instructions_py310(function_key, line_number)
             logger.error("Unsupported Python version: %s", sys.version_info)
             return None
         except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -1040,14 +1044,14 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         ]
 
     @staticmethod
-    def _create_breakpoint_instructions_py39_py310(function_key: str, line_number: int) -> list:
+    def _create_breakpoint_instructions_py310(function_key: str, line_number: int) -> list:
         """
-        Create Python 3.9/3.10-specific breakpoint instructions.
+        Create Python 3.10-specific breakpoint instructions.
 
         Generates bytecode that calls:
         _breakpoint_handler(function_key, line_number, locals())
 
-        Python 3.9/3.10 calling convention:
+        Python 3.10 calling convention:
         - LOAD_GLOBAL (load _breakpoint_handler)
         - LOAD_CONST (load arguments)
         - LOAD_GLOBAL + CALL_FUNCTION (call locals())
@@ -1069,7 +1073,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             Instr("POP_TOP"),
         ]
 
-    # Function-level instrumentation bytecode rewrite (3.9 / 3.10).
+    # Function-level instrumentation bytecode rewrite (3.10).
     # 3.11 lands in a follow-up commit that uses ConcreteBytecode +
     # exception_table since the high-level API forbids nested TryBegin.
 
@@ -1095,7 +1099,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         refusal. unique_local_names is the 3-tuple (start_ns, entry_ctx, retval)
         of slot names to be stored on InjectionState for restoration audits.
 
-        Bytecode shape (3.9/3.10):
+        Bytecode shape (3.10):
             <pre-init three locals to None>
             SETUP_FINALLY @handler_label
             <call entry hook -> (start_ns, entry_ctx); store both>
@@ -1110,11 +1114,11 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             handler_label:
                 <call unwind hook(start_ns, entry_ctx)>
                 POP_TOP
-                RERAISE   (no oparg on 3.9; RERAISE 0 on 3.10)
+                RERAISE 0
         """
         if sys.version_info >= (3, 11):
             return self._create_code_with_function_wrap_311(code, function_key)
-        if not (3, 9) <= sys.version_info < (3, 11):
+        if not (3, 10) <= sys.version_info < (3, 11):
             return None
 
         try:
@@ -1132,25 +1136,23 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             taken.add(retval_slot)
 
             handler_label = Label()
-            prologue = self._build_function_prologue_39_310(function_key, start_ns_slot, entry_ctx_slot, retval_slot)
+            prologue = self._build_function_prologue_310(function_key, start_ns_slot, entry_ctx_slot, retval_slot)
             prologue.append(Instr("SETUP_FINALLY", handler_label))
-            prologue.extend(self._build_function_entry_call_39_310(function_key, start_ns_slot, entry_ctx_slot))
+            prologue.extend(self._build_function_entry_call_310(function_key, start_ns_slot, entry_ctx_slot))
 
             # Walk user instructions; replace RETURN_VALUE with exit-call sequence.
             new_instructions = list(prologue)
             for instr in bc:
                 if hasattr(instr, "name") and instr.name == "RETURN_VALUE":
                     new_instructions.extend(
-                        self._build_function_exit_call_39_310(function_key, start_ns_slot, entry_ctx_slot, retval_slot)
+                        self._build_function_exit_call_310(function_key, start_ns_slot, entry_ctx_slot, retval_slot)
                     )
                 else:
                     new_instructions.append(instr)
 
             # Append unwind handler at end.
             new_instructions.append(handler_label)
-            new_instructions.extend(
-                self._build_function_unwind_call_39_310(function_key, start_ns_slot, entry_ctx_slot)
-            )
+            new_instructions.extend(self._build_function_unwind_call_310(function_key, start_ns_slot, entry_ctx_slot))
 
             new_bc = bc.copy()
             new_bc.clear()
@@ -1162,7 +1164,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             return None
 
     # Bytecode template helpers, paired by event family. Each family has a
-    # 3.9/3.10 builder (uses LOAD_GLOBAL with a string arg + CALL_FUNCTION;
+    # 3.10 builder (uses LOAD_GLOBAL with a string arg + CALL_FUNCTION;
     # SETUP_FINALLY-based exception path) and a 3.11 builder (uses
     # LOAD_GLOBAL with a (push_null, name) tuple arg + PRECALL/CALL pair;
     # PEP 657 exception_table-based exception path).
@@ -1171,7 +1173,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
     # hook's LOAD_FAST is safe even if the entry hook crashes before storing.
 
     @staticmethod
-    def _build_function_prologue_39_310(
+    def _build_function_prologue_310(
         function_key: str,
         start_ns_slot: str,
         entry_ctx_slot: str,
@@ -1203,7 +1205,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
     # start_ns, entry_ctx = tup.
 
     @staticmethod
-    def _build_function_entry_call_39_310(function_key: str, start_ns_slot: str, entry_ctx_slot: str) -> list:
+    def _build_function_entry_call_310(function_key: str, start_ns_slot: str, entry_ctx_slot: str) -> list:
         return [
             Instr("LOAD_GLOBAL", _FUNCTION_HANDLER_NAME),
             Instr("LOAD_CONST", function_key),
@@ -1240,7 +1242,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
     # reload retval, RETURN_VALUE.
 
     @staticmethod
-    def _build_function_exit_call_39_310(
+    def _build_function_exit_call_310(
         function_key: str,
         start_ns_slot: str,
         entry_ctx_slot: str,
@@ -1291,13 +1293,12 @@ class BytecodeInjectionEngine(InstrumentationEngine):
     # ---- unwind call: handler body — call unwind hook then re-raise.
 
     @staticmethod
-    def _build_function_unwind_call_39_310(function_key: str, start_ns_slot: str, entry_ctx_slot: str) -> list:
+    def _build_function_unwind_call_310(function_key: str, start_ns_slot: str, entry_ctx_slot: str) -> list:
         """SETUP_FINALLY handler body: call unwind hook then RERAISE.
 
-        3.9: RERAISE has no oparg.
         3.10: RERAISE takes oparg 0 (re-raise top exception, no f_lasti restore).
         """
-        instrs = [
+        return [
             Instr("LOAD_GLOBAL", _FUNCTION_HANDLER_NAME),
             Instr("LOAD_CONST", function_key),
             Instr("LOAD_CONST", "unwind"),
@@ -1305,12 +1306,8 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             Instr("LOAD_FAST", entry_ctx_slot),
             Instr("CALL_FUNCTION", 4),
             Instr("POP_TOP"),
+            Instr("RERAISE", 0),
         ]
-        if sys.version_info >= (3, 10):
-            instrs.append(Instr("RERAISE", 0))
-        else:
-            instrs.append(Instr("RERAISE"))
-        return instrs
 
     @staticmethod
     def _build_function_unwind_call_311(function_key: str, start_ns_slot: str, entry_ctx_slot: str) -> list:

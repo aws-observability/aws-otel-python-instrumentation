@@ -17,7 +17,7 @@ import time
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs
 
-from amazon.opentelemetry.distro.serviceevents.instrumentation._constants import UNMATCHED_ROUTE
+from amazon.opentelemetry.distro.serviceevents.instrumentation._constants import unmatched_route_label
 from amazon.opentelemetry.distro.serviceevents.instrumentation.flask_instrumentation import (
     _capture_active_trace_context,
     _extract_error_from_call_path,
@@ -98,9 +98,10 @@ def _get_route_pattern(scope) -> str:
     if resolved is not None:
         return resolved
 
-    # No route matched (404 / scanner traffic). Collapse to a single sentinel rather than
-    # the raw path so probed URLs can't explode metric cardinality. Matches Flask/Django.
-    return UNMATCHED_ROUTE
+    # No route matched (404 / scanner traffic). Collapse to the first path segment rather
+    # than the raw path so probed URLs can't explode metric cardinality. Matches
+    # Flask/Django and Application Signals' unmatched-route handling.
+    return unmatched_route_label(scope.get("path"))
 
 
 def _resolve_route_template(scope) -> Optional[str]:
@@ -108,12 +109,12 @@ def _resolve_route_template(scope) -> Optional[str]:
 
     At middleware entry ``scope["route"]`` is unset (routing happens inside the inner
     app), so the raw URL path is all that's available. But the per-request *operation*
-    (used for adaptive hot-endpoint sampling and incident correlation) and the endpoint
-    aggregation are both keyed on the route *template* (e.g. ``/users/{id}``). Without
-    resolving the template here, every distinct param value (``/users/1``, ``/users/2``)
-    would be a different operation, so adaptive sampling — which marks the *template*
-    hot — would never match, and FunctionCall sampling for param routes would silently
-    stay off.
+    (used for incident correlation) and the endpoint aggregation are both keyed on the
+    route *template* (e.g. ``/users/{id}``). Without resolving the template here, every
+    distinct param value (``/users/1``, ``/users/2``) would be a different operation, so
+    incident correlation and endpoint aggregation would shatter into per-value cardinality.
+    (Sampling does not depend on the operation: the default ``always`` mode samples every
+    call, and ``auto`` keys its tier counters on the function, not the route.)
 
     Starlette sets ``scope["app"]`` before the middleware stack runs, so its routes are
     available. We match the scope against them (the same matching the router does moments
@@ -304,8 +305,8 @@ class ServiceEventsFastAPIMiddleware:
 
             # Re-resolve the route now that the app has run. At middleware entry
             # scope["route"] is unset, so `route` was whatever _get_route_pattern could
-            # determine pre-routing: a pre-resolved template, or the <unmatched> sentinel
-            # when nothing matched. Starlette/FastAPI routing populates scope["route"] in
+            # determine pre-routing: a pre-resolved template, or the first-segment
+            # unmatched label when nothing matched. Starlette/FastAPI routing populates scope["route"] in
             # place during dispatch, so by here it resolves to the template (/users/{id}).
             # Use the template for the exported endpoint telemetry below to avoid a
             # per-URL metric cardinality explosion. (The pre-await operation context

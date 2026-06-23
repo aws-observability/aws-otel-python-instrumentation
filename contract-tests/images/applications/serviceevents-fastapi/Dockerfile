@@ -1,4 +1,5 @@
-FROM python:3.10
+ARG PYTHON_VERSION=3.10
+FROM python:${PYTHON_VERSION}
 WORKDIR /serviceevents-fastapi
 COPY ./dist/$DISTRO /serviceevents-fastapi
 COPY ./contract-tests/images/applications/serviceevents-fastapi /serviceevents-fastapi

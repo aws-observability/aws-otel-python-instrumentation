@@ -15,6 +15,10 @@ inputs:
   run_unit_tests:
     required: true
     description: "true/false flag indicating if we should run unit tests/benchmarks with tox"
+  wheel_path:
+    required: false
+    default: ''
+    description: "Optional path to a prebuilt aws-opentelemetry-distro wheel. When set, tox installs the distro from this wheel (via ADOT_WHEEL) instead of building from source."
 
 
 runs:
@@ -24,6 +28,11 @@ runs:
       uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c #v6.0.0
       with:
         python-version: ${{ inputs.python_version }}
+
+    - name: Use prebuilt distro wheel
+      if: ${{ inputs.wheel_path != '' }}
+      shell: bash
+      run: echo "ADOT_WHEEL=$(realpath '${{ inputs.wheel_path }}')" >> "$GITHUB_ENV"
 
     - name: Install tox
       shell: bash
@@ -55,9 +64,7 @@ runs:
       shell: bash
       run: |
         pip install coverage
-        if [ "${{ inputs.python_version }}" = "3.9" ]; then
-          RCFILE=.coveragerc-py39
-        elif [ "${{ inputs.python_version }}" = "3.14" ]; then
+        if [ "${{ inputs.python_version }}" = "3.14" ]; then
           RCFILE=.coveragerc-py314
         else
           RCFILE=.coveragerc

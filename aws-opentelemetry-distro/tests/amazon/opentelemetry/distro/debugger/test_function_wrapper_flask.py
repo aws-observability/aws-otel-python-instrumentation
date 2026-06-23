@@ -38,7 +38,7 @@ def _remove_module(name):
 def _make_engine():
     """Pick the engine the running Python supports.
 
-    3.12+ → SysMonitoringEngine. 3.9-3.11 → BytecodeInjectionEngine.
+    3.12+ → SysMonitoringEngine. 3.10-3.11 → BytecodeInjectionEngine.
     """
     if sys.version_info >= (3, 12):
         # pylint: disable=import-outside-toplevel

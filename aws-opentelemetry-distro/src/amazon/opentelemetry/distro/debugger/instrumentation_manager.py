@@ -138,8 +138,8 @@ class InstrumentationManager:
                 except Exception as exception:  # pylint: disable=broad-exception-caught
                     logger.error("Failed to initialize SysMonitoringEngine: %s", exception, exc_info=True)
 
-            # Python 3.9-3.11 - Use BytecodeInjectionEngine
-            elif sys.version_info >= (3, 9):
+            # Python 3.10-3.11 - Use BytecodeInjectionEngine
+            elif sys.version_info >= (3, 10):
                 try:
                     # pylint: disable=import-outside-toplevel
                     from amazon.opentelemetry.distro.debugger.instrumentation_engine._bytecode_injection_engine import (
@@ -157,11 +157,11 @@ class InstrumentationManager:
                 except Exception as exception:  # pylint: disable=broad-exception-caught
                     logger.error("Failed to initialize BytecodeInjectionEngine: %s", exception, exc_info=True)
 
-            # Python < 3.9 - Not supported
+            # Python < 3.10 - Not supported
             else:
                 logger.warning(
                     "Python %d.%d is not supported for line breakpoints. "
-                    "Supported versions: 3.9-3.12+. Function wrapping will still work, but line breakpoints will not.",
+                    "Supported versions: 3.10-3.12+. Function wrapping will still work, but line breakpoints will not.",
                     sys.version_info.major,
                     sys.version_info.minor,
                 )

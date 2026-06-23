@@ -14,7 +14,7 @@ import logging
 import time
 from typing import Any, Dict, Optional
 
-from amazon.opentelemetry.distro.serviceevents.instrumentation._constants import UNMATCHED_ROUTE
+from amazon.opentelemetry.distro.serviceevents.instrumentation._constants import unmatched_route_label
 from amazon.opentelemetry.distro.serviceevents.instrumentation._safety import never_raises
 from amazon.opentelemetry.distro.serviceevents.python_monitor import (
     _ServiceEventsMonitorState,
@@ -349,9 +349,9 @@ def _get_route_pattern(request) -> str:
         return f"/{request.endpoint}"
 
     # No url_rule and no endpoint means the URL matched no route (404 / scanner traffic).
-    # Collapse to a single sentinel rather than the raw path so probed URLs can't explode
-    # metric cardinality.
-    return UNMATCHED_ROUTE
+    # Collapse to the first path segment rather than the raw path so probed URLs can't
+    # explode metric cardinality, matching Application Signals' unmatched-route handling.
+    return unmatched_route_label(getattr(request, "path", None))
 
 
 def _extract_error_from_call_path(exception, route, method) -> Optional[Dict]:
@@ -389,7 +389,13 @@ def _extract_error_from_call_path(exception, route, method) -> Optional[Dict]:
     elif isinstance(exc_data, dict) and exc_data.get("name"):
         error_type = exc_data["name"]
     else:
-        error_type = "UnknownError"
+        # No real error type was captured — neither a passed-in exception nor a
+        # monitor-recorded one. Return None so callers omit the error breakdown
+        # entirely, matching Java (whose gate is `statusCode >= 500 && errorType
+        # != null`). A 5xx with no captured exception (e.g. a handler that returns
+        # a 500 status without raising) must NOT synthesize an "UnknownError"
+        # breakdown entry.
+        return None
 
     # Find the origin function_name.
     function_name = "unknown"

@@ -12,7 +12,7 @@ from amazon.opentelemetry.distro.debugger._data_models import CaptureConfig
 from amazon.opentelemetry.distro.debugger.instrumentation_engine import _bytecode_injection_engine
 
 
-@unittest.skipIf(not (3, 9) <= sys.version_info < (3, 12), "BytecodeInjectionEngine requires Python 3.9-3.11")
+@unittest.skipIf(not (3, 10) <= sys.version_info < (3, 12), "BytecodeInjectionEngine requires Python 3.10-3.11")
 class TestBytecodeInjectionEngine(InstrumentationEngineTestBase):
     """Tests for BytecodeInjectionEngine."""
 
@@ -498,8 +498,8 @@ class TestBytecodeInjectionEngine(InstrumentationEngineTestBase):
 
 
 @unittest.skipIf(
-    not ((3, 9) <= sys.version_info < (3, 12)),
-    "Function-level bytecode rewrite supported on Python 3.9-3.11 only",
+    not ((3, 10) <= sys.version_info < (3, 12)),
+    "Function-level bytecode rewrite supported on Python 3.10-3.11 only",
 )
 class TestBytecodeInjectionEngineFunctionLevel(unittest.TestCase):
     """End-to-end tests for function-level instrumentation via bytecode rewrite."""

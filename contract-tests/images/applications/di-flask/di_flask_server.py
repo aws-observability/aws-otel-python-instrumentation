@@ -55,8 +55,8 @@ assert _CALCULATE_SUM_LINE is not None, "Could not find 'result = a + b' in calc
 def limited_function(x):
     """Target function with hit limit (MaxHits=3).
 
-    MaxHits=3 means: allow 2 snapshots, disable at 3rd hit.
-    (The check is hit_count >= max_hits, so hit 1&2 pass, hit 3 is blocked.)
+    MaxHits=3 means: allow 3 snapshots, disable on the 4th hit.
+    (The check is hit_count > max_hits, so hits 1-3 pass, hit 4 is blocked.)
     """
     return x * 10
 
@@ -88,11 +88,28 @@ def process_large_collection(large_list):
     return len(large_list)
 
 
+def process_small_limit_string(small_limit_string):
+    """BREAKPOINT target for small (below-max) string limit validation.
+
+    Config requests MaxStringLength=10 (well within range). The input string is
+    100 chars, so a function-level capture that honors the config should truncate
+    to exactly 10 -- proving the function path respects user-supplied limits rather
+    than always using the maximum.
+    """
+    return len(small_limit_string)
+
+
 # ---------------------------------------------------------------------------
 # Mock DI API configuration
 # ---------------------------------------------------------------------------
 
 from mock_di_api import set_breakpoint_configs, set_probe_configs, start_mock_api  # noqa: E402
+
+# Import a target function via `from module import func` so the executing call site
+# (the /from-import route below) holds a bare-name alias in THIS module's namespace
+# rather than in the defining module. A method-level breakpoint on
+# pricing_service.apply_discount must redirect this alias for instrumentation to fire.
+from pricing_service import apply_discount  # noqa: E402
 
 BREAKPOINT_CONFIGS = [
     # Function-level breakpoint on process_data
@@ -221,13 +238,59 @@ BREAKPOINT_CONFIGS = [
             }
         },
     },
+    # Breakpoint for small (below-max) string limit validation (MaxStringLength=10).
+    # Verifies the function-level path honors a user-supplied limit instead of the maximum.
+    {
+        "InstrumentationType": "BREAKPOINT",
+        "SignalType": "SNAPSHOT",
+        "Location": {
+            "CodeLocation": {
+                "Language": "Python",
+                "CodeUnit": "di_flask_server",
+                "MethodName": "process_small_limit_string",
+                "FilePath": "di_flask_server.py",
+            }
+        },
+        "LocationHash": "aabb000000000009",
+        "CaptureConfiguration": {
+            "CodeCapture": {
+                "CaptureReturn": True,
+                "CaptureArguments": ["small_limit_string"],
+                "CaptureLimits": {"MaxStringLength": 10},
+            }
+        },
+    },
+    # Function-level breakpoint on apply_discount, which is DEFINED in pricing_service
+    # but CALLED via a `from pricing_service import apply_discount` bare-name alias in
+    # di_flask_server. The call site resolves the importing module's alias, so a
+    # method-level install must redirect that alias (not just the defining module's
+    # attribute) for this snapshot to be produced. CodeUnit is the defining module.
+    {
+        "InstrumentationType": "BREAKPOINT",
+        "SignalType": "SNAPSHOT",
+        "Location": {
+            "CodeLocation": {
+                "Language": "Python",
+                "CodeUnit": "pricing_service",
+                "MethodName": "apply_discount",
+                "FilePath": "pricing_service.py",
+            }
+        },
+        "LocationHash": "aabb00000000000a",
+        "CaptureConfiguration": {
+            "CodeCapture": {
+                "CaptureReturn": True,
+                "CaptureArguments": ["price_cents", "discount_percent"],
+                "CaptureLimits": {"MaxStringLength": 255},
+            }
+        },
+    },
 ]
 
 PROBE_CONFIGS = [
     # PROBE on compute_total
     {
         "InstrumentationType": "PROBE",
-        "InstrumentationName": "compute-total-probe",
         "SignalType": "SNAPSHOT",
         "Location": {
             "CodeLocation": {
@@ -249,7 +312,6 @@ PROBE_CONFIGS = [
     # PROBE on shared_function (coexists with BREAKPOINT)
     {
         "InstrumentationType": "PROBE",
-        "InstrumentationName": "shared-function-probe",
         "SignalType": "SNAPSHOT",
         "Location": {
             "CodeLocation": {
@@ -336,6 +398,25 @@ def limits_collection_endpoint():
     large_list = list(range(1, 51))
     result = process_large_collection(large_list)
     return jsonify({"status": "ok", "size": result})
+
+
+@app.route("/limits-small-string")
+def limits_small_string_endpoint():
+    """Endpoint that triggers small (below-max) string limit validation."""
+    small_limit_string = "B" * 100
+    result = process_small_limit_string(small_limit_string)
+    return jsonify({"status": "ok", "length": result})
+
+
+@app.route("/from-import")
+def from_import_endpoint():
+    """Endpoint that calls a function reached via `from pricing_service import apply_discount`.
+
+    The call uses the bare imported name, so the method-level breakpoint on
+    pricing_service.apply_discount only fires if the alias in this module is redirected.
+    """
+    result = apply_discount(1999, 15)
+    return jsonify({"status": "ok", "final_cents": result})
 
 
 @app.route("/error")

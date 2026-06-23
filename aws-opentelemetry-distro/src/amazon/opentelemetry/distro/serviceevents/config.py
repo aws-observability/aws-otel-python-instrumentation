@@ -186,6 +186,10 @@ class ServiceEventsConfig:
     # Per-endpoint latency thresholds for latency-triggered incident snapshots
     # Format: "METHOD /route:threshold_ms,METHOD /route:threshold_ms,..."
     # Example: "POST /api/checkout:500,GET /api/health:50,GET /api/reports:5000"
+    # Django note: routes are matched WITHOUT a leading slash (e.g. "api/checkout"), to
+    # mirror Application Signals. Write Django patterns slash-less, e.g. "POST api/checkout:500".
+    # Exception: unmatched/scanner requests (no route) are recorded with a leading-slash
+    # first-segment label (e.g. "/wp-admin"), so thresholds targeting them keep the slash.
     latency_thresholds: List[str] = field(default_factory=list)  # OTEL_AWS_SERVICE_EVENTS_LATENCY_THRESHOLDS
 
     # Incident Snapshot Request Payload Capture Settings. Hardcoded off — no longer a
@@ -195,6 +199,12 @@ class ServiceEventsConfig:
     # Endpoint Filtering - glob patterns in format "METHOD /route" or "* /route" or "METHOD *"
     # If include_patterns is set, only track matching endpoints; then exclude_patterns removes from that set
     # Example: "GET /api/*,POST /api/*" or "* /health,* /metrics"
+    # Django note: routes are recorded WITHOUT a leading slash (e.g. "api/users"), to mirror
+    # Application Signals. Write Django patterns slash-less, e.g. "GET api/*"; Flask/FastAPI
+    # routes carry the leading slash, so their patterns keep it, e.g. "GET /api/*".
+    # Exception: unmatched/scanner requests (no route) are recorded with a leading-slash
+    # first-segment label (e.g. "/wp-admin"), so filters targeting them keep the slash even
+    # on Django, e.g. "* /wp-admin".
     endpoint_include_patterns: List[str] = field(
         default_factory=list
     )  # OTEL_AWS_SERVICE_EVENTS_ENDPOINT_INCLUDE_PATTERNS
@@ -207,19 +217,15 @@ class ServiceEventsConfig:
     # adds patterns to subtract from PACKAGES_INCLUDE.
     packages_exclude: List[str] = field(default_factory=list)  # OTEL_AWS_SERVICE_EVENTS_PACKAGES_EXCLUDE
 
-    # Sampling Mode: "adaptive" (hot endpoint), "auto" (tiered), "always" (100%), "never" (0%)
-    sampling_mode: str = "adaptive"  # OTEL_AWS_SERVICE_EVENTS_SAMPLING_MODE
+    # Sampling Mode: "auto" (tiered), "always" (100%), "never" (0%)
+    sampling_mode: str = "always"  # OTEL_AWS_SERVICE_EVENTS_SAMPLING_MODE
 
-    # Sampling Thresholds (for "auto" mode: 3-tier adaptive sampling). Internal: hardcoded, no env
+    # Sampling Thresholds (for "auto" mode: 3-tier sampling). Internal: hardcoded, no env
     # override (test hook may set them).
     sample_tier1_threshold: int = 100
     sample_tier2_threshold: int = 1000
     sample_tier2_rate: int = 10
     sample_tier3_rate: int = 100
-
-    # Adaptive sampling: number of collector flush cycles an endpoint stays "hot" after an incident.
-    # Internal: hardcoded, no env override.
-    hot_endpoint_cycles: int = 100
 
     # OTLP Export Settings. Empty here means "unset" — the 4316 default is applied
     # by the endpoint policy in aws_opentelemetry_configurator._init_serviceevents so it
@@ -405,7 +411,6 @@ class ServiceEventsConfig:
             sample_tier2_threshold=defaults.sample_tier2_threshold,
             sample_tier2_rate=defaults.sample_tier2_rate,
             sample_tier3_rate=defaults.sample_tier3_rate,
-            hot_endpoint_cycles=defaults.hot_endpoint_cycles,
             # OTLP Export Settings
             logs_endpoint=get_str("OTEL_AWS_OTLP_LOGS_ENDPOINT", defaults.logs_endpoint),
             metrics_endpoint=get_str("OTEL_AWS_OTLP_METRICS_ENDPOINT", defaults.metrics_endpoint),
@@ -434,6 +439,12 @@ class ServiceEventsConfig:
             - "* /server_request:50" - any method to /server_request
             - "GET /api/*:100" - any GET to /api/* routes
             - "* *:200" - all endpoints (catch-all)
+
+        Django note: routes are recorded WITHOUT a leading slash (to mirror Application
+        Signals), so Django thresholds must omit it, e.g. "GET api/users:500". Flask/FastAPI
+        routes carry the leading slash, e.g. "GET /api/users:500". Exception: unmatched/scanner
+        requests (no route) are recorded with a leading-slash first-segment label (e.g.
+        "/wp-admin"), so thresholds targeting them keep the slash even on Django.
 
         Returns:
             List of (pattern, threshold_ms) tuples. Order matters - first match wins.
@@ -486,8 +497,14 @@ class ServiceEventsConfig:
         - "?" matches any single character
         - Format: "METHOD /route" (e.g., "GET /api/*", "* /health", "POST /api/users")
 
+        Django note: routes are recorded WITHOUT a leading slash (to mirror Application
+        Signals), so Django patterns must omit it, e.g. "GET api/*". Flask/FastAPI routes
+        carry the leading slash, e.g. "GET /api/*". Exception: unmatched/scanner requests
+        (no route) are recorded with a leading-slash first-segment label (e.g. "/wp-admin"),
+        so patterns targeting them keep the slash even on Django, e.g. "* /wp-admin".
+
         Args:
-            route: The endpoint route (e.g., "/api/users")
+            route: The endpoint route (e.g., "/api/users" for Flask/FastAPI, "api/users" for Django)
             method: The HTTP method (e.g., "GET", "POST")
 
         Returns:

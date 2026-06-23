@@ -218,7 +218,7 @@ class TestDetermineEffectiveRoot(TestCase):
         with patch("pathlib.Path.is_dir", return_value=True), patch("pathlib.Path.exists", return_value=True):
 
             relative_path = Path("mypackage/submodule.py")
-            parent_path = Path("/usr/lib/python3.9/site-packages")
+            parent_path = Path("/usr/lib/python3.10/site-packages")
 
             result = _determine_effective_root(relative_path, parent_path)
             self.assertEqual(result, "mypackage")
@@ -227,7 +227,7 @@ class TestDetermineEffectiveRoot(TestCase):
         """Test determining root for module without __init__.py."""
         with patch("pathlib.Path.is_dir", return_value=False):
             relative_path = Path("module/file.py")
-            parent_path = Path("/usr/lib/python3.9/site-packages")
+            parent_path = Path("/usr/lib/python3.10/site-packages")
 
             result = _determine_effective_root(relative_path, parent_path)
             self.assertEqual(result, "module/file.py")
@@ -237,7 +237,7 @@ class TestDetermineEffectiveRoot(TestCase):
         with patch("pathlib.Path.is_dir", return_value=True), patch("pathlib.Path.exists", return_value=False):
 
             relative_path = Path("namespace/subpackage.py")
-            parent_path = Path("/usr/lib/python3.9/site-packages")
+            parent_path = Path("/usr/lib/python3.10/site-packages")
 
             result = _determine_effective_root(relative_path, parent_path)
             self.assertEqual(result, "namespace/subpackage.py")
@@ -289,7 +289,7 @@ class TestExtractRootModuleName(TestCase):
     @patch("amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._PURELIB_PATH")
     def test_extract_root_module_name_purelib(self, mock_purelib):
         """Test extracting root module name from purelib path."""
-        mock_purelib.return_value = Path("/usr/lib/python3.9/site-packages")
+        mock_purelib.return_value = Path("/usr/lib/python3.10/site-packages")
 
         with patch.object(Path, "resolve") as mock_resolve, patch.object(
             Path, "relative_to"
@@ -297,11 +297,11 @@ class TestExtractRootModuleName(TestCase):
             "amazon.opentelemetry.distro.code_correlation.internal.packages_resolver._determine_effective_root"
         ) as mock_determine:
 
-            mock_resolve.return_value = Path("/usr/lib/python3.9/site-packages/mypackage/module.py")
+            mock_resolve.return_value = Path("/usr/lib/python3.10/site-packages/mypackage/module.py")
             mock_relative_to.return_value = Path("mypackage/module.py")
             mock_determine.return_value = "mypackage"
 
-            file_path = Path("/usr/lib/python3.9/site-packages/mypackage/module.py")
+            file_path = Path("/usr/lib/python3.10/site-packages/mypackage/module.py")
             result = _extract_root_module_name(file_path)
 
             self.assertEqual(result, "mypackage")
@@ -611,7 +611,7 @@ class TestIsUserCode(TestCase):
         mock_is_stdlib.return_value = True
         mock_is_third_party.return_value = False
 
-        result = is_user_code("/usr/lib/python3.9/os.py")
+        result = is_user_code("/usr/lib/python3.10/os.py")
 
         self.assertFalse(result)
 

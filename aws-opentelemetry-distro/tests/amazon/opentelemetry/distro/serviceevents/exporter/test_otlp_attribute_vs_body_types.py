@@ -367,13 +367,13 @@ class TestAttributeTypeValidation(unittest.TestCase):
 
     def test_valid_anyvalue_types_include_mapping(self):
         """_VALID_ANY_VALUE_TYPES includes Mapping (dict) — Body can hold dicts."""
-        import typing
+        import collections.abc
 
         import opentelemetry.attributes as attrs
 
         valid = attrs._VALID_ANY_VALUE_TYPES
-        self.assertIn(typing.Mapping, valid)
-        self.assertIn(typing.Sequence, valid)
+        self.assertIn(collections.abc.Mapping, valid)
+        self.assertIn(collections.abc.Sequence, valid)
         self.assertIn(str, valid)
         self.assertIn(int, valid)
 

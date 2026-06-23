@@ -89,6 +89,69 @@ class DIFlaskFunctionLevelTest(DITestInfrastructure):
 
 
 # =============================================================================
+# Function-level BREAKPOINT via `from module import func` alias
+# =============================================================================
+
+
+class DIFlaskFromImportAliasTest(DITestInfrastructure):
+    """Function-level breakpoint on a function reached via a `from x import f` alias.
+
+    ``apply_discount`` is DEFINED in ``pricing_service`` but CALLED via
+    ``from pricing_service import apply_discount`` (bare name) in ``di_flask_server``.
+    The executing call site therefore resolves the alias in the importing module's
+    namespace, not the defining module's attribute. A method-level install must
+    redirect that alias for the snapshot to be produced. This is a regression guard:
+    without the alias-redirect fix, instrumentation installs (config reports READY)
+    but never fires, so no snapshot is generated.
+    """
+
+    __test__ = True
+
+    @override
+    @staticmethod
+    def get_application_image_name() -> str:
+        return _APP_IMAGE
+
+    @override
+    def get_application_wait_pattern(self) -> str:
+        return "Ready"
+
+    def test_from_import_alias_snapshot_generated(self) -> None:
+        """A method-level snapshot is produced even though the call site uses a from-import alias."""
+        response = self.send_request("GET", "from-import")
+        self.assertEqual(200, response.status_code)
+
+        logs = self.wait_for_snapshots(min_count=1)
+        method_logs = self.logs_for_method(logs, "apply_discount")
+        self.assertGreater(
+            len(method_logs),
+            0,
+            "Expected a snapshot for apply_discount called via `from pricing_service import apply_discount`. "
+            "If absent, the method-level install did not redirect the importing module's alias.",
+        )
+
+        log = method_logs[0]
+        self.assert_snapshot_attr(log, "aws.di.instrumentation_level", "method")
+        self.assert_snapshot_attr(log, "aws.di.code_unit", "pricing_service")
+        self.assert_body_has_entry_or_return(log)
+
+    def test_from_import_alias_captures_arguments_and_return(self) -> None:
+        """The from-import alias snapshot captures the real entry args and return value."""
+        self.send_request("GET", "from-import")
+        logs = self.wait_for_snapshots(min_count=1)
+        log = self.logs_for_method(logs, "apply_discount")[0]
+
+        body = self.body(log)
+        captures = body.get("captures", {})
+        arguments = captures.get("entry", {}).get("arguments", {})
+        self.assertIn("price_cents", arguments, "Expected 'price_cents' argument to be captured")
+        self.assertIn("discount_percent", arguments, "Expected 'discount_percent' argument to be captured")
+        # apply_discount(1999, 15) -> 1999 - (1999*15//100=299) = 1700
+        return_value = captures.get("return", {}).get("return_value", {})
+        self.assertEqual(return_value.get("value"), "1700")
+
+
+# =============================================================================
 # PROBE instrumentation tests
 # =============================================================================
 
@@ -270,7 +333,8 @@ class DIFlaskHitLimitTest(DITestInfrastructure):
     """Test BREAKPOINT hit limit behavior.
 
     BREAKPOINTs have a max_hits limit. With MaxHits=3, the check is
-    hit_count >= max_hits, so hits 1 and 2 generate snapshots, hit 3 is blocked.
+    hit_count > max_hits, so hits 1, 2, and 3 generate snapshots and the
+    breakpoint is disabled on hit 4.
     """
 
     __test__ = True
@@ -285,36 +349,37 @@ class DIFlaskHitLimitTest(DITestInfrastructure):
         return "Ready"
 
     def test_breakpoint_generates_snapshots_up_to_limit(self) -> None:
-        """BREAKPOINT generates snapshots up to (max_hits - 1)."""
-        # limited_function has MaxHits=3, so 2 snapshots should be generated
+        """BREAKPOINT generates a snapshot for each hit up to and including max_hits."""
+        # limited_function has MaxHits=3, so 3 snapshots should be generated
+        self.send_request("GET", "limited")
         self.send_request("GET", "limited")
         self.send_request("GET", "limited")
 
-        logs = self.wait_for_snapshots(min_count=2)
+        logs = self.wait_for_snapshots(min_count=3)
         limited_logs = self.logs_for_method(logs, "limited_function")
-        self.assertEqual(len(limited_logs), 2, "Expected exactly 2 snapshots (MaxHits=3 allows 2)")
+        self.assertEqual(len(limited_logs), 3, "Expected exactly 3 snapshots (MaxHits=3 allows 3)")
 
     def test_breakpoint_disabled_after_hit_limit(self) -> None:
         """BREAKPOINT stops generating snapshots after hit limit is reached."""
-        # First 2 calls generate snapshots (hits 1 and 2)
+        # First 3 calls generate snapshots (hits 1, 2, and 3)
+        self.send_request("GET", "limited")
         self.send_request("GET", "limited")
         self.send_request("GET", "limited")
 
-        logs = self.wait_for_snapshots(min_count=2)
+        logs = self.wait_for_snapshots(min_count=3)
         initial_count = len(self.logs_for_method(logs, "limited_function"))
-        self.assertEqual(initial_count, 2)
+        self.assertEqual(initial_count, 3)
 
-        # 3rd and 4th calls hit the limit -- no new snapshots
+        # 4th call hits the limit -- no new snapshot
         self.send_request("GET", "limited")
-        self.send_request("GET", "limited")
-        time.sleep(2)
+        time.sleep(5)
 
         final_logs = self._peek_snapshots()
         final_count = len(self.logs_for_method(final_logs, "limited_function"))
         self.assertEqual(
             final_count,
-            2,
-            f"Expected 2 snapshots (MaxHits=3), but got {final_count}. "
+            3,
+            f"Expected 3 snapshots (MaxHits=3), but got {final_count}. "
             "BREAKPOINT should be disabled after hitting limit.",
         )
 
@@ -459,3 +524,33 @@ class DIFlaskCaptureLimitsTest(DITestInfrastructure):
         size = large_list_arg.get("size")
         self.assertIsNotNone(size, "Captured collection should report original size")
         self.assertEqual(size, 50, "Original collection size should be 50")
+
+    def test_string_value_truncated_at_user_supplied_limit_below_maximum(self) -> None:
+        """Function-level capture must honor a user-supplied limit below the maximum.
+
+        The config requests MaxStringLength=10 (well within range) and the input is
+        100 chars. The captured value must be truncated to exactly 10 -- not the
+        maximum (255) -- proving the function path uses the per-config limit rather
+        than a fixed serializer.
+        """
+        self.send_request("GET", "limits-small-string")
+        logs = self.wait_for_snapshots(min_count=1)
+        log = self.logs_for_method(logs, "process_small_limit_string")[0]
+
+        body = self.body(log)
+        captures = body.get("captures", {})
+        entry = captures.get("entry", {})
+        arguments = entry.get("arguments", {})
+        small_string_arg = arguments.get("small_limit_string", {})
+
+        self.assertIsNotNone(small_string_arg, "Expected 'small_limit_string' argument to be captured")
+
+        captured_value = small_string_arg.get("value")
+        self.assertIsNotNone(captured_value, "Captured string value should not be None")
+        self.assertEqual(
+            len(captured_value),
+            10,
+            f"String should be truncated at the user-supplied limit of 10, but was {len(captured_value)}.",
+        )
+        self.assertTrue(small_string_arg.get("truncated", False), "Captured string should be marked as truncated")
+        self.assertEqual(small_string_arg.get("size"), 100, "Captured string should report original size of 100")

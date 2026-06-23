@@ -67,8 +67,6 @@ def _api_config(
         },
         "LocationHash": location_hash,
     }
-    if instrumentation_type == "PROBE":
-        item["InstrumentationName"] = "my-probe"
     return item
 
 

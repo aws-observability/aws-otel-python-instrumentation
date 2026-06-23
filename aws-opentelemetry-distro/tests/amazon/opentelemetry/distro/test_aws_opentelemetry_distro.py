@@ -57,7 +57,7 @@ class TestAwsOpenTelemetryDistro(TestCase):
             "DJANGO_SETTINGS_MODULE",
             OTEL_EXPORTER_OTLP_ENDPOINT,
             OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
-            "AWS_AGENTIC_INSTRUMENTATION_OPT_IN",
+            "AWS_AGENTIC_INSTRUMENTATION",
             "CREWAI_DISABLE_TELEMETRY",
         ]
 
@@ -509,12 +509,15 @@ class TestAwsOpenTelemetryDistro(TestCase):
             ep.dist = None
         return ep
 
-    def _load_instrumentor_with_agent(self, ep, third_party_eps=None, prefer_native=False):
-        """Helper to test load_instrumentor with agent observability enabled."""
+    def _load_instrumentor_with_agent(self, ep, third_party_eps=None, mode=None):
+        """Helper to test load_instrumentor with agent observability enabled.
+
+        mode: None (unset → auto), "auto", "enabled", or "disabled".
+        """
         distro = AwsOpenTelemetryDistro()
-        AwsOpenTelemetryDistro._third_party_instrumentors = None
-        if prefer_native:
-            os.environ["AWS_AGENTIC_INSTRUMENTATION_OPT_IN"] = "true"
+        os.environ.pop("AWS_AGENTIC_INSTRUMENTATION", None)
+        if mode is not None:
+            os.environ["AWS_AGENTIC_INSTRUMENTATION"] = mode
         with patch(
             "amazon.opentelemetry.distro.aws_opentelemetry_distro.is_agent_observability_enabled", return_value=True
         ), patch(
@@ -554,26 +557,65 @@ class TestAwsOpenTelemetryDistro(TestCase):
         mock_super = self._load_instrumentor_with_agent(ep, third_party_eps=[])
         mock_super.assert_called_once_with(ep)
 
-    def test_skip_third_party_when_prefer_native(self):
-        """Third-party langchain should be skipped when AWS_AGENTIC_INSTRUMENTATION_OPT_IN=true."""
-        ep = self._make_ep("langchain", "openinference-instrumentation-langchain")
-        third_party = [self._make_ep("langchain", "openinference-instrumentation-langchain")]
-        mock_super = self._load_instrumentor_with_agent(ep, third_party_eps=third_party, prefer_native=True)
-        mock_super.assert_not_called()
-
-    def test_load_third_party_when_not_prefer_native(self):
-        """Third-party langchain should load when auto-detect (default)."""
+    def test_load_third_party_when_auto_detect(self):
+        """Third-party langchain always loads — ADOT never disables third-party instrumentors."""
         ep = self._make_ep("langchain", "openinference-instrumentation-langchain")
         third_party = [self._make_ep("langchain", "openinference-instrumentation-langchain")]
         mock_super = self._load_instrumentor_with_agent(ep, third_party_eps=third_party)
         mock_super.assert_called_once_with(ep)
 
-    def test_load_native_when_prefer_native(self):
-        """aws_langchain should load when AWS_AGENTIC_INSTRUMENTATION_OPT_IN=true even if third-party registered."""
+    def test_load_native_when_mode_enabled(self):
+        """aws_langchain should load when AWS_AGENTIC_INSTRUMENTATION=enabled even if third-party registered."""
         ep = self._make_ep("aws_langchain", "aws-opentelemetry-distro")
         third_party = [self._make_ep("langchain", "openinference-instrumentation-langchain")]
-        mock_super = self._load_instrumentor_with_agent(ep, third_party_eps=third_party, prefer_native=True)
+        mock_super = self._load_instrumentor_with_agent(ep, third_party_eps=third_party, mode="enabled")
         mock_super.assert_called_once_with(ep)
+
+    def test_load_third_party_when_mode_enabled(self):
+        """Third-party langchain still loads under mode=enabled — only the aws_* side is governed."""
+        ep = self._make_ep("langchain", "openinference-instrumentation-langchain")
+        third_party = [self._make_ep("langchain", "openinference-instrumentation-langchain")]
+        mock_super = self._load_instrumentor_with_agent(ep, third_party_eps=third_party, mode="enabled")
+        mock_super.assert_called_once_with(ep)
+
+    def test_skip_native_when_mode_disabled(self):
+        """aws_langchain should be skipped when AWS_AGENTIC_INSTRUMENTATION=disabled, even with no third-party."""
+        ep = self._make_ep("aws_langchain", "aws-opentelemetry-distro")
+        mock_super = self._load_instrumentor_with_agent(ep, third_party_eps=[], mode="disabled")
+        mock_super.assert_not_called()
+
+    def test_load_third_party_when_mode_disabled(self):
+        """Third-party langchain should load when AWS_AGENTIC_INSTRUMENTATION=disabled."""
+        ep = self._make_ep("langchain", "openinference-instrumentation-langchain")
+        third_party = [self._make_ep("langchain", "openinference-instrumentation-langchain")]
+        mock_super = self._load_instrumentor_with_agent(ep, third_party_eps=third_party, mode="disabled")
+        mock_super.assert_called_once_with(ep)
+
+    def test_unknown_mode_falls_back_to_auto(self):
+        """An unrecognized value should warn (with the raw casing) and behave like auto."""
+        ep = self._make_ep("aws_langchain", "aws-opentelemetry-distro")
+        third_party = [self._make_ep("langchain", "openinference-instrumentation-langchain")]
+        with self.assertLogs("amazon.opentelemetry.distro.aws_opentelemetry_distro", level="WARNING") as cm:
+            mock_super = self._load_instrumentor_with_agent(ep, third_party_eps=third_party, mode="BoGuS")
+        mock_super.assert_not_called()
+        self.assertTrue(any("'BoGuS'" in line for line in cm.output), cm.output)
+
+    def test_mode_value_is_case_insensitive(self):
+        """Values like ENABLED / Disabled / Auto should be accepted."""
+        ep = self._make_ep("aws_langchain", "aws-opentelemetry-distro")
+        third_party = [self._make_ep("langchain", "openinference-instrumentation-langchain")]
+
+        # ENABLED — load aws_* even with same-library third-party present
+        mock_super = self._load_instrumentor_with_agent(ep, third_party_eps=third_party, mode="ENABLED")
+        mock_super.assert_called_once_with(ep)
+
+        # Disabled — skip aws_*
+        mock_super = self._load_instrumentor_with_agent(ep, third_party_eps=[], mode="Disabled")
+        mock_super.assert_not_called()
+
+        # Auto — same as unset, skip native because third-party covers it
+        mock_super = self._load_instrumentor_with_agent(ep, third_party_eps=third_party, mode="Auto")
+        mock_super.assert_not_called()
 
     def test_load_regular_instrumentor(self):
         """Regular instrumentors should always be loaded."""
@@ -732,7 +774,7 @@ class TestVersionCompatibilityCheck(TestCase):
             f"{self.MODULE_PATH}._get_version"
         ) as mock_version:
             mock_requires.return_value = [
-                'opentelemetry-api == 1.40.0 ; python_version >= "3.9"',
+                'opentelemetry-api == 1.40.0 ; python_version >= "3.10"',
                 "opentelemetry-sdk == 1.40.0",
             ]
             mock_version.side_effect = lambda pkg: "1.33.1"

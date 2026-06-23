@@ -966,5 +966,126 @@ class TestClassMethodInstrumentation(_SnapshotEmitterFixture):
         self.assertNotIn("method", D.__dict__)
 
 
+# ===========================================================================
+# `from module import func` alias redirection
+# ===========================================================================
+def _make_engine():
+    """Pick the engine the running Python supports.
+
+    3.12+ → SysMonitoringEngine. 3.10-3.11 → BytecodeInjectionEngine.
+    """
+    if sys.version_info >= (3, 12):
+        # pylint: disable=import-outside-toplevel
+        from amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine import (
+            SysMonitoringEngine,
+        )
+
+        engine = SysMonitoringEngine()
+    else:
+        # pylint: disable=import-outside-toplevel
+        from amazon.opentelemetry.distro.debugger.instrumentation_engine._bytecode_injection_engine import (
+            BytecodeInjectionEngine,
+        )
+
+        engine = BytecodeInjectionEngine()
+    engine.initialize()
+    return engine
+
+
+class TestModuleAliasRedirect(unittest.TestCase):
+    """A `from x import f` alias copies the function object into the importing
+    module's namespace. The setattr-wrapper approach had to scan modules and
+    rewrite those copies because setattr on the defining module did not update
+    them. The engine mutates the function's __code__ in place, so the aliased
+    copy — being the same function object — sees the rewritten code on the next
+    call, and disarm restores it. No alias scan needed.
+    """
+
+    @staticmethod
+    def _make_module(name):
+        module = types.ModuleType(name)
+        sys.modules[name] = module
+        return module
+
+    def setUp(self):
+        self.module_name = "di_alias_defining_mod"
+        self.consumer_name = "di_alias_consumer_mod"
+        self.snapshots = []
+
+        class _FakeEmitter:
+            def emit_snapshot(_self, snap):  # noqa: N805
+                self.snapshots.append(snap)
+
+        set_snapshot_emitter(_FakeEmitter())
+        self.engine = _make_engine()
+
+        def apply_discount(price_cents, discount_percent):
+            return price_cents - (price_cents * discount_percent // 100)
+
+        apply_discount.__module__ = self.module_name
+        self.original = apply_discount
+
+        self.defining = self._make_module(self.module_name)
+        self.defining.apply_discount = apply_discount
+
+        # Consumer that did `from di_alias_defining_mod import apply_discount`
+        # (the alias is a copy of the SAME function object).
+        self.consumer = self._make_module(self.consumer_name)
+        self.consumer.apply_discount = apply_discount
+        self.consumer.aliased_again = apply_discount
+
+        for name in (self.module_name, self.consumer_name):
+            self.addCleanup(lambda n=name: sys.modules.pop(n, None))
+
+    def tearDown(self):
+        try:
+            self.engine.cleanup()
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+
+    def _arm(self):
+        ok = self.engine.enable_function_level_instrumentation(
+            code=self.original.__code__,
+            func=self.original,
+            function_key=f"{self.module_name}.apply_discount",
+            module_name=self.module_name,
+            qualified_name="apply_discount",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
+
+    def test_install_redirects_alias_in_consumer_module(self):
+        """Calling through a `from x import f` alias fires the engine — the alias
+        is the same function object whose __code__ was mutated. No scan needed."""
+        self._arm()
+
+        # The consumer holds the SAME object — engine mutated its __code__.
+        self.assertIs(self.consumer.apply_discount, self.original)
+        self.assertIs(self.consumer.aliased_again, self.original)
+
+        self.assertEqual(self.consumer.apply_discount(100, 10), 90)
+        self.assertEqual(len(self.snapshots), 1)
+        self.assertEqual(self.consumer.aliased_again(100, 25), 75)
+        self.assertEqual(len(self.snapshots), 2)
+
+    def test_restore_reverts_aliases(self):
+        """After disarm the original __code__ is restored, so calling through the
+        alias produces no further snapshot."""
+        original_code = self.original.__code__
+        self._arm()
+
+        # Sanity: armed call via the alias fires.
+        self.consumer.apply_discount(100, 10)
+        self.assertEqual(len(self.snapshots), 1)
+        self.snapshots.clear()
+
+        self.engine.disable_function_level_instrumentation(code=original_code, func=self.original)
+
+        # __code__ restored; calling via the alias emits no new snapshot.
+        self.assertIs(self.original.__code__, original_code)
+        self.assertEqual(self.consumer.apply_discount(100, 10), 90)
+        self.assertEqual(len(self.snapshots), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
