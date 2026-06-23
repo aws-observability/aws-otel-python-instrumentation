@@ -58,6 +58,12 @@ _LOCALS_NAME = "_breakpoint_locals"
 # event dispatcher injected into function globals.
 _FUNCTION_HANDLER_NAME = "_function_event_handler"
 
+# Attribute stamped on the symbol the manager hands us at enable time, pointing
+# at the real (undecorated) function object whose state we keyed. disable reads
+# it back to recover that exact object, so teardown is an identity lookup rather
+# than a heuristic search over unrelated functions that share a module.
+_RESOLVED_TARGET_ATTR = "__di_resolved_target__"
+
 # Code-flag mask the bytecode-rewrite path declines to instrument: rewriting
 # these in place would corrupt .send() / .throw() / await semantics. The
 # manager observes the False return from enable_function_level_instrumentation
@@ -354,10 +360,20 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         # symbol like `@login_required def my_view(...)` rewrites the
         # decorator's wrapper, not my_view, and snapshots report the wrong
         # location. Falls back to func when no deeper match is found.
+        outer_symbol = func  # the object the manager holds and will pass back to disable
         resolved = undecorated(func, name=qualified_name.rsplit(".", 1)[-1], path=code.co_filename)
         if isinstance(resolved, FunctionType) and resolved is not func:
             func = resolved
             code = func.__code__
+
+        # Stamp the outer symbol with a direct reference to the resolved target,
+        # so disable can recover the exact keyed object by identity instead of
+        # re-deriving or scanning. Best-effort: some callables reject setattr.
+        if outer_symbol is not func:
+            try:
+                outer_symbol.__dict__[_RESOLVED_TARGET_ATTR] = func
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
 
         try:
             with self._lock:
@@ -442,47 +458,26 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             return
         try:
             with self._lock:
-                # State is keyed by id(real_user_func). The manager passes us
-                # the wrapper that getattr(module, name) returned, so on a
-                # decorated function id(func) != id(real_user_func). Fall
-                # back to scanning by function_key recorded at enable time.
+                # State is keyed by id(real_user_func). The manager passes back
+                # the symbol it holds (often a decorator wrapper), so id(func)
+                # may not be the key directly. Resolve to the exact keyed object
+                # by identity — never by a co_name/globals heuristic, which would
+                # collide with unrelated functions that share this module (they
+                # all share co_filename and __globals__) and disarm the wrong one.
                 func_id = id(func)
                 state = self._injection_states.get(func_id)
                 if state is None or state.function_metadata is None:
-                    # id(func) isn't a direct function-level key. This happens when
-                    # the manager passes a decorator wrapper rather than the real
-                    # user function: enable_function_level_instrumentation keyed the
-                    # state by id(undecorated(func)), so disable must resolve the
-                    # SAME inner function and look it up by identity.
-                    #
-                    # Anchoring to the resolved TARGET identity (not a module-wide
-                    # co_name/globals scan) is essential: many functions in one
-                    # module share co_filename and __globals__, so a loose scan
-                    # would mis-disarm an unrelated function-level PROBE while
-                    # disabling some other (e.g. line-only) function in the module.
-                    # functools.wraps preserves the inner function's __name__ on the
-                    # wrapper, so it is the right co_name hint for undecorated(); fall
-                    # back to the passed code's own name.
-                    name_hint = getattr(func, "__name__", None) or code.co_name
-                    resolved = undecorated(func, name=name_hint, path=code.co_filename)
-                    state = self._injection_states.get(id(resolved))
-                    if state is not None and state.function_metadata is not None:
-                        func_id = id(resolved)
-                    else:
-                        # Last resort: exact original-code identity match only.
-                        state = None
-                        for sid, candidate in self._injection_states.items():
-                            if sid == func_id or candidate.function_metadata is None:
-                                continue
-                            if candidate.original_code is code or (
-                                candidate.function_ref is not None
-                                and getattr(candidate.function_ref, "__code__", None) is code
-                            ):
-                                func_id = sid
-                                state = candidate
-                                break
-                    if state is None or state.function_metadata is None:
-                        return  # not armed for function-level
+                    # The outer symbol carries a direct reference to the resolved
+                    # target stamped at enable time; use it to recover the keyed
+                    # object exactly.
+                    target = func.__dict__.get(_RESOLVED_TARGET_ATTR) if hasattr(func, "__dict__") else None
+                    if target is not None:
+                        candidate = self._injection_states.get(id(target))
+                        if candidate is not None and candidate.function_metadata is not None:
+                            func_id = id(target)
+                            state = candidate
+                if state is None or state.function_metadata is None:
+                    return  # not armed for function-level
 
                 function_key = state.function_key
                 try:
