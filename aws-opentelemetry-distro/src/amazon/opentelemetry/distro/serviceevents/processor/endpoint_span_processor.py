@@ -72,6 +72,42 @@ def _get_http_method(span: ReadableSpan) -> Optional[str]:
     return method
 
 
+def _exception_from_span_event(span: ReadableSpan) -> Optional[dict]:
+    """Recover an exception from the span's own OTel ``exception`` event.
+
+    The AST function-monitor only captures an exception when the throw unwinds through an
+    instrumented frame. A 5xx raised in uninstrumented library code, or swallowed by a framework
+    global handler that converts it to a 500 *before* it reaches any instrumented frame, leaves the
+    investigation data empty — yet OTel's own instrumentation still records an ``exception`` event
+    on the span (``span.record_exception``). Java's ``ServiceEventsSpanProcessor`` reads that event
+    as its exception source; this is the Python equivalent.
+
+    Returns a dict shaped like the monitor's captured exception (``name``/``message``/
+    ``traceback_info``/``function_name``) so it can seed the investigation data and flow through the
+    unchanged breakdown + snapshot recovery paths, or None when the span has no exception event.
+    """
+    events = getattr(span, "events", None)
+    if not events:
+        return None
+    # Last exception event wins — it is the one closest to the response being produced.
+    for event in reversed(list(events)):
+        if getattr(event, "name", None) != "exception":
+            continue
+        attributes = event.attributes or {}
+        exc_type = attributes.get(SpanAttributes.EXCEPTION_TYPE)
+        if not exc_type:
+            continue
+        return {
+            "name": exc_type,
+            "message": attributes.get(SpanAttributes.EXCEPTION_MESSAGE) or "",
+            "traceback_info": attributes.get(SpanAttributes.EXCEPTION_STACKTRACE) or "",
+            # The span event carries no origin function; "unknown" matches the breakdown's
+            # fallback when no instrumented frame recorded the throw.
+            "function_name": "unknown",
+        }
+    return None
+
+
 def _get_status_code(span: ReadableSpan) -> int:
     """HTTP status from the span: stable ``http.response.status_code`` first, legacy ``http.status_code``.
 
@@ -176,6 +212,22 @@ class EndpointServiceEventsSpanProcessor(SpanProcessor):
         # Anything else (e.g. a lambda "name/FunctionHandler") is not an HTTP route.
         return None
 
+    @staticmethod
+    def _seed_exception_from_span(span: ReadableSpan) -> None:
+        """Seed the span's recorded exception into the investigation data (first-writer-wins).
+
+        Only fills the exception when the AST monitor captured none, so an instrumented throw's
+        origin function (which the span event lacks) is always preferred. No-ops when the span has
+        no exception event or no investigation context exists.
+        """
+        monitor_state = _ServiceEventsMonitorState.get_instance()
+        inv_data = monitor_state.peek_investigation_data()
+        if inv_data is None or inv_data.get("exception") is not None:
+            return
+        span_exception = _exception_from_span_event(span)
+        if span_exception is not None:
+            inv_data["exception"] = span_exception
+
     def _process_request_span(self, span: ReadableSpan) -> None:
         method = _get_http_method(span)
         if not method:
@@ -211,10 +263,22 @@ class EndpointServiceEventsSpanProcessor(SpanProcessor):
         trace_id = span_context.trace_id if span_context and span_context.is_valid else None
         span_id = span_context.span_id if span_context and span_context.is_valid else None
 
-        # Error info from the AST monitor's captured call-path. _extract_error_from_call_path
-        # PEEKS (does not clear) so the incident collector can still consume the investigation
-        # data below. exception=None is correct: like Java, the original exception object is
-        # gone by span end; the captured type/origin live in the investigation data.
+        # Fault recovery from the span's own exception event. When a 5xx unwound through code the
+        # AST monitor never instrumented (library internals, or a global handler that converted the
+        # error to a 500 before any instrumented frame saw it), the investigation data holds no
+        # exception. OTel still recorded an `exception` event on the span, so seed it into the
+        # investigation data here — first-writer-wins, so a real AST-captured exception is never
+        # overwritten. Both the breakdown and the snapshot recover the exception from that same
+        # investigation data, exactly as they do for an instrumented throw, matching Java which
+        # reads the span event directly.
+        if status_code >= 500:
+            self._seed_exception_from_span(span)
+
+        # Error info from the AST monitor's captured call-path (now also seeded from the span event
+        # for uninstrumented faults). _extract_error_from_call_path PEEKS (does not clear) so the
+        # incident collector can still consume the investigation data below. exception=None is
+        # correct: like Java, the original exception object is gone by span end; the captured
+        # type/origin live in the investigation data.
         error_info = None
         if status_code >= 400:
             error_info = _extract_error_from_call_path(None, route, method)

@@ -30,6 +30,17 @@ logger = logging.getLogger(__name__)
 INSTRUMENTATION_SCOPE = "serviceevents"
 INSTRUMENTATION_VERSION = "1.0"
 
+# Valid OTel id ranges: a trace id is a non-zero 128-bit value, a span id a non-zero 64-bit
+# value. Ids outside these bounds would overflow the OTLP encoder's fixed-width
+# trace_id.to_bytes(16)/span_id.to_bytes(8) (an OverflowError raised later in the batch export
+# thread, dropping the whole export), so they are rejected before a SpanContext is built.
+_MAX_TRACE_ID = (1 << 128) - 1
+_MAX_SPAN_ID = (1 << 64) - 1
+# Canonical hex widths of a 0x-prefixed trace/span id as emitted by the collector's
+# _format_trace_id / _format_span_id.
+_TRACE_ID_HEX_WIDTH = 32
+_SPAN_ID_HEX_WIDTH = 16
+
 
 class ServiceEventsOtlpEmitter:
     """Emits ServiceEvents signals as OTLP LogRecords and OTel Metrics."""
@@ -272,35 +283,65 @@ class ServiceEventsOtlpEmitter:
             logger.debug("Failed to emit OTLP log: %s", event_name, exc_info=True)
 
     @staticmethod
-    def _build_trace_context(trace_context: Optional[Dict[str, str]]):
+    def _parse_correlation_id(value, max_value: int, hex_width: int) -> int:
+        """Parse one correlation id into a bounded int, or 0 when it isn't a valid id.
+
+        The collector emits ids via `_format_trace_id` / `_format_span_id` as 0x-prefixed,
+        canonical-width hex (e.g. ``0x{:032x}`` / ``0x{:016x}``); an int is also tolerated. This
+        parser accepts ONLY those shapes:
+
+        * an int already in ``(0, max_value]``;
+        * a string that is exactly ``0x`` + ``hex_width`` hex chars (the collector's own output).
+
+        Crucially it does NOT fall back to ``int(value, 16)`` on an arbitrary string. A raw
+        propagation-header value that survives to here (e.g. a Datadog ``x-datadog-trace-id``,
+        which is DECIMAL) would otherwise be silently mis-read as hex and produce a wrong-but-valid
+        id, mis-correlating the incident to a trace that never existed. Anything that doesn't match
+        the canonical shape — or is out of range — returns 0, so the caller omits the field rather
+        than emitting a corrupt or encoder-overflowing id.
+        """
+        if isinstance(value, bool):  # bool is an int subclass; never a valid id
+            return 0
+        if isinstance(value, int):
+            return value if 0 < value <= max_value else 0
+        if isinstance(value, str):
+            text = value[2:] if value[:2].lower() == "0x" else None
+            if text is not None and len(text) == hex_width:
+                try:
+                    parsed = int(text, 16)
+                except ValueError:
+                    return 0
+                if 0 < parsed <= max_value:
+                    return parsed
+        return 0
+
+    @classmethod
+    def _build_trace_context(cls, trace_context: Optional[Dict[str, str]]):
         """Build the OTel Context to attach to an emitted LogRecord's trace correlation.
 
         Returns a context carrying EXACTLY the supplied trace/span ids (as a NonRecordingSpan),
         or a context carrying INVALID_SPAN when no valid correlation exists. The invalid case makes
         LogRecord resolve trace_id/span_id to 0, which the OTLP encoder omits from the wire — so an
         incident with no correlation has NO trace_id/span_id fields rather than empty ones. Only set
-        the SAMPLED flag when both ids are present.
+        the SAMPLED flag when both ids parse to valid, in-range values.
 
         `trace_context` carries 0x-prefixed hex strings (the collector's `_format_trace_id` /
-        `_format_span_id` output) but ints are tolerated too. A malformed value degrades to
-        INVALID_SPAN (omitted) rather than raising — telemetry must never crash the host app.
+        `_format_span_id` output) but ints are tolerated too. A malformed, mis-formatted, or
+        out-of-range value degrades to INVALID_SPAN (omitted) — telemetry must never crash the host
+        app, and an id outside the 128/64-bit range must never reach the OTLP encoder's fixed-width
+        to_bytes (which would raise OverflowError in the batch export thread and drop the export).
         """
         if trace_context:
-            try:
-                tid = trace_context.get("trace_id")
-                sid = trace_context.get("span_id")
-                trace_id = (int(tid, 16) if isinstance(tid, str) else int(tid)) if tid else 0
-                span_id = (int(sid, 16) if isinstance(sid, str) else int(sid)) if sid else 0
-                if trace_id and span_id:
-                    span_context = SpanContext(
-                        trace_id=trace_id,
-                        span_id=span_id,
-                        is_remote=False,
-                        trace_flags=TraceFlags(TraceFlags.SAMPLED),
-                    )
-                    return set_span_in_context(NonRecordingSpan(span_context))
-            except (ValueError, TypeError):
-                pass
+            trace_id = cls._parse_correlation_id(trace_context.get("trace_id"), _MAX_TRACE_ID, _TRACE_ID_HEX_WIDTH)
+            span_id = cls._parse_correlation_id(trace_context.get("span_id"), _MAX_SPAN_ID, _SPAN_ID_HEX_WIDTH)
+            if trace_id and span_id:
+                span_context = SpanContext(
+                    trace_id=trace_id,
+                    span_id=span_id,
+                    is_remote=False,
+                    trace_flags=TraceFlags(TraceFlags.SAMPLED),
+                )
+                return set_span_in_context(NonRecordingSpan(span_context))
         # No valid correlation → carry INVALID_SPAN so the ids serialize as omitted, not empty.
         return set_span_in_context(INVALID_SPAN)
 

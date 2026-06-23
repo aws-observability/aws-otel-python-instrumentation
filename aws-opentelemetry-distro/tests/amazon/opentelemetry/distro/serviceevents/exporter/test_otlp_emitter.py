@@ -202,9 +202,11 @@ class TestIncidentSnapshot:
                 "timestamp": int(time.time() * 1000),
                 "status_code": 500,
             },
+            # 0x-prefixed, canonical-width hex — exactly what the collector's
+            # _format_trace_id / _format_span_id emit (f"0x{:032x}" / f"0x{:016x}").
             "telemetry_correlation": {
-                "trace_id": "0af7651916cd43dd8448eb211c80319c",
-                "span_id": "b7ad6b7169203331",
+                "trace_id": "0x0af7651916cd43dd8448eb211c80319c",
+                "span_id": "0xb7ad6b7169203331",
             },
         }
 
@@ -301,9 +303,41 @@ class TestIncidentSnapshot:
         # Only a trace_id, no span_id → both omitted (the collector emits both-or-nothing).
         emitter, log_exporter, _, lp, mp = _make_emitter()
         snapshot = self._make_snapshot()
-        snapshot["telemetry_correlation"] = {"trace_id": "0af7651916cd43dd8448eb211c80319c"}
+        snapshot["telemetry_correlation"] = {"trace_id": "0x0af7651916cd43dd8448eb211c80319c"}
         emitter.emit_incident_snapshot(snapshot)
         trace_id, span_id = self._encode(log_exporter)
+        assert len(trace_id) == 0
+        assert len(span_id) == 0
+
+    def test_decimal_correlation_is_not_misparsed_as_hex(self):
+        # A raw decimal propagation-header id (e.g. an x-datadog-trace-id passed through
+        # unformatted) must NOT be silently read as hex — int("12345", 16) would yield a
+        # wrong-but-valid id, mis-correlating the incident. It lacks the 0x prefix / canonical
+        # width, so it is rejected and the fields are omitted on the wire.
+        emitter, log_exporter, _, lp, mp = _make_emitter()
+        snapshot = self._make_snapshot()
+        snapshot["telemetry_correlation"] = {
+            "trace_id": "1234567890123456789",
+            "span_id": "9876543210987654",
+        }
+        emitter.emit_incident_snapshot(snapshot)
+        trace_id, span_id = self._encode(log_exporter)
+        assert len(trace_id) == 0
+        assert len(span_id) == 0
+
+    def test_oversized_correlation_does_not_overflow_encoder(self):
+        # An out-of-range id (a malformed 40-hex-char trace_id → 160 bits) must be rejected
+        # before a SpanContext is built. Otherwise it reaches the OTLP encoder's fixed-width
+        # trace_id.to_bytes(16) and raises OverflowError in the batch export thread, dropping
+        # the whole export. Encoding the record here must succeed with the ids omitted.
+        emitter, log_exporter, _, lp, mp = _make_emitter()
+        snapshot = self._make_snapshot()
+        snapshot["telemetry_correlation"] = {
+            "trace_id": "0x" + "f" * 40,
+            "span_id": "0x" + "f" * 20,
+        }
+        emitter.emit_incident_snapshot(snapshot)
+        trace_id, span_id = self._encode(log_exporter)  # must not raise OverflowError
         assert len(trace_id) == 0
         assert len(span_id) == 0
 

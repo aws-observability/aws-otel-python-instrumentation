@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro.serviceevents.processor.endpoint_span_processor import (
     EndpointServiceEventsSpanProcessor,
+    _exception_from_span_event,
     _get_http_method,
     _get_status_code,
     _is_request_boundary,
@@ -34,6 +35,7 @@ def _build_span(
     start_time: int = 0,
     end_time: int = 5_000_000,
     span_context: SpanContext = _SELF_CONTEXT,
+    events: Optional[list] = None,
 ) -> ReadableSpan:
     span: ReadableSpan = MagicMock()
     span.attributes = attributes
@@ -42,9 +44,25 @@ def _build_span(
     span.name = name
     span.start_time = start_time
     span.end_time = end_time
+    span.events = events if events is not None else []
     span.instrumentation_scope = InstrumentationScope("opentelemetry.instrumentation.flask", "1.0")
     span.get_span_context.return_value = span_context
     return span
+
+
+def _exception_event(exc_type="ValueError", message="bad input", stacktrace="Traceback..."):
+    """A span event shaped like OTel's recorded ``exception`` event."""
+    event = MagicMock()
+    event.name = "exception"
+    attrs = {}
+    if exc_type is not None:
+        attrs[SpanAttributes.EXCEPTION_TYPE] = exc_type
+    if message is not None:
+        attrs[SpanAttributes.EXCEPTION_MESSAGE] = message
+    if stacktrace is not None:
+        attrs[SpanAttributes.EXCEPTION_STACKTRACE] = stacktrace
+    event.attributes = attrs
+    return event
 
 
 class TestRequestBoundary(TestCase):
@@ -328,6 +346,137 @@ class TestOnEnd(TestCase):
         span.name = None
         # _get_http_method tolerates None attributes -> returns None -> early return.
         self.processor.on_end(span)
+
+
+class TestExceptionFromSpanEvent(TestCase):
+    """_exception_from_span_event recovers a fault from the span's own ``exception`` event."""
+
+    def test_returns_none_when_no_events(self):
+        span = _build_span({}, events=[])
+        self.assertIsNone(_exception_from_span_event(span))
+
+    def test_returns_none_when_no_exception_event(self):
+        other = MagicMock()
+        other.name = "some.other.event"
+        other.attributes = {}
+        span = _build_span({}, events=[other])
+        self.assertIsNone(_exception_from_span_event(span))
+
+    def test_parses_exception_event(self):
+        span = _build_span({}, events=[_exception_event("ValueError", "bad input", "Traceback...")])
+        result = _exception_from_span_event(span)
+        self.assertEqual(result["name"], "ValueError")
+        self.assertEqual(result["message"], "bad input")
+        self.assertEqual(result["traceback_info"], "Traceback...")
+        # The span event carries no origin function.
+        self.assertEqual(result["function_name"], "unknown")
+
+    def test_last_exception_event_wins(self):
+        span = _build_span(
+            {},
+            events=[_exception_event("FirstError"), _exception_event("LastError")],
+        )
+        self.assertEqual(_exception_from_span_event(span)["name"], "LastError")
+
+    def test_event_without_type_is_skipped(self):
+        # An exception event missing exception.type is not a usable fault source.
+        span = _build_span({}, events=[_exception_event(exc_type=None)])
+        self.assertIsNone(_exception_from_span_event(span))
+
+    def test_missing_message_and_stacktrace_default_to_empty(self):
+        span = _build_span({}, events=[_exception_event("KeyError", message=None, stacktrace=None)])
+        result = _exception_from_span_event(span)
+        self.assertEqual(result["name"], "KeyError")
+        self.assertEqual(result["message"], "")
+        self.assertEqual(result["traceback_info"], "")
+
+
+class TestSeedExceptionFromSpan(TestCase):
+    """_seed_exception_from_span fills investigation data from the span event (first-writer-wins)."""
+
+    def setUp(self):
+        self.processor = EndpointServiceEventsSpanProcessor(MagicMock(), MagicMock(), MagicMock())
+
+    def test_seeds_when_investigation_has_no_exception(self):
+        # The 5xx unwound through uninstrumented code: AST monitor captured nothing, but the
+        # span has an exception event. It must be seeded so the breakdown/snapshot recover it.
+        inv_data = {"call_path": [], "exception": None, "start_time": 0.0}
+        span = _build_span({}, events=[_exception_event("RuntimeError", "boom")])
+        with patch(_MONITOR_PATH) as monitor_cls:
+            monitor_cls.get_instance.return_value.peek_investigation_data.return_value = inv_data
+            self.processor._seed_exception_from_span(span)
+        self.assertIsNotNone(inv_data["exception"])
+        self.assertEqual(inv_data["exception"]["name"], "RuntimeError")
+        self.assertEqual(inv_data["exception"]["message"], "boom")
+
+    def test_does_not_overwrite_ast_captured_exception(self):
+        # First-writer-wins: a real instrumented throw (with the true origin function) must win
+        # over the span event (which only knows "unknown").
+        captured = {"name": "ValueError", "message": "real", "function_name": "handler"}
+        inv_data = {"call_path": [], "exception": captured, "start_time": 0.0}
+        span = _build_span({}, events=[_exception_event("RuntimeError", "from span")])
+        with patch(_MONITOR_PATH) as monitor_cls:
+            monitor_cls.get_instance.return_value.peek_investigation_data.return_value = inv_data
+            self.processor._seed_exception_from_span(span)
+        self.assertEqual(inv_data["exception"]["name"], "ValueError")
+        self.assertEqual(inv_data["exception"]["function_name"], "handler")
+
+    def test_noop_when_no_investigation_context(self):
+        span = _build_span({}, events=[_exception_event("RuntimeError")])
+        with patch(_MONITOR_PATH) as monitor_cls:
+            monitor_cls.get_instance.return_value.peek_investigation_data.return_value = None
+            # Must not raise.
+            self.processor._seed_exception_from_span(span)
+
+    def test_noop_when_span_has_no_exception_event(self):
+        inv_data = {"call_path": [], "exception": None, "start_time": 0.0}
+        span = _build_span({}, events=[])
+        with patch(_MONITOR_PATH) as monitor_cls:
+            monitor_cls.get_instance.return_value.peek_investigation_data.return_value = inv_data
+            self.processor._seed_exception_from_span(span)
+        self.assertIsNone(inv_data["exception"])
+
+    def test_on_end_seeds_for_5xx_only(self):
+        # The seed runs only for faults (>= 500); a 2xx/4xx span event is not seeded by on_end.
+        inv_data = {"call_path": [], "exception": None, "start_time": 0.0}
+        span = _build_span(
+            {
+                SpanAttributes.HTTP_REQUEST_METHOD: "GET",
+                SpanAttributes.HTTP_ROUTE: "/boom",
+                SpanAttributes.HTTP_RESPONSE_STATUS_CODE: 200,
+            },
+            name="GET /boom",
+            events=[_exception_event("RuntimeError", "boom")],
+        )
+        with patch(_MONITOR_PATH) as monitor_cls, patch(
+            "amazon.opentelemetry.distro.serviceevents.processor.endpoint_span_processor._extract_error_from_call_path"
+        ) as extract_mock:
+            extract_mock.return_value = None
+            monitor_cls.get_instance.return_value.peek_investigation_data.return_value = inv_data
+            self.processor.on_end(span)
+        # 200 status -> seed skipped, investigation exception untouched.
+        self.assertIsNone(inv_data["exception"])
+
+    def test_on_end_seeds_for_5xx(self):
+        inv_data = {"call_path": [], "exception": None, "start_time": 0.0}
+        span = _build_span(
+            {
+                SpanAttributes.HTTP_REQUEST_METHOD: "GET",
+                SpanAttributes.HTTP_ROUTE: "/boom",
+                SpanAttributes.HTTP_RESPONSE_STATUS_CODE: 500,
+            },
+            name="GET /boom",
+            events=[_exception_event("RuntimeError", "boom")],
+        )
+        with patch(_MONITOR_PATH) as monitor_cls, patch(
+            "amazon.opentelemetry.distro.serviceevents.processor.endpoint_span_processor._extract_error_from_call_path"
+        ) as extract_mock:
+            extract_mock.return_value = None
+            monitor_cls.get_instance.return_value.peek_investigation_data.return_value = inv_data
+            self.processor.on_end(span)
+        # 500 status -> span exception seeded into investigation data.
+        self.assertIsNotNone(inv_data["exception"])
+        self.assertEqual(inv_data["exception"]["name"], "RuntimeError")
 
 
 class TestLifecycle(TestCase):
