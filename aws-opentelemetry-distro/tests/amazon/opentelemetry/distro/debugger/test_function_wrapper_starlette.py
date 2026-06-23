@@ -110,14 +110,21 @@ class TestStarletteRoutesPatching(unittest.TestCase):
             function_key=f"{self.module_name}.{name}",
             module_name=self.module_name,
             qualified_name=name,
-            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+            capture_config=CaptureConfig(capture_arguments=[], capture_return=True),
         )
         self.assertTrue(ok)
 
     def test_patch_starlette_route_rebuilds_app_and_fires(self):
         """A pure-Starlette route handler is armed: driving the route's ASGI app
         (route.app, the closure over the original handler) fires the engine —
-        the closure holds the same function object whose __code__ was mutated."""
+        the closure holds the same function object whose __code__ was mutated.
+
+        Uses a SYNC endpoint (Starlette wraps it via functools.partial(
+        run_in_threadpool, endpoint), still closing over the same function
+        object): the bytecode engine on 3.10/3.11 declines to rewrite coroutine
+        bodies — async handlers go through the FunctionWrapper fallback, not this
+        engine path — so a sync handler is the right target for exercising the
+        engine's in-place __code__ mutation uniformly across 3.10–3.12."""
         try:
             from starlette.applications import Starlette  # pylint: disable=import-outside-toplevel
             from starlette.responses import JSONResponse  # pylint: disable=import-outside-toplevel
@@ -127,7 +134,7 @@ class TestStarletteRoutesPatching(unittest.TestCase):
 
         hits = {"n": 0}
 
-        async def handler(request):
+        def handler(request):
             hits["n"] += 1
             return JSONResponse({"v": 1})
 
@@ -164,15 +171,16 @@ class TestStarletteRoutesPatching(unittest.TestCase):
 
         hits = {"n": 0}
 
-        async def handler(request):
+        # SYNC handler (bytecode engine on 3.10/3.11 declines coroutine bodies).
+        def handler(request):
             hits["n"] += 1
             return JSONResponse({})
 
         handler.__module__ = self.module_name
 
         # An external wrapper (different identity) that still calls the underlying handler.
-        async def otel_wrapped(request):
-            return await handler(request)
+        def otel_wrapped(request):
+            return handler(request)
 
         otel_wrapped.__name__ = handler.__name__
         otel_wrapped.__module__ = handler.__module__

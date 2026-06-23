@@ -552,6 +552,75 @@ class TestBytecodeInjectionEngineFunctionLevel(unittest.TestCase):
         self.assertIsNotNone(snap.captures.return_context)
         self.assertEqual(snap.captures.return_context.return_value.value, "5")
 
+    def test_function_level_captures_arguments(self):
+        """A function-level PROBE configured with ``capture_arguments`` must
+        populate ``captures.entry.arguments`` from the call's arguments.
+
+        Regression guard: entry capture is keyed by ``capture_arguments`` (not
+        ``capture_locals``). A PROBE sets ``capture_arguments`` and leaves
+        ``capture_locals`` as None, so reading the wrong field silently drops
+        all argument capture — the snapshot still fires with a return value but
+        an empty entry block, which is exactly what the DI contract tests catch
+        on the 3.10/3.11 bytecode path."""
+
+        # Define the target in its OWN fresh module namespace so the injected
+        # handler global cannot alias another test's same-named function in the
+        # shared test module (each real app module likewise has its own globals).
+        ns: dict = {}
+        exec("def compute_total(items, multiplier=2):\n    return sum(items) * multiplier\n", ns)  # noqa: S102
+        compute_total = ns["compute_total"]
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=compute_total.__code__,
+            func=compute_total,
+            function_key="m.compute_total",
+            module_name="m",
+            qualified_name="compute_total",
+            capture_config=CaptureConfig(capture_arguments=["items"], capture_return=True),
+            location_hash="hash-compute",
+            instrumentation_type="PROBE",
+        )
+        self.assertTrue(ok)
+        self.assertEqual(compute_total([10, 20, 30]), 120)  # sum([10,20,30]) * multiplier(2)
+        self.assertEqual(len(self.snapshots), 1)
+        snap = self.snapshots[0]
+
+        # The entry context must exist and carry the requested argument.
+        self.assertIsNotNone(snap.captures.entry, "entry context must be captured for capture_arguments")
+        self.assertIsNotNone(snap.captures.entry.arguments)
+        self.assertIn("items", snap.captures.entry.arguments)
+        # Only the named argument was requested; multiplier must be excluded.
+        self.assertNotIn("multiplier", snap.captures.entry.arguments)
+        # Return value still captured alongside arguments.
+        self.assertEqual(snap.captures.return_context.return_value.value, "120")
+
+    def test_function_level_captures_all_arguments_when_empty_list(self):
+        """``capture_arguments=[]`` means 'capture all arguments'."""
+
+        # Own fresh module namespace (see sibling test) to avoid handler-global
+        # aliasing across tests in the shared test module.
+        ns: dict = {}
+        exec("def add_all_args(first, second):\n    return first + second\n", ns)  # noqa: S102
+        add_all_args = ns["add_all_args"]
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=add_all_args.__code__,
+            func=add_all_args,
+            function_key="m.add_all_args",
+            module_name="m",
+            qualified_name="add_all_args",
+            capture_config=CaptureConfig(capture_arguments=[], capture_return=True),
+            location_hash="hash-add-all",
+            instrumentation_type="PROBE",
+        )
+        self.assertTrue(ok)
+        self.assertEqual(add_all_args(4, 5), 9)
+        self.assertEqual(len(self.snapshots), 1)
+        entry = self.snapshots[0].captures.entry
+        self.assertIsNotNone(entry)
+        self.assertIn("first", entry.arguments)
+        self.assertIn("second", entry.arguments)
+
     def test_function_level_throwable_capture(self):
         """An instrumented function that raises must produce a snapshot whose
         return_context.throwable is fully populated."""

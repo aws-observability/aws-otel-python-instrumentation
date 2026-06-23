@@ -751,18 +751,23 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             self._function_reentrancy_guard.active = False
 
     def _build_entry_context(self, function_key: str, locals_dict: Dict[str, Any]) -> Optional[CapturedContext]:
-        """Filter & serialize argument locals at function entry. Mirrors the
-        line-BP handler's variable filtering and serializer-config logic."""
+        """Filter & serialize argument locals at function entry.
+
+        Function-entry capture is keyed by ``capture_arguments`` (None = don't
+        capture, [] = all, [names] = named only) — the same field the
+        sys.monitoring engine reads. (Line-level breakpoints use the separate
+        ``capture_locals`` field; the two must not be conflated, or a PROBE that
+        sets only ``capture_arguments`` would capture nothing.)"""
         capture_config = self._capture_configs.get((function_key, 0))
-        capture_locals_list = capture_config.capture_locals if capture_config else None
-        if capture_locals_list is None:
+        capture_arguments_list = capture_config.capture_arguments if capture_config else None
+        if capture_arguments_list is None:
             return None
 
         serializer = SnapshotSerializer(
             max_fields=capture_config.max_fields_per_object if capture_config else DEFAULT_MAX_FIELDS_PER_OBJECT,
             max_string_length=capture_config.max_string_length if capture_config else DEFAULT_MAX_STRING_LENGTH,
-            max_depth=capture_config.max_object_depth if capture_config else 3,
-            max_collection_size=capture_config.max_collection_width if capture_config else 10,
+            max_depth=capture_config.max_object_depth if capture_config else DEFAULT_MAX_OBJECT_DEPTH,
+            max_collection_size=capture_config.max_collection_width if capture_config else DEFAULT_MAX_COLLECTION_WIDTH,
         )
 
         filtered = {
@@ -777,8 +782,8 @@ class BytecodeInjectionEngine(InstrumentationEngine):
                 or inspect.isbuiltin(v)
             )
         }
-        if len(capture_locals_list) > 0:
-            filtered = {k: v for k, v in filtered.items() if k in capture_locals_list}
+        if len(capture_arguments_list) > 0:
+            filtered = {k: v for k, v in filtered.items() if k in capture_arguments_list}
         try:
             arguments = serializer.serialize_variables(filtered)
         except Exception as exc:  # pylint: disable=broad-exception-caught
