@@ -449,27 +449,38 @@ class BytecodeInjectionEngine(InstrumentationEngine):
                 func_id = id(func)
                 state = self._injection_states.get(func_id)
                 if state is None or state.function_metadata is None:
-                    for sid, candidate in self._injection_states.items():
-                        if candidate.function_metadata is not None:
-                            md = candidate.function_metadata
-                            qualname = md.get("qualified_name")
-                            if (
-                                qualname
-                                and md.get("file_path") == code.co_filename
-                                and candidate.original_code.co_name == qualname.rsplit(".", 1)[-1]
+                    # id(func) isn't a direct function-level key. This happens when
+                    # the manager passes a decorator wrapper rather than the real
+                    # user function: enable_function_level_instrumentation keyed the
+                    # state by id(undecorated(func)), so disable must resolve the
+                    # SAME inner function and look it up by identity.
+                    #
+                    # Anchoring to the resolved TARGET identity (not a module-wide
+                    # co_name/globals scan) is essential: many functions in one
+                    # module share co_filename and __globals__, so a loose scan
+                    # would mis-disarm an unrelated function-level PROBE while
+                    # disabling some other (e.g. line-only) function in the module.
+                    # functools.wraps preserves the inner function's __name__ on the
+                    # wrapper, so it is the right co_name hint for undecorated(); fall
+                    # back to the passed code's own name.
+                    name_hint = getattr(func, "__name__", None) or code.co_name
+                    resolved = undecorated(func, name=name_hint, path=code.co_filename)
+                    state = self._injection_states.get(id(resolved))
+                    if state is not None and state.function_metadata is not None:
+                        func_id = id(resolved)
+                    else:
+                        # Last resort: exact original-code identity match only.
+                        state = None
+                        for sid, candidate in self._injection_states.items():
+                            if sid == func_id or candidate.function_metadata is None:
+                                continue
+                            if candidate.original_code is code or (
+                                candidate.function_ref is not None
+                                and getattr(candidate.function_ref, "__code__", None) is code
                             ):
-                                # Probabilistic match — for the manager's call
-                                # contract, the wrapper's resolved-code lookup
-                                # uses qualified_name as co_name. Defensive: we
-                                # only match if the wrapper points at the same
-                                # globals object as the candidate's function_ref.
-                                if (
-                                    candidate.function_ref is not None
-                                    and candidate.function_ref.__globals__ is func.__globals__
-                                ):
-                                    func_id = sid
-                                    state = candidate
-                                    break
+                                func_id = sid
+                                state = candidate
+                                break
                     if state is None or state.function_metadata is None:
                         return  # not armed for function-level
 

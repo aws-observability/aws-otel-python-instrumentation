@@ -860,6 +860,59 @@ class TestBytecodeInjectionEngineFunctionLevel(unittest.TestCase):
         # State must be removed.
         self.assertEqual(len(self.engine._injection_states), 0)
 
+    def test_disable_one_function_does_not_disarm_sibling_in_same_module(self):
+        """Regression: disabling function-level instrumentation for ONE function
+        must not disarm a DIFFERENT function-level PROBE defined in the same
+        module.
+
+        Reproduces the DI contract failure where a PROBE on `compute_total`
+        stopped firing after a sibling function (`shared_function`) was updated:
+        disable_function_level_instrumentation's fallback resolution must anchor
+        to the target's identity, not scan the module by co_filename/__globals__
+        (which all same-module functions share) and disarm the first match."""
+        # Two functions sharing one module-globals dict (mirrors a real app module).
+        ns: dict = {}
+        exec("def compute_total(items):\n    return sum(items)\n", ns)  # noqa: S102
+        exec("def shared_function(data):\n    return data\n", ns)  # noqa: S102
+        compute_total = ns["compute_total"]
+        shared_function = ns["shared_function"]
+
+        # Arm compute_total at the function level (a PROBE).
+        self.assertTrue(
+            self.engine.enable_function_level_instrumentation(
+                code=compute_total.__code__,
+                func=compute_total,
+                function_key="m.compute_total",
+                module_name="m",
+                qualified_name="compute_total",
+                capture_config=CaptureConfig(capture_arguments=["items"], capture_return=True),
+                instrumentation_type="PROBE",
+            )
+        )
+        # Arm shared_function at the line level (independent instrumentation).
+        line = shared_function.__code__.co_firstlineno + 1
+        self.engine.enable_breakpoints_for_function(
+            code=shared_function.__code__,
+            func=shared_function,
+            line_numbers={line},
+            function_key="m.shared_function",
+            line_capture_configs={line: CaptureConfig(capture_locals=[])},
+        )
+
+        # Tear down shared_function exactly as the manager's _remove_function does:
+        # disable its line breakpoints, then its (non-existent) function-level hook.
+        self.engine.disable_breakpoints_for_function(code=ns["shared_function"].__code__, func=ns["shared_function"])
+        self.engine.disable_function_level_instrumentation(
+            code=ns["shared_function"].__code__, func=ns["shared_function"]
+        )
+
+        # compute_total must remain armed and still fire.
+        self.snapshots.clear()
+        self.assertEqual(ns["compute_total"]([10, 20, 30]), 60)
+        self.assertEqual(len(self.snapshots), 1, "sibling PROBE must remain armed after disabling another function")
+        self.assertIsNotNone(self.snapshots[0].captures.entry)
+        self.assertIn("items", self.snapshots[0].captures.entry.arguments)
+
 
 if __name__ == "__main__":
     unittest.main()
