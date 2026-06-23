@@ -141,11 +141,14 @@ if [ -z "${OTEL_PYTHON_ENABLED_INSTRUMENTATIONS}" ] && [ -z "${OTEL_PYTHON_DISAB
 fi
 
 # - The disabled list is used by the full SDK path (opentelemetry-instrument).
+#   In lite mode, the enabled list is authoritative so we skip setting the disabled default.
 
-if [ -z ${OTEL_PYTHON_DISABLED_INSTRUMENTATIONS} ]; then
-    export OTEL_PYTHON_DISABLED_INSTRUMENTATIONS="aio-pika,aiohttp-client,aiohttp-server,aiopg,asgi,asyncio,asyncpg,boto,boto3,cassandra,celery,confluent_kafka,dbapi,django,elasticsearch,falcon,fastapi,flask,grpc_client,grpc_server,grpc_aio_client,grpc_aio_server,httpx,jinja2,kafka,logging,mysql,mysqlclient,pika,psycopg,psycopg2,pymemcache,pymongo,pymysql,pyramid,redis,remoulade,requests,sklearn,sqlalchemy,sqlite3,starlette,system_metrics,threading,tornado,tortoiseorm,wsgi,openai_agents,aws_openai_agents,aws_crewai,aws_langchain,aws_mcp,aws_llama-index"
+if [ "$(echo "${AWS_LAMBDA_LITE_MODE}" | tr '[:upper:]' '[:lower:]')" != "true" ]; then
+    if [ -z ${OTEL_PYTHON_DISABLED_INSTRUMENTATIONS} ]; then
+        export OTEL_PYTHON_DISABLED_INSTRUMENTATIONS="aio-pika,aiohttp-client,aiohttp-server,aiopg,asgi,asyncio,asyncpg,boto,boto3,cassandra,celery,confluent_kafka,dbapi,django,elasticsearch,falcon,fastapi,flask,grpc_client,grpc_server,grpc_aio_client,grpc_aio_server,httpx,jinja2,kafka,logging,mysql,mysqlclient,pika,psycopg,psycopg2,pymemcache,pymongo,pymysql,pyramid,redis,remoulade,requests,sklearn,sqlalchemy,sqlite3,starlette,system_metrics,threading,tornado,tortoiseorm,wsgi,openai_agents,aws_openai_agents,aws_crewai,aws_langchain,aws_mcp,aws_llama-index"
+    fi
+    export OTEL_PYTHON_DISABLED_INSTRUMENTATIONS="$OTEL_PYTHON_DISABLED_INSTRUMENTATIONS,aws-lambda";
 fi
-export OTEL_PYTHON_DISABLED_INSTRUMENTATIONS="$OTEL_PYTHON_DISABLED_INSTRUMENTATIONS,aws-lambda";
 
 # - Use a wrapper because AWS Lambda's `python3 /var/runtime/bootstrap.py` will
 #   use `imp.load_module` to load the function from the `_HANDLER` environment
