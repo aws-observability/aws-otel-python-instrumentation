@@ -414,7 +414,7 @@ class ServiceEventsInstrumentation:
             # Deferred imports: keep this module importable without the OTel SDK present.
             # pylint: disable=import-outside-toplevel
             from amazon.opentelemetry.distro.serviceevents.processor.endpoint_span_processor import (
-                EndpointServiceEventsSpanProcessor,
+                ServiceEventsSpanProcessor,
             )
             from opentelemetry.trace import get_tracer_provider
 
@@ -436,11 +436,11 @@ class ServiceEventsInstrumentation:
             # per span and double-count every endpoint metric. Skip if one is already present —
             # report success so the caller does NOT fall back to the legacy hooks (the existing
             # processor already covers the work).
-            if self._provider_has_endpoint_processor(provider, EndpointServiceEventsSpanProcessor):
+            if self._provider_has_endpoint_processor(provider, ServiceEventsSpanProcessor):
                 logger.info("ServiceEvents endpoint span processor already registered; skipping re-registration")
                 return True
 
-            processor = EndpointServiceEventsSpanProcessor(
+            processor = ServiceEventsSpanProcessor(
                 endpoint_collector=endpoint_collector,
                 incident_snapshot_collector=incident_snapshot_collector,
                 config=self.config,
@@ -454,7 +454,7 @@ class ServiceEventsInstrumentation:
 
     @staticmethod
     def _provider_has_endpoint_processor(provider, processor_cls) -> bool:
-        """True when the provider already carries an EndpointServiceEventsSpanProcessor.
+        """True when the provider already carries an ServiceEventsSpanProcessor.
 
         Introspects the SDK's ``_active_span_processor._span_processors`` (a
         ``(Synchronous|Concurrent)MultiSpanProcessor`` holds its children there). Best-effort:

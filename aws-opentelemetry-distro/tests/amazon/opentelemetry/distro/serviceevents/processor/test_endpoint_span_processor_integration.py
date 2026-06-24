@@ -18,7 +18,7 @@ from unittest import TestCase
 
 from amazon.opentelemetry.distro.serviceevents.collectors.endpoint_collector import EndpointMetricCollector
 from amazon.opentelemetry.distro.serviceevents.processor.endpoint_span_processor import (
-    EndpointServiceEventsSpanProcessor,
+    ServiceEventsSpanProcessor,
 )
 from amazon.opentelemetry.distro.serviceevents.python_monitor import _ServiceEventsMonitorState
 from opentelemetry.sdk.trace import TracerProvider
@@ -44,7 +44,7 @@ class TestEndpointSpanProcessorIntegration(TestCase):
         # no background flush thread or emitter is needed.
         self.endpoint_collector = EndpointMetricCollector(flush_interval_ms=3_600_000, otlp_emitter=None)
         # No incident collector needed for endpoint-metric assertions; pass None.
-        self.processor = EndpointServiceEventsSpanProcessor(
+        self.processor = ServiceEventsSpanProcessor(
             endpoint_collector=self.endpoint_collector,
             incident_snapshot_collector=None,
             config=_Config(),

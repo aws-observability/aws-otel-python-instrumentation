@@ -6,7 +6,7 @@ from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro.serviceevents.processor.endpoint_span_processor import (
-    EndpointServiceEventsSpanProcessor,
+    ServiceEventsSpanProcessor,
     _exception_from_span_event,
     _get_http_method,
     _get_status_code,
@@ -122,7 +122,7 @@ class TestOnStart(TestCase):
         self.endpoint_collector = MagicMock()
         self.incident_collector = MagicMock()
         self.config = MagicMock()
-        self.processor = EndpointServiceEventsSpanProcessor(
+        self.processor = ServiceEventsSpanProcessor(
             self.endpoint_collector, self.incident_collector, self.config
         )
 
@@ -153,7 +153,7 @@ class TestOnEnd(TestCase):
         self.incident_collector.process_potential_incident.return_value = None
         self.config = MagicMock()
         self.config.should_track_endpoint.return_value = True
-        self.processor = EndpointServiceEventsSpanProcessor(
+        self.processor = ServiceEventsSpanProcessor(
             self.endpoint_collector, self.incident_collector, self.config
         )
 
@@ -395,7 +395,7 @@ class TestSeedExceptionFromSpan(TestCase):
     """_seed_exception_from_span fills investigation data from the span event (first-writer-wins)."""
 
     def setUp(self):
-        self.processor = EndpointServiceEventsSpanProcessor(MagicMock(), MagicMock(), MagicMock())
+        self.processor = ServiceEventsSpanProcessor(MagicMock(), MagicMock(), MagicMock())
 
     def test_seeds_when_investigation_has_no_exception(self):
         # The 5xx unwound through uninstrumented code: AST monitor captured nothing, but the
@@ -481,6 +481,6 @@ class TestSeedExceptionFromSpan(TestCase):
 
 class TestLifecycle(TestCase):
     def test_force_flush_and_shutdown(self):
-        processor = EndpointServiceEventsSpanProcessor(MagicMock(), MagicMock(), MagicMock())
+        processor = ServiceEventsSpanProcessor(MagicMock(), MagicMock(), MagicMock())
         self.assertTrue(processor.force_flush())
         self.assertIsNone(processor.shutdown())

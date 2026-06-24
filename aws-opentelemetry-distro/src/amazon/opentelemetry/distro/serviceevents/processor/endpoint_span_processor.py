@@ -124,7 +124,7 @@ def _get_status_code(span: ReadableSpan) -> int:
         return 0
 
 
-class EndpointServiceEventsSpanProcessor(SpanProcessor):
+class ServiceEventsSpanProcessor(SpanProcessor):
     """SpanProcessor that produces ServiceEvents endpoint + incident telemetry from spans.
 
     Holds references to the same two collectors the per-framework hooks use, plus the

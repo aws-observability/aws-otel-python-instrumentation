@@ -250,7 +250,7 @@ class ServiceEventsConfig:
     packages_include: List[str] = field(default_factory=list)  # OTEL_AWS_SERVICE_EVENTS_PACKAGES_INCLUDE
 
     # Endpoint-measurement mode. Default true: a single framework-agnostic span processor
-    # (EndpointServiceEventsSpanProcessor — the Python port of Java's ServiceEventsSpanProcessor)
+    # (ServiceEventsSpanProcessor — the Python port of Java's ServiceEventsSpanProcessor)
     # reads the request-boundary span OTel already produces and derives endpoint metrics + incident
     # snapshots from span attributes, covering every OTel-instrumented framework for free. Set
     # OTEL_AWS_SERVICE_EVENTS_USE_SPAN_PROCESSOR=false to fall back to the legacy per-framework hooks
