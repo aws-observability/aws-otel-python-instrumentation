@@ -72,6 +72,25 @@ def _get_http_method(span: ReadableSpan) -> Optional[str]:
     return method
 
 
+import re
+
+_PYTHON_FRAME_RE = re.compile(r'^\s*File\s+"[^"]*",\s+line\s+\d+,\s+in\s+(\S+)', re.MULTILINE)
+
+
+def _extract_function_from_stacktrace(stacktrace: Optional[str]) -> str:
+    """Extract the origin function name from a Python traceback string.
+
+    Python tracebacks list the throw site LAST (most recent call last), so we take the last
+    ``in <function_name>`` match. Returns "unknown" if unparseable — matching Java's fallback.
+    """
+    if not stacktrace:
+        return "unknown"
+    matches = _PYTHON_FRAME_RE.findall(stacktrace)
+    if matches:
+        return matches[-1]
+    return "unknown"
+
+
 def _exception_from_span_event(span: ReadableSpan) -> Optional[dict]:
     """Recover an exception from the span's own OTel ``exception`` event.
 
@@ -89,21 +108,20 @@ def _exception_from_span_event(span: ReadableSpan) -> Optional[dict]:
     events = getattr(span, "events", None)
     if not events:
         return None
-    # Last exception event wins — it is the one closest to the response being produced.
-    for event in reversed(list(events)):
+    # First exception event wins — the original root-cause exception, matching Java.
+    for event in events:
         if getattr(event, "name", None) != "exception":
             continue
         attributes = event.attributes or {}
         exc_type = attributes.get(SpanAttributes.EXCEPTION_TYPE)
         if not exc_type:
             continue
+        stacktrace = attributes.get(SpanAttributes.EXCEPTION_STACKTRACE) or ""
         return {
             "name": exc_type,
             "message": attributes.get(SpanAttributes.EXCEPTION_MESSAGE) or "",
-            "traceback_info": attributes.get(SpanAttributes.EXCEPTION_STACKTRACE) or "",
-            # The span event carries no origin function; "unknown" matches the breakdown's
-            # fallback when no instrumented frame recorded the throw.
-            "function_name": "unknown",
+            "traceback_info": stacktrace,
+            "function_name": _extract_function_from_stacktrace(stacktrace),
         }
     return None
 

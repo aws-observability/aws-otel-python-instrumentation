@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from amazon.opentelemetry.distro.serviceevents.processor.endpoint_span_processor import (
     ServiceEventsSpanProcessor,
     _exception_from_span_event,
+    _extract_function_from_stacktrace,
     _get_http_method,
     _get_status_code,
     _is_request_boundary,
@@ -371,12 +372,12 @@ class TestExceptionFromSpanEvent(TestCase):
         # The span event carries no origin function.
         self.assertEqual(result["function_name"], "unknown")
 
-    def test_last_exception_event_wins(self):
+    def test_first_exception_event_wins(self):
         span = _build_span(
             {},
             events=[_exception_event("FirstError"), _exception_event("LastError")],
         )
-        self.assertEqual(_exception_from_span_event(span)["name"], "LastError")
+        self.assertEqual(_exception_from_span_event(span)["name"], "FirstError")
 
     def test_event_without_type_is_skipped(self):
         # An exception event missing exception.type is not a usable fault source.
@@ -389,6 +390,57 @@ class TestExceptionFromSpanEvent(TestCase):
         self.assertEqual(result["name"], "KeyError")
         self.assertEqual(result["message"], "")
         self.assertEqual(result["traceback_info"], "")
+
+    def test_extracts_function_name_from_realistic_traceback(self):
+        tb = (
+            'Traceback (most recent call last):\n'
+            '  File "/app/main.py", line 10, in run_app\n'
+            '    result = process(data)\n'
+            '  File "/app/handlers.py", line 42, in process\n'
+            '    raise ValueError("bad")\n'
+            'ValueError: bad'
+        )
+        span = _build_span({}, events=[_exception_event("ValueError", "bad", tb)])
+        result = _exception_from_span_event(span)
+        # Python tracebacks list throw site LAST — we extract "process"
+        self.assertEqual(result["function_name"], "process")
+
+    def test_function_name_unknown_when_stacktrace_unparseable(self):
+        span = _build_span({}, events=[_exception_event("Error", "oops", "no frames here")])
+        result = _exception_from_span_event(span)
+        self.assertEqual(result["function_name"], "unknown")
+
+
+class TestExtractFunctionFromStacktrace(TestCase):
+    """Unit tests for _extract_function_from_stacktrace."""
+
+    def test_standard_python_traceback(self):
+        tb = (
+            'Traceback (most recent call last):\n'
+            '  File "/app/server.py", line 5, in handle_request\n'
+            '    return db.query()\n'
+            '  File "/app/db.py", line 20, in query\n'
+            '    raise RuntimeError("conn lost")\n'
+            'RuntimeError: conn lost'
+        )
+        self.assertEqual(_extract_function_from_stacktrace(tb), "query")
+
+    def test_single_frame(self):
+        tb = '  File "/app/main.py", line 1, in main\nRuntimeError: x'
+        self.assertEqual(_extract_function_from_stacktrace(tb), "main")
+
+    def test_module_level_frame(self):
+        tb = '  File "/app/main.py", line 1, in <module>\nRuntimeError: x'
+        self.assertEqual(_extract_function_from_stacktrace(tb), "<module>")
+
+    def test_none_returns_unknown(self):
+        self.assertEqual(_extract_function_from_stacktrace(None), "unknown")
+
+    def test_empty_string_returns_unknown(self):
+        self.assertEqual(_extract_function_from_stacktrace(""), "unknown")
+
+    def test_no_matching_frames_returns_unknown(self):
+        self.assertEqual(_extract_function_from_stacktrace("just a message, no frames"), "unknown")
 
 
 class TestSeedExceptionFromSpan(TestCase):
