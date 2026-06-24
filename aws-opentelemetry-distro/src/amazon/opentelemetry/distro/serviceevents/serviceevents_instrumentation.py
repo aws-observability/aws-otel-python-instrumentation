@@ -430,6 +430,16 @@ class ServiceEventsInstrumentation:
                 )
                 return False
 
+            # Idempotency guard: the SDK's add_span_processor APPENDS with no de-dup, so
+            # registering again on a provider that already carries our processor (a re-init, or a
+            # forked child that inherited the parent's provider) would fire on_start/on_end twice
+            # per span and double-count every endpoint metric. Skip if one is already present —
+            # report success so the caller does NOT fall back to the legacy hooks (the existing
+            # processor already covers the work).
+            if self._provider_has_endpoint_processor(provider, EndpointServiceEventsSpanProcessor):
+                logger.info("ServiceEvents endpoint span processor already registered; skipping re-registration")
+                return True
+
             processor = EndpointServiceEventsSpanProcessor(
                 endpoint_collector=endpoint_collector,
                 incident_snapshot_collector=incident_snapshot_collector,
@@ -441,6 +451,21 @@ class ServiceEventsInstrumentation:
         except Exception as exc:  # pylint: disable=broad-exception-caught  # telemetry must not crash app
             logger.error("Error installing ServiceEvents endpoint span processor: %s", exc, exc_info=True)
             return False
+
+    @staticmethod
+    def _provider_has_endpoint_processor(provider, processor_cls) -> bool:
+        """True when the provider already carries an EndpointServiceEventsSpanProcessor.
+
+        Introspects the SDK's ``_active_span_processor._span_processors`` (a
+        ``(Synchronous|Concurrent)MultiSpanProcessor`` holds its children there). Best-effort:
+        any unexpected provider shape returns False so registration proceeds — at worst we fall
+        back to the prior append behavior, which is the pre-guard baseline.
+        """
+        active = getattr(provider, "_active_span_processor", None)
+        registered = getattr(active, "_span_processors", None)
+        if not isinstance(registered, (list, tuple)):
+            return False
+        return any(isinstance(sp, processor_cls) for sp in registered)
 
     def _install_framework_hooks(self, endpoint_collector, incident_snapshot_collector) -> None:
         """Install the per-framework endpoint hooks (Flask/FastAPI/Django).

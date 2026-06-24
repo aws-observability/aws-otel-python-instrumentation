@@ -941,3 +941,45 @@ class TestEndpointMeasurementMode(TestCase):
         provider.add_span_processor.side_effect = RuntimeError("provider down")
         with patch("opentelemetry.trace.get_tracer_provider", return_value=provider):
             self.assertFalse(inst._install_endpoint_span_processor(MagicMock(), MagicMock()))
+
+    def test_install_span_processor_is_idempotent_on_same_provider(self):
+        """A second install on a provider that already carries our processor must NOT add a
+        duplicate — a double registration would fire on_start/on_end twice and double-count
+        every endpoint metric. It still reports success so init does not fall back to hooks."""
+        from amazon.opentelemetry.distro.serviceevents.processor.endpoint_span_processor import (
+            EndpointServiceEventsSpanProcessor,
+        )
+        from opentelemetry.sdk.trace import TracerProvider
+
+        config = ServiceEventsConfig(enabled=True, use_span_processor=True)
+        inst = ServiceEventsInstrumentation(config)
+        provider = TracerProvider()
+        with patch("opentelemetry.trace.get_tracer_provider", return_value=provider):
+            self.assertTrue(inst._install_endpoint_span_processor(MagicMock(), MagicMock()))
+            # Second call (re-init / forked child inheriting the provider) is a no-op add.
+            self.assertTrue(inst._install_endpoint_span_processor(MagicMock(), MagicMock()))
+
+        registered = [
+            sp
+            for sp in provider._active_span_processor._span_processors
+            if isinstance(sp, EndpointServiceEventsSpanProcessor)
+        ]
+        self.assertEqual(len(registered), 1)
+
+    def test_provider_has_endpoint_processor_handles_unexpected_shape(self):
+        """The idempotency probe is best-effort: an unintrospectable provider returns False so
+        registration still proceeds (the pre-guard baseline), never crashing."""
+        from amazon.opentelemetry.distro.serviceevents.processor.endpoint_span_processor import (
+            EndpointServiceEventsSpanProcessor,
+        )
+
+        # No _active_span_processor at all.
+        self.assertFalse(
+            ServiceEventsInstrumentation._provider_has_endpoint_processor(object(), EndpointServiceEventsSpanProcessor)
+        )
+        # _span_processors is not a list/tuple.
+        weird = MagicMock()
+        weird._active_span_processor._span_processors = 12345
+        self.assertFalse(
+            ServiceEventsInstrumentation._provider_has_endpoint_processor(weird, EndpointServiceEventsSpanProcessor)
+        )
