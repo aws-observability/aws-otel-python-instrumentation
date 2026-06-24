@@ -650,6 +650,31 @@ class TestOtlpEncoding(unittest.TestCase):
         except ImportError:
             self.skipTest("protobuf library not available for validation")
 
+    def test_scope_schema_url_encoded_and_grouped(self):
+        provider = TracerProvider(resource={"service.name": "test-svc"})
+        tracer_a = provider.get_tracer("my-lib", "1.0", schema_url="https://schema.v1")
+        tracer_b = provider.get_tracer("my-lib", "1.0", schema_url="https://schema.v2")
+
+        span1 = tracer_a.start_span("s1", kind=SpanKind.SERVER)
+        span1.end()
+        span2 = tracer_b.start_span("s2", kind=SpanKind.CLIENT)
+        span2.end()
+
+        data = _encode_export_trace_request([span1, span2])
+        try:
+            from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+
+            req = ExportTraceServiceRequest()
+            req.ParseFromString(data)
+            rs = req.resource_spans[0]
+            self.assertEqual(len(rs.scope_spans), 2)
+
+            schema_urls = {ss.schema_url: [s.name for s in ss.spans] for ss in rs.scope_spans}
+            self.assertEqual(schema_urls["https://schema.v1"], ["s1"])
+            self.assertEqual(schema_urls["https://schema.v2"], ["s2"])
+        except ImportError:
+            self.skipTest("protobuf library not available for validation")
+
 
 class TestEvent(unittest.TestCase):
 

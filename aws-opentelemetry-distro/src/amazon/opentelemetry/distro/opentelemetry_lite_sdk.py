@@ -589,9 +589,9 @@ def _make_hashable(value):
 
 def _scope_key(scope):
     if scope is None:
-        return ("", "", ())
+        return ("", "", "", ())
     attrs = tuple(sorted((k, _make_hashable(v)) for k, v in scope.attributes.items())) if scope.attributes else ()
-    return (scope.name or "", scope.version or "", attrs)
+    return (scope.name or "", scope.version or "", scope.schema_url or "", attrs)
 
 
 def _resource_key(resource):
@@ -631,6 +631,8 @@ def _encode_export_trace_request(spans):
                 scope_spans += _encode_bytes_field(1, scope_bytes)
             for span in scope_spans_list:
                 scope_spans += _encode_bytes_field(2, _encode_span_otlp(span))
+            if scope and scope.schema_url:
+                scope_spans += _encode_string_field(3, scope.schema_url)
             resource_spans += _encode_bytes_field(2, scope_spans)
 
         buf += _encode_bytes_field(1, resource_spans)
