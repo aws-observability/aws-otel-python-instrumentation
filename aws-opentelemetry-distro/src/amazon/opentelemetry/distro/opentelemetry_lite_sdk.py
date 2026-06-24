@@ -49,7 +49,7 @@ def _build_lambda_resource():
 
 
 class InstrumentationScope:
-    __slots__ = ("_name", "_version", "_schema_url")
+    __slots__ = ("_name", "_version", "_schema_url", "_attributes")
 
     def __init__(
         self,
@@ -61,7 +61,7 @@ class InstrumentationScope:
         self._name = name
         self._version = version
         self._schema_url = schema_url or ""
-        # attributes: accepted for API compatibility with TracerProvider.get_tracer() but not stored or encoded.
+        self._attributes = dict(attributes) if attributes else {}
 
     @property
     def schema_url(self) -> Optional[str]:
@@ -74,6 +74,10 @@ class InstrumentationScope:
     @property
     def name(self) -> str:
         return self._name
+
+    @property
+    def attributes(self) -> dict:
+        return self._attributes
 
 
 class SpanProcessor:
@@ -571,13 +575,17 @@ def _encode_instrumentation_scope(scope):
         buf += _encode_string_field(1, scope.name)
         if scope.version:
             buf += _encode_string_field(2, scope.version)
+        if scope.attributes:
+            for key, value in scope.attributes.items():
+                buf += _encode_bytes_field(3, _encode_key_value(key, value))
     return buf
 
 
 def _scope_key(scope):
     if scope is None:
-        return ("", "")
-    return (scope.name or "", scope.version or "")
+        return ("", "", ())
+    attrs = tuple(sorted(scope.attributes.items())) if scope.attributes else ()
+    return (scope.name or "", scope.version or "", attrs)
 
 
 def _resource_key(resource):
