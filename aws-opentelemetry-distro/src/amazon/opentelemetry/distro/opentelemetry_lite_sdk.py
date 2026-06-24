@@ -581,17 +581,23 @@ def _encode_instrumentation_scope(scope):
     return buf
 
 
+def _make_hashable(value):
+    if isinstance(value, (list, tuple)):
+        return tuple(_make_hashable(v) for v in value)
+    return value
+
+
 def _scope_key(scope):
     if scope is None:
         return ("", "", ())
-    attrs = tuple(sorted(scope.attributes.items())) if scope.attributes else ()
+    attrs = tuple(sorted((k, _make_hashable(v)) for k, v in scope.attributes.items())) if scope.attributes else ()
     return (scope.name or "", scope.version or "", attrs)
 
 
 def _resource_key(resource):
     if not resource:
         return ()
-    return tuple(sorted(resource.items()))
+    return tuple(sorted((k, _make_hashable(v)) for k, v in resource.items()))
 
 
 def _encode_export_trace_request(spans):

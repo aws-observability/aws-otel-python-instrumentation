@@ -89,6 +89,11 @@ class TestInstrumentationScope(unittest.TestCase):
         self.assertEqual(scope.name, "my-module")
         self.assertIsNone(scope.version)
         self.assertEqual(scope.schema_url, "")
+        self.assertEqual(scope.attributes, {})
+
+    def test_attributes(self):
+        scope = InstrumentationScope("my-module", "1.0.0", attributes={"foo": "bar", "count": 42})
+        self.assertEqual(scope.attributes, {"foo": "bar", "count": 42})
 
 
 class TestTracerProvider(unittest.TestCase):
@@ -615,6 +620,36 @@ class TestOtlpEncoding(unittest.TestCase):
         except ImportError:
             self.skipTest("protobuf library not available for validation")
 
+    def test_scope_attributes_encoded_and_grouped(self):
+        provider = TracerProvider(resource={"service.name": "test-svc"})
+        tracer_v1 = provider.get_tracer("my-lib", "1.0", attributes={"env": "prod"})
+        tracer_v1_alt = provider.get_tracer("my-lib", "1.0", attributes={"env": "staging"})
+
+        span1 = tracer_v1.start_span("s1", kind=SpanKind.SERVER)
+        span1.end()
+        span2 = tracer_v1_alt.start_span("s2", kind=SpanKind.CLIENT)
+        span2.end()
+
+        data = _encode_export_trace_request([span1, span2])
+        try:
+            from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+
+            req = ExportTraceServiceRequest()
+            req.ParseFromString(data)
+            rs = req.resource_spans[0]
+            self.assertEqual(len(rs.scope_spans), 2)
+
+            scope_attrs = {}
+            for ss in rs.scope_spans:
+                attrs = {kv.key: kv.value.string_value for kv in ss.scope.attributes}
+                span_names = [s.name for s in ss.spans]
+                scope_attrs[attrs.get("env")] = span_names
+
+            self.assertEqual(scope_attrs["prod"], ["s1"])
+            self.assertEqual(scope_attrs["staging"], ["s2"])
+        except ImportError:
+            self.skipTest("protobuf library not available for validation")
+
 
 class TestEvent(unittest.TestCase):
 
@@ -657,6 +692,20 @@ class TestUdpExporter(unittest.TestCase):
 class TestLiteVsFullSdkParity(unittest.TestCase):
     """Compare lite SDK OTLP output against the full OTel SDK to ensure no data loss."""
 
+    def _extract_any_value(self, val):
+        which = val.WhichOneof("value")
+        if which == "string_value":
+            return val.string_value
+        if which == "int_value":
+            return val.int_value
+        if which == "double_value":
+            return val.double_value
+        if which == "bool_value":
+            return val.bool_value
+        if which == "array_value":
+            return [self._extract_any_value(v) for v in val.array_value.values]
+        return str(val)
+
     def _parse_otlp(self, data):
         """Parse OTLP bytes into a normalized dict for comparison."""
         from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
@@ -672,16 +721,7 @@ class TestLiteVsFullSdkParity(unittest.TestCase):
                 for span in ss.spans:
                     attrs = {}
                     for kv in span.attributes:
-                        val = kv.value
-                        which = val.WhichOneof("value")
-                        if which == "string_value":
-                            attrs[kv.key] = val.string_value
-                        elif which == "int_value":
-                            attrs[kv.key] = val.int_value
-                        elif which == "double_value":
-                            attrs[kv.key] = val.double_value
-                        elif which == "bool_value":
-                            attrs[kv.key] = val.bool_value
+                        attrs[kv.key] = self._extract_any_value(kv.value)
                     spans.append(
                         {
                             "name": span.name,
@@ -694,6 +734,7 @@ class TestLiteVsFullSdkParity(unittest.TestCase):
                             "scope_version": scope_version,
                             "has_parent": bool(span.parent_span_id),
                             "events": [e.name for e in span.events],
+                            "flags": span.flags,
                         }
                     )
         return spans
@@ -721,6 +762,9 @@ class TestLiteVsFullSdkParity(unittest.TestCase):
             server_span.set_attribute("http.status_code", 200)
             server_span.set_attribute("score", 3.14)
             server_span.set_attribute("is_cold_start", True)
+            server_span.set_attribute("tags", ["prod", "us-west-2"])
+            server_span.add_event("checkpoint", attributes={"step": "init"})
+            server_span.set_status(StatusCode.OK)
 
             botocore_tracer = provider.get_tracer("opentelemetry.instrumentation.botocore", "0.2.0")
             with botocore_tracer.start_as_current_span("S3.ListBuckets", kind=SpanKind.CLIENT) as client_span:
@@ -741,6 +785,9 @@ class TestLiteVsFullSdkParity(unittest.TestCase):
             server_span.set_attribute("http.status_code", 200)
             server_span.set_attribute("score", 3.14)
             server_span.set_attribute("is_cold_start", True)
+            server_span.set_attribute("tags", ["prod", "us-west-2"])
+            server_span.add_event("checkpoint", attributes={"step": "init"})
+            server_span.set_status(StatusCode.OK)
 
             botocore_tracer = lite_provider.get_tracer("opentelemetry.instrumentation.botocore", "0.2.0")
             with botocore_tracer.start_as_current_span("S3.ListBuckets", kind=SpanKind.CLIENT) as client_span:
@@ -765,10 +812,17 @@ class TestLiteVsFullSdkParity(unittest.TestCase):
         for full_span, lite_span in zip(full_sdk_spans, lite_spans):
             self.assertEqual(full_span.name, lite_span.name)
             self.assertEqual(full_span.kind, lite_span.kind)
+            for key, value in full_span.attributes.items():
+                lite_value = lite_span.attributes[key]
+                if isinstance(value, tuple):
+                    self.assertEqual(list(value), list(lite_value))
+                else:
+                    self.assertEqual(value, lite_value)
             self.assertEqual(
-                dict(full_span.attributes),
-                lite_span.attributes,
+                [e.name for e in full_span.events],
+                [e.name for e in lite_span.events],
             )
+            self.assertEqual(full_span.status.status_code, lite_span.status.status_code)
 
     def test_otlp_encoding_matches_full_sdk(self):
         """Verify lite SDK OTLP output decodes to the same logical data as the full SDK."""
@@ -793,7 +847,12 @@ class TestLiteVsFullSdkParity(unittest.TestCase):
             self.assertEqual(lite_span_data["scope_version"], full_span.instrumentation_scope.version)
             for key, value in full_span.attributes.items():
                 self.assertIn(key, lite_span_data["attributes"])
-                self.assertEqual(value, lite_span_data["attributes"][key])
+                if isinstance(value, (list, tuple)):
+                    self.assertEqual(list(value), lite_span_data["attributes"][key])
+                else:
+                    self.assertEqual(value, lite_span_data["attributes"][key])
+            self.assertEqual([e.name for e in full_span.events], lite_span_data["events"])
+            self.assertTrue(lite_span_data["flags"] & 0x100, "HAS_IS_REMOTE bit not set")
 
     def test_resource_attributes_match_full_sdk(self):
         """Verify resource attributes are encoded identically."""
