@@ -181,7 +181,6 @@ jobs:
           python_version: ${{ matrix.python-version }}
           package_name: aws-opentelemetry-distro
           os: ubuntu-latest
-          run_unit_tests: false
           trivyignore-file: .github/trivy/pr-build.trivyignore.yaml
           platforms: linux/amd64
 

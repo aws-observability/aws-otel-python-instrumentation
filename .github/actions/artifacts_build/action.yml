@@ -33,10 +33,6 @@ inputs:
   os:
     required: true
     description: "The os"
-  run_unit_tests:
-    required: false
-    default: 'true'
-    description: "Whether to run unit tests during setup. Set to false when unit tests run in a separate job."
   build_image:
     required: false
     default: 'true'
@@ -67,7 +63,7 @@ runs:
         python_version: ${{ inputs.python_version }}
         package_name: ${{ inputs.package_name }}
         os: ${{ inputs.os }}
-        run_unit_tests: ${{ inputs.run_unit_tests }}
+        run_unit_tests: 'false'
 
     - name: Configure AWS Credentials
       if: ${{ inputs.push_image == true || inputs.push_image == 'true' }}
