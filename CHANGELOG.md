@@ -12,6 +12,9 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat: add OTel lite SDK for Lambda cold start optimization
+  ([#789](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/789))
+
 ## v0.18.0 - 2026-06-18
 
 - feat: support pluggable session injection for the OTLP HTTP exporter via the upstream OTel SDK hook

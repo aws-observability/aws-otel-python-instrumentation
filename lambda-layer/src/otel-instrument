@@ -111,6 +111,10 @@ if [ -z "${OTEL_LOGS_EXPORTER}" ]; then
         export OTEL_LOGS_EXPORTER="none";
 fi
 
+if [ -z "${OTEL_AWS_LAMBDA_FAST_START}" ]; then
+    export OTEL_AWS_LAMBDA_FAST_START="false";
+fi
+
 if [ -z "${OTEL_AWS_APPLICATION_SIGNALS_ENABLED}" ]; then
     export OTEL_AWS_APPLICATION_SIGNALS_ENABLED="true";
 fi
@@ -128,12 +132,15 @@ else
     export OTEL_RESOURCE_ATTRIBUTES="$LAMBDA_RESOURCE_ATTRIBUTES,$OTEL_RESOURCE_ATTRIBUTES";
 fi
 
-# - Enable botocore instrumentation by default
+# - The disabled list is used by the full SDK path (opentelemetry-instrument).
+#   In lite mode, the enabled list is hardcoded in configure_lite_mode() so we skip setting the disabled default.
 
-if [ -z ${OTEL_PYTHON_DISABLED_INSTRUMENTATIONS} ]; then
-    export OTEL_PYTHON_DISABLED_INSTRUMENTATIONS="aio-pika,aiohttp-client,aiohttp-server,aiopg,asgi,asyncio,asyncpg,boto,boto3,cassandra,celery,confluent_kafka,dbapi,django,elasticsearch,falcon,fastapi,flask,grpc_client,grpc_server,grpc_aio_client,grpc_aio_server,httpx,jinja2,kafka,logging,mysql,mysqlclient,pika,psycopg,psycopg2,pymemcache,pymongo,pymysql,pyramid,redis,remoulade,requests,sklearn,sqlalchemy,sqlite3,starlette,system_metrics,threading,tornado,tortoiseorm,wsgi,openai_agents,aws_openai_agents,aws_crewai,aws_langchain,aws_mcp,aws_llama-index"
+if [ "$(echo "${OTEL_AWS_LAMBDA_FAST_START}" | tr '[:upper:]' '[:lower:]')" != "true" ]; then
+    if [ -z ${OTEL_PYTHON_DISABLED_INSTRUMENTATIONS} ]; then
+        export OTEL_PYTHON_DISABLED_INSTRUMENTATIONS="aio-pika,aiohttp-client,aiohttp-server,aiopg,asgi,asyncio,asyncpg,boto,boto3,cassandra,celery,confluent_kafka,dbapi,django,elasticsearch,falcon,fastapi,flask,grpc_client,grpc_server,grpc_aio_client,grpc_aio_server,httpx,jinja2,kafka,logging,mysql,mysqlclient,pika,psycopg,psycopg2,pymemcache,pymongo,pymysql,pyramid,redis,remoulade,requests,sklearn,sqlalchemy,sqlite3,starlette,system_metrics,threading,tornado,tortoiseorm,wsgi,openai_agents,aws_openai_agents,aws_crewai,aws_langchain,aws_mcp,aws_llama-index"
+    fi
+    export OTEL_PYTHON_DISABLED_INSTRUMENTATIONS="$OTEL_PYTHON_DISABLED_INSTRUMENTATIONS,aws-lambda";
 fi
-export OTEL_PYTHON_DISABLED_INSTRUMENTATIONS="$OTEL_PYTHON_DISABLED_INSTRUMENTATIONS,aws-lambda";
 
 # - Use a wrapper because AWS Lambda's `python3 /var/runtime/bootstrap.py` will
 #   use `imp.load_module` to load the function from the `_HANDLER` environment
@@ -147,6 +154,11 @@ export OTEL_PYTHON_DISABLED_INSTRUMENTATIONS="$OTEL_PYTHON_DISABLED_INSTRUMENTAT
 export ORIG_HANDLER=$_HANDLER;
 export _HANDLER="otel_wrapper.lambda_handler";
 
-# - Call the upstream auto instrumentation script
+# - Lite mode: skip full SDK bootstrap, use lite SDK configured in otel_wrapper.py
+# - Full mode: use standard opentelemetry-instrument path
 
-exec python3 $LAMBDA_LAYER_PKGS_DIR/bin/opentelemetry-instrument "$@"
+if [ "$(echo "${OTEL_AWS_LAMBDA_FAST_START}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+    exec "$@"
+else
+    exec python3 $LAMBDA_LAYER_PKGS_DIR/bin/opentelemetry-instrument "$@"
+fi

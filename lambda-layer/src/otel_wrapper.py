@@ -34,6 +34,7 @@ https://docs.python.org/3/library/imp.html#imp.load_module
 
 """
 
+import logging
 import os
 from importlib import import_module
 from typing import Any
@@ -52,6 +53,15 @@ def modify_module_name(module_name):
 
 class HandlerError(Exception):
     pass
+
+
+if os.environ.get("OTEL_AWS_LAMBDA_FAST_START", "false").lower() == "true":
+    try:
+        from amazon.opentelemetry.distro.opentelemetry_lite_sdk import configure_lite_mode
+
+        configure_lite_mode()
+    except Exception:
+        logging.getLogger(__name__).error("Failed to configure lite mode", exc_info=True)
 
 
 def custom_event_context_extractor(lambda_event: Any) -> Context:
