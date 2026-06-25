@@ -131,11 +131,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Build distro wheel
-        run: |
-          pip install --upgrade pip setuptools wheel packaging build
-          rm -rf ./dist/*
-          cd ./aws-opentelemetry-distro
-          python -m build --outdir ../dist
+        uses: ./.github/actions/artifacts_build/build_wheel
       - name: Upload distro wheel
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
         with:

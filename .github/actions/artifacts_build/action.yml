@@ -76,14 +76,8 @@ runs:
         role-to-assume: ${{ inputs.snapshot-ecr-role }}
         aws-region: ${{ inputs.aws-region }}
 
-    - name: Install Dependencies and Build Wheel
-      id: staging_wheel_build
-      shell: bash
-      run: |
-        pip install --upgrade pip setuptools wheel packaging build
-        rm -rf ./dist/*
-        cd ./aws-opentelemetry-distro
-        python -m build --outdir ../dist
+    - name: Build distro wheel
+      uses: ./.github/actions/artifacts_build/build_wheel
 
     - name: Set up QEMU
       if: ${{ inputs.build_image == true || inputs.build_image == 'true' }}
