@@ -28,7 +28,11 @@ runs:
         python_version: ${{ inputs.python_version }}
         package_name: ${{ inputs.package_name }}
         os: ${{ inputs.os }}
-        wheel_path: ${{ inputs.wheel_path }}
+
+    - name: Use prebuilt distro wheel
+      if: ${{ inputs.wheel_path != '' }}
+      shell: bash
+      run: echo "ADOT_WHEEL=$(realpath '${{ inputs.wheel_path }}')" >> "$GITHUB_ENV"
 
     - name: Run unit tests/benchmarks with tox
       shell: bash
