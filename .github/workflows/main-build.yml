@@ -123,12 +123,6 @@ jobs:
           path: dist/aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl
           retention-days: 1
 
-      - name: Set up and run contract tests with pytest
-        run: |
-          bash scripts/set-up-contract-tests.sh
-          pip install pytest
-          pytest contract-tests/tests
-
   unit-tests:
     runs-on: ubuntu-latest
     needs: build
@@ -160,6 +154,17 @@ jobs:
           os: ubuntu-latest
           wheel_path: ${{ steps.wheel.outputs.path }}
 
+  contract-tests:
+    needs: build
+    strategy:
+      fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    uses: ./.github/workflows/contract-tests.yml
+    with:
+      python-version: ${{ matrix.python-version }}
+      ref: ${{ inputs.ref || github.sha }}
+
   application-signals-e2e-test:
     name: "Application Signals E2E Test"
     needs: [ build ]
@@ -184,7 +189,7 @@ jobs:
 
   publish-main-build-status:
     name: "Publish Main Build Status"
-    needs: [ build, unit-tests, application-signals-e2e-test ]
+    needs: [ build, unit-tests, contract-tests, application-signals-e2e-test ]
     runs-on: ubuntu-latest
     if: always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/v'))
     steps:
@@ -196,7 +201,7 @@ jobs:
 
       - name: Publish main build status
         run: |
-          value="${{ needs.build.result == 'success' && needs.unit-tests.result == 'success' && needs.application-signals-e2e-test.result == 'success' && '0.0' || '1.0'}}"
+          value="${{ needs.build.result == 'success' && needs.unit-tests.result == 'success' && needs.contract-tests.result == 'success' && needs.application-signals-e2e-test.result == 'success' && '0.0' || '1.0'}}"
           aws cloudwatch put-metric-data --namespace 'ADOT/GitHubActions' \
             --metric-name Failure \
             --dimensions repository=${{ github.repository }},branch=${{ github.ref_name }},workflow=main_build \
