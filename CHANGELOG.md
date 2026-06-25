@@ -12,6 +12,10 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+## v0.18.0 - 2026-06-18
+
+- feat: support pluggable session injection for the OTLP HTTP exporter via the upstream OTel SDK hook
+  ([#794](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/794))
 - Nightly dependency update: OpenTelemetry 1.42.1/0.63b1
   ([#762](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/762))
 - feat(agent-observability): add `AWS_AGENTIC_INSTRUMENTATION` (`auto`/`enabled`/`disabled`, case-insensitive) as an escape hatch over auto-detection when `AGENT_OBSERVABILITY_ENABLED=true`; the switch only governs AWS native instrumentors and never disables third-party ones
