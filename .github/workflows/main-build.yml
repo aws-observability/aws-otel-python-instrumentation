@@ -147,12 +147,11 @@ jobs:
         run: echo "path=$(ls dist/aws_opentelemetry_distro-*-py3-none-any.whl)" >> "$GITHUB_OUTPUT"
 
       - name: Set up and run unit tests
-        uses: ./.github/actions/set_up
+        uses: ./.github/actions/unit_tests
         with:
           python_version: ${{ matrix.python-version }}
           package_name: aws-opentelemetry-distro
           os: ubuntu-latest
-          run_unit_tests: true
           wheel_path: ${{ steps.wheel.outputs.path }}
 
   contract-tests:
