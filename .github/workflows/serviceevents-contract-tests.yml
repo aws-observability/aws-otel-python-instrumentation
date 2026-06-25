@@ -27,7 +27,6 @@ jobs:
         uses: ./.github/actions/artifacts_build
         with:
           build_image: false
-          run_unit_tests: false
           python_version: "3.10"
           package_name: aws-opentelemetry-distro
           os: ubuntu-latest

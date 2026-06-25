@@ -1,6 +1,6 @@
 name: Set up
 description: |
-  This action assumes that the repo was checked out. Installs python and tox, then runs tox to trigger unit tests.
+  This action assumes that the repo was checked out. Installs python and tox and restores the tox cache.
 
 inputs:
   python_version:
@@ -12,9 +12,6 @@ inputs:
   os:
     required: true
     description: "The os"
-  run_unit_tests:
-    required: true
-    description: "true/false flag indicating if we should run unit tests/benchmarks with tox"
   wheel_path:
     required: false
     default: ''
@@ -47,27 +44,3 @@ runs:
           .tox
           ~/.cache/pip
         key: v7-build-tox-cache-${{ inputs.python_version }}-${{ inputs.package_name }}-${{ inputs.os }}-${{ hashFiles('tox.ini', 'dev-requirements.txt') }}
-
-    - name: Run unit tests/benchmarks with tox
-      if: ${{ inputs.run_unit_tests == 'true' }}
-      shell: bash
-      run: |
-        PY_VERSION="${{ inputs.python_version }}"
-        # we intend for new or unrecognized Python versions to fail if a new Python version is added to the test 
-        # to ensure they are not silently skipped from testing
-        ENVS=$(tox list -q | grep "^${PY_VERSION}-test-" | sed 's/ .*//' | tr '\n' ',' | sed 's/,$//' || true)
-        echo "Running tox envs: $ENVS"
-        tox --parallel auto --parallel-live -e "$ENVS" -- -v
-
-    - name: Combine and check coverage
-      if: ${{ inputs.run_unit_tests == 'true' }}
-      shell: bash
-      run: |
-        pip install coverage
-        if [ "${{ inputs.python_version }}" = "3.14" ]; then
-          RCFILE=.coveragerc-py314
-        else
-          RCFILE=.coveragerc
-        fi
-        coverage combine --rcfile=$RCFILE
-        coverage report --rcfile=$RCFILE
