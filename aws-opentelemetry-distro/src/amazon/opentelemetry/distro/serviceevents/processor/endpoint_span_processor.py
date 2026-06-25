@@ -171,7 +171,7 @@ class ServiceEventsSpanProcessor(SpanProcessor):
                 return
             _ServiceEventsMonitorState.get_instance().begin_investigation()
         except Exception:  # pylint: disable=broad-exception-caught  # telemetry must never crash host app
-            logger.debug("ServiceEvents span processor on_start failed", exc_info=True)
+            logger.warning("ServiceEvents span processor on_start failed", exc_info=True)
 
     def on_end(self, span: ReadableSpan) -> None:
         """Record endpoint metric + potential incident from the request-boundary span."""
@@ -187,7 +187,7 @@ class ServiceEventsSpanProcessor(SpanProcessor):
                 clear_current_operation()
                 _ServiceEventsMonitorState.get_instance().clear_investigation_data()
         except Exception:  # pylint: disable=broad-exception-caught  # telemetry must never crash host app
-            logger.debug("ServiceEvents span processor on_end failed", exc_info=True)
+            logger.warning("ServiceEvents span processor on_end failed", exc_info=True)
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:  # pylint: disable=unused-argument
         return True
@@ -312,7 +312,7 @@ class ServiceEventsSpanProcessor(SpanProcessor):
                     error_info=error_info,
                 )
             except Exception:  # pylint: disable=broad-exception-caught  # best-effort telemetry
-                logger.debug("ServiceEvents record_request failed", exc_info=True)
+                logger.warning("ServiceEvents record_request failed", exc_info=True)
 
         # Set current operation before the incident path so exemplar correlation matches
         # the recorded aggregation key (mirrors Java onEnd line 241).
@@ -341,4 +341,4 @@ class ServiceEventsSpanProcessor(SpanProcessor):
                 if exemplar and self._endpoint_collector:
                     self._endpoint_collector.record_incident_exemplar(exemplar["operation"], exemplar)
             except Exception:  # pylint: disable=broad-exception-caught  # best-effort telemetry
-                logger.debug("ServiceEvents process_potential_incident failed", exc_info=True)
+                logger.warning("ServiceEvents process_potential_incident failed", exc_info=True)
