@@ -255,7 +255,7 @@ class TestOnEnd(TestCase):
             name="GET /boom",
         )
         _, extract_mock = self._run(span)
-        extract_mock.assert_called_once_with(None, "/boom", "GET")
+        extract_mock.assert_called_once_with("/boom", "GET")
 
     def test_error_not_extracted_for_2xx(self):
         span = _build_span(

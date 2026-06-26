@@ -64,7 +64,6 @@ class IncidentSnapshotCollector(BaseCollector):
         environment: Optional[str] = None,
         service_name: Optional[str] = None,
         sdk_version: str = "",
-        capture_request_body: bool = False,
         max_same_error: int = 1,
         resource_attributes: Optional[ResourceAttributes] = None,
         otlp_emitter=None,
@@ -79,7 +78,6 @@ class IncidentSnapshotCollector(BaseCollector):
             environment: Deployment environment
             service_name: Service name
             sdk_version: SDK version
-            capture_request_body: Whether to capture request body on incidents
             max_same_error: Maximum occurrences of same error pattern
             resource_attributes: AWS platform resource attributes from OTel Resource detectors
             otlp_emitter: Optional ServiceEventsOtlpEmitter for OTLP export
@@ -117,9 +115,6 @@ class IncidentSnapshotCollector(BaseCollector):
         if self.resource_attributes.host_id:
             self.instance_id = self.resource_attributes.host_id
 
-        # Request payload capture settings
-        self.capture_request_body = capture_request_body
-
         # Rate limiting: track snapshot timestamps
         self._snapshot_timestamps: deque = deque(maxlen=max_per_period * 2)
         self._timestamps_lock = threading.Lock()
@@ -142,11 +137,10 @@ class IncidentSnapshotCollector(BaseCollector):
 
     def update_incident_config(
         self,
-        capture_request_body: bool,
         max_per_period: int,
         max_same_error: int,
     ) -> None:
-        """Live-update incident config (max-per-window, max-same-error, capture flag).
+        """Live-update incident config (max-per-window, max-same-error).
 
         Recreates the snapshot_timestamps deque when max_per_period changes
         since deque maxlen is immutable after construction. The rate-limit window
@@ -155,7 +149,6 @@ class IncidentSnapshotCollector(BaseCollector):
         NOTE: no longer watcher-driven — the DI watcher syncer was removed. Retained as
         a public live-setter for callers that mutate the collector directly.
         """
-        self.capture_request_body = capture_request_body
         self._max_same_error = max_same_error
         if max_per_period != self.max_per_period:
             self.max_per_period = max_per_period
@@ -651,36 +644,15 @@ class IncidentSnapshotCollector(BaseCollector):
             else False
         )
 
-        # Lazy request body capture (only if config allows)
-        request_body = None
-        if self.capture_request_body:
-            # Try Flask request object first (lazy loading)
-            flask_request = request_data.get("flask_request")
-            if flask_request is not None:
-                # Lazy import: defer optional Flask instrumentation dependency until
-                # a Flask request is actually present.
-                # pylint: disable=import-outside-toplevel
-                from amazon.opentelemetry.distro.serviceevents.instrumentation.flask_instrumentation import (
-                    _get_request_body,
-                )
-
-                request_body = _get_request_body(flask_request)
-            else:
-                # Try cached_body (pre-read by FastAPI middleware)
-                request_body = request_data.get("cached_body")
-
-        # Build request context — payload fields gated by capture_request_body flag
+        # Build request context. Actual request-payload capture is permanently disabled and is no
+        # longer customer-configurable, so the four payload fields (request_body/query_params/
+        # path_params/request_headers) are always null and custom_context is always empty — see
+        # SERVICE_EVENTS_OTLP_SIGNALS_SPEC.md §5 (the keys stay on the wire as null for consumer
+        # compatibility). Only the non-payload fields (type/timestamp/status_code) carry data.
         request_context = RequestContext(
             type="http",
             timestamp=int(time.time() * 1000),
             status_code=status_code,
-            custom_context=self._extract_custom_context(request_data) if self.capture_request_body else {},
-            request_body=request_body,
-            query_params=request_data.get("args") if self.capture_request_body else None,
-            path_params=request_data.get("view_args") if self.capture_request_body else None,
-            request_headers=(
-                dict(request_data.get("headers")) if self.capture_request_body and request_data.get("headers") else None
-            ),
         )
 
         # Build telemetry correlation
@@ -856,29 +828,6 @@ class IncidentSnapshotCollector(BaseCollector):
                         )
                     )
         return call_path
-
-    @staticmethod
-    def _extract_custom_context(request_data: Dict) -> Dict[str, str]:
-        """
-        Extract custom context from request data (e.g., user_id).
-
-        Args:
-            request_data: Request metadata
-
-        Returns:
-            Custom context dictionary
-        """
-        custom_context = {}
-
-        # Extract user_id from query args if present
-        args = request_data.get("args", {})
-        if "user_id" in args:
-            custom_context["user_id"] = str(args["user_id"])
-
-        # Could extract other business context here
-        # e.g., session_id, tenant_id, etc.
-
-        return custom_context
 
     @staticmethod
     def _format_trace_id(trace_id) -> Optional[str]:

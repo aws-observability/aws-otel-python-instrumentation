@@ -336,7 +336,6 @@ class ServiceEventsInstrumentation:
                 environment=self.config.environment,
                 service_name=self.config.service_name,
                 sdk_version=self.config.sdk_version,
-                capture_request_body=self.config.incident_snapshot_capture_request_body,
                 max_same_error=self.config.incident_snapshot_max_same_error,
                 resource_attributes=self.config.resource_attributes,
                 otlp_emitter=otlp_emitter,
@@ -354,24 +353,13 @@ class ServiceEventsInstrumentation:
                 self.config.incident_snapshot_flush_interval,
             )
 
-            # Phase 3: Endpoint measurement. Two mutually-exclusive modes:
-            #   - Span processor (use_span_processor=True, the default): ONE framework-agnostic
-            #     SpanProcessor (Python port of Java's ServiceEventsSpanProcessor) reads the
-            #     request-boundary span OTel already emits — covers every instrumented
-            #     framework, no per-framework hook code.
-            #   - Per-framework hooks (flag off): Flask/FastAPI/Django request hooks.
-            # If the span processor cannot be registered on the active tracer provider, fall back
-            # to the legacy hooks rather than emit no endpoint signals — the default-on path must
-            # never silently lose endpoint metrics on a provider that lacks add_span_processor.
-            if not self.config.use_span_processor or not self._install_endpoint_span_processor(
-                endpoint_collector, incident_snapshot_collector
-            ):
-                if self.config.use_span_processor:
-                    logger.warning(
-                        "ServiceEvents: endpoint span processor could not be registered; falling back "
-                        "to the legacy per-framework hooks for endpoint signals."
-                    )
-                self._install_framework_hooks(endpoint_collector, incident_snapshot_collector)
+            # Phase 3: Endpoint measurement. ONE framework-agnostic SpanProcessor (the Python port
+            # of Java's ServiceEventsSpanProcessor) reads the request-boundary span OTel already
+            # emits and derives endpoint metrics + incident snapshots from span attributes — covering
+            # every OTel-instrumented framework with no per-framework hook code. A registration miss
+            # (e.g. an API-only NoOp provider with no add_span_processor) is logged and swallowed;
+            # ServiceEvents then emits no endpoint signals rather than crashing the host app.
+            self._install_endpoint_span_processor(endpoint_collector, incident_snapshot_collector)
 
             # Register fork handler for multi-process servers (e.g., gunicorn)
             try:
@@ -399,16 +387,14 @@ class ServiceEventsInstrumentation:
     def _install_endpoint_span_processor(self, endpoint_collector, incident_snapshot_collector) -> bool:
         """Register the framework-agnostic endpoint span processor on the active tracer provider.
 
-        Replaces the three per-framework hooks. The processor reads SERVER / local-root spans
-        from OTel's own framework instrumentation, so it covers every instrumented framework
-        without bespoke hook code. A failure here is logged and swallowed — telemetry must
-        never crash the host app, and ServiceEvents degrades gracefully rather than aborting the
-        whole initialize().
+        The processor reads SERVER / local-root spans from OTel's own framework instrumentation, so
+        it covers every instrumented framework without bespoke hook code. A failure here is logged
+        and swallowed — telemetry must never crash the host app, and ServiceEvents degrades
+        gracefully rather than aborting the whole initialize().
 
         Returns True when the processor was registered, False when the active provider has no
-        ``add_span_processor`` (e.g. the API-only NoOp provider) or registration raised — so the
-        caller can fall back to the legacy per-framework hooks. The span-processor path is the
-        default, so a registration miss must degrade to the working hooks, not emit nothing.
+        ``add_span_processor`` (e.g. the API-only NoOp provider) or registration raised — in which
+        case ServiceEvents emits no endpoint signals (there is no span pipeline to read from).
         """
         try:
             # Deferred imports: keep this module importable without the OTel SDK present.
@@ -421,11 +407,11 @@ class ServiceEventsInstrumentation:
             provider = get_tracer_provider()
             if not hasattr(provider, "add_span_processor"):
                 # No SDK TracerProvider installed (e.g. the API-only NoOp provider). Without a
-                # span pipeline the processor can never fire, so report failure and let the caller
-                # fall back to the per-framework hooks.
+                # span pipeline the processor can never fire, so report failure — ServiceEvents
+                # emits no endpoint signals on such a provider.
                 logger.warning(
-                    "ServiceEvents USE_SPAN_PROCESSOR is set but the active tracer provider has no "
-                    "add_span_processor (%s); falling back to the per-framework hooks",
+                    "ServiceEvents endpoint span processor: the active tracer provider has no "
+                    "add_span_processor (%s); endpoint signals will not be emitted",
                     type(provider).__name__,
                 )
                 return False
@@ -433,9 +419,7 @@ class ServiceEventsInstrumentation:
             # Idempotency guard: the SDK's add_span_processor APPENDS with no de-dup, so
             # registering again on a provider that already carries our processor (a re-init, or a
             # forked child that inherited the parent's provider) would fire on_start/on_end twice
-            # per span and double-count every endpoint metric. Skip if one is already present —
-            # report success so the caller does NOT fall back to the legacy hooks (the existing
-            # processor already covers the work).
+            # per span and double-count every endpoint metric. Skip if one is already present.
             if self._provider_has_endpoint_processor(provider, ServiceEventsSpanProcessor):
                 logger.info("ServiceEvents endpoint span processor already registered; skipping re-registration")
                 return True
@@ -466,66 +450,6 @@ class ServiceEventsInstrumentation:
         if not isinstance(registered, (list, tuple)):
             return False
         return any(isinstance(sp, processor_cls) for sp in registered)
-
-    def _install_framework_hooks(self, endpoint_collector, incident_snapshot_collector) -> None:
-        """Install the per-framework endpoint hooks (Flask/FastAPI/Django).
-
-        Each framework is optional and auto-detected via ImportError; a missing framework is a
-        quiet no-op. The default endpoint-measurement path.
-        """
-        try:
-            # Optional framework dep — auto-detected via ImportError.
-            # pylint: disable=import-outside-toplevel
-            from amazon.opentelemetry.distro.serviceevents.instrumentation.flask_instrumentation import (
-                install_flask_hooks,
-            )
-
-            install_flask_hooks(
-                endpoint_collector=endpoint_collector,
-                incident_snapshot_collector=incident_snapshot_collector,
-                config=self.config,
-            )
-            logger.info("Flask instrumentation hooks installed")
-        except ImportError:
-            logger.debug("Flask not installed, skipping Flask instrumentation")
-        except Exception as exc:  # pylint: disable=broad-exception-caught  # telemetry must not crash app
-            logger.error("Error installing Flask hooks: %s", exc, exc_info=True)
-
-        try:
-            # Optional framework dep — auto-detected via ImportError.
-            # pylint: disable=import-outside-toplevel
-            from amazon.opentelemetry.distro.serviceevents.instrumentation.fastapi_instrumentation import (
-                install_fastapi_hooks,
-            )
-
-            install_fastapi_hooks(
-                endpoint_collector=endpoint_collector,
-                incident_snapshot_collector=incident_snapshot_collector,
-                config=self.config,
-            )
-            logger.info("FastAPI instrumentation hooks installed")
-        except ImportError:
-            logger.debug("FastAPI not installed, skipping FastAPI instrumentation")
-        except Exception as exc:  # pylint: disable=broad-exception-caught  # telemetry must not crash app
-            logger.error("Error installing FastAPI hooks: %s", exc, exc_info=True)
-
-        try:
-            # Optional framework dep — auto-detected via ImportError.
-            # pylint: disable=import-outside-toplevel
-            from amazon.opentelemetry.distro.serviceevents.instrumentation.django_instrumentation import (
-                install_django_hooks,
-            )
-
-            install_django_hooks(
-                endpoint_collector=endpoint_collector,
-                incident_snapshot_collector=incident_snapshot_collector,
-                config=self.config,
-            )
-            logger.info("Django instrumentation hooks installed")
-        except ImportError:
-            logger.debug("Django not installed, skipping Django instrumentation")
-        except Exception as exc:  # pylint: disable=broad-exception-caught  # telemetry must not crash app
-            logger.error("Error installing Django hooks: %s", exc, exc_info=True)
 
     # Tested provider/exporter wiring — kept whole rather than fragmented.
     def _create_otlp_emitter(self):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements

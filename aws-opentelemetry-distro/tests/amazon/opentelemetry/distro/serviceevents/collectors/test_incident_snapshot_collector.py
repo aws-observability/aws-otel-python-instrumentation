@@ -1027,9 +1027,8 @@ class TestUpdateIncidentConfig(TestCase):
         collector = self._make_collector(max_per_period=5)
         original_deque = collector._snapshot_timestamps
 
-        collector.update_incident_config(capture_request_body=True, max_per_period=5, max_same_error=3)
+        collector.update_incident_config(max_per_period=5, max_same_error=3)
 
-        self.assertTrue(collector.capture_request_body)
         self.assertEqual(collector._max_same_error, 3)
         # max_per_period unchanged -> same deque instance
         self.assertIs(collector._snapshot_timestamps, original_deque)
@@ -1042,7 +1041,7 @@ class TestUpdateIncidentConfig(TestCase):
             collector._snapshot_timestamps.append(222.0)
         original_deque = collector._snapshot_timestamps
 
-        collector.update_incident_config(capture_request_body=False, max_per_period=10, max_same_error=1)
+        collector.update_incident_config(max_per_period=10, max_same_error=1)
 
         self.assertEqual(collector.max_per_period, 10)
         self.assertIsNot(collector._snapshot_timestamps, original_deque)
@@ -1261,7 +1260,7 @@ class TestCollectIncidentSnapshot(TestCase):
 
     def test_exception_snapshot_basic_fields(self):
         """Assembles a snapshot for an exception incident with core metadata populated."""
-        collector = self._make_collector(capture_request_body=False)
+        collector = self._make_collector()
 
         snapshot = collector._collect_incident_snapshot(
             route="/api/users",
@@ -1282,9 +1281,12 @@ class TestCollectIncidentSnapshot(TestCase):
         self.assertEqual(snapshot.environment, "prod")
         self.assertEqual(snapshot.duration_ms, 42.0)
         self.assertEqual(snapshot.exception_info[0].stack_trace, "TRACE")
-        # capture_request_body=False -> payload fields are gated off.
+        # Request-payload capture is permanently disabled: the four payload fields are always null
+        # and custom_context is always empty (see SERVICE_EVENTS_OTLP_SIGNALS_SPEC.md §5).
         self.assertEqual(snapshot.request_context.custom_context, {})
+        self.assertIsNone(snapshot.request_context.request_body)
         self.assertIsNone(snapshot.request_context.query_params)
+        self.assertIsNone(snapshot.request_context.path_params)
         self.assertIsNone(snapshot.request_context.request_headers)
 
     def test_partial_flag_when_call_path_durations_zero(self):
@@ -1311,9 +1313,10 @@ class TestCollectIncidentSnapshot(TestCase):
         self.assertTrue(snapshot.is_partial)
         self.assertEqual(snapshot.severity, "medium")
 
-    def test_capture_request_body_with_cached_body(self):
-        """When capture is on and no Flask request, the FastAPI cached_body is used."""
-        collector = self._make_collector(capture_request_body=True)
+    def test_request_payload_fields_always_null(self):
+        """Request-payload capture is permanently off: even when the request_data carries a body,
+        query args, path params, and headers, none of them reach the emitted snapshot."""
+        collector = self._make_collector()
 
         snapshot = collector._collect_incident_snapshot(
             route="/api/users",
@@ -1330,33 +1333,11 @@ class TestCollectIncidentSnapshot(TestCase):
             trigger_type="exception",
         )
 
-        self.assertEqual(snapshot.request_context.request_body, "raw-payload")
-        self.assertEqual(snapshot.request_context.custom_context, {"user_id": "42"})
-        self.assertEqual(snapshot.request_context.query_params, {"user_id": "42"})
-        self.assertEqual(snapshot.request_context.path_params, {"id": "7"})
-        self.assertEqual(snapshot.request_context.request_headers, {"Content-Type": "application/json"})
-
-    def test_capture_request_body_with_flask_request(self):
-        """When capture is on and a Flask request is present, body comes from the lazy importer."""
-        collector = self._make_collector(capture_request_body=True)
-        flask_request = MagicMock()
-
-        with patch(
-            "amazon.opentelemetry.distro.serviceevents.instrumentation." "flask_instrumentation._get_request_body",
-            return_value="flask-body",
-        ) as mock_get_body:
-            snapshot = collector._collect_incident_snapshot(
-                route="/api/users",
-                method="POST",
-                status_code=500,
-                duration_ms=10.0,
-                exception=ValueError("x"),
-                request_data={"flask_request": flask_request, "args": {}},
-                trigger_type="exception",
-            )
-
-        mock_get_body.assert_called_once_with(flask_request)
-        self.assertEqual(snapshot.request_context.request_body, "flask-body")
+        self.assertIsNone(snapshot.request_context.request_body)
+        self.assertEqual(snapshot.request_context.custom_context, {})
+        self.assertIsNone(snapshot.request_context.query_params)
+        self.assertIsNone(snapshot.request_context.path_params)
+        self.assertIsNone(snapshot.request_context.request_headers)
 
 
 class TestCollectExceptionInfo(TestCase):
@@ -1550,23 +1531,6 @@ class TestCollectExceptionInfo(TestCase):
 
         self.assertEqual(result[0].stack_trace, "plain")
         self.assertEqual(result[0].call_path, [])
-
-
-class TestExtractCustomContext(TestCase):
-    """Test the _extract_custom_context static helper."""
-
-    def setUp(self):
-        _ServiceEventsMonitorState._instance = None
-
-    def test_extracts_user_id(self):
-        """user_id present in args is stringified into custom context."""
-        result = IncidentSnapshotCollector._extract_custom_context({"args": {"user_id": 42}})
-        self.assertEqual(result, {"user_id": "42"})
-
-    def test_empty_when_no_user_id(self):
-        """No user_id in args yields an empty custom context."""
-        result = IncidentSnapshotCollector._extract_custom_context({"args": {"other": "x"}})
-        self.assertEqual(result, {})
 
 
 class TestFormatIds(TestCase):

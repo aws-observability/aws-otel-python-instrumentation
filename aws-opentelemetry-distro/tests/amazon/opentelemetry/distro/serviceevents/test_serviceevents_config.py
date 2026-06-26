@@ -42,20 +42,6 @@ class TestServiceEventsConfig(TestCase):
         # Function instrumentation is on by default (instruments nothing until
         # packages_include is set, which defaults empty).
         self.assertTrue(config.function_instrument_enabled)
-        # Endpoint measurement defaults to the framework-agnostic span processor (on).
-        self.assertTrue(config.use_span_processor)
-
-    @patch.dict(os.environ, {"OTEL_AWS_SERVICE_EVENTS_USE_SPAN_PROCESSOR": "false"})
-    def test_use_span_processor_from_env(self):
-        """OTEL_AWS_SERVICE_EVENTS_USE_SPAN_PROCESSOR=false opts out of the default span processor."""
-        config = ServiceEventsConfig.from_env()
-        self.assertFalse(config.use_span_processor)
-
-    @patch.dict(os.environ, {}, clear=True)
-    def test_use_span_processor_defaults_on(self):
-        """use_span_processor is on when the env var is unset."""
-        config = ServiceEventsConfig.from_env()
-        self.assertTrue(config.use_span_processor)
 
     @patch.dict(
         os.environ,

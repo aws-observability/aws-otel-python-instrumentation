@@ -29,6 +29,7 @@ passes scalar ``route``/``method`` and lets that shared layer do the rest.
 """
 
 import logging
+import re
 from typing import Optional
 
 from amazon.opentelemetry.distro._aws_span_processing_util import (
@@ -36,9 +37,6 @@ from amazon.opentelemetry.distro._aws_span_processing_util import (
     UNKNOWN_OPERATION,
     get_ingress_operation,
     is_local_root,
-)
-from amazon.opentelemetry.distro.serviceevents.instrumentation.flask_instrumentation import (
-    _extract_error_from_call_path,
 )
 from amazon.opentelemetry.distro.serviceevents.python_monitor import (
     _ServiceEventsMonitorState,
@@ -71,8 +69,6 @@ def _get_http_method(span: ReadableSpan) -> Optional[str]:
         method = attributes.get(SpanAttributes.HTTP_METHOD)
     return method
 
-
-import re
 
 _PYTHON_FRAME_RE = re.compile(r'^\s*File\s+"[^"]*",\s+line\s+\d+,\s+in\s+(\S+)', re.MULTILINE)
 
@@ -124,6 +120,44 @@ def _exception_from_span_event(span: ReadableSpan) -> Optional[dict]:
             "function_name": _extract_function_from_stacktrace(stacktrace),
         }
     return None
+
+
+def _extract_error_from_call_path(route, method) -> Optional[dict]:
+    """Extract the primary error type + origin function from the monitor's investigation data.
+
+    Reads (PEEKS — does not clear) the per-request investigation data the AST monitor accumulates,
+    so the data remains available for the incident snapshot collector. Returns ``{error_type,
+    function_name}`` or None when no error type was captured.
+
+    Returns None when no real error type was captured — neither a monitor-recorded exception nor a
+    span-seeded one — so callers omit the error breakdown entirely, matching Java (whose gate is
+    ``statusCode >= 500 && errorType != null``). A 5xx with no captured exception (e.g. a handler
+    that returns a 500 status without raising) must NOT synthesize an "UnknownError" breakdown entry.
+
+    ``route``/``method`` are accepted for call-site symmetry with the collectors but are not used:
+    the error type/origin come entirely from the investigation data.
+    """
+    inv_data = _ServiceEventsMonitorState.get_instance().peek_investigation_data()
+    exc_data = inv_data.get("exception") if inv_data else None
+    if isinstance(exc_data, dict) and exc_data.get("name"):
+        error_type = exc_data["name"]
+    else:
+        return None
+
+    # Find the origin function. Prefer the function the monitor recorded as the actual thrower;
+    # call_path[0] is the innermost frame entered, which is not necessarily where the exception was
+    # raised, so the captured exception origin is authoritative when present.
+    function_name = "unknown"
+    if isinstance(exc_data, dict) and exc_data.get("function_name"):
+        function_name = exc_data["function_name"]
+    elif inv_data and inv_data.get("call_path"):
+        call_path = inv_data["call_path"]
+        if call_path:
+            first_entry = call_path[0]
+            if isinstance(first_entry, dict):
+                function_name = first_entry.get("function_name", "unknown")
+
+    return {"error_type": error_type, "function_name": function_name}
 
 
 def _get_status_code(span: ReadableSpan) -> int:
@@ -294,12 +328,12 @@ class ServiceEventsSpanProcessor(SpanProcessor):
 
         # Error info from the AST monitor's captured call-path (now also seeded from the span event
         # for uninstrumented faults). _extract_error_from_call_path PEEKS (does not clear) so the
-        # incident collector can still consume the investigation data below. exception=None is
-        # correct: like Java, the original exception object is gone by span end; the captured
-        # type/origin live in the investigation data.
+        # incident collector can still consume the investigation data below. Like Java, the original
+        # exception object is gone by span end; the captured type/origin live in the investigation
+        # data.
         error_info = None
         if status_code >= 400:
-            error_info = _extract_error_from_call_path(None, route, method)
+            error_info = _extract_error_from_call_path(route, method)
 
         # 1. Endpoint metric.
         if self._endpoint_collector:
