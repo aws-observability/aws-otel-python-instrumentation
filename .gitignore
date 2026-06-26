@@ -70,3 +70,11 @@ examples/**/build/
 # Performance test results
 **/performance-tests/results/
 
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
+
+# Lambda invoke output
+response.json
