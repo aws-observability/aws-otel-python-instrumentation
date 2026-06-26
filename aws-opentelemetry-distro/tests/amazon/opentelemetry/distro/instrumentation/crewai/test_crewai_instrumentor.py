@@ -130,6 +130,7 @@ class TestCrewAIInstrumentor(TestCase):
         mock_llm.model = "gpt-4"
         mock_llm.temperature = 0.7
         mock_llm.max_tokens = 1024
+        mock_llm.stop = []
         mock_llm.call.side_effect = RuntimeError("LLM call failed")
 
         with patch.object(LLM, "__new__", return_value=mock_llm):
@@ -148,6 +149,7 @@ class TestCrewAIInstrumentor(TestCase):
         mock_llm.model = "gpt-4"
         mock_llm.temperature = 0.7
         mock_llm.max_tokens = 1024
+        mock_llm.stop = []
         mock_llm.supports_function_calling.return_value = False
         mock_llm.supports_stop_words.return_value = True
         mock_llm.call.side_effect = [
@@ -424,8 +426,15 @@ class TestCrewAIInstrumentor(TestCase):
         async def mock_acompletion(*args, **kwargs):
             return next(responses)
 
+        def mock_completion(*args, **kwargs):
+            return next(responses)
+
         async def run():
-            with patch("litellm.acompletion", side_effect=mock_acompletion):
+            # crewai routes akickoff through either litellm.acompletion or sync
+            # litellm.completion depending on the executor, so patch both.
+            with patch("litellm.acompletion", side_effect=mock_acompletion), patch(
+                "litellm.completion", side_effect=mock_completion
+            ):
                 return await crew.akickoff()
 
         asyncio.run(run())
@@ -461,8 +470,15 @@ class TestCrewAIInstrumentor(TestCase):
         async def mock_acompletion(*args, **kwargs):
             return next(responses)
 
+        def mock_completion(*args, **kwargs):
+            return next(responses)
+
         async def run():
-            with patch("litellm.acompletion", side_effect=mock_acompletion):
+            # crewai routes akickoff through either litellm.acompletion or sync
+            # litellm.completion depending on the executor, so patch both.
+            with patch("litellm.acompletion", side_effect=mock_acompletion), patch(
+                "litellm.completion", side_effect=mock_completion
+            ):
                 return await crew.akickoff()
 
         asyncio.run(run())
