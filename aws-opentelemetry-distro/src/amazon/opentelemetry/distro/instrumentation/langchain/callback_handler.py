@@ -13,6 +13,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     PROVIDER_MAP,
     DictWithLock,
+    content_to_parts,
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
     try_detach,
@@ -350,11 +351,11 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                         {
                             "type": "tool_call_response",
                             "id": tool_call_id,
-                            "response": str(content) if content else "",
+                            "response": content if content else "",
                         }
                     )
                 elif content:
-                    parts.append({"type": "text", "content": str(content)})
+                    parts.extend(content_to_parts(content))
                 tool_calls: list[dict] = getattr(msg, "tool_calls", None) or []
                 for tc in tool_calls:
                     parts.append(

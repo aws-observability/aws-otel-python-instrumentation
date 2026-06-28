@@ -19,6 +19,11 @@ try:
     from llama_index.core.base.llms.types import ToolCallBlock
 except ImportError:
     ToolCallBlock = None
+
+try:
+    from llama_index.core.base.llms.types import ImageBlock
+except ImportError:
+    ImageBlock = None
 from llama_index.core.instrumentation.events import BaseEvent
 from llama_index.core.instrumentation.events.chat_engine import (
     StreamChatDeltaReceivedEvent,
@@ -47,6 +52,7 @@ from pydantic import PrivateAttr
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     GEN_AI_WORKFLOW_NAME,
     OPERATION_INVOKE_WORKFLOW,
+    content_to_parts,
     serialize_to_json_string,
     try_detach,
 )
@@ -167,10 +173,24 @@ def _message_to_parts(msg: ChatMessage) -> list:
                 parts.append(part)
             elif ThinkingBlock is not None and isinstance(block, ThinkingBlock):
                 parts.append({"type": "reasoning", "content": str(block.content)})
+            elif ImageBlock is not None and isinstance(block, ImageBlock):
+                if getattr(block, "url", None):
+                    parts.append({"type": "uri", "modality": "image", "uri": str(block.url)})
+                elif getattr(block, "image", None) is not None:
+                    image = block.image
+                    parts.append(
+                        {
+                            "type": "blob",
+                            "modality": "image",
+                            "mime_type": getattr(block, "image_mimetype", None) or "image/*",
+                            "content": image.decode() if isinstance(image, (bytes, bytearray)) else str(image),
+                        }
+                    )
+                elif getattr(block, "path", None):
+                    parts.append({"type": "uri", "modality": "image", "uri": str(block.path)})
         if parts:
             return parts
-    content = str(getattr(msg, "content", ""))
-    return [{"type": "text", "content": content}]
+    return content_to_parts(getattr(msg, "content", ""))
 
 
 def _format_messages(messages: Iterable[ChatMessage]) -> tuple:

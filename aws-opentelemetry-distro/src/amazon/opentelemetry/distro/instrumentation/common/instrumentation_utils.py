@@ -98,6 +98,63 @@ def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:
         return str(value)
 
 
+def content_to_parts(content: Any) -> list:
+    """Convert a GenAI message's content into GenAI message parts, mapping each block to
+    its typed part per the input and output message schemas:
+    https://github.com/open-telemetry/semantic-conventions-genai/blob/main/model/gen-ai/gen-ai-input-messages.json
+    https://github.com/open-telemetry/semantic-conventions-genai/blob/main/model/gen-ai/gen-ai-output-messages.json
+    """
+    if isinstance(content, str):
+        return [{"type": "text", "content": content}] if content else []
+    if isinstance(content, dict):
+        content = [content]
+    elif not isinstance(content, list):
+        return [{"type": "text", "content": str(content)}] if content else []
+
+    parts: list = []
+    for block in content:
+        if isinstance(block, str):
+            if block:
+                parts.append({"type": "text", "content": block})
+            continue
+        if not isinstance(block, dict):
+            parts.append({"type": "text", "content": str(block)})
+            continue
+
+        block_type = block.get("type", "")
+        if block_type == "text":
+            text = block.get("text", "")
+            if text:
+                parts.append({"type": "text", "content": str(text)})
+        elif block_type in ("thinking", "reasoning"):
+            reasoning = block.get("thinking") or block.get("reasoning") or block.get("content") or ""
+            if reasoning:
+                parts.append({"type": "reasoning", "content": str(reasoning)})
+        elif block_type == "image_url":
+            url = (block.get("image_url") or {}).get("url", "")
+            if not url:
+                continue
+            if url.startswith("data:"):
+                mime = url[len("data:") :].split(",", 1)[0].split(";", 1)[0] or "image/*"
+                parts.append({"type": "blob", "modality": "image", "mime_type": mime, "content": url})
+            else:
+                parts.append({"type": "uri", "modality": "image", "uri": url})
+        elif block_type == "image":
+            parts.append(
+                {
+                    "type": "blob",
+                    "modality": "image",
+                    "mime_type": block.get("media_type") or block.get("mime_type") or "image/*",
+                    "content": block.get("data", ""),
+                }
+            )
+        else:
+            part = dict(block)
+            part["type"] = block_type or "text"
+            parts.append(part)
+    return parts
+
+
 def try_wrap(
     module: str, name: str, wrapper: Callable[..., Any], should_wrap: Optional[Callable[..., bool]] = None
 ) -> None:

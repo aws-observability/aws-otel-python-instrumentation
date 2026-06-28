@@ -18,7 +18,16 @@ if sys.version_info < (3, 10):
     raise unittest.SkipTest("llama-index requires Python >= 3.10")
 
 from llama_index.core.agent.workflow import AgentWorkflow, FunctionAgent
-from llama_index.core.base.llms.types import ChatMessage, ChatResponse, CompletionResponse, LLMMetadata, MessageRole
+from llama_index.core.base.llms.types import (
+    ChatMessage,
+    ChatResponse,
+    CompletionResponse,
+    ImageBlock,
+    LLMMetadata,
+    MessageRole,
+    TextBlock,
+)
+from llama_index.core.instrumentation.events.llm import LLMChatStartEvent
 from llama_index.core.llms.function_calling import FunctionCallingLLM
 from llama_index.core.llms.llm import ToolSelection
 from llama_index.core.tools import FunctionTool
@@ -1337,6 +1346,60 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self.assertIn("sunny", output[0]["parts"][0]["content"])
         self.assertNotIn(GEN_AI_RESPONSE_FINISH_REASONS, span._attributes)
         span.end()
+
+    def test_multimodal_input_and_output_messages(self):
+        from llama_index.core.base.llms.types import ThinkingBlock
+        from llama_index.core.instrumentation.events.llm import LLMChatEndEvent
+
+        input_message = ChatMessage(
+            role="user",
+            blocks=[
+                TextBlock(text="describe"),
+                ImageBlock(url="https://example.com/cat.png"),
+                ImageBlock(image=b"QQ==", image_mimetype="image/png"),
+            ],
+        )
+        expected_input_parts = [
+            {"type": "text", "content": "describe"},
+            {"type": "uri", "modality": "image", "uri": "https://example.com/cat.png"},
+            {"type": "blob", "modality": "image", "mime_type": "image/png", "content": "QQ=="},
+        ]
+
+        output_message = ChatMessage(
+            role="assistant",
+            blocks=[
+                TextBlock(text="The answer is blue."),
+                ThinkingBlock(content="Let me reason about this."),
+                ImageBlock(url="https://example.com/cat.png"),
+                ImageBlock(image=b"QQ==", image_mimetype="image/png"),
+            ],
+        )
+        expected_output_parts = [
+            {"type": "text", "content": "The answer is blue."},
+            {"type": "reasoning", "content": "Let me reason about this."},
+            {"type": "uri", "modality": "image", "uri": "https://example.com/cat.png"},
+            {"type": "blob", "modality": "image", "mime_type": "image/png", "content": "QQ=="},
+        ]
+
+        otel_span = self.tracer.start_span("test")
+        span = self._Span(otel_span=otel_span)
+        span._process_event(LLMChatStartEvent(messages=[input_message], additional_kwargs={}, model_dict={}))
+        span._process_event(LLMChatEndEvent(messages=[], response=ChatResponse(message=output_message)))
+        otel_span.end()
+
+        input_messages = json.loads(span._attributes[GEN_AI_INPUT_MESSAGES])
+        validate_otel_genai_schema(input_messages, "gen-ai-input-messages")
+        self.assertEqual(input_messages[0]["parts"], expected_input_parts)
+
+        output_messages = json.loads(span._attributes[GEN_AI_OUTPUT_MESSAGES])
+        validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
+        self.assertEqual(output_messages[0]["parts"], expected_output_parts)
+
+        for parts in (input_messages[0]["parts"], output_messages[0]["parts"]):
+            for part in parts:
+                value = part.get("content", "")
+                if isinstance(value, str):
+                    self.assertFalse(value.lstrip().startswith("[{") and "'type'" in value)
 
     def test_chat_response_by_provider(self):
         from llama_index.core.base.llms.types import TextBlock
