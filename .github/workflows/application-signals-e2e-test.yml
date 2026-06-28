@@ -109,6 +109,21 @@ jobs:
       cpu-architecture: 'x86_64'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
+  adot-di:
+    needs: [ upload-main-build ]
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [ '3.10', '3.11', '3.12', '3.13', '3.14' ]
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-adot-di-test.yml@main
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      caller-workflow-name: 'main-build'
+      python-version: ${{ matrix.python-version }}
+      cpu-architecture: 'x86_64'
+      staging-wheel-name: ${{ inputs.staging-wheel-name }}
+
   #
   # DOCKER DISTRIBUTION LANGUAGE VERSION COVERAGE
   # DEFAULT SETTING: {Python Version}, EKS, AMD64, AL2
