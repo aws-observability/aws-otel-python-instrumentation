@@ -56,16 +56,7 @@ class DIStarletteRouteHandlerTest(DITestInfrastructure):
     ``route.endpoint``).
     """
 
-    # TEMPORARILY DISABLED: starlette_handler is an `async def` handler. The
-    # bytecode engine declines to rewrite coroutine bodies, so instrumentation
-    # falls back to the setattr wrapper, which replaces only the module-level
-    # name — it does NOT reach the handler captured inside Starlette's
-    # request_response closure on route.app at import time. So an async route
-    # handler currently produces no snapshot when hit via Starlette. The plain
-    # control function (DIStarletteFunctionLevelTest, process_data) is
-    # instrumented in place by the engine and works. Re-enable once async
-    # route-handler instrumentation reaches framework-held references.
-    __test__ = False
+    __test__ = True
 
     @override
     @staticmethod
@@ -100,3 +91,60 @@ class DIStarletteRouteHandlerTest(DITestInfrastructure):
         self.assert_snapshot_attr(log, "aws.di.instrumentation_level", "method")
         self.assert_snapshot_attr(log, "aws.di.code_unit", _CODE_UNIT)
         self.assert_body_has_entry_or_return(log)
+
+
+class DIStarletteAsyncWorkflowTest(DITestInfrastructure):
+    __test__ = True
+
+    @override
+    @staticmethod
+    def get_application_image_name() -> str:
+        return _APP_IMAGE
+
+    @override
+    def get_application_wait_pattern(self) -> str:
+        return "Ready"
+
+    def test_streaming_response_async_generator_snapshot(self) -> None:
+        response = self.send_request("GET", "stream")
+        self.assertEqual(200, response.status_code)
+        self.assertIn("chunk-0", response.text)
+        self.assertIn("chunk-4", response.text)
+
+        method_logs = self.wait_for_method_snapshots("number_stream", min_count=1)
+        self.assertGreater(len(method_logs), 0, "Expected a snapshot for the StreamingResponse async generator")
+        log = method_logs[0]
+        self.assert_snapshot_attr(log, "aws.di.instrumentation_level", "method")
+        self.assert_snapshot_attr(log, "aws.di.code_unit", _CODE_UNIT)
+        self.assert_body_has_entry_or_return(log)
+
+    def test_sse_event_stream_async_generator_snapshot(self) -> None:
+        response = self.send_request("GET", "sse")
+        self.assertEqual(200, response.status_code)
+        self.assertIn("data: 0", response.text)
+
+        method_logs = self.wait_for_method_snapshots("sse_event_stream", min_count=1)
+        self.assertGreater(len(method_logs), 0, "Expected a snapshot for the SSE async generator")
+        self.assert_snapshot_attr(method_logs[0], "aws.di.code_unit", _CODE_UNIT)
+
+    def test_await_io_coroutine_snapshot(self) -> None:
+        response = self.send_request("GET", "await-io")
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(response.json().get("value"), 56)
+
+        method_logs = self.wait_for_method_snapshots("fetch_remote_value", min_count=1)
+        self.assertGreater(len(method_logs), 0, "Expected a snapshot for the await-I/O coroutine")
+        body = self.body(method_logs[0])
+        return_value = body.get("captures", {}).get("return", {}).get("return_value", {})
+        self.assertEqual(return_value.get("value"), "56")
+
+    def test_async_exception_path_captures_throwable(self) -> None:
+        response = self.send_request("GET", "lookup", params={"item_id": -1})
+        self.assertEqual(404, response.status_code)
+
+        method_logs = self.wait_for_method_snapshots("lookup_or_404", min_count=1)
+        self.assertGreater(len(method_logs), 0, "Expected a snapshot for the raising async function")
+        body = self.body(method_logs[0])
+        throwable = body.get("captures", {}).get("return", {}).get("throwable", {})
+        self.assertTrue(throwable, "Expected a captured throwable on the async exception path")
+        self.assertIn("HTTPException", throwable.get("type", ""))

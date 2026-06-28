@@ -11,13 +11,14 @@ exercises the async instrumentation path with `async def` target functions
 cannot cover.
 """
 
+import asyncio
 import inspect
 import logging
 import time
 
 import uvicorn
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -111,6 +112,42 @@ async def compute_total_async(items):
     for item in items:
         total += item
     return total
+
+
+async def number_stream(count):
+    for i in range(count):
+        await asyncio.sleep(0)
+        yield f"chunk-{i}\n".encode()
+
+
+async def sse_event_stream(request, count):
+    for i in range(count):
+        if await request.is_disconnected():
+            break
+        await asyncio.sleep(0)
+        yield f"data: {i}\n\n"
+
+
+async def db_session_dependency():
+    session = {"id": 1, "queries": 0}
+    try:
+        yield session
+    finally:
+        session["queries"] += 1
+
+
+async def fetch_remote_value(key):
+    await asyncio.sleep(0.01)
+    value = len(key) * 7
+    await asyncio.sleep(0.01)
+    return value
+
+
+async def lookup_or_404(item_id):
+    await asyncio.sleep(0.01)
+    if item_id < 0:
+        raise HTTPException(status_code=404, detail=f"item {item_id} not found")
+    return {"item_id": item_id}
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +352,106 @@ BREAKPOINT_CONFIGS = [
             }
         },
     },
+    {
+        "InstrumentationType": "BREAKPOINT",
+        "SignalType": "SNAPSHOT",
+        "Location": {
+            "CodeLocation": {
+                "Language": "Python",
+                "CodeUnit": "di_fastapi_server",
+                "MethodName": "number_stream",
+                "FilePath": "di_fastapi_server.py",
+            }
+        },
+        "LocationHash": "aabb00000000000d",
+        "CaptureConfiguration": {
+            "CodeCapture": {
+                "CaptureReturn": True,
+                "CaptureArguments": ["count"],
+                "CaptureLimits": {"MaxStringLength": 255},
+            }
+        },
+    },
+    {
+        "InstrumentationType": "BREAKPOINT",
+        "SignalType": "SNAPSHOT",
+        "Location": {
+            "CodeLocation": {
+                "Language": "Python",
+                "CodeUnit": "di_fastapi_server",
+                "MethodName": "sse_event_stream",
+                "FilePath": "di_fastapi_server.py",
+            }
+        },
+        "LocationHash": "aabb00000000000e",
+        "CaptureConfiguration": {
+            "CodeCapture": {
+                "CaptureReturn": True,
+                "CaptureArguments": ["count"],
+                "CaptureLimits": {"MaxStringLength": 255},
+            }
+        },
+    },
+    {
+        "InstrumentationType": "BREAKPOINT",
+        "SignalType": "SNAPSHOT",
+        "Location": {
+            "CodeLocation": {
+                "Language": "Python",
+                "CodeUnit": "di_fastapi_server",
+                "MethodName": "db_session_dependency",
+                "FilePath": "di_fastapi_server.py",
+            }
+        },
+        "LocationHash": "aabb00000000000f",
+        "CaptureConfiguration": {
+            "CodeCapture": {
+                "CaptureReturn": True,
+                "CaptureArguments": [],
+                "CaptureLimits": {"MaxStringLength": 255},
+            }
+        },
+    },
+    {
+        "InstrumentationType": "BREAKPOINT",
+        "SignalType": "SNAPSHOT",
+        "Location": {
+            "CodeLocation": {
+                "Language": "Python",
+                "CodeUnit": "di_fastapi_server",
+                "MethodName": "fetch_remote_value",
+                "FilePath": "di_fastapi_server.py",
+            }
+        },
+        "LocationHash": "aabb000000000010",
+        "CaptureConfiguration": {
+            "CodeCapture": {
+                "CaptureReturn": True,
+                "CaptureArguments": ["key"],
+                "CaptureLimits": {"MaxStringLength": 255},
+            }
+        },
+    },
+    {
+        "InstrumentationType": "BREAKPOINT",
+        "SignalType": "SNAPSHOT",
+        "Location": {
+            "CodeLocation": {
+                "Language": "Python",
+                "CodeUnit": "di_fastapi_server",
+                "MethodName": "lookup_or_404",
+                "FilePath": "di_fastapi_server.py",
+            }
+        },
+        "LocationHash": "aabb000000000011",
+        "CaptureConfiguration": {
+            "CodeCapture": {
+                "CaptureReturn": True,
+                "CaptureArguments": ["item_id"],
+                "CaptureLimits": {"MaxStringLength": 255},
+            }
+        },
+    },
 ]
 
 PROBE_CONFIGS = [
@@ -466,6 +603,33 @@ async def probe_async_endpoint():
     """Endpoint that triggers an async PROBE-instrumented function."""
     total = await compute_total_async([10, 20, 30])
     return {"status": "ok", "total": total}
+
+
+@app.get("/stream")
+async def stream_endpoint():
+    return StreamingResponse(number_stream(5), media_type="text/plain")
+
+
+@app.get("/sse")
+async def sse_endpoint(request: Request):
+    return StreamingResponse(sse_event_stream(request, 4), media_type="text/event-stream")
+
+
+@app.get("/with-db")
+async def with_db_endpoint(session=Depends(db_session_dependency)):
+    session["queries"] += 1
+    return {"status": "ok", "session_id": session["id"]}
+
+
+@app.get("/await-io")
+async def await_io_endpoint():
+    value = await fetch_remote_value("contract")
+    return {"status": "ok", "value": value}
+
+
+@app.get("/lookup")
+async def lookup_endpoint(item_id: int = 1):
+    return await lookup_or_404(item_id)
 
 
 @app.get("/route-handler-target")

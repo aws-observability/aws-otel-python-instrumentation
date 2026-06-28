@@ -14,11 +14,13 @@ rebuilds ``route.app``. A plain (non-handler) function is also instrumented as a
 to prove DI is active in this process.
 """
 
+import asyncio
 import logging
 
 import uvicorn
 from starlette.applications import Starlette
-from starlette.responses import JSONResponse, PlainTextResponse
+from starlette.exceptions import HTTPException
+from starlette.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from starlette.routing import Route
 
 logging.basicConfig(level=logging.DEBUG)
@@ -49,6 +51,34 @@ async def starlette_handler(request):
     multiplier = int(request.query_params.get("multiplier", "2"))
     result = multiplier * 21
     return JSONResponse({"status": "ok", "result": result})
+
+
+async def number_stream(count):
+    for i in range(count):
+        await asyncio.sleep(0)
+        yield f"chunk-{i}\n".encode()
+
+
+async def sse_event_stream(request, count):
+    for i in range(count):
+        if await request.is_disconnected():
+            break
+        await asyncio.sleep(0)
+        yield f"data: {i}\n\n"
+
+
+async def fetch_remote_value(key):
+    await asyncio.sleep(0.01)
+    value = len(key) * 7
+    await asyncio.sleep(0.01)
+    return value
+
+
+async def lookup_or_404(item_id):
+    await asyncio.sleep(0.01)
+    if item_id < 0:
+        raise HTTPException(status_code=404, detail=f"item {item_id} not found")
+    return {"item_id": item_id}
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +130,86 @@ BREAKPOINT_CONFIGS = [
             }
         },
     },
+    {
+        "InstrumentationType": "BREAKPOINT",
+        "SignalType": "SNAPSHOT",
+        "Location": {
+            "CodeLocation": {
+                "Language": "Python",
+                "CodeUnit": "di_starlette_server",
+                "MethodName": "number_stream",
+                "FilePath": "di_starlette_server.py",
+            }
+        },
+        "LocationHash": "ccdd000000000003",
+        "CaptureConfiguration": {
+            "CodeCapture": {
+                "CaptureReturn": True,
+                "CaptureArguments": ["count"],
+                "CaptureLimits": {"MaxStringLength": 255},
+            }
+        },
+    },
+    {
+        "InstrumentationType": "BREAKPOINT",
+        "SignalType": "SNAPSHOT",
+        "Location": {
+            "CodeLocation": {
+                "Language": "Python",
+                "CodeUnit": "di_starlette_server",
+                "MethodName": "sse_event_stream",
+                "FilePath": "di_starlette_server.py",
+            }
+        },
+        "LocationHash": "ccdd000000000004",
+        "CaptureConfiguration": {
+            "CodeCapture": {
+                "CaptureReturn": True,
+                "CaptureArguments": ["count"],
+                "CaptureLimits": {"MaxStringLength": 255},
+            }
+        },
+    },
+    {
+        "InstrumentationType": "BREAKPOINT",
+        "SignalType": "SNAPSHOT",
+        "Location": {
+            "CodeLocation": {
+                "Language": "Python",
+                "CodeUnit": "di_starlette_server",
+                "MethodName": "fetch_remote_value",
+                "FilePath": "di_starlette_server.py",
+            }
+        },
+        "LocationHash": "ccdd000000000005",
+        "CaptureConfiguration": {
+            "CodeCapture": {
+                "CaptureReturn": True,
+                "CaptureArguments": ["key"],
+                "CaptureLimits": {"MaxStringLength": 255},
+            }
+        },
+    },
+    {
+        "InstrumentationType": "BREAKPOINT",
+        "SignalType": "SNAPSHOT",
+        "Location": {
+            "CodeLocation": {
+                "Language": "Python",
+                "CodeUnit": "di_starlette_server",
+                "MethodName": "lookup_or_404",
+                "FilePath": "di_starlette_server.py",
+            }
+        },
+        "LocationHash": "ccdd000000000006",
+        "CaptureConfiguration": {
+            "CodeCapture": {
+                "CaptureReturn": True,
+                "CaptureArguments": ["item_id"],
+                "CaptureLimits": {"MaxStringLength": 255},
+            }
+        },
+    },
 ]
 
 set_breakpoint_configs(BREAKPOINT_CONFIGS)
@@ -123,11 +233,34 @@ async def success(request):
     return JSONResponse({"status": "ok", "result": result})
 
 
+async def stream_handler(request):
+    return StreamingResponse(number_stream(5), media_type="text/plain")
+
+
+async def sse_handler(request):
+    return StreamingResponse(sse_event_stream(request, 4), media_type="text/event-stream")
+
+
+async def await_io_handler(request):
+    value = await fetch_remote_value("contract")
+    return JSONResponse({"status": "ok", "value": value})
+
+
+async def lookup_handler(request):
+    item_id = int(request.query_params.get("item_id", "1"))
+    result = await lookup_or_404(item_id)
+    return JSONResponse({"status": "ok", **result})
+
+
 app = Starlette(
     routes=[
         Route("/health", health),
         Route("/success", success),
         Route("/handler", starlette_handler),
+        Route("/stream", stream_handler),
+        Route("/sse", sse_handler),
+        Route("/await-io", await_io_handler),
+        Route("/lookup", lookup_handler),
     ]
 )
 
