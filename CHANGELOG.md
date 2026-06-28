@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix(genai): serialize list-valued message content into typed parts so multimodal/reasoning content is no longer stringified to a Python repr in `gen_ai.input/output.messages` across langchain, llama_index, and crewai
+  ([#805](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/805))
 - feat: add OTel lite SDK for Lambda cold start optimization
   ([#789](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/789))
 
