@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix(crewai): report per-call LLM token usage instead of cumulative total
+  ([#806](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/806))
 - feat: add OTel lite SDK for Lambda cold start optimization
   ([#789](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/789))
 
