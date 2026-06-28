@@ -154,7 +154,7 @@ def _safe_get(obj: Any, key: str) -> Any:
     return obj.get(key) if isinstance(obj, Mapping) else getattr(obj, key, None)
 
 
-def _message_to_parts(msg: ChatMessage) -> list:
+def _message_to_parts(msg: ChatMessage) -> list:  # pylint: disable=too-many-branches
     """Convert a ChatMessage's blocks to OTel parts format."""
     blocks = getattr(msg, "blocks", None)
     if blocks:
