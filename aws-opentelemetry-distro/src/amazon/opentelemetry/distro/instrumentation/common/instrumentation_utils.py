@@ -98,7 +98,7 @@ def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:
         return str(value)
 
 
-def content_to_parts(content: Any) -> list:
+def content_to_parts(content: Any) -> list:  # pylint: disable=too-many-branches
     """Convert a GenAI message's content into GenAI message parts, mapping each block to
     its typed part per the input and output message schemas:
     https://github.com/open-telemetry/semantic-conventions-genai/blob/main/model/gen-ai/gen-ai-input-messages.json
