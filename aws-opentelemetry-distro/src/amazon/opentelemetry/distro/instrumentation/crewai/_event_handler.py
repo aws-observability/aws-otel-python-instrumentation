@@ -394,6 +394,7 @@ class OpenTelemetryEventHandler:
         self._end_span(event.started_event_id, attrs)
 
     def _on_llm_failed(self, source: Any, event: "LLMCallFailedEvent") -> None:  # pylint: disable=unused-argument
+        self._event_id_to_token_usage.pop(event.started_event_id)
         self._end_span(event.started_event_id, error=getattr(event, "error", None))
 
     def _start_span(
