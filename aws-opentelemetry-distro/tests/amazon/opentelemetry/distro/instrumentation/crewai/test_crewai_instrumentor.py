@@ -147,7 +147,7 @@ class TestCrewAIInstrumentor(TestCase):
         expected_input_parts = [
             {"type": "text", "content": "describe"},
             {"type": "uri", "modality": "image", "uri": "https://example.com/cat.png"},
-            {"type": "blob", "modality": "image", "mime_type": "image/png", "content": "data:image/png;base64,AAAA"},
+            {"type": "blob", "modality": "image", "mime_type": "image/png", "content": "AAAA"},
         ]
 
         output_content = [
@@ -160,7 +160,7 @@ class TestCrewAIInstrumentor(TestCase):
             {"type": "text", "content": "The answer is blue."},
             {"type": "reasoning", "content": "Let me reason about this."},
             {"type": "uri", "modality": "image", "uri": "https://example.com/cat.png"},
-            {"type": "blob", "modality": "image", "mime_type": "image/png", "content": "data:image/png;base64,AAAA"},
+            {"type": "blob", "modality": "image", "mime_type": "image/png", "content": "AAAA"},
         ]
 
         for model in models:

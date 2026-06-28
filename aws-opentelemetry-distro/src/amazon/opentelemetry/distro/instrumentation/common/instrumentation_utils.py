@@ -135,8 +135,9 @@ def content_to_parts(content: Any) -> list:  # pylint: disable=too-many-branches
             if not url:
                 continue
             if url.startswith("data:"):
-                mime = url[len("data:") :].split(",", 1)[0].split(";", 1)[0] or "image/*"
-                parts.append({"type": "blob", "modality": "image", "mime_type": mime, "content": url})
+                header, _, data = url[len("data:") :].partition(",")
+                mime = header.split(";", 1)[0] or "image/*"
+                parts.append({"type": "blob", "modality": "image", "mime_type": mime, "content": data})
             else:
                 parts.append({"type": "uri", "modality": "image", "uri": url})
         elif block_type == "image":

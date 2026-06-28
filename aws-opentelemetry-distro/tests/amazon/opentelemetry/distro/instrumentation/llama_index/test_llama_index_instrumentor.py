@@ -1348,8 +1348,12 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         span.end()
 
     def test_multimodal_input_and_output_messages(self):
-        from llama_index.core.base.llms.types import ThinkingBlock
         from llama_index.core.instrumentation.events.llm import LLMChatEndEvent
+
+        try:
+            from llama_index.core.base.llms.types import ThinkingBlock
+        except ImportError:
+            ThinkingBlock = None
 
         input_message = ChatMessage(
             role="user",
@@ -1365,21 +1369,20 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
             {"type": "blob", "modality": "image", "mime_type": "image/png", "content": "QQ=="},
         ]
 
-        output_message = ChatMessage(
-            role="assistant",
-            blocks=[
-                TextBlock(text="The answer is blue."),
-                ThinkingBlock(content="Let me reason about this."),
-                ImageBlock(url="https://example.com/cat.png"),
-                ImageBlock(image=b"QQ==", image_mimetype="image/png"),
-            ],
-        )
-        expected_output_parts = [
-            {"type": "text", "content": "The answer is blue."},
-            {"type": "reasoning", "content": "Let me reason about this."},
+        output_blocks = [TextBlock(text="The answer is blue.")]
+        expected_output_parts = [{"type": "text", "content": "The answer is blue."}]
+        if ThinkingBlock is not None:
+            output_blocks.append(ThinkingBlock(content="Let me reason about this."))
+            expected_output_parts.append({"type": "reasoning", "content": "Let me reason about this."})
+        output_blocks += [
+            ImageBlock(url="https://example.com/cat.png"),
+            ImageBlock(image=b"QQ==", image_mimetype="image/png"),
+        ]
+        expected_output_parts += [
             {"type": "uri", "modality": "image", "uri": "https://example.com/cat.png"},
             {"type": "blob", "modality": "image", "mime_type": "image/png", "content": "QQ=="},
         ]
+        output_message = ChatMessage(role="assistant", blocks=output_blocks)
 
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
