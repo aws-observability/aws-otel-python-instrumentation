@@ -865,6 +865,34 @@ class TestSysMonitoringEngineFunctionLevelRecursion(unittest.TestCase):
         for inner, outer in zip(durations, durations[1:]):
             self.assertGreaterEqual(outer, inner, f"outer frame duration {outer}ms < inner {inner}ms")
 
+    def test_generator_exit_is_not_reported_as_exception(self):
+        """On 3.12+, closing a suspended generator fires PY_UNWIND with a live
+        GeneratorExit. That is lifecycle teardown (an early ``break``/GC of a
+        partially-consumed generator), not an application error, so NO snapshot
+        must fire — matching the bytecode engine's behaviour on 3.10/3.11."""
+
+        def gen():
+            i = 0
+            while True:
+                yield i
+                i += 1
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=gen.__code__,
+            func=gen,
+            function_key="m.gen_inf",
+            module_name="m",
+            qualified_name="gen",
+            capture_config=CaptureConfig(capture_arguments=[]),
+            instrumentation_type="PROBE",
+        )
+        self.assertTrue(ok)
+        generator = gen()
+        next(generator)
+        next(generator)
+        generator.close()  # raises GeneratorExit into the suspended generator
+        self.assertEqual(len(self.snapshots), 0, "GeneratorExit must not produce a snapshot")
+
 
 if __name__ == "__main__":
     unittest.main()

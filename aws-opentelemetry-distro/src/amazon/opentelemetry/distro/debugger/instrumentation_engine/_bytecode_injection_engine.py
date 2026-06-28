@@ -9,6 +9,7 @@ This module handles the injection of breakpoint calls into Python functions
 using bytecode injection for Python 3.10-3.11.
 """
 
+import asyncio
 import inspect
 import logging
 import sys
@@ -64,22 +65,8 @@ _FUNCTION_HANDLER_NAME = "_function_event_handler"
 # than a heuristic search over unrelated functions that share a module.
 _RESOLVED_TARGET_ATTR = "__di_resolved_target__"
 
-# Code-flag mask the bytecode-rewrite path declines to instrument: rewriting
-# these in place would corrupt .send() / .throw() / await semantics. The
-# manager observes the False return from enable_function_level_instrumentation
-# and routes these through _function_wrapper.instrument_function instead,
-# which has dedicated coroutine support via _create_async_wrapper. So async
-# functions ARE instrumented end-to-end — just not by the bytecode engine.
-# Plain generators and async generators don't have a dedicated wrapper path
-# yet; they fall through to the sync wrapper and only fire on the
-# generator-construction call.
-_DECLINE_BYTECODE_REWRITE_MASK = (
-    # pylint: disable=no-member
-    inspect.CO_GENERATOR
-    | inspect.CO_COROUTINE
-    | inspect.CO_ASYNC_GENERATOR
-    | inspect.CO_ITERABLE_COROUTINE
-)
+# Generator/coroutine teardown (close/GC, task cancel) — not reported as a throwable.
+_LIFECYCLE_TEARDOWN_EXCEPTIONS = (GeneratorExit, asyncio.CancelledError)
 
 # Import bytecode classes if available
 if IS_BYTECODE_INSTALLED:
@@ -176,19 +163,6 @@ class BytecodeInjectionEngine(InstrumentationEngine):
     def supports_runtime() -> bool:
         """Check if bytecode injection is supported (Python 3.10-3.11)."""
         return (3, 10) <= sys.version_info < (3, 12) and IS_BYTECODE_INSTALLED
-
-    @staticmethod
-    def _should_decline_bytecode_rewrite(code: CodeType) -> bool:
-        """True if this code object's body cannot safely be rewritten by the
-        bytecode-injection path: generators, coroutines, async generators,
-        and iterable coroutines.
-
-        A False return from enable_function_level_instrumentation is the
-        manager's cue to fall back to _function_wrapper.instrument_function,
-        which DOES support coroutines via _create_async_wrapper. So an
-        ``async def`` function is still instrumented end-to-end; just not
-        by this engine."""
-        return bool(code.co_flags & _DECLINE_BYTECODE_REWRITE_MASK)
 
     def enable_breakpoints_for_function(
         self,
@@ -337,22 +311,13 @@ class BytecodeInjectionEngine(InstrumentationEngine):
     ) -> bool:
         """Arm function-level (PROBE / function-level BREAKPOINT) on `func`.
 
-        Refuses generators, coroutines, async generators (CO_* flag mask) since
-        wrapping their bodies with try/finally would corrupt .send()/.throw()/
-        await semantics. 3.11 is also refused in this commit; ConcreteBytecode
-        + exception_table support lands in a follow-up.
+        Wraps the function body with entry/return/unwind hooks via in-place
+        ``func.__code__`` mutation; handles plain functions and generators /
+        coroutines / async generators (the wrap is spliced after the preamble).
 
-        Returns True on successful arm, False on refusal or rewrite failure.
+        Returns True on successful arm, False on rewrite failure.
         """
         if not self._initialized:
-            return False
-        if self._should_decline_bytecode_rewrite(code):
-            # The manager will fall back to _function_wrapper.instrument_function,
-            # which has a working coroutine path. Return False, not raise.
-            logger.debug(
-                "Engine declines bytecode rewrite for %s; manager will route through wrapper instead",
-                function_key,
-            )
             return False
 
         # Resolve past decorator wrappers (functools.wraps, partial, closures)
@@ -740,6 +705,8 @@ class BytecodeInjectionEngine(InstrumentationEngine):
         check (so reentrant calls still see the live exception via the bytecode
         path's RERAISE)."""
         exc_type, exc_value, exc_tb = sys.exc_info()
+        if exc_value is not None and isinstance(exc_value, _LIFECYCLE_TEARDOWN_EXCEPTIONS):
+            return
         if getattr(self._function_reentrancy_guard, "active", False):
             return
         try:
@@ -1146,14 +1113,21 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             retval_slot = self._unique_local_name(code, "_di_retval", taken)
             taken.add(retval_slot)
 
+            # GEN_START must stay first on a 3.10 generator/coroutine; splice after it.
+            preamble_end = 0
+            for instr in bc:
+                if isinstance(instr, Instr) and instr.name == "GEN_START":
+                    preamble_end += 1
+                else:
+                    break
+
             handler_label = Label()
             prologue = self._build_function_prologue_310(function_key, start_ns_slot, entry_ctx_slot, retval_slot)
             prologue.append(Instr("SETUP_FINALLY", handler_label))
             prologue.extend(self._build_function_entry_call_310(function_key, start_ns_slot, entry_ctx_slot))
 
-            # Walk user instructions; replace RETURN_VALUE with exit-call sequence.
-            new_instructions = list(prologue)
-            for instr in bc:
+            new_instructions = list(bc[:preamble_end]) + list(prologue)
+            for instr in bc[preamble_end:]:
                 if hasattr(instr, "name") and instr.name == "RETURN_VALUE":
                     new_instructions.extend(
                         self._build_function_exit_call_310(function_key, start_ns_slot, entry_ctx_slot, retval_slot)
@@ -1390,16 +1364,21 @@ class BytecodeInjectionEngine(InstrumentationEngine):
             retval_slot = self._unique_local_name(code, "_di_retval", taken)
             taken.add(retval_slot)
 
-            # Find preamble end: skip past RESUME and any COPY_FREE_VARS /
-            # MAKE_CELL so our entry hook fires only after closures are armed.
+            # Splice after the contiguous preamble run only (a generator/coroutine
+            # has a second RESUME after each yield/await; stop at the first
+            # non-preamble instruction).
             preamble_end = 0
-            for idx, instr in enumerate(bc):
+            for instr in bc:
                 if isinstance(instr, Instr) and instr.name in (
                     "RESUME",
                     "COPY_FREE_VARS",
                     "MAKE_CELL",
+                    "RETURN_GENERATOR",
+                    "POP_TOP",
                 ):
-                    preamble_end = idx + 1
+                    preamble_end += 1
+                else:
+                    break
 
             handler_label = Label()
 
@@ -1496,6 +1475,7 @@ class BytecodeInjectionEngine(InstrumentationEngine):
                             # Clean up injected globals
                             state.function_ref.__globals__.pop(_HANDLER_NAME, None)
                             state.function_ref.__globals__.pop(_LOCALS_NAME, None)
+                            state.function_ref.__globals__.pop(_FUNCTION_HANDLER_NAME, None)
 
                             restored_count += 1
                             logger.debug("Restored function %s", state.original_code.co_name)

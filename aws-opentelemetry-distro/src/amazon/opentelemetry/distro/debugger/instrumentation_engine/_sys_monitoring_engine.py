@@ -4,6 +4,7 @@
 # pylint: disable=no-member
 # Disabling no-member from linter as sys.monitoring is only available in Python 3.12+
 
+import asyncio
 import inspect
 import logging
 import sys
@@ -43,6 +44,9 @@ from opentelemetry.semconv.resource import ResourceAttributes
 logger = logging.getLogger(__name__)
 
 _TOOL_NAME = "AwsLiveDebugger"
+
+# Generator/coroutine teardown (close/GC, task cancel) — not reported as a throwable.
+_LIFECYCLE_TEARDOWN_EXCEPTIONS = (GeneratorExit, asyncio.CancelledError)
 
 
 class SysMonitoringEngine(InstrumentationEngine):
@@ -341,6 +345,8 @@ class SysMonitoringEngine(InstrumentationEngine):
         # Pop AFTER membership check so we don't disturb stacks of other
         # threads' instrumented calls when uninstrumented code raises.
         start_ns = self._pop_matching_start_ns(code_id)
+        if exception is not None and isinstance(exception, _LIFECYCLE_TEARDOWN_EXCEPTIONS):
+            return
         if getattr(self._reentrancy_guard, "active", False):
             return
         try:

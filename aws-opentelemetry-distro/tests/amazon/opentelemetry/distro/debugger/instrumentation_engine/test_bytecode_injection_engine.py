@@ -651,50 +651,243 @@ class TestBytecodeInjectionEngineFunctionLevel(unittest.TestCase):
         self.assertEqual(throwable.message, "bad: 7")
         self.assertGreater(len(throwable.stacktrace), 0)
 
-    def test_engine_declines_generator_so_manager_can_fall_back_to_wrapper(self):
-        """The bytecode engine cannot safely rewrite a generator's body
-        (would corrupt .send()/.throw()), so it returns False. The manager
-        observes this and routes to _function_wrapper.instrument_function,
-        which is responsible for the actual generator handling."""
+    def test_generator_accepted_and_emits_return_value(self):
+        """A generator is instrumented in place (not declined): the body is
+        wrapped after the generator head, yields flow through untouched, and ONE
+        snapshot fires on completion carrying the generator's return value
+        (StopIteration.value)."""
+
+        def gen(n):
+            total = 0
+            for i in range(n):
+                total += i
+                yield i
+            return total
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=gen.__code__,
+            func=gen,
+            function_key="m.gen",
+            module_name="m",
+            qualified_name="gen",
+            capture_config=CaptureConfig(capture_arguments=[], capture_return=True),
+            location_hash="hash-gen",
+            instrumentation_type="PROBE",
+        )
+        self.assertTrue(ok, "engine must instrument the generator in place")
+        self.assertEqual(list(gen(4)), [0, 1, 2, 3])  # yields preserved
+        self.assertEqual(len(self.snapshots), 1)
+        snap = self.snapshots[0]
+        self.assertEqual(snap.instrumentation_type, "PROBE")
+        self.assertEqual(snap.captures.return_context.return_value.value, "6")  # 0+1+2+3
+
+    def test_generator_send_and_throw_preserved(self):
+        """The wrapped generator's own body runs in place, so ``.send()`` values
+        reach it and a consumer ``.throw()`` is raised at the ``yield`` site where
+        the user ``try/except`` catches it — full generator protocol preserved."""
+
+        ns: dict = {}
+        exec(  # noqa: S102
+            "def echo(n):\n"
+            "    received = []\n"
+            "    for _ in range(n):\n"
+            "        try:\n"
+            "            got = yield len(received)\n"
+            "            received.append(got)\n"
+            "        except ValueError:\n"
+            "            received.append('caught')\n"
+            "    return received\n",
+            ns,
+        )
+        echo = ns["echo"]
+        ok = self.engine.enable_function_level_instrumentation(
+            code=echo.__code__,
+            func=echo,
+            function_key="m.echo",
+            module_name="m",
+            qualified_name="echo",
+            capture_config=CaptureConfig(capture_arguments=[], capture_return=True),
+            location_hash="hash-echo",
+            instrumentation_type="PROBE",
+        )
+        self.assertTrue(ok)
+        generator = echo(3)
+        self.assertEqual(next(generator), 0)
+        self.assertEqual(generator.send("a"), 1)  # value delivered to user body
+        self.assertEqual(generator.throw(ValueError()), 2)  # user except around yield ran
+        with self.assertRaises(StopIteration) as stop:
+            generator.send("b")
+        self.assertEqual(stop.exception.value, ["a", "caught", "b"])
+
+    def test_generator_exception_captured(self):
+        """A generator that raises mid-iteration emits ONE snapshot whose
+        throwable is populated, and the exception still propagates."""
+
+        def gen(n):
+            for i in range(n):
+                if i == 2:
+                    raise RuntimeError("gen boom")
+                yield i
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=gen.__code__,
+            func=gen,
+            function_key="m.gen_raises",
+            module_name="m",
+            qualified_name="gen",
+            capture_config=CaptureConfig(capture_arguments=[]),
+            location_hash="hash-gen-raises",
+            instrumentation_type="PROBE",
+        )
+        self.assertTrue(ok)
+        with self.assertRaises(RuntimeError) as ctx:
+            list(gen(5))
+        self.assertEqual(str(ctx.exception), "gen boom")
+        self.assertEqual(len(self.snapshots), 1)
+        throwable = self.snapshots[0].captures.return_context.throwable
+        self.assertIsNotNone(throwable)
+        self.assertEqual(throwable.type, "RuntimeError")
+
+    def test_generator_exit_is_not_reported_as_exception(self):
+        """Closing a suspended generator (explicit .close(), or far more commonly
+        an early ``break``/GC of a partially-consumed generator) raises
+        GeneratorExit through the body's unwind path. That is lifecycle teardown,
+        not an application error, so NO snapshot must fire — otherwise healthy
+        code that simply stops iterating early would look like it threw."""
 
         def gen():
-            yield 1
+            i = 0
+            while True:
+                yield i
+                i += 1
 
         ok = self.engine.enable_function_level_instrumentation(
-            code=gen.__code__, func=gen, function_key="m.gen", module_name="m", qualified_name="gen"
+            code=gen.__code__,
+            func=gen,
+            function_key="m.gen_inf",
+            module_name="m",
+            qualified_name="gen",
+            capture_config=CaptureConfig(capture_arguments=[]),
+            location_hash="hash-gen-inf",
+            instrumentation_type="PROBE",
         )
-        self.assertFalse(ok, "engine must decline so manager can fall back")
-        # Engine should NOT have patched the generator's __code__.
-        self.assertNotIn(id(gen), self.engine._injection_states)
+        self.assertTrue(ok)
+        generator = gen()
+        next(generator)
+        next(generator)
+        generator.close()  # raises GeneratorExit into the suspended generator
+        self.assertEqual(len(self.snapshots), 0, "GeneratorExit must not produce a snapshot")
 
-    def test_engine_declines_coroutine_so_manager_can_fall_back_to_wrapper(self):
-        """Coroutines are instrumented end-to-end via the wrapper's
-        _create_async_wrapper path. The engine declines so the manager falls
-        back. This test asserts the engine half of that contract; the
-        wrapper-fallback half lives in test_function_wrapper / manager tests."""
+    def test_coroutine_accepted_and_emits_result(self):
+        """A coroutine is instrumented in place; awaiting it yields the real
+        result and ONE snapshot fires carrying that return value."""
+        import asyncio  # pylint: disable=import-outside-toplevel
+
+        async def coro(n):
+            total = 0
+            for i in range(n):
+                await asyncio.sleep(0)
+                total += i
+            return total
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=coro.__code__,
+            func=coro,
+            function_key="m.coro",
+            module_name="m",
+            qualified_name="coro",
+            capture_config=CaptureConfig(capture_arguments=[], capture_return=True),
+            location_hash="hash-coro",
+            instrumentation_type="PROBE",
+        )
+        self.assertTrue(ok, "engine must instrument the coroutine in place")
+        self.assertEqual(asyncio.run(coro(4)), 6)
+        self.assertEqual(len(self.snapshots), 1)
+        self.assertEqual(self.snapshots[0].captures.return_context.return_value.value, "6")
+
+    def test_coroutine_exception_captured(self):
+        """A coroutine that raises emits ONE snapshot with a populated throwable
+        and the exception still propagates to the awaiter."""
+        import asyncio  # pylint: disable=import-outside-toplevel
 
         async def coro():
-            return 1
+            await asyncio.sleep(0)
+            raise ValueError("async boom")
 
         ok = self.engine.enable_function_level_instrumentation(
-            code=coro.__code__, func=coro, function_key="m.coro", module_name="m", qualified_name="coro"
+            code=coro.__code__,
+            func=coro,
+            function_key="m.coro_raises",
+            module_name="m",
+            qualified_name="coro",
+            capture_config=CaptureConfig(capture_arguments=[]),
+            location_hash="hash-coro-raises",
+            instrumentation_type="PROBE",
         )
-        self.assertFalse(ok, "engine must decline so manager can route through async wrapper")
-        self.assertNotIn(id(coro), self.engine._injection_states)
+        self.assertTrue(ok)
+        with self.assertRaises(ValueError):
+            asyncio.run(coro())
+        self.assertEqual(len(self.snapshots), 1)
+        throwable = self.snapshots[0].captures.return_context.throwable
+        self.assertIsNotNone(throwable)
+        self.assertEqual(throwable.type, "ValueError")
 
-    def test_engine_declines_async_generator_so_manager_can_fall_back_to_wrapper(self):
-        """Async generators (`async def f(): yield`) are declined for the
-        same reason as plain generators — rewriting their body breaks
-        .asend()/.athrow(). Manager routes to wrapper."""
+    def test_async_generator_accepted_and_emits_snapshot(self):
+        """An async generator is instrumented in place; ``async for`` yields all
+        values and ONE snapshot fires on completion."""
+        import asyncio  # pylint: disable=import-outside-toplevel
 
-        async def agen():
-            yield 1
+        async def agen(n):
+            for i in range(n):
+                await asyncio.sleep(0)
+                yield i
 
         ok = self.engine.enable_function_level_instrumentation(
-            code=agen.__code__, func=agen, function_key="m.agen", module_name="m", qualified_name="agen"
+            code=agen.__code__,
+            func=agen,
+            function_key="m.agen",
+            module_name="m",
+            qualified_name="agen",
+            capture_config=CaptureConfig(capture_arguments=[], capture_return=True),
+            location_hash="hash-agen",
+            instrumentation_type="PROBE",
         )
-        self.assertFalse(ok, "engine must decline so manager can fall back")
-        self.assertNotIn(id(agen), self.engine._injection_states)
+        self.assertTrue(ok, "engine must instrument the async generator in place")
+
+        async def drive():
+            collected = []
+            async for value in agen(3):
+                collected.append(value)
+            return collected
+
+        self.assertEqual(asyncio.run(drive()), [0, 1, 2])
+        self.assertEqual(len(self.snapshots), 1)
+        self.assertEqual(self.snapshots[0].instrumentation_type, "PROBE")
+
+    def test_generator_entry_fires_once_and_captures_args(self):
+        """Regression for the 3.11 splice/preamble bug: the entry hook must fire
+        exactly ONCE (not once per yield), so exactly one snapshot is emitted
+        with the call's arguments captured once."""
+
+        ns: dict = {}
+        exec("def ranged(count):\n    for i in range(count):\n        yield i\n", ns)  # noqa: S102
+        ranged = ns["ranged"]
+        ok = self.engine.enable_function_level_instrumentation(
+            code=ranged.__code__,
+            func=ranged,
+            function_key="m.ranged",
+            module_name="m",
+            qualified_name="ranged",
+            capture_config=CaptureConfig(capture_arguments=[], capture_return=True),
+            location_hash="hash-ranged",
+            instrumentation_type="PROBE",
+        )
+        self.assertTrue(ok)
+        self.assertEqual(list(ranged(5)), [0, 1, 2, 3, 4])
+        self.assertEqual(len(self.snapshots), 1, "entry/exit must fire once, not per-yield")
+        entry = self.snapshots[0].captures.entry
+        self.assertIsNotNone(entry)
+        self.assertIn("count", entry.arguments)
 
     def test_function_level_disable_restores_original(self):
         """After disable, the original code object is restored and no snapshots fire."""
