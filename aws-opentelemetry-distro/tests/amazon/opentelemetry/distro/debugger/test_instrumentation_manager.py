@@ -917,5 +917,90 @@ class TestInheritedMethodEndToEnd(unittest.TestCase):
         self.assertNotIn("handle", Child.__dict__)
 
 
+class TestLineBreakpointNoCodeObjectReportsError(unittest.TestCase):
+    """A line-level breakpoint on a target with no __code__ (e.g. a callable-class
+    instance or a functools.partial) cannot arm the line engine. Instead of skipping
+    silently and leaving the config at READY, the manager must report a non-silent
+    LINE_NOT_EXECUTABLE error for the line-level config(s)."""
+
+    def test_line_bp_on_codeless_target_reports_line_not_executable(self):
+        manager = _make_manager()
+        manager._engine = mock.MagicMock()  # engine present, so the new branch is reachable
+        reporter = mock.MagicMock()
+        manager._status_reporter = reporter
+
+        # A line-level breakpoint config (line > 0) on a real, importable module so the
+        # manager's early module-existence pre-check passes; instrument_function itself is
+        # mocked below to return a codeless target.
+        module_name = "_test_codeless_module"
+        sys.modules[module_name] = types.ModuleType(module_name)
+        self.addCleanup(lambda: sys.modules.pop(module_name, None))
+        config = _make_config(method_name="handler", line_number=14, location_hash="bp-codeless", code_unit=module_name)
+        bp_set = FunctionBreakpointSet(
+            function_key=config.function_key,
+            module=config.module,
+            function_name=config.function_name,
+            breakpoints={config.line_number: config},
+        )
+
+        # instrument_function returns (original, wrapped); make the "original" a callable-class
+        # instance, which has NO __code__ -> bp_set.code_object resolves to None.
+        class _CallableInstance:
+            def __call__(self, *a, **k):
+                return None
+
+        codeless = _CallableInstance()
+        wrapped = lambda *a, **k: None  # noqa: E731
+        manager._wrapper = mock.MagicMock()
+        manager._wrapper.instrument_function.return_value = (codeless, wrapped)
+
+        manager._apply_function(bp_set)
+
+        # code_object could not be resolved...
+        self.assertIsNone(bp_set.code_object)
+        # ...so the line engine was never armed...
+        manager._engine.enable_breakpoints_for_function.assert_not_called()
+        # ...and a non-silent LINE_NOT_EXECUTABLE error was reported (not silent READY).
+        reporter.report_status_immediately.assert_any_call(
+            "bp-codeless", config.instrumentation_type, ConfigurationStatus.ERROR, ErrorCause.LINE_NOT_EXECUTABLE
+        )
+        self.assertEqual(manager._failed_configs.get("bp-codeless"), ErrorCause.LINE_NOT_EXECUTABLE)
+
+    def test_apply_configurations_does_not_overwrite_error_with_ready(self):
+        """End-to-end through apply_configurations: a codeless line-level target must NOT have
+        its ERROR overwritten by the per-config READY report the new-function branch emits."""
+        manager = _make_manager()
+        manager._engine = mock.MagicMock()
+        reporter = mock.MagicMock()
+        manager._status_reporter = reporter
+
+        module_name = "_test_codeless_module_e2e"
+        sys.modules[module_name] = types.ModuleType(module_name)
+        self.addCleanup(lambda: sys.modules.pop(module_name, None))
+
+        # instrument_function yields a codeless target so _apply_function marks it failed.
+        class _CallableInstance:
+            def __call__(self, *a, **k):
+                return None
+
+        manager._wrapper = mock.MagicMock()
+        manager._wrapper.instrument_function.return_value = (_CallableInstance(), lambda *a, **k: None)
+
+        config = _make_config(method_name="handler", line_number=14, location_hash="bp-codeless", code_unit=module_name)
+        manager.apply_configuration([config])
+
+        calls = reporter.report_status_immediately.call_args_list
+        # The error was reported for the codeless config...
+        self.assertTrue(
+            any(c.args[0] == "bp-codeless" and c.args[2] == ConfigurationStatus.ERROR for c in calls),
+            f"expected ERROR for bp-codeless, got {calls}",
+        )
+        # ...and READY was NOT subsequently reported for it (which would mask the error).
+        self.assertFalse(
+            any(c.args[0] == "bp-codeless" and c.args[2] == ConfigurationStatus.READY for c in calls),
+            f"READY must not be reported for a failed config, got {calls}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
