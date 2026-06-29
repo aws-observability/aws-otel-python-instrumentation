@@ -156,6 +156,7 @@ class OpenTelemetryEventHandler:
         # a map of every event's id to its span. If the event does not
         # create a span, then it's mapped to the span created by its nearest ancestor event
         self._event_id_to_span = DictWithLock()
+        self._event_id_to_token_usage = DictWithLock()
         self._event_type_handlers: Dict[type, Any] = {
             CrewKickoffStartedEvent: self._on_crew_start,
             CrewKickoffCompletedEvent: self._on_crew_completed,
@@ -211,12 +212,14 @@ class OpenTelemetryEventHandler:
     ) -> None:  # pylint: disable=unused-argument
         self._end_span(event.started_event_id)
         self._event_id_to_span.clear()
+        self._event_id_to_token_usage.clear()
 
     def _on_crew_failed(
         self, source: "Crew", event: "CrewKickoffFailedEvent"
     ) -> None:  # pylint: disable=unused-argument
         self._end_span(event.started_event_id, error=getattr(event, "error", None))
         self._event_id_to_span.clear()
+        self._event_id_to_token_usage.clear()
 
     def _on_agent_start(  # pylint: disable=too-many-branches
         self, source: "BaseAgent", event: "AgentExecutionStartedEvent"  # pylint: disable=unused-argument
@@ -331,6 +334,9 @@ class OpenTelemetryEventHandler:
             f"{GenAiOperationNameValues.CHAT.value} {model_name}" if model_name else GenAiOperationNameValues.CHAT.value
         )
 
+        usage = source.get_token_usage_summary()
+        self._event_id_to_token_usage.put(event.event_id, (usage.prompt_tokens, usage.completion_tokens))
+
         messages = event.messages
         if messages:
             if isinstance(messages, str):
@@ -378,14 +384,18 @@ class OpenTelemetryEventHandler:
             attrs[GEN_AI_RESPONSE_MODEL] = model_name
 
         usage: "UsageMetrics" = source.get_token_usage_summary()
-        if usage.prompt_tokens > 0:
-            attrs[GEN_AI_USAGE_INPUT_TOKENS] = usage.prompt_tokens
-        if usage.completion_tokens > 0:
-            attrs[GEN_AI_USAGE_OUTPUT_TOKENS] = usage.completion_tokens
+        prev_prompt_tokens, prev_completion_tokens = self._event_id_to_token_usage.pop(event.started_event_id) or (0, 0)
+        input_tokens = usage.prompt_tokens - prev_prompt_tokens
+        output_tokens = usage.completion_tokens - prev_completion_tokens
+        if input_tokens > 0:
+            attrs[GEN_AI_USAGE_INPUT_TOKENS] = input_tokens
+        if output_tokens > 0:
+            attrs[GEN_AI_USAGE_OUTPUT_TOKENS] = output_tokens
 
         self._end_span(event.started_event_id, attrs)
 
     def _on_llm_failed(self, source: Any, event: "LLMCallFailedEvent") -> None:  # pylint: disable=unused-argument
+        self._event_id_to_token_usage.pop(event.started_event_id)
         self._end_span(event.started_event_id, error=getattr(event, "error", None))
 
     def _start_span(

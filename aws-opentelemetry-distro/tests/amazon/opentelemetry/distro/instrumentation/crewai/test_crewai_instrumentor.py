@@ -54,6 +54,8 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
+    GEN_AI_USAGE_INPUT_TOKENS,
+    GEN_AI_USAGE_OUTPUT_TOKENS,
     GenAiProviderNameValues,
 )
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
@@ -590,8 +592,12 @@ class TestCrewAIInstrumentor(TestCase):
         with patch(
             "litellm.completion",
             side_effect=[
-                self._mock_response(content="", tool_calls=[tc]),
-                self._mock_response(content="Thought: I now know the final answer\nFinal Answer: Hello! Welcome!"),
+                self._mock_response(content="", tool_calls=[tc], prompt_tokens=100, completion_tokens=50),
+                self._mock_response(
+                    content="Thought: I now know the final answer\nFinal Answer: Hello! Welcome!",
+                    prompt_tokens=200,
+                    completion_tokens=80,
+                ),
             ],
         ):
             crew.kickoff()
@@ -668,6 +674,12 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertEqual(chat_span.attributes.get(GEN_AI_RESPONSE_MODEL), model_id)
         self.assertIn(GEN_AI_RESPONSE_FINISH_REASONS, chat_span.attributes)
 
+        usage_spans = [s for s in spans if GEN_AI_USAGE_INPUT_TOKENS in s.attributes]
+        usage = sorted(
+            (s.attributes[GEN_AI_USAGE_INPUT_TOKENS], s.attributes[GEN_AI_USAGE_OUTPUT_TOKENS]) for s in usage_spans
+        )
+        self.assertEqual(usage, [(100, 50), (200, 80)])
+
     def _create_test_crew(self, model: str):
         test_tracer = self.tracer_provider.get_tracer("test")
 
@@ -721,21 +733,24 @@ class TestCrewAIInstrumentor(TestCase):
         return next((s for s in self.span_exporter.get_finished_spans() if name_contains in s.name), None)
 
     @staticmethod
-    def _mock_response(content: str = "", tool_calls: Optional[list] = None):
-        r = MagicMock()
-        r.choices = [MagicMock()]
-        r.choices[0].message = MagicMock()
-        r.choices[0].message.content = content
-        r.choices[0].message.tool_calls = tool_calls or []
-        r.usage = {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
-        return r
+    def _mock_response(
+        content: str = "", tool_calls: Optional[list] = None, prompt_tokens: int = 100, completion_tokens: int = 50
+    ):
+        from litellm.types.utils import Choices, Message, ModelResponse, Usage
+
+        message = Message(content=content, role="assistant", tool_calls=tool_calls or None)
+        choice = Choices(index=0, message=message, finish_reason="tool_calls" if tool_calls else "stop")
+        usage = Usage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens,
+        )
+        return ModelResponse(choices=[choice], usage=usage)
 
     @staticmethod
     def _mock_tool_call(call_id: str = "call_123", name: str = "get_greeting", arguments: str = '{"name": "World"}'):
-        tc = MagicMock()
-        tc.id = call_id
-        tc.type = "function"
-        tc.function = MagicMock()
-        tc.function.name = name
-        tc.function.arguments = arguments
-        return tc
+        from litellm.types.utils import ChatCompletionMessageToolCall, Function
+
+        return ChatCompletionMessageToolCall(
+            id=call_id, type="function", function=Function(name=name, arguments=arguments)
+        )
