@@ -4,7 +4,7 @@ from typing import Optional
 
 from typing_extensions import override
 
-from amazon.opentelemetry.distro._aws_attribute_keys import AWS_TRACE_LAMBDA_FLAG_MULTIPLE_SERVER
+from amazon.opentelemetry.application_signals.internal.semconv.aws_attributes import AWS_TRACE_LAMBDA_FLAG_MULTIPLE_SERVER
 from opentelemetry.context import Context, get_value
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
 from opentelemetry.trace import SpanKind

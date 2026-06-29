@@ -13,8 +13,8 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
-from amazon.opentelemetry.distro._aws_resource_attribute_configurator import _OTEL_UNKNOWN_SERVICE_PREFIX
-from amazon.opentelemetry.distro._aws_span_processing_util import UNKNOWN_SERVICE
+from amazon.opentelemetry.application_signals.internal.aws_resource_attribute_configurator import _OTEL_UNKNOWN_SERVICE_PREFIX
+from amazon.opentelemetry.application_signals.internal.aws_span_processing_util import UNKNOWN_SERVICE
 from amazon.opentelemetry.distro.debugger._data_models import BreakpointConfiguration
 from amazon.opentelemetry.distro.debugger.instrumentation_manager import get_global_manager
 from opentelemetry import trace

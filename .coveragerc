@@ -10,6 +10,8 @@ parallel = true
 ; from different tox envs can be combined into a single report
 source =
     aws-opentelemetry-distro/src/amazon
+    aws-opentelemetry-application-signals/src/amazon
+    aws-opentelemetry-serviceevents/src/amazon
     .tox/3.*/lib/python*/site-packages/amazon
     */site-packages/amazon
 

@@ -3,7 +3,7 @@
 from types import MappingProxyType
 from typing import Optional
 
-from amazon.opentelemetry.distro._aws_attribute_keys import (
+from amazon.opentelemetry.application_signals.internal.semconv.aws_attributes import (
     AWS_XRAY_ADAPTIVE_SAMPLING_CONFIGURED_ATTRIBUTE_KEY,
     AWS_XRAY_SAMPLING_RULE,
 )

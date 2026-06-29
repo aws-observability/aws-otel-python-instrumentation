@@ -5,7 +5,7 @@ import inspect
 import logging
 from typing import Dict, Optional
 
-from amazon.opentelemetry.distro._aws_attribute_keys import (
+from amazon.opentelemetry.application_signals.internal.semconv.aws_attributes import (
     AWS_BEDROCK_AGENT_ID,
     AWS_BEDROCK_DATA_SOURCE_ID,
     AWS_BEDROCK_GUARDRAIL_ARN,

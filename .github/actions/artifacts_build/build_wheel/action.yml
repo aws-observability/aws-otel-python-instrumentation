@@ -1,14 +1,18 @@
-name: Build aws-opentelemetry-distro wheel
+name: Build aws-opentelemetry wheels
 description: |
-  This action assumes that the repo was checked out and Python is set up. Builds the aws-opentelemetry-distro wheel into ./dist.
+  This action assumes that the repo was checked out and Python is set up. Builds the
+  aws-opentelemetry-application-signals, aws-opentelemetry-serviceevents, and
+  aws-opentelemetry-distro wheels into ./dist.
 
 runs:
   using: "composite"
   steps:
-    - name: Install Dependencies and Build Wheel
+    - name: Install Dependencies and Build Wheels
       shell: bash
       run: |
         pip install --upgrade pip setuptools wheel packaging build
         rm -rf ./dist/*
-        cd ./aws-opentelemetry-distro
-        python -m build --outdir ../dist
+        # application_signals is the base package; serviceevents depends on it; distro depends on both.
+        for pkg in aws-opentelemetry-application-signals aws-opentelemetry-serviceevents aws-opentelemetry-distro; do
+          (cd "./$pkg" && python -m build --outdir ../dist)
+        done

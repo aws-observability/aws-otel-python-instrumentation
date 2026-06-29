@@ -5,7 +5,7 @@ import importlib
 
 from botocore.exceptions import ClientError
 
-from amazon.opentelemetry.distro._aws_attribute_keys import (
+from amazon.opentelemetry.application_signals.internal.semconv.aws_attributes import (
     AWS_AUTH_ACCESS_KEY,
     AWS_AUTH_REGION,
     AWS_DYNAMODB_TABLE_ARN,
