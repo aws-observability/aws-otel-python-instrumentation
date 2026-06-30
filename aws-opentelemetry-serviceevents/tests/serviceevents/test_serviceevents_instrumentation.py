@@ -5,7 +5,6 @@ import logging
 import os
 import sys
 import tempfile
-import types
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
@@ -809,41 +808,3 @@ class TestServiceEventsShutdownEdgeCases(TestCase):
 
         # Should not raise.
         inst.shutdown()
-
-
-class TestBuildLogOtlpExporterSigV4(TestCase):
-    """Cover the CloudWatch SigV4 branch of _build_log_otlp_exporter.
-
-    Kept in this file (in addition to test_direct_cw_otlp.py) so the module's
-    isolated coverage reaches the SigV4 path. boto3 and the AWS exporter module
-    are stubbed via sys.modules so the lazy imports resolve from cache, avoiding
-    AWS credential resolution and meta_path finder recursion.
-    """
-
-    def test_cloudwatch_endpoint_routes_to_sigv4_exporter(self):
-        """A CloudWatch logs endpoint is wrapped with the SigV4 AWS exporter."""
-        from amazon.opentelemetry.serviceevents.serviceevents_instrumentation import _build_log_otlp_exporter
-        from opentelemetry.exporter.otlp.proto.http import Compression
-
-        stub_boto3 = types.ModuleType("boto3")
-        stub_boto3.Session = MagicMock(return_value=MagicMock(name="stub-boto3-session"))
-
-        exporter_module_path = "amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter"
-        stub_exporter_module = types.ModuleType(exporter_module_path)
-        mock_ctor = MagicMock(name="OTLPAwsLogRecordExporter")
-        stub_exporter_module.OTLPAwsLogRecordExporter = mock_ctor
-
-        with patch.dict(
-            sys.modules,
-            {"boto3": stub_boto3, exporter_module_path: stub_exporter_module},
-        ):
-            _build_log_otlp_exporter(
-                "https://logs.us-east-2.amazonaws.com/v1/logs",
-                {"x-aws-log-group": "/my/group", "x-aws-log-stream": "my-stream"},
-                Compression.Gzip,
-            )
-
-        mock_ctor.assert_called_once()
-        kwargs = mock_ctor.call_args.kwargs
-        self.assertEqual(kwargs["aws_region"], "us-east-2")
-        self.assertEqual(kwargs["endpoint"], "https://logs.us-east-2.amazonaws.com/v1/logs")
