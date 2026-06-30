@@ -213,9 +213,6 @@ def _initialize_components():
     if logging_enabled.strip().lower() == "true":
         _init_logging(log_exporters, resource)
 
-    # ServiceEvents is now initialized via the opentelemetry_instrumentor entry point registered
-    # by the aws-opentelemetry-serviceevents package, not from the configurator.
-
 
 def _init_logging(
     exporters: dict[str, Type[LogRecordExporter]],
@@ -307,8 +304,6 @@ def _export_unsampled_span_for_lambda(trace_provider: TracerProvider, resource: 
 
     traces_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
 
-    # Metric attributes are attached by AwsMetricAttributesSpanProcessor on the provider, so the
-    # unsampled Lambda exporter no longer needs the exporter-wrapping builder.
     span_exporter = OTLPUdpSpanExporter(endpoint=traces_endpoint, sampled=False)
 
     trace_provider.add_span_processor(
@@ -455,8 +450,6 @@ def _customize_span_exporter(span_exporter: SpanExporter, sampler: Sampler = Non
     if not _is_application_signals_enabled():
         return span_exporter
 
-    # Metric attributes are now attached by AwsMetricAttributesSpanProcessor (added via
-    # configure_application_signals in _customize_span_processors), not by wrapping the exporter.
     if sampler is not None and isinstance(sampler, AwsXRayRemoteSampler):
         sampler.set_span_exporter(span_exporter)
     return span_exporter
@@ -532,9 +525,6 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource, sam
 
     provider.add_span_processor(BaggageSpanProcessor(lambda key: key in baggage_keys))
 
-    # Configure the Application Signals pipeline (AlwaysRecordSampler wrapping is handled in
-    # _customize_sampler; here we add the attribute-propagating + metric-attribute + span-metrics
-    # processors). Returns False when App Signals is disabled or already configured.
     configured = configure_application_signals(provider, resource, sampler)
 
     # Export 100% spans and not export Application-Signals metrics if on Lambda.

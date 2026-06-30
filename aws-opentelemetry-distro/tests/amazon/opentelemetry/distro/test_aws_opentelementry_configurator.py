@@ -439,8 +439,6 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         customized_exporter: SpanExporter = _customize_span_exporter(mock_exporter)
         self.assertEqual(mock_exporter, customized_exporter)
 
-        # Metric attributes are now attached by AwsMetricAttributesSpanProcessor (added in
-        # configure_application_signals), so the exporter is returned unchanged when App Signals is on.
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", "False")
         customized_exporter = _customize_span_exporter(mock_exporter)

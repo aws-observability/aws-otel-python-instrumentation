@@ -4,13 +4,13 @@
 ARG PYTHON_VERSION=3.12
 FROM python:${PYTHON_VERSION}
 WORKDIR /langchain
-COPY ./dist/$DISTRO /langchain
+COPY ./dist/aws_opentelemetry_*.whl /langchain/
 COPY ./contract-tests/images/applications/gen_ai/langchain /langchain
 COPY ./contract-tests/images/applications/gen_ai/mock_llm.py /langchain
 
 ENV PIP_ROOT_USER_ACTION=ignore
 ARG DISTRO
-RUN pip install --upgrade pip && pip install -r requirements.txt && pip install ${DISTRO} --force-reinstall
+RUN pip install --upgrade pip && pip install -r requirements.txt && pip install ${DISTRO} --find-links . --force-reinstall
 
 # Without `-u`, logs will be buffered and `wait_for_logs` will never return.
 CMD ["opentelemetry-instrument", "python", "-u", "./langchain_server.py"]

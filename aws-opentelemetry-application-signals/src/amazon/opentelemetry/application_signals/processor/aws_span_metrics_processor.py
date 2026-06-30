@@ -97,9 +97,6 @@ class AwsSpanMetricsProcessor(SpanProcessor):
         for attributes in attribute_dict.values():
             self._record_metrics(span, attributes)
 
-        # Duck-typed to avoid importing AwsXRayRemoteSampler from the distro package, which would
-        # create a distro -> application_signals -> distro import cycle. The X-Ray remote sampler
-        # is the only sampler that exposes adapt_sampling, so this is behaviorally equivalent.
         if self._sampler and hasattr(self._sampler, "adapt_sampling"):
             self._sampler.adapt_sampling(span)
 

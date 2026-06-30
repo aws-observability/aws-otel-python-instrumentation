@@ -26,9 +26,6 @@ classifiers = [
 ]
 
 dependencies = [
-  # AWS Application Signals + ServiceEvents now ship as standalone packages. The distro depends on
-  # both: application_signals is the base package (owns shared internal utils used by distro-core),
-  # and serviceevents registers its own opentelemetry_instrumentor entry point.
   "aws-opentelemetry-application-signals == 0.18.0.dev0",
   "aws-opentelemetry-serviceevents == 0.18.0.dev0",
   "opentelemetry-api == 1.42.1",

@@ -12,7 +12,6 @@ runs:
       run: |
         pip install --upgrade pip setuptools wheel packaging build
         rm -rf ./dist/*
-        # application_signals is the base package; serviceevents depends on it; distro depends on both.
         for pkg in aws-opentelemetry-application-signals aws-opentelemetry-serviceevents aws-opentelemetry-distro; do
           (cd "./$pkg" && python -m build --outdir ../dist)
         done

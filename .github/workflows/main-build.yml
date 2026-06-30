@@ -120,7 +120,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
         with:
           name: distro-wheel
-          path: dist/aws_opentelemetry_distro-${{ steps.python_output.outputs.ADOT_PYTHON_VERSION }}-py3-none-any.whl
+          path: dist/aws_opentelemetry_*-py3-none-any.whl
           retention-days: 1
 
   unit-tests:

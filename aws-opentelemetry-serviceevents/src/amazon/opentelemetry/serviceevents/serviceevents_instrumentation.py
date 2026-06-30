@@ -693,8 +693,6 @@ class ServiceEventsInstrumentor(BaseInstrumentor):
         return []
 
     def _instrument(self, **kwargs):
-        # Honor the same bundling gate the ADOT configurator applied via _init_serviceevents.
-        # A manual caller can bypass it by passing an explicit config kwarg.
         config = kwargs.get("config")
         if config is None and not is_serviceevents_enabled():
             return
@@ -707,13 +705,8 @@ class ServiceEventsInstrumentor(BaseInstrumentor):
                 )
                 config = ServiceEventsConfig.from_env(resource_attributes=resource_attributes)
 
-            # config.enabled mirrors OTEL_AWS_SERVICE_EVENTS_ENABLED directly; the bundling gate
-            # above has already decided ServiceEvents should run, so flip the inner flag on.
             config.enabled = True
 
-            # Endpoint policy:
-            # - App Signals enabled: empty/null endpoints default to the 4316 App Signals receiver.
-            # - App Signals disabled + ServiceEvents force-enabled: endpoints are required; refuse to init.
             # pylint: disable=import-outside-toplevel
             from amazon.opentelemetry.application_signals import is_application_signals_enabled
 
@@ -750,10 +743,4 @@ class ServiceEventsInstrumentor(BaseInstrumentor):
 
     @classmethod
     def post_instrument(cls):
-        """Hook invoked after auto-instrumentation has loaded all instrumentors.
-
-        ADOT's AwsOpenTelemetryConfigurator does not initialize ServiceEvents itself
-        anymore, so there is nothing to defer here. Kept as the registered
-        ``opentelemetry_post_instrument`` target for forward compatibility.
-        """
         return
