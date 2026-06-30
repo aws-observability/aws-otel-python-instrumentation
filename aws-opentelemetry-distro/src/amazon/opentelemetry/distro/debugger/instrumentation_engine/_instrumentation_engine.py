@@ -52,6 +52,27 @@ class InstrumentationEngine(ABC):
             line_capture_configs: Optional mapping of line_number -> CaptureConfig for capture filtering
         """
 
+    def enable_function_level_instrumentation(  # pylint: disable=too-many-arguments
+        self,
+        code: CodeType,
+        func: FunctionType,
+        function_key: str,
+        module_name: str,
+        qualified_name: str,
+        capture_config: Optional[Any] = None,
+        location_hash: Optional[str] = None,
+        instrumentation_type: Optional[str] = None,
+    ) -> bool:
+        """Enable function-entry/exit instrumentation. Default no-op returns False."""
+        _ = self
+        return False
+
+    def disable_function_level_instrumentation(self, code: CodeType, func: Optional[FunctionType] = None) -> None:
+        """Tear down function-entry instrumentation. Default no-op."""
+        _ = self
+        _ = code
+        _ = func
+
     @abstractmethod
     def disable_breakpoints_for_function(self, code: CodeType, func: FunctionType) -> None:
         """

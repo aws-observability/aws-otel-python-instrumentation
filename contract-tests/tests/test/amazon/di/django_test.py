@@ -5,7 +5,9 @@
 Mirror of `flask_test.py`. The Django app exercises the cross-module
 URLPattern.callback path: target functions live in `api.views`, while
 the urlpatterns capturing direct refs live in `di_django_server.urls`.
-This locks in `_patch_django_url_patterns` behavior end-to-end.
+This locks in end-to-end that the instrumentation engine's in-place
+`__code__` mutation flows through Django's stored URLPattern.callback
+references without any framework-specific patching.
 """
 
 import time

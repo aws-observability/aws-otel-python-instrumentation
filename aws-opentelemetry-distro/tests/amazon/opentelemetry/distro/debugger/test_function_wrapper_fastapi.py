@@ -2,19 +2,26 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Tests for FastAPI route-table patching in _function_wrapper.py.
+Tests that the function-level instrumentation engine fires for FastAPI route
+handlers without requiring route-table patching.
 
-Validates that _replace_function_in_module and restore_function correctly
-patch a FastAPI app's route table (APIRoute.endpoint and APIRoute.dependant.call)
-when instrumenting route handlers, mirroring the Flask view_functions patching.
+FastAPI's @app.get()/@app.post() decorators store a direct reference to the
+route function in the app's route table (APIRoute.endpoint and
+APIRoute.dependant.call) at import time, and Depends() sub-dependencies in
+APIRoute.dependant.dependencies[*].call. The setattr-wrapper approach required
+us to walk that route table and rewrite every reference because replacing the
+module-level name does not update FastAPI's internal references. The
+bytecode-injection / sys.monitoring engines mutate the function's __code__ in
+place, so any reference FastAPI is holding (or any other framework) sees the
+rewritten code on the next call — no route-table patch needed.
 """
 
 import sys
 import types
 import unittest
-from unittest.mock import patch
 
-from amazon.opentelemetry.distro.debugger._function_wrapper import FunctionWrapper
+from amazon.opentelemetry.distro.debugger._data_models import CaptureConfig
+from amazon.opentelemetry.distro.debugger._function_wrapper import set_snapshot_emitter
 
 
 def _make_module(name, **attrs):
@@ -30,6 +37,29 @@ def _remove_module(name):
     sys.modules.pop(name, None)
 
 
+def _make_engine():
+    """Pick the engine the running Python supports.
+
+    3.12+ → SysMonitoringEngine. 3.10-3.11 → BytecodeInjectionEngine.
+    """
+    if sys.version_info >= (3, 12):
+        # pylint: disable=import-outside-toplevel
+        from amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine import (
+            SysMonitoringEngine,
+        )
+
+        engine = SysMonitoringEngine()
+    else:
+        # pylint: disable=import-outside-toplevel
+        from amazon.opentelemetry.distro.debugger.instrumentation_engine._bytecode_injection_engine import (
+            BytecodeInjectionEngine,
+        )
+
+        engine = BytecodeInjectionEngine()
+    engine.initialize()
+    return engine
+
+
 def _route_for(app, path):
     """Return the APIRoute registered on `app` for `path`."""
     for route in app.router.routes:
@@ -39,23 +69,38 @@ def _route_for(app, path):
 
 
 class TestFastAPIRoutesPatching(unittest.TestCase):
-    """Tests for _patch_fastapi_routes and its integration."""
+    """Exercises the engine against a FastAPI app's route table to prove no
+    route-table patching is required: mutating __code__ in place flows through
+    any reference FastAPI holds (endpoint, dependant.call, sub-dependencies)."""
 
     def setUp(self):
         self.module_name = "_test_fastapi_module"
         _remove_module(self.module_name)
+        self.snapshots = []
+
+        class _FakeEmitter:
+            def emit_snapshot(_self, snap):  # noqa: N805
+                self.snapshots.append(snap)
+
+        set_snapshot_emitter(_FakeEmitter())
+        self.engine = _make_engine()
 
     def tearDown(self):
+        try:
+            self.engine.cleanup()
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
         _remove_module(self.module_name)
 
     # ------------------------------------------------------------------
-    # _patch_fastapi_routes
+    # APIRoute.endpoint / dependant.call identity match
     # ------------------------------------------------------------------
 
     def test_patch_fastapi_routes_identity_match(self):
-        """When route.endpoint is original_func, identity-based patching rebinds endpoint + dependant.call."""
+        """When route.endpoint is the armed function, the engine's __code__
+        mutation flows through endpoint + dependant.call — no route-table patch."""
         try:
-            from fastapi import FastAPI
+            from fastapi import FastAPI  # pylint: disable=import-outside-toplevel
         except ImportError:
             self.skipTest("FastAPI not installed")
 
@@ -67,19 +112,32 @@ class TestFastAPIRoutesPatching(unittest.TestCase):
 
         route = _route_for(app, "/orders")
         original = route.endpoint  # the function object FastAPI captured
-        wrapper = lambda: "wrapper"  # noqa: E731
 
-        mod = _make_module(self.module_name, app=app, get_orders=original)
+        _make_module(self.module_name, app=app, get_orders=original)
 
-        FunctionWrapper._patch_fastapi_routes(mod, original, wrapper)
+        ok = self.engine.enable_function_level_instrumentation(
+            code=original.__code__,
+            func=original,
+            function_key=f"{self.module_name}.get_orders",
+            module_name=self.module_name,
+            qualified_name="get_orders",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
 
-        self.assertIs(route.endpoint, wrapper)
-        self.assertIs(route.dependant.call, wrapper)
+        # FastAPI's stored references are the SAME function object — engine
+        # mutated its __code__ — so calling through either fires.
+        self.assertIs(route.endpoint, original)
+        self.assertIs(route.dependant.call, original)
+        self.assertEqual(route.endpoint(), "orders")
+        self.assertEqual(len(self.snapshots), 1)
 
     def test_patch_fastapi_routes_name_fallback(self):
-        """When identity doesn't match (e.g. external wrapping), name+module fallback rebinds the route."""
+        """When something has replaced the stored handler with a different-identity
+        callable that calls the underlying function (as functools.wraps does),
+        arming the underlying function still fires when the wrapper invokes it."""
         try:
-            from fastapi import FastAPI
+            from fastapi import FastAPI  # pylint: disable=import-outside-toplevel
         except ImportError:
             self.skipTest("FastAPI not installed")
 
@@ -92,53 +150,84 @@ class TestFastAPIRoutesPatching(unittest.TestCase):
         route = _route_for(app, "/orders")
         original = route.endpoint
 
-        # Simulate something having replaced the stored handler with a different-identity
-        # callable that preserves __name__/__module__ (as functools.wraps does).
+        # Simulate something having replaced the stored handler with a
+        # different-identity wrapper that calls the underlying function.
         def other_same_name():
-            return "other"
+            return original()
 
         other_same_name.__name__ = original.__name__
         other_same_name.__module__ = original.__module__
         route.endpoint = other_same_name
         route.dependant.call = other_same_name
 
-        di_wrapper = lambda: "di_wrapper"  # noqa: E731
+        _make_module(self.module_name, app=app, get_orders=original)
 
-        mod = _make_module(self.module_name, app=app, get_orders=original)
+        ok = self.engine.enable_function_level_instrumentation(
+            code=original.__code__,
+            func=original,
+            function_key=f"{self.module_name}.get_orders",
+            module_name=self.module_name,
+            qualified_name="get_orders",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
 
-        FunctionWrapper._patch_fastapi_routes(mod, original, di_wrapper)
-
-        self.assertIs(route.endpoint, di_wrapper)
-        self.assertIs(route.dependant.call, di_wrapper)
+        # The wrapper still calls the underlying get_orders, whose __code__ is
+        # now mutated. Snapshot fires.
+        self.assertEqual(route.endpoint(), "orders")
+        self.assertEqual(len(self.snapshots), 1)
 
     def test_patch_fastapi_no_fastapi_installed(self):
-        """When FastAPI is not installed, patching is a no-op."""
-        original = lambda: None  # noqa: E731
-        wrapper = lambda: None  # noqa: E731
-        mod = _make_module(self.module_name, some_func=original)
+        """When FastAPI is not installed, the engine arms unaffected — the engine
+        path has no FastAPI dependency at all."""
 
-        with patch.dict(sys.modules, {"fastapi": None}):
-            # Should not raise
-            FunctionWrapper._patch_fastapi_routes(mod, original, wrapper)
+        def some_func():
+            return "ok"
+
+        _make_module(self.module_name, some_func=some_func)
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=some_func.__code__,
+            func=some_func,
+            function_key=f"{self.module_name}.some_func",
+            module_name=self.module_name,
+            qualified_name="some_func",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
+        self.assertEqual(some_func(), "ok")
+        self.assertEqual(len(self.snapshots), 1)
 
     def test_patch_fastapi_no_app_in_module(self):
-        """When module has no FastAPI app instances, patching is a no-op."""
+        """When module has no FastAPI app instance, the engine still arms the
+        function correctly — the engine doesn't scan for FastAPI apps."""
         try:
-            from fastapi import FastAPI  # noqa: F401
+            from fastapi import FastAPI  # noqa: F401  pylint: disable=import-outside-toplevel,unused-import
         except ImportError:
             self.skipTest("FastAPI not installed")
 
-        original = lambda: None  # noqa: E731
-        wrapper = lambda: None  # noqa: E731
-        mod = _make_module(self.module_name, some_func=original, x=42, y="hello")
+        def some_func():
+            return "no fastapi here"
 
-        # Should not raise
-        FunctionWrapper._patch_fastapi_routes(mod, original, wrapper)
+        _make_module(self.module_name, some_func=some_func, x=42, y="hello")
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=some_func.__code__,
+            func=some_func,
+            function_key=f"{self.module_name}.some_func",
+            module_name=self.module_name,
+            qualified_name="some_func",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
+        self.assertEqual(some_func(), "no fastapi here")
+        self.assertEqual(len(self.snapshots), 1)
 
     def test_patch_fastapi_function_not_a_route(self):
-        """When the function is not a route handler, the route table is unchanged."""
+        """Arming a function that is not a route handler leaves the route table
+        un-instrumented — no cross-talk."""
         try:
-            from fastapi import FastAPI
+            from fastapi import FastAPI  # pylint: disable=import-outside-toplevel
         except ImportError:
             self.skipTest("FastAPI not installed")
 
@@ -152,34 +241,38 @@ class TestFastAPIRoutesPatching(unittest.TestCase):
         other_endpoint = route.endpoint
         other_call = route.dependant.call
 
-        original = lambda: None  # noqa: E731
-        original.__name__ = "helper_func"
-        wrapper = lambda: None  # noqa: E731
+        def helper_func():
+            return "helper"
 
-        mod = _make_module(self.module_name, app=app, helper_func=original)
+        _make_module(self.module_name, app=app, helper_func=helper_func)
 
-        FunctionWrapper._patch_fastapi_routes(mod, original, wrapper)
+        ok = self.engine.enable_function_level_instrumentation(
+            code=helper_func.__code__,
+            func=helper_func,
+            function_key=f"{self.module_name}.helper_func",
+            module_name=self.module_name,
+            qualified_name="helper_func",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
 
-        # The unrelated route should be untouched.
+        # The unrelated route should be untouched and fire no snapshot.
         self.assertIs(route.endpoint, other_endpoint)
         self.assertIs(route.dependant.call, other_call)
+        self.assertEqual(route.endpoint(), "other")
+        self.assertEqual(len(self.snapshots), 0)
 
     # ------------------------------------------------------------------
-    # Depends() sub-dependency patching (regression: sub-dependency
-    # breakpoints silently never fired because only the top-level
-    # dependant.call was rebound, never dependant.dependencies[*].call)
+    # Depends() sub-dependency: solver invokes dependant.dependencies[*].call
     # ------------------------------------------------------------------
 
     def test_patch_fastapi_routes_sub_dependency(self):
-        """A function used as a Depends() sub-dependency is rebound on dependant.dependencies[*].call.
-
-        The per-request solver invokes the sub-dependency via
-        route.dependant.dependencies[i].call, not the top-level endpoint, so
-        rebinding only endpoint/dependant.call would leave it pointing at the
-        original (the breakpoint would silently never fire).
-        """
+        """A function used as a Depends() sub-dependency is held in
+        route.dependant.dependencies[i].call. The per-request solver invokes it
+        there, not via the top-level endpoint — and because the engine mutated
+        the same function object's __code__ in place, the snapshot fires."""
         try:
-            from fastapi import Depends, FastAPI
+            from fastapi import Depends, FastAPI  # pylint: disable=import-outside-toplevel
         except ImportError:
             self.skipTest("FastAPI not installed")
 
@@ -194,27 +287,34 @@ class TestFastAPIRoutesPatching(unittest.TestCase):
 
         route = _route_for(app, "/dep")
         sub_calls = [d.call for d in route.dependant.dependencies]
-        # Precondition: the solver currently points at the ORIGINAL sub-dependency.
+        # Precondition: the solver points at the sub-dependency function object.
         self.assertIn(square_dependency, sub_calls)
 
-        wrapper = lambda value=7: value * value  # noqa: E731
-        wrapper.__name__ = square_dependency.__name__
-        wrapper.__module__ = square_dependency.__module__
+        _make_module(self.module_name, app=app, square_dependency=square_dependency)
 
-        mod = _make_module(self.module_name, app=app, square_dependency=square_dependency)
+        ok = self.engine.enable_function_level_instrumentation(
+            code=square_dependency.__code__,
+            func=square_dependency,
+            function_key=f"{self.module_name}.square_dependency",
+            module_name=self.module_name,
+            qualified_name="square_dependency",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
 
-        FunctionWrapper._patch_fastapi_routes(mod, square_dependency, wrapper)
-
-        rebound_calls = [d.call for d in route.dependant.dependencies]
-        self.assertIn(wrapper, rebound_calls)
-        self.assertNotIn(square_dependency, rebound_calls)
+        # The solver still holds the SAME function object — engine mutated its
+        # __code__ — so invoking the sub-dependency fires.
+        sub_dep = next(d.call for d in route.dependant.dependencies if d.call is square_dependency)
+        self.assertEqual(sub_dep(), 49)
+        self.assertEqual(len(self.snapshots), 1)
         # The route's own endpoint (a different function) must not be clobbered.
-        self.assertIsNot(route.endpoint, wrapper)
+        self.assertIsNot(route.endpoint, square_dependency)
 
     def test_patch_fastapi_routes_only_target_sub_dependency_rebound(self):
-        """With two Depends() on a route, only the targeted sub-dependency is rebound."""
+        """With two Depends() on a route, arming one sub-dependency instruments
+        only that one — invoking the other fires no snapshot."""
         try:
-            from fastapi import Depends, FastAPI
+            from fastapi import Depends, FastAPI  # pylint: disable=import-outside-toplevel
         except ImportError:
             self.skipTest("FastAPI not installed")
 
@@ -231,27 +331,43 @@ class TestFastAPIRoutesPatching(unittest.TestCase):
             return {"result": dep + x}
 
         route = _route_for(app, "/nested")
-        wrapper = lambda value=7: value * value  # noqa: E731
-        wrapper.__name__ = square_dependency.__name__
-        wrapper.__module__ = square_dependency.__module__
 
-        mod = _make_module(self.module_name, app=app, square_dependency=square_dependency)
+        _make_module(self.module_name, app=app, square_dependency=square_dependency)
 
-        FunctionWrapper._patch_fastapi_routes(mod, square_dependency, wrapper)
+        ok = self.engine.enable_function_level_instrumentation(
+            code=square_dependency.__code__,
+            func=square_dependency,
+            function_key=f"{self.module_name}.square_dependency",
+            module_name=self.module_name,
+            qualified_name="square_dependency",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
 
-        rebound_calls = [d.call for d in route.dependant.dependencies]
-        self.assertIn(wrapper, rebound_calls)  # target rebound
-        self.assertIn(inner_dep, rebound_calls)  # the other dep left intact
-        self.assertNotIn(square_dependency, rebound_calls)
+        calls = [d.call for d in route.dependant.dependencies]
+        self.assertIn(square_dependency, calls)  # target instrumented
+        self.assertIn(inner_dep, calls)  # the other dep left intact
+
+        # Invoking the target fires; invoking the untouched dep does not.
+        target = next(d.call for d in route.dependant.dependencies if d.call is square_dependency)
+        self.assertEqual(target(), 49)
+        self.assertEqual(len(self.snapshots), 1)
+        self.snapshots.clear()
+
+        other = next(d.call for d in route.dependant.dependencies if d.call is inner_dep)
+        self.assertEqual(other(), 1)
+        self.assertEqual(len(self.snapshots), 0)
 
     # ------------------------------------------------------------------
-    # Integration: _replace_function_in_module with FastAPI patching
+    # Integration: arm a route handler, fire via the route table
     # ------------------------------------------------------------------
 
     def test_replace_function_patches_fastapi_routes(self):
-        """_replace_function_in_module patches FastAPI route references."""
+        """Engine arming a route handler: invoking via FastAPI's route table
+        produces a snapshot. (No setattr/route-table patching required — the
+        __code__ mutation is in-place.)"""
         try:
-            from fastapi import FastAPI
+            from fastapi import FastAPI  # pylint: disable=import-outside-toplevel
         except ImportError:
             self.skipTest("FastAPI not installed")
 
@@ -264,80 +380,69 @@ class TestFastAPIRoutesPatching(unittest.TestCase):
         route = _route_for(app, "/hello")
         original = route.endpoint
 
-        mod = _make_module(self.module_name, app=app, my_route=original)
-        wrapper = lambda: "wrapped"  # noqa: E731
+        _make_module(self.module_name, app=app, my_route=original)
 
-        with patch.object(FunctionWrapper, "_resolve_module", return_value=mod):
-            FunctionWrapper._replace_function_in_module(self.module_name, "my_route", wrapper)
+        ok = self.engine.enable_function_level_instrumentation(
+            code=original.__code__,
+            func=original,
+            function_key=f"{self.module_name}.my_route",
+            module_name=self.module_name,
+            qualified_name="my_route",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
 
-        # Module attribute replaced
-        self.assertIs(mod.my_route, wrapper)
-        # FastAPI route table also patched
-        self.assertIs(route.endpoint, wrapper)
-        self.assertIs(route.dependant.call, wrapper)
+        # FastAPI's stored references are the SAME function object — engine
+        # mutated its __code__ — so calling through the route table fires.
+        self.assertIs(route.endpoint, original)
+        self.assertIs(route.dependant.call, original)
+        self.assertEqual(route.endpoint(), "hello")
+        self.assertEqual(len(self.snapshots), 1)
 
     # ------------------------------------------------------------------
-    # Integration: restore_function with FastAPI patching
+    # Integration: disarm restores the original __code__
     # ------------------------------------------------------------------
 
     def test_restore_function_restores_fastapi_routes(self):
-        """restore_function restores FastAPI route references back to the original."""
+        """Engine disarm restores original __code__: invoking via FastAPI's
+        route table after disable produces NO snapshot."""
         try:
-            from fastapi import FastAPI
+            from fastapi import FastAPI  # pylint: disable=import-outside-toplevel
         except ImportError:
             self.skipTest("FastAPI not installed")
-
-        def original_route():
-            return "original"
-
-        def wrapped_route():
-            return "wrapped"
 
         app = FastAPI()
 
         @app.get("/hello")
         def my_route():
-            return "hello"
+            return "original"
 
         route = _route_for(app, "/hello")
-        # Simulate: DI already wrapped the function and patched the route table.
-        route.endpoint = wrapped_route
-        route.dependant.call = wrapped_route
+        original = route.endpoint
+        original_code = original.__code__
 
-        mod = _make_module(self.module_name, app=app, my_route=wrapped_route)
+        _make_module(self.module_name, app=app, my_route=original)
 
-        with patch.object(FunctionWrapper, "_resolve_module", return_value=mod):
-            result = FunctionWrapper.restore_function(self.module_name, "my_route", original_route)
+        self.engine.enable_function_level_instrumentation(
+            code=original.__code__,
+            func=original,
+            function_key=f"{self.module_name}.my_route",
+            module_name=self.module_name,
+            qualified_name="my_route",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
 
-        self.assertTrue(result)
-        self.assertIs(mod.my_route, original_route)
-        # FastAPI route table restored
-        self.assertIs(route.endpoint, original_route)
-        self.assertIs(route.dependant.call, original_route)
+        # Sanity: armed call fires.
+        route.endpoint()
+        self.assertEqual(len(self.snapshots), 1)
+        self.snapshots.clear()
 
-    # ------------------------------------------------------------------
-    # _patch_framework_references (dispatcher)
-    # ------------------------------------------------------------------
+        self.engine.disable_function_level_instrumentation(code=original_code, func=original)
 
-    def test_patch_framework_references_calls_fastapi_patching(self):
-        """_patch_framework_references delegates to _patch_fastapi_routes."""
-        original = lambda: None  # noqa: E731
-        wrapper = lambda: None  # noqa: E731
-        mod = _make_module(self.module_name)
-
-        with patch.object(FunctionWrapper, "_patch_fastapi_routes") as mock_fastapi:
-            FunctionWrapper._patch_framework_references(mod, original, wrapper)
-            mock_fastapi.assert_called_once_with(mod, original, wrapper)
-
-    def test_patch_framework_references_swallows_fastapi_exceptions(self):
-        """_patch_framework_references never raises even if FastAPI patching fails."""
-        original = lambda: None  # noqa: E731
-        wrapper = lambda: None  # noqa: E731
-        mod = _make_module(self.module_name)
-
-        with patch.object(FunctionWrapper, "_patch_fastapi_routes", side_effect=RuntimeError("boom")):
-            # Should not raise
-            FunctionWrapper._patch_framework_references(mod, original, wrapper)
+        # __code__ restored; calling via the route table emits no new snapshot.
+        self.assertIs(original.__code__, original_code)
+        self.assertEqual(route.endpoint(), "original")
+        self.assertEqual(len(self.snapshots), 0)
 
 
 if __name__ == "__main__":

@@ -2,18 +2,24 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Tests for Flask view_functions patching in _function_wrapper.py.
+Tests that the function-level instrumentation engine fires for Flask route
+handlers without requiring view_functions patching.
 
-Validates that _replace_function_in_module and restore_function correctly
-patch Flask's internal view_functions dict when instrumenting route handlers.
+Flask's @app.route() decorator stores a direct reference to the route
+function in app.view_functions at import time. The setattr-wrapper approach
+required us to patch that dict because replacing the module-level name does
+not update Flask's internal references. The bytecode-injection / sys.monitoring
+engines mutate the function's __code__ in place, so any reference Flask is
+holding (or any other framework) sees the rewritten code on the next call —
+no view_functions patch needed.
 """
 
 import sys
 import types
 import unittest
-from unittest.mock import patch
 
-from amazon.opentelemetry.distro.debugger._function_wrapper import FunctionWrapper
+from amazon.opentelemetry.distro.debugger._data_models import CaptureConfig
+from amazon.opentelemetry.distro.debugger._function_wrapper import set_snapshot_emitter
 
 
 def _make_module(name, **attrs):
@@ -29,123 +35,224 @@ def _remove_module(name):
     sys.modules.pop(name, None)
 
 
+def _make_engine():
+    """Pick the engine the running Python supports.
+
+    3.12+ → SysMonitoringEngine. 3.10-3.11 → BytecodeInjectionEngine.
+    """
+    if sys.version_info >= (3, 12):
+        # pylint: disable=import-outside-toplevel
+        from amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine import (
+            SysMonitoringEngine,
+        )
+
+        engine = SysMonitoringEngine()
+    else:
+        # pylint: disable=import-outside-toplevel
+        from amazon.opentelemetry.distro.debugger.instrumentation_engine._bytecode_injection_engine import (
+            BytecodeInjectionEngine,
+        )
+
+        engine = BytecodeInjectionEngine()
+    engine.initialize()
+    return engine
+
+
 class TestFlaskViewFunctionsPatching(unittest.TestCase):
-    """Tests for _patch_flask_view_functions and its integration."""
+    """Exercises the engine against Flask app.view_functions to prove no
+    framework-references patching is required: mutating __code__ in place
+    flows through any reference Flask holds in its internal dict."""
 
     def setUp(self):
         self.module_name = "_test_flask_module"
         _remove_module(self.module_name)
+        self.snapshots = []
+
+        class _FakeEmitter:
+            def emit_snapshot(_self, snap):  # noqa: N805
+                self.snapshots.append(snap)
+
+        set_snapshot_emitter(_FakeEmitter())
+        self.engine = _make_engine()
 
     def tearDown(self):
+        try:
+            self.engine.cleanup()
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
         _remove_module(self.module_name)
 
     # ------------------------------------------------------------------
     # _patch_flask_view_functions
     # ------------------------------------------------------------------
 
-    @patch("amazon.opentelemetry.distro.debugger._function_wrapper.FunctionWrapper._resolve_module")
-    def test_patch_flask_view_functions_identity_match(self, mock_resolve):
-        """When view_func is original_func, identity-based patching works."""
+    def test_patch_flask_view_functions_identity_match(self):
+        """When view_func is the same identity as the armed function, the engine's
+        __code__ mutation flows through — no view_functions patch needed."""
         try:
-            from flask import Flask
+            from flask import Flask  # pylint: disable=import-outside-toplevel
         except ImportError:
             self.skipTest("Flask not installed")
 
-        original = lambda: "original"  # noqa: E731
-        wrapper = lambda: "wrapper"  # noqa: E731
-        original.__name__ = "my_view"
+        def my_view():
+            return "original"
 
         flask_app = Flask(__name__)
-        flask_app.view_functions["my_view"] = original
+        flask_app.view_functions["my_view"] = my_view
 
-        mod = _make_module(self.module_name, app=flask_app, my_view=original)
-        mock_resolve.return_value = mod
+        mod = _make_module(self.module_name, app=flask_app, my_view=my_view)
+        del mod  # silence linter; module exists in sys.modules
 
-        FunctionWrapper._patch_flask_view_functions(mod, original, wrapper)
+        ok = self.engine.enable_function_level_instrumentation(
+            code=my_view.__code__,
+            func=my_view,
+            function_key=f"{self.module_name}.my_view",
+            module_name=self.module_name,
+            qualified_name="my_view",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
 
-        self.assertIs(flask_app.view_functions["my_view"], wrapper)
+        # Calling through view_functions (Flask's internal reference) still
+        # fires the engine — same function object, mutated __code__.
+        result = flask_app.view_functions["my_view"]()
+        self.assertEqual(result, "original")
+        self.assertEqual(len(self.snapshots), 1)
 
-    @patch("amazon.opentelemetry.distro.debugger._function_wrapper.FunctionWrapper._resolve_module")
-    def test_patch_flask_view_functions_name_fallback(self, mock_resolve):
-        """When identity doesn't match (e.g. OTel wrapping), name-based fallback works."""
+    def test_patch_flask_view_functions_name_fallback(self):
+        """When Flask holds an OTel-wrapped view (different identity from the
+        underlying function), arming the underlying function still produces a
+        snapshot when the wrapper invokes it — because the wrapper calls the
+        same function object whose __code__ we mutated."""
         try:
-            from flask import Flask
+            from flask import Flask  # pylint: disable=import-outside-toplevel
         except ImportError:
             self.skipTest("Flask not installed")
 
-        original = lambda: "original"  # noqa: E731
-        otel_wrapped = lambda: "otel_wrapped"  # noqa: E731
-        di_wrapper = lambda: "di_wrapper"  # noqa: E731
-        original.__name__ = "get_order"
+        def get_order():
+            return "original"
+
+        # Simulate OTel's auto-instrumentation wrapping the view.
+        def otel_wrapped():
+            return get_order()
+
         otel_wrapped.__name__ = "get_order"
 
         flask_app = Flask(__name__)
-        # Flask stores the OTel-wrapped version (different identity from original)
         flask_app.view_functions["get_order"] = otel_wrapped
 
-        mod = _make_module(self.module_name, app=flask_app, get_order=original)
-        mock_resolve.return_value = mod
+        mod = _make_module(self.module_name, app=flask_app, get_order=get_order)
+        del mod
 
-        FunctionWrapper._patch_flask_view_functions(mod, original, di_wrapper)
+        ok = self.engine.enable_function_level_instrumentation(
+            code=get_order.__code__,
+            func=get_order,
+            function_key=f"{self.module_name}.get_order",
+            module_name=self.module_name,
+            qualified_name="get_order",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
 
-        self.assertIs(flask_app.view_functions["get_order"], di_wrapper)
+        # OTel wrapper still calls the underlying get_order, whose __code__
+        # is now mutated. Snapshot fires.
+        result = flask_app.view_functions["get_order"]()
+        self.assertEqual(result, "original")
+        self.assertEqual(len(self.snapshots), 1)
 
     def test_patch_flask_no_flask_installed(self):
-        """When Flask is not installed, patching is a no-op."""
-        original = lambda: None  # noqa: E731
-        wrapper = lambda: None  # noqa: E731
-        mod = _make_module(self.module_name, some_func=original)
+        """When Flask is not installed, the engine arms unaffected — engine
+        path has no Flask dependency at all."""
 
-        with patch.dict(sys.modules, {"flask": None}):
-            # Should not raise
-            FunctionWrapper._patch_flask_view_functions(mod, original, wrapper)
+        def some_func():
+            return "ok"
+
+        mod = _make_module(self.module_name, some_func=some_func)
+        del mod
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=some_func.__code__,
+            func=some_func,
+            function_key=f"{self.module_name}.some_func",
+            module_name=self.module_name,
+            qualified_name="some_func",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
+        self.assertEqual(some_func(), "ok")
+        self.assertEqual(len(self.snapshots), 1)
 
     def test_patch_flask_no_flask_app_in_module(self):
-        """When module has no Flask app instances, patching is a no-op."""
+        """When module has no Flask app instance, the engine still arms the
+        function correctly — engine doesn't scan for Flask apps."""
         try:
-            from flask import Flask  # noqa: F401
+            from flask import Flask  # noqa: F401  pylint: disable=import-outside-toplevel,unused-import
         except ImportError:
             self.skipTest("Flask not installed")
 
-        original = lambda: None  # noqa: E731
-        wrapper = lambda: None  # noqa: E731
-        mod = _make_module(self.module_name, some_func=original, x=42, y="hello")
+        def some_func():
+            return "no flask here"
 
-        # Should not raise
-        FunctionWrapper._patch_flask_view_functions(mod, original, wrapper)
+        mod = _make_module(self.module_name, some_func=some_func, x=42, y="hello")
+        del mod
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=some_func.__code__,
+            func=some_func,
+            function_key=f"{self.module_name}.some_func",
+            module_name=self.module_name,
+            qualified_name="some_func",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
+        self.assertEqual(some_func(), "no flask here")
+        self.assertEqual(len(self.snapshots), 1)
 
     def test_patch_flask_function_not_in_view_functions(self):
-        """When function is not a route handler, view_functions is unchanged."""
+        """Arming function A leaves a different function B in view_functions
+        un-instrumented — no cross-talk."""
         try:
-            from flask import Flask
+            from flask import Flask  # pylint: disable=import-outside-toplevel
         except ImportError:
             self.skipTest("Flask not installed")
 
-        original = lambda: None  # noqa: E731
-        wrapper = lambda: None  # noqa: E731
-        original.__name__ = "helper_func"
+        def helper_func():
+            return "helper"
 
-        other_view = lambda: "other"  # noqa: E731
-        other_view.__name__ = "other_view"
+        def other_view():
+            return "other"
 
         flask_app = Flask(__name__)
         flask_app.view_functions["other_view"] = other_view
 
-        mod = _make_module(self.module_name, app=flask_app, helper_func=original)
+        mod = _make_module(self.module_name, app=flask_app, helper_func=helper_func)
+        del mod
 
-        FunctionWrapper._patch_flask_view_functions(mod, original, wrapper)
+        ok = self.engine.enable_function_level_instrumentation(
+            code=helper_func.__code__,
+            func=helper_func,
+            function_key=f"{self.module_name}.helper_func",
+            module_name=self.module_name,
+            qualified_name="helper_func",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
 
-        # other_view should be unchanged
+        # other_view should NOT be instrumented.
         self.assertIs(flask_app.view_functions["other_view"], other_view)
+        self.assertEqual(flask_app.view_functions["other_view"](), "other")
+        self.assertEqual(len(self.snapshots), 0)
 
     # ------------------------------------------------------------------
-    # Integration: _replace_function_in_module with Flask patching
+    # Integration: enable_function_level_instrumentation flows through Flask
     # ------------------------------------------------------------------
 
     def test_replace_function_patches_flask_view_functions(self):
-        """_replace_function_in_module patches Flask view_functions."""
+        """Engine arming a route handler: invoking via Flask's view_functions
+        produces a snapshot. (No setattr/view_functions patching required —
+        the __code__ mutation is in-place.)"""
         try:
-            from flask import Flask
+            from flask import Flask  # pylint: disable=import-outside-toplevel
         except ImportError:
             self.skipTest("Flask not installed")
 
@@ -156,71 +263,66 @@ class TestFlaskViewFunctionsPatching(unittest.TestCase):
         flask_app.view_functions["my_route"] = my_route
 
         mod = _make_module(self.module_name, app=flask_app, my_route=my_route)
+        del mod
 
-        wrapper = lambda: "wrapped"  # noqa: E731
+        ok = self.engine.enable_function_level_instrumentation(
+            code=my_route.__code__,
+            func=my_route,
+            function_key=f"{self.module_name}.my_route",
+            module_name=self.module_name,
+            qualified_name="my_route",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
 
-        with patch.object(FunctionWrapper, "_resolve_module", return_value=mod):
-            FunctionWrapper._replace_function_in_module(self.module_name, "my_route", wrapper)
-
-        # Module attribute replaced
-        self.assertIs(mod.my_route, wrapper)
-        # Flask view_functions also patched
-        self.assertIs(flask_app.view_functions["my_route"], wrapper)
+        # Flask's stored reference is the SAME function object — engine
+        # mutated its __code__ — so calling through view_functions fires.
+        self.assertEqual(flask_app.view_functions["my_route"](), "hello")
+        self.assertEqual(len(self.snapshots), 1)
 
     # ------------------------------------------------------------------
-    # Integration: restore_function with Flask patching
+    # Integration: disable_function_level_instrumentation
     # ------------------------------------------------------------------
 
     def test_restore_function_restores_flask_view_functions(self):
-        """restore_function restores Flask view_functions back to original."""
+        """Engine disarm restores original __code__: invoking via Flask's
+        view_functions after disable produces NO snapshot."""
         try:
-            from flask import Flask
+            from flask import Flask  # pylint: disable=import-outside-toplevel
         except ImportError:
             self.skipTest("Flask not installed")
 
-        def original_route():
+        def my_route():
             return "original"
 
-        def wrapped_route():
-            return "wrapped"
-
         flask_app = Flask(__name__)
-        # Simulate: DI already wrapped the function and patched view_functions
-        flask_app.view_functions["my_route"] = wrapped_route
+        flask_app.view_functions["my_route"] = my_route
 
-        mod = _make_module(self.module_name, app=flask_app, my_route=wrapped_route)
+        mod = _make_module(self.module_name, app=flask_app, my_route=my_route)
+        del mod
 
-        with patch.object(FunctionWrapper, "_resolve_module", return_value=mod):
-            result = FunctionWrapper.restore_function(self.module_name, "my_route", original_route)
+        original_code = my_route.__code__
 
-        self.assertTrue(result)
-        self.assertIs(mod.my_route, original_route)
-        # Flask view_functions restored
-        self.assertIs(flask_app.view_functions["my_route"], original_route)
+        self.engine.enable_function_level_instrumentation(
+            code=my_route.__code__,
+            func=my_route,
+            function_key=f"{self.module_name}.my_route",
+            module_name=self.module_name,
+            qualified_name="my_route",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
 
-    # ------------------------------------------------------------------
-    # _patch_framework_references (dispatcher)
-    # ------------------------------------------------------------------
+        # Sanity: armed call fires.
+        flask_app.view_functions["my_route"]()
+        self.assertEqual(len(self.snapshots), 1)
+        self.snapshots.clear()
 
-    def test_patch_framework_references_calls_flask_patching(self):
-        """_patch_framework_references delegates to _patch_flask_view_functions."""
-        original = lambda: None  # noqa: E731
-        wrapper = lambda: None  # noqa: E731
-        mod = _make_module(self.module_name)
+        self.engine.disable_function_level_instrumentation(code=original_code, func=my_route)
 
-        with patch.object(FunctionWrapper, "_patch_flask_view_functions") as mock_flask:
-            FunctionWrapper._patch_framework_references(mod, original, wrapper)
-            mock_flask.assert_called_once_with(mod, original, wrapper)
-
-    def test_patch_framework_references_swallows_exceptions(self):
-        """_patch_framework_references never raises."""
-        original = lambda: None  # noqa: E731
-        wrapper = lambda: None  # noqa: E731
-        mod = _make_module(self.module_name)
-
-        with patch.object(FunctionWrapper, "_patch_flask_view_functions", side_effect=RuntimeError("boom")):
-            # Should not raise
-            FunctionWrapper._patch_framework_references(mod, original, wrapper)
+        # __code__ restored; calling via view_functions emits no new snapshot.
+        self.assertIs(my_route.__code__, original_code)
+        self.assertEqual(flask_app.view_functions["my_route"](), "original")
+        self.assertEqual(len(self.snapshots), 0)
 
 
 if __name__ == "__main__":

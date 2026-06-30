@@ -4,9 +4,10 @@
 """URL configuration for the DI contract test Django app.
 
 The `path()` calls below capture direct references to view functions defined
-in the sibling `api.views` module. After DI replaces those functions on
-`api.views` via setattr, the URLPattern.callback cache here still points to
-the originals — which is exactly the bug `_patch_django_url_patterns` fixes.
+in the sibling `api.views` module. The instrumentation engine mutates each
+target function's `__code__` in place, so the URLPattern.callback references
+captured here fire the instrumentation on the next call with no framework
+patching — even though they are distinct bindings from `api.views`.
 """
 from api.views import (
     error_endpoint,

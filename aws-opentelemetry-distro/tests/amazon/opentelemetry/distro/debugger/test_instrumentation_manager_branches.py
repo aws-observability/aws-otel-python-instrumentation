@@ -56,13 +56,7 @@ def _bp_set(config):
 
 
 class TestBuildResourceException(unittest.TestCase):
-    """Covers _build_resource's broad except branch (lines 94-95)."""
-
-    def test_resource_import_failure_returns_none(self):
-        # Force the Resource import to raise -> the except branch returns None.
-        with mock.patch.dict("sys.modules", {"opentelemetry.sdk.resources": None}):
-            result = InstrumentationManager._build_resource("svc", "prod")
-        self.assertIsNone(result)
+    """Covers _build_resource's broad except branch."""
 
     def test_resource_create_failure_returns_none(self):
         with mock.patch("opentelemetry.sdk.resources.Resource.create", side_effect=RuntimeError("boom")):
