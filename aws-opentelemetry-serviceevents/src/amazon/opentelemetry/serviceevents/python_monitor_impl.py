@@ -44,7 +44,7 @@ _call_counters_lock = threading.Lock()
 # entry on EVERY instrumented function exit (not just sampled ones), which would otherwise pay a
 # ContextVar lookup on the hot path even when no incident investigation is in flight (the common
 # case). This counter lets record_call_path_entry skip that lookup when nothing is investigating —
-# mirroring the JS distro's _investigationActiveCount and the Java bridge's investigationActiveCount.
+# mirroring the JS SDK's _investigationActiveCount and the Java bridge's investigationActiveCount.
 # Reads on the hot path are lock-free (a plain int load is atomic under CPython); the infrequent
 # begin/clear writes take the lock to avoid lost updates. The counter is global (shared across
 # threads/contexts) while the investigation data itself is a per-context ContextVar, exactly like

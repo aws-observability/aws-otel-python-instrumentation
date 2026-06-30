@@ -494,15 +494,15 @@ class ServiceEventsSourceLoader(SourceFileLoader):
 
 
 # SDK self-exclusion (SDK_SELF_EXCLUDE) — the non-configurable safety boundary.
-# These prefixes cover the entire ADOT distro and OpenTelemetry itself; a customer
-# cannot opt them back in via PACKAGES_INCLUDE. Instrumenting them would cause import
-# cycles (the distro's own modules) or infinite recursion in the tracing pipeline
-# (every signal emit re-enters instrumentation). Matched by module `fullname`
-# (exact-or-dotted-prefix), so it catches OTel/distro modules even when installed in
+# These prefixes cover the entire amazon.opentelemetry namespace and OpenTelemetry
+# itself; a customer cannot opt them back in via PACKAGES_INCLUDE. Instrumenting them
+# would cause import cycles (our own modules) or infinite recursion in the tracing
+# pipeline (every signal emit re-enters instrumentation). Matched by module `fullname`
+# (exact-or-dotted-prefix), so it catches these modules even when installed in
 # site-packages — making a path-based gate unnecessary.
 #
-#   - "amazon.opentelemetry" — the entire ADOT distro (it installs under the single
-#     `amazon` src root, so every distro submodule is caught by this one prefix).
+#   - "amazon.opentelemetry" — the entire amazon.opentelemetry namespace (every
+#     submodule installs under the single `amazon` src root, so this one prefix catches all).
 #   - "opentelemetry" — OTel API/SDK + contrib, and the lambda-layer's vendored
 #     `opentelemetry/` tree (caught regardless of install path).
 SDK_SELF_EXCLUDE: List[str] = [
@@ -582,7 +582,7 @@ class ServiceEventsMetaPathFinder(importlib.abc.MetaPathFinder):
         # Rule 1: empty include → instrument nothing (no need to resolve anything).
         if not self.packages_include:
             return False
-        # Rule 0: SDK self-exclusion — never instrument the distro/OTel.
+        # Rule 0: SDK self-exclusion — never instrument the amazon.opentelemetry/OTel SDK.
         for prefix in SDK_SELF_EXCLUDE:
             if fullname == prefix or fullname.startswith(f"{prefix}."):
                 return False

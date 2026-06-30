@@ -481,7 +481,7 @@ class TestScopePrecedence(TestCase):
         """
         finder = self._finder(packages_include=["*.*"])
         self.assertFalse(finder.should_instrument_module("opentelemetry.sdk.trace", self._spec()))
-        self.assertFalse(finder.should_instrument_module("amazon.opentelemetry.distro.foo", self._spec()))
+        self.assertFalse(finder.should_instrument_module("amazon.opentelemetry.serviceevents.foo", self._spec()))
 
     # --- INCLUDE coverage gaps ---
 
@@ -802,7 +802,7 @@ class TestNameCouldMatch(TestCase):
         """Rule 0: SDK self-exclusion drops candidates by name alone."""
         finder = self._finder(packages_include=["*.*"])
         self.assertFalse(finder._name_could_match("opentelemetry.sdk.trace"))
-        self.assertFalse(finder._name_could_match("amazon.opentelemetry.distro.foo"))
+        self.assertFalse(finder._name_could_match("amazon.opentelemetry.serviceevents.foo"))
 
     def test_include_match_returns_true(self):
         """Rule 3 (name part): a matching include pattern makes it a candidate."""

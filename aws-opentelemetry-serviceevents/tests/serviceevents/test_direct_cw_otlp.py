@@ -22,8 +22,6 @@ class TestBuildLogOtlpExporter(TestCase):
             {"x-aws-log-group": "g", "x-aws-log-stream": "s"},
             Compression.NoCompression,
         )
-        # OTLPAwsLogRecordExporter subclasses OTLPLogExporter, so use `type is`
-        # rather than `isinstance` to distinguish the plain upstream class.
         self.assertIs(type(exp), OTLPLogExporter)
 
     def test_arbitrary_https_endpoint_returns_plain_exporter(self):

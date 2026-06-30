@@ -5,9 +5,9 @@ OTEL_AWS_APPLICATION_SIGNALS_ENABLED = "OTEL_AWS_APPLICATION_SIGNALS_ENABLED"
 """
 .. envvar:: OTEL_AWS_APPLICATION_SIGNALS_ENABLED
 
-Enables AWS Application Signals. When enabled, the distro will generate
-Application Signals metrics from spans and propagate attributes for
-service/dependency metric correlation.
+Enables AWS Application Signals. When enabled, Application Signals metrics are
+generated from spans and attributes are propagated for service/dependency
+metric correlation.
 Default: "false"
 """
 
