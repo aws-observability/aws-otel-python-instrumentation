@@ -260,12 +260,24 @@ class OpenTelemetryEventHandler:
                 if getattr(llm, "stop", None):
                     attributes[GEN_AI_REQUEST_STOP_SEQUENCES] = llm.stop
 
+        task_prompt = getattr(event, "task_prompt", None)
+        if task_prompt:
+            attributes[GEN_AI_INPUT_MESSAGES] = serialize_to_json_string(
+                [{"role": "user", "parts": content_to_parts(task_prompt)}]
+            )
+
         self._start_span(span_name, event.event_id, attributes, event.parent_event_id)
 
     def _on_agent_completed(
         self, source: "BaseAgent", event: "AgentExecutionCompletedEvent"  # pylint: disable=unused-argument
     ) -> None:
-        self._end_span(event.started_event_id)
+        attrs: Dict[str, Any] = {}
+        output = getattr(event, "output", None)
+        if output:
+            attrs[GEN_AI_OUTPUT_MESSAGES] = serialize_to_json_string(
+                [{"role": "assistant", "parts": content_to_parts(output), "finish_reason": "stop"}]
+            )
+        self._end_span(event.started_event_id, attrs)
 
     def _on_agent_failed(
         self, source: "BaseAgent", event: "AgentExecutionErrorEvent"
