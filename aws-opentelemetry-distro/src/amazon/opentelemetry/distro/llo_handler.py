@@ -180,6 +180,18 @@ LLO_PATTERNS: Dict[str, PatternConfig] = {
         "role": ROLE_SYSTEM,
         "source": "prompt",
     },
+    # OTel GenAI tool call content (execute_tool spans)
+    # Reference: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/
+    "gen_ai.tool.call.arguments": {
+        "type": PatternType.DIRECT,
+        "role": ROLE_TOOL,
+        "source": "input",
+    },
+    "gen_ai.tool.call.result": {
+        "type": PatternType.DIRECT,
+        "role": ROLE_TOOL,
+        "source": "output",
+    },
 }
 
 
