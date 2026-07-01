@@ -288,6 +288,17 @@ jobs:
       caller-workflow-name: 'main-build'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
+  service-events-eks:
+    if: ${{ always() }}
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@main
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      test-cluster-name: 'e2e-python-adot-test'
+      adot-image-name: ${{ inputs.adot-image-name }}
+      caller-workflow-name: 'main-build'
+      python-version: '3.10'
+
   # This validation is to ensure that all test workflows relevant to this repo are actually
   # being used in this repo, which is referring to all the other jobs in this file.
   #
