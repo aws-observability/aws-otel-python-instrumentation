@@ -3,7 +3,7 @@
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from amazon.opentelemetry.distro._aws_attribute_keys import AWS_TRACE_FLAG_SAMPLED
+from amazon.opentelemetry.application_signals.internal.semconv.aws_attributes import AWS_TRACE_FLAG_SAMPLED
 from amazon.opentelemetry.distro.aws_batch_unsampled_span_processor import BatchUnsampledSpanProcessor
 from opentelemetry.trace import TraceFlags
 

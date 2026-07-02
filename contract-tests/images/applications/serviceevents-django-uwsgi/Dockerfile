@@ -1,12 +1,12 @@
 ARG PYTHON_VERSION=3.10
 FROM python:${PYTHON_VERSION}
 WORKDIR /serviceevents-django-uwsgi
-COPY ./dist/$DISTRO /serviceevents-django-uwsgi
+COPY ./dist/aws_opentelemetry_*.whl /serviceevents-django-uwsgi/
 COPY ./contract-tests/images/applications/serviceevents-django-uwsgi /serviceevents-django-uwsgi
 
 ENV PIP_ROOT_USER_ACTION=ignore
 ARG DISTRO
-RUN pip install --upgrade pip && pip install -r requirements.txt && pip install ${DISTRO} --force-reinstall
+RUN pip install --upgrade pip && pip install -r requirements.txt && pip install ${DISTRO} --find-links . --force-reinstall
 RUN opentelemetry-bootstrap -a install
 
 CMD ["opentelemetry-instrument", "uwsgi", \

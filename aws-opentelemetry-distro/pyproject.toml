@@ -26,6 +26,8 @@ classifiers = [
 ]
 
 dependencies = [
+  "aws-opentelemetry-application-signals == 0.18.0.dev0",
+  "aws-opentelemetry-serviceevents == 0.18.0.dev0",
   "opentelemetry-api == 1.42.1",
   "opentelemetry-sdk == 1.42.1",
   "opentelemetry-exporter-otlp-proto-grpc == 1.42.1",

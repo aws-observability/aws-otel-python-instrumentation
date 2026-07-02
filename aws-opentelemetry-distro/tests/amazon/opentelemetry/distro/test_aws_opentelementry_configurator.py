@@ -10,19 +10,24 @@ from unittest.mock import MagicMock, patch
 
 from requests import Session
 
-from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE, AWS_SERVICE_TYPE
-from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
-from amazon.opentelemetry.distro.attribute_propagating_span_processor import AttributePropagatingSpanProcessor
+from amazon.opentelemetry.application_signals import ApplicationSignalsExporterProvider
+from amazon.opentelemetry.application_signals.internal.semconv.aws_attributes import AWS_LOCAL_SERVICE, AWS_SERVICE_TYPE
+from amazon.opentelemetry.application_signals.processor.attribute_propagating_span_processor import (
+    AttributePropagatingSpanProcessor,
+)
+from amazon.opentelemetry.application_signals.processor.aws_metric_attributes_span_processor import (
+    AwsMetricAttributesSpanProcessor,
+)
+from amazon.opentelemetry.application_signals.processor.aws_span_metrics_processor import AwsSpanMetricsProcessor
+from amazon.opentelemetry.application_signals.sampler.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.aws_batch_unsampled_span_processor import BatchUnsampledSpanProcessor
 from amazon.opentelemetry.distro.aws_lambda_span_processor import AwsLambdaSpanProcessor
-from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter import AwsMetricAttributesSpanExporter
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     LAMBDA_SPAN_EXPORT_BATCH_SIZE,
     OTEL_AWS_ENHANCED_CODE_ATTRIBUTES,
     OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
     OTEL_EXPORTER_OTLP_LOGS_HEADERS,
     OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
-    ApplicationSignalsExporterProvider,
     AwsOpenTelemetryConfigurator,
     OtlpLogHeaderSetting,
     _check_emf_exporter_enabled,
@@ -41,17 +46,14 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _export_unsampled_span_for_lambda,
     _fetch_logs_header,
     _init_logging,
-    _init_serviceevents,
     _is_application_signals_enabled,
     _is_application_signals_runtime_enabled,
     _is_defer_to_workers_enabled,
-    _is_serviceevents_enabled,
     _is_wsgi_master_process,
     _parse_config_string,
     is_enhanced_code_attributes,
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_distro import AwsOpenTelemetryDistro
-from amazon.opentelemetry.distro.aws_span_metrics_processor import AwsSpanMetricsProcessor
 from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import (
     CompactConsoleLogRecordExporter,
 )
@@ -334,115 +336,6 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", None)
         self.assertFalse(_is_application_signals_enabled())
 
-    def test_is_serviceevents_enabled_follows_app_signals_when_unset(self):
-        # Unset OTEL_AWS_SERVICE_EVENTS_ENABLED → follow OTEL_AWS_APPLICATION_SIGNALS_ENABLED
-        with patch.dict(
-            os.environ,
-            {"OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "true"},
-            clear=True,
-        ):
-            self.assertTrue(_is_serviceevents_enabled())
-
-        with patch.dict(
-            os.environ,
-            {"OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "false"},
-            clear=True,
-        ):
-            self.assertFalse(_is_serviceevents_enabled())
-
-        with patch.dict(os.environ, {}, clear=True):
-            self.assertFalse(_is_serviceevents_enabled())
-
-    def test_is_serviceevents_enabled_explicit_override(self):
-        # Explicit true forces ServiceEvents on even when App Signals is off
-        with patch.dict(
-            os.environ,
-            {
-                "OTEL_AWS_SERVICE_EVENTS_ENABLED": "true",
-                "OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "false",
-            },
-            clear=True,
-        ):
-            self.assertTrue(_is_serviceevents_enabled())
-
-        # Explicit false forces ServiceEvents off even when App Signals is on
-        with patch.dict(
-            os.environ,
-            {
-                "OTEL_AWS_SERVICE_EVENTS_ENABLED": "false",
-                "OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "true",
-            },
-            clear=True,
-        ):
-            self.assertFalse(_is_serviceevents_enabled())
-
-    def test_is_serviceevents_enabled_disabled_on_lambda(self):
-        # Lambda always disables ServiceEvents, regardless of the other flags
-        with patch.dict(
-            os.environ,
-            {
-                "AWS_LAMBDA_FUNCTION_NAME": "my-fn",
-                "OTEL_AWS_SERVICE_EVENTS_ENABLED": "true",
-                "OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "true",
-            },
-            clear=True,
-        ):
-            self.assertFalse(_is_serviceevents_enabled())
-
-    @patch("amazon.opentelemetry.distro.serviceevents.get_serviceevents_instrumentation")
-    def test_init_serviceevents_backfills_endpoints_when_app_signals_enabled(self, mock_get_inst):
-        mock_get_inst.return_value = None  # short-circuit after the policy check
-
-        with patch.dict(
-            os.environ,
-            {
-                "OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "true",
-                "OTEL_AWS_OTLP_LOGS_ENDPOINT": "",
-                "OTEL_AWS_OTLP_METRICS_ENDPOINT": "",
-            },
-            clear=True,
-        ):
-            _init_serviceevents()
-
-        config = mock_get_inst.call_args[0][0]
-        self.assertEqual(config.logs_endpoint, "http://localhost:4316/v1/logs")
-        self.assertEqual(config.metrics_endpoint, "http://localhost:4316/v1/metrics")
-
-    @patch("amazon.opentelemetry.distro.serviceevents.get_serviceevents_instrumentation")
-    def test_init_serviceevents_refuses_force_enabled_without_endpoints(self, mock_get_inst):
-        # Force-enabled ServiceEvents with App Signals off and no endpoints → skip init
-        with patch.dict(
-            os.environ,
-            {
-                "OTEL_AWS_SERVICE_EVENTS_ENABLED": "true",
-                "OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "false",
-            },
-            clear=True,
-        ):
-            _init_serviceevents()
-
-        mock_get_inst.assert_not_called()
-
-    @patch("amazon.opentelemetry.distro.serviceevents.get_serviceevents_instrumentation")
-    def test_init_serviceevents_honors_explicit_endpoints_when_force_enabled(self, mock_get_inst):
-        mock_get_inst.return_value = None
-
-        with patch.dict(
-            os.environ,
-            {
-                "OTEL_AWS_SERVICE_EVENTS_ENABLED": "true",
-                "OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "false",
-                "OTEL_AWS_OTLP_LOGS_ENDPOINT": "http://custom:9999/v1/logs",
-                "OTEL_AWS_OTLP_METRICS_ENDPOINT": "http://custom:9999/v1/metrics",
-            },
-            clear=True,
-        ):
-            _init_serviceevents()
-
-        config = mock_get_inst.call_args[0][0]
-        self.assertEqual(config.logs_endpoint, "http://custom:9999/v1/logs")
-        self.assertEqual(config.metrics_endpoint, "http://custom:9999/v1/metrics")
-
     def test_customize_sampler(self):
         mock_sampler: Sampler = MagicMock()
         customized_sampler: Sampler = _customize_sampler(mock_sampler)
@@ -543,24 +436,22 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
     def test_customize_span_exporter(self):
         mock_exporter: SpanExporter = MagicMock(spec=OTLPSpanExporter)
-        customized_exporter: SpanExporter = _customize_span_exporter(mock_exporter, Resource.get_empty())
+        customized_exporter: SpanExporter = _customize_span_exporter(mock_exporter)
         self.assertEqual(mock_exporter, customized_exporter)
 
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", "False")
-        customized_exporter = _customize_span_exporter(mock_exporter, Resource.get_empty())
-        self.assertNotEqual(mock_exporter, customized_exporter)
-        self.assertIsInstance(customized_exporter, AwsMetricAttributesSpanExporter)
-        self.assertEqual(mock_exporter, customized_exporter._delegate)
+        customized_exporter = _customize_span_exporter(mock_exporter)
+        self.assertEqual(mock_exporter, customized_exporter)
 
-        # when Application Signals is enabled and running in lambda
+        # when Application Signals is enabled and running in lambda the OTLP http exporter is swapped
+        # for an OTLPUdpSpanExporter, which is then returned unchanged (no exporter wrapping).
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", "False")
         os.environ.setdefault("AWS_LAMBDA_FUNCTION_NAME", "myLambdaFunc")
-        customized_exporter = _customize_span_exporter(mock_exporter, Resource.get_empty())
+        customized_exporter = _customize_span_exporter(mock_exporter)
         self.assertNotEqual(mock_exporter, customized_exporter)
-        self.assertIsInstance(customized_exporter, AwsMetricAttributesSpanExporter)
-        self.assertIsInstance(customized_exporter._delegate, OTLPUdpSpanExporter)
+        self.assertIsInstance(customized_exporter, OTLPUdpSpanExporter)
         os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
 
     def test_customize_span_exporter_with_agent_observability(self):
@@ -574,7 +465,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
             return_value=mock_logger_provider,
         ):
             mock_exporter = MagicMock(spec=OTLPSpanExporter)
-            result = _customize_span_exporter(mock_exporter, Resource.get_empty())
+            result = _customize_span_exporter(mock_exporter)
 
             self.assertIsInstance(result, OTLPAwsSpanExporter)
             self.assertEqual(result._logger_provider, mock_logger_provider)
@@ -583,7 +474,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ["AGENT_OBSERVABILITY_ENABLED"] = "false"
 
         mock_exporter = MagicMock(spec=OTLPSpanExporter)
-        result = _customize_span_exporter(mock_exporter, Resource.get_empty())
+        result = _customize_span_exporter(mock_exporter)
 
         self.assertIsInstance(result, OTLPAwsSpanExporter)
         self.assertIsNone(result._logger_provider)
@@ -771,7 +662,6 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
                 OTLPAwsSpanExporter,
                 AwsAuthSession,
                 Compression.NoCompression,
-                Resource.get_empty(),
             )
 
         for config in bad_configs:
@@ -783,12 +673,9 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
                 OTLPSpanExporter,
                 Session,
                 Compression.NoCompression,
-                Resource.get_empty(),
             )
 
-        self.assertIsInstance(
-            _customize_span_exporter(OTLPGrpcSpanExporter(), Resource.get_empty()), OTLPGrpcSpanExporter
-        )
+        self.assertIsInstance(_customize_span_exporter(OTLPGrpcSpanExporter()), OTLPGrpcSpanExporter)
 
     def test_customize_logs_exporter_sigv4(self):
         logs_good_endpoints = [
@@ -1003,27 +890,30 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", "False")
         _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
-        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 3)
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 4)
         first_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
         self.assertIsInstance(first_processor, BaggageSpanProcessor)
         second_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[1].args[0]
         self.assertIsInstance(second_processor, AttributePropagatingSpanProcessor)
         third_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[2].args[0]
-        self.assertIsInstance(third_processor, AwsSpanMetricsProcessor)
+        self.assertIsInstance(third_processor, AwsMetricAttributesSpanProcessor)
+        fourth_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[3].args[0]
+        self.assertIsInstance(fourth_processor, AwsSpanMetricsProcessor)
 
         mock_tracer_provider.reset_mock()
 
         os.environ.setdefault("AGENT_OBSERVABILITY_ENABLED", "true")
         os.environ.setdefault("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "https://xray.us-east-1.amazonaws.com/v1/traces")
         _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
-        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 5)
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 6)
 
         processors = [call.args[0] for call in mock_tracer_provider.add_span_processor.call_args_list]
         self.assertIsInstance(processors[0], BatchUnsampledSpanProcessor)
         self.assertIsInstance(processors[1], GenAiNestedClientSpanProcessor)
         self.assertIsInstance(processors[2], BaggageSpanProcessor)
         self.assertIsInstance(processors[3], AttributePropagatingSpanProcessor)
-        self.assertIsInstance(processors[4], AwsSpanMetricsProcessor)
+        self.assertIsInstance(processors[4], AwsMetricAttributesSpanProcessor)
+        self.assertIsInstance(processors[5], AwsSpanMetricsProcessor)
 
         os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
 
@@ -1074,13 +964,14 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
             _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
 
-            self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 4)
+            self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 5)
 
             processors = [c.args[0] for c in mock_tracer_provider.add_span_processor.call_args_list]
             self.assertEqual(processors[0], mock_code_processor_instance)
             self.assertIsInstance(processors[1], BaggageSpanProcessor)
             self.assertIsInstance(processors[2], AttributePropagatingSpanProcessor)
-            self.assertIsInstance(processors[3], AwsSpanMetricsProcessor)
+            self.assertIsInstance(processors[3], AwsMetricAttributesSpanProcessor)
+            self.assertIsInstance(processors[4], AwsSpanMetricsProcessor)
 
         # Clean up
         os.environ.pop(OTEL_AWS_ENHANCED_CODE_ATTRIBUTES, None)
@@ -1104,7 +995,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.setdefault("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", "True")
         os.environ.setdefault("AWS_LAMBDA_FUNCTION_NAME", "myLambdaFunc")
         _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
-        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 4)
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 5)
         first_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
         self.assertIsInstance(first_processor, AwsLambdaSpanProcessor)
         second_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[1].args[0]
@@ -1112,8 +1003,10 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         third_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[2].args[0]
         self.assertIsInstance(third_processor, AttributePropagatingSpanProcessor)
         fourth_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[3].args[0]
-        self.assertIsInstance(fourth_processor, BatchUnsampledSpanProcessor)
-        self.assertEqual(fourth_processor._batch_processor._max_export_batch_size, LAMBDA_SPAN_EXPORT_BATCH_SIZE)
+        self.assertIsInstance(fourth_processor, AwsMetricAttributesSpanProcessor)
+        fifth_processor: SpanProcessor = mock_tracer_provider.add_span_processor.call_args_list[4].args[0]
+        self.assertIsInstance(fifth_processor, BatchUnsampledSpanProcessor)
+        self.assertEqual(fifth_processor._batch_processor._max_export_batch_size, LAMBDA_SPAN_EXPORT_BATCH_SIZE)
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
         os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
 

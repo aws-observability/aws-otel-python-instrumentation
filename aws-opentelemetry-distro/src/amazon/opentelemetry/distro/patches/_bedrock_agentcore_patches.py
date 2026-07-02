@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from typing import Any, Dict
 
-from amazon.opentelemetry.distro._aws_attribute_keys import (
+from amazon.opentelemetry.application_signals.internal.semconv.aws_attributes import (
     AWS_AUTH_CREDENTIAL_PROVIDER,
     AWS_BEDROCK_AGENTCORE_BROWSER_ARN,
     AWS_BEDROCK_AGENTCORE_CODE_INTERPRETER_ARN,
@@ -13,7 +13,7 @@ from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_BEDROCK_AGENTCORE_WORKLOAD_IDENTITY_ARN,
     AWS_GATEWAY_TARGET_ID,
 )
-from amazon.opentelemetry.distro.semconv._incubating.attributes.gen_ai_attributes import (
+from amazon.opentelemetry.application_signals.internal.semconv.gen_ai_attributes import (
     GEN_AI_BROWSER_ID,
     GEN_AI_CODE_INTERPRETER_ID,
     GEN_AI_GATEWAY_ID,

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from mock_clock import MockClock
 
-from amazon.opentelemetry.distro._aws_attribute_keys import (
+from amazon.opentelemetry.application_signals.internal.semconv.aws_attributes import (
     AWS_LOCAL_OPERATION,
     AWS_XRAY_ADAPTIVE_SAMPLING_CONFIGURED_ATTRIBUTE_KEY,
     AWS_XRAY_SAMPLING_RULE,

@@ -8,8 +8,8 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 from cachetools import TTLCache
 
-from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_OPERATION
-from amazon.opentelemetry.distro._aws_span_processing_util import _generate_ingress_operation
+from amazon.opentelemetry.application_signals.internal.semconv.aws_attributes import AWS_LOCAL_OPERATION
+from amazon.opentelemetry.application_signals.internal.aws_span_processing_util import _generate_ingress_operation
 from amazon.opentelemetry.distro.sampler._aws_sampling_result import _AwsSamplingResult
 from amazon.opentelemetry.distro.sampler._aws_xray_adaptive_sampling_config import (
     _AnomalyConditions,

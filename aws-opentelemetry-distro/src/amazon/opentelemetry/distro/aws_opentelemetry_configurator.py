@@ -10,24 +10,22 @@ import re
 from importlib.metadata import version
 from logging import Logger, getLogger
 from pathlib import Path
-from typing import ClassVar, Dict, List, NamedTuple, Optional, Type, Union
+from typing import Dict, List, NamedTuple, Optional, Type, Union
 
 import yaml
 from typing_extensions import override
 
-from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE, AWS_SERVICE_TYPE
-from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
-from amazon.opentelemetry.distro._utils import get_aws_session, is_agent_observability_enabled
-from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
-from amazon.opentelemetry.distro.attribute_propagating_span_processor_builder import (
-    AttributePropagatingSpanProcessorBuilder,
+from amazon.opentelemetry.application_signals import (
+    ApplicationSignalsExporterProvider,
+    configure_application_signals,
+    create_always_record_sampler,
+    get_metric_export_interval,
 )
+from amazon.opentelemetry.application_signals.internal.aws_resource_attribute_configurator import get_service_attribute
+from amazon.opentelemetry.application_signals.internal.semconv.aws_attributes import AWS_LOCAL_SERVICE, AWS_SERVICE_TYPE
+from amazon.opentelemetry.distro._utils import get_aws_session, is_agent_observability_enabled
 from amazon.opentelemetry.distro.aws_batch_unsampled_span_processor import BatchUnsampledSpanProcessor
 from amazon.opentelemetry.distro.aws_lambda_span_processor import AwsLambdaSpanProcessor
-from amazon.opentelemetry.distro.aws_metric_attributes_span_exporter_builder import (
-    AwsMetricAttributesSpanExporterBuilder,
-)
-from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSpanMetricsProcessorBuilder
 from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import (
     CompactConsoleLogRecordExporter,
 )
@@ -45,7 +43,6 @@ from amazon.opentelemetry.distro.scope_based_filtering_view import ScopeBasedRet
 from opentelemetry._events import set_event_logger_provider
 from opentelemetry._logs import get_logger_provider, set_logger_provider
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
-from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.metrics import set_meter_provider
 from opentelemetry.processor.baggage import BaggageSpanProcessor
@@ -65,24 +62,13 @@ from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogRe
 from opentelemetry.sdk.environment_variables import (
     _OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED,
     OTEL_EXPORTER_OTLP_ENDPOINT,
-    OTEL_EXPORTER_OTLP_METRICS_PROTOCOL,
-    OTEL_EXPORTER_OTLP_PROTOCOL,
     OTEL_TRACES_SAMPLER_ARG,
 )
 from opentelemetry.sdk.extension.aws.resource.ec2 import AwsEc2ResourceDetector
 from opentelemetry.sdk.extension.aws.resource.ecs import AwsEcsResourceDetector
 from opentelemetry.sdk.extension.aws.resource.eks import AwsEksResourceDetector
 from opentelemetry.sdk.metrics import MeterProvider
-from opentelemetry.sdk.metrics._internal.instrument import (
-    Counter,
-    Histogram,
-    ObservableCounter,
-    ObservableGauge,
-    ObservableUpDownCounter,
-    UpDownCounter,
-)
 from opentelemetry.sdk.metrics.export import (
-    AggregationTemporality,
     MetricExporter,
     MetricReader,
     PeriodicExportingMetricReader,
@@ -227,78 +213,6 @@ def _initialize_components():
     if logging_enabled.strip().lower() == "true":
         _init_logging(log_exporters, resource)
 
-    # Initialize ServiceEvents instrumentation
-    _init_serviceevents(resource)
-
-
-def _init_serviceevents(resource=None):
-    """Initialize ServiceEvents instrumentation if enabled.
-
-    Args:
-        resource: OTel Resource object from AWS detectors (EC2/ECS/EKS).
-                  Used to extract platform attributes for serviceevents telemetry.
-    """
-    try:
-        if not _is_serviceevents_enabled():
-            return
-
-        # Lazy imports: defer the serviceevents package (and its optional deps) until enabled,
-        # and avoid an import cycle with this configurator module.
-        # pylint: disable=import-outside-toplevel
-        from amazon.opentelemetry.distro.serviceevents import ServiceEventsConfig, get_serviceevents_instrumentation
-        from amazon.opentelemetry.distro.serviceevents.models.resource_attributes import (
-            ResourceAttributes as ServiceEventsResourceAttributes,
-        )
-
-        # Extract resource attributes from OTel Resource
-        resource_attributes = (
-            ServiceEventsResourceAttributes.from_otel_resource(resource)
-            if resource
-            else ServiceEventsResourceAttributes()
-        )
-
-        # Build configuration from environment variables with resource attributes.
-        # `config.enabled` mirrors OTEL_AWS_SERVICE_EVENTS_ENABLED directly; the outer
-        # bundling gate above has already decided ServiceEvents should run, so flip
-        # the inner flag on regardless of whether the env var was set.
-        config = ServiceEventsConfig.from_env(resource_attributes=resource_attributes)
-        config.enabled = True
-
-        # Endpoint policy:
-        # - App Signals enabled: empty/null endpoints default to the 4316 App Signals receiver.
-        # - App Signals disabled + ServiceEvents force-enabled: endpoints are required; refuse to init.
-        as_enabled = _is_application_signals_enabled()
-        if not (config.logs_endpoint or "").strip() or not (config.metrics_endpoint or "").strip():
-            if as_enabled:
-                if not (config.logs_endpoint or "").strip():
-                    config.logs_endpoint = "http://localhost:4316/v1/logs"
-                if not (config.metrics_endpoint or "").strip():
-                    config.metrics_endpoint = "http://localhost:4316/v1/metrics"
-            else:
-                _logger.error(
-                    "ServiceEvents force-enabled (OTEL_AWS_SERVICE_EVENTS_ENABLED=true) without "
-                    "Application Signals, but OTEL_AWS_OTLP_LOGS_ENDPOINT / "
-                    "OTEL_AWS_OTLP_METRICS_ENDPOINT are unset or empty. Both are "
-                    "required in this mode. Skipping ServiceEvents initialization."
-                )
-                return
-
-        # Get or create singleton instrumentation instance
-        # If already initialized (e.g., by manual init), this will return existing instance
-        instrumentation = get_serviceevents_instrumentation(config)
-        if instrumentation is None:
-            _logger.warning("Failed to get ServiceEvents instrumentation instance")
-            return
-
-        # Initialize if not already initialized
-        instrumentation.initialize()
-
-        _logger.info("ServiceEvents instrumentation initialized")
-
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-        # Don't fail the whole instrumentation if ServiceEvents fails
-        _logger.error("Failed to initialize ServiceEvents: %s", exc, exc_info=True)
-
 
 def _init_logging(
     exporters: dict[str, Type[LogRecordExporter]],
@@ -347,7 +261,7 @@ def _init_tracing(
     for _, exporter_class in exporters.items():
         exporter_args: Dict[str, any] = {}
         span_exporter: SpanExporter = exporter_class(**exporter_args)
-        span_exporter = _customize_span_exporter(span_exporter, resource, original_sampler)
+        span_exporter = _customize_span_exporter(span_exporter, original_sampler)
         trace_provider.add_span_processor(
             BatchSpanProcessor(span_exporter=span_exporter, max_export_batch_size=_span_export_batch_size())
         )
@@ -390,9 +304,7 @@ def _export_unsampled_span_for_lambda(trace_provider: TracerProvider, resource: 
 
     traces_endpoint = os.environ.get(AWS_XRAY_DAEMON_ADDRESS_CONFIG, "127.0.0.1:2000")
 
-    span_exporter = AwsMetricAttributesSpanExporterBuilder(
-        OTLPUdpSpanExporter(endpoint=traces_endpoint, sampled=False), resource
-    ).build()
+    span_exporter = OTLPUdpSpanExporter(endpoint=traces_endpoint, sampled=False)
 
     trace_provider.add_span_processor(
         BatchUnsampledSpanProcessor(span_exporter=span_exporter, max_export_batch_size=LAMBDA_SPAN_EXPORT_BATCH_SIZE)
@@ -512,12 +424,10 @@ def _customize_sampler(sampler: Sampler) -> Sampler:
         if parsed_config is not None:
             sampler.set_adaptive_sampling_config(parsed_config)
 
-    if not _is_application_signals_enabled():
-        return sampler
-    return AlwaysRecordSampler(sampler)
+    return create_always_record_sampler(sampler)
 
 
-def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource, sampler: Sampler = None) -> SpanExporter:
+def _customize_span_exporter(span_exporter: SpanExporter, sampler: Sampler = None) -> SpanExporter:
     traces_endpoint = os.environ.get(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)
     if _is_lambda_environment():
         # Override OTLP http default endpoint to UDP
@@ -540,7 +450,6 @@ def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource, sa
     if not _is_application_signals_enabled():
         return span_exporter
 
-    span_exporter = AwsMetricAttributesSpanExporterBuilder(span_exporter, resource).build()
     if sampler is not None and isinstance(sampler, AwsXRayRemoteSampler):
         sampler.set_span_exporter(span_exporter)
     return span_exporter
@@ -616,27 +525,11 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource, sam
 
     provider.add_span_processor(BaggageSpanProcessor(lambda key: key in baggage_keys))
 
-    if not _is_application_signals_enabled():
-        return
-
-    # Construct and set local and remote attributes span processor
-    provider.add_span_processor(AttributePropagatingSpanProcessorBuilder().build())
+    configured = configure_application_signals(provider, resource, sampler)
 
     # Export 100% spans and not export Application-Signals metrics if on Lambda.
-    if _is_lambda_environment():
+    if configured and _is_lambda_environment():
         _export_unsampled_span_for_lambda(provider, resource)
-        return
-
-    # Construct meterProvider
-    _logger.info("AWS Application Signals enabled")
-    otel_metric_exporter = ApplicationSignalsExporterProvider().create_exporter()
-
-    periodic_exporting_metric_reader = PeriodicExportingMetricReader(
-        exporter=otel_metric_exporter, export_interval_millis=_get_metric_export_interval()
-    )
-    meter_provider: MeterProvider = MeterProvider(resource=resource, metric_readers=[periodic_exporting_metric_reader])
-    # Construct and set application signals metrics processor
-    provider.add_span_processor(AwsSpanMetricsProcessorBuilder(meter_provider, resource).set_sampler(sampler).build())
 
     return
 
@@ -650,7 +543,7 @@ def _customize_metric_exporters(
         application_signals_metric_exporter = ApplicationSignalsExporterProvider().create_exporter()
         scope_based_periodic_exporting_metric_reader = ScopeBasedPeriodicExportingMetricReader(
             exporter=application_signals_metric_exporter,
-            export_interval_millis=_get_metric_export_interval(),
+            export_interval_millis=get_metric_export_interval(),
             registered_scope_names={SYSTEM_METRICS_INSTRUMENTATION_SCOPE_NAME},
         )
         metric_readers.append(scope_based_periodic_exporting_metric_reader)
@@ -752,18 +645,6 @@ def _is_application_signals_enabled():
     )
 
 
-def _is_serviceevents_enabled():
-    # ServiceEvents is bundled with Application Signals: on by default when App Signals is on,
-    # off by default when it isn't, and always off on Lambda regardless. An explicit
-    # OTEL_AWS_SERVICE_EVENTS_ENABLED value (true/false) overrides the bundling.
-    if _is_lambda_environment():
-        return False
-    explicit = os.environ.get("OTEL_AWS_SERVICE_EVENTS_ENABLED")
-    if explicit is not None and explicit.strip() != "":
-        return explicit.strip().lower() == "true"
-    return _is_application_signals_enabled()
-
-
 def _is_application_signals_runtime_enabled():
     return _is_application_signals_enabled() and (
         os.environ.get(APPLICATION_SIGNALS_RUNTIME_ENABLED_CONFIG, "true").lower() == "true"
@@ -859,74 +740,8 @@ def _clear_logs_header_cache():
     _otlp_log_header_setting_cache = None
 
 
-def _get_metric_export_interval():
-    export_interval_millis = float(os.environ.get(METRIC_EXPORT_INTERVAL_CONFIG, DEFAULT_METRIC_EXPORT_INTERVAL))
-    _logger.debug("Span Metrics export interval: %s", export_interval_millis)
-    # Cap export interval to 60 seconds. This is currently required for metrics-trace correlation to work correctly.
-    if export_interval_millis > DEFAULT_METRIC_EXPORT_INTERVAL:
-        export_interval_millis = DEFAULT_METRIC_EXPORT_INTERVAL
-        _logger.info("AWS Application Signals metrics export interval capped to %s", export_interval_millis)
-    return export_interval_millis
-
-
 def _span_export_batch_size():
     return LAMBDA_SPAN_EXPORT_BATCH_SIZE if _is_lambda_environment() else None
-
-
-class ApplicationSignalsExporterProvider:
-    _instance: ClassVar["ApplicationSignalsExporterProvider"] = None
-
-    def __new__(cls, *args, **kwargs):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
-    # pylint: disable=no-self-use
-    def create_exporter(self):
-        protocol = os.environ.get(
-            OTEL_EXPORTER_OTLP_METRICS_PROTOCOL, os.environ.get(OTEL_EXPORTER_OTLP_PROTOCOL, "http/protobuf")
-        )
-        _logger.debug("AWS Application Signals export protocol: %s", protocol)
-
-        temporality_dict: Dict[type, AggregationTemporality] = {}
-        for typ in [
-            Counter,
-            UpDownCounter,
-            ObservableCounter,
-            ObservableCounter,
-            ObservableUpDownCounter,
-            ObservableGauge,
-            Histogram,
-        ]:
-            temporality_dict[typ] = AggregationTemporality.DELTA
-
-        if protocol == "http/protobuf":
-            application_signals_endpoint = os.environ.get(
-                APPLICATION_SIGNALS_EXPORTER_ENDPOINT_CONFIG,
-                os.environ.get(DEPRECATED_APP_SIGNALS_EXPORTER_ENDPOINT_CONFIG, "http://localhost:4316/v1/metrics"),
-            )
-            _logger.debug("AWS Application Signals export endpoint: %s", application_signals_endpoint)
-            return OTLPHttpOTLPMetricExporter(
-                endpoint=application_signals_endpoint, preferred_temporality=temporality_dict
-            )
-        if protocol == "grpc":
-            # pylint: disable=import-outside-toplevel
-            # Delay import to only occur if gRPC specifically requested. Vended Docker image will not have gRPC bundled,
-            # so importing it at the class level can cause runtime failures.
-            from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
-                OTLPMetricExporter as OTLPGrpcOTLPMetricExporter,
-            )
-
-            application_signals_endpoint = os.environ.get(
-                APPLICATION_SIGNALS_EXPORTER_ENDPOINT_CONFIG,
-                os.environ.get(DEPRECATED_APP_SIGNALS_EXPORTER_ENDPOINT_CONFIG, "localhost:4315"),
-            )
-            _logger.debug("AWS Application Signals export endpoint: %s", application_signals_endpoint)
-            return OTLPGrpcOTLPMetricExporter(
-                endpoint=application_signals_endpoint, preferred_temporality=temporality_dict
-            )
-
-        raise RuntimeError(f"Unsupported AWS Application Signals export protocol: {protocol} ")
 
 
 def _check_emf_exporter_enabled() -> bool:

@@ -3,7 +3,7 @@
 import logging
 from typing import Optional
 
-from amazon.opentelemetry.distro._aws_attribute_keys import AWS_TRACE_FLAG_SAMPLED
+from amazon.opentelemetry.application_signals.internal.semconv.aws_attributes import AWS_TRACE_FLAG_SAMPLED
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import ReadableSpan, Span
 from opentelemetry.sdk.trace.export import BatchSpanProcessor as BaseBatchSpanProcessor
