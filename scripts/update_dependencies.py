@@ -62,6 +62,7 @@ CONTRIB_DEPS = [
     "opentelemetry-instrumentation-sqlite3",
     "opentelemetry-instrumentation-starlette",
     "opentelemetry-instrumentation-system-metrics",
+    "opentelemetry-instrumentation-threading",
     "opentelemetry-instrumentation-tornado",
     "opentelemetry-instrumentation-tortoiseorm",
     "opentelemetry-instrumentation-urllib",
@@ -70,10 +71,11 @@ CONTRIB_DEPS = [
     "opentelemetry-instrumentation-cassandra",
 ]
 
-# AWS-specific packages with independent versioning
-AWS_DEPS = [
+# Packages with independent versioning (not tied to opentelemetry-python or contrib)
+INDEPENDENT_DEPS = [
     "opentelemetry-sdk-extension-aws",
     "opentelemetry-propagator-aws-xray",
+    "opentelemetry-instrumentation-openai-agents-v2",
 ]
 
 
@@ -104,7 +106,7 @@ def _replace_tox_repo_branches(content, otel_python_version, otel_contrib_versio
     return content, bool(count)
 
 
-def update_file_dependencies(file_path, otel_python_version, otel_contrib_version, aws_versions):
+def update_file_dependencies(file_path, otel_python_version, otel_contrib_version, independent_versions):
     """Update all Otel dependencies in a given file"""
     try:
         with open(file_path, "r", encoding="utf-8") as input_file:
@@ -118,7 +120,7 @@ def update_file_dependencies(file_path, otel_python_version, otel_contrib_versio
         content, changed = _replace_dep_versions(content, CONTRIB_DEPS, otel_contrib_version)
         updated = updated or changed
 
-        for dep, version in aws_versions.items():
+        for dep, version in independent_versions.items():
             if version:
                 content, changed = _replace_dep_versions(content, [dep], version)
                 updated = updated or changed
@@ -142,18 +144,20 @@ def main():
     otel_contrib_version = os.environ.get("OTEL_CONTRIB_VERSION")
     aws_sdk_ext_version = os.environ.get("OPENTELEMETRY_SDK_EXTENSION_AWS_VERSION")
     aws_xray_prop_version = os.environ.get("OPENTELEMETRY_PROPAGATOR_AWS_XRAY_VERSION")
+    openai_agents_v2_version = os.environ.get("OPENTELEMETRY_INSTRUMENTATION_OPENAI_AGENTS_V2_VERSION")
 
     if not otel_python_version or not otel_contrib_version:
         print("Error: OTEL_PYTHON_VERSION and OTEL_CONTRIB_VERSION environment variables required")
         sys.exit(1)
 
-    if not aws_sdk_ext_version or not aws_xray_prop_version:
-        print("Error: AWS dependency versions required")
+    if not aws_sdk_ext_version or not aws_xray_prop_version or not openai_agents_v2_version:
+        print("Error: independent dependency versions required")
         sys.exit(1)
 
-    aws_versions = {
+    independent_versions = {
         "opentelemetry-sdk-extension-aws": aws_sdk_ext_version,
         "opentelemetry-propagator-aws-xray": aws_xray_prop_version,
+        "opentelemetry-instrumentation-openai-agents-v2": openai_agents_v2_version,
     }
 
     # All files to update
@@ -168,7 +172,7 @@ def main():
 
     any_updated = False
     for file_path in files_to_update:
-        if update_file_dependencies(file_path, otel_python_version, otel_contrib_version, aws_versions):
+        if update_file_dependencies(file_path, otel_python_version, otel_contrib_version, independent_versions):
             any_updated = True
 
     if any_updated:
