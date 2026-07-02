@@ -10,6 +10,7 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     OPERATION_INVOKE_WORKFLOW,
     PROVIDER_MAP,
     DictWithLock,
+    content_to_parts,
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
 )
@@ -337,7 +338,7 @@ class OpenTelemetryEventHandler:
             system_instructions = [m for m in messages if m.get("role") == "system"]
             non_system_messages = [m for m in messages if m.get("role") != "system"]
             if system_instructions:
-                parts = [{"type": "text", "content": m.get("content", "")} for m in system_instructions]
+                parts = [p for m in system_instructions for p in content_to_parts(m.get("content", ""))]
                 attributes[GEN_AI_SYSTEM_INSTRUCTIONS] = serialize_to_json_string(parts)
             if non_system_messages:
                 attributes[GEN_AI_INPUT_MESSAGES] = serialize_to_json_string(
@@ -455,7 +456,7 @@ class OpenTelemetryEventHandler:
         parts = []
         content = msg.get("content")
         if content:
-            parts.append({"type": "text", "content": content})
+            parts.extend(content_to_parts(content))
         tool_calls = msg.get("tool_calls")
         if tool_calls:
             parts.extend(OpenTelemetryEventHandler._to_tool_call_parts(tool_calls))
@@ -468,7 +469,7 @@ class OpenTelemetryEventHandler:
         parts = []
         content = msg.get("content")
         if content:
-            parts.append({"type": "text", "content": content})
+            parts.extend(content_to_parts(content))
         tool_calls = msg.get("tool_calls")
         if tool_calls:
             parts.extend(OpenTelemetryEventHandler._to_tool_call_parts(tool_calls))

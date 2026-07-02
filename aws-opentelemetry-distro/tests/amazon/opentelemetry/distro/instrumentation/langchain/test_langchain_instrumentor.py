@@ -655,6 +655,94 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(output[0]["parts"][0]["type"], "text")
         self.assertIn("Final Answer: Done.", output[0]["parts"][0]["content"])
 
+    def test_multimodal_input_and_output_messages(self):
+        from langchain_anthropic import ChatAnthropic
+        from langchain_aws import ChatBedrock, ChatBedrockConverse
+        from langchain_cohere import ChatCohere
+        from langchain_deepseek import ChatDeepSeek
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        from langchain_groq import ChatGroq
+        from langchain_mistralai import ChatMistralAI
+        from langchain_openai import AzureChatOpenAI, ChatOpenAI
+        from langchain_xai import ChatXAI
+
+        models = [
+            (ChatBedrock, {"model_id": "test", "region_name": "us-east-1"}),
+            (ChatBedrockConverse, {"model": "test", "region_name": "us-east-1"}),
+            (ChatOpenAI, {"api_key": "fake"}),
+            (
+                AzureChatOpenAI,
+                {"api_key": "fake", "azure_endpoint": "https://fake.openai.azure.com", "api_version": "2024-01-01"},
+            ),
+            (ChatAnthropic, {"anthropic_api_key": "fake", "model_name": "claude-3"}),
+            (ChatGoogleGenerativeAI, {"google_api_key": "fake", "model": "gemini-pro"}),
+            (ChatMistralAI, {"api_key": "fake", "model": "test"}),
+            (ChatGroq, {"api_key": "fake", "model": "test"}),
+            (ChatCohere, {"cohere_api_key": "fake", "model": "test"}),
+            (ChatDeepSeek, {"api_key": "fake", "model": "test"}),
+            (ChatXAI, {"api_key": "fake", "model": "test"}),
+        ]
+
+        input_content = [
+            {"type": "text", "text": "describe"},
+            {"type": "image_url", "image_url": {"url": "https://example.com/cat.png"}},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+        ]
+        expected_input_parts = [
+            {"type": "text", "content": "describe"},
+            {"type": "uri", "modality": "image", "uri": "https://example.com/cat.png"},
+            {"type": "blob", "modality": "image", "mime_type": "image/png", "content": "AAAA"},
+        ]
+
+        output_content = [
+            {"type": "text", "text": "The answer is blue."},
+            {"type": "thinking", "thinking": "Let me reason about this."},
+            {"type": "image_url", "image_url": {"url": "https://example.com/cat.png"}},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+        ]
+        expected_output_parts = [
+            {"type": "text", "content": "The answer is blue."},
+            {"type": "reasoning", "content": "Let me reason about this."},
+            {"type": "uri", "modality": "image", "uri": "https://example.com/cat.png"},
+            {"type": "blob", "modality": "image", "mime_type": "image/png", "content": "AAAA"},
+        ]
+
+        fake_result = ChatResult(
+            generations=[
+                ChatGeneration(message=AIMessage(content=output_content), generation_info={"finish_reason": "stop"})
+            ],
+            llm_output={"model_name": "test", "token_usage": {"prompt_tokens": 1, "completion_tokens": 1}},
+        )
+
+        for model_cls, init_kwargs in models:
+            with self.subTest(model=model_cls.__name__):
+                self.span_exporter.clear()
+                llm = model_cls(**init_kwargs)
+                with patch.object(type(llm), "_generate", return_value=fake_result):
+                    llm.invoke([HumanMessage(content=input_content)])
+
+                chat_spans = [
+                    s
+                    for s in self.span_exporter.get_finished_spans()
+                    if "chat" in s.name or "text_completion" in s.name
+                ]
+                self.assertGreaterEqual(len(chat_spans), 1, f"No chat span for {model_cls.__name__}")
+                attrs = chat_spans[0].attributes
+
+                input_messages = json.loads(attrs[GEN_AI_INPUT_MESSAGES])
+                validate_otel_genai_schema(input_messages, "gen-ai-input-messages")
+                self.assertEqual(input_messages[0]["parts"], expected_input_parts)
+
+                output_messages = json.loads(attrs[GEN_AI_OUTPUT_MESSAGES])
+                validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
+                self.assertEqual(output_messages[0]["parts"], expected_output_parts)
+
+                for parts in (input_messages[0]["parts"], output_messages[0]["parts"]):
+                    for part in parts:
+                        value = part.get("content", "")
+                        if isinstance(value, str):
+                            self.assertFalse(value.lstrip().startswith("[{") and "'type'" in value)
+
     def test_system_instructions_schema_validation(self):
         llm = self.FakeChatModel(messages=iter([AIMessage(content="Hi!")]))
         llm.invoke([SystemMessage(content="You are a helpful assistant."), HumanMessage(content="Hello")])

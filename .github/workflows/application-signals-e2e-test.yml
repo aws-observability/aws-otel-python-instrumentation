@@ -109,6 +109,21 @@ jobs:
       cpu-architecture: 'x86_64'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
+  adot-di:
+    needs: [ upload-main-build ]
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [ '3.10', '3.11', '3.12', '3.13', '3.14' ]
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-adot-di-test.yml@main
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      caller-workflow-name: 'main-build'
+      python-version: ${{ matrix.python-version }}
+      cpu-architecture: 'x86_64'
+      staging-wheel-name: ${{ inputs.staging-wheel-name }}
+
   #
   # DOCKER DISTRIBUTION LANGUAGE VERSION COVERAGE
   # DEFAULT SETTING: {Python Version}, EKS, AMD64, AL2
@@ -264,6 +279,30 @@ jobs:
     with:
       caller-workflow-name: 'main-build'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
+
+  service-events-ec2:
+    needs: [ upload-main-build ]
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-ec2-service-events-test.yml@main
+    secrets: inherit
+    with:
+      caller-workflow-name: 'main-build'
+      staging-wheel-name: ${{ inputs.staging-wheel-name }}
+
+  service-events-eks:
+    if: ${{ always() }}
+    # Chain onto the tail of the eks-py* jobs: they all target e2e-python-adot-test and the
+    # sample-app Service binds cluster-wide NodePort 30100, which this SE test also uses. Running
+    # in parallel would collide on that port ("provided port is already allocated"), so serialize
+    # after the last eks-py* job, matching how eks-py311..314 chain via needs.
+    needs: eks-py314-amd64
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@main
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      test-cluster-name: 'e2e-python-adot-test'
+      adot-image-name: ${{ inputs.adot-image-name }}
+      caller-workflow-name: 'main-build'
+      python-version: '3.10'
 
   # This validation is to ensure that all test workflows relevant to this repo are actually
   # being used in this repo, which is referring to all the other jobs in this file.
