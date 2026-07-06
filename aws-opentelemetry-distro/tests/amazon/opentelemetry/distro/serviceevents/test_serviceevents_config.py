@@ -59,6 +59,32 @@ class TestServiceEventsConfig(TestCase):
         self.assertEqual(config.service_name, "test-service")
         self.assertEqual(config.incident_snapshot_max_per_minute, 10)
 
+    # ─── Incident-snapshot flush interval is derived from max_same_error ──
+    # flush = max(10s, 60s / N). Batch dedup keeps one snapshot per error per flush cycle and
+    # period dedup allows N per 60s window, so the 60s window must be sliced into >= N cycles to
+    # emit all N; the largest such cycle (60s / N) is the widest Point #2 upgrade window.
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_incident_flush_interval_default_is_60s(self):
+        """Default max_same_error=1 → flush = 60s / 1 = 60s (maximizes the single-snapshot window)."""
+        config = ServiceEventsConfig.from_env()
+        self.assertEqual(config.incident_snapshot_max_same_error, 1)
+        self.assertEqual(config.incident_snapshot_flush_interval, 60000)
+
+    @patch.dict(os.environ, {"OTEL_AWS_SERVICE_EVENTS_INCIDENT_SNAPSHOT_MAX_SAME_ERROR": "3"})
+    def test_incident_flush_interval_derived_from_max_same_error(self):
+        """max_same_error=3 → flush = 60s / 3 = 20s, so all 3 snapshots fit the 60s window."""
+        config = ServiceEventsConfig.from_env()
+        self.assertEqual(config.incident_snapshot_max_same_error, 3)
+        self.assertEqual(config.incident_snapshot_flush_interval, 20000)
+
+    @patch.dict(os.environ, {"OTEL_AWS_SERVICE_EVENTS_INCIDENT_SNAPSHOT_MAX_SAME_ERROR": "10"})
+    def test_incident_flush_interval_floored_at_10s(self):
+        """max_same_error=10 → 60s / 10 = 6s, floored at 10s (effective per-error rate caps at 6/min)."""
+        config = ServiceEventsConfig.from_env()
+        self.assertEqual(config.incident_snapshot_max_same_error, 10)
+        self.assertEqual(config.incident_snapshot_flush_interval, 10000)
+
     @patch.dict(
         os.environ,
         {

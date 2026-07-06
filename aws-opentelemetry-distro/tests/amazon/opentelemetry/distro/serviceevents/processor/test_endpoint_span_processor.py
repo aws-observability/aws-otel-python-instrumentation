@@ -26,6 +26,11 @@ _LOCAL_PARENT = SpanContext(trace_id=0x1, span_id=0x2, is_remote=False, trace_fl
 _REMOTE_PARENT = SpanContext(trace_id=0x1, span_id=0x2, is_remote=True, trace_flags=TraceFlags(TraceFlags.SAMPLED))
 # A valid span context for the span itself (so trace_id/span_id are extractable).
 _SELF_CONTEXT = SpanContext(trace_id=0xAA, span_id=0xBB, is_remote=False, trace_flags=TraceFlags(TraceFlags.SAMPLED))
+# A valid-but-unsampled (RECORD_ONLY) self context: AlwaysRecordSampler keeps the span recording
+# under reduced sampling, but the trace is dropped before export, so it must NOT be correlated.
+_SELF_CONTEXT_UNSAMPLED = SpanContext(
+    trace_id=0xAA, span_id=0xBB, is_remote=False, trace_flags=TraceFlags(TraceFlags.DEFAULT)
+)
 
 
 def _build_span(
@@ -284,9 +289,28 @@ class TestOnEnd(TestCase):
         self.assertEqual(kwargs["route"], "/boom")
         self.assertEqual(kwargs["status_code"], 500)
         self.assertIsNone(kwargs["exception"])
-        # Trace correlation carried from the span context.
+        # Trace correlation carried from the span context (this span is sampled).
         self.assertEqual(kwargs["request_data"]["trace_id"], 0xAA)
         self.assertEqual(kwargs["request_data"]["span_id"], 0xBB)
+
+    def test_trace_correlation_omitted_for_unsampled_span(self):
+        # A RECORD_ONLY span (valid context, SAMPLED unset) — its trace is dropped before export,
+        # so correlation must be omitted to avoid linking to a trace the backend never received.
+        # The incident is still emitted; only trace_id/span_id are None.
+        span = _build_span(
+            {
+                SpanAttributes.HTTP_REQUEST_METHOD: "GET",
+                SpanAttributes.HTTP_ROUTE: "/boom",
+                SpanAttributes.HTTP_RESPONSE_STATUS_CODE: 500,
+            },
+            name="GET /boom",
+            span_context=_SELF_CONTEXT_UNSAMPLED,
+        )
+        self._run(span)
+        self.incident_collector.process_potential_incident.assert_called_once()
+        kwargs = self.incident_collector.process_potential_incident.call_args.kwargs
+        self.assertIsNone(kwargs["request_data"]["trace_id"])
+        self.assertIsNone(kwargs["request_data"]["span_id"])
 
     def test_exemplar_recorded_when_incident_returns_one(self):
         self.incident_collector.process_potential_incident.return_value = {

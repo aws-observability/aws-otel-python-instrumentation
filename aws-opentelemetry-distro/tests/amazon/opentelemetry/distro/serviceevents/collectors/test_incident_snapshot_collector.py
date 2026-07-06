@@ -663,6 +663,144 @@ class TestProcessPotentialIncident(TestCase):
         self.assertEqual(mock_collect.call_count, 5)  # No additional snapshot
 
 
+class TestInBatchSampledUpgrade(TestCase):
+    """Point #2: within a collection cycle, a sampled occurrence upgrades a pending UNSAMPLED
+    snapshot's correlation (whole-snapshot swap, snapshot_id preserved)."""
+
+    def setUp(self):
+        _ServiceEventsMonitorState._instance = None
+
+    def _make_collector(self):
+        # max_same_error high so period dedup never interferes; batch dedup is what we exercise.
+        return IncidentSnapshotCollector(
+            flush_interval_ms=10000,
+            duration_threshold_ms=1000,
+            max_per_period=100,
+            max_same_error=100,
+        )
+
+    @staticmethod
+    def _args(trace_id=None, span_id=None):
+        rd = {"headers": {}, "args": {}}
+        if trace_id is not None:
+            rd["trace_id"] = trace_id
+            rd["span_id"] = span_id
+        return dict(
+            route="/boom",
+            method="GET",
+            status_code=500,
+            duration_ms=50.0,
+            exception=ValueError("same error"),
+            request_data=rd,
+        )
+
+    def test_sampled_occurrence_upgrades_unsampled_pending(self):
+        collector = self._make_collector()
+        # First occurrence: unsampled (no trace_id) → pending snapshot has no correlation.
+        collector.process_potential_incident(**self._args())
+        self.assertEqual(len(collector._pending_snapshots), 1)
+        original_id = collector._pending_snapshots[0].snapshot_id
+        self.assertIsNone(collector._pending_snapshots[0].telemetry_correlation.trace_id)
+
+        # Second occurrence same error, sampled → upgrades the pending snapshot in place.
+        collector.process_potential_incident(**self._args(trace_id=0xAA, span_id=0xBB))
+        self.assertEqual(len(collector._pending_snapshots), 1)  # still ONE snapshot (batch dedup)
+        upgraded = collector._pending_snapshots[0]
+        self.assertEqual(upgraded.snapshot_id, original_id)  # identity preserved for the exemplar
+        # Exact values (not just non-None): proves request_data["trace_id"]/["span_id"] flow through
+        # to the correlation as 0x-prefixed, zero-padded hex — the format the backend joins on.
+        self.assertEqual(upgraded.telemetry_correlation.trace_id, "0x" + "0" * 30 + "aa")
+        self.assertEqual(upgraded.telemetry_correlation.span_id, "0x" + "0" * 14 + "bb")
+
+    def test_unsampled_occurrence_does_not_downgrade_sampled_pending(self):
+        collector = self._make_collector()
+        # First occurrence sampled → pending snapshot correlated.
+        collector.process_potential_incident(**self._args(trace_id=0xAA, span_id=0xBB))
+        correlated_tid = collector._pending_snapshots[0].telemetry_correlation.trace_id
+        self.assertIsNotNone(correlated_tid)
+
+        # Second occurrence unsampled → must NOT clear the existing correlation.
+        collector.process_potential_incident(**self._args())
+        self.assertEqual(len(collector._pending_snapshots), 1)
+        self.assertEqual(collector._pending_snapshots[0].telemetry_correlation.trace_id, correlated_tid)
+
+    def test_first_sampled_occurrence_wins(self):
+        collector = self._make_collector()
+        collector.process_potential_incident(**self._args(trace_id=0xAA, span_id=0xBB))
+        first_tid = collector._pending_snapshots[0].telemetry_correlation.trace_id
+
+        # A later sampled occurrence with different ids must not churn the already-correlated one.
+        collector.process_potential_incident(**self._args(trace_id=0xCC, span_id=0xDD))
+        self.assertEqual(len(collector._pending_snapshots), 1)
+        self.assertEqual(collector._pending_snapshots[0].telemetry_correlation.trace_id, first_tid)
+
+    def test_collect_clears_upgrade_index(self):
+        collector = self._make_collector()
+        collector.process_potential_incident(**self._args())
+        self.assertTrue(collector._pending_by_hash)
+        collector.collect()
+        # After flush the per-hash index is cleared (upgrade window is one cycle).
+        self.assertEqual(collector._pending_by_hash, {})
+
+    def test_unsampled_occurrence_with_header_does_not_upgrade(self):
+        # Correlation comes solely from the SAMPLED-gated request_data["trace_id"] (fix #1); inbound
+        # headers are never consulted. A RECORD_ONLY occurrence carries no trace_id but may still
+        # arrive with a traceparent header — that header must NOT resurrect a correlation, either at
+        # the upgrade gate or when the snapshot body is built. Both stay uncorrelated.
+        collector = self._make_collector()
+        collector.process_potential_incident(**self._args())
+        self.assertIsNone(collector._pending_snapshots[0].telemetry_correlation.trace_id)
+
+        # Second occurrence: still unsampled (no request_data["trace_id"]) but with a traceparent
+        # header a header-based extractor would have honored. Must NOT upgrade.
+        unsampled_with_header = self._args()
+        unsampled_with_header["request_data"]["headers"] = {
+            "traceparent": "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-00"
+        }
+        collector.process_potential_incident(**unsampled_with_header)
+        self.assertEqual(len(collector._pending_snapshots), 1)
+        self.assertIsNone(collector._pending_snapshots[0].telemetry_correlation.trace_id)
+
+    def _seed_investigation(self, collector, func_name):
+        # Seed the per-request investigation data that _collect_incident_snapshot consumes to build
+        # the snapshot body (call_path). Read-and-cleared by get_investigation_data(), so it must be
+        # set immediately before each process_potential_incident call that should observe it.
+        collector._monitor_state._investigation_data.set(
+            {
+                "call_path": [{"function_name": func_name, "caller_function_name": "root", "duration_ns": 100}],
+                "exception": None,
+            }
+        )
+
+    def test_upgrade_swaps_whole_snapshot_body_coherent_with_trace(self):
+        # The upgrade is a WHOLE-snapshot swap, not a correlation-only patch: the replacement body
+        # (call_path/stack trace) must come from the sampled occurrence whose trace it now links to,
+        # so the snapshot stays coherent with that trace. A correlation-only patch would leave the
+        # first (unsampled) occurrence's body attached to the second occurrence's trace.
+        collector = self._make_collector()
+
+        # Occurrence 1 — unsampled, body captured from "func_unsampled".
+        self._seed_investigation(collector, "func_unsampled")
+        collector.process_potential_incident(**self._args())
+        original = collector._pending_snapshots[0]
+        original_names = [e.function_name for exc in original.exception_info for e in exc.call_path]
+        self.assertIn("func_unsampled", original_names)
+        self.assertIsNone(original.telemetry_correlation.trace_id)
+
+        # Occurrence 2 — sampled, body captured from "func_sampled" → upgrades in place.
+        self._seed_investigation(collector, "func_sampled")
+        collector.process_potential_incident(**self._args(trace_id=0xAA, span_id=0xBB))
+
+        self.assertEqual(len(collector._pending_snapshots), 1)  # still one (batch dedup)
+        upgraded = collector._pending_snapshots[0]
+        self.assertEqual(upgraded.snapshot_id, original.snapshot_id)  # identity preserved
+        self.assertIsNotNone(upgraded.telemetry_correlation.trace_id)  # now correlated
+        # Body reflects the SAMPLED occurrence (coherent with the linked trace), not the stale first.
+        upgraded_names = [e.function_name for exc in upgraded.exception_info for e in exc.call_path]
+        self.assertIn("func_sampled", upgraded_names)
+        self.assertNotIn("func_unsampled", upgraded_names)
+
+
 class TestBuildCallPath(TestCase):
     """Test the _build_call_path method."""
 
@@ -1562,222 +1700,6 @@ class TestFormatIds(TestCase):
     def test_format_span_id_str_passthrough(self):
         """A string span id is passed through as-is."""
         self.assertEqual(IncidentSnapshotCollector._format_span_id("span-1"), "span-1")
-
-
-class TestValidTraceparentId(TestCase):
-    """Test the _valid_traceparent_id validator."""
-
-    def setUp(self):
-        _ServiceEventsMonitorState._instance = None
-
-    def test_empty_returns_none(self):
-        """Empty input is rejected."""
-        self.assertIsNone(IncidentSnapshotCollector._valid_traceparent_id("", 32))
-
-    def test_wrong_length_returns_none(self):
-        """Input of the wrong length is rejected."""
-        self.assertIsNone(IncidentSnapshotCollector._valid_traceparent_id("abcd", 32))
-
-    def test_non_hex_returns_none(self):
-        """Input containing non-hex characters is rejected."""
-        self.assertIsNone(IncidentSnapshotCollector._valid_traceparent_id("z" * 16, 16))
-
-    def test_all_zero_sentinel_returns_none(self):
-        """The all-zero sentinel id is rejected per the W3C spec."""
-        self.assertIsNone(IncidentSnapshotCollector._valid_traceparent_id("0" * 16, 16))
-
-    def test_valid_id_lowercased(self):
-        """A valid mixed-case hex id is accepted and lowercased."""
-        self.assertEqual(IncidentSnapshotCollector._valid_traceparent_id("ABCD" * 4, 16), "abcd" * 4)
-
-
-class TestExtractTraceId(TestCase):
-    """Test the _extract_trace_id method across its lookup tiers."""
-
-    def setUp(self):
-        _ServiceEventsMonitorState._instance = None
-
-    def _make_collector(self):
-        return IncidentSnapshotCollector(
-            flush_interval_ms=10000,
-            duration_threshold_ms=1000,
-            max_per_period=100,
-        )
-
-    def test_pre_captured_trace_id(self):
-        """A pre-captured int trace_id is formatted and returned first."""
-        collector = self._make_collector()
-        result = collector._extract_trace_id({"trace_id": 255})
-        self.assertEqual(result, "0x" + "0" * 30 + "ff")
-
-    def test_from_current_otel_span(self):
-        """A valid current OTel span supplies the trace id when no pre-captured value exists."""
-        collector = self._make_collector()
-        span = MagicMock()
-        span_context = MagicMock()
-        span_context.is_valid = True
-        span_context.trace_id = 1
-        span.get_span_context.return_value = span_context
-
-        with patch(
-            "amazon.opentelemetry.distro.serviceevents.collectors."
-            "incident_snapshot_collector.trace.get_current_span",
-            return_value=span,
-        ):
-            result = collector._extract_trace_id({})
-
-        self.assertEqual(result, "0x" + "0" * 31 + "1")
-
-    def test_otel_span_exception_falls_through(self):
-        """If reading the current span raises, extraction falls through to headers."""
-        collector = self._make_collector()
-        with patch(
-            "amazon.opentelemetry.distro.serviceevents.collectors."
-            "incident_snapshot_collector.trace.get_current_span",
-            side_effect=RuntimeError("no span"),
-        ):
-            result = collector._extract_trace_id(
-                {"headers": {"traceparent": "00-" + "a" * 32 + "-" + "b" * 16 + "-01"}}
-            )
-
-        self.assertEqual(result, "0x" + "a" * 32)
-
-    def test_from_traceparent_header(self):
-        """A valid traceparent header supplies the trace id."""
-        collector = self._make_collector()
-        span = MagicMock()
-        span.get_span_context.return_value.is_valid = False
-        with patch(
-            "amazon.opentelemetry.distro.serviceevents.collectors."
-            "incident_snapshot_collector.trace.get_current_span",
-            return_value=span,
-        ):
-            result = collector._extract_trace_id(
-                {"headers": {"traceparent": "00-" + "c" * 32 + "-" + "d" * 16 + "-01"}}
-            )
-        self.assertEqual(result, "0x" + "c" * 32)
-
-    def test_invalid_traceparent_falls_to_xray(self):
-        """An invalid traceparent trace-id falls through to the X-Ray header."""
-        collector = self._make_collector()
-        span = MagicMock()
-        span.get_span_context.return_value.is_valid = False
-        with patch(
-            "amazon.opentelemetry.distro.serviceevents.collectors."
-            "incident_snapshot_collector.trace.get_current_span",
-            return_value=span,
-        ):
-            result = collector._extract_trace_id(
-                {
-                    "headers": {
-                        "traceparent": "00-" + "0" * 32 + "-" + "b" * 16 + "-01",
-                        "X-Amzn-Trace-Id": "Root=1-abc",
-                    }
-                }
-            )
-        self.assertEqual(result, "Root=1-abc")
-
-    def test_datadog_header(self):
-        """The Datadog trace-id header is used as a final fallback."""
-        collector = self._make_collector()
-        span = MagicMock()
-        span.get_span_context.return_value.is_valid = False
-        with patch(
-            "amazon.opentelemetry.distro.serviceevents.collectors."
-            "incident_snapshot_collector.trace.get_current_span",
-            return_value=span,
-        ):
-            result = collector._extract_trace_id({"headers": {"x-datadog-trace-id": "12345"}})
-        self.assertEqual(result, "12345")
-
-    def test_no_trace_id_returns_none(self):
-        """When no source supplies a trace id, None is returned."""
-        collector = self._make_collector()
-        span = MagicMock()
-        span.get_span_context.return_value.is_valid = False
-        with patch(
-            "amazon.opentelemetry.distro.serviceevents.collectors."
-            "incident_snapshot_collector.trace.get_current_span",
-            return_value=span,
-        ):
-            result = collector._extract_trace_id({"headers": {}})
-        self.assertIsNone(result)
-
-
-class TestExtractSpanId(TestCase):
-    """Test the _extract_span_id method across its lookup tiers."""
-
-    def setUp(self):
-        _ServiceEventsMonitorState._instance = None
-
-    def _make_collector(self):
-        return IncidentSnapshotCollector(
-            flush_interval_ms=10000,
-            duration_threshold_ms=1000,
-            max_per_period=100,
-        )
-
-    def test_pre_captured_span_id(self):
-        """A pre-captured int span_id is formatted and returned first."""
-        collector = self._make_collector()
-        result = collector._extract_span_id({"span_id": 255})
-        self.assertEqual(result, "0x" + "0" * 14 + "ff")
-
-    def test_from_current_otel_span(self):
-        """A valid current OTel span supplies the span id when no pre-captured value exists."""
-        collector = self._make_collector()
-        span = MagicMock()
-        span_context = MagicMock()
-        span_context.is_valid = True
-        span_context.span_id = 1
-        span.get_span_context.return_value = span_context
-
-        with patch(
-            "amazon.opentelemetry.distro.serviceevents.collectors."
-            "incident_snapshot_collector.trace.get_current_span",
-            return_value=span,
-        ):
-            result = collector._extract_span_id({})
-
-        self.assertEqual(result, "0x" + "0" * 15 + "1")
-
-    def test_otel_span_exception_falls_through(self):
-        """If reading the current span raises, extraction falls through to headers."""
-        collector = self._make_collector()
-        with patch(
-            "amazon.opentelemetry.distro.serviceevents.collectors."
-            "incident_snapshot_collector.trace.get_current_span",
-            side_effect=RuntimeError("no span"),
-        ):
-            result = collector._extract_span_id({"headers": {"traceparent": "00-" + "a" * 32 + "-" + "b" * 16 + "-01"}})
-
-        self.assertEqual(result, "0x" + "b" * 16)
-
-    def test_invalid_traceparent_span_returns_none(self):
-        """An invalid traceparent span-id yields None (no further fallback)."""
-        collector = self._make_collector()
-        span = MagicMock()
-        span.get_span_context.return_value.is_valid = False
-        with patch(
-            "amazon.opentelemetry.distro.serviceevents.collectors."
-            "incident_snapshot_collector.trace.get_current_span",
-            return_value=span,
-        ):
-            result = collector._extract_span_id({"headers": {"traceparent": "00-" + "a" * 32 + "-" + "0" * 16 + "-01"}})
-        self.assertIsNone(result)
-
-    def test_no_span_id_returns_none(self):
-        """When no source supplies a span id, None is returned."""
-        collector = self._make_collector()
-        span = MagicMock()
-        span.get_span_context.return_value.is_valid = False
-        with patch(
-            "amazon.opentelemetry.distro.serviceevents.collectors."
-            "incident_snapshot_collector.trace.get_current_span",
-            return_value=span,
-        ):
-            result = collector._extract_span_id({"headers": {}})
-        self.assertIsNone(result)
 
 
 class TestGenerateSessionAndRequestId(TestCase):

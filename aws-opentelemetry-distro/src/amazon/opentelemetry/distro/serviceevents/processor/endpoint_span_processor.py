@@ -311,9 +311,17 @@ class ServiceEventsSpanProcessor(SpanProcessor):
         duration_ns = max(0, end_ns - start_ns)
         duration_ms = duration_ns / 1_000_000.0
 
+        # Trace correlation is best-effort and sampling-conditional. Under reduced sampling,
+        # AlwaysRecordSampler keeps this span recording (so App Signals metrics see every request)
+        # even though its trace was dropped before export — a RECORD_ONLY span whose context is
+        # valid but whose SAMPLED flag is unset. Capturing its ids would emit a correlation link to
+        # a trace the backend never received. Gate on the real SAMPLED flag in addition to validity
+        # so only sampled (backend-present) traces are correlated; an unsampled request still emits a
+        # complete (self-contained) IncidentSnapshot, just without trace_id/span_id.
         span_context = span.get_span_context()
-        trace_id = span_context.trace_id if span_context and span_context.is_valid else None
-        span_id = span_context.span_id if span_context and span_context.is_valid else None
+        sampled = bool(span_context and span_context.is_valid and span_context.trace_flags.sampled)
+        trace_id = span_context.trace_id if sampled else None
+        span_id = span_context.span_id if sampled else None
 
         # Fault recovery from the span's own exception event. When a 5xx unwound through code the
         # AST monitor never instrumented (library internals, or a global handler that converted the
@@ -363,11 +371,11 @@ class ServiceEventsSpanProcessor(SpanProcessor):
                     status_code=status_code,
                     duration_ms=duration_ms,
                     exception=None,
+                    # trace_id/span_id are already gated on the real SAMPLED flag above (fix #1):
+                    # set iff the trace was sampled, else None. The collector uses them directly and
+                    # never re-derives correlation from headers or the current span, so no request
+                    # headers are threaded here.
                     request_data={
-                        "method": method,
-                        "headers": {},
-                        "args": {},
-                        "view_args": {},
                         "trace_id": trace_id,
                         "span_id": span_id,
                     },

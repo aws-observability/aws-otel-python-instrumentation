@@ -352,6 +352,23 @@ class ServiceEventsConfig:
             # Fall back to default (None when unset)
             return default
 
+        # Resolve max_same_error up front so the incident-snapshot flush interval can be derived
+        # from it (below).
+        incident_max_same_error = get_int(
+            "OTEL_AWS_SERVICE_EVENTS_INCIDENT_SNAPSHOT_MAX_SAME_ERROR", defaults.incident_snapshot_max_same_error
+        )
+        # Derive the incident-snapshot flush interval from max_same_error rather than exposing it
+        # as an independent knob. Batch dedup keeps exactly one snapshot per error hash per flush
+        # cycle, and period dedup allows up to max_same_error (N) per fixed 60s window, so to emit
+        # all N the 60s window must be sliced into at least N flush cycles: flush <= 60s / N. We
+        # pick the *largest* such value, flush = 60s / N, because a wider cycle is a wider Point #2
+        # window (more chances for a later SAMPLED occurrence to upgrade a pending UNSAMPLED
+        # snapshot), maximizing the odds each emitted snapshot carries a resolvable trace link.
+        # Floored at 10s to bound export latency and crash-loss; this caps the effective per-error
+        # rate at 60s/10s = 6/min. The test hook (applied after cls()) can still override flush
+        # directly for fast test cycles.
+        incident_flush_interval = max(10_000, 60_000 // max(1, incident_max_same_error))
+
         # Build configuration using class defaults as fallback
         config = cls(
             # Enable/Disable
@@ -372,9 +389,12 @@ class ServiceEventsConfig:
             # Environment and SDK
             environment=get_environment(defaults.environment),
             sdk_version=defaults.sdk_version,
-            # Flush Intervals (internal; hardcoded defaults, reachable only via the test hook)
+            # Flush Intervals. endpoint_ and deployment_event_ are internal (hardcoded defaults,
+            # reachable only via the test hook). incident_snapshot_flush_interval is derived from
+            # max_same_error above (flush = 60s / N, floored at 10s); the test hook can still
+            # override it directly.
             endpoint_flush_interval=defaults.endpoint_flush_interval,
-            incident_snapshot_flush_interval=defaults.incident_snapshot_flush_interval,
+            incident_snapshot_flush_interval=incident_flush_interval,
             deployment_event_flush_interval=defaults.deployment_event_flush_interval,
             # Incident Snapshot Settings (rate-limit window fixed at 1 minute)
             incident_snapshot_max_per_minute=get_int(
@@ -384,9 +404,7 @@ class ServiceEventsConfig:
                 "OTEL_AWS_SERVICE_EVENTS_INCIDENT_SNAPSHOT_DURATION_THRESHOLD_MS",
                 defaults.incident_snapshot_duration_threshold_ms,
             ),
-            incident_snapshot_max_same_error=get_int(
-                "OTEL_AWS_SERVICE_EVENTS_INCIDENT_SNAPSHOT_MAX_SAME_ERROR", defaults.incident_snapshot_max_same_error
-            ),
+            incident_snapshot_max_same_error=incident_max_same_error,
             latency_thresholds=get_list("OTEL_AWS_SERVICE_EVENTS_LATENCY_THRESHOLDS", defaults.latency_thresholds),
             # Incident Snapshot Request Payload Capture Settings: hardcoded off (no env opt-in).
             # Endpoint Filtering

@@ -37,7 +37,6 @@ from amazon.opentelemetry.distro.serviceevents.models import (
 )
 from amazon.opentelemetry.distro.serviceevents.python_monitor import _ServiceEventsMonitorState
 from amazon.opentelemetry.distro.serviceevents.utils import get_instance_id
-from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +130,11 @@ class IncidentSnapshotCollector(BaseCollector):
         # Pending snapshots to export
         self._pending_snapshots: List[IncidentSnapshot] = []
         self._pending_lock = threading.Lock()
+        # Within a collection cycle, the single pending snapshot per error hash (batch dedup keeps
+        # exactly one). Lets a later SAMPLED occurrence of the same error upgrade an earlier
+        # UNSAMPLED pending snapshot's correlation before it flushes — see
+        # _maybe_upgrade_pending_correlation. Guarded by _pending_lock; cleared each collect().
+        self._pending_by_hash: Dict[str, IncidentSnapshot] = {}
 
         # Monitor state for getting execution flow
         self._monitor_state = _ServiceEventsMonitorState.get_instance()
@@ -173,6 +177,7 @@ class IncidentSnapshotCollector(BaseCollector):
         super()._reset_for_fork()
         self.pid = os.getpid()
         self._pending_snapshots = []
+        self._pending_by_hash = {}
         self._pending_lock = threading.Lock()
         self._snapshot_timestamps = deque(maxlen=self.max_per_period * 2)
         self._timestamps_lock = threading.Lock()
@@ -340,13 +345,31 @@ class IncidentSnapshotCollector(BaseCollector):
         # Generate error hash for deduplication
         error_hash = self._generate_error_hash(route, exception)
 
-        # Check batch-level deduplication FIRST (one per error type per collection interval)
+        # Check batch-level deduplication FIRST (one per error type per collection interval).
         with self._error_hashes_lock:
-            if error_hash in self._current_batch_hashes:
-                logger.debug("Incident snapshot batch-deduplicated (hash: %s)", error_hash)
-                return None
-            # Add to current batch (will be cleared after collect())
-            self._current_batch_hashes.add(error_hash)
+            already_in_batch = error_hash in self._current_batch_hashes
+            if not already_in_batch:
+                # Add to current batch (will be cleared after collect())
+                self._current_batch_hashes.add(error_hash)
+
+        if already_in_batch:
+            # A snapshot for this error is already pending this cycle. Batch dedup keeps that
+            # single snapshot, but if it was built from an UNSAMPLED occurrence (no resolvable
+            # trace link, see fix #1) and THIS occurrence is sampled, upgrade the pending snapshot
+            # in place so the one snapshot we emit per cycle carries a resolvable trace link.
+            self._maybe_upgrade_pending_correlation(
+                error_hash,
+                route,
+                method,
+                status_code,
+                duration_ms,
+                exception,
+                request_data,
+                trigger_type,
+                captured_stack_trace,
+            )
+            logger.debug("Incident snapshot batch-deduplicated (hash: %s)", error_hash)
+            return None
 
         # Check period-level deduplication (limits same error over the fixed 60s window)
         if not self._check_deduplication(error_hash):
@@ -373,9 +396,11 @@ class IncidentSnapshotCollector(BaseCollector):
                 captured_stack_trace=captured_stack_trace,
             )
 
-            # Add to pending snapshots
+            # Add to pending snapshots, and index by error hash so a later sampled occurrence of
+            # the same error can upgrade this snapshot's correlation in place before it flushes.
             with self._pending_lock:
                 self._pending_snapshots.append(snapshot)
+                self._pending_by_hash[error_hash] = snapshot
 
             logger.info(
                 "Incident snapshot triggered: %s %s (status=%s, trigger=%s)",
@@ -403,6 +428,78 @@ class IncidentSnapshotCollector(BaseCollector):
             # that could have produced a snapshot — for up to the 60s dedup/rate windows.
             self._rollback_reservation(error_hash)
             return None
+
+    def _maybe_upgrade_pending_correlation(
+        self,
+        error_hash: str,
+        route: str,
+        method: str,
+        status_code: int,
+        duration_ms: float,
+        exception: Optional[Exception],
+        request_data: Dict,
+        trigger_type: str,
+        captured_stack_trace: Optional[str],
+    ) -> None:
+        """Upgrade a pending UNSAMPLED snapshot to this SAMPLED occurrence (whole-snapshot swap).
+
+        Trace correlation is sampling-conditional (fix #1): an unsampled request emits a snapshot
+        with no trace_id. Because batch dedup keeps exactly one snapshot per error hash per cycle,
+        that single snapshot inherits the FIRST occurrence's sampling state — so under reduced
+        sampling it usually carries no resolvable trace link even if a sampled occurrence of the
+        same error happens moments later in the same cycle.
+
+        When this occurrence IS sampled (request_data carries a trace_id) and the pending snapshot
+        is NOT (its trace_id is None), replace the pending snapshot WHOLESALE with a freshly
+        collected one for this occurrence, preserving the original snapshot_id so the endpoint
+        exemplar pointer stays valid. The replacement is whole-snapshot (not correlation-only) so
+        the body — stack trace, call path, duration, timestamp — stays coherent with the trace it
+        links to. First sampled occurrence wins; once upgraded, later occurrences are left alone.
+        No-op (so the original is preserved) on any failure — telemetry must never crash the host.
+        """
+        # Only sampled occurrences can upgrade — an unsampled one has nothing better to offer.
+        # request_data["trace_id"] is the span processor's SAMPLED-gated correlation (fix #1):
+        # present iff the trace was sampled, so it is the authoritative "is this sampled?" signal.
+        if not request_data.get("trace_id"):
+            return
+        try:
+            with self._pending_lock:
+                pending = self._pending_by_hash.get(error_hash)
+                # Upgrade only an uncorrelated pending snapshot; if it already has a trace_id, the
+                # first sampled occurrence already won.
+                if pending is None or pending.telemetry_correlation.trace_id is not None:
+                    return
+
+            # Collect outside the lock (it can do non-trivial work); the snapshot_id is stamped
+            # after so the replacement keeps the original's identity.
+            replacement = self._collect_incident_snapshot(
+                route=route,
+                method=method,
+                status_code=status_code,
+                duration_ms=duration_ms,
+                exception=exception,
+                request_data=request_data,
+                trigger_type=trigger_type,
+                captured_stack_trace=captured_stack_trace,
+            )
+
+            with self._pending_lock:
+                # Re-fetch under the lock: collect() may have drained the cycle, or another thread
+                # may have upgraded it meanwhile. Only swap if the same uncorrelated snapshot is
+                # still pending.
+                pending = self._pending_by_hash.get(error_hash)
+                if pending is None or pending.telemetry_correlation.trace_id is not None:
+                    return
+                replacement.snapshot_id = pending.snapshot_id
+                try:
+                    idx = self._pending_snapshots.index(pending)
+                except ValueError:
+                    return
+                self._pending_snapshots[idx] = replacement
+                self._pending_by_hash[error_hash] = replacement
+            logger.debug("Upgraded pending incident snapshot to a sampled occurrence (hash: %s)", error_hash)
+        except Exception:  # pylint: disable=broad-exception-caught  # telemetry must never crash host app
+            logger.debug("Failed to upgrade pending incident correlation", exc_info=True)
 
     def _rollback_reservation(self, error_hash: str) -> None:
         """Undo the batch/period-dedup/rate-limit slots claimed for a failed collection.
@@ -436,6 +533,8 @@ class IncidentSnapshotCollector(BaseCollector):
         with self._pending_lock:
             snapshots = self._pending_snapshots
             self._pending_snapshots = []
+            # Drop the per-hash index for the drained cycle; the upgrade window is one cycle.
+            self._pending_by_hash = {}
 
         if not snapshots:
             logger.debug("No incident snapshots to export")
@@ -655,11 +754,16 @@ class IncidentSnapshotCollector(BaseCollector):
             status_code=status_code,
         )
 
-        # Build telemetry correlation
+        # Build telemetry correlation. trace_id/span_id come straight from request_data, where the
+        # span processor already gated them on the real SAMPLED flag (fix #1): present iff the trace
+        # was sampled, else None (an unsampled request emits a complete, self-contained snapshot with
+        # empty correlation). They are NOT re-derived from the current span or inbound headers — those
+        # sources are not sampling-gated and would resurrect a link to a trace the backend never
+        # exported. The span processor is the single, sampling-gated source of correlation truth.
         telemetry_correlation = TelemetryCorrelation(
-            trace_id=self._extract_trace_id(request_data),
+            trace_id=self._format_trace_id(request_data.get("trace_id")),
             session_id=self._generate_session_id(request_data),
-            span_id=self._extract_span_id(request_data),
+            span_id=self._format_span_id(request_data.get("span_id")),
             request_id=self._generate_request_id(),
         )
 
@@ -846,102 +950,6 @@ class IncidentSnapshotCollector(BaseCollector):
         if isinstance(span_id, int):
             return f"0x{span_id:016x}"
         return str(span_id)
-
-    @staticmethod
-    def _valid_traceparent_id(raw: str, length: int) -> Optional[str]:
-        """Validate a hex id field from an inbound W3C traceparent header.
-
-        The traceparent header is attacker-controllable, so the trace/span id fields
-        are validated before being copied into the snapshot's correlation: they must be
-        exactly `length` hex chars and not the all-zero sentinel (invalid per the W3C
-        trace-context spec). Returns the lowercased hex (no 0x prefix) or None.
-        """
-        if not raw or len(raw) != length:
-            return None
-        lowered = raw.lower()
-        if any(c not in "0123456789abcdef" for c in lowered):
-            return None
-        if lowered == "0" * length:
-            return None
-        return lowered
-
-    def _extract_trace_id(self, request_data: Dict) -> Optional[str]:
-        """Extract trace ID from pre-captured value, OTel context, or request headers."""
-        # FIRST: Check for pre-captured trace_id (from Flask/FastAPI instrumentation)
-        # This is most reliable because it was captured while the span was still active
-        pre_captured = request_data.get("trace_id")
-        if pre_captured:
-            return self._format_trace_id(pre_captured)
-
-        # SECOND: Try to get from current OTel span (may not work in teardown hooks)
-        try:
-            current_span = trace.get_current_span()
-            if current_span:
-                span_context = current_span.get_span_context()
-                if span_context.is_valid:
-                    return self._format_trace_id(span_context.trace_id)
-        except Exception:  # pylint: disable=broad-exception-caught  # telemetry must never crash host app
-            pass
-
-        # FALLBACK: Try request headers (for distributed tracing)
-        headers = request_data.get("headers", {})
-
-        # Try OpenTelemetry traceparent
-        traceparent = headers.get("traceparent")
-        if traceparent:
-            # Extract trace-id from traceparent (format: 00-trace_id-span_id-flags).
-            # The header is untrusted input; validate the 32-char hex trace-id before use.
-            parts = traceparent.split("-")
-            if len(parts) >= 2:
-                trace_id_hex = self._valid_traceparent_id(parts[1], 32)
-                if trace_id_hex:
-                    return f"0x{trace_id_hex}"
-
-        # Try X-Ray trace ID
-        xray_trace = headers.get("X-Amzn-Trace-Id")
-        if xray_trace:
-            return xray_trace
-
-        # Try Datadog
-        dd_trace_id = headers.get("x-datadog-trace-id")
-        if dd_trace_id:
-            return dd_trace_id
-
-        return None
-
-    def _extract_span_id(self, request_data: Dict) -> Optional[str]:
-        """Extract span ID from pre-captured value, OTel context, or request headers."""
-        # FIRST: Check for pre-captured span_id (from Flask/FastAPI instrumentation)
-        # This is most reliable because it was captured while the span was still active
-        pre_captured = request_data.get("span_id")
-        if pre_captured:
-            return self._format_span_id(pre_captured)
-
-        # SECOND: Try to get from current OTel span (may not work in teardown hooks)
-        try:
-            current_span = trace.get_current_span()
-            if current_span:
-                span_context = current_span.get_span_context()
-                if span_context.is_valid:
-                    return self._format_span_id(span_context.span_id)
-        except Exception:  # pylint: disable=broad-exception-caught  # telemetry must never crash host app
-            pass
-
-        # FALLBACK: Try request headers (for distributed tracing)
-        headers = request_data.get("headers", {})
-
-        # OpenTelemetry traceparent
-        traceparent = headers.get("traceparent")
-        if traceparent:
-            # Extract span-id from traceparent (format: 00-trace_id-span_id-flags).
-            # The header is untrusted input; validate the 16-char hex span-id before use.
-            parts = traceparent.split("-")
-            if len(parts) >= 3:
-                span_id_hex = self._valid_traceparent_id(parts[2], 16)
-                if span_id_hex:
-                    return f"0x{span_id_hex}"
-
-        return None
 
     @staticmethod
     def _generate_session_id(request_data: Dict) -> Optional[str]:
