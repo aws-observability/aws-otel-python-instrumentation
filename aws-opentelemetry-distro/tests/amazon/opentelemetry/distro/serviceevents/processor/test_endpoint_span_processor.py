@@ -16,7 +16,7 @@ from amazon.opentelemetry.distro.serviceevents.processor.endpoint_span_processor
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 from opentelemetry.semconv.trace import SpanAttributes
-from opentelemetry.trace import INVALID_SPAN_CONTEXT, SpanContext, SpanKind, TraceFlags
+from opentelemetry.trace import SpanContext, SpanKind, TraceFlags
 
 _MONITOR_PATH = "amazon.opentelemetry.distro.serviceevents.processor.endpoint_span_processor._ServiceEventsMonitorState"
 
@@ -128,9 +128,7 @@ class TestOnStart(TestCase):
         self.endpoint_collector = MagicMock()
         self.incident_collector = MagicMock()
         self.config = MagicMock()
-        self.processor = ServiceEventsSpanProcessor(
-            self.endpoint_collector, self.incident_collector, self.config
-        )
+        self.processor = ServiceEventsSpanProcessor(self.endpoint_collector, self.incident_collector, self.config)
 
     def test_begin_investigation_fired_for_boundary(self):
         span = _build_span({}, kind=SpanKind.SERVER, parent=_LOCAL_PARENT)
@@ -159,9 +157,7 @@ class TestOnEnd(TestCase):
         self.incident_collector.process_potential_incident.return_value = None
         self.config = MagicMock()
         self.config.should_track_endpoint.return_value = True
-        self.processor = ServiceEventsSpanProcessor(
-            self.endpoint_collector, self.incident_collector, self.config
-        )
+        self.processor = ServiceEventsSpanProcessor(self.endpoint_collector, self.incident_collector, self.config)
 
     def _run(self, span):
         with patch(_MONITOR_PATH) as monitor_cls, patch(
@@ -417,12 +413,12 @@ class TestExceptionFromSpanEvent(TestCase):
 
     def test_extracts_function_name_from_realistic_traceback(self):
         tb = (
-            'Traceback (most recent call last):\n'
+            "Traceback (most recent call last):\n"
             '  File "/app/main.py", line 10, in run_app\n'
-            '    result = process(data)\n'
+            "    result = process(data)\n"
             '  File "/app/handlers.py", line 42, in process\n'
             '    raise ValueError("bad")\n'
-            'ValueError: bad'
+            "ValueError: bad"
         )
         span = _build_span({}, events=[_exception_event("ValueError", "bad", tb)])
         result = _exception_from_span_event(span)
@@ -440,12 +436,12 @@ class TestExtractFunctionFromStacktrace(TestCase):
 
     def test_standard_python_traceback(self):
         tb = (
-            'Traceback (most recent call last):\n'
+            "Traceback (most recent call last):\n"
             '  File "/app/server.py", line 5, in handle_request\n'
-            '    return db.query()\n'
+            "    return db.query()\n"
             '  File "/app/db.py", line 20, in query\n'
             '    raise RuntimeError("conn lost")\n'
-            'RuntimeError: conn lost'
+            "RuntimeError: conn lost"
         )
         self.assertEqual(_extract_function_from_stacktrace(tb), "query")
 

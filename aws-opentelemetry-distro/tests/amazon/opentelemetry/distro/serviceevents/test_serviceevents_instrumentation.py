@@ -224,9 +224,7 @@ class TestServiceEventsInstrumentation(TestCase):
         # cannot register on this unit test's NoOp provider, so it logs its own "no add_span_processor"
         # warning — filter that out so this test stays scoped to the function-instrumentation path.
         warn_records = [
-            r
-            for r in captured.records
-            if r.levelno >= logging.WARNING and "add_span_processor" not in r.getMessage()
+            r for r in captured.records if r.levelno >= logging.WARNING and "add_span_processor" not in r.getMessage()
         ]
         self.assertEqual(warn_records, [], "expected no WARNING when include list is empty")
         # AST hooks are still installed (instruments nothing, but the call still happens).
@@ -889,9 +887,7 @@ class TestEndpointMeasurementMode(TestCase):
             self.assertTrue(inst._install_endpoint_span_processor(MagicMock(), MagicMock()))
 
         registered = [
-            sp
-            for sp in provider._active_span_processor._span_processors
-            if isinstance(sp, ServiceEventsSpanProcessor)
+            sp for sp in provider._active_span_processor._span_processors if isinstance(sp, ServiceEventsSpanProcessor)
         ]
         self.assertEqual(len(registered), 1)
 

@@ -77,7 +77,7 @@ def _extract_function_from_stacktrace(stacktrace: Optional[str]) -> str:
     """Extract the origin function name from a Python traceback string.
 
     Python tracebacks list the throw site LAST (most recent call last), so we take the last
-    ``in <function_name>`` match. Returns "unknown" if unparseable — matching Java's fallback.
+    ``in <function_name>`` match. Returns "unknown" if unparsable — matching Java's fallback.
     """
     if not stacktrace:
         return "unknown"
@@ -192,7 +192,7 @@ class ServiceEventsSpanProcessor(SpanProcessor):
 
     # -- SpanProcessor interface ------------------------------------------------------------
 
-    def on_start(self, span: Span, parent_context: Optional[Context] = None) -> None:
+    def on_start(self, span: Span, parent_context: Optional[Context] = None) -> None:  # pylint: disable=no-self-use
         """Begin investigation for the request-boundary span only.
 
         This is the generic begin hook (the Python analogue of Java's bytecode servlet
@@ -223,10 +223,10 @@ class ServiceEventsSpanProcessor(SpanProcessor):
         except Exception:  # pylint: disable=broad-exception-caught  # telemetry must never crash host app
             logger.warning("ServiceEvents span processor on_end failed", exc_info=True)
 
-    def force_flush(self, timeout_millis: int = 30000) -> bool:  # pylint: disable=unused-argument
+    def force_flush(self, timeout_millis: int = 30000) -> bool:  # pylint: disable=unused-argument,no-self-use
         return True
 
-    def shutdown(self) -> None:
+    def shutdown(self) -> None:  # pylint: disable=no-self-use
         return None
 
     # -- internals --------------------------------------------------------------------------
@@ -280,7 +280,7 @@ class ServiceEventsSpanProcessor(SpanProcessor):
         if span_exception is not None:
             inv_data["exception"] = span_exception
 
-    def _process_request_span(self, span: ReadableSpan) -> None:
+    def _process_request_span(self, span: ReadableSpan) -> None:  # pylint: disable=too-many-locals
         method = _get_http_method(span)
         if not method:
             # No HTTP method → not an inbound HTTP request boundary (e.g. a messaging

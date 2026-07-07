@@ -17,9 +17,7 @@ import os
 from unittest import TestCase
 
 from amazon.opentelemetry.distro.serviceevents.collectors.endpoint_collector import EndpointMetricCollector
-from amazon.opentelemetry.distro.serviceevents.processor.endpoint_span_processor import (
-    ServiceEventsSpanProcessor,
-)
+from amazon.opentelemetry.distro.serviceevents.processor.endpoint_span_processor import ServiceEventsSpanProcessor
 from amazon.opentelemetry.distro.serviceevents.python_monitor import _ServiceEventsMonitorState
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.semconv.trace import SpanAttributes
