@@ -165,13 +165,13 @@ class TestDetermineSeverity(TestCase):
 
 
 class TestCheckRateLimit(TestCase):
-    """Test the _check_rate_limit method."""
+    """Test the atomic _try_reserve_rate_limit_slot (check-and-reserve under one lock hold)."""
 
     def setUp(self):
         _ServiceEventsMonitorState._instance = None
 
     def test_allows_within_limit(self):
-        """Test that requests within limit are allowed."""
+        """Test that requests within limit are allowed, each reservation consuming one slot."""
         collector = IncidentSnapshotCollector(
             flush_interval_ms=10000,
             duration_threshold_ms=1000,
@@ -179,7 +179,7 @@ class TestCheckRateLimit(TestCase):
         )
 
         for _ in range(5):
-            self.assertTrue(collector._check_rate_limit())
+            self.assertTrue(collector._try_reserve_rate_limit_slot())
 
     def test_denies_over_limit(self):
         """Test that requests over limit are denied."""
@@ -189,12 +189,41 @@ class TestCheckRateLimit(TestCase):
             max_per_period=3,
         )
 
-        # Fill up the limit
+        # Fill up the limit — each successful reservation consumes a slot.
         for _ in range(3):
-            self.assertTrue(collector._check_rate_limit())
+            self.assertTrue(collector._try_reserve_rate_limit_slot())
 
         # Next should be denied
-        self.assertFalse(collector._check_rate_limit())
+        self.assertFalse(collector._try_reserve_rate_limit_slot())
+
+    def test_rejected_reservation_consumes_no_slot(self):
+        """A rejected reservation must NOT consume a slot: once full, repeated calls stay False and
+        the count never grows past max_per_period."""
+        collector = IncidentSnapshotCollector(
+            flush_interval_ms=10000,
+            duration_threshold_ms=1000,
+            max_per_period=1,
+        )
+
+        # One reservation fills the single slot.
+        self.assertTrue(collector._try_reserve_rate_limit_slot())
+        # Further attempts are rejected and do not append phantom slots.
+        for _ in range(5):
+            self.assertFalse(collector._try_reserve_rate_limit_slot())
+        self.assertEqual(len(collector._snapshot_timestamps), 1)
+
+    def test_reservation_is_atomic_check_and_append(self):
+        """A successful reservation appends exactly one timestamp in the same call (no separate
+        commit step) — the property that prevents concurrent distinct-hash overshoot."""
+        collector = IncidentSnapshotCollector(
+            flush_interval_ms=10000,
+            duration_threshold_ms=1000,
+            max_per_period=5,
+        )
+
+        self.assertEqual(len(collector._snapshot_timestamps), 0)
+        self.assertTrue(collector._try_reserve_rate_limit_slot())
+        self.assertEqual(len(collector._snapshot_timestamps), 1)
 
     def test_old_entries_expire(self):
         """Test that old entries expire and free up capacity."""
@@ -205,9 +234,9 @@ class TestCheckRateLimit(TestCase):
         )
 
         # Fill up the limit
-        self.assertTrue(collector._check_rate_limit())
-        self.assertTrue(collector._check_rate_limit())
-        self.assertFalse(collector._check_rate_limit())
+        self.assertTrue(collector._try_reserve_rate_limit_slot())
+        self.assertTrue(collector._try_reserve_rate_limit_slot())
+        self.assertFalse(collector._try_reserve_rate_limit_slot())
 
         # Manually age out old entries by modifying timestamps
         with collector._timestamps_lock:
@@ -217,7 +246,7 @@ class TestCheckRateLimit(TestCase):
             collector._snapshot_timestamps.append(old_time)
 
         # Now should be allowed (old entries expired)
-        self.assertTrue(collector._check_rate_limit())
+        self.assertTrue(collector._try_reserve_rate_limit_slot())
 
 
 class TestGenerateErrorHash(TestCase):
@@ -269,7 +298,7 @@ class TestGenerateErrorHash(TestCase):
 
 
 class TestCheckDeduplication(TestCase):
-    """Test the _check_deduplication method."""
+    """Test the _is_within_dedup_limit (pure check) + _record_error_hash (commit) pair."""
 
     def setUp(self):
         _ServiceEventsMonitorState._instance = None
@@ -283,7 +312,23 @@ class TestCheckDeduplication(TestCase):
             max_same_error=2,
         )
 
-        self.assertTrue(collector._check_deduplication("error_hash_1"))
+        self.assertTrue(collector._is_within_dedup_limit("error_hash_1"))
+
+    def test_pure_check_does_not_consume_slot(self):
+        """The pure check is idempotent — repeated calls without record() never dedup."""
+        collector = IncidentSnapshotCollector(
+            flush_interval_ms=10000,
+            duration_threshold_ms=1000,
+            max_per_period=100,
+            max_same_error=1,
+        )
+
+        # Many checks without a commit stay allowed.
+        for _ in range(5):
+            self.assertTrue(collector._is_within_dedup_limit("error_hash_1"))
+        # A single commit fills the max_same_error=1 slot.
+        collector._record_error_hash("error_hash_1")
+        self.assertFalse(collector._is_within_dedup_limit("error_hash_1"))
 
     def test_blocks_after_max_same_error(self):
         """Test that error is blocked after max_same_error occurrences."""
@@ -294,10 +339,13 @@ class TestCheckDeduplication(TestCase):
             max_same_error=2,
         )
 
-        self.assertTrue(collector._check_deduplication("error_hash_1"))
-        self.assertTrue(collector._check_deduplication("error_hash_1"))
-        # Third should be blocked (max_same_error=2)
-        self.assertFalse(collector._check_deduplication("error_hash_1"))
+        # Emit twice (check-then-record for each).
+        self.assertTrue(collector._is_within_dedup_limit("error_hash_1"))
+        collector._record_error_hash("error_hash_1")
+        self.assertTrue(collector._is_within_dedup_limit("error_hash_1"))
+        collector._record_error_hash("error_hash_1")
+        # Third would exceed max_same_error=2.
+        self.assertFalse(collector._is_within_dedup_limit("error_hash_1"))
 
     def test_batch_deduplication(self):
         """Test batch-level deduplication (one per error type per batch)."""
@@ -325,14 +373,16 @@ class TestCheckDeduplication(TestCase):
             max_same_error=1,
         )
 
-        self.assertTrue(collector._check_deduplication("hash_a"))
-        self.assertTrue(collector._check_deduplication("hash_b"))
+        self.assertTrue(collector._is_within_dedup_limit("hash_a"))
+        collector._record_error_hash("hash_a")
+        self.assertTrue(collector._is_within_dedup_limit("hash_b"))
+        collector._record_error_hash("hash_b")
         # hash_a is at limit
-        self.assertFalse(collector._check_deduplication("hash_a"))
+        self.assertFalse(collector._is_within_dedup_limit("hash_a"))
         # hash_b is at limit
-        self.assertFalse(collector._check_deduplication("hash_b"))
+        self.assertFalse(collector._is_within_dedup_limit("hash_b"))
         # New hash is fine
-        self.assertTrue(collector._check_deduplication("hash_c"))
+        self.assertTrue(collector._is_within_dedup_limit("hash_c"))
 
 
 class TestSetAndGetLatencyThreshold(TestCase):
@@ -799,6 +849,181 @@ class TestInBatchSampledUpgrade(TestCase):
         upgraded_names = [e.function_name for exc in upgraded.exception_info for e in exc.call_path]
         self.assertIn("func_sampled", upgraded_names)
         self.assertNotIn("func_unsampled", upgraded_names)
+
+
+class TestDedupKeysOnRecoveredErrorIdentity(TestCase):
+    """Regression: the span processor passes exception=None and defers exception detail to the
+    collector. The dedup hash must recover the error type+message from investigation data so two
+    DISTINCT errors on the same route do NOT collapse to one snapshot under max_same_error=1."""
+
+    def setUp(self):
+        _ServiceEventsMonitorState._instance = None
+
+    def _make_collector(self):
+        emitter = MagicMock()
+        collector = IncidentSnapshotCollector(
+            flush_interval_ms=600000,
+            duration_threshold_ms=5000,
+            max_per_period=100,
+            max_same_error=1,
+            otlp_emitter=emitter,
+        )
+        return collector, emitter
+
+    @staticmethod
+    def _seed_exception(collector, name, message):
+        # Mirror the processor seeding the span's exception event into per-request investigation
+        # data for an uninstrumented 5xx (exception=None reaches the collector). _recover_error_identity
+        # PEEKs this to key the dedup hash on type+message rather than route-only.
+        collector._monitor_state._investigation_data.set(
+            {
+                "call_path": [],
+                "exception": {"name": name, "message": message, "function_name": "app.handler"},
+            }
+        )
+
+    @staticmethod
+    def _rd():
+        return {"headers": {}, "args": {}}
+
+    def test_two_distinct_error_types_same_route_both_emit(self):
+        collector, emitter = self._make_collector()
+        self._seed_exception(collector, "TypeError", "x")
+        self.assertIsNotNone(collector.process_potential_incident("/orders", "POST", 500, 10.0, None, self._rd()))
+        collector.collect()  # clears the per-batch set so the next call reaches period dedup
+        self._seed_exception(collector, "RangeError", "y")
+        self.assertIsNotNone(collector.process_potential_incident("/orders", "POST", 500, 10.0, None, self._rd()))
+        collector.collect()
+        self.assertEqual(emitter.emit_incident_snapshot.call_count, 2)
+
+    def test_two_distinct_messages_same_type_same_route_both_emit(self):
+        collector, emitter = self._make_collector()
+        self._seed_exception(collector, "DbError", "timeout on shard A")
+        self.assertIsNotNone(collector.process_potential_incident("/orders", "POST", 500, 10.0, None, self._rd()))
+        collector.collect()
+        self._seed_exception(collector, "DbError", "timeout on shard B")
+        self.assertIsNotNone(collector.process_potential_incident("/orders", "POST", 500, 10.0, None, self._rd()))
+        collector.collect()
+        self.assertEqual(emitter.emit_incident_snapshot.call_count, 2)
+
+    def test_same_error_type_and_message_same_route_deduplicates(self):
+        collector, emitter = self._make_collector()
+        self._seed_exception(collector, "DbError", "timeout")
+        self.assertIsNotNone(collector.process_potential_incident("/orders", "POST", 500, 10.0, None, self._rd()))
+        collector.collect()
+        self._seed_exception(collector, "DbError", "timeout")
+        # Same recovered identity → same hash → period-deduplicated (max_same_error=1).
+        self.assertIsNone(collector.process_potential_incident("/orders", "POST", 500, 10.0, None, self._rd()))
+        collector.collect()
+        self.assertEqual(emitter.emit_incident_snapshot.call_count, 1)
+
+    def test_latency_incident_no_exception_keys_route_only(self):
+        collector, emitter = self._make_collector()
+        # No investigation exception; two slow 2xx on the same route dedup together (route-only).
+        self.assertIsNotNone(collector.process_potential_incident("/slow", "GET", 200, 6000.0, None, self._rd()))
+        collector.collect()
+        self.assertIsNone(collector.process_potential_incident("/slow", "GET", 200, 6000.0, None, self._rd()))
+        collector.collect()
+        self.assertEqual(emitter.emit_incident_snapshot.call_count, 1)
+
+
+class TestRateLimitedRequestDoesNotPoisonDedup(TestCase):
+    """Pure-check/commit ordering: a request rejected by the rate limit must NOT record a dedup
+    occurrence, or a later retry of that same error (after the rate window frees) is wrongly dropped
+    as a duplicate even though it never produced a snapshot."""
+
+    def setUp(self):
+        _ServiceEventsMonitorState._instance = None
+
+    @patch.object(IncidentSnapshotCollector, "_collect_incident_snapshot")
+    def test_rate_limited_error_does_not_consume_dedup_slot(self, mock_collect):
+        mock_collect.return_value = MagicMock()
+        # max_per_period=1, max_same_error=1. Two DISTINCT errors: the first emits (consuming the
+        # single rate slot); the second is rate-limited.
+        collector = IncidentSnapshotCollector(
+            flush_interval_ms=600000,
+            duration_threshold_ms=5000,
+            max_per_period=1,
+            max_same_error=1,
+        )
+        err_a = ValueError("A")
+        err_b = ValueError("B")
+        rd = {"headers": {}, "args": {}}
+        self.assertIsNotNone(collector.process_potential_incident("/x", "GET", 500, 10.0, err_a, rd))
+        # Second distinct error: passes dedup but the rate window (1) is full → rejected.
+        self.assertIsNone(collector.process_potential_incident("/x", "GET", 500, 10.0, err_b, rd))
+        # err_b left NO dedup timestamp and NO batch entry. Free the rate window and retry it in a
+        # fresh cycle: it must now emit (it was never actually recorded).
+        collector._snapshot_timestamps.clear()
+        collector.collect()
+        self.assertIsNotNone(collector.process_potential_incident("/x", "GET", 500, 10.0, err_b, rd))
+
+
+class TestEndpointExemplarTracksUpgrade(TestCase):
+    """Point #2: the exemplar dict returned to the endpoint collector is the SAME object indexed by
+    error hash, so a later whole-snapshot upgrade must mutate it in place to stay coherent."""
+
+    def setUp(self):
+        _ServiceEventsMonitorState._instance = None
+
+    def _make_collector(self):
+        return IncidentSnapshotCollector(
+            flush_interval_ms=600000,
+            duration_threshold_ms=5000,
+            max_per_period=100,
+            max_same_error=100,
+            otlp_emitter=MagicMock(),
+        )
+
+    @patch("amazon.opentelemetry.distro.serviceevents.collectors.incident_snapshot_collector.time")
+    def test_returned_exemplar_resyncs_timestamp_and_id_on_upgrade(self, mock_time):
+        # Drive time so the two occurrences get DIFFERENT timestamps. This is what makes the in-place
+        # exemplar["timestamp"] sync observable: if the mutation were dropped, the exemplar would keep
+        # the first occurrence's timestamp while the emitted snapshot carries the later one.
+        mock_time.time.return_value = 1_000.0
+        collector = self._make_collector()
+        err = ValueError("boom")
+        # First (unsampled) occurrence. This is the exemplar the endpoint collector records.
+        exemplar = collector.process_potential_incident("/api/x", "POST", 500, 50.0, err, {"headers": {}, "args": {}})
+        self.assertIsNotNone(exemplar)
+        first_timestamp = exemplar["timestamp"]
+        # Advance 5s, then a SAMPLED occurrence of the same error upgrades the pending snapshot
+        # wholesale. The already-returned exemplar dict (held by reference by the endpoint collector)
+        # must track the swap.
+        mock_time.time.return_value = 1_005.0
+        collector.process_potential_incident(
+            "/api/x", "POST", 500, 50.0, err, {"headers": {}, "args": {}, "trace_id": 0xAA, "span_id": 0xBB}
+        )
+        self.assertEqual(len(collector._pending_snapshots), 1)  # still ONE snapshot (batch dedup)
+        upgraded = collector._pending_snapshots[0]
+        # The emitter serializes snapshot_id/trigger_type/timestamp for the exemplar (severity is NOT
+        # on the wire), so those must stay coherent with the emitted (upgraded) snapshot.
+        self.assertEqual(exemplar["snapshot_id"], upgraded.snapshot_id)
+        self.assertEqual(exemplar["trigger_type"], upgraded.trigger_type)
+        # The exemplar timestamp moved to the upgraded snapshot's (later) timestamp, not the first.
+        self.assertGreater(upgraded.timestamp, first_timestamp)
+        self.assertEqual(exemplar["timestamp"], upgraded.timestamp)
+        # The upgraded snapshot now carries the sampled trace correlation.
+        self.assertIsNotNone(upgraded.telemetry_correlation.trace_id)
+
+    def test_upgrade_preserves_first_occurrence_operation(self):
+        # The dedup hash keys on route (not method), so GET /api/x and POST /api/x with the same error
+        # share a hash. The exemplar is filed under the FIRST occurrence's operation, so the swapped
+        # snapshot must keep the first occurrence's operation, not adopt the upgrader's method.
+        collector = self._make_collector()
+        err = ValueError("boom")
+        exemplar = collector.process_potential_incident("/api/x", "GET", 500, 50.0, err, {"headers": {}, "args": {}})
+        self.assertIsNotNone(exemplar)
+        self.assertEqual(exemplar["operation"], "GET /api/x")
+        # Sampled POST occurrence of the same error upgrades the pending (unsampled) GET snapshot.
+        collector.process_potential_incident(
+            "/api/x", "POST", 500, 50.0, err, {"headers": {}, "args": {}, "trace_id": 0xAA, "span_id": 0xBB}
+        )
+        self.assertEqual(len(collector._pending_snapshots), 1)
+        upgraded = collector._pending_snapshots[0]
+        # operation stays 'GET /api/x' (the exemplar's filed operation), NOT 'POST /api/x'.
+        self.assertEqual(upgraded.operation, "GET /api/x")
+        self.assertEqual(upgraded.snapshot_id, exemplar["snapshot_id"])
 
 
 class TestBuildCallPath(TestCase):
@@ -1312,7 +1537,7 @@ class TestCheckDeduplicationCleanup(TestCase):
             collector._error_hashes["stale_hash"] = [time.time() - 7200]
 
         # A different hash triggers the cleanup loop, which deletes the stale entry.
-        self.assertTrue(collector._check_deduplication("fresh_hash"))
+        self.assertTrue(collector._is_within_dedup_limit("fresh_hash"))
         self.assertNotIn("stale_hash", collector._error_hashes)
 
 

@@ -274,6 +274,16 @@ class ServiceEventsConfig:
             except ValueError:
                 return default
 
+        def get_int_clamped(env_var: str, default: int, minimum: int, maximum: int) -> int:
+            """Parse an integer env var and clamp it to [minimum, maximum].
+
+            Guards knobs where an out-of-range value would silently break the feature — e.g. a 0 or
+            negative incident cap would suppress ALL incident snapshots (deque(maxlen=0), or a dedup
+            gate that always fires). Clamps rather than raising so a fat-fingered value degrades
+            gracefully to the nearest sane bound. Mirrors the Node distro's getIntClamped.
+            """
+            return max(minimum, min(maximum, get_int(env_var, default)))
+
         def get_str(env_var: str, default: str) -> str:
             """Parse string environment variable."""
             return os.getenv(env_var, default)
@@ -353,9 +363,13 @@ class ServiceEventsConfig:
             return default
 
         # Resolve max_same_error up front so the incident-snapshot flush interval can be derived
-        # from it (below).
-        incident_max_same_error = get_int(
-            "OTEL_AWS_SERVICE_EVENTS_INCIDENT_SNAPSHOT_MAX_SAME_ERROR", defaults.incident_snapshot_max_same_error
+        # from it (below). Clamped to [1, 100000] (matches Node's getIntClamped): a 0/negative value
+        # would make the dedup gate always fire and silently suppress every incident snapshot.
+        incident_max_same_error = get_int_clamped(
+            "OTEL_AWS_SERVICE_EVENTS_INCIDENT_SNAPSHOT_MAX_SAME_ERROR",
+            defaults.incident_snapshot_max_same_error,
+            1,
+            100_000,
         )
         # Derive the incident-snapshot flush interval from max_same_error rather than exposing it
         # as an independent knob. Batch dedup keeps exactly one snapshot per error hash per flush
@@ -396,9 +410,14 @@ class ServiceEventsConfig:
             endpoint_flush_interval=defaults.endpoint_flush_interval,
             incident_snapshot_flush_interval=incident_flush_interval,
             deployment_event_flush_interval=defaults.deployment_event_flush_interval,
-            # Incident Snapshot Settings (rate-limit window fixed at 1 minute)
-            incident_snapshot_max_per_minute=get_int(
-                "OTEL_AWS_SERVICE_EVENTS_INCIDENT_SNAPSHOT_MAX_PER_MINUTE", defaults.incident_snapshot_max_per_minute
+            # Incident Snapshot Settings (rate-limit window fixed at 1 minute). Clamped to
+            # [1, 100000] (matches Node): a 0/negative cap would make the rate-limit gate always
+            # fire (deque(maxlen=0), len >= 0) and silently suppress every incident snapshot.
+            incident_snapshot_max_per_minute=get_int_clamped(
+                "OTEL_AWS_SERVICE_EVENTS_INCIDENT_SNAPSHOT_MAX_PER_MINUTE",
+                defaults.incident_snapshot_max_per_minute,
+                1,
+                100_000,
             ),
             incident_snapshot_duration_threshold_ms=get_int(
                 "OTEL_AWS_SERVICE_EVENTS_INCIDENT_SNAPSHOT_DURATION_THRESHOLD_MS",
