@@ -24,6 +24,9 @@ _OTEL_KEY_MAP = {
     "k8s.cluster.name": "k8s_cluster_name",
     "k8s.pod.name": "k8s_pod_name",
     "k8s.namespace.name": "k8s_namespace_name",
+    # Inputs the environment resolver needs to match the CloudWatch agent on ECS/EC2.
+    "aws.ecs.cluster.arn": "aws_ecs_cluster_arn",
+    "ec2.tag.aws:autoscaling:groupName": "ec2_autoscaling_group",
 }
 
 # Reverse mapping: field name -> OTel key
@@ -53,6 +56,8 @@ class ResourceAttributes:
     k8s_cluster_name: Optional[str] = None  # e.g., "my-cluster"
     k8s_pod_name: Optional[str] = None  # e.g., "my-pod-xyz"
     k8s_namespace_name: Optional[str] = None  # e.g., "default"
+    aws_ecs_cluster_arn: Optional[str] = None  # e.g., "arn:aws:ecs:...:cluster/my-cluster"
+    ec2_autoscaling_group: Optional[str] = None  # e.g., "my-asg"
 
     @classmethod
     def from_otel_resource(cls, resource) -> "ResourceAttributes":

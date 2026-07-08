@@ -42,6 +42,7 @@ from amazon.opentelemetry.distro.sampler._aws_xray_adaptive_sampling_config impo
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
 from amazon.opentelemetry.distro.scope_based_filtering_view import ScopeBasedRetainingView
+from amazon.opentelemetry.distro.serviceevents.utils.ec2_asg_detector import Ec2AutoScalingGroupResourceDetector
 from opentelemetry._events import set_event_logger_provider
 from opentelemetry._logs import get_logger_provider, set_logger_provider
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
@@ -200,7 +201,14 @@ def _initialize_components():
     auto_resource: Dict[str, any] = {}
     auto_resource = _customize_versions(auto_resource)
 
-    resource_detectors = (
+    # The EC2 ASG detector is intentionally NOT in the global detector list, so
+    # ec2.tag.aws:autoscaling:groupName does NOT ride the global resource (which feeds
+    # Application Signals). The CloudWatch agent reads that exact key off incoming telemetry
+    # (awsapplicationsignals processor) and would resolve the AppSignals EC2 environment from
+    # our SDK-sent value — so keeping it out of the global chain leaves AppSignals' environment
+    # untouched (the SDK's value flows only through ServiceEvents/DI). The ASG is instead
+    # resolved into the dedicated ServiceEvents resource below.
+    base_detectors = (
         [
             AwsEc2ResourceDetector(),
             AwsEksResourceDetector(),
@@ -210,7 +218,22 @@ def _initialize_components():
         else []
     )
 
-    resource = _customize_resource(get_aggregated_resources(resource_detectors).merge(Resource.create(auto_resource)))
+    resource = _customize_resource(get_aggregated_resources(base_detectors).merge(Resource.create(auto_resource)))
+
+    # ServiceEvents gets its OWN resource, built from a full copy of the detector set PLUS the
+    # custom EC2 ASG detector, so aws.local.environment can resolve ec2:<asg> without leaking
+    # the ASG tag onto the global/AppSignals resource.
+    serviceevents_resource = resource
+    if base_detectors:
+        serviceevents_detectors = [
+            AwsEc2ResourceDetector(),
+            Ec2AutoScalingGroupResourceDetector(),
+            AwsEksResourceDetector(),
+            AwsEcsResourceDetector(),
+        ]
+        serviceevents_resource = _customize_resource(
+            get_aggregated_resources(serviceevents_detectors).merge(Resource.create(auto_resource))
+        )
 
     sampler_name = _get_sampler()
     sampler = _custom_import_sampler(sampler_name, resource)
@@ -227,8 +250,9 @@ def _initialize_components():
     if logging_enabled.strip().lower() == "true":
         _init_logging(log_exporters, resource)
 
-    # Initialize ServiceEvents instrumentation
-    _init_serviceevents(resource)
+    # Initialize ServiceEvents instrumentation (uses the ServiceEvents-specific resource,
+    # which includes the EC2 ASG tag; see note above).
+    _init_serviceevents(serviceevents_resource)
 
 
 def _init_serviceevents(resource=None):

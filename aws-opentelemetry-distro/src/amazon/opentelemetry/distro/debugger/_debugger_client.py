@@ -17,8 +17,12 @@ from amazon.opentelemetry.distro._aws_resource_attribute_configurator import _OT
 from amazon.opentelemetry.distro._aws_span_processing_util import UNKNOWN_SERVICE
 from amazon.opentelemetry.distro.debugger._data_models import BreakpointConfiguration
 from amazon.opentelemetry.distro.debugger.instrumentation_manager import get_global_manager
+from amazon.opentelemetry.distro.serviceevents.utils.ec2_asg_detector import (
+    EC2_ASG_ATTRIBUTE,
+    Ec2AutoScalingGroupResourceDetector,
+)
+from amazon.opentelemetry.distro.serviceevents.utils.environment_resolver import resolve_local_environment
 from opentelemetry import trace
-from opentelemetry.semconv.resource import ResourceAttributes
 
 try:
     import requests
@@ -37,6 +41,19 @@ DEFAULT_API_URL = "http://localhost:2000"  # Default debugger API URL
 BASE_BACKOFF_INTERVAL = 10  # Base interval for exponential backoff (seconds)
 MAX_BACKOFF_ATTEMPTS = 3  # Maximum number of backoff attempts for initial fetch
 DEGRADED_POLL_INTERVAL = 300  # 5 minutes — used when API endpoint is unreachable
+
+# Process-wide memoized EC2 Auto Scaling group lookup. DI reads the global resource, which
+# omits the ASG tag so it does not ride the AppSignals path; on the EC2 branch the resolver
+# falls back to this lazy IMDS lookup. Sentinel None = not yet attempted.
+_CACHED_ASG: Optional[str] = None
+
+
+def _fetch_ec2_asg() -> str:
+    global _CACHED_ASG  # pylint: disable=global-statement
+    if _CACHED_ASG is None:
+        resource = Ec2AutoScalingGroupResourceDetector().detect()
+        _CACHED_ASG = str(resource.attributes.get(EC2_ASG_ATTRIBUTE, "") or "")
+    return _CACHED_ASG
 
 
 class DebuggerClient:
@@ -125,11 +142,20 @@ class DebuggerClient:
     @property
     def environment(self) -> str:
         """
-        Get environment from OpenTelemetry resource (lazy-loaded, cached after successful resolution).
+        Get aws.local.environment from the OpenTelemetry resource (lazy-loaded, cached).
 
-        Only caches successful environment resolution to handle timing issues with Resource population.
-        If environment is not yet available, returns "UnknownEnvironment" without caching,
-        allowing automatic retry on next call.
+        SDK-only environment resolution: rather than reading only an explicit
+        deployment.environment[.name], compute the full aws.local.environment from the
+        detected resource attributes using the same precedence as the CloudWatch agent
+        (explicit -> eks/k8s:<cluster>/<namespace> -> ecs:<cluster> -> ec2:<asg> ->
+        ec2:default -> generic:default). This makes DI self-sufficient — the value used as
+        the request's Environment lookup key matches Application Signals without relying on
+        the agent proxy to inject it.
+
+        Only caches once the resource carries platform context (for the fallback values
+        ec2:default / generic:default), to handle timing issues with Resource population.
+        Until then returns "UnknownEnvironment" without caching, allowing automatic retry on
+        the next call.
         """
         # Return cached value if we successfully found it before
         if self._cached_environment:
@@ -141,21 +167,30 @@ class DebuggerClient:
             tracer_provider = trace.get_tracer_provider()
             global_resource = tracer_provider.resource
 
-            # Try deployment.environment.name first, then DEPLOYMENT_ENVIRONMENT
-            environment = global_resource.attributes.get(
-                "deployment.environment.name"
-            ) or global_resource.attributes.get(ResourceAttributes.DEPLOYMENT_ENVIRONMENT)
+            # The global resource intentionally omits the EC2 ASG tag (it must not ride the
+            # AppSignals path), so on the EC2 branch the resolver falls back to a lazy IMDS
+            # lookup via the ASG detector. Other branches never invoke the supplier.
+            environment = resolve_local_environment(global_resource.attributes, _fetch_ec2_asg)
 
-            if environment:
-                # SUCCESS! Cache it so we never query again
+            # The resolver's fallback values (ec2:default, generic:default) are what a
+            # half-populated resource momentarily yields before async detectors settle, so
+            # require platform context before caching them — otherwise a still-populating
+            # resource would cache the wrong value and never retry. A specific value
+            # (eks:/k8s:/ecs:/ec2:<asg>/explicit env) is always safe to cache.
+            has_platform_context = any(
+                global_resource.attributes.get(key)
+                for key in ("cloud.platform", "k8s.cluster.name", "aws.ecs.cluster.arn", "host.id")
+            )
+            is_fallback = environment in ("ec2:default", "generic:default")
+            if environment and (not is_fallback or has_platform_context):
                 self._cached_environment = environment
                 logger.debug("Deployment environment resolved and cached: %s", environment)
                 return environment
         except Exception as exception:  # pylint: disable=broad-exception-caught
             logger.debug("Error getting environment from OpenTelemetry resource: %s", exception)
 
-        # Attribute not available yet - don't cache, try again next time
-        logger.debug("deployment.environment.name attribute not yet available, will retry on next call")
+        # Resource not populated yet - don't cache, try again next time
+        logger.debug("environment not yet resolvable from resource, will retry on next call")
         return "UnknownEnvironment"  # Don't cache - Resource might populate later
 
     @staticmethod
