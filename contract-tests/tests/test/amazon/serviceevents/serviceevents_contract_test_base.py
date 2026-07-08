@@ -634,10 +634,18 @@ class ServiceEventsContractTestBase(ServiceEventsTestInfrastructure):
             status_code=500,
         )
         # Verify trace context present (trace_id and span_id are bytes in OTLP proto).
+        # Correlation is sampling-conditional: the SDK only attaches trace_id/span_id when the
+        # request's trace was sampled (otherwise the link would point at a trace the backend never
+        # received). This suite forces OTEL_TRACES_SAMPLER=always_on (see _create_application above),
+        # so every request IS sampled and these ids are always populated. Under reduced sampling an
+        # unsampled request would still emit a complete IncidentSnapshot, but with empty
+        # trace_id/span_id and flags 0.
         self.assertTrue(any(logs[0].log_record.trace_id), "Expected non-zero trace_id")
         self.assertTrue(any(logs[0].log_record.span_id), "Expected non-zero span_id")
-        # The OTLP proto LogRecord exposes the trace flags as `flags`; SAMPLED (1)
-        # is set when both trace_id and span_id are present.
+        # The OTLP proto LogRecord exposes the trace flags as `flags`. The emitter sets the SAMPLED
+        # bit (1) whenever it attaches a trace_id/span_id, and — because correlation is only attached
+        # for sampled traces (fix #1) — that bit is present exactly when the incident is correlated.
+        # Here always_on guarantees correlation, so flags == 1.
         self.assertEqual(logs[0].log_record.flags, 1, "Expected SAMPLED trace flags")
         # VCS + deployment metadata (from env) also ride on IncidentSnapshot attributes.
         self.assert_vcs_and_deployment_attrs(logs[0])
