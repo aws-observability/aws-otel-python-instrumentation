@@ -246,11 +246,15 @@ jobs:
   #
   # Lambda layer integration tests
   lambda:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [ '3.10', '3.11', '3.12', '3.13', '3.14' ]
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-lambda-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
-      python-version: '3.12'
+      python-version: ${{ matrix.python-version }}
       caller-workflow-name: 'main-build'
   #
   # Stand-Alone ADOT/ADOT SigV4 test on EC2
