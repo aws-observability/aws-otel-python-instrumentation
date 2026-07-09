@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat(genai): capture user input and agent output on invoke_agent spans
+  ([#815](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/815))
 - refactor(serviceevents): make the endpoint span processor framework-agnostic
 - fix(serviceevents): gate incident trace correlation on the SAMPLED flag and harden incident dedup/rate-limiting
 - fix(genai): serialize list-valued message content into typed parts so multimodal/reasoning content is no longer stringified to a Python repr in `gen_ai.input/output.messages` across langchain, llama_index, and crewai
