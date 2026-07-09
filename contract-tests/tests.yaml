@@ -101,6 +101,15 @@ tests:
       - "3.11"
       - "3.12"
       - "3.13"
+  - name: openai_agents
+    paths:
+      - gen_ai/openai_agents
+    versions:
+      - "3.10"
+      - "3.11"
+      - "3.12"
+      - "3.13"
+      - "3.14"
   - name: serviceevents-flask
     paths:
       - serviceevents/flask_test.py
