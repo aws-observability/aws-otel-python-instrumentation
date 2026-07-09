@@ -46,6 +46,32 @@ class TestLLOHandlerCollection(LLOHandlerTestBase):
         self.assertEqual(message["role"], "user")
         self.assertEqual(message["source"], "prompt")
 
+    def test_collect_gen_ai_tool_call_content(self):
+        """
+        Verify gen_ai.tool.call.arguments/result are collected with role=tool and routed by source
+        (arguments -> input, result -> output).
+        """
+        attributes = {
+            "gen_ai.tool.call.arguments": '{"city": "Paris"}',
+            "gen_ai.tool.call.result": "72F and sunny",
+        }
+
+        span = self._create_mock_span(attributes)
+
+        messages = self.llo_handler._collect_all_llo_messages(span, attributes)
+
+        by_content = {msg["content"]: msg for msg in messages}
+        self.assertIn('{"city": "Paris"}', by_content)
+        self.assertIn("72F and sunny", by_content)
+
+        arguments_message = by_content['{"city": "Paris"}']
+        self.assertEqual(arguments_message["role"], "tool")
+        self.assertEqual(arguments_message["source"], "input")
+
+        result_message = by_content["72F and sunny"]
+        self.assertEqual(result_message["role"], "tool")
+        self.assertEqual(result_message["source"], "output")
+
     def test_collect_gen_ai_prompt_messages_assistant_role(self):
         """
         Verify indexed prompt messages with assistant role are collected with correct content, role, and source.

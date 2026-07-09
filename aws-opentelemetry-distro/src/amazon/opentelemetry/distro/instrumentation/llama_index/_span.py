@@ -54,6 +54,7 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     OPERATION_INVOKE_WORKFLOW,
     content_to_parts,
     serialize_to_json_string,
+    to_tool_attribute_value,
     try_detach,
 )
 from opentelemetry import context as context_api
@@ -346,7 +347,7 @@ class _Span(BaseSpan):
         if isinstance(instance, (BaseTool, FunctionTool)):
             kwargs = bound_args.kwargs
             if kwargs:
-                self[GEN_AI_TOOL_CALL_ARGUMENTS] = serialize_to_json_string(kwargs)
+                self[GEN_AI_TOOL_CALL_ARGUMENTS] = to_tool_attribute_value(kwargs)
 
     @singledispatchmethod
     def process_instance(self, instance: Any) -> None: ...  # noqa: E704  # pylint: disable=no-self-use
