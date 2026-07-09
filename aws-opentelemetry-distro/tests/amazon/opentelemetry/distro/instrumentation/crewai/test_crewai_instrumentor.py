@@ -657,7 +657,7 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertIsNotNone(tool_span.attributes)
         self.assertIn("get_greeting", tool_span.attributes[GEN_AI_TOOL_DESCRIPTION])
         self.assertIn(GEN_AI_TOOL_CALL_ARGUMENTS, tool_span.attributes)
-        self.assertEqual('"Hello, World!"', tool_span.attributes[GEN_AI_TOOL_CALL_RESULT])
+        self.assertEqual("Hello, World!", tool_span.attributes[GEN_AI_TOOL_CALL_RESULT])
 
         self._assert_span_parent(agent_span, crew_span)
         self._assert_span_parent(tool_span, agent_span)
