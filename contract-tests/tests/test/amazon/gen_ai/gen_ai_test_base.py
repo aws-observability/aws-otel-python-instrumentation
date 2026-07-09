@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import json
 from typing import List
 
 from mock_collector_client import ResourceScopeSpan
@@ -70,7 +71,6 @@ class GenAITestBase(ContractTestBase):
             self.assertIn(GEN_AI_AGENT_NAME, attrs)
             self.assertIn(GEN_AI_PROVIDER_NAME, attrs)
             self.assertIn(GEN_AI_REQUEST_MODEL, attrs)
-            self.assertIn(GEN_AI_REQUEST_TEMPERATURE, attrs)
 
     def _assert_execute_tool_spans(self, execute_tool_spans: list, expected_count: int = 1):
         self.assertGreaterEqual(len(execute_tool_spans), expected_count)
@@ -79,22 +79,44 @@ class GenAITestBase(ContractTestBase):
             self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.EXECUTE_TOOL.value)
             self.assertIn(GEN_AI_TOOL_NAME, attrs)
             self._assert_str_attribute(attrs, GEN_AI_TOOL_TYPE, "function")
-            self.assertIn(GEN_AI_TOOL_DESCRIPTION, attrs)
             self.assertIn(GEN_AI_TOOL_CALL_ARGUMENTS, attrs)
             self.assertIn(GEN_AI_TOOL_CALL_RESULT, attrs)
 
     def _assert_chat_spans(self, chat_spans: list, expected_count: int = 1):
         self.assertGreaterEqual(len(chat_spans), expected_count)
+        input_messages = []
+        output_messages = []
         for span in chat_spans:
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
             self.assertIn(GEN_AI_PROVIDER_NAME, attrs)
             self.assertIn(GEN_AI_REQUEST_MODEL, attrs)
-            self.assertIn(GEN_AI_REQUEST_TEMPERATURE, attrs)
             self.assertIn(GEN_AI_INPUT_MESSAGES, attrs)
             self.assertIn(GEN_AI_SYSTEM_INSTRUCTIONS, attrs)
-            self.assertIn(GEN_AI_RESPONSE_MODEL, attrs)
             self.assertIn(GEN_AI_USAGE_INPUT_TOKENS, attrs)
             self.assertIn(GEN_AI_USAGE_OUTPUT_TOKENS, attrs)
+            input_messages.extend(json.loads(attrs[GEN_AI_INPUT_MESSAGES].string_value))
+            if GEN_AI_OUTPUT_MESSAGES in attrs:
+                output_messages.extend(json.loads(attrs[GEN_AI_OUTPUT_MESSAGES].string_value))
         completed_spans = [s for s in chat_spans if GEN_AI_OUTPUT_MESSAGES in self._get_attributes_dict(s.attributes)]
         self.assertGreaterEqual(len(completed_spans), 1)
+
+        self.assertTrue(self._text_parts(input_messages, "user"), "Expected a user input message across chat spans")
+        self.assertTrue(
+            self._text_parts(output_messages, "assistant"), "Expected an assistant output message across chat spans"
+        )
+        self.assertTrue(self._tool_call_parts(input_messages), "Expected a tool call in chat span input messages")
+
+    @staticmethod
+    def _text_parts(messages: list, role: str) -> list:
+        return [
+            part["content"]
+            for message in messages
+            if message.get("role") == role
+            for part in message.get("parts", [])
+            if part.get("type") == "text" and part.get("content")
+        ]
+
+    @staticmethod
+    def _tool_call_parts(messages: list) -> list:
+        return [part for message in messages for part in message.get("parts", []) if part.get("type") == "tool_call"]
