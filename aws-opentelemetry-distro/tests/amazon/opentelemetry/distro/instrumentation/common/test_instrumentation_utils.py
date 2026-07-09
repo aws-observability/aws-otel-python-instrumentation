@@ -55,7 +55,6 @@ class TestInstrumentationUtils(TestCase):
         self.assertEqual(result, str(obj))
 
     def test_serialize_bytes_base64_encoded(self):
-        # bytes are base64-encoded rather than dropped (matches OTel util-genai encoder).
         raw = b"\x89PNG\r\n"
         expected = b64encode(raw).decode()
         self.assertEqual(serialize_to_json_string(raw), json.dumps(expected))
@@ -65,6 +64,11 @@ class TestInstrumentationUtils(TestCase):
         result = serialize_to_json_string({"parts": [{"type": "blob", "content": raw}]})
         self.assertIn(b64encode(raw).decode(), result)
         self.assertIn('"content"', result)
+
+    def test_to_tool_attribute_value_dict_with_bytes_base64_encoded(self):
+        raw = b"\x89PNG\r\n"
+        result = to_tool_attribute_value({"parts": [{"type": "blob", "content": raw}]})
+        self.assertEqual(json.loads(result), {"parts": [{"type": "blob", "content": b64encode(raw).decode()}]})
 
     def test_to_tool_attribute_value_primitives_kept_native(self):
         self.assertEqual(to_tool_attribute_value("Hello, World!"), "Hello, World!")
