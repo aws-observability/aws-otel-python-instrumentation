@@ -4,9 +4,10 @@
 import json
 import logging
 import threading
+from base64 import b64encode
 from contextvars import Token
 from functools import wraps
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Union
 
 from wrapt import wrap_function_wrapper
 
@@ -80,8 +81,17 @@ class DictWithLock:
             return len(self._data)
 
 
+class _GenAIJSONEncoder(json.JSONEncoder):
+    # Mirrors the OTel util-genai encoder: bytes are emitted as base64 text rather than dropped.
+    # https://github.com/open-telemetry/opentelemetry-python-genai/blob/main/util/opentelemetry-util-genai/src/opentelemetry/util/genai/utils.py
+    def default(self, o: Any) -> Any:
+        if isinstance(o, bytes):
+            return b64encode(o).decode()
+        return super().default(o)
+
+
 def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:
-    json_safe_types = (str, int, float, bool, dict, list, tuple, type(None))
+    json_safe_types = (str, int, float, bool, bytes, dict, list, tuple, type(None))
 
     def _sanitize(obj: Any, depth: int) -> Any:
         if depth <= 0:
@@ -93,9 +103,23 @@ def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:
         return obj
 
     try:
-        return json.dumps(_sanitize(value, max_depth))
+        return json.dumps(_sanitize(value, max_depth), cls=_GenAIJSONEncoder)
     except (TypeError, ValueError):
         return str(value)
+
+
+def to_tool_attribute_value(value: Any) -> Union[str, int, float, bool, bytes, None]:
+    """Serialize a tool call argument/result for a span attribute the way OTel util-genai does.
+
+    Primitives (bool/str/bytes/int/float) are kept native; everything else is JSON-serialized,
+    falling back to str() when it is not JSON-serializable. Mirrors _any_value_to_attribute_value:
+    https://github.com/open-telemetry/opentelemetry-python-genai/blob/main/util/opentelemetry-util-genai/src/opentelemetry/util/genai/_tool_invocation.py
+    """
+    if value is None:
+        return None
+    if isinstance(value, (bool, str, bytes, int, float)):
+        return value
+    return serialize_to_json_string(value)
 
 
 def content_to_parts(content: Any) -> list:  # pylint: disable=too-many-branches
