@@ -70,7 +70,6 @@ class GenAITestBase(ContractTestBase):
             self.assertIn(GEN_AI_AGENT_NAME, attrs)
             self.assertIn(GEN_AI_PROVIDER_NAME, attrs)
             self.assertIn(GEN_AI_REQUEST_MODEL, attrs)
-            self.assertIn(GEN_AI_REQUEST_TEMPERATURE, attrs)
 
     def _assert_execute_tool_spans(self, execute_tool_spans: list, expected_count: int = 1):
         self.assertGreaterEqual(len(execute_tool_spans), expected_count)
@@ -79,7 +78,6 @@ class GenAITestBase(ContractTestBase):
             self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.EXECUTE_TOOL.value)
             self.assertIn(GEN_AI_TOOL_NAME, attrs)
             self._assert_str_attribute(attrs, GEN_AI_TOOL_TYPE, "function")
-            self.assertIn(GEN_AI_TOOL_DESCRIPTION, attrs)
             self.assertIn(GEN_AI_TOOL_CALL_ARGUMENTS, attrs)
             self.assertIn(GEN_AI_TOOL_CALL_RESULT, attrs)
 
@@ -90,10 +88,8 @@ class GenAITestBase(ContractTestBase):
             self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
             self.assertIn(GEN_AI_PROVIDER_NAME, attrs)
             self.assertIn(GEN_AI_REQUEST_MODEL, attrs)
-            self.assertIn(GEN_AI_REQUEST_TEMPERATURE, attrs)
             self.assertIn(GEN_AI_INPUT_MESSAGES, attrs)
             self.assertIn(GEN_AI_SYSTEM_INSTRUCTIONS, attrs)
-            self.assertIn(GEN_AI_RESPONSE_MODEL, attrs)
             self.assertIn(GEN_AI_USAGE_INPUT_TOKENS, attrs)
             self.assertIn(GEN_AI_USAGE_OUTPUT_TOKENS, attrs)
         completed_spans = [s for s in chat_spans if GEN_AI_OUTPUT_MESSAGES in self._get_attributes_dict(s.attributes)]

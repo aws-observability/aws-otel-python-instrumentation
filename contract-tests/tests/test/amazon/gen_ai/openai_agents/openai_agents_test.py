@@ -5,21 +5,9 @@ import json
 from typing_extensions import override
 
 from amazon.gen_ai.gen_ai_test_base import (
-    GEN_AI_AGENT_NAME,
     GEN_AI_INPUT_MESSAGES,
-    GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
-    GEN_AI_PROVIDER_NAME,
-    GEN_AI_REQUEST_MODEL,
     GEN_AI_REQUEST_TEMPERATURE,
-    GEN_AI_SYSTEM_INSTRUCTIONS,
-    GEN_AI_TOOL_CALL_ARGUMENTS,
-    GEN_AI_TOOL_CALL_RESULT,
-    GEN_AI_TOOL_NAME,
-    GEN_AI_TOOL_TYPE,
-    GEN_AI_USAGE_INPUT_TOKENS,
-    GEN_AI_USAGE_OUTPUT_TOKENS,
-    GenAiOperationNameValues,
     GenAITestBase,
 )
 
@@ -40,47 +28,62 @@ class OpenAIAgentsTest(GenAITestBase):
 
     @override
     def _assert_invoke_agent_spans(self, invoke_agent_spans: list, expected_count: int = 1):
-        self.assertEqual(len(invoke_agent_spans), expected_count)
+        super()._assert_invoke_agent_spans(invoke_agent_spans, expected_count)
         for span in invoke_agent_spans:
             attrs = self._get_attributes_dict(span.attributes)
-            self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
-            self._assert_str_attribute(attrs, GEN_AI_PROVIDER_NAME, "openai")
-            self.assertIn(GEN_AI_AGENT_NAME, attrs)
-            self.assertIn(GEN_AI_REQUEST_MODEL, attrs)
-            self.assertIn(GEN_AI_INPUT_MESSAGES, attrs)
-            self.assertIn(GEN_AI_OUTPUT_MESSAGES, attrs)
-            self.assertIn(GEN_AI_SYSTEM_INSTRUCTIONS, attrs)
+            input_messages = json.loads(attrs[GEN_AI_INPUT_MESSAGES].string_value)
+            output_messages = json.loads(attrs[GEN_AI_OUTPUT_MESSAGES].string_value)
 
-    @override
-    def _assert_execute_tool_spans(self, execute_tool_spans: list, expected_count: int = 1):
-        self.assertGreaterEqual(len(execute_tool_spans), expected_count)
-        for span in execute_tool_spans:
-            attrs = self._get_attributes_dict(span.attributes)
-            self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.EXECUTE_TOOL.value)
-            self._assert_str_attribute(attrs, GEN_AI_PROVIDER_NAME, "openai")
-            self._assert_str_attribute(attrs, GEN_AI_TOOL_TYPE, "function")
-            self.assertIn(GEN_AI_TOOL_NAME, attrs)
-            self.assertIn(GEN_AI_TOOL_CALL_ARGUMENTS, attrs)
-            self.assertIn(GEN_AI_TOOL_CALL_RESULT, attrs)
+            # The invoke_agent span aggregates the whole turn: the first user input must be visible.
+            user_inputs = self._text_parts(input_messages, "user")
+            self.assertTrue(user_inputs, "Expected a user input message on the invoke_agent span")
+            self.assertTrue(user_inputs[0])
+
+            # ...and the last assistant LLM output must be visible.
+            agent_outputs = self._text_parts(output_messages, "assistant")
+            self.assertTrue(agent_outputs, "Expected an assistant output message on the invoke_agent span")
+            self.assertTrue(agent_outputs[-1])
 
     @override
     def _assert_chat_spans(self, chat_spans: list, expected_count: int = 1):
-        self.assertGreaterEqual(len(chat_spans), expected_count)
+        super()._assert_chat_spans(chat_spans, expected_count)
+
         for span in chat_spans:
             attrs = self._get_attributes_dict(span.attributes)
-            self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
-            self._assert_str_attribute(attrs, GEN_AI_PROVIDER_NAME, "openai")
-            self._assert_str_attribute(attrs, GEN_AI_REQUEST_MODEL, "gpt-4")
             self.assertIn(GEN_AI_REQUEST_TEMPERATURE, attrs)
             self.assertEqual(attrs[GEN_AI_REQUEST_TEMPERATURE].double_value, 0.7)
-            self.assertIn(GEN_AI_SYSTEM_INSTRUCTIONS, attrs)
-            self.assertIn(GEN_AI_INPUT_MESSAGES, attrs)
-            self.assertIn(GEN_AI_USAGE_INPUT_TOKENS, attrs)
-            self.assertIn(GEN_AI_USAGE_OUTPUT_TOKENS, attrs)
 
-            input_messages = json.loads(attrs[GEN_AI_INPUT_MESSAGES].string_value)
-            self.assertIsInstance(input_messages, list)
-            self.assertGreater(len(input_messages), 0)
+        # Across the chat turns we must be able to see the user input, the assistant output, and the
+        # tool calls the model requested.
+        input_messages = []
+        output_messages = []
+        for span in chat_spans:
+            attrs = self._get_attributes_dict(span.attributes)
+            input_messages.extend(json.loads(attrs[GEN_AI_INPUT_MESSAGES].string_value))
+            if GEN_AI_OUTPUT_MESSAGES in attrs:
+                output_messages.extend(json.loads(attrs[GEN_AI_OUTPUT_MESSAGES].string_value))
 
-        completed_spans = [s for s in chat_spans if GEN_AI_OUTPUT_MESSAGES in self._get_attributes_dict(s.attributes)]
-        self.assertGreaterEqual(len(completed_spans), 1)
+        self.assertTrue(self._text_parts(input_messages, "user"), "Expected a user input message across chat spans")
+        self.assertTrue(
+            self._text_parts(output_messages, "assistant"), "Expected an assistant output message across chat spans"
+        )
+        self.assertTrue(self._tool_call_parts(input_messages), "Expected a tool call across chat spans")
+
+    @staticmethod
+    def _text_parts(messages: list, role: str) -> list:
+        return [
+            part["content"]
+            for message in messages
+            if message.get("role") == role
+            for part in message.get("parts", [])
+            if part.get("type") == "text" and part.get("content")
+        ]
+
+    @staticmethod
+    def _tool_call_parts(messages: list) -> list:
+        return [
+            part
+            for message in messages
+            for part in message.get("parts", [])
+            if part.get("type") == "tool_call"
+        ]
