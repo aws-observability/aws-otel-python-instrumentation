@@ -11,6 +11,8 @@ from amazon.gen_ai.gen_ai_test_base import (
     GenAITestBase,
 )
 
+_FINAL_AGENT_OUTPUT = "Hello, World!"
+
 
 class OpenAIAgentsTest(GenAITestBase):
     @override
@@ -19,9 +21,11 @@ class OpenAIAgentsTest(GenAITestBase):
         return "aws-application-signals-tests-openai_agents-app"
 
     def test_openai_agents_single_agent(self):
+        self._expected_user_inputs = {"Greet the world"}
         self.do_test_requests("openai_agents/agent", "GET", 200, 0, 0)
 
     def test_openai_agents_multi_agent(self):
+        self._expected_user_inputs = {"Greet the world", "Format: Hello World"}
         self.do_test_requests(
             "openai_agents/multiagent", "GET", 200, 0, 0, expected_agent_count=2, expected_tool_count=2
         )
@@ -29,6 +33,8 @@ class OpenAIAgentsTest(GenAITestBase):
     @override
     def _assert_invoke_agent_spans(self, invoke_agent_spans: list, expected_count: int = 1):
         super()._assert_invoke_agent_spans(invoke_agent_spans, expected_count)
+
+        first_user_inputs = set()
         for span in invoke_agent_spans:
             attrs = self._get_attributes_dict(span.attributes)
             input_messages = json.loads(attrs[GEN_AI_INPUT_MESSAGES].string_value)
@@ -36,9 +42,13 @@ class OpenAIAgentsTest(GenAITestBase):
 
             user_inputs = self._text_parts(input_messages, "user")
             self.assertTrue(user_inputs, "Expected a user input message on the invoke_agent span")
+            first_user_inputs.add(user_inputs[0])
 
             agent_outputs = self._text_parts(output_messages, "assistant")
             self.assertTrue(agent_outputs, "Expected an assistant output message on the invoke_agent span")
+            self.assertEqual(agent_outputs[-1], _FINAL_AGENT_OUTPUT)
+
+        self.assertEqual(first_user_inputs, self._expected_user_inputs)
 
     @override
     def _assert_chat_spans(self, chat_spans: list, expected_count: int = 1):
