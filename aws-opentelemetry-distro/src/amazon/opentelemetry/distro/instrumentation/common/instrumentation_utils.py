@@ -81,15 +81,6 @@ class DictWithLock:
             return len(self._data)
 
 
-class _GenAIJSONEncoder(json.JSONEncoder):
-    # Mirrors the OTel util-genai encoder: bytes are emitted as base64 text rather than dropped.
-    # https://github.com/open-telemetry/opentelemetry-python-genai/blob/main/util/opentelemetry-util-genai/src/opentelemetry/util/genai/utils.py
-    def default(self, o: Any) -> Any:
-        if isinstance(o, bytes):
-            return b64encode(o).decode()
-        return super().default(o)
-
-
 def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:
     json_safe_types = (str, int, float, bool, bytes, dict, list, tuple, type(None))
 
@@ -103,18 +94,12 @@ def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:
         return obj
 
     try:
-        return json.dumps(_sanitize(value, max_depth), cls=_GenAIJSONEncoder)
+        return json.dumps(_sanitize(value, max_depth), default=lambda o: b64encode(o).decode())
     except (TypeError, ValueError):
         return str(value)
 
 
 def to_tool_attribute_value(value: Any) -> Union[str, int, float, bool, bytes, None]:
-    """Serialize a tool call argument/result for a span attribute the way OTel util-genai does.
-
-    Primitives (bool/str/bytes/int/float) are kept native; everything else is JSON-serialized,
-    falling back to str() when it is not JSON-serializable. Mirrors _any_value_to_attribute_value:
-    https://github.com/open-telemetry/opentelemetry-python-genai/blob/main/util/opentelemetry-util-genai/src/opentelemetry/util/genai/_tool_invocation.py
-    """
     if value is None:
         return None
     if isinstance(value, (bool, str, bytes, int, float)):
