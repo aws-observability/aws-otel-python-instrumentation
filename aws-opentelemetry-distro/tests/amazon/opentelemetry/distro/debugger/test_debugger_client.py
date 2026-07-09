@@ -227,6 +227,69 @@ class TestFetchConfigurationByType(unittest.TestCase):
         self.assertEqual(result["LatestConfigurations"], [])
 
 
+class TestEnvironmentResolution(unittest.TestCase):
+    """The DI client's `environment` property computes the full aws.local.environment
+    from the OTel Resource using the same precedence as the CloudWatch agent, so the DI
+    request's Environment lookup key matches Application Signals (SDK-only resolution).
+    """
+
+    def _client_with_attributes(self, attributes):
+        client = DebuggerClient(
+            probe_poll_interval=60,
+            breakpoint_poll_interval=30,
+            service_name="my-service",
+            api_url="http://localhost:2000",
+        )
+        provider = mock.MagicMock()
+        provider.resource.attributes = attributes
+        return client, provider
+
+    def _resolve(self, attributes):
+        client, provider = self._client_with_attributes(attributes)
+        with mock.patch.object(dc_module.trace, "get_tracer_provider", return_value=provider):
+            return client.environment
+
+    def test_explicit_environment(self):
+        self.assertEqual("prod", self._resolve({"deployment.environment.name": "prod"}))
+
+    def test_eks_cluster_namespace(self):
+        env = self._resolve(
+            {
+                "cloud.platform": "aws_eks",
+                "k8s.cluster.name": "my-cluster",
+                "k8s.namespace.name": "default",
+            }
+        )
+        self.assertEqual("eks:my-cluster/default", env)
+
+    def test_ecs_cluster(self):
+        env = self._resolve(
+            {
+                "cloud.platform": "aws_ecs",
+                "aws.ecs.cluster.arn": "arn:aws:ecs:us-west-2:123456789012:cluster/my-ecs",
+            }
+        )
+        self.assertEqual("ecs:my-ecs", env)
+
+    def test_ec2_with_asg(self):
+        env = self._resolve({"cloud.platform": "aws_ec2", "ec2.tag.aws:autoscaling:groupName": "my-asg"})
+        self.assertEqual("ec2:my-asg", env)
+
+    def test_ec2_default_is_cached_with_platform_context(self):
+        client, provider = self._client_with_attributes({"cloud.platform": "aws_ec2"})
+        with mock.patch.object(dc_module.trace, "get_tracer_provider", return_value=provider):
+            self.assertEqual("ec2:default", client.environment)
+            # Platform context present -> ec2:default is a real answer and is cached.
+            self.assertEqual("ec2:default", client._cached_environment)
+
+    def test_empty_resource_returns_unknown_and_does_not_cache(self):
+        client, provider = self._client_with_attributes({})
+        with mock.patch.object(dc_module.trace, "get_tracer_provider", return_value=provider):
+            self.assertEqual("UnknownEnvironment", client.environment)
+            # No platform context yet -> don't cache, allow retry once the Resource fills in.
+            self.assertIsNone(client._cached_environment)
+
+
 class TestConfigurationPollerLogic(unittest.TestCase):
     def setUp(self):
         self.client = _make_client()

@@ -19,6 +19,7 @@ from amazon.opentelemetry.distro.serviceevents.collectors.endpoint_collector imp
 from amazon.opentelemetry.distro.serviceevents.collectors.incident_snapshot_collector import IncidentSnapshotCollector
 from amazon.opentelemetry.distro.serviceevents.config import ServiceEventsConfig
 from amazon.opentelemetry.distro.serviceevents.python_monitor import _ServiceEventsMonitorState
+from amazon.opentelemetry.distro.serviceevents.utils.environment_resolver import stamp_local_environment
 
 logger = logging.getLogger(__name__)
 
@@ -498,7 +499,9 @@ class ServiceEventsInstrumentation:
         git_repo_url = os.getenv("OTEL_AWS_SERVICE_EVENTS_GIT_REPO_URL", "")
         if git_repo_url:
             resource_attrs["vcs.repository.url.full"] = git_repo_url
-        # Add platform attributes from OTel Resource detectors
+        # Add platform attributes from OTel Resource detectors. Includes the k8s/ECS/EC2
+        # inputs the environment resolver needs (cluster, namespace, ECS cluster ARN, ASG)
+        # so it can compute aws.local.environment to match the CloudWatch agent.
         if self.config.resource_attributes:
             ra = self.config.resource_attributes
             for attr_name, attr_key in [
@@ -510,10 +513,21 @@ class ServiceEventsInstrumentation:
                 ("host_id", "host.id"),
                 ("host_type", "host.type"),
                 ("container_id", "container.id"),
+                ("k8s_cluster_name", "k8s.cluster.name"),
+                ("k8s_namespace_name", "k8s.namespace.name"),
+                ("aws_ecs_cluster_arn", "aws.ecs.cluster.arn"),
+                ("ec2_autoscaling_group", "ec2.tag.aws:autoscaling:groupName"),
             ]:
                 val = getattr(ra, attr_name, None)
                 if val:
                     resource_attrs[attr_key] = val
+
+        # SDK-only environment resolution: compute aws.local.environment from the
+        # resource attributes using the same precedence as the CloudWatch agent, so
+        # ServiceEvents correlates with Application Signals. An explicit
+        # deployment.environment[.name] (set above) still wins via the resolver.
+        stamp_local_environment(resource_attrs)
+
         resource = Resource.create(resource_attrs)
 
         # Dedicated LoggerProvider for ServiceEvents OTLP signals.
