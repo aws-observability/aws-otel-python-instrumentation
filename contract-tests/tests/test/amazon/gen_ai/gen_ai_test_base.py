@@ -119,9 +119,4 @@ class GenAITestBase(ContractTestBase):
 
     @staticmethod
     def _tool_call_parts(messages: list) -> list:
-        return [
-            part
-            for message in messages
-            for part in message.get("parts", [])
-            if part.get("type") == "tool_call"
-        ]
+        return [part for message in messages for part in message.get("parts", []) if part.get("type") == "tool_call"]
