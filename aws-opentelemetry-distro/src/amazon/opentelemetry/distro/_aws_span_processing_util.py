@@ -287,8 +287,15 @@ def _is_valid_operation(span: ReadableSpan, operation: str) -> bool:
 
 def _generate_ingress_operation(span: ReadableSpan) -> str:
     """
-    When span name is not meaningful, this method is invoked to try to extract the operation name from either
-    `http.target`, if present, or from `http.url`, and combine with `http.method`.
+    When span name is not meaningful, this method is invoked to try to extract the operation name from the
+    request path — legacy `http.target`/`http.url` first, then stable `url.path`/`url.full` — combined with
+    the HTTP method (legacy `http.method` or stable `http.request.method`).
+
+    The stable (`url.path`/`url.full`, `http.request.method`) fallbacks matter for apps that opt into
+    stable-only HTTP semconv (OTEL_SEMCONV_STABILITY_OPT_IN=http), where the legacy attributes are absent.
+    Without them, an unmatched/scanner request (e.g. GET /wp-admin with no matched route) would yield
+    UnknownOperation and be dropped instead of tracked as `GET /wp-admin`. Matches the Node distro's
+    generateIngressOperation, which already reads both attribute families.
     """
     operation: str = UNKNOWN_OPERATION
     http_path: str = None
@@ -298,14 +305,21 @@ def _generate_ingress_operation(span: ReadableSpan) -> str:
         http_url = span.attributes.get(SpanAttributes.HTTP_URL)
         url: ParseResult = urlparse(http_url)
         http_path = url.path
+    elif is_key_present(span, SpanAttributes.URL_PATH):
+        http_path = span.attributes.get(SpanAttributes.URL_PATH)
+    elif is_key_present(span, SpanAttributes.URL_FULL):
+        url: ParseResult = urlparse(span.attributes.get(SpanAttributes.URL_FULL))
+        http_path = url.path
 
     # get the first part from API path string as operation value
     # the more levels/parts we get from API path the higher chance for getting high cardinality data
     if http_path is not None:
         operation = extract_api_path_value(http_path)
-        if is_key_present(span, SpanAttributes.HTTP_METHOD):
-            http_method: str = span.attributes.get(SpanAttributes.HTTP_METHOD)
-            if http_method is not None:
-                operation = http_method + " " + operation
+        # Method: legacy http.method first, then stable http.request.method.
+        http_method = span.attributes.get(SpanAttributes.HTTP_METHOD) or span.attributes.get(
+            SpanAttributes.HTTP_REQUEST_METHOD
+        )
+        if http_method is not None:
+            operation = http_method + " " + operation
 
     return operation
