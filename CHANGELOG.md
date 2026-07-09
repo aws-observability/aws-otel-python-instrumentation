@@ -14,6 +14,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 - fix(genai): serialize tool call arguments/results and blob bytes to match OTel util-genai (primitives kept native, bytes base64-encoded)
   ([#817](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/817))
+- feat(genai): extract gen_ai.tool.call.arguments/result as LLO content
+  ([#816](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/816))
 - feat(genai): capture user input and agent output on invoke_agent spans
   ([#815](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/815))
 - refactor(serviceevents): make the endpoint span processor framework-agnostic
