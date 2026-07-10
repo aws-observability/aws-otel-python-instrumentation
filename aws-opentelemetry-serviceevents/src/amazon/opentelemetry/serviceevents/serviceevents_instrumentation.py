@@ -289,7 +289,6 @@ class ServiceEventsInstrumentation:
                 environment=self.config.environment,
                 service_name=self.config.service_name,
                 sdk_version=self.config.sdk_version,
-                capture_request_body=self.config.incident_snapshot_capture_request_body,
                 max_same_error=self.config.incident_snapshot_max_same_error,
                 resource_attributes=self.config.resource_attributes,
                 otlp_emitter=otlp_emitter,
@@ -307,60 +306,13 @@ class ServiceEventsInstrumentation:
                 self.config.incident_snapshot_flush_interval,
             )
 
-            # Phase 3: Initialize framework hooks (auto-detect via ImportError)
-            try:
-                # Optional framework dep — auto-detected via ImportError.
-                # pylint: disable=import-outside-toplevel
-                from amazon.opentelemetry.serviceevents.instrumentation.flask_instrumentation import (
-                    install_flask_hooks,
-                )
-
-                install_flask_hooks(
-                    endpoint_collector=endpoint_collector,
-                    incident_snapshot_collector=incident_snapshot_collector,
-                    config=self.config,
-                )
-                logger.info("Flask instrumentation hooks installed")
-            except ImportError:
-                logger.debug("Flask not installed, skipping Flask instrumentation")
-            except Exception as exc:  # pylint: disable=broad-exception-caught  # telemetry must not crash app
-                logger.error("Error installing Flask hooks: %s", exc, exc_info=True)
-
-            try:
-                # Optional framework dep — auto-detected via ImportError.
-                # pylint: disable=import-outside-toplevel
-                from amazon.opentelemetry.serviceevents.instrumentation.fastapi_instrumentation import (
-                    install_fastapi_hooks,
-                )
-
-                install_fastapi_hooks(
-                    endpoint_collector=endpoint_collector,
-                    incident_snapshot_collector=incident_snapshot_collector,
-                    config=self.config,
-                )
-                logger.info("FastAPI instrumentation hooks installed")
-            except ImportError:
-                logger.debug("FastAPI not installed, skipping FastAPI instrumentation")
-            except Exception as exc:  # pylint: disable=broad-exception-caught  # telemetry must not crash app
-                logger.error("Error installing FastAPI hooks: %s", exc, exc_info=True)
-
-            try:
-                # Optional framework dep — auto-detected via ImportError.
-                # pylint: disable=import-outside-toplevel
-                from amazon.opentelemetry.serviceevents.instrumentation.django_instrumentation import (
-                    install_django_hooks,
-                )
-
-                install_django_hooks(
-                    endpoint_collector=endpoint_collector,
-                    incident_snapshot_collector=incident_snapshot_collector,
-                    config=self.config,
-                )
-                logger.info("Django instrumentation hooks installed")
-            except ImportError:
-                logger.debug("Django not installed, skipping Django instrumentation")
-            except Exception as exc:  # pylint: disable=broad-exception-caught  # telemetry must not crash app
-                logger.error("Error installing Django hooks: %s", exc, exc_info=True)
+            # Phase 3: Endpoint measurement. ONE framework-agnostic SpanProcessor (the Python port
+            # of Java's ServiceEventsSpanProcessor) reads the request-boundary span OTel already
+            # emits and derives endpoint metrics + incident snapshots from span attributes — covering
+            # every OTel-instrumented framework with no per-framework hook code. A registration miss
+            # (e.g. an API-only NoOp provider with no add_span_processor) is logged and swallowed;
+            # ServiceEvents then emits no endpoint signals rather than crashing the host app.
+            self._install_endpoint_span_processor(endpoint_collector, incident_snapshot_collector)
 
             # Register fork handler for multi-process servers (e.g., gunicorn)
             try:
@@ -384,6 +336,73 @@ class ServiceEventsInstrumentation:
             logger.error("Failed to initialize ServiceEvents instrumentation: %s", exc, exc_info=True)
             # Don't crash application - graceful degradation
             self._initialized = False
+
+    def _install_endpoint_span_processor(self, endpoint_collector, incident_snapshot_collector) -> bool:
+        """Register the framework-agnostic endpoint span processor on the active tracer provider.
+
+        The processor reads SERVER / local-root spans from OTel's own framework instrumentation, so
+        it covers every instrumented framework without bespoke hook code. A failure here is logged
+        and swallowed — telemetry must never crash the host app, and ServiceEvents degrades
+        gracefully rather than aborting the whole initialize().
+
+        Returns True when the processor was registered, False when the active provider has no
+        ``add_span_processor`` (e.g. the API-only NoOp provider) or registration raised — in which
+        case ServiceEvents emits no endpoint signals (there is no span pipeline to read from).
+        """
+        try:
+            # Deferred imports: keep this module importable without the OTel SDK present.
+            # pylint: disable=import-outside-toplevel
+            from amazon.opentelemetry.serviceevents.processor.endpoint_span_processor import (
+                ServiceEventsSpanProcessor,
+            )
+            from opentelemetry.trace import get_tracer_provider
+
+            provider = get_tracer_provider()
+            if not hasattr(provider, "add_span_processor"):
+                # No SDK TracerProvider installed (e.g. the API-only NoOp provider). Without a
+                # span pipeline the processor can never fire, so report failure — ServiceEvents
+                # emits no endpoint signals on such a provider.
+                logger.warning(
+                    "ServiceEvents endpoint span processor: the active tracer provider has no "
+                    "add_span_processor (%s); endpoint signals will not be emitted",
+                    type(provider).__name__,
+                )
+                return False
+
+            # Idempotency guard: the SDK's add_span_processor APPENDS with no de-dup, so
+            # registering again on a provider that already carries our processor (a re-init, or a
+            # forked child that inherited the parent's provider) would fire on_start/on_end twice
+            # per span and double-count every endpoint metric. Skip if one is already present.
+            if self._provider_has_endpoint_processor(provider, ServiceEventsSpanProcessor):
+                logger.info("ServiceEvents endpoint span processor already registered; skipping re-registration")
+                return True
+
+            processor = ServiceEventsSpanProcessor(
+                endpoint_collector=endpoint_collector,
+                incident_snapshot_collector=incident_snapshot_collector,
+                config=self.config,
+            )
+            provider.add_span_processor(processor)
+            logger.info("ServiceEvents endpoint span processor installed (framework-agnostic mode)")
+            return True
+        except Exception as exc:  # pylint: disable=broad-exception-caught  # telemetry must not crash app
+            logger.error("Error installing ServiceEvents endpoint span processor: %s", exc, exc_info=True)
+            return False
+
+    @staticmethod
+    def _provider_has_endpoint_processor(provider, processor_cls) -> bool:
+        """True when the provider already carries an ServiceEventsSpanProcessor.
+
+        Introspects the SDK's ``_active_span_processor._span_processors`` (a
+        ``(Synchronous|Concurrent)MultiSpanProcessor`` holds its children there). Best-effort:
+        any unexpected provider shape returns False so registration proceeds — at worst we fall
+        back to the prior append behavior, which is the pre-guard baseline.
+        """
+        active = getattr(provider, "_active_span_processor", None)
+        registered = getattr(active, "_span_processors", None)
+        if not isinstance(registered, (list, tuple)):
+            return False
+        return any(isinstance(sp, processor_cls) for sp in registered)
 
     # Tested provider/exporter wiring — kept whole rather than fragmented.
     def _create_otlp_emitter(self):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements

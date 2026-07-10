@@ -12,6 +12,14 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix(genai): serialize tool call arguments/results and blob bytes to match OTel util-genai (primitives kept native, bytes base64-encoded)
+  ([#817](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/817))
+- feat(genai): extract gen_ai.tool.call.arguments/result as LLO content
+  ([#816](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/816))
+- feat(genai): capture user input and agent output on invoke_agent spans
+  ([#815](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/815))
+- refactor(serviceevents): make the endpoint span processor framework-agnostic
+- fix(serviceevents): gate incident trace correlation on the SAMPLED flag and harden incident dedup/rate-limiting
 - fix(genai): serialize list-valued message content into typed parts so multimodal/reasoning content is no longer stringified to a Python repr in `gen_ai.input/output.messages` across langchain, llama_index, and crewai
   ([#805](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/805))
 - feat: add OTel lite SDK for Lambda cold start optimization

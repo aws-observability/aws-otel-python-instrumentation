@@ -630,6 +630,20 @@ class TestCrewAIInstrumentor(TestCase):
             },
         )
 
+        agent_input_messages = json.loads(agent_span.attributes[GEN_AI_INPUT_MESSAGES])
+        validate_otel_genai_schema(agent_input_messages, "gen-ai-input-messages")
+        self.assertTrue(
+            any(
+                part.get("type") == "text" and "Greet the user warmly." in part.get("content", "")
+                for message in agent_input_messages
+                if message.get("role") == "user"
+                for part in message.get("parts", [])
+            )
+        )
+        agent_output_messages = json.loads(agent_span.attributes[GEN_AI_OUTPUT_MESSAGES])
+        validate_otel_genai_schema(agent_output_messages, "gen-ai-output-messages")
+        self.assertTrue(any(message.get("role") == "assistant" for message in agent_output_messages))
+
         self._assert_span_attributes(
             spans,
             "execute_tool get_greeting",
@@ -643,7 +657,7 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertIsNotNone(tool_span.attributes)
         self.assertIn("get_greeting", tool_span.attributes[GEN_AI_TOOL_DESCRIPTION])
         self.assertIn(GEN_AI_TOOL_CALL_ARGUMENTS, tool_span.attributes)
-        self.assertEqual('"Hello, World!"', tool_span.attributes[GEN_AI_TOOL_CALL_RESULT])
+        self.assertEqual("Hello, World!", tool_span.attributes[GEN_AI_TOOL_CALL_RESULT])
 
         self._assert_span_parent(agent_span, crew_span)
         self._assert_span_parent(tool_span, agent_span)

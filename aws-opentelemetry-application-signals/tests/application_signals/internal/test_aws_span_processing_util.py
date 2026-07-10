@@ -126,6 +126,71 @@ class TestAwsSpanProcessingUtil(TestCase):
         expected_operation = f"{valid_method} {valid_target}"
         self.assertEqual(actual_operation, expected_operation)
 
+    def test_get_ingress_operation_invalid_name_and_stable_url_path(self):
+        # Stable-only HTTP semconv (OTEL_SEMCONV_STABILITY_OPT_IN=http): legacy http.target/http.url
+        # are absent, so the operation must fall back to stable url.path. Without this an unmatched
+        # request yields UnknownOperation and is dropped.
+        self.span_data_mock.name = None
+        self.span_data_mock.kind = SpanKind.SERVER
+
+        def attributes_get_side_effect(key):
+            if key == SpanAttributes.URL_PATH:
+                return "/wp-admin"
+            return None
+
+        self.attributes_mock.get.side_effect = attributes_get_side_effect
+        actual_operation = get_ingress_operation(self, self.span_data_mock)
+        self.assertEqual(actual_operation, "/wp-admin")
+
+    def test_get_ingress_operation_invalid_name_and_stable_url_path_and_method(self):
+        # Stable url.path + stable http.request.method → "GET /wp-admin".
+        self.span_data_mock.name = None
+        self.span_data_mock.kind = SpanKind.SERVER
+
+        def attributes_get_side_effect(key):
+            if key == SpanAttributes.URL_PATH:
+                return "/wp-admin"
+            if key == SpanAttributes.HTTP_REQUEST_METHOD:
+                return "GET"
+            return None
+
+        self.attributes_mock.get.side_effect = attributes_get_side_effect
+        actual_operation = get_ingress_operation(self, self.span_data_mock)
+        self.assertEqual(actual_operation, "GET /wp-admin")
+
+    def test_get_ingress_operation_invalid_name_and_stable_url_full(self):
+        # Only stable url.full present → path extracted via urlparse.
+        self.span_data_mock.name = None
+        self.span_data_mock.kind = SpanKind.SERVER
+
+        def attributes_get_side_effect(key):
+            if key == SpanAttributes.URL_FULL:
+                return "https://example.com/wp-admin/login?a=b"
+            if key == SpanAttributes.HTTP_REQUEST_METHOD:
+                return "POST"
+            return None
+
+        self.attributes_mock.get.side_effect = attributes_get_side_effect
+        actual_operation = get_ingress_operation(self, self.span_data_mock)
+        self.assertEqual(actual_operation, "POST /wp-admin")
+
+    def test_get_ingress_operation_legacy_target_preferred_over_stable_url_path(self):
+        # When both legacy http.target and stable url.path are present, legacy wins (legacy-first
+        # ordering) so App Signals behavior under default/legacy semconv is unchanged.
+        self.span_data_mock.name = None
+        self.span_data_mock.kind = SpanKind.SERVER
+
+        def attributes_get_side_effect(key):
+            if key == SpanAttributes.HTTP_TARGET:
+                return "/legacy"
+            if key == SpanAttributes.URL_PATH:
+                return "/stable"
+            return None
+
+        self.attributes_mock.get.side_effect = attributes_get_side_effect
+        actual_operation = get_ingress_operation(self, self.span_data_mock)
+        self.assertEqual(actual_operation, "/legacy")
+
     def test_get_egress_operation_use_internal_operation(self):
         invalid_name = None
         self.span_data_mock.name = invalid_name

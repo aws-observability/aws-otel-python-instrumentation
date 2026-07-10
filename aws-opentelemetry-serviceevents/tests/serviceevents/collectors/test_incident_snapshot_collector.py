@@ -165,13 +165,13 @@ class TestDetermineSeverity(TestCase):
 
 
 class TestCheckRateLimit(TestCase):
-    """Test the _check_rate_limit method."""
+    """Test the atomic _try_reserve_rate_limit_slot (check-and-reserve under one lock hold)."""
 
     def setUp(self):
         _ServiceEventsMonitorState._instance = None
 
     def test_allows_within_limit(self):
-        """Test that requests within limit are allowed."""
+        """Test that requests within limit are allowed, each reservation consuming one slot."""
         collector = IncidentSnapshotCollector(
             flush_interval_ms=10000,
             duration_threshold_ms=1000,
@@ -179,7 +179,7 @@ class TestCheckRateLimit(TestCase):
         )
 
         for _ in range(5):
-            self.assertTrue(collector._check_rate_limit())
+            self.assertTrue(collector._try_reserve_rate_limit_slot())
 
     def test_denies_over_limit(self):
         """Test that requests over limit are denied."""
@@ -189,12 +189,41 @@ class TestCheckRateLimit(TestCase):
             max_per_period=3,
         )
 
-        # Fill up the limit
+        # Fill up the limit — each successful reservation consumes a slot.
         for _ in range(3):
-            self.assertTrue(collector._check_rate_limit())
+            self.assertTrue(collector._try_reserve_rate_limit_slot())
 
         # Next should be denied
-        self.assertFalse(collector._check_rate_limit())
+        self.assertFalse(collector._try_reserve_rate_limit_slot())
+
+    def test_rejected_reservation_consumes_no_slot(self):
+        """A rejected reservation must NOT consume a slot: once full, repeated calls stay False and
+        the count never grows past max_per_period."""
+        collector = IncidentSnapshotCollector(
+            flush_interval_ms=10000,
+            duration_threshold_ms=1000,
+            max_per_period=1,
+        )
+
+        # One reservation fills the single slot.
+        self.assertTrue(collector._try_reserve_rate_limit_slot())
+        # Further attempts are rejected and do not append phantom slots.
+        for _ in range(5):
+            self.assertFalse(collector._try_reserve_rate_limit_slot())
+        self.assertEqual(len(collector._snapshot_timestamps), 1)
+
+    def test_reservation_is_atomic_check_and_append(self):
+        """A successful reservation appends exactly one timestamp in the same call (no separate
+        commit step) — the property that prevents concurrent distinct-hash overshoot."""
+        collector = IncidentSnapshotCollector(
+            flush_interval_ms=10000,
+            duration_threshold_ms=1000,
+            max_per_period=5,
+        )
+
+        self.assertEqual(len(collector._snapshot_timestamps), 0)
+        self.assertTrue(collector._try_reserve_rate_limit_slot())
+        self.assertEqual(len(collector._snapshot_timestamps), 1)
 
     def test_old_entries_expire(self):
         """Test that old entries expire and free up capacity."""
@@ -205,9 +234,9 @@ class TestCheckRateLimit(TestCase):
         )
 
         # Fill up the limit
-        self.assertTrue(collector._check_rate_limit())
-        self.assertTrue(collector._check_rate_limit())
-        self.assertFalse(collector._check_rate_limit())
+        self.assertTrue(collector._try_reserve_rate_limit_slot())
+        self.assertTrue(collector._try_reserve_rate_limit_slot())
+        self.assertFalse(collector._try_reserve_rate_limit_slot())
 
         # Manually age out old entries by modifying timestamps
         with collector._timestamps_lock:
@@ -217,7 +246,7 @@ class TestCheckRateLimit(TestCase):
             collector._snapshot_timestamps.append(old_time)
 
         # Now should be allowed (old entries expired)
-        self.assertTrue(collector._check_rate_limit())
+        self.assertTrue(collector._try_reserve_rate_limit_slot())
 
 
 class TestGenerateErrorHash(TestCase):
@@ -269,7 +298,7 @@ class TestGenerateErrorHash(TestCase):
 
 
 class TestCheckDeduplication(TestCase):
-    """Test the _check_deduplication method."""
+    """Test the _is_within_dedup_limit (pure check) + _record_error_hash (commit) pair."""
 
     def setUp(self):
         _ServiceEventsMonitorState._instance = None
@@ -283,7 +312,23 @@ class TestCheckDeduplication(TestCase):
             max_same_error=2,
         )
 
-        self.assertTrue(collector._check_deduplication("error_hash_1"))
+        self.assertTrue(collector._is_within_dedup_limit("error_hash_1"))
+
+    def test_pure_check_does_not_consume_slot(self):
+        """The pure check is idempotent — repeated calls without record() never dedup."""
+        collector = IncidentSnapshotCollector(
+            flush_interval_ms=10000,
+            duration_threshold_ms=1000,
+            max_per_period=100,
+            max_same_error=1,
+        )
+
+        # Many checks without a commit stay allowed.
+        for _ in range(5):
+            self.assertTrue(collector._is_within_dedup_limit("error_hash_1"))
+        # A single commit fills the max_same_error=1 slot.
+        collector._record_error_hash("error_hash_1")
+        self.assertFalse(collector._is_within_dedup_limit("error_hash_1"))
 
     def test_blocks_after_max_same_error(self):
         """Test that error is blocked after max_same_error occurrences."""
@@ -294,10 +339,13 @@ class TestCheckDeduplication(TestCase):
             max_same_error=2,
         )
 
-        self.assertTrue(collector._check_deduplication("error_hash_1"))
-        self.assertTrue(collector._check_deduplication("error_hash_1"))
-        # Third should be blocked (max_same_error=2)
-        self.assertFalse(collector._check_deduplication("error_hash_1"))
+        # Emit twice (check-then-record for each).
+        self.assertTrue(collector._is_within_dedup_limit("error_hash_1"))
+        collector._record_error_hash("error_hash_1")
+        self.assertTrue(collector._is_within_dedup_limit("error_hash_1"))
+        collector._record_error_hash("error_hash_1")
+        # Third would exceed max_same_error=2.
+        self.assertFalse(collector._is_within_dedup_limit("error_hash_1"))
 
     def test_batch_deduplication(self):
         """Test batch-level deduplication (one per error type per batch)."""
@@ -325,14 +373,16 @@ class TestCheckDeduplication(TestCase):
             max_same_error=1,
         )
 
-        self.assertTrue(collector._check_deduplication("hash_a"))
-        self.assertTrue(collector._check_deduplication("hash_b"))
+        self.assertTrue(collector._is_within_dedup_limit("hash_a"))
+        collector._record_error_hash("hash_a")
+        self.assertTrue(collector._is_within_dedup_limit("hash_b"))
+        collector._record_error_hash("hash_b")
         # hash_a is at limit
-        self.assertFalse(collector._check_deduplication("hash_a"))
+        self.assertFalse(collector._is_within_dedup_limit("hash_a"))
         # hash_b is at limit
-        self.assertFalse(collector._check_deduplication("hash_b"))
+        self.assertFalse(collector._is_within_dedup_limit("hash_b"))
         # New hash is fine
-        self.assertTrue(collector._check_deduplication("hash_c"))
+        self.assertTrue(collector._is_within_dedup_limit("hash_c"))
 
 
 class TestSetAndGetLatencyThreshold(TestCase):
@@ -661,6 +711,319 @@ class TestProcessPotentialIncident(TestCase):
         )
         self.assertIsNone(result)
         self.assertEqual(mock_collect.call_count, 5)  # No additional snapshot
+
+
+class TestInBatchSampledUpgrade(TestCase):
+    """Point #2: within a collection cycle, a sampled occurrence upgrades a pending UNSAMPLED
+    snapshot's correlation (whole-snapshot swap, snapshot_id preserved)."""
+
+    def setUp(self):
+        _ServiceEventsMonitorState._instance = None
+
+    def _make_collector(self):
+        # max_same_error high so period dedup never interferes; batch dedup is what we exercise.
+        return IncidentSnapshotCollector(
+            flush_interval_ms=10000,
+            duration_threshold_ms=1000,
+            max_per_period=100,
+            max_same_error=100,
+        )
+
+    @staticmethod
+    def _args(trace_id=None, span_id=None):
+        rd = {"headers": {}, "args": {}}
+        if trace_id is not None:
+            rd["trace_id"] = trace_id
+            rd["span_id"] = span_id
+        return dict(
+            route="/boom",
+            method="GET",
+            status_code=500,
+            duration_ms=50.0,
+            exception=ValueError("same error"),
+            request_data=rd,
+        )
+
+    def test_sampled_occurrence_upgrades_unsampled_pending(self):
+        collector = self._make_collector()
+        # First occurrence: unsampled (no trace_id) → pending snapshot has no correlation.
+        collector.process_potential_incident(**self._args())
+        self.assertEqual(len(collector._pending_snapshots), 1)
+        original_id = collector._pending_snapshots[0].snapshot_id
+        self.assertIsNone(collector._pending_snapshots[0].telemetry_correlation.trace_id)
+
+        # Second occurrence same error, sampled → upgrades the pending snapshot in place.
+        collector.process_potential_incident(**self._args(trace_id=0xAA, span_id=0xBB))
+        self.assertEqual(len(collector._pending_snapshots), 1)  # still ONE snapshot (batch dedup)
+        upgraded = collector._pending_snapshots[0]
+        self.assertEqual(upgraded.snapshot_id, original_id)  # identity preserved for the exemplar
+        # Exact values (not just non-None): proves request_data["trace_id"]/["span_id"] flow through
+        # to the correlation as 0x-prefixed, zero-padded hex — the format the backend joins on.
+        self.assertEqual(upgraded.telemetry_correlation.trace_id, "0x" + "0" * 30 + "aa")
+        self.assertEqual(upgraded.telemetry_correlation.span_id, "0x" + "0" * 14 + "bb")
+
+    def test_unsampled_occurrence_does_not_downgrade_sampled_pending(self):
+        collector = self._make_collector()
+        # First occurrence sampled → pending snapshot correlated.
+        collector.process_potential_incident(**self._args(trace_id=0xAA, span_id=0xBB))
+        correlated_tid = collector._pending_snapshots[0].telemetry_correlation.trace_id
+        self.assertIsNotNone(correlated_tid)
+
+        # Second occurrence unsampled → must NOT clear the existing correlation.
+        collector.process_potential_incident(**self._args())
+        self.assertEqual(len(collector._pending_snapshots), 1)
+        self.assertEqual(collector._pending_snapshots[0].telemetry_correlation.trace_id, correlated_tid)
+
+    def test_first_sampled_occurrence_wins(self):
+        collector = self._make_collector()
+        collector.process_potential_incident(**self._args(trace_id=0xAA, span_id=0xBB))
+        first_tid = collector._pending_snapshots[0].telemetry_correlation.trace_id
+
+        # A later sampled occurrence with different ids must not churn the already-correlated one.
+        collector.process_potential_incident(**self._args(trace_id=0xCC, span_id=0xDD))
+        self.assertEqual(len(collector._pending_snapshots), 1)
+        self.assertEqual(collector._pending_snapshots[0].telemetry_correlation.trace_id, first_tid)
+
+    def test_collect_clears_upgrade_index(self):
+        collector = self._make_collector()
+        collector.process_potential_incident(**self._args())
+        self.assertTrue(collector._pending_by_hash)
+        collector.collect()
+        # After flush the per-hash index is cleared (upgrade window is one cycle).
+        self.assertEqual(collector._pending_by_hash, {})
+
+    def test_unsampled_occurrence_with_header_does_not_upgrade(self):
+        # Correlation comes solely from the SAMPLED-gated request_data["trace_id"] (fix #1); inbound
+        # headers are never consulted. A RECORD_ONLY occurrence carries no trace_id but may still
+        # arrive with a traceparent header — that header must NOT resurrect a correlation, either at
+        # the upgrade gate or when the snapshot body is built. Both stay uncorrelated.
+        collector = self._make_collector()
+        collector.process_potential_incident(**self._args())
+        self.assertIsNone(collector._pending_snapshots[0].telemetry_correlation.trace_id)
+
+        # Second occurrence: still unsampled (no request_data["trace_id"]) but with a traceparent
+        # header a header-based extractor would have honored. Must NOT upgrade.
+        unsampled_with_header = self._args()
+        unsampled_with_header["request_data"]["headers"] = {
+            "traceparent": "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-00"
+        }
+        collector.process_potential_incident(**unsampled_with_header)
+        self.assertEqual(len(collector._pending_snapshots), 1)
+        self.assertIsNone(collector._pending_snapshots[0].telemetry_correlation.trace_id)
+
+    def _seed_investigation(self, collector, func_name):
+        # Seed the per-request investigation data that _collect_incident_snapshot consumes to build
+        # the snapshot body (call_path). Read-and-cleared by get_investigation_data(), so it must be
+        # set immediately before each process_potential_incident call that should observe it.
+        collector._monitor_state._investigation_data.set(
+            {
+                "call_path": [{"function_name": func_name, "caller_function_name": "root", "duration_ns": 100}],
+                "exception": None,
+            }
+        )
+
+    def test_upgrade_swaps_whole_snapshot_body_coherent_with_trace(self):
+        # The upgrade is a WHOLE-snapshot swap, not a correlation-only patch: the replacement body
+        # (call_path/stack trace) must come from the sampled occurrence whose trace it now links to,
+        # so the snapshot stays coherent with that trace. A correlation-only patch would leave the
+        # first (unsampled) occurrence's body attached to the second occurrence's trace.
+        collector = self._make_collector()
+
+        # Occurrence 1 — unsampled, body captured from "func_unsampled".
+        self._seed_investigation(collector, "func_unsampled")
+        collector.process_potential_incident(**self._args())
+        original = collector._pending_snapshots[0]
+        original_names = [e.function_name for exc in original.exception_info for e in exc.call_path]
+        self.assertIn("func_unsampled", original_names)
+        self.assertIsNone(original.telemetry_correlation.trace_id)
+
+        # Occurrence 2 — sampled, body captured from "func_sampled" → upgrades in place.
+        self._seed_investigation(collector, "func_sampled")
+        collector.process_potential_incident(**self._args(trace_id=0xAA, span_id=0xBB))
+
+        self.assertEqual(len(collector._pending_snapshots), 1)  # still one (batch dedup)
+        upgraded = collector._pending_snapshots[0]
+        self.assertEqual(upgraded.snapshot_id, original.snapshot_id)  # identity preserved
+        self.assertIsNotNone(upgraded.telemetry_correlation.trace_id)  # now correlated
+        # Body reflects the SAMPLED occurrence (coherent with the linked trace), not the stale first.
+        upgraded_names = [e.function_name for exc in upgraded.exception_info for e in exc.call_path]
+        self.assertIn("func_sampled", upgraded_names)
+        self.assertNotIn("func_unsampled", upgraded_names)
+
+
+class TestDedupKeysOnRecoveredErrorIdentity(TestCase):
+    """Regression: the span processor passes exception=None and defers exception detail to the
+    collector. The dedup hash must recover the error type+message from investigation data so two
+    DISTINCT errors on the same route do NOT collapse to one snapshot under max_same_error=1."""
+
+    def setUp(self):
+        _ServiceEventsMonitorState._instance = None
+
+    def _make_collector(self):
+        emitter = MagicMock()
+        collector = IncidentSnapshotCollector(
+            flush_interval_ms=600000,
+            duration_threshold_ms=5000,
+            max_per_period=100,
+            max_same_error=1,
+            otlp_emitter=emitter,
+        )
+        return collector, emitter
+
+    @staticmethod
+    def _seed_exception(collector, name, message):
+        # Mirror the processor seeding the span's exception event into per-request investigation
+        # data for an uninstrumented 5xx (exception=None reaches the collector). _recover_error_identity
+        # PEEKs this to key the dedup hash on type+message rather than route-only.
+        collector._monitor_state._investigation_data.set(
+            {
+                "call_path": [],
+                "exception": {"name": name, "message": message, "function_name": "app.handler"},
+            }
+        )
+
+    @staticmethod
+    def _rd():
+        return {"headers": {}, "args": {}}
+
+    def test_two_distinct_error_types_same_route_both_emit(self):
+        collector, emitter = self._make_collector()
+        self._seed_exception(collector, "TypeError", "x")
+        self.assertIsNotNone(collector.process_potential_incident("/orders", "POST", 500, 10.0, None, self._rd()))
+        collector.collect()  # clears the per-batch set so the next call reaches period dedup
+        self._seed_exception(collector, "RangeError", "y")
+        self.assertIsNotNone(collector.process_potential_incident("/orders", "POST", 500, 10.0, None, self._rd()))
+        collector.collect()
+        self.assertEqual(emitter.emit_incident_snapshot.call_count, 2)
+
+    def test_two_distinct_messages_same_type_same_route_both_emit(self):
+        collector, emitter = self._make_collector()
+        self._seed_exception(collector, "DbError", "timeout on shard A")
+        self.assertIsNotNone(collector.process_potential_incident("/orders", "POST", 500, 10.0, None, self._rd()))
+        collector.collect()
+        self._seed_exception(collector, "DbError", "timeout on shard B")
+        self.assertIsNotNone(collector.process_potential_incident("/orders", "POST", 500, 10.0, None, self._rd()))
+        collector.collect()
+        self.assertEqual(emitter.emit_incident_snapshot.call_count, 2)
+
+    def test_same_error_type_and_message_same_route_deduplicates(self):
+        collector, emitter = self._make_collector()
+        self._seed_exception(collector, "DbError", "timeout")
+        self.assertIsNotNone(collector.process_potential_incident("/orders", "POST", 500, 10.0, None, self._rd()))
+        collector.collect()
+        self._seed_exception(collector, "DbError", "timeout")
+        # Same recovered identity → same hash → period-deduplicated (max_same_error=1).
+        self.assertIsNone(collector.process_potential_incident("/orders", "POST", 500, 10.0, None, self._rd()))
+        collector.collect()
+        self.assertEqual(emitter.emit_incident_snapshot.call_count, 1)
+
+    def test_latency_incident_no_exception_keys_route_only(self):
+        collector, emitter = self._make_collector()
+        # No investigation exception; two slow 2xx on the same route dedup together (route-only).
+        self.assertIsNotNone(collector.process_potential_incident("/slow", "GET", 200, 6000.0, None, self._rd()))
+        collector.collect()
+        self.assertIsNone(collector.process_potential_incident("/slow", "GET", 200, 6000.0, None, self._rd()))
+        collector.collect()
+        self.assertEqual(emitter.emit_incident_snapshot.call_count, 1)
+
+
+class TestRateLimitedRequestDoesNotPoisonDedup(TestCase):
+    """Pure-check/commit ordering: a request rejected by the rate limit must NOT record a dedup
+    occurrence, or a later retry of that same error (after the rate window frees) is wrongly dropped
+    as a duplicate even though it never produced a snapshot."""
+
+    def setUp(self):
+        _ServiceEventsMonitorState._instance = None
+
+    @patch.object(IncidentSnapshotCollector, "_collect_incident_snapshot")
+    def test_rate_limited_error_does_not_consume_dedup_slot(self, mock_collect):
+        mock_collect.return_value = MagicMock()
+        # max_per_period=1, max_same_error=1. Two DISTINCT errors: the first emits (consuming the
+        # single rate slot); the second is rate-limited.
+        collector = IncidentSnapshotCollector(
+            flush_interval_ms=600000,
+            duration_threshold_ms=5000,
+            max_per_period=1,
+            max_same_error=1,
+        )
+        err_a = ValueError("A")
+        err_b = ValueError("B")
+        rd = {"headers": {}, "args": {}}
+        self.assertIsNotNone(collector.process_potential_incident("/x", "GET", 500, 10.0, err_a, rd))
+        # Second distinct error: passes dedup but the rate window (1) is full → rejected.
+        self.assertIsNone(collector.process_potential_incident("/x", "GET", 500, 10.0, err_b, rd))
+        # err_b left NO dedup timestamp and NO batch entry. Free the rate window and retry it in a
+        # fresh cycle: it must now emit (it was never actually recorded).
+        collector._snapshot_timestamps.clear()
+        collector.collect()
+        self.assertIsNotNone(collector.process_potential_incident("/x", "GET", 500, 10.0, err_b, rd))
+
+
+class TestEndpointExemplarTracksUpgrade(TestCase):
+    """Point #2: the exemplar dict returned to the endpoint collector is the SAME object indexed by
+    error hash, so a later whole-snapshot upgrade must mutate it in place to stay coherent."""
+
+    def setUp(self):
+        _ServiceEventsMonitorState._instance = None
+
+    def _make_collector(self):
+        return IncidentSnapshotCollector(
+            flush_interval_ms=600000,
+            duration_threshold_ms=5000,
+            max_per_period=100,
+            max_same_error=100,
+            otlp_emitter=MagicMock(),
+        )
+
+    @patch("amazon.opentelemetry.serviceevents.collectors.incident_snapshot_collector.time")
+    def test_returned_exemplar_resyncs_timestamp_and_id_on_upgrade(self, mock_time):
+        # Drive time so the two occurrences get DIFFERENT timestamps. This is what makes the in-place
+        # exemplar["timestamp"] sync observable: if the mutation were dropped, the exemplar would keep
+        # the first occurrence's timestamp while the emitted snapshot carries the later one.
+        mock_time.time.return_value = 1_000.0
+        collector = self._make_collector()
+        err = ValueError("boom")
+        # First (unsampled) occurrence. This is the exemplar the endpoint collector records.
+        exemplar = collector.process_potential_incident("/api/x", "POST", 500, 50.0, err, {"headers": {}, "args": {}})
+        self.assertIsNotNone(exemplar)
+        first_timestamp = exemplar["timestamp"]
+        # Advance 5s, then a SAMPLED occurrence of the same error upgrades the pending snapshot
+        # wholesale. The already-returned exemplar dict (held by reference by the endpoint collector)
+        # must track the swap.
+        mock_time.time.return_value = 1_005.0
+        collector.process_potential_incident(
+            "/api/x", "POST", 500, 50.0, err, {"headers": {}, "args": {}, "trace_id": 0xAA, "span_id": 0xBB}
+        )
+        self.assertEqual(len(collector._pending_snapshots), 1)  # still ONE snapshot (batch dedup)
+        upgraded = collector._pending_snapshots[0]
+        # The emitter serializes snapshot_id/trigger_type/timestamp for the exemplar (severity is NOT
+        # on the wire), so those must stay coherent with the emitted (upgraded) snapshot.
+        self.assertEqual(exemplar["snapshot_id"], upgraded.snapshot_id)
+        self.assertEqual(exemplar["trigger_type"], upgraded.trigger_type)
+        # The exemplar timestamp moved to the upgraded snapshot's (later) timestamp, not the first.
+        self.assertGreater(upgraded.timestamp, first_timestamp)
+        self.assertEqual(exemplar["timestamp"], upgraded.timestamp)
+        # The upgraded snapshot now carries the sampled trace correlation.
+        self.assertIsNotNone(upgraded.telemetry_correlation.trace_id)
+
+    def test_upgrade_preserves_first_occurrence_operation(self):
+        # The dedup hash keys on route (not method), so GET /api/x and POST /api/x with the same error
+        # share a hash. The exemplar is filed under the FIRST occurrence's operation, so the swapped
+        # snapshot must keep the first occurrence's operation, not adopt the upgrader's method.
+        collector = self._make_collector()
+        err = ValueError("boom")
+        exemplar = collector.process_potential_incident("/api/x", "GET", 500, 50.0, err, {"headers": {}, "args": {}})
+        self.assertIsNotNone(exemplar)
+        self.assertEqual(exemplar["operation"], "GET /api/x")
+        # Sampled POST occurrence of the same error upgrades the pending (unsampled) GET snapshot.
+        collector.process_potential_incident(
+            "/api/x", "POST", 500, 50.0, err, {"headers": {}, "args": {}, "trace_id": 0xAA, "span_id": 0xBB}
+        )
+        self.assertEqual(len(collector._pending_snapshots), 1)
+        upgraded = collector._pending_snapshots[0]
+        # operation stays 'GET /api/x' (the exemplar's filed operation), NOT 'POST /api/x'.
+        self.assertEqual(upgraded.operation, "GET /api/x")
+        self.assertEqual(upgraded.snapshot_id, exemplar["snapshot_id"])
 
 
 class TestBuildCallPath(TestCase):
@@ -1027,9 +1390,8 @@ class TestUpdateIncidentConfig(TestCase):
         collector = self._make_collector(max_per_period=5)
         original_deque = collector._snapshot_timestamps
 
-        collector.update_incident_config(capture_request_body=True, max_per_period=5, max_same_error=3)
+        collector.update_incident_config(max_per_period=5, max_same_error=3)
 
-        self.assertTrue(collector.capture_request_body)
         self.assertEqual(collector._max_same_error, 3)
         # max_per_period unchanged -> same deque instance
         self.assertIs(collector._snapshot_timestamps, original_deque)
@@ -1042,7 +1404,7 @@ class TestUpdateIncidentConfig(TestCase):
             collector._snapshot_timestamps.append(222.0)
         original_deque = collector._snapshot_timestamps
 
-        collector.update_incident_config(capture_request_body=False, max_per_period=10, max_same_error=1)
+        collector.update_incident_config(max_per_period=10, max_same_error=1)
 
         self.assertEqual(collector.max_per_period, 10)
         self.assertIsNot(collector._snapshot_timestamps, original_deque)
@@ -1175,7 +1537,7 @@ class TestCheckDeduplicationCleanup(TestCase):
             collector._error_hashes["stale_hash"] = [time.time() - 7200]
 
         # A different hash triggers the cleanup loop, which deletes the stale entry.
-        self.assertTrue(collector._check_deduplication("fresh_hash"))
+        self.assertTrue(collector._is_within_dedup_limit("fresh_hash"))
         self.assertNotIn("stale_hash", collector._error_hashes)
 
 
@@ -1261,7 +1623,7 @@ class TestCollectIncidentSnapshot(TestCase):
 
     def test_exception_snapshot_basic_fields(self):
         """Assembles a snapshot for an exception incident with core metadata populated."""
-        collector = self._make_collector(capture_request_body=False)
+        collector = self._make_collector()
 
         snapshot = collector._collect_incident_snapshot(
             route="/api/users",
@@ -1282,9 +1644,12 @@ class TestCollectIncidentSnapshot(TestCase):
         self.assertEqual(snapshot.environment, "prod")
         self.assertEqual(snapshot.duration_ms, 42.0)
         self.assertEqual(snapshot.exception_info[0].stack_trace, "TRACE")
-        # capture_request_body=False -> payload fields are gated off.
+        # Request-payload capture is permanently disabled: the four payload fields are always null
+        # and custom_context is always empty (see SERVICE_EVENTS_OTLP_SIGNALS_SPEC.md §5).
         self.assertEqual(snapshot.request_context.custom_context, {})
+        self.assertIsNone(snapshot.request_context.request_body)
         self.assertIsNone(snapshot.request_context.query_params)
+        self.assertIsNone(snapshot.request_context.path_params)
         self.assertIsNone(snapshot.request_context.request_headers)
 
     def test_partial_flag_when_call_path_durations_zero(self):
@@ -1311,9 +1676,10 @@ class TestCollectIncidentSnapshot(TestCase):
         self.assertTrue(snapshot.is_partial)
         self.assertEqual(snapshot.severity, "medium")
 
-    def test_capture_request_body_with_cached_body(self):
-        """When capture is on and no Flask request, the FastAPI cached_body is used."""
-        collector = self._make_collector(capture_request_body=True)
+    def test_request_payload_fields_always_null(self):
+        """Request-payload capture is permanently off: even when the request_data carries a body,
+        query args, path params, and headers, none of them reach the emitted snapshot."""
+        collector = self._make_collector()
 
         snapshot = collector._collect_incident_snapshot(
             route="/api/users",
@@ -1330,33 +1696,11 @@ class TestCollectIncidentSnapshot(TestCase):
             trigger_type="exception",
         )
 
-        self.assertEqual(snapshot.request_context.request_body, "raw-payload")
-        self.assertEqual(snapshot.request_context.custom_context, {"user_id": "42"})
-        self.assertEqual(snapshot.request_context.query_params, {"user_id": "42"})
-        self.assertEqual(snapshot.request_context.path_params, {"id": "7"})
-        self.assertEqual(snapshot.request_context.request_headers, {"Content-Type": "application/json"})
-
-    def test_capture_request_body_with_flask_request(self):
-        """When capture is on and a Flask request is present, body comes from the lazy importer."""
-        collector = self._make_collector(capture_request_body=True)
-        flask_request = MagicMock()
-
-        with patch(
-            "amazon.opentelemetry.serviceevents.instrumentation." "flask_instrumentation._get_request_body",
-            return_value="flask-body",
-        ) as mock_get_body:
-            snapshot = collector._collect_incident_snapshot(
-                route="/api/users",
-                method="POST",
-                status_code=500,
-                duration_ms=10.0,
-                exception=ValueError("x"),
-                request_data={"flask_request": flask_request, "args": {}},
-                trigger_type="exception",
-            )
-
-        mock_get_body.assert_called_once_with(flask_request)
-        self.assertEqual(snapshot.request_context.request_body, "flask-body")
+        self.assertIsNone(snapshot.request_context.request_body)
+        self.assertEqual(snapshot.request_context.custom_context, {})
+        self.assertIsNone(snapshot.request_context.query_params)
+        self.assertIsNone(snapshot.request_context.path_params)
+        self.assertIsNone(snapshot.request_context.request_headers)
 
 
 class TestCollectExceptionInfo(TestCase):
@@ -1552,23 +1896,6 @@ class TestCollectExceptionInfo(TestCase):
         self.assertEqual(result[0].call_path, [])
 
 
-class TestExtractCustomContext(TestCase):
-    """Test the _extract_custom_context static helper."""
-
-    def setUp(self):
-        _ServiceEventsMonitorState._instance = None
-
-    def test_extracts_user_id(self):
-        """user_id present in args is stringified into custom context."""
-        result = IncidentSnapshotCollector._extract_custom_context({"args": {"user_id": 42}})
-        self.assertEqual(result, {"user_id": "42"})
-
-    def test_empty_when_no_user_id(self):
-        """No user_id in args yields an empty custom context."""
-        result = IncidentSnapshotCollector._extract_custom_context({"args": {"other": "x"}})
-        self.assertEqual(result, {})
-
-
 class TestFormatIds(TestCase):
     """Test the _format_trace_id and _format_span_id static helpers."""
 
@@ -1598,222 +1925,6 @@ class TestFormatIds(TestCase):
     def test_format_span_id_str_passthrough(self):
         """A string span id is passed through as-is."""
         self.assertEqual(IncidentSnapshotCollector._format_span_id("span-1"), "span-1")
-
-
-class TestValidTraceparentId(TestCase):
-    """Test the _valid_traceparent_id validator."""
-
-    def setUp(self):
-        _ServiceEventsMonitorState._instance = None
-
-    def test_empty_returns_none(self):
-        """Empty input is rejected."""
-        self.assertIsNone(IncidentSnapshotCollector._valid_traceparent_id("", 32))
-
-    def test_wrong_length_returns_none(self):
-        """Input of the wrong length is rejected."""
-        self.assertIsNone(IncidentSnapshotCollector._valid_traceparent_id("abcd", 32))
-
-    def test_non_hex_returns_none(self):
-        """Input containing non-hex characters is rejected."""
-        self.assertIsNone(IncidentSnapshotCollector._valid_traceparent_id("z" * 16, 16))
-
-    def test_all_zero_sentinel_returns_none(self):
-        """The all-zero sentinel id is rejected per the W3C spec."""
-        self.assertIsNone(IncidentSnapshotCollector._valid_traceparent_id("0" * 16, 16))
-
-    def test_valid_id_lowercased(self):
-        """A valid mixed-case hex id is accepted and lowercased."""
-        self.assertEqual(IncidentSnapshotCollector._valid_traceparent_id("ABCD" * 4, 16), "abcd" * 4)
-
-
-class TestExtractTraceId(TestCase):
-    """Test the _extract_trace_id method across its lookup tiers."""
-
-    def setUp(self):
-        _ServiceEventsMonitorState._instance = None
-
-    def _make_collector(self):
-        return IncidentSnapshotCollector(
-            flush_interval_ms=10000,
-            duration_threshold_ms=1000,
-            max_per_period=100,
-        )
-
-    def test_pre_captured_trace_id(self):
-        """A pre-captured int trace_id is formatted and returned first."""
-        collector = self._make_collector()
-        result = collector._extract_trace_id({"trace_id": 255})
-        self.assertEqual(result, "0x" + "0" * 30 + "ff")
-
-    def test_from_current_otel_span(self):
-        """A valid current OTel span supplies the trace id when no pre-captured value exists."""
-        collector = self._make_collector()
-        span = MagicMock()
-        span_context = MagicMock()
-        span_context.is_valid = True
-        span_context.trace_id = 1
-        span.get_span_context.return_value = span_context
-
-        with patch(
-            "amazon.opentelemetry.serviceevents.collectors."
-            "incident_snapshot_collector.trace.get_current_span",
-            return_value=span,
-        ):
-            result = collector._extract_trace_id({})
-
-        self.assertEqual(result, "0x" + "0" * 31 + "1")
-
-    def test_otel_span_exception_falls_through(self):
-        """If reading the current span raises, extraction falls through to headers."""
-        collector = self._make_collector()
-        with patch(
-            "amazon.opentelemetry.serviceevents.collectors."
-            "incident_snapshot_collector.trace.get_current_span",
-            side_effect=RuntimeError("no span"),
-        ):
-            result = collector._extract_trace_id(
-                {"headers": {"traceparent": "00-" + "a" * 32 + "-" + "b" * 16 + "-01"}}
-            )
-
-        self.assertEqual(result, "0x" + "a" * 32)
-
-    def test_from_traceparent_header(self):
-        """A valid traceparent header supplies the trace id."""
-        collector = self._make_collector()
-        span = MagicMock()
-        span.get_span_context.return_value.is_valid = False
-        with patch(
-            "amazon.opentelemetry.serviceevents.collectors."
-            "incident_snapshot_collector.trace.get_current_span",
-            return_value=span,
-        ):
-            result = collector._extract_trace_id(
-                {"headers": {"traceparent": "00-" + "c" * 32 + "-" + "d" * 16 + "-01"}}
-            )
-        self.assertEqual(result, "0x" + "c" * 32)
-
-    def test_invalid_traceparent_falls_to_xray(self):
-        """An invalid traceparent trace-id falls through to the X-Ray header."""
-        collector = self._make_collector()
-        span = MagicMock()
-        span.get_span_context.return_value.is_valid = False
-        with patch(
-            "amazon.opentelemetry.serviceevents.collectors."
-            "incident_snapshot_collector.trace.get_current_span",
-            return_value=span,
-        ):
-            result = collector._extract_trace_id(
-                {
-                    "headers": {
-                        "traceparent": "00-" + "0" * 32 + "-" + "b" * 16 + "-01",
-                        "X-Amzn-Trace-Id": "Root=1-abc",
-                    }
-                }
-            )
-        self.assertEqual(result, "Root=1-abc")
-
-    def test_datadog_header(self):
-        """The Datadog trace-id header is used as a final fallback."""
-        collector = self._make_collector()
-        span = MagicMock()
-        span.get_span_context.return_value.is_valid = False
-        with patch(
-            "amazon.opentelemetry.serviceevents.collectors."
-            "incident_snapshot_collector.trace.get_current_span",
-            return_value=span,
-        ):
-            result = collector._extract_trace_id({"headers": {"x-datadog-trace-id": "12345"}})
-        self.assertEqual(result, "12345")
-
-    def test_no_trace_id_returns_none(self):
-        """When no source supplies a trace id, None is returned."""
-        collector = self._make_collector()
-        span = MagicMock()
-        span.get_span_context.return_value.is_valid = False
-        with patch(
-            "amazon.opentelemetry.serviceevents.collectors."
-            "incident_snapshot_collector.trace.get_current_span",
-            return_value=span,
-        ):
-            result = collector._extract_trace_id({"headers": {}})
-        self.assertIsNone(result)
-
-
-class TestExtractSpanId(TestCase):
-    """Test the _extract_span_id method across its lookup tiers."""
-
-    def setUp(self):
-        _ServiceEventsMonitorState._instance = None
-
-    def _make_collector(self):
-        return IncidentSnapshotCollector(
-            flush_interval_ms=10000,
-            duration_threshold_ms=1000,
-            max_per_period=100,
-        )
-
-    def test_pre_captured_span_id(self):
-        """A pre-captured int span_id is formatted and returned first."""
-        collector = self._make_collector()
-        result = collector._extract_span_id({"span_id": 255})
-        self.assertEqual(result, "0x" + "0" * 14 + "ff")
-
-    def test_from_current_otel_span(self):
-        """A valid current OTel span supplies the span id when no pre-captured value exists."""
-        collector = self._make_collector()
-        span = MagicMock()
-        span_context = MagicMock()
-        span_context.is_valid = True
-        span_context.span_id = 1
-        span.get_span_context.return_value = span_context
-
-        with patch(
-            "amazon.opentelemetry.serviceevents.collectors."
-            "incident_snapshot_collector.trace.get_current_span",
-            return_value=span,
-        ):
-            result = collector._extract_span_id({})
-
-        self.assertEqual(result, "0x" + "0" * 15 + "1")
-
-    def test_otel_span_exception_falls_through(self):
-        """If reading the current span raises, extraction falls through to headers."""
-        collector = self._make_collector()
-        with patch(
-            "amazon.opentelemetry.serviceevents.collectors."
-            "incident_snapshot_collector.trace.get_current_span",
-            side_effect=RuntimeError("no span"),
-        ):
-            result = collector._extract_span_id({"headers": {"traceparent": "00-" + "a" * 32 + "-" + "b" * 16 + "-01"}})
-
-        self.assertEqual(result, "0x" + "b" * 16)
-
-    def test_invalid_traceparent_span_returns_none(self):
-        """An invalid traceparent span-id yields None (no further fallback)."""
-        collector = self._make_collector()
-        span = MagicMock()
-        span.get_span_context.return_value.is_valid = False
-        with patch(
-            "amazon.opentelemetry.serviceevents.collectors."
-            "incident_snapshot_collector.trace.get_current_span",
-            return_value=span,
-        ):
-            result = collector._extract_span_id({"headers": {"traceparent": "00-" + "a" * 32 + "-" + "0" * 16 + "-01"}})
-        self.assertIsNone(result)
-
-    def test_no_span_id_returns_none(self):
-        """When no source supplies a span id, None is returned."""
-        collector = self._make_collector()
-        span = MagicMock()
-        span.get_span_context.return_value.is_valid = False
-        with patch(
-            "amazon.opentelemetry.serviceevents.collectors."
-            "incident_snapshot_collector.trace.get_current_span",
-            return_value=span,
-        ):
-            result = collector._extract_span_id({"headers": {}})
-        self.assertIsNone(result)
 
 
 class TestGenerateSessionAndRequestId(TestCase):

@@ -37,7 +37,6 @@ from amazon.opentelemetry.serviceevents.models import (
 )
 from amazon.opentelemetry.serviceevents.python_monitor import _ServiceEventsMonitorState
 from amazon.opentelemetry.serviceevents.utils import get_instance_id
-from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +63,6 @@ class IncidentSnapshotCollector(BaseCollector):
         environment: Optional[str] = None,
         service_name: Optional[str] = None,
         sdk_version: str = "",
-        capture_request_body: bool = False,
         max_same_error: int = 1,
         resource_attributes: Optional[ResourceAttributes] = None,
         otlp_emitter=None,
@@ -79,7 +77,6 @@ class IncidentSnapshotCollector(BaseCollector):
             environment: Deployment environment
             service_name: Service name
             sdk_version: SDK version
-            capture_request_body: Whether to capture request body on incidents
             max_same_error: Maximum occurrences of same error pattern
             resource_attributes: AWS platform resource attributes from OTel Resource detectors
             otlp_emitter: Optional ServiceEventsOtlpEmitter for OTLP export
@@ -117,9 +114,6 @@ class IncidentSnapshotCollector(BaseCollector):
         if self.resource_attributes.host_id:
             self.instance_id = self.resource_attributes.host_id
 
-        # Request payload capture settings
-        self.capture_request_body = capture_request_body
-
         # Rate limiting: track snapshot timestamps
         self._snapshot_timestamps: deque = deque(maxlen=max_per_period * 2)
         self._timestamps_lock = threading.Lock()
@@ -136,17 +130,26 @@ class IncidentSnapshotCollector(BaseCollector):
         # Pending snapshots to export
         self._pending_snapshots: List[IncidentSnapshot] = []
         self._pending_lock = threading.Lock()
+        # Within a collection cycle, the single pending snapshot per error hash (batch dedup keeps
+        # exactly one). Lets a later SAMPLED occurrence of the same error upgrade an earlier
+        # UNSAMPLED pending snapshot's correlation before it flushes — see
+        # _maybe_upgrade_pending_correlation. Guarded by _pending_lock; cleared each collect().
+        self._pending_by_hash: Dict[str, IncidentSnapshot] = {}
+        # The endpoint exemplar dict returned for each pending snapshot, keyed by error hash. The
+        # endpoint collector holds the SAME dict object, so mutating it on a Point #2 upgrade keeps
+        # the recorded exemplar's emitted fields (trigger_type/timestamp) coherent with the swapped
+        # snapshot (they share a snapshot_id). Guarded by _pending_lock; cleared each collect().
+        self._pending_exemplar_by_hash: Dict[str, Dict] = {}
 
         # Monitor state for getting execution flow
         self._monitor_state = _ServiceEventsMonitorState.get_instance()
 
     def update_incident_config(
         self,
-        capture_request_body: bool,
         max_per_period: int,
         max_same_error: int,
     ) -> None:
-        """Live-update incident config (max-per-window, max-same-error, capture flag).
+        """Live-update incident config (max-per-window, max-same-error).
 
         Recreates the snapshot_timestamps deque when max_per_period changes
         since deque maxlen is immutable after construction. The rate-limit window
@@ -155,7 +158,6 @@ class IncidentSnapshotCollector(BaseCollector):
         NOTE: no longer watcher-driven — the DI watcher syncer was removed. Retained as
         a public live-setter for callers that mutate the collector directly.
         """
-        self.capture_request_body = capture_request_body
         self._max_same_error = max_same_error
         if max_per_period != self.max_per_period:
             self.max_per_period = max_per_period
@@ -180,6 +182,8 @@ class IncidentSnapshotCollector(BaseCollector):
         super()._reset_for_fork()
         self.pid = os.getpid()
         self._pending_snapshots = []
+        self._pending_by_hash = {}
+        self._pending_exemplar_by_hash = {}
         self._pending_lock = threading.Lock()
         self._snapshot_timestamps = deque(maxlen=self.max_per_period * 2)
         self._timestamps_lock = threading.Lock()
@@ -344,28 +348,73 @@ class IncidentSnapshotCollector(BaseCollector):
         if trigger_type is None:
             return None
 
-        # Generate error hash for deduplication
-        error_hash = self._generate_error_hash(route, exception)
+        # Generate error hash for deduplication. The processor passes exception=None (like Java) and
+        # defers exception detail to the collector, so recover the error identity (type + message)
+        # from the investigation data — already seeded from the span's exception event for
+        # uninstrumented 5xx — BEFORE hashing. Without this the hash would collapse to route-only and
+        # two distinct errors on the same route would deduplicate together. Latency incidents have no
+        # exception → (None, None) → route-only hash, matching the pre-refactor behavior.
+        exc_type, exc_message = self._recover_error_identity(exception)
+        error_hash = self._error_hash(route, exc_type, exc_message)
 
-        # Check batch-level deduplication FIRST (one per error type per collection interval)
+        # Claim the batch slot atomically FIRST (one snapshot per error type per collection
+        # interval). The check-and-add under the lock is the serialization point that lets exactly
+        # one of several concurrent same-hash requests proceed; every other sees already_in_batch.
         with self._error_hashes_lock:
-            if error_hash in self._current_batch_hashes:
-                logger.debug("Incident snapshot batch-deduplicated (hash: %s)", error_hash)
-                return None
-            # Add to current batch (will be cleared after collect())
-            self._current_batch_hashes.add(error_hash)
+            already_in_batch = error_hash in self._current_batch_hashes
+            if not already_in_batch:
+                # Add to current batch (will be cleared after collect())
+                self._current_batch_hashes.add(error_hash)
 
-        # Check period-level deduplication (limits same error over the fixed 60s window)
-        if not self._check_deduplication(error_hash):
+        if already_in_batch:
+            # A snapshot for this error is already pending this cycle. Batch dedup keeps that
+            # single snapshot, but if it was built from an UNSAMPLED occurrence (no resolvable
+            # trace link, see fix #1) and THIS occurrence is sampled, upgrade the pending snapshot
+            # in place so the one snapshot we emit per cycle carries a resolvable trace link.
+            self._maybe_upgrade_pending_correlation(
+                error_hash,
+                route,
+                method,
+                status_code,
+                duration_ms,
+                exception,
+                request_data,
+                trigger_type,
+                captured_stack_trace,
+            )
+            logger.debug("Incident snapshot batch-deduplicated (hash: %s)", error_hash)
+            return None
+
+        # Period-dedup is checked WITHOUT mutating its state (pure check) so a rate-limited request
+        # never records a dedup occurrence — committing on rejection would poison the dedup map and
+        # cause the next legitimate occurrence of that same error to be dropped as a duplicate. Dedup
+        # does NOT need to be atomic: same-hash requests are serialized by the batch-slot claim above
+        # (exactly one same-hash request reaches this check per cycle), so no concurrent same-hash
+        # request can race the check. The batch slot is already claimed above (the concurrency
+        # serialization point); release it on either rejection so a later sampled occurrence's upgrade
+        # doesn't find the hash batch-marked with no pending snapshot.
+        if not self._is_within_dedup_limit(error_hash):
+            with self._error_hashes_lock:
+                self._current_batch_hashes.discard(error_hash)
             logger.debug("Incident snapshot period-deduplicated (hash: %s)", error_hash)
             return None
 
-        # Check rate limit AFTER dedup — only non-deduplicated requests consume slots.
-        # Previously this ran before dedup, causing phantom slot consumption:
-        # dedup-blocked requests incremented the counter without producing snapshots.
-        if not self._check_rate_limit():
+        # The rate limit is a GLOBAL counter across all error hashes, so — unlike dedup — it is NOT
+        # serialized by the per-hash batch claim: concurrent requests with DISTINCT hashes race here.
+        # Reserve the slot atomically (check-and-append under a single lock hold) so they cannot all
+        # observe room and then all commit, overshooting max_per_period. Reserving only after the
+        # dedup check keeps a dedup-rejected request from consuming a rate slot.
+        if not self._try_reserve_rate_limit_slot():
+            with self._error_hashes_lock:
+                self._current_batch_hashes.discard(error_hash)
             logger.debug("Incident snapshot rate limit exceeded, skipping")
             return None
+
+        # Rate slot reserved and every gate passed — a snapshot WILL be produced. Record the period-
+        # dedup occurrence now (the batch and rate slots are already claimed). Recording dedup only
+        # here, after the rate reservation succeeds, is what keeps a rate-rejected request from
+        # poisoning the dedup map.
+        self._record_error_hash(error_hash)
 
         # Collect incident snapshot data
         try:
@@ -380,9 +429,24 @@ class IncidentSnapshotCollector(BaseCollector):
                 captured_stack_trace=captured_stack_trace,
             )
 
-            # Add to pending snapshots
+            # Build the exemplar for endpoint telemetry correlation. Keep a reference indexed by
+            # error hash: the endpoint collector holds this SAME dict, so a later Point #2 upgrade
+            # can mutate it in place to track the swapped snapshot's emitted fields
+            # (trigger_type/timestamp).
+            exemplar = {
+                "snapshot_id": snapshot.snapshot_id,
+                "trigger_type": snapshot.trigger_type,
+                "severity": snapshot.severity,
+                "operation": operation,
+                "timestamp": snapshot.timestamp,
+            }
+
+            # Add to pending snapshots, and index by error hash so a later sampled occurrence of
+            # the same error can upgrade this snapshot's correlation in place before it flushes.
             with self._pending_lock:
                 self._pending_snapshots.append(snapshot)
+                self._pending_by_hash[error_hash] = snapshot
+                self._pending_exemplar_by_hash[error_hash] = exemplar
 
             logger.info(
                 "Incident snapshot triggered: %s %s (status=%s, trigger=%s)",
@@ -392,24 +456,107 @@ class IncidentSnapshotCollector(BaseCollector):
                 trigger_type,
             )
 
-            # Return exemplar for endpoint telemetry correlation
-            return {
-                "snapshot_id": snapshot.snapshot_id,
-                "trigger_type": snapshot.trigger_type,
-                "severity": snapshot.severity,
-                "operation": operation,
-                "timestamp": snapshot.timestamp,
-            }
+            return exemplar
 
         except Exception as exc:  # pylint: disable=broad-exception-caught  # telemetry must never crash host app
             logger.error("Error collecting incident snapshot data: %s", exc, exc_info=True)
-            # Roll back the slots this attempt consumed. The batch/dedup/rate-limit slots
-            # are claimed before collection (claim-then-check is required for the
-            # concurrent-request race protection in _check_deduplication). If collection
-            # then fails, leaving them claimed would suppress a *later* identical error
-            # that could have produced a snapshot — for up to the 60s dedup/rate windows.
+            # Roll back the slots this attempt consumed. The batch slot was claimed at the top (the
+            # concurrency serialization point) and the dedup/rate-limit slots were committed just
+            # above once every gate passed. If collection then fails, leaving them claimed would
+            # suppress a *later* identical error that could have produced a snapshot — for up to the
+            # 60s dedup/rate windows — and would leave error_hash batch-marked with nothing in
+            # _pending_by_hash, so a later sampled occurrence's upgrade finds no pending snapshot.
             self._rollback_reservation(error_hash)
             return None
+
+    def _maybe_upgrade_pending_correlation(
+        self,
+        error_hash: str,
+        route: str,
+        method: str,
+        status_code: int,
+        duration_ms: float,
+        exception: Optional[Exception],
+        request_data: Dict,
+        trigger_type: str,
+        captured_stack_trace: Optional[str],
+    ) -> None:
+        """Upgrade a pending UNSAMPLED snapshot to this SAMPLED occurrence (whole-snapshot swap).
+
+        Trace correlation is sampling-conditional (fix #1): an unsampled request emits a snapshot
+        with no trace_id. Because batch dedup keeps exactly one snapshot per error hash per cycle,
+        that single snapshot inherits the FIRST occurrence's sampling state — so under reduced
+        sampling it usually carries no resolvable trace link even if a sampled occurrence of the
+        same error happens moments later in the same cycle.
+
+        When this occurrence IS sampled (request_data carries a trace_id) and the pending snapshot
+        is NOT (its trace_id is None), replace the pending snapshot WHOLESALE with a freshly
+        collected one for this occurrence, preserving the original snapshot_id so the endpoint
+        exemplar pointer stays valid. The replacement is whole-snapshot (not correlation-only) so
+        the body — stack trace, call path, duration, timestamp — stays coherent with the trace it
+        links to. First sampled occurrence wins; once upgraded, later occurrences are left alone.
+        No-op (so the original is preserved) on any failure — telemetry must never crash the host.
+        """
+        # Only sampled occurrences can upgrade — an unsampled one has nothing better to offer.
+        # request_data["trace_id"] is the span processor's SAMPLED-gated correlation (fix #1):
+        # present iff the trace was sampled, so it is the authoritative "is this sampled?" signal.
+        if not request_data.get("trace_id"):
+            return
+        try:
+            with self._pending_lock:
+                pending = self._pending_by_hash.get(error_hash)
+                # Upgrade only an uncorrelated pending snapshot; if it already has a trace_id, the
+                # first sampled occurrence already won.
+                if pending is None or pending.telemetry_correlation.trace_id is not None:
+                    return
+
+            # Collect outside the lock (it can do non-trivial work); the snapshot_id is stamped
+            # after so the replacement keeps the original's identity.
+            replacement = self._collect_incident_snapshot(
+                route=route,
+                method=method,
+                status_code=status_code,
+                duration_ms=duration_ms,
+                exception=exception,
+                request_data=request_data,
+                trigger_type=trigger_type,
+                captured_stack_trace=captured_stack_trace,
+            )
+
+            with self._pending_lock:
+                # Re-fetch under the lock: collect() may have drained the cycle, or another thread
+                # may have upgraded it meanwhile. Only swap if the same uncorrelated snapshot is
+                # still pending.
+                pending = self._pending_by_hash.get(error_hash)
+                if pending is None or pending.telemetry_correlation.trace_id is not None:
+                    return
+                replacement.snapshot_id = pending.snapshot_id
+                # Preserve the original operation too. The dedup hash keys on route (not method), so a
+                # GET and a POST to the same route with the same error share a hash and can upgrade
+                # each other. The endpoint exemplar is filed under the FIRST occurrence's operation
+                # key; rebuilding operation from THIS occurrence's method would make the swapped
+                # snapshot's operation disagree with the endpoint summary that references its
+                # snapshot_id. Keep the first occurrence's operation.
+                replacement.operation = pending.operation
+                try:
+                    idx = self._pending_snapshots.index(pending)
+                except ValueError:
+                    return
+                self._pending_snapshots[idx] = replacement
+                self._pending_by_hash[error_hash] = replacement
+                # The whole-snapshot swap can change trigger_type/timestamp (a later occurrence may
+                # have a different status or fire later). The endpoint exemplar was already recorded
+                # pointing at this snapshot_id, so update the SAME dict in place — the endpoint
+                # collector holds this reference — to keep the emitted fields coherent with the
+                # snapshot they link to. Only trigger_type and timestamp are serialized onto the wire
+                # (the emitter drops severity), so those are what we sync.
+                exemplar = self._pending_exemplar_by_hash.get(error_hash)
+                if exemplar is not None:
+                    exemplar["trigger_type"] = replacement.trigger_type
+                    exemplar["timestamp"] = replacement.timestamp
+            logger.debug("Upgraded pending incident snapshot to a sampled occurrence (hash: %s)", error_hash)
+        except Exception:  # pylint: disable=broad-exception-caught  # telemetry must never crash host app
+            logger.debug("Failed to upgrade pending incident correlation", exc_info=True)
 
     def _rollback_reservation(self, error_hash: str) -> None:
         """Undo the batch/period-dedup/rate-limit slots claimed for a failed collection.
@@ -443,6 +590,9 @@ class IncidentSnapshotCollector(BaseCollector):
         with self._pending_lock:
             snapshots = self._pending_snapshots
             self._pending_snapshots = []
+            # Drop the per-hash indexes for the drained cycle; the upgrade window is one cycle.
+            self._pending_by_hash = {}
+            self._pending_exemplar_by_hash = {}
 
         if not snapshots:
             logger.debug("No incident snapshots to export")
@@ -520,12 +670,19 @@ class IncidentSnapshotCollector(BaseCollector):
 
         return "low"
 
-    def _check_rate_limit(self) -> bool:
-        """
-        Check if rate limit allows new snapshot.
+    def _try_reserve_rate_limit_slot(self) -> bool:
+        """Atomically check the rate-limit window and reserve a slot if there is room.
+
+        The prune, the capacity check, and the append all happen under a SINGLE ``_timestamps_lock``
+        hold, so the rate limit — a global counter across all error hashes, not serialized by the
+        per-hash batch claim — cannot be overshot by concurrent distinct-hash requests all observing
+        room before any of them records (the TOCTOU a separate check-then-commit pair would allow).
+        The slot is consumed only when this returns True, so dedup-rejected requests (checked before
+        this) never consume a rate slot. A reserved slot is released by ``_rollback_reservation`` if
+        collection later fails.
 
         Returns:
-            True if snapshot allowed, False if rate limited
+            True if a slot was reserved (snapshot allowed), False if rate limited (no slot consumed).
         """
         current_time = time.time()
         cutoff_time = current_time - self.period_seconds
@@ -535,75 +692,98 @@ class IncidentSnapshotCollector(BaseCollector):
             while self._snapshot_timestamps and self._snapshot_timestamps[0] < cutoff_time:
                 self._snapshot_timestamps.popleft()
 
-            # Check if we're at the limit
             if len(self._snapshot_timestamps) >= self.max_per_period:
                 return False
-
-            # Add current timestamp
             self._snapshot_timestamps.append(current_time)
             return True
 
+    def _recover_error_identity(self, exception: Optional[Exception]) -> Tuple[Optional[str], Optional[str]]:
+        """Recover the (exception_type, exception_message) that keys the dedup hash.
+
+        The endpoint span processor passes ``exception=None`` (like Java) and defers exception detail
+        to the collector, so the dedup key must be recovered from the same investigation data the
+        snapshot body uses. Without this the hash would collapse to route-only and two distinct
+        errors on the same route would deduplicate together (defeating per-error incident coverage).
+
+        * When an explicit ``exception`` object is supplied (legacy/manual callers), use it directly.
+        * Otherwise PEEK the per-request investigation data — the AST monitor's captured exception,
+          or the span's exception event seeded into it by the processor for uninstrumented 5xx.
+        * A latency incident (no exception anywhere) returns ``(None, None)`` → route-only hash,
+          matching the pre-refactor behavior for slow requests.
+
+        Best-effort and guarded: hashing must never crash the host, so any failure degrades to
+        ``(None, None)`` (route-only), the safe default.
+        """
+        try:
+            if exception is not None:
+                return type(exception).__name__, str(exception)
+            inv_data = self._monitor_state.peek_investigation_data()
+            exc_data = inv_data.get("exception") if inv_data else None
+            if isinstance(exc_data, dict) and exc_data.get("name"):
+                return exc_data.get("name"), exc_data.get("message") or ""
+        except Exception:  # pylint: disable=broad-exception-caught  # telemetry must never crash host app
+            logger.debug("Failed to recover error identity for dedup hash", exc_info=True)
+        return None, None
+
     @staticmethod
-    def _generate_error_hash(route: str, exception: Optional[Exception]) -> str:
-        """
-        Generate hash for error deduplication.
+    def _error_hash(route: str, exc_type: Optional[str], exc_message: Optional[str]) -> str:
+        """Hash the dedup key from route + recovered exception type/message.
 
-        Args:
-            route: Route pattern
-            exception: Exception object
-
-        Returns:
-            Hash string
+        Keyed ``route:<route>`` for latency (no exception) or ``route:<route>|exc:<type>:<message>``
+        for errors, matching the documented per-SDK key (see SERVICE_EVENTS_INCIDENT_RATE_LIMITING.md)
+        and the Node distro's ``generateErrorHash``.
         """
-        if exception is None:
-            # For non-exception incidents (slow requests), use route only
+        if not exc_type:
             hash_input = f"route:{route}"
         else:
-            # Include exception type and message
-            exc_type = type(exception).__name__
-            exc_message = str(exception)
-            hash_input = f"route:{route}|exc:{exc_type}:{exc_message}"
-
+            hash_input = f"route:{route}|exc:{exc_type}:{exc_message or ''}"
         return hashlib.md5(hash_input.encode("utf-8")).hexdigest()
 
-    def _check_deduplication(self, error_hash: str) -> bool:
+    def _generate_error_hash(self, route: str, exception: Optional[Exception]) -> str:
+        """Backward-compatible hash entry point taking an exception object directly.
+
+        Retained for callers/tests that pass an explicit exception; delegates to ``_error_hash``.
         """
-        Check if error should be deduplicated.
+        if exception is None:
+            return self._error_hash(route, None, None)
+        return self._error_hash(route, type(exception).__name__, str(exception))
 
-        Uses atomic add-then-check to handle concurrent requests correctly.
+    def _is_within_dedup_limit(self, error_hash: str) -> bool:
+        """True if emitting this error now would NOT exceed the per-period same-error cap.
 
-        Args:
-            error_hash: Error hash
+        Pure check — does NOT record the occurrence. Prunes expired timestamps (idempotent
+        cleanup), but never mutates the count for ``error_hash``. Call ``_record_error_hash`` only
+        once the snapshot actually emits, so a rate-limited error never poisons the dedup map and
+        drops the next legitimate occurrence of the same error. Mirrors the Node distro's
+        ``isWithinDedupLimit``.
 
         Returns:
-            True if snapshot allowed, False if deduplicated
+            True if a snapshot is allowed, False if it would be deduplicated
         """
         current_time = time.time()
         cutoff_time = current_time - self.period_seconds
 
         with self._error_hashes_lock:
-            # Clean up old hashes
+            # Clean up old hashes (does not affect the would-be-count decision below).
             for hash_key in list(self._error_hashes.keys()):
-                timestamps = self._error_hashes[hash_key]
-                # Remove old timestamps
-                timestamps = [ts for ts in timestamps if ts >= cutoff_time]
+                timestamps = [ts for ts in self._error_hashes[hash_key] if ts >= cutoff_time]
                 if timestamps:
                     self._error_hashes[hash_key] = timestamps
                 else:
                     del self._error_hashes[hash_key]
 
-            # Add timestamp FIRST (atomic add-then-check pattern)
-            # This prevents race conditions where concurrent requests both pass the check
+            # Would-be count if we recorded now = current live count + 1.
+            live_count = len(self._error_hashes.get(error_hash, ()))
+            return live_count + 1 <= self._max_same_error
+
+    def _record_error_hash(self, error_hash: str) -> None:
+        """Record this error occurrence against the per-period dedup cap. Call only on emit."""
+        current_time = time.time()
+        with self._error_hashes_lock:
             if error_hash in self._error_hashes:
                 self._error_hashes[error_hash].append(current_time)
             else:
                 self._error_hashes[error_hash] = [current_time]
-
-            # Now check if we've exceeded the limit (use > because we already added)
-            if len(self._error_hashes[error_hash]) > self._max_same_error:
-                return False  # Deduplicate
-
-            return True
 
     def _collect_incident_snapshot(  # pylint: disable=too-many-locals
         self,
@@ -651,43 +831,27 @@ class IncidentSnapshotCollector(BaseCollector):
             else False
         )
 
-        # Lazy request body capture (only if config allows)
-        request_body = None
-        if self.capture_request_body:
-            # Try Flask request object first (lazy loading)
-            flask_request = request_data.get("flask_request")
-            if flask_request is not None:
-                # Lazy import: defer optional Flask instrumentation dependency until
-                # a Flask request is actually present.
-                # pylint: disable=import-outside-toplevel
-                from amazon.opentelemetry.serviceevents.instrumentation.flask_instrumentation import (
-                    _get_request_body,
-                )
-
-                request_body = _get_request_body(flask_request)
-            else:
-                # Try cached_body (pre-read by FastAPI middleware)
-                request_body = request_data.get("cached_body")
-
-        # Build request context — payload fields gated by capture_request_body flag
+        # Build request context. Actual request-payload capture is permanently disabled and is no
+        # longer customer-configurable, so the four payload fields (request_body/query_params/
+        # path_params/request_headers) are always null and custom_context is always empty — see
+        # SERVICE_EVENTS_OTLP_SIGNALS_SPEC.md §5 (the keys stay on the wire as null for consumer
+        # compatibility). Only the non-payload fields (type/timestamp/status_code) carry data.
         request_context = RequestContext(
             type="http",
             timestamp=int(time.time() * 1000),
             status_code=status_code,
-            custom_context=self._extract_custom_context(request_data) if self.capture_request_body else {},
-            request_body=request_body,
-            query_params=request_data.get("args") if self.capture_request_body else None,
-            path_params=request_data.get("view_args") if self.capture_request_body else None,
-            request_headers=(
-                dict(request_data.get("headers")) if self.capture_request_body and request_data.get("headers") else None
-            ),
         )
 
-        # Build telemetry correlation
+        # Build telemetry correlation. trace_id/span_id come straight from request_data, where the
+        # span processor already gated them on the real SAMPLED flag (fix #1): present iff the trace
+        # was sampled, else None (an unsampled request emits a complete, self-contained snapshot with
+        # empty correlation). They are NOT re-derived from the current span or inbound headers — those
+        # sources are not sampling-gated and would resurrect a link to a trace the backend never
+        # exported. The span processor is the single, sampling-gated source of correlation truth.
         telemetry_correlation = TelemetryCorrelation(
-            trace_id=self._extract_trace_id(request_data),
+            trace_id=self._format_trace_id(request_data.get("trace_id")),
             session_id=self._generate_session_id(request_data),
-            span_id=self._extract_span_id(request_data),
+            span_id=self._format_span_id(request_data.get("span_id")),
             request_id=self._generate_request_id(),
         )
 
@@ -858,29 +1022,6 @@ class IncidentSnapshotCollector(BaseCollector):
         return call_path
 
     @staticmethod
-    def _extract_custom_context(request_data: Dict) -> Dict[str, str]:
-        """
-        Extract custom context from request data (e.g., user_id).
-
-        Args:
-            request_data: Request metadata
-
-        Returns:
-            Custom context dictionary
-        """
-        custom_context = {}
-
-        # Extract user_id from query args if present
-        args = request_data.get("args", {})
-        if "user_id" in args:
-            custom_context["user_id"] = str(args["user_id"])
-
-        # Could extract other business context here
-        # e.g., session_id, tenant_id, etc.
-
-        return custom_context
-
-    @staticmethod
     def _format_trace_id(trace_id) -> Optional[str]:
         """Format a trace ID as a 0x-prefixed 32-char hex string."""
         if trace_id is None:
@@ -897,102 +1038,6 @@ class IncidentSnapshotCollector(BaseCollector):
         if isinstance(span_id, int):
             return f"0x{span_id:016x}"
         return str(span_id)
-
-    @staticmethod
-    def _valid_traceparent_id(raw: str, length: int) -> Optional[str]:
-        """Validate a hex id field from an inbound W3C traceparent header.
-
-        The traceparent header is attacker-controllable, so the trace/span id fields
-        are validated before being copied into the snapshot's correlation: they must be
-        exactly `length` hex chars and not the all-zero sentinel (invalid per the W3C
-        trace-context spec). Returns the lowercased hex (no 0x prefix) or None.
-        """
-        if not raw or len(raw) != length:
-            return None
-        lowered = raw.lower()
-        if any(c not in "0123456789abcdef" for c in lowered):
-            return None
-        if lowered == "0" * length:
-            return None
-        return lowered
-
-    def _extract_trace_id(self, request_data: Dict) -> Optional[str]:
-        """Extract trace ID from pre-captured value, OTel context, or request headers."""
-        # FIRST: Check for pre-captured trace_id (from Flask/FastAPI instrumentation)
-        # This is most reliable because it was captured while the span was still active
-        pre_captured = request_data.get("trace_id")
-        if pre_captured:
-            return self._format_trace_id(pre_captured)
-
-        # SECOND: Try to get from current OTel span (may not work in teardown hooks)
-        try:
-            current_span = trace.get_current_span()
-            if current_span:
-                span_context = current_span.get_span_context()
-                if span_context.is_valid:
-                    return self._format_trace_id(span_context.trace_id)
-        except Exception:  # pylint: disable=broad-exception-caught  # telemetry must never crash host app
-            pass
-
-        # FALLBACK: Try request headers (for distributed tracing)
-        headers = request_data.get("headers", {})
-
-        # Try OpenTelemetry traceparent
-        traceparent = headers.get("traceparent")
-        if traceparent:
-            # Extract trace-id from traceparent (format: 00-trace_id-span_id-flags).
-            # The header is untrusted input; validate the 32-char hex trace-id before use.
-            parts = traceparent.split("-")
-            if len(parts) >= 2:
-                trace_id_hex = self._valid_traceparent_id(parts[1], 32)
-                if trace_id_hex:
-                    return f"0x{trace_id_hex}"
-
-        # Try X-Ray trace ID
-        xray_trace = headers.get("X-Amzn-Trace-Id")
-        if xray_trace:
-            return xray_trace
-
-        # Try Datadog
-        dd_trace_id = headers.get("x-datadog-trace-id")
-        if dd_trace_id:
-            return dd_trace_id
-
-        return None
-
-    def _extract_span_id(self, request_data: Dict) -> Optional[str]:
-        """Extract span ID from pre-captured value, OTel context, or request headers."""
-        # FIRST: Check for pre-captured span_id (from Flask/FastAPI instrumentation)
-        # This is most reliable because it was captured while the span was still active
-        pre_captured = request_data.get("span_id")
-        if pre_captured:
-            return self._format_span_id(pre_captured)
-
-        # SECOND: Try to get from current OTel span (may not work in teardown hooks)
-        try:
-            current_span = trace.get_current_span()
-            if current_span:
-                span_context = current_span.get_span_context()
-                if span_context.is_valid:
-                    return self._format_span_id(span_context.span_id)
-        except Exception:  # pylint: disable=broad-exception-caught  # telemetry must never crash host app
-            pass
-
-        # FALLBACK: Try request headers (for distributed tracing)
-        headers = request_data.get("headers", {})
-
-        # OpenTelemetry traceparent
-        traceparent = headers.get("traceparent")
-        if traceparent:
-            # Extract span-id from traceparent (format: 00-trace_id-span_id-flags).
-            # The header is untrusted input; validate the 16-char hex span-id before use.
-            parts = traceparent.split("-")
-            if len(parts) >= 3:
-                span_id_hex = self._valid_traceparent_id(parts[2], 16)
-                if span_id_hex:
-                    return f"0x{span_id_hex}"
-
-        return None
 
     @staticmethod
     def _generate_session_id(request_data: Dict) -> Optional[str]:

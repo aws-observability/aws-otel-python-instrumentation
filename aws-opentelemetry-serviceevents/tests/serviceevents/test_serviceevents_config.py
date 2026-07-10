@@ -59,6 +59,32 @@ class TestServiceEventsConfig(TestCase):
         self.assertEqual(config.service_name, "test-service")
         self.assertEqual(config.incident_snapshot_max_per_minute, 10)
 
+    # ─── Incident-snapshot flush interval is derived from max_same_error ──
+    # flush = max(10s, 60s / N). Batch dedup keeps one snapshot per error per flush cycle and
+    # period dedup allows N per 60s window, so the 60s window must be sliced into >= N cycles to
+    # emit all N; the largest such cycle (60s / N) is the widest Point #2 upgrade window.
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_incident_flush_interval_default_is_60s(self):
+        """Default max_same_error=1 → flush = 60s / 1 = 60s (maximizes the single-snapshot window)."""
+        config = ServiceEventsConfig.from_env()
+        self.assertEqual(config.incident_snapshot_max_same_error, 1)
+        self.assertEqual(config.incident_snapshot_flush_interval, 60000)
+
+    @patch.dict(os.environ, {"OTEL_AWS_SERVICE_EVENTS_INCIDENT_SNAPSHOT_MAX_SAME_ERROR": "3"})
+    def test_incident_flush_interval_derived_from_max_same_error(self):
+        """max_same_error=3 → flush = 60s / 3 = 20s, so all 3 snapshots fit the 60s window."""
+        config = ServiceEventsConfig.from_env()
+        self.assertEqual(config.incident_snapshot_max_same_error, 3)
+        self.assertEqual(config.incident_snapshot_flush_interval, 20000)
+
+    @patch.dict(os.environ, {"OTEL_AWS_SERVICE_EVENTS_INCIDENT_SNAPSHOT_MAX_SAME_ERROR": "10"})
+    def test_incident_flush_interval_floored_at_10s(self):
+        """max_same_error=10 → 60s / 10 = 6s, floored at 10s (effective per-error rate caps at 6/min)."""
+        config = ServiceEventsConfig.from_env()
+        self.assertEqual(config.incident_snapshot_max_same_error, 10)
+        self.assertEqual(config.incident_snapshot_flush_interval, 10000)
+
     @patch.dict(
         os.environ,
         {
@@ -107,6 +133,49 @@ class TestServiceEventsConfig(TestCase):
 
         # Should fall back to default
         self.assertEqual(config.incident_snapshot_max_per_minute, 100)
+
+    # ─── Incident config knobs are clamped to [1, 100000] ──
+    # A 0/negative value would silently break the feature (a 0 max_same_error makes the dedup gate
+    # always fire; a 0 max_per_minute makes deque(maxlen=0) drop every snapshot). Clamp rather than
+    # raise so a fat-fingered value degrades to the nearest sane bound. Mirrors Node's getIntClamped.
+
+    @patch.dict(os.environ, {"OTEL_AWS_SERVICE_EVENTS_INCIDENT_SNAPSHOT_MAX_SAME_ERROR": "0"})
+    def test_max_same_error_zero_clamped_to_min(self):
+        """0 would make the dedup gate always fire → clamped up to 1 (flush stays 60s)."""
+        config = ServiceEventsConfig.from_env()
+        self.assertEqual(config.incident_snapshot_max_same_error, 1)
+        self.assertEqual(config.incident_snapshot_flush_interval, 60000)
+
+    @patch.dict(os.environ, {"OTEL_AWS_SERVICE_EVENTS_INCIDENT_SNAPSHOT_MAX_SAME_ERROR": "-5"})
+    def test_max_same_error_negative_clamped_to_min(self):
+        """A negative value clamps up to the minimum of 1."""
+        config = ServiceEventsConfig.from_env()
+        self.assertEqual(config.incident_snapshot_max_same_error, 1)
+
+    @patch.dict(os.environ, {"OTEL_AWS_SERVICE_EVENTS_INCIDENT_SNAPSHOT_MAX_SAME_ERROR": "999999999"})
+    def test_max_same_error_above_max_clamped_to_max(self):
+        """An absurdly large value clamps down to the maximum of 100000 (flush floors at 10s)."""
+        config = ServiceEventsConfig.from_env()
+        self.assertEqual(config.incident_snapshot_max_same_error, 100_000)
+        self.assertEqual(config.incident_snapshot_flush_interval, 10000)
+
+    @patch.dict(os.environ, {"OTEL_AWS_SERVICE_EVENTS_INCIDENT_SNAPSHOT_MAX_PER_MINUTE": "0"})
+    def test_max_per_minute_zero_clamped_to_min(self):
+        """0 would make deque(maxlen=0) drop every snapshot → clamped up to 1."""
+        config = ServiceEventsConfig.from_env()
+        self.assertEqual(config.incident_snapshot_max_per_minute, 1)
+
+    @patch.dict(os.environ, {"OTEL_AWS_SERVICE_EVENTS_INCIDENT_SNAPSHOT_MAX_PER_MINUTE": "-1"})
+    def test_max_per_minute_negative_clamped_to_min(self):
+        """A negative value clamps up to the minimum of 1."""
+        config = ServiceEventsConfig.from_env()
+        self.assertEqual(config.incident_snapshot_max_per_minute, 1)
+
+    @patch.dict(os.environ, {"OTEL_AWS_SERVICE_EVENTS_INCIDENT_SNAPSHOT_MAX_PER_MINUTE": "500000"})
+    def test_max_per_minute_above_max_clamped_to_max(self):
+        """A value above the ceiling clamps down to the maximum of 100000."""
+        config = ServiceEventsConfig.from_env()
+        self.assertEqual(config.incident_snapshot_max_per_minute, 100_000)
 
     @patch.dict(os.environ, {"OTEL_AWS_SERVICE_EVENTS_ENABLED": "TRUE"}, clear=True)
     def test_from_env_case_insensitive_bool(self):

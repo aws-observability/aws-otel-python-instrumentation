@@ -491,9 +491,10 @@ class TestIncidentSnapshotContract:
                 "status_code": 500,
                 "custom_context": {"user_id": "u123"},
             },
+            # 0x-prefixed, canonical-width hex — exactly what the collector emits.
             "telemetry_correlation": {
-                "trace_id": "abcdef0123456789abcdef0123456789",
-                "span_id": "0123456789abcdef",
+                "trace_id": "0xabcdef0123456789abcdef0123456789",
+                "span_id": "0x0123456789abcdef",
             },
         }
 

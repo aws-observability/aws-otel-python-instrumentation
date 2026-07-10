@@ -219,9 +219,14 @@ class TestServiceEventsInstrumentation(TestCase):
         with self.assertLogs(logger_name, level="DEBUG") as captured:
             instrumentation.initialize()
 
-        warn_records = [r for r in captured.records if r.levelno >= logging.WARNING]
+        # Only the absent-function-instrumentation warning matters here. The endpoint span processor
+        # cannot register on this unit test's NoOp provider, so it logs its own "no add_span_processor"
+        # warning — filter that out so this test stays scoped to the function-instrumentation path.
+        warn_records = [
+            r for r in captured.records if r.levelno >= logging.WARNING and "add_span_processor" not in r.getMessage()
+        ]
         self.assertEqual(warn_records, [], "expected no WARNING when include list is empty")
-        # Hooks are still installed (instruments nothing, but endpoint signals flow).
+        # AST hooks are still installed (instruments nothing, but the call still happens).
         mock_install_hooks.assert_called_once()
 
 
@@ -666,46 +671,6 @@ class TestServiceEventsFrameworkHooks(TestCase):
         )
         return ServiceEventsInstrumentation(config)
 
-    def test_framework_import_errors_are_handled(self):
-        """Missing Flask/FastAPI/Django modules are skipped via ImportError handling."""
-        # Setting the module entries to None makes the deferred imports raise ImportError,
-        # exercising the "framework not installed" debug branches without uninstalling
-        # the real packages.
-        blocked = {
-            "amazon.opentelemetry.serviceevents.instrumentation.flask_instrumentation": None,
-            "amazon.opentelemetry.serviceevents.instrumentation.fastapi_instrumentation": None,
-            "amazon.opentelemetry.serviceevents.instrumentation.django_instrumentation": None,
-        }
-        inst = self._make_instrumentation()
-        with patch.dict(sys.modules, blocked):
-            inst.initialize()
-        try:
-            self.assertTrue(inst._initialized)
-        finally:
-            inst.shutdown()
-
-    def test_framework_install_exceptions_are_handled(self):
-        """Errors raised while installing framework hooks are caught, not propagated."""
-        inst = self._make_instrumentation()
-        flask_mod = (
-            "amazon.opentelemetry.serviceevents.instrumentation.flask_instrumentation.install_flask_hooks"
-        )
-        fastapi_mod = (
-            "amazon.opentelemetry.serviceevents.instrumentation." "fastapi_instrumentation.install_fastapi_hooks"
-        )
-        django_mod = (
-            "amazon.opentelemetry.serviceevents.instrumentation.django_instrumentation.install_django_hooks"
-        )
-        with patch(flask_mod, side_effect=RuntimeError("flask boom")), patch(
-            fastapi_mod, side_effect=RuntimeError("fastapi boom")
-        ), patch(django_mod, side_effect=RuntimeError("django boom")):
-            inst.initialize()
-        try:
-            # Initialization still completes despite the framework-hook failures.
-            self.assertTrue(inst._initialized)
-        finally:
-            inst.shutdown()
-
     def test_register_at_fork_attribute_error_is_handled(self):
         """A platform without os.register_at_fork (e.g. Windows) is handled gracefully."""
         inst = self._make_instrumentation()
@@ -808,3 +773,99 @@ class TestServiceEventsShutdownEdgeCases(TestCase):
 
         # Should not raise.
         inst.shutdown()
+
+
+class TestEndpointMeasurementMode(TestCase):
+    """Tests for the framework-agnostic endpoint span processor (the sole endpoint-measurement path)."""
+
+    def setUp(self):
+        patcher = patch("amazon.opentelemetry.serviceevents.serviceevents_instrumentation.atexit")
+        self.mock_atexit = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    @patch("amazon.opentelemetry.serviceevents.serviceevents_instrumentation._ServiceEventsMonitorState")
+    @patch("amazon.opentelemetry.serviceevents.serviceevents_instrumentation.install_ast_hooks")
+    def test_initialize_installs_span_processor(self, _mock_ast, mock_state):
+        """initialize() always installs the endpoint span processor — there is no legacy hook path."""
+        mock_state.get_instance.return_value = MagicMock()
+        config = ServiceEventsConfig(enabled=True, function_instrument_enabled=False)
+        inst = ServiceEventsInstrumentation(config)
+        with patch.object(inst, "_install_endpoint_span_processor", return_value=True) as proc:
+            inst.initialize()
+            proc.assert_called_once()
+
+    def test_install_span_processor_registers_on_provider(self):
+        """_install_endpoint_span_processor adds a processor to a provider that supports it."""
+        config = ServiceEventsConfig(enabled=True)
+        inst = ServiceEventsInstrumentation(config)
+        provider = MagicMock()  # has add_span_processor
+        with patch("opentelemetry.trace.get_tracer_provider", return_value=provider):
+            self.assertTrue(inst._install_endpoint_span_processor(MagicMock(), MagicMock()))
+        provider.add_span_processor.assert_called_once()
+        registered = provider.add_span_processor.call_args.args[0]
+        from amazon.opentelemetry.serviceevents.processor.endpoint_span_processor import (
+            ServiceEventsSpanProcessor,
+        )
+
+        self.assertIsInstance(registered, ServiceEventsSpanProcessor)
+
+    def test_install_span_processor_noop_provider_returns_false(self):
+        """A provider without add_span_processor (NoOp API provider) does not crash; returns False."""
+        config = ServiceEventsConfig(enabled=True)
+        inst = ServiceEventsInstrumentation(config)
+
+        class _NoOpProvider:
+            pass
+
+        with patch("opentelemetry.trace.get_tracer_provider", return_value=_NoOpProvider()):
+            # Must not raise; reports failure (no span pipeline → no endpoint signals).
+            self.assertFalse(inst._install_endpoint_span_processor(MagicMock(), MagicMock()))
+
+    def test_install_span_processor_swallows_errors(self):
+        """A failure registering the processor is swallowed (telemetry must not crash app); returns False."""
+        config = ServiceEventsConfig(enabled=True)
+        inst = ServiceEventsInstrumentation(config)
+        provider = MagicMock()
+        provider.add_span_processor.side_effect = RuntimeError("provider down")
+        with patch("opentelemetry.trace.get_tracer_provider", return_value=provider):
+            self.assertFalse(inst._install_endpoint_span_processor(MagicMock(), MagicMock()))
+
+    def test_install_span_processor_is_idempotent_on_same_provider(self):
+        """A second install on a provider that already carries our processor must NOT add a
+        duplicate — a double registration would fire on_start/on_end twice and double-count
+        every endpoint metric. It still reports success."""
+        from amazon.opentelemetry.serviceevents.processor.endpoint_span_processor import (
+            ServiceEventsSpanProcessor,
+        )
+        from opentelemetry.sdk.trace import TracerProvider
+
+        config = ServiceEventsConfig(enabled=True)
+        inst = ServiceEventsInstrumentation(config)
+        provider = TracerProvider()
+        with patch("opentelemetry.trace.get_tracer_provider", return_value=provider):
+            self.assertTrue(inst._install_endpoint_span_processor(MagicMock(), MagicMock()))
+            # Second call (re-init / forked child inheriting the provider) is a no-op add.
+            self.assertTrue(inst._install_endpoint_span_processor(MagicMock(), MagicMock()))
+
+        registered = [
+            sp for sp in provider._active_span_processor._span_processors if isinstance(sp, ServiceEventsSpanProcessor)
+        ]
+        self.assertEqual(len(registered), 1)
+
+    def test_provider_has_endpoint_processor_handles_unexpected_shape(self):
+        """The idempotency probe is best-effort: an unintrospectable provider returns False so
+        registration still proceeds (the pre-guard baseline), never crashing."""
+        from amazon.opentelemetry.serviceevents.processor.endpoint_span_processor import (
+            ServiceEventsSpanProcessor,
+        )
+
+        # No _active_span_processor at all.
+        self.assertFalse(
+            ServiceEventsInstrumentation._provider_has_endpoint_processor(object(), ServiceEventsSpanProcessor)
+        )
+        # _span_processors is not a list/tuple.
+        weird = MagicMock()
+        weird._active_span_processor._span_processors = 12345
+        self.assertFalse(
+            ServiceEventsInstrumentation._provider_has_endpoint_processor(weird, ServiceEventsSpanProcessor)
+        )
