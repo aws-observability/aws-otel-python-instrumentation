@@ -15,9 +15,7 @@ each test that needs module-level discovery.
 """
 
 import asyncio
-import os
 import sys
-import tempfile
 import threading
 import types
 import unittest
@@ -969,205 +967,124 @@ class TestClassMethodInstrumentation(_SnapshotEmitterFixture):
 
 
 # ===========================================================================
-# `from module import func` alias redirection (_patch_module_aliases)
+# `from module import func` alias redirection
 # ===========================================================================
-class TestModuleAliasRedirect(unittest.TestCase):
-    """Method-level install must redirect `from x import f` aliases in other app modules.
+def _make_engine():
+    """Pick the engine the running Python supports.
 
-    `from module import func` copies the function object into the importing module's
-    namespace; setattr on the defining module does not update that copy. These tests
-    verify the alias is redirected on install, restored on uninstall, and that the
-    scan is bounded (defining module, stdlib, and site-packages are never touched)
-    and never raises on an un-writable namespace.
+    3.12+ → SysMonitoringEngine. 3.10-3.11 → BytecodeInjectionEngine.
+    """
+    if sys.version_info >= (3, 12):
+        # pylint: disable=import-outside-toplevel
+        from amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine import (
+            SysMonitoringEngine,
+        )
+
+        engine = SysMonitoringEngine()
+    else:
+        # pylint: disable=import-outside-toplevel
+        from amazon.opentelemetry.distro.debugger.instrumentation_engine._bytecode_injection_engine import (
+            BytecodeInjectionEngine,
+        )
+
+        engine = BytecodeInjectionEngine()
+    engine.initialize()
+    return engine
+
+
+class TestModuleAliasRedirect(unittest.TestCase):
+    """A `from x import f` alias copies the function object into the importing
+    module's namespace. The setattr-wrapper approach had to scan modules and
+    rewrite those copies because setattr on the defining module did not update
+    them. The engine mutates the function's __code__ in place, so the aliased
+    copy — being the same function object — sees the rewritten code on the next
+    call, and disarm restores it. No alias scan needed.
     """
 
     @staticmethod
-    def _make_module(name, origin):
+    def _make_module(name):
         module = types.ModuleType(name)
-        module.__file__ = origin
-        module.__spec__ = types.SimpleNamespace(origin=origin, name=name)
         sys.modules[name] = module
         return module
 
     def setUp(self):
-        # App-like file origins (outside stdlib / site-packages) so the modules
-        # classify as application code that the alias scan is willing to rewrite.
-        app_dir = os.path.join(tempfile.gettempdir(), "di_alias_unit_app")
+        self.module_name = "di_alias_defining_mod"
+        self.consumer_name = "di_alias_consumer_mod"
+        self.snapshots = []
 
-        def _orig(price_cents, discount_percent):
+        class _FakeEmitter:
+            def emit_snapshot(_self, snap):  # noqa: N805
+                self.snapshots.append(snap)
+
+        set_snapshot_emitter(_FakeEmitter())
+        self.engine = _make_engine()
+
+        def apply_discount(price_cents, discount_percent):
             return price_cents - (price_cents * discount_percent // 100)
 
-        _orig.__module__ = "di_alias_defining_mod"
-        self.original = _orig
+        apply_discount.__module__ = self.module_name
+        self.original = apply_discount
 
-        self.defining = self._make_module("di_alias_defining_mod", os.path.join(app_dir, "pricing.py"))
-        self.defining.apply_discount = _orig
+        self.defining = self._make_module(self.module_name)
+        self.defining.apply_discount = apply_discount
 
-        # Consumer that did `from di_alias_defining_mod import apply_discount` (two aliases).
-        self.consumer = self._make_module("di_alias_consumer_mod", os.path.join(app_dir, "server.py"))
-        self.consumer.apply_discount = _orig
-        self.consumer.aliased_again = _orig
+        # Consumer that did `from di_alias_defining_mod import apply_discount`
+        # (the alias is a copy of the SAME function object).
+        self.consumer = self._make_module(self.consumer_name)
+        self.consumer.apply_discount = apply_discount
+        self.consumer.aliased_again = apply_discount
 
-        # A stdlib-like and a site-packages-like module that (pathologically) also
-        # reference the same object -- these must NOT be rewritten.
-        self.stdlike = self._make_module(
-            "di_alias_stdlike_mod", os.path.join(os.path.realpath(sys.prefix), "lib", "python3.x", "stdlike.py")
-        )
-        self.stdlike.apply_discount = _orig
-        self.sitelike = self._make_module(
-            "di_alias_sitelike_mod", os.path.join(app_dir, "site-packages", "third_party_pkg", "__init__.py")
-        )
-        self.sitelike.apply_discount = _orig
-
-        for name in (
-            "di_alias_defining_mod",
-            "di_alias_consumer_mod",
-            "di_alias_stdlike_mod",
-            "di_alias_sitelike_mod",
-        ):
+        for name in (self.module_name, self.consumer_name):
             self.addCleanup(lambda n=name: sys.modules.pop(n, None))
 
+    def tearDown(self):
+        try:
+            self.engine.cleanup()
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+
+    def _arm(self):
+        ok = self.engine.enable_function_level_instrumentation(
+            code=self.original.__code__,
+            func=self.original,
+            function_key=f"{self.module_name}.apply_discount",
+            module_name=self.module_name,
+            qualified_name="apply_discount",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
+
     def test_install_redirects_alias_in_consumer_module(self):
-        def wrapper(*args, **kwargs):
-            return "wrapped"
+        """Calling through a `from x import f` alias fires the engine — the alias
+        is the same function object whose __code__ was mutated. No scan needed."""
+        self._arm()
 
-        rebound = FunctionWrapper._patch_module_aliases(self.defining, self.original, wrapper)
-
-        self.assertGreaterEqual(rebound, 2, "Both consumer aliases should be redirected")
-        self.assertIs(self.consumer.apply_discount, wrapper)
-        self.assertIs(self.consumer.aliased_again, wrapper)
-
-    def test_defining_module_is_not_rewritten(self):
-        def wrapper(*args, **kwargs):
-            return "wrapped"
-
-        FunctionWrapper._patch_module_aliases(self.defining, self.original, wrapper)
-        # The defining module's own attribute is owned by the caller (setattr happens
-        # separately); the alias scan must skip the defining module.
-        self.assertIs(self.defining.apply_discount, self.original)
-
-    def test_stdlib_and_site_packages_modules_are_not_touched(self):
-        def wrapper(*args, **kwargs):
-            return "wrapped"
-
-        FunctionWrapper._patch_module_aliases(self.defining, self.original, wrapper)
-        self.assertIs(self.stdlike.apply_discount, self.original, "stdlib-like module must be untouched")
-        self.assertIs(self.sitelike.apply_discount, self.original, "site-packages-like module must be untouched")
-
-    def test_restore_reverts_aliases(self):
-        def wrapper(*args, **kwargs):
-            return "wrapped"
-
-        FunctionWrapper._patch_module_aliases(self.defining, self.original, wrapper)
-        # Restore (swap args): redirect the wrapper references back to the original.
-        FunctionWrapper._patch_module_aliases(self.defining, wrapper, self.original)
+        # The consumer holds the SAME object — engine mutated its __code__.
         self.assertIs(self.consumer.apply_discount, self.original)
         self.assertIs(self.consumer.aliased_again, self.original)
 
-    def test_unwritable_namespace_does_not_raise(self):
-        class _Frozen(types.ModuleType):
-            def __setattr__(self, key, value):
-                if key == "apply_discount":
-                    raise RuntimeError("read-only")
-                super().__setattr__(key, value)
+        self.assertEqual(self.consumer.apply_discount(100, 10), 90)
+        self.assertEqual(len(self.snapshots), 1)
+        self.assertEqual(self.consumer.aliased_again(100, 25), 75)
+        self.assertEqual(len(self.snapshots), 2)
 
-        frozen = _Frozen("di_alias_frozen_mod")
-        object.__setattr__(frozen, "__file__", os.path.join(tempfile.gettempdir(), "di_alias_unit_app", "frozen.py"))
-        object.__setattr__(
-            frozen, "__spec__", types.SimpleNamespace(origin=frozen.__file__, name="di_alias_frozen_mod")
-        )
-        object.__setattr__(frozen, "apply_discount", self.original)
-        sys.modules["di_alias_frozen_mod"] = frozen
-        self.addCleanup(lambda: sys.modules.pop("di_alias_frozen_mod", None))
+    def test_restore_reverts_aliases(self):
+        """After disarm the original __code__ is restored, so calling through the
+        alias produces no further snapshot."""
+        original_code = self.original.__code__
+        self._arm()
 
-        def wrapper(*args, **kwargs):
-            return "wrapped"
+        # Sanity: armed call via the alias fires.
+        self.consumer.apply_discount(100, 10)
+        self.assertEqual(len(self.snapshots), 1)
+        self.snapshots.clear()
 
-        # Must not raise even though one module's setattr fails; other modules still rebind.
-        rebound = FunctionWrapper._patch_module_aliases(self.defining, self.original, wrapper)
-        self.assertIs(self.consumer.apply_discount, wrapper)
-        self.assertIs(frozen.apply_discount, self.original, "frozen module attribute should be unchanged")
-        self.assertGreaterEqual(rebound, 2)
+        self.engine.disable_function_level_instrumentation(code=original_code, func=self.original)
 
-
-# ===========================================================================
-# _is_application_module classification (structural name/path matching)
-# ===========================================================================
-class TestIsApplicationModule(unittest.TestCase):
-    """Application-vs-non-application classification must be structural, not loose.
-
-    Regression guards for three false-negatives where legitimate first-party code was
-    misclassified as non-application (so its `from x import f` aliases were silently never
-    redirected): top-level name prefix matched as a bare string, ``site-packages`` matched as a
-    substring, and ``spec.origin`` taken without falling back to ``__file__``.
-    """
-
-    APP_ORIGIN = os.path.join(tempfile.gettempdir(), "di_isapp_unit", "server.py")
-
-    @staticmethod
-    def _module(name, *, spec_origin="__unset__", file_attr="__unset__"):
-        """Build a throwaway module with a controllable ``__spec__.origin`` and ``__file__``.
-
-        ``spec_origin``/``file_attr`` left at the sentinel mean "use APP_ORIGIN"; pass ``None`` to
-        omit/blank that attribute explicitly.
-        """
-        module = types.ModuleType(name)
-        file_attr = TestIsApplicationModule.APP_ORIGIN if file_attr == "__unset__" else file_attr
-        spec_origin = TestIsApplicationModule.APP_ORIGIN if spec_origin == "__unset__" else spec_origin
-        if file_attr is not None:
-            module.__file__ = file_attr
-        module.__spec__ = types.SimpleNamespace(origin=spec_origin, name=name)
-        return module
-
-    def _is_app(self, module):
-        return FunctionWrapper._is_application_module(module)
-
-    # --- Fix #3: top-level name matched on first dotted component, not bare prefix ----------
-    def test_app_names_beginning_with_skip_prefix_are_application(self):
-        for name in ("wraptools", "wrapt_helpers", "pytest_fixtures_local", "pytestutils"):
-            self.assertTrue(self._is_app(self._module(name)), f"{name} should be application code")
-
-    def test_skipped_packages_and_subtrees_still_excluded(self):
-        for name in (
-            "wrapt",
-            "wrapt.decorators",
-            "pytest",
-            "pytest.fixtures",
-            "_pytest",
-            "_pytest.config",
-            "opentelemetry.trace",
-            "amazon.opentelemetry.distro",
-        ):
-            self.assertFalse(self._is_app(self._module(name)), f"{name} must be excluded")
-
-    # --- Fix #1: site-packages/dist-packages matched as path components, not substrings -----
-    def test_app_path_containing_site_packages_substring_is_application(self):
-        for origin in (
-            os.path.join(tempfile.gettempdir(), "site-packages-demo", "myapp", "server.py"),
-            os.path.join(tempfile.gettempdir(), "my-site-packages", "app.py"),
-        ):
-            module = self._module("myapp", spec_origin=origin, file_attr=origin)
-            self.assertTrue(self._is_app(module), f"{origin} should be application code")
-
-    def test_real_site_and_dist_packages_components_still_excluded(self):
-        for origin in (
-            os.path.join(tempfile.gettempdir(), "venv", "lib", "python3.11", "site-packages", "foo", "__init__.py"),
-            os.path.join(tempfile.gettempdir(), "usr", "lib", "python3", "dist-packages", "bar.py"),
-        ):
-            module = self._module("foo", spec_origin=origin, file_attr=origin)
-            self.assertFalse(self._is_app(module), f"{origin} must be excluded")
-
-    # --- Fix #2b: fall back to __file__ when spec.origin is None ----------------------------
-    def test_falls_back_to_file_when_spec_origin_is_none(self):
-        module = self._module("myapp", spec_origin=None, file_attr=self.APP_ORIGIN)
-        self.assertTrue(
-            self._is_app(module),
-            "module with __spec__.origin=None but a valid __file__ should classify as application",
-        )
-
-    def test_no_usable_origin_anywhere_is_excluded(self):
-        module = self._module("myapp", spec_origin=None, file_attr=None)
-        self.assertFalse(self._is_app(module), "module with no usable origin must be excluded (fail-safe)")
+        # __code__ restored; calling via the alias emits no new snapshot.
+        self.assertIs(self.original.__code__, original_code)
+        self.assertEqual(self.consumer.apply_discount(100, 10), 90)
+        self.assertEqual(len(self.snapshots), 0)
 
 
 if __name__ == "__main__":

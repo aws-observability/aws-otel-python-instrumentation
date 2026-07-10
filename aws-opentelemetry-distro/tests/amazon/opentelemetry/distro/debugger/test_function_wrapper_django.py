@@ -2,19 +2,25 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Tests for Django URLPattern.callback patching in _function_wrapper.py.
+Tests that the function-level instrumentation engine fires for Django view
+handlers without requiring URLPattern.callback patching.
 
-Validates that _replace_function_in_module and restore_function correctly
-patch Django's URL resolver tree (URLPattern.callback) when instrumenting
-view functions registered via path() / re_path() / include().
+Django's path() / re_path() / include() store a direct reference to the view
+function in the URL resolver tree (URLPattern.callback) at import time. The
+setattr-wrapper approach required us to walk that tree and rewrite every
+callback because replacing the module-level name does not update Django's
+internal references. The bytecode-injection / sys.monitoring engines mutate
+the function's __code__ in place, so any reference Django is holding (or any
+other framework) sees the rewritten code on the next call — no URLPattern
+patch needed.
 """
 
 import sys
 import types
 import unittest
-from unittest.mock import patch
 
-from amazon.opentelemetry.distro.debugger._function_wrapper import FunctionWrapper
+from amazon.opentelemetry.distro.debugger._data_models import CaptureConfig
+from amazon.opentelemetry.distro.debugger._function_wrapper import set_snapshot_emitter
 
 
 def _make_module(name, **attrs):
@@ -30,11 +36,32 @@ def _remove_module(name):
     sys.modules.pop(name, None)
 
 
+def _make_engine():
+    """Pick the engine the running Python supports.
+
+    3.12+ → SysMonitoringEngine. 3.10-3.11 → BytecodeInjectionEngine.
+    """
+    if sys.version_info >= (3, 12):
+        # pylint: disable=import-outside-toplevel
+        from amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine import (
+            SysMonitoringEngine,
+        )
+
+        engine = SysMonitoringEngine()
+    else:
+        # pylint: disable=import-outside-toplevel
+        from amazon.opentelemetry.distro.debugger.instrumentation_engine._bytecode_injection_engine import (
+            BytecodeInjectionEngine,
+        )
+
+        engine = BytecodeInjectionEngine()
+    engine.initialize()
+    return engine
+
+
 def _configure_django_if_needed():
     """Make Django importable in test contexts. Returns True if Django is
-    available + minimally configured; False otherwise (caller should skip).
-    Tests that exercise URLPattern/URLResolver only need Django importable;
-    tests that hit get_resolver(None) need ROOT_URLCONF set."""
+    available + minimally configured; False otherwise (caller should skip)."""
     try:
         import django  # noqa: F401  pylint: disable=import-outside-toplevel,unused-import
     except ImportError:
@@ -55,203 +82,272 @@ def _configure_django_if_needed():
         return False
 
 
-def _isolated_from_get_resolver():
-    """Context manager that forces ``django.urls.get_resolver`` to raise.
-
-    Tests that exercise the module-scan fallback path of
-    ``_patch_django_url_patterns`` use this to make the path under test
-    explicit: with this active, the patcher's ``get_resolver(None)``
-    attempt fails and discovery falls through to scanning the passed-in
-    module. Without it, these tests would silently rely on the dummy
-    ROOT_URLCONF being unimportable, which is opaque and brittle."""
-    return patch("django.urls.get_resolver", side_effect=RuntimeError("test isolation: get_resolver disabled"))
-
-
 class TestDjangoUrlPatternsPatching(unittest.TestCase):
-    """Tests for _patch_django_url_patterns and its integration."""
+    """Exercises the engine against Django's URLPattern.callback to prove no
+    URL-resolver patching is required: mutating __code__ in place flows through
+    any reference Django holds in its resolver tree."""
 
     def setUp(self):
         self.module_name = "_test_django_module"
         _remove_module(self.module_name)
+        self.snapshots = []
+
+        class _FakeEmitter:
+            def emit_snapshot(_self, snap):  # noqa: N805
+                self.snapshots.append(snap)
+
+        set_snapshot_emitter(_FakeEmitter())
+        self.engine = _make_engine()
 
     def tearDown(self):
+        try:
+            self.engine.cleanup()
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
         _remove_module(self.module_name)
 
     # ------------------------------------------------------------------
-    # _patch_django_url_patterns: identity match
+    # URLPattern.callback identity match
     # ------------------------------------------------------------------
 
     def test_patch_django_url_patterns_identity_match(self):
-        """When URLPattern.callback is original_func, identity-based patching works."""
+        """When URLPattern.callback is the same identity as the armed function,
+        the engine's __code__ mutation flows through — no URLPattern patch needed."""
         if not _configure_django_if_needed():
             self.skipTest("Django not installed")
         from django.urls import path  # pylint: disable=import-outside-toplevel
 
-        original = lambda request: "original"  # noqa: E731
-        wrapper = lambda request: "wrapper"  # noqa: E731
-        original.__name__ = "my_view"
+        def my_view(request):
+            return "original"
 
-        urlpattern = path("my-view/", original)
-        mod = _make_module(self.module_name, urlpatterns=[urlpattern])
+        urlpattern = path("my-view/", my_view)
+        _make_module(self.module_name, urlpatterns=[urlpattern], my_view=my_view)
 
-        with _isolated_from_get_resolver():
-            FunctionWrapper._patch_django_url_patterns(mod, original, wrapper)
+        ok = self.engine.enable_function_level_instrumentation(
+            code=my_view.__code__,
+            func=my_view,
+            function_key=f"{self.module_name}.my_view",
+            module_name=self.module_name,
+            qualified_name="my_view",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
 
-        self.assertIs(urlpattern.callback, wrapper)
+        # Calling through URLPattern.callback (Django's internal reference) still
+        # fires the engine — same function object, mutated __code__.
+        result = urlpattern.callback(None)
+        self.assertEqual(result, "original")
+        self.assertEqual(len(self.snapshots), 1)
 
     # ------------------------------------------------------------------
-    # _patch_django_url_patterns: name+module fallback
+    # OTel-wrapped view (different identity, same underlying call)
     # ------------------------------------------------------------------
 
     def test_patch_django_url_patterns_name_fallback(self):
-        """When identity doesn't match (e.g. OTel wrapping or @login_required),
-        name+module-based fallback works."""
+        """When Django holds an OTel-wrapped view (different identity from the
+        underlying function), arming the underlying function still produces a
+        snapshot when the wrapper invokes it — the wrapper calls the same
+        function object whose __code__ we mutated."""
         if not _configure_django_if_needed():
             self.skipTest("Django not installed")
         from django.urls import path  # pylint: disable=import-outside-toplevel
 
-        original = lambda request: "original"  # noqa: E731
-        otel_wrapped = lambda request: "otel_wrapped"  # noqa: E731
-        di_wrapper = lambda request: "di_wrapper"  # noqa: E731
-        original.__name__ = "get_order"
-        original.__module__ = self.module_name
+        def get_order(request):
+            return "original"
+
+        # Simulate OTel's auto-instrumentation wrapping the view.
+        def otel_wrapped(request):
+            return get_order(request)
+
         otel_wrapped.__name__ = "get_order"
         otel_wrapped.__module__ = self.module_name
 
         urlpattern = path("orders/", otel_wrapped)
-        mod = _make_module(self.module_name, urlpatterns=[urlpattern])
+        _make_module(self.module_name, urlpatterns=[urlpattern], get_order=get_order)
 
-        with _isolated_from_get_resolver():
-            FunctionWrapper._patch_django_url_patterns(mod, original, di_wrapper)
+        ok = self.engine.enable_function_level_instrumentation(
+            code=get_order.__code__,
+            func=get_order,
+            function_key=f"{self.module_name}.get_order",
+            module_name=self.module_name,
+            qualified_name="get_order",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
 
-        self.assertIs(urlpattern.callback, di_wrapper)
-
-    # ------------------------------------------------------------------
-    # _patch_django_url_patterns: no-op edge cases
-    # ------------------------------------------------------------------
+        # OTel wrapper still calls the underlying get_order, whose __code__ is
+        # now mutated. Snapshot fires.
+        result = urlpattern.callback(None)
+        self.assertEqual(result, "original")
+        self.assertEqual(len(self.snapshots), 1)
 
     def test_patch_django_no_django_installed(self):
-        """When Django is not installed, patching is a no-op."""
-        original = lambda request: None  # noqa: E731
-        wrapper = lambda request: None  # noqa: E731
-        mod = _make_module(self.module_name, some_func=original)
+        """When Django is not installed, the engine arms unaffected — the engine
+        path has no Django dependency at all."""
 
-        with patch.dict(sys.modules, {"django.urls": None}):
-            # Should not raise
-            FunctionWrapper._patch_django_url_patterns(mod, original, wrapper)
+        def some_func():
+            return "ok"
+
+        _make_module(self.module_name, some_func=some_func)
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=some_func.__code__,
+            func=some_func,
+            function_key=f"{self.module_name}.some_func",
+            module_name=self.module_name,
+            qualified_name="some_func",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
+        self.assertEqual(some_func(), "ok")
+        self.assertEqual(len(self.snapshots), 1)
 
     def test_patch_django_no_urlpatterns_in_module(self):
-        """When module has no urlpatterns / URLPattern instances, patching is a no-op."""
+        """When the module has no urlpatterns, the engine still arms the function
+        correctly — the engine doesn't scan for URL patterns."""
         if not _configure_django_if_needed():
             self.skipTest("Django not installed")
 
-        original = lambda request: None  # noqa: E731
-        wrapper = lambda request: None  # noqa: E731
-        mod = _make_module(self.module_name, some_func=original, x=42, y="hello")
+        def some_func():
+            return "no urls here"
 
-        # Should not raise
-        with _isolated_from_get_resolver():
-            FunctionWrapper._patch_django_url_patterns(mod, original, wrapper)
+        _make_module(self.module_name, some_func=some_func, x=42, y="hello")
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=some_func.__code__,
+            func=some_func,
+            function_key=f"{self.module_name}.some_func",
+            module_name=self.module_name,
+            qualified_name="some_func",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
+        self.assertEqual(some_func(), "no urls here")
+        self.assertEqual(len(self.snapshots), 1)
 
     def test_patch_django_function_not_in_url_patterns(self):
-        """When function is not a registered view, urlpatterns is unchanged."""
+        """Arming function A leaves a different view B in the resolver tree
+        un-instrumented — no cross-talk."""
         if not _configure_django_if_needed():
             self.skipTest("Django not installed")
         from django.urls import path  # pylint: disable=import-outside-toplevel
 
-        original = lambda request: None  # noqa: E731
-        wrapper = lambda request: None  # noqa: E731
-        original.__name__ = "helper_func"
-        original.__module__ = self.module_name
+        def helper_func(request):
+            return "helper"
 
-        other_view = lambda request: "other"  # noqa: E731
-        other_view.__name__ = "other_view"
-        other_view.__module__ = self.module_name
+        def other_view(request):
+            return "other"
 
         urlpattern = path("other/", other_view)
-        mod = _make_module(self.module_name, urlpatterns=[urlpattern])
+        _make_module(self.module_name, urlpatterns=[urlpattern], helper_func=helper_func)
 
-        with _isolated_from_get_resolver():
-            FunctionWrapper._patch_django_url_patterns(mod, original, wrapper)
+        ok = self.engine.enable_function_level_instrumentation(
+            code=helper_func.__code__,
+            func=helper_func,
+            function_key=f"{self.module_name}.helper_func",
+            module_name=self.module_name,
+            qualified_name="helper_func",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
 
-        # other_view should be unchanged
+        # other_view should NOT be instrumented.
         self.assertIs(urlpattern.callback, other_view)
+        self.assertEqual(urlpattern.callback(None), "other")
+        self.assertEqual(len(self.snapshots), 0)
 
     # ------------------------------------------------------------------
-    # Django-specific: include()-nested resolvers
+    # include()-nested resolvers
     # ------------------------------------------------------------------
 
     def test_patch_django_nested_resolvers(self):
-        """include()-nested URLs are reached via recursive descent."""
+        """include()-nested URLs hold the same function object, so the engine's
+        in-place __code__ mutation fires there too — no recursive resolver-tree
+        descent required."""
         if not _configure_django_if_needed():
             self.skipTest("Django not installed")
         from django.urls import include, path  # pylint: disable=import-outside-toplevel
 
-        original = lambda request: "original"  # noqa: E731
-        wrapper = lambda request: "wrapper"  # noqa: E731
-        original.__name__ = "deep_view"
+        def deep_view(request):
+            return "deep"
 
-        inner_pattern = path("deep/", original)
+        inner_pattern = path("deep/", deep_view)
 
         # Build a nested module with its own urlpatterns, then include() it.
         inner_module_name = self.module_name + "_inner"
         _make_module(inner_module_name, urlpatterns=[inner_pattern])
         outer_pattern = path("api/", include(inner_module_name))
         try:
-            mod = _make_module(self.module_name, urlpatterns=[outer_pattern])
+            _make_module(self.module_name, urlpatterns=[outer_pattern])
 
-            FunctionWrapper._patch_django_url_patterns(mod, original, wrapper)
+            ok = self.engine.enable_function_level_instrumentation(
+                code=deep_view.__code__,
+                func=deep_view,
+                function_key=f"{self.module_name}.deep_view",
+                module_name=self.module_name,
+                qualified_name="deep_view",
+                capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+            )
+            self.assertTrue(ok)
 
-            self.assertIs(inner_pattern.callback, wrapper)
+            self.assertIs(inner_pattern.callback, deep_view)
+            self.assertEqual(inner_pattern.callback(None), "deep")
+            self.assertEqual(len(self.snapshots), 1)
         finally:
             _remove_module(inner_module_name)
 
     # ------------------------------------------------------------------
-    # Django-specific: get_resolver(None) discovery for cross-module urlpatterns
+    # Cross-module urlpatterns (the common Django layout: urls module separate
+    # from the views module)
     # ------------------------------------------------------------------
 
     def test_patch_django_get_resolver_path(self):
         """When the views module has no urlpatterns (the common Django layout —
-        urlpatterns lives in a dedicated urls module), the patcher reaches the
-        active routes via get_resolver(None)."""
+        urlpatterns lives in a dedicated urls module), the engine still fires:
+        the urls module's URLPattern.callback references the same function object
+        whose __code__ the engine mutated."""
         if not _configure_django_if_needed():
             self.skipTest("Django not installed")
-        from django.urls import URLResolver, path  # pylint: disable=import-outside-toplevel
+        from django.urls import path  # pylint: disable=import-outside-toplevel
 
-        original = lambda request: "original"  # noqa: E731
-        wrapper = lambda request: "wrapper"  # noqa: E731
-        original.__name__ = "cross_module_view"
+        def cross_module_view(request):
+            return "original"
 
-        urlpattern = path("cross/", original)
+        urlpattern = path("cross/", cross_module_view)
 
         # views module — has no urlpatterns
         views_module_name = self.module_name + "_views"
-        views_mod = _make_module(views_module_name, cross_module_view=original)
-
-        # Build a fake URLResolver that returns our urlpattern. Mock get_resolver
-        # to return it.
-        fake_resolver = unittest.mock.MagicMock(spec=URLResolver)
-        fake_resolver.url_patterns = [urlpattern]
+        _make_module(views_module_name, cross_module_view=cross_module_view)
+        # urls module — holds the URLPattern in a separate module
+        urls_module_name = self.module_name + "_urls"
+        _make_module(urls_module_name, urlpatterns=[urlpattern])
         try:
-            with patch(
-                "amazon.opentelemetry.distro.debugger._function_wrapper.FunctionWrapper._patch_django_url_patterns",
-                wraps=FunctionWrapper._patch_django_url_patterns,
-            ):
-                with patch("django.urls.get_resolver", return_value=fake_resolver):
-                    FunctionWrapper._patch_django_url_patterns(views_mod, original, wrapper)
+            ok = self.engine.enable_function_level_instrumentation(
+                code=cross_module_view.__code__,
+                func=cross_module_view,
+                function_key=f"{views_module_name}.cross_module_view",
+                module_name=views_module_name,
+                qualified_name="cross_module_view",
+                capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+            )
+            self.assertTrue(ok)
 
-            self.assertIs(urlpattern.callback, wrapper)
+            self.assertIs(urlpattern.callback, cross_module_view)
+            self.assertEqual(urlpattern.callback(None), "original")
+            self.assertEqual(len(self.snapshots), 1)
         finally:
             _remove_module(views_module_name)
+            _remove_module(urls_module_name)
 
     # ------------------------------------------------------------------
-    # Django-specific: decorator-wrapped view (functools.wraps)
+    # Decorator-wrapped view (functools.wraps)
     # ------------------------------------------------------------------
 
     def test_patch_django_decorator_wrapped(self):
         """A view wrapped by a functools.wraps-preserving decorator (the
-        @login_required / @csrf_exempt pattern): identity match misses, but
-        name+module fallback succeeds."""
+        @login_required / @csrf_exempt pattern): the URLPattern holds the
+        decorator wrapper, but the wrapper calls the underlying view whose
+        __code__ the engine mutated — so the snapshot still fires."""
         if not _configure_django_if_needed():
             self.skipTest("Django not installed")
         import functools  # pylint: disable=import-outside-toplevel
@@ -267,27 +363,34 @@ class TestDjangoUrlPatternsPatching(unittest.TestCase):
         def decorator_wrapper(request):
             return my_view(request)
 
-        # decorator_wrapper inherits __name__ + __module__ from my_view.
-        wrapper = lambda request: "di_wrapper"  # noqa: E731
-
         urlpattern = path("decorated/", decorator_wrapper)
-        mod = _make_module(self.module_name, urlpatterns=[urlpattern])
+        _make_module(self.module_name, urlpatterns=[urlpattern], my_view=my_view)
 
-        with _isolated_from_get_resolver():
-            FunctionWrapper._patch_django_url_patterns(mod, my_view, wrapper)
+        ok = self.engine.enable_function_level_instrumentation(
+            code=my_view.__code__,
+            func=my_view,
+            function_key=f"{self.module_name}.my_view",
+            module_name=self.module_name,
+            qualified_name="my_view",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
 
-        self.assertIs(urlpattern.callback, wrapper)
+        # The decorator wrapper invokes the underlying my_view, whose __code__
+        # is now mutated. Snapshot fires.
+        result = urlpattern.callback(None)
+        self.assertEqual(result, "view")
+        self.assertEqual(len(self.snapshots), 1)
 
     # ------------------------------------------------------------------
-    # Django-specific: class-based views — patcher does NOT touch the
-    # as_view() closure
+    # Class-based views — arming the method fires via dispatch
     # ------------------------------------------------------------------
 
     def test_patch_django_cbv_unaffected(self):
-        """The closure returned by View.as_view() has __name__ == 'view', not
-        the user's view-name, so neither identity nor name match. CBV
-        instrumentation flows through dispatch's getattr(self, method)
-        elsewhere; the patcher must not mutate the closure."""
+        """The closure returned by View.as_view() (URLPattern.callback) is never
+        touched by the engine. Probing MyView.get arms the method's __code__;
+        invoking the method (as dispatch's getattr(self, method) would) fires the
+        snapshot, while the as_view closure stays intact."""
         if not _configure_django_if_needed():
             self.skipTest("Django not installed")
         from django.urls import path  # pylint: disable=import-outside-toplevel
@@ -299,70 +402,35 @@ class TestDjangoUrlPatternsPatching(unittest.TestCase):
 
         cbv_callable = MyView.as_view()  # closure: __name__ == 'view'
 
-        # User puts a probe on MyView.get — original_func is the unbound method.
-        original = MyView.get
-        wrapper = lambda self, request: "wrapped"  # noqa: E731
-
         urlpattern = path("cbv/", cbv_callable)
-        mod = _make_module(self.module_name, urlpatterns=[urlpattern])
+        _make_module(self.module_name, urlpatterns=[urlpattern])
 
-        with _isolated_from_get_resolver():
-            FunctionWrapper._patch_django_url_patterns(mod, original, wrapper)
-
-        # The as_view closure is NOT replaced — closure's __name__ is 'view'.
-        self.assertIs(urlpattern.callback, cbv_callable)
-
-    # ------------------------------------------------------------------
-    # Django-specific: error-branch swallowing
-    # ------------------------------------------------------------------
-
-    def test_patch_django_resolver_traversal_error_swallowed(self):
-        """When a URLResolver.url_patterns access raises (e.g. ImproperlyConfigured),
-        the patcher logs and continues without raising."""
-        if not _configure_django_if_needed():
-            self.skipTest("Django not installed")
-        from django.urls import URLResolver  # pylint: disable=import-outside-toplevel
-
-        original = lambda request: None  # noqa: E731
-        wrapper = lambda request: None  # noqa: E731
-        original.__name__ = "some_view"
-
-        broken_resolver = unittest.mock.MagicMock(spec=URLResolver)
-        type(broken_resolver).url_patterns = unittest.mock.PropertyMock(
-            side_effect=RuntimeError("ImproperlyConfigured")
+        # User puts a probe on MyView.get — arm the unbound method's code.
+        ok = self.engine.enable_function_level_instrumentation(
+            code=MyView.get.__code__,
+            func=MyView.get,
+            function_key=f"{self.module_name}.MyView.get",
+            module_name=self.module_name,
+            qualified_name="MyView.get",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
         )
-        mod = _make_module(self.module_name, broken_resolver=broken_resolver)
+        self.assertTrue(ok)
 
-        # Should not raise.
-        with _isolated_from_get_resolver():
-            FunctionWrapper._patch_django_url_patterns(mod, original, wrapper)
-
-    def test_patch_django_get_resolver_unconfigured_swallowed(self):
-        """When get_resolver(None) raises (e.g. ImproperlyConfigured before
-        ROOT_URLCONF is set), the patcher continues with the module-scan fallback."""
-        if not _configure_django_if_needed():
-            self.skipTest("Django not installed")
-        from django.urls import path  # pylint: disable=import-outside-toplevel
-
-        original = lambda request: "original"  # noqa: E731
-        wrapper = lambda request: "wrapper"  # noqa: E731
-        original.__name__ = "fallback_view"
-
-        urlpattern = path("fb/", original)
-        mod = _make_module(self.module_name, urlpatterns=[urlpattern])
-
-        with patch("django.urls.get_resolver", side_effect=RuntimeError("ImproperlyConfigured")):
-            FunctionWrapper._patch_django_url_patterns(mod, original, wrapper)
-
-        # Module-scan fallback succeeded.
-        self.assertIs(urlpattern.callback, wrapper)
+        # The as_view closure is NOT replaced — the engine doesn't touch it.
+        self.assertIs(urlpattern.callback, cbv_callable)
+        # Invoking MyView.get fires the snapshot (CBV instrumentation flows
+        # through dispatch's getattr(self, method)).
+        self.assertEqual(MyView().get(None), "get")
+        self.assertEqual(len(self.snapshots), 1)
 
     # ------------------------------------------------------------------
-    # Integration: _replace_function_in_module with Django patching
+    # Integration: arm a view, fire via URLPattern.callback
     # ------------------------------------------------------------------
 
     def test_replace_function_patches_django_url_patterns(self):
-        """_replace_function_in_module patches Django URLPattern.callback."""
+        """Engine arming a view: invoking via Django's URLPattern.callback
+        produces a snapshot. (No setattr/resolver-tree patching required — the
+        __code__ mutation is in-place.)"""
         if not _configure_django_if_needed():
             self.skipTest("Django not installed")
         from django.urls import path  # pylint: disable=import-outside-toplevel
@@ -373,75 +441,64 @@ class TestDjangoUrlPatternsPatching(unittest.TestCase):
         my_route.__module__ = self.module_name
 
         urlpattern = path("my-route/", my_route)
-        mod = _make_module(self.module_name, my_route=my_route, urlpatterns=[urlpattern])
+        _make_module(self.module_name, my_route=my_route, urlpatterns=[urlpattern])
 
-        wrapper = lambda request: "wrapped"  # noqa: E731
+        ok = self.engine.enable_function_level_instrumentation(
+            code=my_route.__code__,
+            func=my_route,
+            function_key=f"{self.module_name}.my_route",
+            module_name=self.module_name,
+            qualified_name="my_route",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
+        self.assertTrue(ok)
 
-        with patch.object(FunctionWrapper, "_resolve_module", return_value=mod):
-            FunctionWrapper._replace_function_in_module(self.module_name, "my_route", wrapper)
-
-        # Module attribute replaced
-        self.assertIs(mod.my_route, wrapper)
-        # Django URLPattern.callback also patched
-        self.assertIs(urlpattern.callback, wrapper)
+        # Django's stored reference is the SAME function object — engine mutated
+        # its __code__ — so calling through URLPattern.callback fires.
+        self.assertEqual(urlpattern.callback(None), "hello")
+        self.assertEqual(len(self.snapshots), 1)
 
     # ------------------------------------------------------------------
-    # Integration: restore_function with Django patching
+    # Integration: disarm restores the original __code__
     # ------------------------------------------------------------------
 
     def test_restore_function_restores_django_url_patterns(self):
-        """restore_function restores Django URLPattern.callback to original."""
+        """Engine disarm restores original __code__: invoking via Django's
+        URLPattern.callback after disable produces NO snapshot."""
         if not _configure_django_if_needed():
             self.skipTest("Django not installed")
         from django.urls import path  # pylint: disable=import-outside-toplevel
 
-        def original_route(request):
+        def my_route(request):
             return "original"
 
-        def wrapped_route(request):
-            return "wrapped"
+        my_route.__module__ = self.module_name
 
-        original_route.__module__ = self.module_name
-        wrapped_route.__module__ = self.module_name
+        urlpattern = path("my-route/", my_route)
+        _make_module(self.module_name, my_route=my_route, urlpatterns=[urlpattern])
 
-        # Simulate: DI already wrapped and patched URLPattern.
-        urlpattern = path("my-route/", wrapped_route)
-        mod = _make_module(self.module_name, my_route=wrapped_route, urlpatterns=[urlpattern])
+        original_code = my_route.__code__
 
-        with patch.object(FunctionWrapper, "_resolve_module", return_value=mod):
-            result = FunctionWrapper.restore_function(self.module_name, "my_route", original_route)
+        self.engine.enable_function_level_instrumentation(
+            code=my_route.__code__,
+            func=my_route,
+            function_key=f"{self.module_name}.my_route",
+            module_name=self.module_name,
+            qualified_name="my_route",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+        )
 
-        self.assertTrue(result)
-        self.assertIs(mod.my_route, original_route)
-        # URLPattern.callback restored
-        self.assertIs(urlpattern.callback, original_route)
+        # Sanity: armed call fires.
+        urlpattern.callback(None)
+        self.assertEqual(len(self.snapshots), 1)
+        self.snapshots.clear()
 
-    # ------------------------------------------------------------------
-    # _patch_framework_references (dispatcher delegates to Django patcher)
-    # ------------------------------------------------------------------
+        self.engine.disable_function_level_instrumentation(code=original_code, func=my_route)
 
-    def test_patch_framework_references_calls_django_patching(self):
-        """_patch_framework_references delegates to _patch_django_url_patterns."""
-        original = lambda request: None  # noqa: E731
-        wrapper = lambda request: None  # noqa: E731
-        mod = _make_module(self.module_name)
-
-        with patch.object(FunctionWrapper, "_patch_django_url_patterns") as mock_django:
-            FunctionWrapper._patch_framework_references(mod, original, wrapper)
-            mock_django.assert_called_once_with(mod, original, wrapper)
-
-    def test_patch_framework_references_swallows_django_exceptions(self):
-        """A failure in Django patching never raises and never blocks Flask patching."""
-        original = lambda request: None  # noqa: E731
-        wrapper = lambda request: None  # noqa: E731
-        mod = _make_module(self.module_name)
-
-        with patch.object(FunctionWrapper, "_patch_django_url_patterns", side_effect=RuntimeError("boom")):
-            with patch.object(FunctionWrapper, "_patch_flask_view_functions") as mock_flask:
-                # Should not raise.
-                FunctionWrapper._patch_framework_references(mod, original, wrapper)
-                # Flask patcher was still called even though Django raised.
-                mock_flask.assert_called_once_with(mod, original, wrapper)
+        # __code__ restored; calling via URLPattern.callback emits no new snapshot.
+        self.assertIs(my_route.__code__, original_code)
+        self.assertEqual(urlpattern.callback(None), "original")
+        self.assertEqual(len(self.snapshots), 0)
 
 
 if __name__ == "__main__":

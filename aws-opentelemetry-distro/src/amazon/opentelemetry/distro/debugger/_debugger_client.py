@@ -18,6 +18,7 @@ from amazon.opentelemetry.distro._aws_span_processing_util import UNKNOWN_SERVIC
 from amazon.opentelemetry.distro.debugger._data_models import BreakpointConfiguration
 from amazon.opentelemetry.distro.debugger.instrumentation_manager import get_global_manager
 from opentelemetry import trace
+from opentelemetry.semconv._incubating.attributes.deployment_attributes import DEPLOYMENT_ENVIRONMENT_NAME
 from opentelemetry.semconv.resource import ResourceAttributes
 
 try:
@@ -100,7 +101,7 @@ class DebuggerClient:
             tracer_provider = trace.get_tracer_provider()
             global_resource = tracer_provider.resource
 
-            service_name = global_resource.attributes.get("service.name")
+            service_name = global_resource.attributes.get(ResourceAttributes.SERVICE_NAME)
 
             if service_name and not service_name.startswith(_OTEL_UNKNOWN_SERVICE_PREFIX):
                 # SUCCESS! Cache it so we never query again
@@ -141,10 +142,9 @@ class DebuggerClient:
             tracer_provider = trace.get_tracer_provider()
             global_resource = tracer_provider.resource
 
-            # Try deployment.environment.name first, then DEPLOYMENT_ENVIRONMENT
-            environment = global_resource.attributes.get(
-                "deployment.environment.name"
-            ) or global_resource.attributes.get(ResourceAttributes.DEPLOYMENT_ENVIRONMENT)
+            environment = global_resource.attributes.get(DEPLOYMENT_ENVIRONMENT_NAME) or global_resource.attributes.get(
+                ResourceAttributes.DEPLOYMENT_ENVIRONMENT
+            )
 
             if environment:
                 # SUCCESS! Cache it so we never query again

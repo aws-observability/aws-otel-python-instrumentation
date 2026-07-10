@@ -5,8 +5,9 @@
 
 The target functions live in this module so URLPattern.callback in the
 sibling `di_django_server.urls` module holds direct references to them at
-import time — the exact cross-module case the URLPattern.callback patcher
-needs to handle.
+import time — the exact cross-module case the instrumentation engine must
+handle by mutating each function's `__code__` in place (so Django's stored
+callback reference sees the rewritten code with no framework patching).
 """
 
 import inspect

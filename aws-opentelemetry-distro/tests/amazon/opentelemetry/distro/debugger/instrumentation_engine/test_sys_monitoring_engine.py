@@ -37,14 +37,34 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
         """Test initialization, tool registration, and callback registration."""
         with mock.patch("sys.monitoring.use_tool_id") as mock_use_tool, mock.patch(
             "sys.monitoring.register_callback"
-        ) as mock_register:
+        ) as mock_register, mock.patch("sys.monitoring.set_events") as mock_set_events:
 
             self.engine.initialize(hit_count_callback=self.callback)
 
             mock_use_tool.assert_called_once_with(sys.monitoring.DEBUGGER_ID, _TOOL_NAME)
-            mock_register.assert_called_once_with(
+            # Four event callbacks: LINE for line BPs; PY_START / PY_RETURN / PY_UNWIND
+            # for function-level (PROBE / function-level BREAKPOINT).
+            mock_register.assert_any_call(
                 sys.monitoring.DEBUGGER_ID, sys.monitoring.events.LINE, self.engine._line_event_handler
             )
+            mock_register.assert_any_call(
+                sys.monitoring.DEBUGGER_ID,
+                sys.monitoring.events.PY_START,
+                self.engine._function_start_event_handler,
+            )
+            mock_register.assert_any_call(
+                sys.monitoring.DEBUGGER_ID,
+                sys.monitoring.events.PY_RETURN,
+                self.engine._function_return_event_handler,
+            )
+            mock_register.assert_any_call(
+                sys.monitoring.DEBUGGER_ID,
+                sys.monitoring.events.PY_UNWIND,
+                self.engine._function_unwind_event_handler,
+            )
+            self.assertEqual(mock_register.call_count, 4)
+            # PY_UNWIND is set globally (not local-event-capable on 3.12-3.14).
+            mock_set_events.assert_called_once_with(sys.monitoring.DEBUGGER_ID, sys.monitoring.events.PY_UNWIND)
 
             self.assertTrue(self.engine._initialized)
             self.assertEqual(self.engine._hit_count_callback, self.callback)
@@ -84,9 +104,26 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
                 self.engine.initialize(hit_count_callback=self.callback)
 
                 mock_use_tool.assert_not_called()
-                mock_register.assert_called_once_with(
+                # All four callbacks must rebind to the fresh engine instance after fork.
+                mock_register.assert_any_call(
                     sys.monitoring.DEBUGGER_ID, sys.monitoring.events.LINE, self.engine._line_event_handler
                 )
+                mock_register.assert_any_call(
+                    sys.monitoring.DEBUGGER_ID,
+                    sys.monitoring.events.PY_START,
+                    self.engine._function_start_event_handler,
+                )
+                mock_register.assert_any_call(
+                    sys.monitoring.DEBUGGER_ID,
+                    sys.monitoring.events.PY_RETURN,
+                    self.engine._function_return_event_handler,
+                )
+                mock_register.assert_any_call(
+                    sys.monitoring.DEBUGGER_ID,
+                    sys.monitoring.events.PY_UNWIND,
+                    self.engine._function_unwind_event_handler,
+                )
+                self.assertEqual(mock_register.call_count, 4)
 
             self.assertTrue(self.engine._initialized)
             self.assertEqual(self.engine._hit_count_callback, self.callback)
@@ -314,7 +351,7 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
 
         # No span context — snapshot should still be created, hit count called
         with mock.patch(
-            "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+            "amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine.get_snapshot_emitter"
         ) as mock_get_writer:
             mock_writer = mock.MagicMock()
             mock_get_writer.return_value = mock_writer
@@ -349,7 +386,7 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
         )
 
         with mock.patch(
-            "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+            "amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine.get_snapshot_emitter"
         ) as mock_get_writer:
             mock_writer = mock.MagicMock()
             mock_get_writer.return_value = mock_writer
@@ -405,7 +442,7 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
         )
 
         with mock.patch(
-            "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+            "amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine.get_snapshot_emitter"
         ) as mock_get_writer:
             mock_writer = mock.MagicMock()
             mock_get_writer.return_value = mock_writer
@@ -459,7 +496,7 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
         )
 
         with mock.patch(
-            "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+            "amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine.get_snapshot_emitter"
         ) as mock_get_writer:
             mock_writer = mock.MagicMock()
             mock_get_writer.return_value = mock_writer
@@ -617,7 +654,7 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
         )
 
         with mock.patch(
-            "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+            "amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine.get_snapshot_emitter"
         ) as mock_get_writer:
             mock_writer = mock.MagicMock()
             mock_get_writer.return_value = mock_writer
@@ -656,7 +693,7 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
         )
 
         with mock.patch(
-            "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+            "amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine.get_snapshot_emitter"
         ) as mock_get_writer:
             mock_writer = mock.MagicMock()
             mock_get_writer.return_value = mock_writer
@@ -689,7 +726,7 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
         )
 
         with mock.patch(
-            "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+            "amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine.get_snapshot_emitter"
         ) as mock_get_writer:
             mock_writer = mock.MagicMock()
             mock_get_writer.return_value = mock_writer
@@ -724,7 +761,7 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
         )
 
         with mock.patch(
-            "amazon.opentelemetry.distro.debugger._function_wrapper.get_snapshot_emitter"
+            "amazon.opentelemetry.distro.debugger.instrumentation_engine._sys_monitoring_engine.get_snapshot_emitter"
         ) as mock_get_writer:
             mock_writer = mock.MagicMock()
             mock_get_writer.return_value = mock_writer
@@ -737,6 +774,124 @@ class TestSysMonitoringEngine(InstrumentationEngineTestBase):
             for frame in snapshot["stack"]:
                 self.assertNotIn("/amazon/opentelemetry/", frame["file_path"])
                 self.assertNotIn("/site-packages/opentelemetry/", frame["file_path"])
+
+
+@unittest.skipIf(sys.version_info < (3, 12), "SysMonitoringEngine requires Python 3.12+")
+class TestSysMonitoringEngineFunctionLevelRecursion(unittest.TestCase):
+    """Regression: PROBE on a recursive function on 3.12+ must report a
+    correct duration for every frame, not just the innermost.
+
+    The original implementation keyed start_ns by (code_id, thread_id), so
+    each recursive call clobbered the outer frame's stamp. Per-thread LIFO
+    of (code_id, start_ns) tuples preserves nested-frame durations."""
+
+    def setUp(self):
+        # pylint: disable=import-outside-toplevel
+        from amazon.opentelemetry.distro.debugger._function_wrapper import set_snapshot_emitter
+
+        self.engine = _sys_monitoring_engine.SysMonitoringEngine()
+        self.engine.initialize()
+        self.snapshots = []
+
+        class _FakeEmitter:
+            def emit_snapshot(_self, snap):  # noqa: N805
+                self.snapshots.append(snap)
+
+        set_snapshot_emitter(_FakeEmitter())
+
+    def tearDown(self):
+        try:
+            self.engine.cleanup()
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+
+    def test_recursive_calls_each_get_their_own_duration(self):
+        """fib(5) makes 15 nested calls; every snapshot must carry a duration
+        (could be 0ms for a fast call, but the field must be populated, i.e.
+        no frame got duration=None which is the symptom of a clobbered stamp)."""
+
+        def fib(n):
+            if n < 2:
+                return n
+            return fib(n - 1) + fib(n - 2)
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=fib.__code__,
+            func=fib,
+            function_key="m.fib",
+            module_name="m",
+            qualified_name="fib",
+            capture_config=CaptureConfig(capture_locals=[], capture_return=True),
+            instrumentation_type="PROBE",
+        )
+        self.assertTrue(ok)
+        self.assertEqual(fib(5), 5)
+        # fib(5) emits 15 snapshots (one per call). Every snapshot must have
+        # a non-None duration — None would indicate start_ns was 0, which is
+        # the symptom of the recursion clobber bug.
+        self.assertEqual(len(self.snapshots), 15)
+        for snap in self.snapshots:
+            self.assertIsNotNone(snap.duration, "every recursive frame must record duration")
+
+    def test_nested_calls_have_increasing_durations(self):
+        """A recursive function with sleep at each level: outer frames must
+        report durations ≥ inner frames'. The test is empirical proof the
+        per-thread stack pops in LIFO order."""
+        import time as _time  # pylint: disable=import-outside-toplevel
+
+        def slow(n):
+            _time.sleep(0.01)
+            if n > 1:
+                return slow(n - 1) + 1
+            return 0
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=slow.__code__,
+            func=slow,
+            function_key="m.slow",
+            module_name="m",
+            qualified_name="slow",
+            instrumentation_type="PROBE",
+        )
+        self.assertTrue(ok)
+        slow(4)
+        self.assertEqual(len(self.snapshots), 4)
+        # Snapshots emitted in PY_RETURN order: innermost first, outermost last.
+        durations = [s.duration for s in self.snapshots]
+        for d in durations:
+            self.assertIsNotNone(d, "every frame must record duration")
+        # Each successive snapshot is for a frame one level outer, so its
+        # duration must be at least as long as the previous frame's.
+        for inner, outer in zip(durations, durations[1:]):
+            self.assertGreaterEqual(outer, inner, f"outer frame duration {outer}ms < inner {inner}ms")
+
+    def test_generator_exit_is_not_reported_as_exception(self):
+        """On 3.12+, closing a suspended generator fires PY_UNWIND with a live
+        GeneratorExit. That is lifecycle teardown (an early ``break``/GC of a
+        partially-consumed generator), not an application error, so NO snapshot
+        must fire — matching the bytecode engine's behaviour on 3.10/3.11."""
+
+        def gen():
+            i = 0
+            while True:
+                yield i
+                i += 1
+
+        ok = self.engine.enable_function_level_instrumentation(
+            code=gen.__code__,
+            func=gen,
+            function_key="m.gen_inf",
+            module_name="m",
+            qualified_name="gen",
+            capture_config=CaptureConfig(capture_arguments=[]),
+            instrumentation_type="PROBE",
+        )
+        self.assertTrue(ok)
+        generator = gen()
+        next(generator)
+        next(generator)
+        generator.close()  # raises GeneratorExit into the suspended generator
+        self.assertEqual(len(self.snapshots), 0, "GeneratorExit must not produce a snapshot")
 
 
 if __name__ == "__main__":
