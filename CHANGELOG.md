@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix(crewai): report per-call LLM token usage instead of cumulative total
+  ([#806](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/806))
 - fix(genai): serialize tool call arguments/results and blob bytes to match OTel util-genai (primitives kept native, bytes base64-encoded)
   ([#817](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/817))
 - feat(genai): extract gen_ai.tool.call.arguments/result as LLO content
