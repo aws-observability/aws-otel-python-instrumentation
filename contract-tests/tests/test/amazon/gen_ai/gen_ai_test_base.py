@@ -28,6 +28,8 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (  # 
     GenAiOperationNameValues,
 )
 
+AGENT_FINAL_OUTPUT = "Hello, World!"
+
 
 class GenAITestBase(ContractTestBase):
 
@@ -71,6 +73,18 @@ class GenAITestBase(ContractTestBase):
             self.assertIn(GEN_AI_AGENT_NAME, attrs)
             self.assertIn(GEN_AI_PROVIDER_NAME, attrs)
             self.assertIn(GEN_AI_REQUEST_MODEL, attrs)
+
+            self.assertIn(GEN_AI_INPUT_MESSAGES, attrs)
+            self.assertIn(GEN_AI_OUTPUT_MESSAGES, attrs)
+            input_messages = json.loads(attrs[GEN_AI_INPUT_MESSAGES].string_value)
+            output_messages = json.loads(attrs[GEN_AI_OUTPUT_MESSAGES].string_value)
+
+            user_inputs = self._text_parts(input_messages, "user")
+            self.assertTrue(user_inputs, "Expected the first user input on the invoke_agent span")
+
+            agent_outputs = self._text_parts(output_messages, "assistant")
+            self.assertTrue(agent_outputs, "Expected the final agent output on the invoke_agent span")
+            self.assertEqual(agent_outputs[-1], AGENT_FINAL_OUTPUT)
 
     def _assert_execute_tool_spans(self, execute_tool_spans: list, expected_count: int = 1):
         self.assertGreaterEqual(len(execute_tool_spans), expected_count)

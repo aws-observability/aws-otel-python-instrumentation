@@ -227,6 +227,20 @@ class TestLangChainInstrumentor(TestCase):
         agent_span = agent_spans[0]
         self.assertEqual(agent_span.attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.INVOKE_AGENT.value)
 
+        input_messages = json.loads(agent_span.attributes[GEN_AI_INPUT_MESSAGES])
+        validate_otel_genai_schema(input_messages, "gen-ai-input-messages")
+        self.assertTrue(
+            any(
+                part.get("type") == "text" and "What's the weather in Paris?" in part.get("content", "")
+                for message in input_messages
+                if message.get("role") == "user"
+                for part in message.get("parts", [])
+            )
+        )
+        output_messages = json.loads(agent_span.attributes[GEN_AI_OUTPUT_MESSAGES])
+        validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
+        self.assertTrue(any(message.get("role") == "assistant" for message in output_messages))
+
     def test_tool_span_has_all_attributes(self):
         def add_numbers(a: int, b: int) -> int:
             return a + b
@@ -244,7 +258,7 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(span.attributes[GEN_AI_TOOL_DESCRIPTION], "Add two numbers")
         self.assertEqual(span.attributes[GEN_AI_TOOL_TYPE], "function")
         self.assertIsNotNone(span.attributes.get(GEN_AI_TOOL_CALL_ARGUMENTS))
-        self.assertEqual(span.attributes[GEN_AI_TOOL_CALL_RESULT], str(result))
+        self.assertEqual(span.attributes[GEN_AI_TOOL_CALL_RESULT], result)
 
     def test_internal_chains_suppressed(self):
         chain_factories = [

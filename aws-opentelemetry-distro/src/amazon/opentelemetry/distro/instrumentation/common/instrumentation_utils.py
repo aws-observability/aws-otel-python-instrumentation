@@ -4,9 +4,10 @@
 import json
 import logging
 import threading
+from base64 import b64encode
 from contextvars import Token
 from functools import wraps
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Union
 
 from wrapt import wrap_function_wrapper
 
@@ -81,7 +82,7 @@ class DictWithLock:
 
 
 def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:
-    json_safe_types = (str, int, float, bool, dict, list, tuple, type(None))
+    json_safe_types = (str, int, float, bool, bytes, dict, list, tuple, type(None))
 
     def _sanitize(obj: Any, depth: int) -> Any:
         if depth <= 0:
@@ -93,9 +94,17 @@ def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:
         return obj
 
     try:
-        return json.dumps(_sanitize(value, max_depth))
+        return json.dumps(_sanitize(value, max_depth), default=lambda o: b64encode(o).decode())
     except (TypeError, ValueError):
         return str(value)
+
+
+def to_tool_attribute_value(value: Any) -> Union[str, int, float, bool, bytes, None]:
+    if value is None:
+        return None
+    if isinstance(value, (bool, str, bytes, int, float)):
+        return value
+    return serialize_to_json_string(value)
 
 
 def content_to_parts(content: Any) -> list:  # pylint: disable=too-many-branches
