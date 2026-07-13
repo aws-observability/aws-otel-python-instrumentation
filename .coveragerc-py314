@@ -6,8 +6,7 @@ parallel = true
 [paths]
 source =
     aws-opentelemetry-distro/src/amazon
-    aws-opentelemetry-application-signals/src/amazon
-    aws-opentelemetry-serviceevents/src/amazon
+    aws-opentelemetry-components/src/amazon
     .tox/3.*/lib/python*/site-packages/amazon
     */site-packages/amazon
 

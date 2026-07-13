@@ -68,11 +68,7 @@ from opentelemetry.sdk.extension.aws.resource.ec2 import AwsEc2ResourceDetector
 from opentelemetry.sdk.extension.aws.resource.ecs import AwsEcsResourceDetector
 from opentelemetry.sdk.extension.aws.resource.eks import AwsEksResourceDetector
 from opentelemetry.sdk.metrics import MeterProvider
-from opentelemetry.sdk.metrics.export import (
-    MetricExporter,
-    MetricReader,
-    PeriodicExportingMetricReader,
-)
+from opentelemetry.sdk.metrics.export import MetricExporter, MetricReader, PeriodicExportingMetricReader
 from opentelemetry.sdk.metrics.view import LastValueAggregation, View
 from opentelemetry.sdk.resources import Resource, get_aggregated_resources
 from opentelemetry.sdk.trace import TracerProvider

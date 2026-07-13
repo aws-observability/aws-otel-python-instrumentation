@@ -1,8 +1,7 @@
 name: Build aws-opentelemetry wheels
 description: |
   This action assumes that the repo was checked out and Python is set up. Builds the
-  aws-opentelemetry-application-signals, aws-opentelemetry-serviceevents, and
-  aws-opentelemetry-distro wheels into ./dist.
+  aws-opentelemetry-components and aws-opentelemetry-distro wheels into ./dist.
 
 runs:
   using: "composite"
@@ -12,6 +11,6 @@ runs:
       run: |
         pip install --upgrade pip setuptools wheel packaging build
         rm -rf ./dist/*
-        for pkg in aws-opentelemetry-application-signals aws-opentelemetry-serviceevents aws-opentelemetry-distro; do
+        for pkg in aws-opentelemetry-components aws-opentelemetry-distro; do
           (cd "./$pkg" && python -m build --outdir ../dist)
         done
