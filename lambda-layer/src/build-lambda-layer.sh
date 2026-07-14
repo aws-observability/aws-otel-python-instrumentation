@@ -2,9 +2,10 @@
 set -e
 
 rm -rf build
-rm -rf ./aws-opentelemetry-distro
+rm -rf ./aws-opentelemetry-distro ./aws-opentelemetry-components
 cp -r ../../aws-opentelemetry-distro ./
+cp -r ../../aws-opentelemetry-components ./
 mkdir -p build
 docker build --progress plain -t aws-opentelemetry-python-layer .
 docker run --rm -v "$(pwd)/build:/out" aws-opentelemetry-python-layer
-rm -rf ./aws-opentelemetry-distro
+rm -rf ./aws-opentelemetry-distro ./aws-opentelemetry-components

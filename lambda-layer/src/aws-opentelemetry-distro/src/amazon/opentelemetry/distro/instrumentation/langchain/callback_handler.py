@@ -1,0 +1,624 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+from __future__ import annotations
+
+import logging
+from contextvars import Token
+from typing import TYPE_CHECKING, Any, Optional
+from uuid import UUID
+
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.messages import convert_to_messages
+
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
+    PROVIDER_MAP,
+    DictWithLock,
+    content_to_parts,
+    serialize_to_json_string,
+    skip_instrumentation_if_suppressed,
+    to_tool_attribute_value,
+    try_detach,
+)
+from opentelemetry import context
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
+    GEN_AI_AGENT_NAME,
+    GEN_AI_INPUT_MESSAGES,
+    GEN_AI_OPERATION_NAME,
+    GEN_AI_OUTPUT_MESSAGES,
+    GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_FREQUENCY_PENALTY,
+    GEN_AI_REQUEST_MAX_TOKENS,
+    GEN_AI_REQUEST_MODEL,
+    GEN_AI_REQUEST_PRESENCE_PENALTY,
+    GEN_AI_REQUEST_STOP_SEQUENCES,
+    GEN_AI_REQUEST_TEMPERATURE,
+    GEN_AI_REQUEST_TOP_K,
+    GEN_AI_REQUEST_TOP_P,
+    GEN_AI_RESPONSE_FINISH_REASONS,
+    GEN_AI_RESPONSE_ID,
+    GEN_AI_RESPONSE_MODEL,
+    GEN_AI_SYSTEM_INSTRUCTIONS,
+    GEN_AI_TOOL_CALL_ARGUMENTS,
+    GEN_AI_TOOL_CALL_ID,
+    GEN_AI_TOOL_CALL_RESULT,
+    GEN_AI_TOOL_DESCRIPTION,
+    GEN_AI_TOOL_NAME,
+    GEN_AI_TOOL_TYPE,
+    GEN_AI_USAGE_INPUT_TOKENS,
+    GEN_AI_USAGE_OUTPUT_TOKENS,
+    GenAiOperationNameValues,
+)
+from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
+from opentelemetry.trace import SpanKind, set_span_in_context
+from opentelemetry.trace.span import Span
+from opentelemetry.trace.status import Status, StatusCode
+from opentelemetry.util.types import AttributeValue
+
+if TYPE_CHECKING:
+    from langchain_core.messages import BaseMessage
+    from langchain_core.outputs import LLMResult
+
+_logger = logging.getLogger(__name__)
+
+LANGGRAPH_STEP_SPAN_ATTR = "langgraph.step"
+LANGGRAPH_NODE_SPAN_ATTR = "langgraph.node"
+
+
+class _BaseCallbackManagerInitWrapper:
+    """Wrapper for BaseCallbackManager.__init__ to inject OpenTelemetry callback handler."""
+
+    def __init__(self, callback_handler: "OpenTelemetryCallbackHandler"):
+        self.callback_handler = callback_handler
+
+    def __call__(self, wrapped, instance, args, kwargs) -> None:
+        wrapped(*args, **kwargs)
+        if not hasattr(instance, "inheritable_handlers") or not hasattr(instance, "handlers"):
+            _logger.debug("Missing handler lists on %s, skipping OTel callback injection.", type(instance).__name__)
+            return
+        for handler in instance.inheritable_handlers:
+            if isinstance(handler, OpenTelemetryCallbackHandler):
+                return
+        # OTel handler must be first so that the
+        # span context is properly propagated to downstream spans
+        instance.inheritable_handlers.insert(0, self.callback_handler)
+        instance.handlers.insert(0, self.callback_handler)
+
+
+class OpenTelemetryCallbackHandler(BaseCallbackHandler):
+    # Ensures the OTel callback is executed synchronously and not in an async thread.
+    # This is to ensure that we are ALWAYS setting this instrumentation's spans as the current span in context to make
+    # sure we propagate the trace to downstream
+    # https://github.com/langchain-ai/langchain/blob/80e09feec/libs/core/langchain_core/callbacks/manager.py#L381-L390
+    run_inline = True
+
+    def __init__(self, tracer, should_suppress_internal_chains: bool = True):
+        super().__init__()
+        self.tracer = tracer
+        self.should_suppress_internal_chains = should_suppress_internal_chains
+        self.run_id_to_span_map: DictWithLock = DictWithLock()
+
+    @skip_instrumentation_if_suppressed
+    def on_chat_model_start(
+        self,
+        serialized: dict[str, Any],
+        messages: list,
+        *,
+        run_id: UUID,
+        parent_run_id: UUID | None = None,
+        metadata: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+
+        serialized_kwargs = serialized.get("kwargs", {})
+        model_name: str | None = self._extract_llm_model_id(kwargs, serialized_kwargs) or self._get_name_from_callback(
+            serialized, **kwargs
+        )
+        provider: str | None = self._extract_llm_provider(serialized, kwargs)
+        system_instructions, conversation = self._format_lc_messages(messages)
+        span_name: str = (
+            f"{GenAiOperationNameValues.CHAT.value} {model_name}" if model_name else GenAiOperationNameValues.CHAT.value
+        )
+
+        span: Span = self._start_span(run_id, parent_run_id, span_name, kind=SpanKind.CLIENT)
+
+        self._set_langgraph_span_attributes(span, metadata)
+        self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
+        self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
+        self._set_span_attribute(span, GEN_AI_INPUT_MESSAGES, serialize_to_json_string(conversation))
+
+        if system_instructions:
+            self._set_span_attribute(span, GEN_AI_SYSTEM_INSTRUCTIONS, serialize_to_json_string(system_instructions))
+        self._set_llm_request_span_attributes(span, kwargs, serialized=serialized_kwargs, model_name=model_name)
+
+    @skip_instrumentation_if_suppressed
+    def on_llm_start(
+        self,
+        serialized: dict[str, Any],
+        prompts: list[str],
+        *,
+        run_id: UUID,
+        parent_run_id: UUID | None = None,
+        metadata: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+
+        serialized_kwargs = serialized.get("kwargs", {})
+        model_name: str | None = self._extract_llm_model_id(kwargs, serialized_kwargs) or self._get_name_from_callback(
+            serialized, **kwargs
+        )
+        provider: str | None = self._extract_llm_provider(serialized, kwargs)
+        span_name: str = (
+            f"{GenAiOperationNameValues.TEXT_COMPLETION.value} {model_name}"
+            if model_name
+            else GenAiOperationNameValues.TEXT_COMPLETION.value
+        )
+        span: Span = self._start_span(run_id, parent_run_id, span_name, kind=SpanKind.CLIENT)
+
+        self._set_langgraph_span_attributes(span, metadata)
+        self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
+        self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.TEXT_COMPLETION.value)
+        self._set_span_attribute(
+            span,
+            GEN_AI_INPUT_MESSAGES,
+            serialize_to_json_string([{"role": "user", "parts": [{"type": "text", "content": p}]} for p in prompts]),
+        )
+        self._set_llm_request_span_attributes(span, kwargs, serialized=serialized_kwargs, model_name=model_name)
+
+    @skip_instrumentation_if_suppressed
+    def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: Any) -> None:
+
+        entry = self._safe_get_span(run_id)
+        if not entry:
+            return
+        span, _ = entry
+        llm_output: dict | None = response.llm_output
+        usage: dict = (llm_output.get("token_usage") or llm_output.get("usage") or {}) if llm_output else {}
+        model: str | None = (llm_output.get("model_name") or llm_output.get("model_id")) if llm_output else None
+        response_id: str | None = llm_output.get("id") if llm_output else None
+        input_tokens: int | None = (
+            usage.get("prompt_tokens") or usage.get("input_token_count") or usage.get("input_tokens")
+        )
+        output_tokens: int | None = (
+            usage.get("completion_tokens") or usage.get("generated_token_count") or usage.get("output_tokens")
+        )
+
+        if response.generations:
+            output_messages = self._format_lc_llm_output(response.generations)
+            self._set_span_attribute(span, GEN_AI_OUTPUT_MESSAGES, serialize_to_json_string(output_messages))
+            finish_reasons = [
+                self._extract_finish_reason(getattr(gen, "message", None), getattr(gen, "generation_info", None))
+                for batch in response.generations
+                for gen in batch
+            ]
+            if finish_reasons:
+                self._set_span_attribute(span, GEN_AI_RESPONSE_FINISH_REASONS, finish_reasons)
+
+        self._set_span_attribute(span, GEN_AI_RESPONSE_MODEL, model)
+        self._set_span_attribute(span, GEN_AI_RESPONSE_ID, response_id)
+        self._set_span_attribute(span, GEN_AI_USAGE_INPUT_TOKENS, input_tokens)
+        self._set_span_attribute(span, GEN_AI_USAGE_OUTPUT_TOKENS, output_tokens)
+
+        self._end_span(run_id)
+
+    def on_llm_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
+        self._handle_error(error, run_id, **kwargs)
+
+    @skip_instrumentation_if_suppressed
+    def on_chain_start(  # pylint: disable=too-many-locals
+        self,
+        serialized: dict[str, Any],
+        inputs: dict[str, Any],
+        *,
+        run_id: UUID,
+        parent_run_id: UUID | None = None,
+        metadata: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+
+        name: str | None = self._get_name_from_callback(serialized, **kwargs)
+        if self._should_skip_chain(serialized, name, metadata):
+            return
+
+        # AgentExecutor is the legacy LangChain agent node, lc_agent_name metadata was added in
+        # langchain >= 1.2.4 this is only set when a custom name is given to the agent,
+        # otherwise if no name is given it defaults to "LangGraph".
+        # langgraph_node check ensures we only match against agent nodes, not unwanted
+        # internal nodes.
+        is_agent_chain: bool = bool(name) and (
+            "AgentExecutor" in name or name == "LangGraph" or name == (metadata or {}).get("lc_agent_name")
+        )
+
+        provider: str | None = self._extract_llm_provider(serialized, kwargs)
+        agent_name: str | None = (metadata.get("lc_agent_name") if metadata else None) or (
+            name if is_agent_chain else None
+        )
+        operation: str = GenAiOperationNameValues.INVOKE_AGENT.value if is_agent_chain else "chain"
+        span_name: str = f"{operation} {name}" if name else operation
+
+        span: Span = self._start_span(run_id, parent_run_id, span_name)
+
+        self._set_langgraph_span_attributes(span, metadata)
+        self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
+        if is_agent_chain:
+            self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
+            payload = inputs.get("messages") or inputs.get("input") if isinstance(inputs, dict) else None
+            if payload:
+                _, conversation = self._format_lc_messages(
+                    [convert_to_messages([payload] if isinstance(payload, str) else payload)]
+                )
+                if conversation:
+                    self._set_span_attribute(span, GEN_AI_INPUT_MESSAGES, serialize_to_json_string(conversation))
+        self._set_span_attribute(span, GEN_AI_AGENT_NAME, agent_name)
+
+    @skip_instrumentation_if_suppressed
+    def on_chain_end(self, outputs: dict[str, Any], *, run_id: UUID, **kwargs: Any) -> None:
+        entry = self._safe_get_span(run_id)
+        if entry:
+            span, _ = entry
+            payload = outputs.get("messages") or outputs.get("output") if isinstance(outputs, dict) else None
+            if payload and GenAiOperationNameValues.INVOKE_AGENT.value in getattr(span, "name", ""):
+                messages = convert_to_messages([payload] if isinstance(payload, str) else payload)
+                _, conversation = self._format_lc_messages([messages])
+                if conversation:
+                    finish_reason = self._extract_finish_reason(messages[-1]) if messages else "stop"
+                    message = {**conversation[-1], "role": "assistant", "finish_reason": finish_reason}
+                    self._set_span_attribute(span, GEN_AI_OUTPUT_MESSAGES, serialize_to_json_string([message]))
+        self._end_span(run_id)
+
+    def on_chain_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
+        self._handle_error(error, run_id, **kwargs)
+
+    @skip_instrumentation_if_suppressed
+    def on_tool_start(
+        self,
+        serialized: dict[str, Any],
+        input_str: str,
+        *,
+        run_id: UUID,
+        parent_run_id: UUID | None = None,
+        metadata: dict[str, Any] | None = None,
+        inputs: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+
+        name: str | None = self._get_name_from_callback(serialized, **kwargs)
+        provider: str | None = self._extract_llm_provider(serialized, kwargs)
+        tool_call_id: str | None = serialized.get("id")
+        description: str | None = serialized.get("description")
+        span_name: str = (
+            f"{GenAiOperationNameValues.EXECUTE_TOOL.value} {name}"
+            if name
+            else GenAiOperationNameValues.EXECUTE_TOOL.value
+        )
+        span: Span = self._start_span(run_id, parent_run_id, span_name)
+
+        self._set_langgraph_span_attributes(span, metadata)
+        self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
+        self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.EXECUTE_TOOL.value)
+        self._set_span_attribute(span, GEN_AI_TOOL_NAME, name)
+        self._set_span_attribute(span, GEN_AI_TOOL_TYPE, "function")
+        self._set_span_attribute(span, GEN_AI_TOOL_DESCRIPTION, description)
+        self._set_span_attribute(span, GEN_AI_TOOL_CALL_ID, tool_call_id)
+        self._set_span_attribute(
+            span, GEN_AI_TOOL_CALL_ARGUMENTS, to_tool_attribute_value(inputs if inputs is not None else input_str)
+        )
+
+    @skip_instrumentation_if_suppressed
+    def on_tool_end(self, output: Any, *, run_id: UUID, **kwargs: Any) -> None:
+
+        entry = self._safe_get_span(run_id)
+        if not entry:
+            return
+        span, _ = entry
+        self._set_span_attribute(span, GEN_AI_TOOL_CALL_RESULT, to_tool_attribute_value(output))
+        self._end_span(run_id)
+
+    def on_tool_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
+        self._handle_error(error, run_id, **kwargs)
+
+    def on_agent_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
+        self._handle_error(error, run_id, **kwargs)
+
+    @staticmethod
+    def _format_lc_messages(messages: list[list[BaseMessage]]) -> tuple[list[dict], list[dict]]:
+        # converts langchain messages to OTel format conversation and system instructions format based on
+        # the following schemas -
+        # https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-input-messages.json
+        # https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-output-messages.json
+        # https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-system-instructions.json
+        #
+        # example LangChain input based on:
+        # https://github.com/langchain-ai/langchain/blob/7a4cc3ec321c4ded3681b57456df365936139333/libs/core/langchain_core/messages/human.py#L31
+        # https://github.com/langchain-ai/langchain/blob/7a4cc3ec321c4ded3681b57456df365936139333/libs/core/langchain_core/messages/system.py#L24
+        # https://github.com/langchain-ai/langchain/blob/7a4cc3ec321c4ded3681b57456df365936139333/libs/core/langchain_core/messages/tool.py#L53
+        #
+        #   [[
+        #     SystemMessage(type="system", content="You are a helpful assistant."),
+        #     HumanMessage(type="human", content="What is the weather in Paris?"),
+        #     AIMessage(type="ai", content="Let me check.", tool_calls=[
+        #         {"name": "get_weather", "args": {"city": "Paris"}, "id": "call_abc123", "type": "tool_call"}
+        #     ]),
+        #   ]]
+        #
+        #
+        # example OTel output
+        #
+        #   system_instructions:
+        #     [{"type": "text", "content": "You are a helpful assistant."}]
+        #
+        #   conversation:
+        #     [
+        #       {"role": "user", "parts": [{"type": "text", "content": "What is the weather in Paris?"}]},
+        #       {"role": "assistant", "parts": [
+        #           {"type": "text", "content": "Let me check."},
+        #           {"type": "tool_call", "id": "call_abc123", "name": "get_weather", "arguments": {...}},
+        #       ]},
+        #       {"role": "tool", "parts": [
+        #           {"type": "tool_call_response", "id": "call_abc123", "response": "72°F and sunny"},
+        #       ]},
+        #     ]
+        role_map: dict[str, str] = {"human": "user", "ai": "assistant", "system": "system", "tool": "tool"}
+        system_instructions: list[dict] = []
+        conversation: list[dict] = []
+        batch: list[BaseMessage]
+
+        for batch in messages:
+            msg: BaseMessage
+            for msg in batch:
+                role: str = role_map.get(msg.type, msg.type)
+                parts: list[dict] = []
+                content: str | list[str | dict] = msg.content
+                tool_call_id: str | None = getattr(msg, "tool_call_id", None)
+                if role == "tool" and tool_call_id:
+                    parts.append(
+                        {
+                            "type": "tool_call_response",
+                            "id": tool_call_id,
+                            "response": content if content else "",
+                        }
+                    )
+                elif content:
+                    parts.extend(content_to_parts(content))
+                tool_calls: list[dict] = getattr(msg, "tool_calls", None) or []
+                for tc in tool_calls:
+                    parts.append(
+                        {
+                            "type": "tool_call",
+                            "id": tc.get("id", ""),
+                            "name": tc.get("name", ""),
+                            "arguments": tc.get("args", {}),
+                        }
+                    )
+                if role == "system":
+                    system_instructions.extend(parts)
+                else:
+                    conversation.append({"role": role, "parts": parts})
+        return system_instructions, conversation
+
+    @staticmethod
+    def _format_lc_llm_output(generations: list) -> list[dict]:
+        # converts the result of LLM to OTel output messages format
+        # https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-output-messages.json
+        #
+        # example LangChain input based on:
+        # https://github.com/langchain-ai/langchain/blob/7a4cc3ec321c4ded3681b57456df365936139333/libs/core/langchain_core/outputs/llm_result.py#L19
+        #
+        #   [[ChatGeneration(
+        #       message=AIMessage(content="The weather is sunny.", tool_calls=[...]),
+        #       generation_info={"finish_reason": "end_turn"},
+        #   )]]
+        #
+        # example OTel output:
+        #
+        #   [{"role": "assistant", "parts": [
+        #       {"type": "text", "content": "The weather is sunny."},
+        #       {"type": "tool_call", "id": "call_abc", "name": "get_weather", "arguments": {...}},
+        #   ], "finish_reason": "stop"}]
+        formatted: list[dict] = []
+        for batch in generations:
+            for gen in batch:
+                msg: BaseMessage | None = getattr(gen, "message", None)
+                if msg is not None:
+                    _, msgs = OpenTelemetryCallbackHandler._format_lc_messages([[msg]])
+                    # https://github.com/langchain-ai/langchain/blob/7a4cc3ec321c4ded3681b57456df365936139333/libs/core/langchain_core/outputs/chat_generation.py#L28
+                    # https://github.com/langchain-ai/langchain/blob/7a4cc3ec321c4ded3681b57456df365936139333/libs/core/langchain_core/messages/ai.py#L195
+                    finish_reason: str = OpenTelemetryCallbackHandler._extract_finish_reason(
+                        msg, getattr(gen, "generation_info", None)
+                    )
+                    for msg_dict in msgs:
+                        msg_dict["finish_reason"] = finish_reason
+                    formatted.extend(msgs)
+                else:
+                    text: str = getattr(gen, "text", "")
+                    if text:
+                        formatted.append(
+                            {
+                                "role": "assistant",
+                                "parts": [{"type": "text", "content": text}],
+                                "finish_reason": "stop",
+                            }
+                        )
+        return formatted
+
+    @staticmethod
+    def _set_langgraph_span_attributes(span: Span, metadata: Optional[dict]) -> None:
+        if not metadata:
+            return
+        OpenTelemetryCallbackHandler._set_span_attribute(span, LANGGRAPH_STEP_SPAN_ATTR, metadata.get("langgraph_step"))
+        OpenTelemetryCallbackHandler._set_span_attribute(span, LANGGRAPH_NODE_SPAN_ATTR, metadata.get("langgraph_node"))
+
+    def _set_llm_request_span_attributes(
+        self, span: Span, kwargs: dict, serialized: Optional[dict] = None, model_name: Optional[str] = None
+    ):
+        config = serialized or {}
+        model = self._extract_llm_model_id(kwargs, config) or model_name
+        if model:
+            self._set_span_attribute(span, GEN_AI_REQUEST_MODEL, model)
+            self._set_span_attribute(span, GEN_AI_RESPONSE_MODEL, model)
+
+        params: dict[str, Any] = (
+            kwargs.get("invocation_params", {}).get("params") or kwargs.get("invocation_params") or kwargs
+        )
+        self._set_span_attribute(
+            span,
+            GEN_AI_REQUEST_MAX_TOKENS,
+            params.get("max_tokens") or params.get("max_new_tokens") or config.get("max_tokens"),
+        )
+        self._set_span_attribute(
+            span, GEN_AI_REQUEST_TEMPERATURE, params.get("temperature") or config.get("temperature")
+        )
+        self._set_span_attribute(span, GEN_AI_REQUEST_TOP_P, params.get("top_p") or config.get("top_p"))
+        self._set_span_attribute(span, GEN_AI_REQUEST_TOP_K, params.get("top_k") or config.get("top_k"))
+        self._set_span_attribute(
+            span,
+            GEN_AI_REQUEST_FREQUENCY_PENALTY,
+            params.get("frequency_penalty") or config.get("frequency_penalty"),
+        )
+        self._set_span_attribute(
+            span, GEN_AI_REQUEST_PRESENCE_PENALTY, params.get("presence_penalty") or config.get("presence_penalty")
+        )
+        stop = params.get("stop") or config.get("stop")
+        if stop:
+            self._set_span_attribute(span, GEN_AI_REQUEST_STOP_SEQUENCES, stop)
+
+    def _should_skip_chain(
+        self, serialized: dict[str, Any], name: Optional[str], metadata: Optional[dict] = None
+    ) -> bool:
+        if not self.should_suppress_internal_chains:
+            return False
+
+        # on_chain_start/end callbacks will contain internal chain types showing the
+        # internal agent orchestration workflow which can cause a lot of noisy spans
+        # except for chains with "AgentExecutor or LangGraph" in the name as
+        # those are used for invoke_agent spans:
+        # - "runnable": internal orchestration, see:
+        #   https://github.com/langchain-ai/langchain/blob/80e09feec/libs/core/langchain_core/runnables/base.py
+        # - "prompts": string formatting, see:
+        #   https://github.com/langchain-ai/langchain/blob/80e09feec/libs/core/langchain_core/prompts
+        # - "output_parser": text parsing, see:
+        #   https://github.com/langchain-ai/langchain/blob/80e09feec/libs/core/langchain_core/output_parsers
+        skippable_namespaces = {"runnable", "prompts", "output_parser"}
+
+        # legacy agent for supporting classic langchain >= 0.3.21, < 1.0.0
+        if name and (name.startswith("Runnable") or name.endswith("OutputParser") or name.endswith("PromptTemplate")):
+            return "AgentExecutor" not in name
+
+        if serialized and (ids := serialized.get("id")):
+            if any(ns in ids for ns in skippable_namespaces):
+                return True
+
+        # In langchain >= 1.0.0, the agent creation logic changed to depend on langgraph.
+        # We suppress internal nodes that have langgraph metadata, except for nodes that
+        # contain the agent name metadata as those are used for invoke_agent spans.
+        if metadata and any(k.startswith("langgraph_") for k in metadata):
+            is_agent = "lc_agent_name" in metadata or (name and ("LangGraph" == name or "AgentExecutor" in name))
+            return not is_agent
+        return False
+
+    @skip_instrumentation_if_suppressed
+    def _handle_error(self, error: BaseException, run_id: UUID, **kwargs: Any) -> None:
+
+        entry = self._safe_get_span(run_id)
+        if not entry:
+            return
+        span, _ = entry
+        span.record_exception(error)
+        span.set_status(Status(StatusCode.ERROR, str(error)))
+        span.set_attribute(ERROR_TYPE, type(error).__qualname__)
+        self._end_span(run_id)
+
+    def _start_span(
+        self,
+        run_id: UUID,
+        parent_run_id: Optional[UUID],
+        span_name: str,
+        kind: SpanKind = SpanKind.INTERNAL,
+    ) -> Span:
+        parent_entry = self.run_id_to_span_map.get(parent_run_id) if parent_run_id else None
+        if parent_entry:
+            parent_span, _ = parent_entry
+            span = self.tracer.start_span(span_name, context=set_span_in_context(parent_span), kind=kind)
+        else:
+            span = self.tracer.start_span(span_name, kind=kind)
+
+        token = context.attach(set_span_in_context(span))
+        self.run_id_to_span_map.put(run_id, (span, token))
+        return span
+
+    def _end_span(self, run_id: UUID) -> None:
+        entry = self.run_id_to_span_map.pop(run_id)
+        if not entry:
+            return
+        span, token = entry
+        try_detach(token)
+        span.end()
+
+    @staticmethod
+    def _get_name_from_callback(serialized: dict[str, Any], **kwargs: Any) -> Optional[str]:
+        if serialized:
+            if name := serialized.get("kwargs", {}).get("name"):
+                return name
+            if name := serialized.get("name"):
+                return name
+            if ids := serialized.get("id"):
+                return ids[-1]
+        return kwargs.get("name")
+
+    @staticmethod
+    def _extract_finish_reason(message: Any, generation_info: Optional[dict] = None) -> str:
+        finish_reason_map: dict[str, str] = {
+            "stop": "stop",
+            "end_turn": "stop",
+            "tool_use": "tool_call",
+            "tool_calls": "tool_call",
+            "max_tokens": "length",
+            "length": "length",
+            "content_filter": "content_filter",
+        }
+        metadata: dict = getattr(message, "response_metadata", None) or {}
+        raw: str | None = (
+            (generation_info or {}).get("finish_reason") or metadata.get("finish_reason") or metadata.get("stop_reason")
+        )
+        return finish_reason_map.get(raw, raw) if raw else "stop"
+
+    @staticmethod
+    def _extract_llm_model_id(kwargs: dict, serialized: Optional[dict] = None) -> Optional[str]:
+        config = serialized or {}
+        for model_tag in ("model", "model_name", "model_id", "base_model_id"):
+            if (model := kwargs.get(model_tag)) is not None:
+                return model
+            if (model := (kwargs.get("invocation_params") or {}).get(model_tag)) is not None:
+                return model
+            if (model := config.get(model_tag)) is not None:
+                return model
+        return None
+
+    @staticmethod
+    def _extract_llm_provider(serialized: dict[str, Any], kwargs: dict[str, Any]) -> Optional[str]:
+        if ids := (serialized or {}).get("id", []):
+            for part in ids:
+                if provider := PROVIDER_MAP.get(part.lower()):
+                    return provider
+
+        inv_type = kwargs.get("invocation_params", {}).get("_type", "")
+        if inv_type:
+            prefix = inv_type.split("-")[0].lower()
+            if provider := PROVIDER_MAP.get(prefix):
+                return provider
+
+        model = kwargs.get("invocation_params", {}).get("model_id") or kwargs.get("model_id")
+        if model and "/" in model:
+            prefix = model.split("/")[0].lower()
+            if provider := PROVIDER_MAP.get(prefix):
+                return provider
+
+        return None
+
+    def _safe_get_span(self, run_id: UUID) -> Optional[tuple[Span, Token]]:
+        return self.run_id_to_span_map.get(run_id)
+
+    @staticmethod
+    def _set_span_attribute(span: Span, name: str, value: Optional[AttributeValue]):
+        if value is not None and value != "":
+            span.set_attribute(name, value)

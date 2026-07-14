@@ -4,13 +4,13 @@
 ARG PYTHON_VERSION=3.12
 FROM python:${PYTHON_VERSION}
 WORKDIR /openai_agents
-COPY ./dist/$DISTRO /openai_agents
+COPY ./dist/aws_opentelemetry_*.whl /openai_agents/
 COPY ./contract-tests/images/applications/gen_ai/openai_agents /openai_agents
 COPY ./contract-tests/images/applications/gen_ai/mock_llm.py /openai_agents
 
 ENV PIP_ROOT_USER_ACTION=ignore
 ARG DISTRO
-RUN pip install --upgrade pip && pip install -r requirements.txt && pip install ${DISTRO} --force-reinstall
+RUN pip install --upgrade pip && pip install -r requirements.txt && pip install ${DISTRO} --find-links . --force-reinstall
 
 # Without `-u`, logs will be buffered and `wait_for_logs` will never return.
 CMD ["opentelemetry-instrument", "python", "-u", "./openai_agents_server.py"]

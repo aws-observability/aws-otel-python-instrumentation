@@ -10,7 +10,12 @@ RUN sed -i "/opentelemetry-instrumentation-aws-lambda/d" ./aws-opentelemetry-dis
 
 RUN sed -i "/opentelemetry-instrumentation-system-metrics/d" ./aws-opentelemetry-distro/pyproject.toml
 
+# aws-opentelemetry-components is an unpublished sibling package; install it from local
+# source and drop the pinned dependency so the distro install doesn't try to fetch it from PyPI.
+RUN sed -i "/aws-opentelemetry-components/d" ./aws-opentelemetry-distro/pyproject.toml
+
 RUN mkdir -p /build && \
+  python3 -m pip install aws-opentelemetry-components/ -t /build/python && \
   python3 -m pip install aws-opentelemetry-distro/ -t /build/python && \
   cp -r opentelemetry /build/python && \
   mv otel_wrapper.py /build/python && \

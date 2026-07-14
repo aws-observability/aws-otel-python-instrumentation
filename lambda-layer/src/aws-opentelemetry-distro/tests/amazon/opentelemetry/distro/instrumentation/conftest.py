@@ -1,0 +1,27 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+import json
+import os
+import urllib.request
+
+os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
+
+_OTEL_SEMCONV_VERSION = "v1.41.0"
+_OTEL_SCHEMA_BASE = (
+    f"https://raw.githubusercontent.com/open-telemetry/semantic-conventions/{_OTEL_SEMCONV_VERSION}/docs"
+)
+_SCHEMA_CACHE: dict = {}
+
+
+def validate_otel_schema(data, schema_url: str) -> None:
+    import jsonschema
+
+    if schema_url not in _SCHEMA_CACHE:
+        with urllib.request.urlopen(schema_url) as resp:
+            _SCHEMA_CACHE[schema_url] = json.loads(resp.read())
+    jsonschema.validate(data, _SCHEMA_CACHE[schema_url])
+
+
+def validate_otel_genai_schema(data: list, schema_name: str) -> None:
+    validate_otel_schema(data, f"{_OTEL_SCHEMA_BASE}/gen-ai/{schema_name}.json")

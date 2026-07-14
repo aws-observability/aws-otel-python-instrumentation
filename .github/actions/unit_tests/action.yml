@@ -49,3 +49,21 @@ runs:
         fi
         echo "Running tox envs: $ENVS"
         tox --parallel auto --parallel-live -e "$ENVS" -- -v
+
+    - name: Combine and check coverage
+      # The distro suite is split across several tox envs (base + per-framework instrumentation)
+      # that each write a separate .coverage.* data file. Combine them and check the threshold
+      # once here, so no individual env fails the threshold in isolation. aws-opentelemetry-components
+      # runs as a single env and self-checks its coverage via pytest --cov, so it is skipped here.
+      if: ${{ inputs.package_name == 'aws-opentelemetry-distro' }}
+      shell: bash
+      working-directory: aws-opentelemetry-distro/tests
+      run: |
+        pip install coverage
+        if [ "${{ inputs.python_version }}" = "3.14" ]; then
+          RCFILE="${GITHUB_WORKSPACE}/.coveragerc-py314"
+        else
+          RCFILE="${GITHUB_WORKSPACE}/.coveragerc"
+        fi
+        coverage combine --rcfile="$RCFILE"
+        coverage report --rcfile="$RCFILE"

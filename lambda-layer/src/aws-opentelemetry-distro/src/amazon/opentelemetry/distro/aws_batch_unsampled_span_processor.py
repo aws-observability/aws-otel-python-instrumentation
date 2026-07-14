@@ -1,0 +1,42 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+import logging
+from typing import Optional
+
+from amazon.opentelemetry.application_signals.internal.semconv.aws_attributes import AWS_TRACE_FLAG_SAMPLED
+from opentelemetry.context import Context
+from opentelemetry.sdk.trace import ReadableSpan, Span
+from opentelemetry.sdk.trace.export import BatchSpanProcessor as BaseBatchSpanProcessor
+
+logger = logging.getLogger(__name__)
+
+
+class BatchUnsampledSpanProcessor(BaseBatchSpanProcessor):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._spans_dropped = False
+
+    # pylint: disable=no-self-use
+    def on_start(self, span: Span, parent_context: Optional[Context] = None) -> None:
+        if not span.context.trace_flags.sampled:
+            span.set_attribute(AWS_TRACE_FLAG_SAMPLED, False)
+
+    def on_end(self, span: ReadableSpan) -> None:
+        if span.context.trace_flags.sampled:
+            return
+
+        if self._batch_processor._shutdown:
+            logger.warning("Already shutdown, dropping span.")
+            return
+
+        if len(self._batch_processor._queue) == self._batch_processor._max_queue_size:
+            # pylint: disable=access-member-before-definition
+            if not self._spans_dropped:
+                logger.warning("Queue is full, likely spans will be dropped.")
+                # pylint: disable=attribute-defined-outside-init
+                self._spans_dropped = True
+
+        self._batch_processor._queue.appendleft(span)
+
+        if len(self._batch_processor._queue) >= self._batch_processor._max_export_batch_size:
+            self._batch_processor._worker_awaken.set()
