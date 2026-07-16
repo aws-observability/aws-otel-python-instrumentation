@@ -27,70 +27,18 @@ _serviceevents_instance: Optional["ServiceEventsInstrumentation"] = None
 
 
 def _build_log_otlp_exporter(logs_endpoint: str, headers: dict, compression):
-    """Build an OTLP log exporter for the configured logs endpoint.
+    """Build a plain OTLP log exporter for the configured logs endpoint.
 
-    When the endpoint matches the CloudWatch Logs OTLP pattern
-    (``https://logs.{region}.amazonaws.com/v1/logs``), wrap the upstream
-    ``OTLPLogExporter`` with ADOT's ``OTLPAwsLogRecordExporter`` so
-    requests are SigV4-signed. The ``x-aws-log-group`` / ``x-aws-log-stream``
-    headers travel with every batch (already populated in ``headers``).
-    Otherwise return a plain upstream ``OTLPLogExporter`` pointing at the
-    collector-proxied endpoint.
-
-    Mirrors the Java SDK's behavior in ``ServiceEventsInstrumentation.java:557``.
-    Imports are deferred so this module stays importable without OTel SDK
-    and botocore at import time.
-
-    The SigV4 path requires ``botocore`` (an optional distro dependency). When
-    it is unavailable we fall back to a plain, unsigned ``OTLPLogExporter``
-    against the same endpoint rather than raising — telemetry must never crash
-    the host app, and a usable exporter keeps ``initialize()`` from tripping its
-    broad-except and silently disabling all of ServiceEvents.
+    ServiceEvents exports through the collector-proxied OTLP endpoint (e.g.
+    ``http://localhost:4316/v1/logs``); the ``x-aws-log-group`` / ``x-aws-log-stream``
+    headers travel with every batch (already populated in ``headers``). The import is
+    deferred so this module stays importable without the OTel SDK at import time.
     """
-    # Module-local imports to preserve the file's lazy-import posture (defer OTel SDK / botocore).
+    # Module-local import to preserve the file's lazy-import posture (defer OTel SDK).
     # pylint: disable=import-outside-toplevel
-    import re
-
-    from amazon.opentelemetry.distro.aws_opentelemetry_configurator import AWS_LOGS_OTLP_ENDPOINT_PATTERN
     from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 
-    is_cw_endpoint = bool(re.match(AWS_LOGS_OTLP_ENDPOINT_PATTERN, (logs_endpoint or "").lower()))
-    if not is_cw_endpoint:
-        return OTLPLogExporter(endpoint=logs_endpoint, headers=headers, compression=compression)
-
-    # Direct-to-CloudWatch (SigV4) path. Use the shared botocore-session helper
-    # the rest of the distro relies on (see aws_opentelemetry_configurator
-    # ._create_aws_otlp_exporter). It returns a ``botocore.session.Session`` —
-    # the type OTLPAwsLogRecordExporter is annotated for — or ``None`` when
-    # botocore is not installed.
-    # pylint: disable=import-outside-toplevel
-    from amazon.opentelemetry.distro._utils import get_aws_session
-
-    session = get_aws_session()
-    if not session:
-        # botocore unavailable: cannot SigV4-sign. Degrade to a plain OTLP
-        # exporter against the same endpoint instead of returning None (the
-        # caller does not handle None) or raising into the host app.
-        logger.warning(
-            "ServiceEvents direct-to-CloudWatch SigV4 export requires botocore, which is not installed; "
-            "falling back to an unsigned OTLP log exporter for %s",
-            logs_endpoint,
-        )
-        return OTLPLogExporter(endpoint=logs_endpoint, headers=headers, compression=compression)
-
-    from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter import OTLPAwsLogRecordExporter
-
-    region = (logs_endpoint or "").lower().split(".")[1]
-    # OTLPAwsLogRecordExporter hardcodes compression=Gzip (matches ADOT design —
-    # CloudWatch OTLP ingestion assumes gzip for LLO batching). The `compression`
-    # argument is honored only on the collector-proxied branch above.
-    _ = compression  # suppress unused-kwarg lint on this branch
-    return OTLPAwsLogRecordExporter(
-        aws_region=region,
-        session=session,
-        endpoint=logs_endpoint,
-        headers=headers,
-    )
+    return OTLPLogExporter(endpoint=logs_endpoint, headers=headers, compression=compression)
 
 
 def get_serviceevents_instrumentation(
