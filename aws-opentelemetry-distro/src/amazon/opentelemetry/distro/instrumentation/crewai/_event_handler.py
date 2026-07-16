@@ -397,10 +397,7 @@ class OpenTelemetryEventHandler:
         if model_name:
             attrs[GEN_AI_RESPONSE_MODEL] = model_name
 
-        usage: "UsageMetrics" = source.get_token_usage_summary()
-        prev_prompt_tokens, prev_completion_tokens = self._event_id_to_token_usage.pop(event.started_event_id) or (0, 0)
-        input_tokens = usage.prompt_tokens - prev_prompt_tokens
-        output_tokens = usage.completion_tokens - prev_completion_tokens
+        input_tokens, output_tokens = self._resolve_per_call_tokens(source, event)
         if input_tokens > 0:
             attrs[GEN_AI_USAGE_INPUT_TOKENS] = input_tokens
         if output_tokens > 0:
@@ -411,6 +408,16 @@ class OpenTelemetryEventHandler:
     def _on_llm_failed(self, source: Any, event: "LLMCallFailedEvent") -> None:  # pylint: disable=unused-argument
         self._event_id_to_token_usage.pop(event.started_event_id)
         self._end_span(event.started_event_id, error=getattr(event, "error", None))
+
+    def _resolve_per_call_tokens(self, source: "LLM", event: "LLMCallCompletedEvent") -> Tuple[int, int]:
+        # crewai >=1.13.0 reports per-call usage on the completed event; older versions only expose a
+        # cumulative summary, so diff it against the snapshot taken when the call started.
+        prev_prompt_tokens, prev_completion_tokens = self._event_id_to_token_usage.pop(event.started_event_id) or (0, 0)
+        usage = getattr(event, "usage", None)
+        if isinstance(usage, dict):
+            return usage.get("prompt_tokens") or 0, usage.get("completion_tokens") or 0
+        summary: "UsageMetrics" = source.get_token_usage_summary()
+        return summary.prompt_tokens - prev_prompt_tokens, summary.completion_tokens - prev_completion_tokens
 
     def _start_span(
         self,
