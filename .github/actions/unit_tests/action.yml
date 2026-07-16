@@ -38,20 +38,25 @@ runs:
       shell: bash
       run: |
         PY_VERSION="${{ inputs.python_version }}"
-        # we intend for new or unrecognized Python versions to fail if a new Python version is added to the test
-        # to ensure they are not silently skipped from testing
-        ENVS=$(tox list -q | grep "^${PY_VERSION}-test-" | sed 's/ .*//' | tr '\n' ',' | sed 's/,$//' || true)
+        PACKAGE="${{ inputs.package_name }}"
+        ENVS=$(tox list -q | grep "^${PY_VERSION}-test-${PACKAGE}" | sed 's/ .*//' | tr '\n' ',' | sed 's/,$//' || true)
+        if [ -z "$ENVS" ]; then
+          echo "No tox envs matched ^${PY_VERSION}-test-${PACKAGE}"
+          exit 1
+        fi
         echo "Running tox envs: $ENVS"
         tox --parallel auto --parallel-live -e "$ENVS" -- -v
 
     - name: Combine and check coverage
+      if: ${{ inputs.package_name == 'aws-opentelemetry-distro' }}
       shell: bash
+      working-directory: aws-opentelemetry-distro/tests
       run: |
         pip install coverage
         if [ "${{ inputs.python_version }}" = "3.14" ]; then
-          RCFILE=.coveragerc-py314
+          RCFILE="${GITHUB_WORKSPACE}/.coveragerc-py314"
         else
-          RCFILE=.coveragerc
+          RCFILE="${GITHUB_WORKSPACE}/.coveragerc"
         fi
-        coverage combine --rcfile=$RCFILE
-        coverage report --rcfile=$RCFILE
+        coverage combine --rcfile="$RCFILE"
+        coverage report --rcfile="$RCFILE"

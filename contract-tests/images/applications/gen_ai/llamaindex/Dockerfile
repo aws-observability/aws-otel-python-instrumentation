@@ -4,12 +4,12 @@
 ARG PYTHON_VERSION=3.12
 FROM python:${PYTHON_VERSION}
 WORKDIR /llamaindex
-COPY ./dist/$DISTRO /llamaindex
+COPY ./dist/aws_opentelemetry_*.whl /llamaindex/
 COPY ./contract-tests/images/applications/gen_ai/llamaindex /llamaindex
 
 ENV PIP_ROOT_USER_ACTION=ignore
 ARG DISTRO
-RUN pip install --upgrade pip && pip install -r requirements.txt && pip install ${DISTRO} --force-reinstall
+RUN pip install --upgrade pip && pip install -r requirements.txt && pip install ${DISTRO} --find-links . --force-reinstall
 
 # Without `-u`, logs will be buffered and `wait_for_logs` will never return.
 CMD ["opentelemetry-instrument", "python", "-u", "./llamaindex_server.py"]

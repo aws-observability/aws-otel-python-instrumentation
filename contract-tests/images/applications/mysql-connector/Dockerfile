@@ -4,12 +4,12 @@
 ARG PYTHON_VERSION=3.10
 FROM python:${PYTHON_VERSION}
 WORKDIR /mysql-connector
-COPY ./dist/$DISTRO /mysql-connector
+COPY ./dist/aws_opentelemetry_*.whl /mysql-connector/
 COPY ./contract-tests/images/applications/mysql-connector /mysql-connector
 
 ENV PIP_ROOT_USER_ACTION=ignore
 ARG DISTRO
-RUN pip install --upgrade pip && pip install -r requirements.txt && pip install ${DISTRO} --force-reinstall
+RUN pip install --upgrade pip && pip install -r requirements.txt && pip install ${DISTRO} --find-links . --force-reinstall
 RUN opentelemetry-bootstrap -a install
 
 # Without `-u`, logs will be buffered and `wait_for_logs` will never return.

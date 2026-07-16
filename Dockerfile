@@ -10,6 +10,7 @@ FROM public.ecr.aws/docker/library/python:3.11 AS build
 WORKDIR /operator-build
 
 ADD aws-opentelemetry-distro/ ./aws-opentelemetry-distro/
+ADD aws-opentelemetry-components/ ./aws-opentelemetry-components/
 
 # Remove opentelemetry-exporter-otlp-proto-grpc and grpcio, as grpcio has strict dependencies on the Python version and
 # will cause confusing failures if gRPC protocol is used. Now if gRPC protocol is requested by the user, instrumentation
@@ -18,7 +19,11 @@ ADD aws-opentelemetry-distro/ ./aws-opentelemetry-distro/
 # * https://github.com/MicrosoftDocs/azure-docs/blob/main/articles/azure-functions/recover-python-functions.md#troubleshoot-cannot-import-cygrpc
 RUN sed -i "/opentelemetry-exporter-otlp-proto-grpc/d" ./aws-opentelemetry-distro/pyproject.toml
 
-RUN mkdir workspace && pip install --target workspace ./aws-opentelemetry-distro
+RUN sed -i "/aws-opentelemetry-components/d" ./aws-opentelemetry-distro/pyproject.toml
+
+RUN mkdir workspace && \
+  pip install --target workspace ./aws-opentelemetry-components && \
+  pip install --target workspace ./aws-opentelemetry-distro
 
 # Stage 2: Build the cp-utility binary
 FROM public.ecr.aws/docker/library/rust:1.89 AS builder
