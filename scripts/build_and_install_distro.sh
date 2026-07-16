@@ -16,14 +16,15 @@ fi
 # Setup - update dependencies and create/empty dist dir
 python3 -m pip install --upgrade pip setuptools wheel packaging build
 mkdir -p dist
-rm -rf dist/aws_opentelemetry_distro*
+rm -rf dist/aws_opentelemetry_distro* dist/aws_opentelemetry_components*
 
-# Build distro
-cd aws-opentelemetry-distro
-python3 -m build --outdir ../dist
+# Build components + distro (components first so distro can resolve its dependency locally)
+for pkg in aws-opentelemetry-components aws-opentelemetry-distro; do
+  (cd "$pkg" && python3 -m build --outdir ../dist)
+done
 
-# Install distro
-cd ../dist
+# Install distro, resolving the aws-opentelemetry-components dependency from the local dist dir
+cd dist
 DISTRO=(aws_opentelemetry_distro-*-py3-none-any.whl)
-python3 -m pip install $DISTRO --force-reinstall
+python3 -m pip install $DISTRO --force-reinstall --find-links .
 cd ..

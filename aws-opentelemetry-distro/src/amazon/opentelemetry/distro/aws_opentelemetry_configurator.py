@@ -245,8 +245,8 @@ def _init_serviceevents(resource=None):
         # Lazy imports: defer the serviceevents package (and its optional deps) until enabled,
         # and avoid an import cycle with this configurator module.
         # pylint: disable=import-outside-toplevel
-        from amazon.opentelemetry.distro.serviceevents import ServiceEventsConfig, get_serviceevents_instrumentation
-        from amazon.opentelemetry.distro.serviceevents.models.resource_attributes import (
+        from amazon.opentelemetry.serviceevents import ServiceEventsConfig, get_serviceevents_instrumentation
+        from amazon.opentelemetry.serviceevents.models.resource_attributes import (
             ResourceAttributes as ServiceEventsResourceAttributes,
         )
 

@@ -389,7 +389,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         ):
             self.assertFalse(_is_serviceevents_enabled())
 
-    @patch("amazon.opentelemetry.distro.serviceevents.get_serviceevents_instrumentation")
+    @patch("amazon.opentelemetry.serviceevents.get_serviceevents_instrumentation")
     def test_init_serviceevents_backfills_endpoints_when_app_signals_enabled(self, mock_get_inst):
         mock_get_inst.return_value = None  # short-circuit after the policy check
 
@@ -408,7 +408,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertEqual(config.logs_endpoint, "http://localhost:4316/v1/logs")
         self.assertEqual(config.metrics_endpoint, "http://localhost:4316/v1/metrics")
 
-    @patch("amazon.opentelemetry.distro.serviceevents.get_serviceevents_instrumentation")
+    @patch("amazon.opentelemetry.serviceevents.get_serviceevents_instrumentation")
     def test_init_serviceevents_refuses_force_enabled_without_endpoints(self, mock_get_inst):
         # Force-enabled ServiceEvents with App Signals off and no endpoints → skip init
         with patch.dict(
@@ -423,7 +423,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
 
         mock_get_inst.assert_not_called()
 
-    @patch("amazon.opentelemetry.distro.serviceevents.get_serviceevents_instrumentation")
+    @patch("amazon.opentelemetry.serviceevents.get_serviceevents_instrumentation")
     def test_init_serviceevents_honors_explicit_endpoints_when_force_enabled(self, mock_get_inst):
         mock_get_inst.return_value = None
 

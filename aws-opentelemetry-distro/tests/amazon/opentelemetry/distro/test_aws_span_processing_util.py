@@ -6,8 +6,11 @@ from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_CONSUMER_PARENT_SPAN_KIND, AWS_LOCAL_OPERATION
+
+# These symbols are re-exported by _aws_span_processing_util after the ServiceEvents extraction moved
+# the get_ingress_operation closure into amazon.opentelemetry.serviceevents.span_processing_util. Importing
+# them from the distro module here doubles as an integration check that the re-export surface is intact.
 from amazon.opentelemetry.distro._aws_span_processing_util import (
-    _AWS_LAMBDA_FUNCTION_NAME,
     MAX_KEYWORD_LENGTH,
     _get_dialect_keywords,
     extract_api_path_value,
@@ -21,6 +24,7 @@ from amazon.opentelemetry.distro._aws_span_processing_util import (
     should_generate_service_metric_attributes,
     should_use_internal_operation,
 )
+from amazon.opentelemetry.serviceevents.span_processing_util import _AWS_LAMBDA_FUNCTION_NAME
 from opentelemetry.sdk.trace import Span, SpanContext
 from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 from opentelemetry.semconv.trace import MessagingOperationValues, SpanAttributes
