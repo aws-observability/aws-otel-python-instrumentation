@@ -202,9 +202,11 @@ class TestIncidentSnapshot:
                 "timestamp": int(time.time() * 1000),
                 "status_code": 500,
             },
+            # 0x-prefixed, canonical-width hex — exactly what the collector's
+            # _format_trace_id / _format_span_id emit (f"0x{:032x}" / f"0x{:016x}").
             "telemetry_correlation": {
-                "trace_id": "0af7651916cd43dd8448eb211c80319c",
-                "span_id": "b7ad6b7169203331",
+                "trace_id": "0x0af7651916cd43dd8448eb211c80319c",
+                "span_id": "0xb7ad6b7169203331",
             },
         }
 
@@ -256,6 +258,114 @@ class TestIncidentSnapshot:
         log = log_exporter.get_finished_logs()[0]
         assert log.log_record.trace_id == 0
         assert log.log_record.span_id == 0
+
+    # --- Wire-level trace-correlation: ids must be OMITTED (not empty) when absent. ---
+    # These assert against the actual OTLP protobuf encoding, because the bug
+    # (SERVICE_EVENTS_PYTHON_INCIDENT_TRACE_CONTEXT_ISSUE) was a present-but-empty traceId/spanId
+    # ON THE WIRE — an in-memory trace_id == 0 alone doesn't prove what the encoder serializes.
+
+    @staticmethod
+    def _encode(log_exporter):
+        """Encode the first finished log to OTLP protobuf and return (trace_id_bytes, span_id_bytes)."""
+        from opentelemetry.exporter.otlp.proto.common._internal._log_encoder import encode_logs
+
+        pb = encode_logs(log_exporter.get_finished_logs())
+        rec = pb.resource_logs[0].scope_logs[0].log_records[0]
+        return rec.trace_id, rec.span_id
+
+    def test_valid_correlation_serializes_ids(self):
+        emitter, log_exporter, _, lp, mp = _make_emitter()
+        emitter.emit_incident_snapshot(self._make_snapshot())
+        trace_id, span_id = self._encode(log_exporter)
+        assert trace_id.hex() == "0af7651916cd43dd8448eb211c80319c"
+        assert span_id.hex() == "b7ad6b7169203331"
+
+    def test_missing_correlation_omits_ids_on_wire(self):
+        emitter, log_exporter, _, lp, mp = _make_emitter()
+        snapshot = self._make_snapshot()
+        snapshot["telemetry_correlation"] = {}
+        emitter.emit_incident_snapshot(snapshot)
+        trace_id, span_id = self._encode(log_exporter)
+        # Omitted == zero-length proto bytes. Never present-but-empty, never all-zero hex.
+        assert len(trace_id) == 0
+        assert len(span_id) == 0
+
+    def test_empty_string_correlation_omits_ids_on_wire(self):
+        emitter, log_exporter, _, lp, mp = _make_emitter()
+        snapshot = self._make_snapshot()
+        snapshot["telemetry_correlation"] = {"trace_id": "", "span_id": ""}
+        emitter.emit_incident_snapshot(snapshot)
+        trace_id, span_id = self._encode(log_exporter)
+        assert len(trace_id) == 0
+        assert len(span_id) == 0
+
+    def test_partial_correlation_omits_ids_on_wire(self):
+        # Only a trace_id, no span_id → both omitted (the collector emits both-or-nothing).
+        emitter, log_exporter, _, lp, mp = _make_emitter()
+        snapshot = self._make_snapshot()
+        snapshot["telemetry_correlation"] = {"trace_id": "0x0af7651916cd43dd8448eb211c80319c"}
+        emitter.emit_incident_snapshot(snapshot)
+        trace_id, span_id = self._encode(log_exporter)
+        assert len(trace_id) == 0
+        assert len(span_id) == 0
+
+    def test_decimal_correlation_is_not_misparsed_as_hex(self):
+        # A raw decimal propagation-header id (e.g. an x-datadog-trace-id passed through
+        # unformatted) must NOT be silently read as hex — int("12345", 16) would yield a
+        # wrong-but-valid id, mis-correlating the incident. It lacks the 0x prefix / canonical
+        # width, so it is rejected and the fields are omitted on the wire.
+        emitter, log_exporter, _, lp, mp = _make_emitter()
+        snapshot = self._make_snapshot()
+        snapshot["telemetry_correlation"] = {
+            "trace_id": "1234567890123456789",
+            "span_id": "9876543210987654",
+        }
+        emitter.emit_incident_snapshot(snapshot)
+        trace_id, span_id = self._encode(log_exporter)
+        assert len(trace_id) == 0
+        assert len(span_id) == 0
+
+    def test_oversized_correlation_does_not_overflow_encoder(self):
+        # An out-of-range id (a malformed 40-hex-char trace_id → 160 bits) must be rejected
+        # before a SpanContext is built. Otherwise it reaches the OTLP encoder's fixed-width
+        # trace_id.to_bytes(16) and raises OverflowError in the batch export thread, dropping
+        # the whole export. Encoding the record here must succeed with the ids omitted.
+        emitter, log_exporter, _, lp, mp = _make_emitter()
+        snapshot = self._make_snapshot()
+        snapshot["telemetry_correlation"] = {
+            "trace_id": "0x" + "f" * 40,
+            "span_id": "0x" + "f" * 20,
+        }
+        emitter.emit_incident_snapshot(snapshot)
+        trace_id, span_id = self._encode(log_exporter)  # must not raise OverflowError
+        assert len(trace_id) == 0
+        assert len(span_id) == 0
+
+    def test_missing_correlation_does_not_leak_ambient_span(self):
+        # The bug's intermittent twin: when no correlation is supplied, the LogRecord must NOT
+        # adopt whatever span happens to be active at emit time. Emit inside an active span and
+        # assert the ids are still omitted.
+        from opentelemetry import context as otel_context
+        from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags
+        from opentelemetry.trace.propagation import set_span_in_context
+
+        emitter, log_exporter, _, lp, mp = _make_emitter()
+        snapshot = self._make_snapshot()
+        snapshot["telemetry_correlation"] = {}
+        ambient = SpanContext(
+            trace_id=0xDEADBEEFDEADBEEFDEADBEEFDEADBEEF,
+            span_id=0xDEADBEEFDEADBEEF,
+            is_remote=False,
+            trace_flags=TraceFlags(TraceFlags.SAMPLED),
+        )
+        token = otel_context.attach(set_span_in_context(NonRecordingSpan(ambient)))
+        try:
+            emitter.emit_incident_snapshot(snapshot)
+        finally:
+            otel_context.detach(token)
+        trace_id, span_id = self._encode(log_exporter)
+        assert len(trace_id) == 0
+        assert len(span_id) == 0
 
 
 class TestEndpointErrorMetrics:

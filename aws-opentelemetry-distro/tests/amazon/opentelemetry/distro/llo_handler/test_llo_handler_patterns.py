@@ -124,6 +124,8 @@ class TestLLOHandlerPatterns(LLOHandlerTestBase):
         self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.input.messages"))
         self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.output.messages"))
         self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.system_instructions"))
+        self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.tool.call.arguments"))
+        self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.tool.call.result"))
 
     def test_is_llo_attribute_otel_genai_patterns_no_match(self):
         """

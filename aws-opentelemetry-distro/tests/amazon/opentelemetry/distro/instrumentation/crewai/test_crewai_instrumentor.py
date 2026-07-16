@@ -18,6 +18,8 @@ if sys.version_info < (3, 10) or sys.version_info >= (3, 14):
     raise unittest.SkipTest("crewai requires >=3.10, <3.14")
 
 from crewai import LLM, Agent, Crew, Task
+from crewai.events import crewai_event_bus
+from crewai.events.types.llm_events import LLMCallCompletedEvent, LLMCallStartedEvent, LLMCallType
 from crewai.tools import tool
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
@@ -52,6 +54,8 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
+    GEN_AI_USAGE_INPUT_TOKENS,
+    GEN_AI_USAGE_OUTPUT_TOKENS,
     GenAiProviderNameValues,
 )
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
@@ -124,12 +128,83 @@ class TestCrewAIInstrumentor(TestCase):
     def test_perplexity_crew_kickoff(self):
         self._run_crew_kickoff_test("perplexity/sonar-medium", GenAiProviderNameValues.PERPLEXITY.value, "sonar-medium")
 
+    def test_multimodal_input_and_output_messages(self):
+        models = [
+            "bedrock/anthropic.claude-3-haiku-20240307-v1:0",
+            "openai/gpt-4",
+            "anthropic/claude-3-sonnet-20240229",
+            "google/gemini-pro",
+            "groq/llama-3",
+            "cohere/command-r",
+            "mistral/mistral-large",
+            "deepseek/deepseek-chat",
+            "perplexity/sonar-medium",
+        ]
+
+        input_content = [
+            {"type": "text", "text": "describe"},
+            {"type": "image_url", "image_url": {"url": "https://example.com/cat.png"}},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+        ]
+        expected_input_parts = [
+            {"type": "text", "content": "describe"},
+            {"type": "uri", "modality": "image", "uri": "https://example.com/cat.png"},
+            {"type": "blob", "modality": "image", "mime_type": "image/png", "content": "AAAA"},
+        ]
+
+        output_content = [
+            {"type": "text", "text": "The answer is blue."},
+            {"type": "thinking", "thinking": "Let me reason about this."},
+            {"type": "image_url", "image_url": {"url": "https://example.com/cat.png"}},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+        ]
+        expected_output_parts = [
+            {"type": "text", "content": "The answer is blue."},
+            {"type": "reasoning", "content": "Let me reason about this."},
+            {"type": "uri", "modality": "image", "uri": "https://example.com/cat.png"},
+            {"type": "blob", "modality": "image", "mime_type": "image/png", "content": "AAAA"},
+        ]
+
+        for model in models:
+            with self.subTest(model=model):
+                self.span_exporter.clear()
+                llm = LLM(model=model, is_litellm=True)
+                start_event = LLMCallStartedEvent(call_id="c1", messages=[{"role": "user", "content": input_content}])
+                crewai_event_bus.emit(llm, start_event)
+                crewai_event_bus.emit(
+                    llm,
+                    LLMCallCompletedEvent(
+                        call_id="c1",
+                        response=[{"role": "assistant", "content": output_content}],
+                        call_type=LLMCallType.LLM_CALL,
+                        started_event_id=start_event.event_id,
+                    ),
+                )
+
+                chat_span = self._find_span("chat")
+                self.assertIsNotNone(chat_span)
+
+                input_messages = json.loads(chat_span.attributes[GEN_AI_INPUT_MESSAGES])
+                validate_otel_genai_schema(input_messages, "gen-ai-input-messages")
+                self.assertEqual(input_messages[0]["parts"], expected_input_parts)
+
+                output_messages = json.loads(chat_span.attributes[GEN_AI_OUTPUT_MESSAGES])
+                validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
+                self.assertEqual(output_messages[0]["parts"], expected_output_parts)
+
+                for parts in (input_messages[0]["parts"], output_messages[0]["parts"]):
+                    for part in parts:
+                        value = part.get("content", "")
+                        if isinstance(value, str):
+                            self.assertFalse(value.lstrip().startswith("[{") and "'type'" in value)
+
     def test_crew_kickoff_error_handling(self):
         mock_llm = MagicMock(spec=LLM)
         mock_llm.provider = "openai"
         mock_llm.model = "gpt-4"
         mock_llm.temperature = 0.7
         mock_llm.max_tokens = 1024
+        mock_llm.stop = []
         mock_llm.call.side_effect = RuntimeError("LLM call failed")
 
         with patch.object(LLM, "__new__", return_value=mock_llm):
@@ -148,6 +223,7 @@ class TestCrewAIInstrumentor(TestCase):
         mock_llm.model = "gpt-4"
         mock_llm.temperature = 0.7
         mock_llm.max_tokens = 1024
+        mock_llm.stop = []
         mock_llm.supports_function_calling.return_value = False
         mock_llm.supports_stop_words.return_value = True
         mock_llm.call.side_effect = [
@@ -424,8 +500,15 @@ class TestCrewAIInstrumentor(TestCase):
         async def mock_acompletion(*args, **kwargs):
             return next(responses)
 
+        def mock_completion(*args, **kwargs):
+            return next(responses)
+
         async def run():
-            with patch("litellm.acompletion", side_effect=mock_acompletion):
+            # crewai routes akickoff through either litellm.acompletion or sync
+            # litellm.completion depending on the executor, so patch both.
+            with patch("litellm.acompletion", side_effect=mock_acompletion), patch(
+                "litellm.completion", side_effect=mock_completion
+            ):
                 return await crew.akickoff()
 
         asyncio.run(run())
@@ -461,8 +544,15 @@ class TestCrewAIInstrumentor(TestCase):
         async def mock_acompletion(*args, **kwargs):
             return next(responses)
 
+        def mock_completion(*args, **kwargs):
+            return next(responses)
+
         async def run():
-            with patch("litellm.acompletion", side_effect=mock_acompletion):
+            # crewai routes akickoff through either litellm.acompletion or sync
+            # litellm.completion depending on the executor, so patch both.
+            with patch("litellm.acompletion", side_effect=mock_acompletion), patch(
+                "litellm.completion", side_effect=mock_completion
+            ):
                 return await crew.akickoff()
 
         asyncio.run(run())
@@ -502,8 +592,12 @@ class TestCrewAIInstrumentor(TestCase):
         with patch(
             "litellm.completion",
             side_effect=[
-                self._mock_response(content="", tool_calls=[tc]),
-                self._mock_response(content="Thought: I now know the final answer\nFinal Answer: Hello! Welcome!"),
+                self._mock_response(content="", tool_calls=[tc], prompt_tokens=100, completion_tokens=50),
+                self._mock_response(
+                    content="Thought: I now know the final answer\nFinal Answer: Hello! Welcome!",
+                    prompt_tokens=200,
+                    completion_tokens=80,
+                ),
             ],
         ):
             crew.kickoff()
@@ -542,6 +636,20 @@ class TestCrewAIInstrumentor(TestCase):
             },
         )
 
+        agent_input_messages = json.loads(agent_span.attributes[GEN_AI_INPUT_MESSAGES])
+        validate_otel_genai_schema(agent_input_messages, "gen-ai-input-messages")
+        self.assertTrue(
+            any(
+                part.get("type") == "text" and "Greet the user warmly." in part.get("content", "")
+                for message in agent_input_messages
+                if message.get("role") == "user"
+                for part in message.get("parts", [])
+            )
+        )
+        agent_output_messages = json.loads(agent_span.attributes[GEN_AI_OUTPUT_MESSAGES])
+        validate_otel_genai_schema(agent_output_messages, "gen-ai-output-messages")
+        self.assertTrue(any(message.get("role") == "assistant" for message in agent_output_messages))
+
         self._assert_span_attributes(
             spans,
             "execute_tool get_greeting",
@@ -555,7 +663,7 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertIsNotNone(tool_span.attributes)
         self.assertIn("get_greeting", tool_span.attributes[GEN_AI_TOOL_DESCRIPTION])
         self.assertIn(GEN_AI_TOOL_CALL_ARGUMENTS, tool_span.attributes)
-        self.assertEqual('"Hello, World!"', tool_span.attributes[GEN_AI_TOOL_CALL_RESULT])
+        self.assertEqual("Hello, World!", tool_span.attributes[GEN_AI_TOOL_CALL_RESULT])
 
         self._assert_span_parent(agent_span, crew_span)
         self._assert_span_parent(tool_span, agent_span)
@@ -579,6 +687,12 @@ class TestCrewAIInstrumentor(TestCase):
         validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
         self.assertEqual(chat_span.attributes.get(GEN_AI_RESPONSE_MODEL), model_id)
         self.assertIn(GEN_AI_RESPONSE_FINISH_REASONS, chat_span.attributes)
+
+        usage_spans = [s for s in spans if GEN_AI_USAGE_INPUT_TOKENS in s.attributes]
+        usage = sorted(
+            (s.attributes[GEN_AI_USAGE_INPUT_TOKENS], s.attributes[GEN_AI_USAGE_OUTPUT_TOKENS]) for s in usage_spans
+        )
+        self.assertEqual(usage, [(100, 50), (200, 80)])
 
     def _create_test_crew(self, model: str):
         test_tracer = self.tracer_provider.get_tracer("test")
@@ -633,21 +747,24 @@ class TestCrewAIInstrumentor(TestCase):
         return next((s for s in self.span_exporter.get_finished_spans() if name_contains in s.name), None)
 
     @staticmethod
-    def _mock_response(content: str = "", tool_calls: Optional[list] = None):
-        r = MagicMock()
-        r.choices = [MagicMock()]
-        r.choices[0].message = MagicMock()
-        r.choices[0].message.content = content
-        r.choices[0].message.tool_calls = tool_calls or []
-        r.usage = {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
-        return r
+    def _mock_response(
+        content: str = "", tool_calls: Optional[list] = None, prompt_tokens: int = 100, completion_tokens: int = 50
+    ):
+        from litellm.types.utils import Choices, Message, ModelResponse, Usage
+
+        message = Message(content=content, role="assistant", tool_calls=tool_calls or None)
+        choice = Choices(index=0, message=message, finish_reason="tool_calls" if tool_calls else "stop")
+        usage = Usage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens,
+        )
+        return ModelResponse(choices=[choice], usage=usage)
 
     @staticmethod
     def _mock_tool_call(call_id: str = "call_123", name: str = "get_greeting", arguments: str = '{"name": "World"}'):
-        tc = MagicMock()
-        tc.id = call_id
-        tc.type = "function"
-        tc.function = MagicMock()
-        tc.function.name = name
-        tc.function.arguments = arguments
-        return tc
+        from litellm.types.utils import ChatCompletionMessageToolCall, Function
+
+        return ChatCompletionMessageToolCall(
+            id=call_id, type="function", function=Function(name=name, arguments=arguments)
+        )

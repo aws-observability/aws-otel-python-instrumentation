@@ -10,8 +10,10 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     OPERATION_INVOKE_WORKFLOW,
     PROVIDER_MAP,
     DictWithLock,
+    content_to_parts,
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
+    to_tool_attribute_value,
 )
 from opentelemetry import context, trace
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
@@ -155,6 +157,7 @@ class OpenTelemetryEventHandler:
         # a map of every event's id to its span. If the event does not
         # create a span, then it's mapped to the span created by its nearest ancestor event
         self._event_id_to_span = DictWithLock()
+        self._event_id_to_token_usage = DictWithLock()
         self._event_type_handlers: Dict[type, Any] = {
             CrewKickoffStartedEvent: self._on_crew_start,
             CrewKickoffCompletedEvent: self._on_crew_completed,
@@ -210,12 +213,14 @@ class OpenTelemetryEventHandler:
     ) -> None:  # pylint: disable=unused-argument
         self._end_span(event.started_event_id)
         self._event_id_to_span.clear()
+        self._event_id_to_token_usage.clear()
 
     def _on_crew_failed(
         self, source: "Crew", event: "CrewKickoffFailedEvent"
     ) -> None:  # pylint: disable=unused-argument
         self._end_span(event.started_event_id, error=getattr(event, "error", None))
         self._event_id_to_span.clear()
+        self._event_id_to_token_usage.clear()
 
     def _on_agent_start(  # pylint: disable=too-many-branches
         self, source: "BaseAgent", event: "AgentExecutionStartedEvent"  # pylint: disable=unused-argument
@@ -259,12 +264,24 @@ class OpenTelemetryEventHandler:
                 if getattr(llm, "stop", None):
                     attributes[GEN_AI_REQUEST_STOP_SEQUENCES] = llm.stop
 
+        task_prompt = getattr(event, "task_prompt", None)
+        if task_prompt:
+            attributes[GEN_AI_INPUT_MESSAGES] = serialize_to_json_string(
+                [{"role": "user", "parts": content_to_parts(task_prompt)}]
+            )
+
         self._start_span(span_name, event.event_id, attributes, event.parent_event_id)
 
     def _on_agent_completed(
         self, source: "BaseAgent", event: "AgentExecutionCompletedEvent"  # pylint: disable=unused-argument
     ) -> None:
-        self._end_span(event.started_event_id)
+        attrs: Dict[str, Any] = {}
+        output = getattr(event, "output", None)
+        if output:
+            attrs[GEN_AI_OUTPUT_MESSAGES] = serialize_to_json_string(
+                [{"role": "assistant", "parts": content_to_parts(output), "finish_reason": "stop"}]
+            )
+        self._end_span(event.started_event_id, attrs)
 
     def _on_agent_failed(
         self, source: "BaseAgent", event: "AgentExecutionErrorEvent"
@@ -299,7 +316,7 @@ class OpenTelemetryEventHandler:
                 attributes[GEN_AI_REQUEST_MODEL] = model
 
         if event.tool_args:
-            attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = serialize_to_json_string(event.tool_args)
+            attributes[GEN_AI_TOOL_CALL_ARGUMENTS] = to_tool_attribute_value(event.tool_args)
 
         self._start_span(span_name, event.event_id, attributes, event.parent_event_id)
 
@@ -309,7 +326,7 @@ class OpenTelemetryEventHandler:
         attrs: Dict[str, Any] = {}
         output = getattr(event, "output", None)
         if output is not None:
-            attrs[GEN_AI_TOOL_CALL_RESULT] = serialize_to_json_string(output)
+            attrs[GEN_AI_TOOL_CALL_RESULT] = to_tool_attribute_value(output)
         self._end_span(event.started_event_id, attrs)
 
     def _on_llm_start(self, source: "LLM", event: "LLMCallStartedEvent") -> None:
@@ -330,6 +347,9 @@ class OpenTelemetryEventHandler:
             f"{GenAiOperationNameValues.CHAT.value} {model_name}" if model_name else GenAiOperationNameValues.CHAT.value
         )
 
+        usage = source.get_token_usage_summary()
+        self._event_id_to_token_usage.put(event.event_id, (usage.prompt_tokens, usage.completion_tokens))
+
         messages = event.messages
         if messages:
             if isinstance(messages, str):
@@ -337,7 +357,7 @@ class OpenTelemetryEventHandler:
             system_instructions = [m for m in messages if m.get("role") == "system"]
             non_system_messages = [m for m in messages if m.get("role") != "system"]
             if system_instructions:
-                parts = [{"type": "text", "content": m.get("content", "")} for m in system_instructions]
+                parts = [p for m in system_instructions for p in content_to_parts(m.get("content", ""))]
                 attributes[GEN_AI_SYSTEM_INSTRUCTIONS] = serialize_to_json_string(parts)
             if non_system_messages:
                 attributes[GEN_AI_INPUT_MESSAGES] = serialize_to_json_string(
@@ -377,14 +397,18 @@ class OpenTelemetryEventHandler:
             attrs[GEN_AI_RESPONSE_MODEL] = model_name
 
         usage: "UsageMetrics" = source.get_token_usage_summary()
-        if usage.prompt_tokens > 0:
-            attrs[GEN_AI_USAGE_INPUT_TOKENS] = usage.prompt_tokens
-        if usage.completion_tokens > 0:
-            attrs[GEN_AI_USAGE_OUTPUT_TOKENS] = usage.completion_tokens
+        prev_prompt_tokens, prev_completion_tokens = self._event_id_to_token_usage.pop(event.started_event_id) or (0, 0)
+        input_tokens = usage.prompt_tokens - prev_prompt_tokens
+        output_tokens = usage.completion_tokens - prev_completion_tokens
+        if input_tokens > 0:
+            attrs[GEN_AI_USAGE_INPUT_TOKENS] = input_tokens
+        if output_tokens > 0:
+            attrs[GEN_AI_USAGE_OUTPUT_TOKENS] = output_tokens
 
         self._end_span(event.started_event_id, attrs)
 
     def _on_llm_failed(self, source: Any, event: "LLMCallFailedEvent") -> None:  # pylint: disable=unused-argument
+        self._event_id_to_token_usage.pop(event.started_event_id)
         self._end_span(event.started_event_id, error=getattr(event, "error", None))
 
     def _start_span(
@@ -455,7 +479,7 @@ class OpenTelemetryEventHandler:
         parts = []
         content = msg.get("content")
         if content:
-            parts.append({"type": "text", "content": content})
+            parts.extend(content_to_parts(content))
         tool_calls = msg.get("tool_calls")
         if tool_calls:
             parts.extend(OpenTelemetryEventHandler._to_tool_call_parts(tool_calls))
@@ -468,7 +492,7 @@ class OpenTelemetryEventHandler:
         parts = []
         content = msg.get("content")
         if content:
-            parts.append({"type": "text", "content": content})
+            parts.extend(content_to_parts(content))
         tool_calls = msg.get("tool_calls")
         if tool_calls:
             parts.extend(OpenTelemetryEventHandler._to_tool_call_parts(tool_calls))
