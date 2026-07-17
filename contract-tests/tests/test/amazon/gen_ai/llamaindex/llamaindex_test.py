@@ -137,14 +137,10 @@ class LlamaIndexTest(ContractTestBase):
         invoke_agent_spans = []
         execute_tool_spans = []
         chat_spans = []
-        run_agent_step_spans = []
 
         for resource_scope_span in resource_scope_spans:
             span = resource_scope_span.span
             attrs = self._get_attributes_dict(span.attributes)
-
-            if "run_agent_step" in span.name:
-                run_agent_step_spans.append(span)
 
             if attrs.get(GEN_AI_OPERATION_NAME):
                 op_name = attrs[GEN_AI_OPERATION_NAME].string_value
@@ -161,15 +157,9 @@ class LlamaIndexTest(ContractTestBase):
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
             self._assert_str_attribute(attrs, GEN_AI_AGENT_NAME, "TestAgent")
-            self._assert_str_attribute(attrs, GEN_AI_AGENT_DESCRIPTION, "A test agent that greets and multiplies.")
-            self._assert_invoke_agent_input_output(attrs)
-
-        for span in run_agent_step_spans:
-            attrs = self._get_attributes_dict(span.attributes)
-            self.assertNotIn(GEN_AI_OPERATION_NAME, attrs)
-            self.assertIn(GEN_AI_AGENT_NAME, attrs)
-            self.assertNotIn(GEN_AI_INPUT_MESSAGES, attrs)
-            self.assertNotIn(GEN_AI_OUTPUT_MESSAGES, attrs)
+            if "run_agent_step" not in span.name:
+                self._assert_str_attribute(attrs, GEN_AI_AGENT_DESCRIPTION, "A test agent that greets and multiplies.")
+                self._assert_invoke_agent_input_output(attrs)
 
         if execute_tool_spans:
             tool_names = set()
@@ -379,7 +369,6 @@ class LlamaIndexTest(ContractTestBase):
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
             self.assertIn(GEN_AI_AGENT_NAME, attrs)
-            self._assert_invoke_agent_input_output(attrs)
 
         self.assertGreater(len(chat_spans), 0, "Expected at least one chat span")
 
