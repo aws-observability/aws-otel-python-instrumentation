@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix(crewai): use native per-call token usage when crewai provides it
+  ([#822](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/822))
 - fix(crewai): normalize tool description across crewai versions
   ([#821](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/821))
 - fix(crewai): report per-call LLM token usage instead of cumulative total
