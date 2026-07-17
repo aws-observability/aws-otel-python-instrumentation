@@ -6,6 +6,7 @@ import time
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
+from amazon.opentelemetry.distro.serviceevents.ast_transformation import _file_path_to_module_path
 from amazon.opentelemetry.distro.serviceevents.collectors.incident_snapshot_collector import IncidentSnapshotCollector
 from amazon.opentelemetry.distro.serviceevents.models import (
     CallPathEntry,
@@ -256,19 +257,77 @@ class TestGenerateErrorHash(TestCase):
         _ServiceEventsMonitorState._instance = None
 
     def test_with_exception(self):
-        """Test hash with exception type and message."""
+        """Test hash with exception type and file-qualified throw-site origin (not the message)."""
         collector = IncidentSnapshotCollector(
             flush_interval_ms=10000,
             duration_threshold_ms=1000,
             max_per_period=100,
         )
 
-        exc = ValueError("test error")
-        result = collector._generate_error_hash("/api/users", exc)
+        def raise_here():
+            raise ValueError("test error")
 
-        expected_input = "route:/api/users|exc:ValueError:test error"
+        try:
+            raise_here()
+        except ValueError as exc:
+            result = collector._generate_error_hash("GET /api/users", exc)
+
+        # Keyed on op:<operation> + type + file-qualified origin (module/path.function), NOT the
+        # message, so it stays bounded. The origin is derived from this test file's path so same-named
+        # functions in other modules can't collide.
+        origin = f"{_file_path_to_module_path(__file__)}.raise_here"
+        expected_input = f"op:GET /api/users|exc:ValueError:{origin}"
         expected = hashlib.md5(expected_input.encode("utf-8")).hexdigest()
         self.assertEqual(result, expected)
+
+    def test_message_variations_share_one_hash(self):
+        """Two occurrences of the same error with request-specific messages must collide.
+
+        This is the property the fix restores: the unbounded message no longer leaks into the key,
+        so a recurring error dedups regardless of per-request detail in its message.
+        """
+        collector = IncidentSnapshotCollector(
+            flush_interval_ms=10000,
+            duration_threshold_ms=1000,
+            max_per_period=100,
+        )
+
+        def raise_here(msg):
+            raise ValueError(msg)
+
+        hashes = set()
+        for msg in ("user 1 not found", "user 2 not found", "user 3 not found"):
+            try:
+                raise_here(msg)
+            except ValueError as exc:
+                hashes.add(collector._generate_error_hash("/api/users", exc))
+
+        self.assertEqual(len(hashes), 1)
+
+    def test_different_functions_different_hashes(self):
+        """Same exception type raised from different functions must NOT dedup together."""
+        collector = IncidentSnapshotCollector(
+            flush_interval_ms=10000,
+            duration_threshold_ms=1000,
+            max_per_period=100,
+        )
+
+        def raise_a():
+            raise ValueError("boom")
+
+        def raise_b():
+            raise ValueError("boom")
+
+        try:
+            raise_a()
+        except ValueError as exc:
+            hash_a = collector._generate_error_hash("/api/users", exc)
+        try:
+            raise_b()
+        except ValueError as exc:
+            hash_b = collector._generate_error_hash("/api/users", exc)
+
+        self.assertNotEqual(hash_a, hash_b)
 
     def test_without_exception(self):
         """Test hash without exception (slow request)."""
@@ -278,9 +337,9 @@ class TestGenerateErrorHash(TestCase):
             max_per_period=100,
         )
 
-        result = collector._generate_error_hash("/api/users", None)
+        result = collector._generate_error_hash("GET /api/users", None)
 
-        expected_input = "route:/api/users"
+        expected_input = "op:GET /api/users"
         expected = hashlib.md5(expected_input.encode("utf-8")).hexdigest()
         self.assertEqual(result, expected)
 
@@ -292,9 +351,91 @@ class TestGenerateErrorHash(TestCase):
             max_per_period=100,
         )
 
-        hash1 = collector._generate_error_hash("/api/users", None)
-        hash2 = collector._generate_error_hash("/api/items", None)
+        hash1 = collector._generate_error_hash("GET /api/users", None)
+        hash2 = collector._generate_error_hash("GET /api/items", None)
         self.assertNotEqual(hash1, hash2)
+
+    def test_different_methods_same_route_different_hashes(self):
+        """Different HTTP methods on one route are distinct incidents (operation-keyed, like Java)."""
+        collector = IncidentSnapshotCollector(
+            flush_interval_ms=10000,
+            duration_threshold_ms=1000,
+            max_per_period=100,
+        )
+
+        hash_get = collector._generate_error_hash("GET /api/users", None)
+        hash_post = collector._generate_error_hash("POST /api/users", None)
+        self.assertNotEqual(hash_get, hash_post)
+
+
+class TestOriginFromTracebackStr(TestCase):
+    """Test the seeded-exception origin parser: file-qualifies the producer-recorded thrower."""
+
+    def setUp(self):
+        _ServiceEventsMonitorState._instance = None
+
+    @staticmethod
+    def _collector():
+        return IncidentSnapshotCollector(flush_interval_ms=10000, duration_threshold_ms=1000, max_per_period=100)
+
+    def test_file_qualifies_bare_thrower_from_matching_frame(self):
+        collector = self._collector()
+        tb = 'Traceback (most recent call last):\n  File "app/db.py", line 5, in query_orders\nDbError: boom'
+        self.assertEqual(collector._origin_from_traceback_str(tb, "query_orders"), "app/db.query_orders")
+
+    def test_message_embedded_fake_frame_cannot_hijack_origin(self):
+        # The exception message quotes a traceback fragment (request-specific). The anchored lookup
+        # keys on the recorded thrower name, so the injected frame is ignored — no per-request origin.
+        collector = self._collector()
+        tb = (
+            "Traceback (most recent call last):\n"
+            '  File "app/db.py", line 5, in query_orders\n'
+            'DbError: lookup failed for\n  File "/req/12345.py", line 1, in do'
+        )
+        self.assertEqual(collector._origin_from_traceback_str(tb, "query_orders"), "app/db.query_orders")
+
+    def test_message_embedding_same_named_frame_cannot_hijack_origin(self):
+        # Harder injection: the message trailer embeds a frame reusing the RECORDED thrower name
+        # (query_orders) with a request-specific path. Passing the message truncates the scan before
+        # the trailer (format_exception renders it last), so the real frame — not the injected one —
+        # file-qualifies the origin. Without the message-strip, last-match-wins would pick /req/...
+        collector = self._collector()
+        message = 'lookup failed\n  File "/req/12345.py", line 1, in query_orders'
+        tb = (
+            "Traceback (most recent call last):\n" '  File "app/db.py", line 5, in query_orders\n' f"DbError: {message}"
+        )
+        self.assertEqual(collector._origin_from_traceback_str(tb, "query_orders", message), "app/db.query_orders")
+
+    def test_composite_thrower_name_passes_through_unchanged(self):
+        # The AST monitor records a composite module/path.function that matches no bare frame clause;
+        # it is already file-qualified, so it is returned as-is.
+        collector = self._collector()
+        tb = 'Traceback (most recent call last):\n  File "app/db.py", line 5, in query_orders\nDbError: boom'
+        self.assertEqual(collector._origin_from_traceback_str(tb, "app/db.query_orders"), "app/db.query_orders")
+
+    def test_unlocatable_thrower_falls_back_to_bare_name(self):
+        collector = self._collector()
+        tb = 'Traceback (most recent call last):\n  File "app/db.py", line 5, in something_else\nDbError: boom'
+        self.assertEqual(collector._origin_from_traceback_str(tb, "query_orders"), "query_orders")
+
+    def test_no_thrower_recorded_returns_empty(self):
+        collector = self._collector()
+        self.assertEqual(collector._origin_from_traceback_str("whatever", None), "")
+
+    def test_no_traceback_returns_bare_thrower(self):
+        collector = self._collector()
+        self.assertEqual(collector._origin_from_traceback_str(None, "query_orders"), "query_orders")
+
+    def test_recursion_takes_last_matching_frame(self):
+        # Same function recurses; the LAST matching frame is the raise site.
+        collector = self._collector()
+        tb = (
+            "Traceback (most recent call last):\n"
+            '  File "app/a.py", line 1, in recurse\n'
+            '  File "app/b.py", line 2, in recurse\n'
+            "RecursionError: boom"
+        )
+        self.assertEqual(collector._origin_from_traceback_str(tb, "recurse"), "app/b.recurse")
 
 
 class TestCheckDeduplication(TestCase):
@@ -871,14 +1012,25 @@ class TestDedupKeysOnRecoveredErrorIdentity(TestCase):
         return collector, emitter
 
     @staticmethod
-    def _seed_exception(collector, name, message):
+    def _seed_exception(collector, name, message, file_path="app/handler.py", func="handle"):
         # Mirror the processor seeding the span's exception event into per-request investigation
         # data for an uninstrumented 5xx (exception=None reaches the collector). _recover_error_identity
-        # PEEKs this to key the dedup hash on type+message rather than route-only.
+        # PEEKs this to key the dedup hash on type + file-qualified origin (parsed from traceback_info)
+        # rather than operation-only. The message is captured for the snapshot body but is deliberately NOT
+        # part of the dedup key. function_name here is the customer-consumed value (left untouched by
+        # the hash) — the hash derives its origin from traceback_info instead.
+        traceback_info = (
+            f'Traceback (most recent call last):\n  File "{file_path}", line 1, in {func}\n{name}: {message}'
+        )
         collector._monitor_state._investigation_data.set(
             {
                 "call_path": [],
-                "exception": {"name": name, "message": message, "function_name": "app.handler"},
+                "exception": {
+                    "name": name,
+                    "message": message,
+                    "function_name": func,
+                    "traceback_info": traceback_info,
+                },
             }
         )
 
@@ -896,30 +1048,56 @@ class TestDedupKeysOnRecoveredErrorIdentity(TestCase):
         collector.collect()
         self.assertEqual(emitter.emit_incident_snapshot.call_count, 2)
 
-    def test_two_distinct_messages_same_type_same_route_both_emit(self):
+    def test_two_distinct_messages_same_type_and_function_same_route_deduplicate(self):
+        # Same type + same origin function, differing only in request-specific message text, must
+        # now collide (the message is no longer part of the key). This is the unbounded-key fix.
         collector, emitter = self._make_collector()
-        self._seed_exception(collector, "DbError", "timeout on shard A")
+        self._seed_exception(collector, "DbError", "timeout on shard A", file_path="app/db.py", func="query_orders")
         self.assertIsNotNone(collector.process_potential_incident("/orders", "POST", 500, 10.0, None, self._rd()))
         collector.collect()
-        self._seed_exception(collector, "DbError", "timeout on shard B")
+        self._seed_exception(collector, "DbError", "timeout on shard B", file_path="app/db.py", func="query_orders")
+        self.assertIsNone(collector.process_potential_incident("/orders", "POST", 500, 10.0, None, self._rd()))
+        collector.collect()
+        self.assertEqual(emitter.emit_incident_snapshot.call_count, 1)
+
+    def test_same_type_same_function_name_distinct_modules_both_emit(self):
+        # Same exception type + same bare function name but in DIFFERENT modules must NOT dedup
+        # together — the file-qualified origin keeps them apart (the collision the qualification fixes).
+        collector, emitter = self._make_collector()
+        self._seed_exception(collector, "DbError", "timeout", file_path="app/orders.py", func="handle")
+        self.assertIsNotNone(collector.process_potential_incident("/orders", "POST", 500, 10.0, None, self._rd()))
+        collector.collect()
+        self._seed_exception(collector, "DbError", "timeout", file_path="app/users.py", func="handle")
         self.assertIsNotNone(collector.process_potential_incident("/orders", "POST", 500, 10.0, None, self._rd()))
         collector.collect()
         self.assertEqual(emitter.emit_incident_snapshot.call_count, 2)
 
-    def test_same_error_type_and_message_same_route_deduplicates(self):
+    def test_same_type_distinct_functions_same_route_both_emit(self):
+        # Same exception type raised from two different functions on one route are distinct
+        # incidents — the origin function keeps them apart now that the message is gone.
         collector, emitter = self._make_collector()
-        self._seed_exception(collector, "DbError", "timeout")
+        self._seed_exception(collector, "DbError", "timeout", file_path="app/db.py", func="query_orders")
         self.assertIsNotNone(collector.process_potential_incident("/orders", "POST", 500, 10.0, None, self._rd()))
         collector.collect()
-        self._seed_exception(collector, "DbError", "timeout")
+        self._seed_exception(collector, "DbError", "timeout", file_path="app/db.py", func="write_orders")
+        self.assertIsNotNone(collector.process_potential_incident("/orders", "POST", 500, 10.0, None, self._rd()))
+        collector.collect()
+        self.assertEqual(emitter.emit_incident_snapshot.call_count, 2)
+
+    def test_same_error_type_and_function_same_route_deduplicates(self):
+        collector, emitter = self._make_collector()
+        self._seed_exception(collector, "DbError", "timeout", file_path="app/db.py", func="query_orders")
+        self.assertIsNotNone(collector.process_potential_incident("/orders", "POST", 500, 10.0, None, self._rd()))
+        collector.collect()
+        self._seed_exception(collector, "DbError", "timeout", file_path="app/db.py", func="query_orders")
         # Same recovered identity → same hash → period-deduplicated (max_same_error=1).
         self.assertIsNone(collector.process_potential_incident("/orders", "POST", 500, 10.0, None, self._rd()))
         collector.collect()
         self.assertEqual(emitter.emit_incident_snapshot.call_count, 1)
 
-    def test_latency_incident_no_exception_keys_route_only(self):
+    def test_latency_incident_no_exception_keys_operation_only(self):
         collector, emitter = self._make_collector()
-        # No investigation exception; two slow 2xx on the same route dedup together (route-only).
+        # No investigation exception; two slow 2xx on the same operation dedup together (operation-only).
         self.assertIsNotNone(collector.process_potential_incident("/slow", "GET", 200, 6000.0, None, self._rd()))
         collector.collect()
         self.assertIsNone(collector.process_potential_incident("/slow", "GET", 200, 6000.0, None, self._rd()))
@@ -946,8 +1124,23 @@ class TestRateLimitedRequestDoesNotPoisonDedup(TestCase):
             max_per_period=1,
             max_same_error=1,
         )
-        err_a = ValueError("A")
-        err_b = ValueError("B")
+
+        # Two DISTINCT errors: same type, but raised from different functions so they hash apart
+        # under the type+origin-function key (the message is no longer part of the key).
+        def raise_a():
+            raise ValueError("A")
+
+        def raise_b():
+            raise ValueError("B")
+
+        try:
+            raise_a()
+        except ValueError as e:
+            err_a = e
+        try:
+            raise_b()
+        except ValueError as e:
+            err_b = e
         rd = {"headers": {}, "args": {}}
         self.assertIsNotNone(collector.process_potential_incident("/x", "GET", 500, 10.0, err_a, rd))
         # Second distinct error: passes dedup but the rate window (1) is full → rejected.
@@ -1007,21 +1200,22 @@ class TestEndpointExemplarTracksUpgrade(TestCase):
         self.assertIsNotNone(upgraded.telemetry_correlation.trace_id)
 
     def test_upgrade_preserves_first_occurrence_operation(self):
-        # The dedup hash keys on route (not method), so GET /api/x and POST /api/x with the same error
-        # share a hash. The exemplar is filed under the FIRST occurrence's operation, so the swapped
-        # snapshot must keep the first occurrence's operation, not adopt the upgrader's method.
+        # Two occurrences of the same error on the same operation (GET /api/x) share a hash: the first
+        # is unsampled, the second sampled. The sampled one upgrades the pending snapshot in place; the
+        # exemplar (held by reference by the endpoint collector) is filed under the first occurrence, so
+        # the swapped snapshot must keep the first occurrence's operation and snapshot_id.
         collector = self._make_collector()
         err = ValueError("boom")
         exemplar = collector.process_potential_incident("/api/x", "GET", 500, 50.0, err, {"headers": {}, "args": {}})
         self.assertIsNotNone(exemplar)
         self.assertEqual(exemplar["operation"], "GET /api/x")
-        # Sampled POST occurrence of the same error upgrades the pending (unsampled) GET snapshot.
+        # Sampled occurrence of the same error+operation upgrades the pending (unsampled) snapshot.
         collector.process_potential_incident(
-            "/api/x", "POST", 500, 50.0, err, {"headers": {}, "args": {}, "trace_id": 0xAA, "span_id": 0xBB}
+            "/api/x", "GET", 500, 50.0, err, {"headers": {}, "args": {}, "trace_id": 0xAA, "span_id": 0xBB}
         )
         self.assertEqual(len(collector._pending_snapshots), 1)
         upgraded = collector._pending_snapshots[0]
-        # operation stays 'GET /api/x' (the exemplar's filed operation), NOT 'POST /api/x'.
+        # operation stays 'GET /api/x' (the exemplar's filed operation) and snapshot_id is preserved.
         self.assertEqual(upgraded.operation, "GET /api/x")
         self.assertEqual(upgraded.snapshot_id, exemplar["snapshot_id"])
 
@@ -1477,7 +1671,9 @@ class TestProcessPotentialIncidentBranches(TestCase):
         mock_collect.return_value = MagicMock()
         collector = self._make_collector()
 
-        error_hash = collector._generate_error_hash("/api/users", ValueError("dup"))
+        # Pre-seed with the SAME operation process_potential_incident computes internally
+        # (operation = "<method> <route>" = "GET /api/users").
+        error_hash = collector._generate_error_hash("GET /api/users", ValueError("dup"))
         with collector._error_hashes_lock:
             collector._current_batch_hashes.add(error_hash)
 
