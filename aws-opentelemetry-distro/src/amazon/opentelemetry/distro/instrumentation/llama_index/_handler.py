@@ -213,6 +213,8 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
 
         if isinstance(result, ToolOutput):
             span._attributes[GEN_AI_TOOL_CALL_RESULT] = to_tool_attribute_value(result.content)
+        elif span._attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.INVOKE_AGENT.value:
+            span.process_agent_output(result)
         span.end()
         return span
 

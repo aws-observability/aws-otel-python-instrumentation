@@ -349,6 +349,24 @@ class _Span(BaseSpan):
             if kwargs:
                 self[GEN_AI_TOOL_CALL_ARGUMENTS] = to_tool_attribute_value(kwargs)
 
+        if isinstance(instance, BaseWorkflowAgent):
+            start_event = bound_args.arguments.get("start_event")
+            user_msg = start_event.get("user_msg") if hasattr(start_event, "get") else None
+            if user_msg:
+                _, conversation = _format_messages([ChatMessage(role="user", content=user_msg)])
+                if conversation:
+                    self[GEN_AI_INPUT_MESSAGES] = serialize_to_json_string(conversation)
+
+    def process_agent_output(self, result: Any) -> None:
+        """Capture the final agent output on the invoke_agent span."""
+        response = getattr(getattr(result, "result", None), "response", None)
+        if not isinstance(response, ChatMessage):
+            return
+        _, conversation = _format_messages([response])
+        if conversation:
+            conversation[-1].setdefault("finish_reason", "stop")
+            self[GEN_AI_OUTPUT_MESSAGES] = serialize_to_json_string(conversation)
+
     @singledispatchmethod
     def process_instance(self, instance: Any) -> None: ...  # noqa: E704  # pylint: disable=no-self-use
 
