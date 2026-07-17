@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat(genai): capture user input and agent output on llama_index invoke_agent spans
+  ([#824](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/824))
 - fix(crewai): use native per-call token usage when crewai provides it
   ([#822](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/822))
 - fix(crewai): normalize tool description across crewai versions
