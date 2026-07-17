@@ -397,10 +397,17 @@ class OpenTelemetryEventHandler:
         if model_name:
             attrs[GEN_AI_RESPONSE_MODEL] = model_name
 
-        usage: "UsageMetrics" = source.get_token_usage_summary()
+        # crewai >=1.13.0 reports per-call usage on the completed event; older versions only expose a
+        # cumulative summary, so diff it against the snapshot taken when the call started.
         prev_prompt_tokens, prev_completion_tokens = self._event_id_to_token_usage.pop(event.started_event_id) or (0, 0)
-        input_tokens = usage.prompt_tokens - prev_prompt_tokens
-        output_tokens = usage.completion_tokens - prev_completion_tokens
+        event_usage = getattr(event, "usage", None)
+        if isinstance(event_usage, dict):
+            input_tokens = event_usage.get("prompt_tokens") or 0
+            output_tokens = event_usage.get("completion_tokens") or 0
+        else:
+            usage: "UsageMetrics" = source.get_token_usage_summary()
+            input_tokens = usage.prompt_tokens - prev_prompt_tokens
+            output_tokens = usage.completion_tokens - prev_completion_tokens
         if input_tokens > 0:
             attrs[GEN_AI_USAGE_INPUT_TOKENS] = input_tokens
         if output_tokens > 0:
