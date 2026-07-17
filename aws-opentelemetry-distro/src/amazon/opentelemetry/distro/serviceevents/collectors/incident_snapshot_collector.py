@@ -25,7 +25,7 @@ import uuid
 from collections import deque
 from typing import Dict, List, Optional, Pattern, Set, Tuple
 
-from amazon.opentelemetry.distro.serviceevents.ast_transformation import get_function_info
+from amazon.opentelemetry.distro.serviceevents.ast_transformation import file_path_to_module_path, get_function_info
 from amazon.opentelemetry.distro.serviceevents.collectors.base_collector import BaseCollector
 from amazon.opentelemetry.distro.serviceevents.models import (
     CallPathEntry,
@@ -39,6 +39,10 @@ from amazon.opentelemetry.distro.serviceevents.python_monitor import _ServiceEve
 from amazon.opentelemetry.distro.serviceevents.utils import get_instance_id
 
 logger = logging.getLogger(__name__)
+
+# Matches a Python traceback frame line: File "<path>", line N, in <func>. Used ONLY to derive the
+# file-qualified origin for the dedup hash from a captured traceback string (never emitted).
+_TRACEBACK_FRAME_RE = re.compile(r'^\s*File\s+"([^"]*)",\s+line\s+\d+,\s+in\s+(\S+)', re.MULTILINE)
 
 # too-many-lines: this collector owns the full incident pipeline (trigger detection,
 # per-endpoint latency thresholds, dedup + rate limiting, fork-safe state reset, trace
@@ -349,13 +353,15 @@ class IncidentSnapshotCollector(BaseCollector):
             return None
 
         # Generate error hash for deduplication. The processor passes exception=None (like Java) and
-        # defers exception detail to the collector, so recover the error identity (type + message)
-        # from the investigation data — already seeded from the span's exception event for
-        # uninstrumented 5xx — BEFORE hashing. Without this the hash would collapse to route-only and
-        # two distinct errors on the same route would deduplicate together. Latency incidents have no
-        # exception → (None, None) → route-only hash, matching the pre-refactor behavior.
-        exc_type, exc_message = self._recover_error_identity(exception)
-        error_hash = self._error_hash(route, exc_type, exc_message)
+        # defers exception detail to the collector, so recover the error identity (type + throw-site
+        # function) from the investigation data — already seeded from the span's exception event for
+        # uninstrumented 5xx — BEFORE hashing. Without this the hash would collapse to operation-only
+        # and two distinct errors on the same operation would deduplicate together. The function name
+        # (not the unbounded message) keeps the key bounded. The key uses the full operation
+        # (<method> <route>) so different methods on one route are distinct incidents, matching Java.
+        # Latency incidents have no exception → (None, None) → operation-only hash.
+        exc_type, origin_function = self._recover_error_identity(exception)
+        error_hash = self._error_hash(operation, exc_type, origin_function)
 
         # Claim the batch slot atomically FIRST (one snapshot per error type per collection
         # interval). The check-and-add under the lock is the serialization point that lets exactly
@@ -531,12 +537,12 @@ class IncidentSnapshotCollector(BaseCollector):
                 if pending is None or pending.telemetry_correlation.trace_id is not None:
                     return
                 replacement.snapshot_id = pending.snapshot_id
-                # Preserve the original operation too. The dedup hash keys on route (not method), so a
-                # GET and a POST to the same route with the same error share a hash and can upgrade
-                # each other. The endpoint exemplar is filed under the FIRST occurrence's operation
-                # key; rebuilding operation from THIS occurrence's method would make the swapped
-                # snapshot's operation disagree with the endpoint summary that references its
-                # snapshot_id. Keep the first occurrence's operation.
+                # Preserve the original operation too. The dedup hash keys on operation
+                # (``<method> <route>``), so only occurrences sharing an operation (e.g. two GET
+                # /api/x with the same error) share a hash and can upgrade each other. The endpoint
+                # exemplar is filed under the FIRST occurrence's operation key; rebuilding operation
+                # from THIS occurrence would make the swapped snapshot's operation disagree with the
+                # endpoint summary that references its snapshot_id. Keep the first occurrence's operation.
                 replacement.operation = pending.operation
                 try:
                     idx = self._pending_snapshots.index(pending)
@@ -698,55 +704,140 @@ class IncidentSnapshotCollector(BaseCollector):
             return True
 
     def _recover_error_identity(self, exception: Optional[Exception]) -> Tuple[Optional[str], Optional[str]]:
-        """Recover the (exception_type, exception_message) that keys the dedup hash.
+        """Recover the (exception_type, origin) that keys the dedup hash.
 
         The endpoint span processor passes ``exception=None`` (like Java) and defers exception detail
         to the collector, so the dedup key must be recovered from the same investigation data the
-        snapshot body uses. Without this the hash would collapse to route-only and two distinct
-        errors on the same route would deduplicate together (defeating per-error incident coverage).
+        snapshot body uses. Without this the hash would collapse to operation-only and two distinct
+        errors on the same operation would deduplicate together (defeating per-error incident coverage).
 
-        * When an explicit ``exception`` object is supplied (legacy/manual callers), use it directly.
+        The second element is the *file-qualified throw-site origin* (``module/path.function``), not
+        the exception message. The message is unbounded — it routinely embeds request-specific data
+        (IDs, timestamps, values) — so keying on it lets a single recurring error spawn a distinct
+        hash per occurrence, defeating dedup and churning the per-window hash map against its size
+        cap. The origin is bounded (finite functions per service) and stable across deploys. It is
+        file-qualified so two same-named functions in different modules don't collide into one
+        incident, mirroring the composite name the AST monitor assigns instrumented frames (see
+        ``build_function_name``) and Java's ``class.method``.
+
+        This value is used ONLY for the dedup hash. Customer-consumed telemetry (the endpoint error
+        breakdown key and the snapshot body ``function_name``) is left untouched — those still carry
+        the bare/monitor-recorded name, so this change does not alter emitted data.
+
+        * When an explicit ``exception`` object is supplied (legacy/manual callers), take the type
+          from it and the origin from the last frame of its traceback (the raise site).
         * Otherwise PEEK the per-request investigation data — the AST monitor's captured exception,
-          or the span's exception event seeded into it by the processor for uninstrumented 5xx.
-        * A latency incident (no exception anywhere) returns ``(None, None)`` → route-only hash,
+          or the span's exception event seeded into it by the processor for uninstrumented 5xx —
+          and file-qualify the producer-recorded thrower (``function_name``) against the captured
+          ``traceback_info`` string.
+        * A latency incident (no exception anywhere) returns ``(None, None)`` → operation-only hash,
           matching the pre-refactor behavior for slow requests.
 
         Best-effort and guarded: hashing must never crash the host, so any failure degrades to
-        ``(None, None)`` (route-only), the safe default.
+        ``(None, None)`` (operation-only), the safe default.
         """
         try:
             if exception is not None:
-                return type(exception).__name__, str(exception)
+                return type(exception).__name__, self._origin_from_traceback(exception.__traceback__)
             inv_data = self._monitor_state.peek_investigation_data()
             exc_data = inv_data.get("exception") if inv_data else None
             if isinstance(exc_data, dict) and exc_data.get("name"):
-                return exc_data.get("name"), exc_data.get("message") or ""
+                origin = self._origin_from_traceback_str(
+                    exc_data.get("traceback_info"),
+                    exc_data.get("function_name"),
+                    exc_data.get("message"),
+                )
+                return exc_data.get("name"), origin
         except Exception:  # pylint: disable=broad-exception-caught  # telemetry must never crash host app
             logger.debug("Failed to recover error identity for dedup hash", exc_info=True)
         return None, None
 
     @staticmethod
-    def _error_hash(route: str, exc_type: Optional[str], exc_message: Optional[str]) -> str:
-        """Hash the dedup key from route + recovered exception type/message.
+    def _origin_from_traceback(tb) -> str:
+        """Return the file-qualified origin at the raise site of a traceback object.
 
-        Keyed ``route:<route>`` for latency (no exception) or ``route:<route>|exc:<type>:<message>``
-        for errors, matching the documented per-SDK key (see SERVICE_EVENTS_INCIDENT_RATE_LIMITING.md)
-        and the Node distro's ``generateErrorHash``.
+        Walks to the last frame (``tb_next`` chain) — Python appends frames innermost-last, so the
+        final frame is where the exception was raised — and builds ``module/path.function`` from that
+        frame's filename + code name (same normalization as ``build_function_name``). Returns ``""``
+        if no traceback is attached.
+        """
+        if tb is None:
+            return ""
+        while tb.tb_next is not None:
+            tb = tb.tb_next
+        frame = tb.tb_frame
+        return f"{file_path_to_module_path(frame.f_code.co_filename)}.{frame.f_code.co_name}"
+
+    @staticmethod
+    def _origin_from_traceback_str(
+        stacktrace: Optional[str], func_name: Optional[str], message: Optional[str] = None
+    ) -> str:
+        """File-qualify the producer-recorded thrower against a formatted Python traceback string.
+
+        ``func_name`` is the thrower the producer already recorded — a composite
+        ``module/path.function`` from the AST monitor (derived from instrumented frame metadata, not
+        string-parsed) or a bare name from the span-event path. A composite name matches no frame's
+        ``in <func>`` clause (frames carry bare names) and is returned unchanged. A bare name is
+        file-qualified by locating the LAST frame whose ``in <func>`` equals it — the raise site under
+        recursion — and prepending that frame's module path, yielding ``module/path.function``.
+
+        ``format_exception`` renders the ``<Type>: <message>`` trailer AFTER the frames, so any
+        ``File "...", line N, in x`` text embedded in the message sits past the real frames. Anchoring
+        on the recorded ``func_name`` already ignores frames with a different name; passing the
+        ``message`` additionally truncates the scan before the trailer, so a message that embeds a
+        frame reusing the recorded name (e.g. a wrapped error quoting its own traceback) still cannot
+        inject a per-request origin and reintroduce the unbounded-key proliferation this change
+        removes. Returns the bare name unchanged if its frame can't be located, or ``""`` if the
+        producer recorded no thrower.
+        """
+        if not func_name:
+            return ""
+        if not stacktrace:
+            return func_name
+        frame_region = stacktrace
+        if message:
+            # Drop the trailing "<Type>: <message>" block so message text isn't scanned as a frame.
+            trailer_index = stacktrace.rfind(message)
+            if trailer_index != -1:
+                frame_region = stacktrace[:trailer_index]
+        file_path = ""
+        for match in _TRACEBACK_FRAME_RE.finditer(frame_region):
+            if match.group(2) == func_name:
+                file_path = match.group(1)  # keep the last match — the raise site under recursion
+        if not file_path:
+            return func_name
+        return f"{file_path_to_module_path(file_path)}.{func_name}"
+
+    @staticmethod
+    def _error_hash(operation: str, exc_type: Optional[str], origin: Optional[str]) -> str:
+        """Hash the dedup key from operation + recovered exception type/origin.
+
+        Keyed ``op:<operation>`` for latency (no exception) or ``op:<operation>|exc:<type>:<origin>``
+        for errors, following the same ``op:``/``|exc:`` scheme as the Java and Node distros.
+        ``operation`` is the full ``<method> <route>`` (e.g. ``GET /api/users``), so different HTTP
+        methods on one route are distinct incidents. The file-qualified origin (not the message)
+        keeps the key bounded — see ``_recover_error_identity``.
+
+        Hashes are compared only within a distro, never across them, so the strings need not be
+        byte-identical between distros — and they are not: when the origin is unresolvable this distro
+        emits a trailing ``:`` (empty origin), whereas Java omits the ``:origin`` segment entirely.
         """
         if not exc_type:
-            hash_input = f"route:{route}"
+            hash_input = f"op:{operation}"
         else:
-            hash_input = f"route:{route}|exc:{exc_type}:{exc_message or ''}"
+            hash_input = f"op:{operation}|exc:{exc_type}:{origin or ''}"
         return hashlib.md5(hash_input.encode("utf-8")).hexdigest()
 
-    def _generate_error_hash(self, route: str, exception: Optional[Exception]) -> str:
+    def _generate_error_hash(self, operation: str, exception: Optional[Exception]) -> str:
         """Backward-compatible hash entry point taking an exception object directly.
 
         Retained for callers/tests that pass an explicit exception; delegates to ``_error_hash``.
+        ``operation`` is the full ``<method> <route>`` label.
         """
         if exception is None:
-            return self._error_hash(route, None, None)
-        return self._error_hash(route, type(exception).__name__, str(exception))
+            return self._error_hash(operation, None, None)
+        origin = self._origin_from_traceback(exception.__traceback__)
+        return self._error_hash(operation, type(exception).__name__, origin)
 
     def _is_within_dedup_limit(self, error_hash: str) -> bool:
         """True if emitting this error now would NOT exceed the per-period same-error cap.

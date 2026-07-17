@@ -50,10 +50,14 @@ def _is_docstring_expr(node: ast.stmt) -> bool:
     return isinstance(node.value, ast.Str) and isinstance(node.value.s, str)  # type: ignore[attr-defined]
 
 
-def _file_path_to_module_path(file_path: str) -> str:
+def file_path_to_module_path(file_path: str) -> str:
     """Convert a file path to a module-style path for function naming.
 
     Strips the .py extension and handles __init__.py by using the parent directory.
+
+    Public seam: the incident-snapshot collector file-qualifies dedup-hash origins with this same
+    normalization, so the composite name it builds matches ``build_function_name``. Keep the two in
+    lockstep — a change here rotates every dedup hash.
 
     Examples:
         'indico/modules/foo/bar.py' → 'indico/modules/foo/bar'
@@ -72,6 +76,10 @@ def _file_path_to_module_path(file_path: str) -> str:
         path = path[:-9]
 
     return path
+
+
+# Backward-compatible alias for the pre-public underscore name.
+_file_path_to_module_path = file_path_to_module_path
 
 
 def build_function_name(function_name: str, file_path: str, lineno: int, is_async: bool = False) -> str:
@@ -99,7 +107,7 @@ def build_function_name(function_name: str, file_path: str, lineno: int, is_asyn
         >>> build_function_name("my_func", "myapp/server.py", 42)
         "myapp/server.my_func"
     """
-    module_path = _file_path_to_module_path(file_path)
+    module_path = file_path_to_module_path(file_path)
     composite_name = f"{module_path}.{function_name}"
 
     # Register the function in the global registry (thread-safe)
