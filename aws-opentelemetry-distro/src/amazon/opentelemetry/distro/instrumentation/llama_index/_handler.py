@@ -25,11 +25,7 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     to_tool_attribute_value,
 )
 from opentelemetry import context as context_api
-from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
-    GEN_AI_AGENT_NAME,
-    GEN_AI_OPERATION_NAME,
-    GenAiOperationNameValues,
-)
+from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import GEN_AI_AGENT_NAME
 from opentelemetry.trace import SpanKind, Tracer, set_span_in_context
 
 from ._span import (  # noqa: F401  # pylint: disable=unused-import
@@ -179,7 +175,6 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
 
         agent_setup = self._get_agent_setup(bound_args)
         if agent_setup is not None:
-            span[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.INVOKE_AGENT.value
             agent_name = getattr(agent_setup, "current_agent_name", None)
             if agent_name:
                 span[GEN_AI_AGENT_NAME] = agent_name
@@ -212,8 +207,8 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             return None
 
         if isinstance(result, ToolOutput):
-            span._attributes[GEN_AI_TOOL_CALL_RESULT] = to_tool_attribute_value(result.content)
-        elif span._attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.INVOKE_AGENT.value:
+            span[GEN_AI_TOOL_CALL_RESULT] = to_tool_attribute_value(result.content)
+        else:
             span.process_agent_output(result)
         span.end()
         return span

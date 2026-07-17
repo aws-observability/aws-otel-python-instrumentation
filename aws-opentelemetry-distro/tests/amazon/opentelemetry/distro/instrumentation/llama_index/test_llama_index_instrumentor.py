@@ -372,6 +372,52 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self.assertEqual(span._attributes[GEN_AI_OPERATION_NAME], "invoke_agent")
         otel_span.end()
 
+    def test_process_agent_output_captures_output_messages(self):
+        """Test process_agent_output writes the final agent response to output messages."""
+        from llama_index.core.agent.workflow import AgentOutput
+
+        otel_span = self.tracer.start_span("test")
+        span = self._Span(otel_span=otel_span)
+        span[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.INVOKE_AGENT.value
+        result = AgentOutput(
+            response=ChatMessage(role=MessageRole.ASSISTANT, content="Greeting complete!"),
+            tool_calls=[],
+            raw=None,
+            current_agent_name="Greeter",
+        )
+        span.process_agent_output(result)
+        self.assertIn(GEN_AI_OUTPUT_MESSAGES, span._attributes)
+        output_messages = json.loads(span._attributes[GEN_AI_OUTPUT_MESSAGES])
+        self.assertEqual(output_messages[0]["role"], "assistant")
+        self.assertEqual(output_messages[0]["parts"][0]["content"], "Greeting complete!")
+        self.assertEqual(output_messages[0]["finish_reason"], "stop")
+        otel_span.end()
+
+    def test_process_agent_output_non_chatmessage_response_ignored(self):
+        """Test process_agent_output does nothing when response is not a ChatMessage."""
+        otel_span = self.tracer.start_span("test")
+        span = self._Span(otel_span=otel_span)
+        span[GEN_AI_OPERATION_NAME] = GenAiOperationNameValues.INVOKE_AGENT.value
+        span.process_agent_output(object())
+        self.assertNotIn(GEN_AI_OUTPUT_MESSAGES, span._attributes)
+        otel_span.end()
+
+    def test_process_agent_output_skips_non_invoke_agent_span(self):
+        """Test process_agent_output does nothing when the span is not an invoke_agent span."""
+        from llama_index.core.agent.workflow import AgentOutput
+
+        otel_span = self.tracer.start_span("test")
+        span = self._Span(otel_span=otel_span)
+        result = AgentOutput(
+            response=ChatMessage(role=MessageRole.ASSISTANT, content="Greeting complete!"),
+            tool_calls=[],
+            raw=None,
+            current_agent_name="Greeter",
+        )
+        span.process_agent_output(result)
+        self.assertNotIn(GEN_AI_OUTPUT_MESSAGES, span._attributes)
+        otel_span.end()
+
     def test_process_instance_default_handler_none(self):
         """Test default process_instance handler with None does nothing."""
         otel_span = self.tracer.start_span("test")
@@ -1666,9 +1712,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         spans = self.span_exporter.get_finished_spans()
 
         workflow_spans = [s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == OPERATION_INVOKE_WORKFLOW]
-        agent_step_spans = [
-            s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == "invoke_agent" and "run_agent_step" in s.name
-        ]
+        agent_step_spans = [s for s in spans if "run_agent_step" in s.name]
         tool_spans = [s for s in spans if s.attributes.get(GEN_AI_OPERATION_NAME) == "execute_tool"]
 
         self.assertEqual(len(workflow_spans), 1)
@@ -1678,6 +1722,9 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         for step_span in agent_step_spans:
             self.assertEqual(step_span.name, "run_agent_step Greeter")
             self.assertEqual(step_span.attributes[GEN_AI_AGENT_NAME], "Greeter")
+            self.assertNotIn(GEN_AI_OPERATION_NAME, step_span.attributes)
+            self.assertNotIn(GEN_AI_INPUT_MESSAGES, step_span.attributes)
+            self.assertNotIn(GEN_AI_OUTPUT_MESSAGES, step_span.attributes)
 
         self.assertEqual(len(tool_spans), 1)
         self.assertIn("greet", tool_spans[0].name)

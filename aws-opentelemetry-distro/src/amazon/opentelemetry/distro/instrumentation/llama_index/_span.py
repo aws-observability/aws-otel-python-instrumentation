@@ -359,7 +359,11 @@ class _Span(BaseSpan):
 
     def process_agent_output(self, result: Any) -> None:
         """Capture the final agent output on the invoke_agent span."""
-        response = getattr(getattr(result, "result", None), "response", None)
+        if self._attributes.get(GEN_AI_OPERATION_NAME) != GenAiOperationNameValues.INVOKE_AGENT.value:
+            return
+        response = getattr(result, "response", None)
+        if not isinstance(response, ChatMessage):
+            response = getattr(getattr(result, "result", None), "response", None)
         if not isinstance(response, ChatMessage):
             return
         _, conversation = _format_messages([response])
