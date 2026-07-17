@@ -510,6 +510,101 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
         tool_parent_id = format(tool_parent.context.span_id, "016x")
         self.assertEqual(format(tool_call.parent.span_id, "016x"), tool_parent_id)
 
+    def test_http_headers_carry_trace_context_regardless_of_suppression(self):
+        """W3C trace context must reach outgoing HTTP headers even when
+        ``OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION`` is enabled.
+
+        Servers that only read trace context from HTTP headers (API Gateways,
+        service meshes, non-Python MCP servers) rely on this. The MCP
+        instrumentation historically bundled span-deduplication and
+        header-injection suppression together via
+        ``suppress_http_instrumentation()``, silently breaking propagation to
+        such servers. Header injection now happens via an httpx request event
+        hook that is independent of the span suppression flag.
+        """
+        # pylint: disable=import-outside-toplevel
+        import httpx
+
+        for suppress_value in ("true", "false", None):
+            label = f"suppress={suppress_value}" if suppress_value else "suppress=default"
+            with self.subTest(label):
+                self.instrumentor.uninstrument()
+                self.span_exporter.clear()
+
+                patch_env = {}
+                if suppress_value is not None:
+                    patch_env[OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION] = suppress_value
+
+                with unittest.mock.patch.dict(os.environ, patch_env):
+                    if suppress_value is None:
+                        os.environ.pop(OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION, None)
+
+                    self.instrumentor.instrument(tracer_provider=self.tracer_provider, propagators=self.propagator)
+                    self.server = self._create_server()
+
+                    captured_traceparents = []
+
+                    original_send_single = httpx.AsyncClient._send_single_request
+
+                    async def _capture(self_client, request, *a, **kw):  # pylint: disable=unused-argument
+                        # _send_single_request runs AFTER the request event hooks
+                        # have had a chance to mutate headers, so this reflects
+                        # what will actually go on the wire.
+                        traceparent = request.headers.get("traceparent")
+                        if traceparent:
+                            captured_traceparents.append(traceparent)
+                        return await original_send_single(self_client, request, *a, **kw)
+
+                    with unittest.mock.patch.object(httpx.AsyncClient, "_send_single_request", _capture):
+
+                        async def run(session):
+                            await session.call_tool("hello", {"name": "World"})
+
+                        asyncio.run(self._run_http_inprocess(run))
+
+                    self.assertTrue(
+                        len(captured_traceparents) > 0,
+                        f"Expected at least one outgoing request to carry a traceparent header ({label})",
+                    )
+                    # Every request should carry a valid W3C traceparent
+                    # (00-<32hex trace-id>-<16hex span-id>-<2hex flags>).
+                    for tp in captured_traceparents:
+                        parts = tp.split("-")
+                        self.assertEqual(len(parts), 4, f"malformed traceparent {tp!r}")
+                        self.assertEqual(parts[0], "00")
+                        self.assertEqual(len(parts[1]), 32)
+                        self.assertEqual(len(parts[2]), 16)
+
+    def test_http_headers_pretbuilt_client_gets_hook(self):
+        """When the newer ``streamable_http_client(url, http_client=...)`` API is
+        used, the instrumentation should attach the injection hook directly to
+        the user-supplied client, since the caller owns it (there is no factory
+        to wrap)."""
+        # pylint: disable=import-outside-toplevel
+        try:
+            from mcp.client.streamable_http import streamable_http_client  # noqa: F401
+        except ImportError:
+            self.skipTest("mcp<1.16 has no pre-built-client transport")
+
+        import httpx
+
+        client = httpx.AsyncClient()
+        try:
+            self.instrumentor._client_wrapper._install_trace_header_injection(
+                # Use a callable that matches the signature (url, http_client=...).
+                lambda url, http_client=None, terminate_on_close=True: None,
+                (),
+                {"http_client": client},
+            )
+        finally:
+            asyncio.run(client.aclose())
+
+        request_hooks = client.event_hooks.get("request", [])
+        self.assertTrue(
+            any(hook.__name__ == "_inject_trace_context" for hook in request_hooks),
+            "Expected the injection hook to be installed on the pre-built client",
+        )
+
     async def _run_inprocess(self, callback, raise_exceptions=False):
         from mcp.server.fastmcp import FastMCP  # pylint: disable=import-outside-toplevel
         from mcp.shared.memory import (  # pylint: disable=import-outside-toplevel

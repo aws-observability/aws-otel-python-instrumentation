@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import inspect
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -42,6 +43,14 @@ OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION = "OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION
 
 # Context key for storing client transport metadata alongside the session span.
 _TRANSPORT_KEY = context.create_key("mcp_client_transport")
+
+
+def _get_parameter_names(func: Callable[..., Any]) -> Tuple[str, ...]:
+    """Return the parameter names of ``func`` (best-effort, empty on failure)."""
+    try:
+        return tuple(inspect.signature(func).parameters.keys())
+    except (TypeError, ValueError):
+        return ()
 
 
 class McpWrapper:
@@ -278,19 +287,117 @@ class ClientWrapper(McpWrapper):
                     SERVER_PORT: parsed.port or (443 if parsed.scheme == "https" else 80),
                 }
             )
+
+            # Ensure W3C trace context is injected into outbound HTTP request
+            # headers so MCP servers that read context from HTTP headers (rather
+            # than the JSON-RPC ``_meta`` body) can still join the caller's
+            # trace. ``suppress_http_instrumentation()`` — which we use to
+            # deduplicate the redundant HTTP CLIENT span — also short-circuits
+            # the HTTP client instrumentation's own header injection, so we
+            # inject ourselves via an httpx request event hook attached at
+            # client-construction time.
+            patched_args, patched_kwargs = self._install_trace_header_injection(wrapped, args, kwargs)
+
             try:
                 if self._should_suppress_http_spans:
                     with suppress_http_instrumentation():
-                        async with wrapped(*args, **kwargs) as streams:
+                        async with wrapped(*patched_args, **patched_kwargs) as streams:
                             yield streams
                 else:
-                    async with wrapped(*args, **kwargs) as streams:
+                    async with wrapped(*patched_args, **patched_kwargs) as streams:
                         yield streams
             finally:
                 session_span.end()
                 context.detach(token)
 
         return wrapper()
+
+    def _install_trace_header_injection(  # pylint: disable=too-many-return-statements
+        self, wrapped: Callable[..., Any], args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        """Return ``(args, kwargs)`` with an httpx event hook installed for W3C header injection.
+
+        Wraps the caller's ``httpx_client_factory`` (or the transport's default
+        factory) so every ``httpx.AsyncClient`` the MCP transport uses has a
+        request event hook that calls the configured propagator against the
+        outgoing request's headers. The hook takes the OTel context *at
+        request-send time*, so per-tool-call parents are honored correctly
+        across a shared MCP session.
+
+        The newer ``streamable_http_client`` (mcp>=1.16) takes a pre-built
+        ``http_client`` instead of a factory; the caller owns that client, so
+        we install the event hook directly on it.
+
+        Silently no-ops on any unexpected shape so instrumentation never
+        breaks the request path.
+        """
+        # pylint: disable=import-outside-toplevel
+        try:
+            import httpx
+        except ImportError:
+            return args, kwargs
+
+        propagators = self._propagators
+
+        async def _inject_trace_context(request: "httpx.Request") -> None:
+            propagators.inject(carrier=request.headers)
+
+        def _attach_hook(client: "httpx.AsyncClient") -> None:
+            try:
+                request_hooks = client.event_hooks.setdefault("request", [])
+                if _inject_trace_context not in request_hooks:
+                    request_hooks.append(_inject_trace_context)
+            except Exception:  # pylint: disable=broad-exception-caught
+                _LOG.debug("Failed to attach MCP trace-context injection hook", exc_info=True)
+
+        try:
+            wrapped_params = _get_parameter_names(wrapped)
+        except Exception:  # pylint: disable=broad-exception-caught
+            wrapped_params = ()
+
+        # streamable_http_client(url, http_client=...) — user may pass a
+        # pre-built client. Attach the hook directly to it. If they didn't
+        # pass one, MCP would create one internally via create_mcp_http_client;
+        # we intercept by supplying our own pre-built client instead.
+        if "http_client" in wrapped_params:
+            pre_built_client = kwargs.get("http_client")
+            if isinstance(pre_built_client, httpx.AsyncClient):
+                _attach_hook(pre_built_client)
+                return args, kwargs
+
+            try:
+                from mcp.client.streamable_http import create_mcp_http_client
+            except ImportError:
+                return args, kwargs
+
+            new_client = create_mcp_http_client()
+            _attach_hook(new_client)
+            new_kwargs = dict(kwargs)
+            new_kwargs["http_client"] = new_client
+            return args, new_kwargs
+
+        # streamablehttp_client / sse_client accept ``httpx_client_factory``.
+        # Wrap it (or install a default that MCP would otherwise create).
+        if "httpx_client_factory" not in wrapped_params:
+            return args, kwargs
+
+        original_factory = kwargs.get("httpx_client_factory")
+        if original_factory is None:
+            try:
+                from mcp.client.streamable_http import create_mcp_http_client
+
+                original_factory = create_mcp_http_client
+            except ImportError:
+                return args, kwargs
+
+        def wrapped_factory(*f_args: Any, **f_kwargs: Any) -> "httpx.AsyncClient":
+            client = original_factory(*f_args, **f_kwargs)
+            _attach_hook(client)
+            return client
+
+        new_kwargs = dict(kwargs)
+        new_kwargs["httpx_client_factory"] = wrapped_factory
+        return args, new_kwargs
 
     def wrap_handle_post_request(
         self,
