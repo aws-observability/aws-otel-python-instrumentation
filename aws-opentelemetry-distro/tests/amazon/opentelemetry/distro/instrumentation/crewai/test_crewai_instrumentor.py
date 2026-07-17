@@ -661,7 +661,10 @@ class TestCrewAIInstrumentor(TestCase):
         )
         self.assertIsNotNone(tool_span)
         self.assertIsNotNone(tool_span.attributes)
-        self.assertIn("get_greeting", tool_span.attributes[GEN_AI_TOOL_DESCRIPTION])
+        self.assertEqual(
+            "Get a greeting message for the given name.",
+            tool_span.attributes[GEN_AI_TOOL_DESCRIPTION],
+        )
         self.assertIn(GEN_AI_TOOL_CALL_ARGUMENTS, tool_span.attributes)
         self.assertEqual("Hello, World!", tool_span.attributes[GEN_AI_TOOL_CALL_RESULT])
 

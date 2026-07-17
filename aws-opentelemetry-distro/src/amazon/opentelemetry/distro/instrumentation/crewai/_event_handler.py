@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
@@ -538,7 +539,7 @@ class OpenTelemetryEventHandler:
         if tool_class:
             desc = getattr(tool_class, "description", None)
             if desc:
-                return desc
+                return OpenTelemetryEventHandler._normalize_tool_description(desc)
         for tools_holder in [source, getattr(source, "agent", None), getattr(event, "agent", None)]:
             tools = getattr(tools_holder, "tools", None) if tools_holder else None
             if not tools:
@@ -547,7 +548,7 @@ class OpenTelemetryEventHandler:
                 if getattr(tool, "name", None) == tool_name:
                     desc = getattr(tool, "description", None)
                     if desc:
-                        return desc
+                        return OpenTelemetryEventHandler._normalize_tool_description(desc)
         return None
 
     @staticmethod
@@ -557,7 +558,7 @@ class OpenTelemetryEventHandler:
             tool_def: Dict[str, Any] = {"type": "function"}
             if name := getattr(tool, "name", None):
                 tool_def["name"] = name
-            if desc := getattr(tool, "description", None):
+            if desc := OpenTelemetryEventHandler._normalize_tool_description(getattr(tool, "description", None)):
                 tool_def["description"] = desc
             args_schema = getattr(tool, "args_schema", None)
             if args_schema is not None:
@@ -567,3 +568,12 @@ class OpenTelemetryEventHandler:
                     pass
             defs.append(tool_def)
         return defs
+
+    @staticmethod
+    def _normalize_tool_description(desc: Optional[str]) -> Optional[str]:
+        # crewai <1.15.3 stored the LLM prompt composite in description; strip it to the authored text.
+        # See crewai 1.15.3 changelog: https://github.com/crewAIInc/crewAI/releases/tag/1.15.3
+        if not desc:
+            return desc
+        match = re.match(r"^Tool Name:.*\nTool Arguments:.*\nTool Description:\s*", desc, re.DOTALL)
+        return desc[match.end() :] if match else desc
