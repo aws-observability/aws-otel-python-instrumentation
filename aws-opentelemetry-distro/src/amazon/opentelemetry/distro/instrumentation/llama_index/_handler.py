@@ -184,6 +184,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             if agent_name:
                 span[GEN_AI_AGENT_NAME] = agent_name
                 span._span_name = f"run_agent_step {agent_name}"
+            span.process_agent_setup_input(agent_setup)
         else:
             span.process_instance(instance)
             span.process_input(instance, bound_args)

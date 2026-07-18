@@ -357,9 +357,39 @@ class _Span(BaseSpan):
                 if conversation:
                     self[GEN_AI_INPUT_MESSAGES] = serialize_to_json_string(conversation)
 
+    def process_agent_setup_input(self, agent_setup: Any) -> None:
+        """Capture agent-step input messages on a run_agent_step invoke_agent span.
+
+        run_agent_step spans are created from the AgentSetup event (instance is
+        None) so the BaseWorkflowAgent process_input path never runs for them.
+        AgentSetup.input is the list of ChatMessages fed to the agent this turn
+        (system prompt + conversation so far).
+        """
+        messages = getattr(agent_setup, "input", None)
+        if not messages:
+            return
+        system_instructions, conversation = _format_messages(messages)
+        if system_instructions:
+            self[GEN_AI_SYSTEM_INSTRUCTIONS] = serialize_to_json_string(system_instructions)
+        if conversation:
+            self[GEN_AI_INPUT_MESSAGES] = serialize_to_json_string(conversation)
+
     def process_agent_output(self, result: Any) -> None:
-        """Capture the final agent output on the invoke_agent span."""
+        """Capture the final agent output on the invoke_agent span.
+
+        Two result shapes reach this method:
+        - StopEvent (single-agent parent run / early-stop): final ChatMessage at
+          result.result.response.
+        - AgentOutput (run_agent_step in an AgentWorkflow): ChatMessage at
+          result.response. Only the FINAL answer turn carries real output; an
+          intermediate turn that requests tools has result.tool_calls populated
+          and must be skipped so tool-call turns are not recorded as the output.
+        """
         response = getattr(getattr(result, "result", None), "response", None)
+        if response is None:
+            if getattr(result, "tool_calls", None):
+                return
+            response = getattr(result, "response", None)
         if not isinstance(response, ChatMessage):
             return
         _, conversation = _format_messages([response])
