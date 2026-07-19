@@ -13,7 +13,7 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 ## Unreleased
 
 - fix(mcp-instrumentation): always inject W3C trace context into outbound HTTP request headers so MCP servers that read context only from HTTP (API Gateways, service meshes, non-Python MCP servers) can join the caller's trace, even with `OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION` enabled
-  ([#826](https://github.com/aws-observability/aws-otel-python-instrumentation/issues/826))
+  ([#827](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/827))
 - fix(crewai): use native per-call token usage when crewai provides it
   ([#822](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/822))
 - fix(crewai): normalize tool description across crewai versions

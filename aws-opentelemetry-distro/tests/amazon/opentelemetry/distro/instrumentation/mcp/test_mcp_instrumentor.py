@@ -544,18 +544,18 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
 
                     captured_traceparents = []
 
-                    original_send_single = httpx.AsyncClient._send_single_request
+                    def _make_capture(orig):
+                        async def _capture(self_client, request, *a, **kw):
+                            traceparent = request.headers.get("traceparent")
+                            if traceparent:
+                                captured_traceparents.append(traceparent)
+                            return await orig(self_client, request, *a, **kw)
 
-                    async def _capture(self_client, request, *a, **kw):  # pylint: disable=unused-argument
-                        # _send_single_request runs AFTER the request event hooks
-                        # have had a chance to mutate headers, so this reflects
-                        # what will actually go on the wire.
-                        traceparent = request.headers.get("traceparent")
-                        if traceparent:
-                            captured_traceparents.append(traceparent)
-                        return await original_send_single(self_client, request, *a, **kw)
+                        return _capture
 
-                    with unittest.mock.patch.object(httpx.AsyncClient, "_send_single_request", _capture):
+                    capture_fn = _make_capture(httpx.AsyncClient._send_single_request)
+
+                    with unittest.mock.patch.object(httpx.AsyncClient, "_send_single_request", capture_fn):
 
                         async def run(session):
                             await session.call_tool("hello", {"name": "World"})
@@ -575,7 +575,7 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
                         self.assertEqual(len(parts[1]), 32)
                         self.assertEqual(len(parts[2]), 16)
 
-    def test_http_headers_pretbuilt_client_gets_hook(self):
+    def test_http_headers_prebuilt_client_gets_hook(self):
         """When the newer ``streamable_http_client(url, http_client=...)`` API is
         used, the instrumentation should attach the injection hook directly to
         the user-supplied client, since the caller owns it (there is no factory
@@ -599,11 +599,14 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
         finally:
             asyncio.run(client.aclose())
 
-        request_hooks = client.event_hooks.get("request", [])
+        from amazon.opentelemetry.distro.instrumentation.mcp._wrappers import _HOOK_INSTALLED_ATTR
+
         self.assertTrue(
-            any(hook.__name__ == "_inject_trace_context" for hook in request_hooks),
-            "Expected the injection hook to be installed on the pre-built client",
+            getattr(client, _HOOK_INSTALLED_ATTR, False),
+            "Expected the injection hook sentinel to be set on the pre-built client",
         )
+        request_hooks = client.event_hooks.get("request", [])
+        self.assertEqual(len(request_hooks), 1, "Expected exactly one hook to be installed")
 
     async def _run_inprocess(self, callback, raise_exceptions=False):
         from mcp.server.fastmcp import FastMCP  # pylint: disable=import-outside-toplevel
