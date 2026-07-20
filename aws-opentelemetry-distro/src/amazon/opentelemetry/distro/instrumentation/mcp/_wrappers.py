@@ -456,13 +456,8 @@ class ServerWrapper(McpWrapper):
 
         request_id = getattr(incoming_msg, "id", None)
 
-        carrier = self._extract_trace_context(incoming_msg)
+        carrier = self._extract_trace_context(incoming_msg, args)
         parent_ctx = self._propagators.extract(carrier=carrier)
-
-        if not trace.get_current_span(parent_ctx).get_span_context().is_valid:
-            header_carrier = self._extract_header_carrier(args)
-            if header_carrier:
-                parent_ctx = self._propagators.extract(carrier=header_carrier)
 
         with self._tracer.start_as_current_span(
             self._SERVER_SPAN_NAME,
@@ -493,42 +488,39 @@ class ServerWrapper(McpWrapper):
                 self._set_error_attrs(span, exc)
                 raise
 
-    def _extract_trace_context(self, message: Any) -> Dict[str, Any]:  # pylint: disable=no-self-use
+    def _extract_trace_context(
+        self, message: Any, args: Tuple[Any, ...]
+    ) -> Dict[str, Any]:  # pylint: disable=no-self-use
         """
-        Extract trace context carrier from message metadata.
+        Extract trace context carrier from the incoming request's HTTP headers and MCP
+        message metadata, preferring MCP ``params._meta`` over HTTP headers.
 
         Args:
             message: Incoming MCP message
+            args: Server handler arguments carrying the request
 
         Returns:
             Dictionary containing trace context or empty dict
         """
+        # pylint: disable=import-outside-toplevel
+        from mcp.shared.message import ServerMessageMetadata
+        from mcp.shared.session import RequestResponder
+
+        carrier: Dict[str, Any] = {}
         try:
+            responder = args[0] if args else None
+            if isinstance(responder, RequestResponder) and isinstance(
+                responder.message_metadata, ServerMessageMetadata
+            ):
+                request_context = responder.message_metadata.request_context
+                headers = getattr(request_context, "headers", None) if request_context else None
+                if headers:
+                    carrier.update(headers.items())
             if hasattr(message, "params") and hasattr(message.params, "meta") and message.params.meta:
-                return message.params.meta.model_dump()
+                carrier.update(message.params.meta.model_dump())
         except Exception as exc:  # pylint: disable=broad-exception-caught
             _LOG.debug("Failed to extract trace context: %s", exc)
-        return {}
-
-    def _extract_header_carrier(self, args: Tuple[Any, ...]) -> Dict[str, Any]:  # pylint: disable=no-self-use
-        """Extract trace context carrier from the incoming request's HTTP headers."""
-        try:
-            # pylint: disable=import-outside-toplevel
-            from mcp.shared.message import ServerMessageMetadata
-            from mcp.shared.session import RequestResponder
-
-            message = args[0] if args else None
-            if not isinstance(message, RequestResponder):
-                return {}
-            metadata = message.message_metadata
-            if not isinstance(metadata, ServerMessageMetadata) or not metadata.request_context:
-                return {}
-            headers = getattr(metadata.request_context, "headers", None)
-            if headers:
-                return dict(headers)
-        except Exception as exc:  # pylint: disable=broad-exception-caught
-            _LOG.debug("Failed to extract header carrier: %s", exc)
-        return {}
+        return carrier
 
     def _extract_server_transport_info(
         self, args: Tuple[Any, ...]
