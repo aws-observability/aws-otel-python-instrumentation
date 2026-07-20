@@ -493,7 +493,7 @@ class ServerWrapper(McpWrapper):
     ) -> Dict[str, Any]:  # pylint: disable=no-self-use
         """
         Extract trace context carrier from the incoming request's HTTP headers and MCP
-        message metadata, preferring MCP ``params._meta`` over HTTP headers.
+        message metadata.
 
         Args:
             message: Incoming MCP message
