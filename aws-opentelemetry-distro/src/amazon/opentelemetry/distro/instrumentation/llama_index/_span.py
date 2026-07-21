@@ -375,16 +375,7 @@ class _Span(BaseSpan):
             self[GEN_AI_INPUT_MESSAGES] = serialize_to_json_string(conversation)
 
     def process_agent_output(self, result: Any) -> None:
-        """Capture the final agent output on the invoke_agent span.
-
-        Two result shapes reach this method:
-        - StopEvent (single-agent parent run / early-stop): final ChatMessage at
-          result.result.response.
-        - AgentOutput (run_agent_step in an AgentWorkflow): ChatMessage at
-          result.response. Only the FINAL answer turn carries real output; an
-          intermediate turn that requests tools has result.tool_calls populated
-          and must be skipped so tool-call turns are not recorded as the output.
-        """
+        """Capture the final agent output on the invoke_agent span."""
         response = getattr(getattr(result, "result", None), "response", None)
         if response is None:
             if getattr(result, "tool_calls", None):
