@@ -27,70 +27,18 @@ _serviceevents_instance: Optional["ServiceEventsInstrumentation"] = None
 
 
 def _build_log_otlp_exporter(logs_endpoint: str, headers: dict, compression):
-    """Build an OTLP log exporter for the configured logs endpoint.
+    """Build a plain OTLP log exporter for the configured logs endpoint.
 
-    When the endpoint matches the CloudWatch Logs OTLP pattern
-    (``https://logs.{region}.amazonaws.com/v1/logs``), wrap the upstream
-    ``OTLPLogExporter`` with ADOT's ``OTLPAwsLogRecordExporter`` so
-    requests are SigV4-signed. The ``x-aws-log-group`` / ``x-aws-log-stream``
-    headers travel with every batch (already populated in ``headers``).
-    Otherwise return a plain upstream ``OTLPLogExporter`` pointing at the
-    collector-proxied endpoint.
-
-    Mirrors the Java SDK's behavior in ``ServiceEventsInstrumentation.java:557``.
-    Imports are deferred so this module stays importable without OTel SDK
-    and botocore at import time.
-
-    The SigV4 path requires ``botocore`` (an optional distro dependency). When
-    it is unavailable we fall back to a plain, unsigned ``OTLPLogExporter``
-    against the same endpoint rather than raising — telemetry must never crash
-    the host app, and a usable exporter keeps ``initialize()`` from tripping its
-    broad-except and silently disabling all of ServiceEvents.
+    ServiceEvents exports through the collector-proxied OTLP endpoint (e.g.
+    ``http://localhost:4316/v1/logs``); the ``x-aws-log-group`` / ``x-aws-log-stream``
+    headers travel with every batch (already populated in ``headers``). The import is
+    deferred so this module stays importable without the OTel SDK at import time.
     """
-    # Module-local imports to preserve the file's lazy-import posture (defer OTel SDK / botocore).
+    # Module-local import to preserve the file's lazy-import posture (defer OTel SDK).
     # pylint: disable=import-outside-toplevel
-    import re
-
-    from amazon.opentelemetry.distro.aws_opentelemetry_configurator import AWS_LOGS_OTLP_ENDPOINT_PATTERN
     from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 
-    is_cw_endpoint = bool(re.match(AWS_LOGS_OTLP_ENDPOINT_PATTERN, (logs_endpoint or "").lower()))
-    if not is_cw_endpoint:
-        return OTLPLogExporter(endpoint=logs_endpoint, headers=headers, compression=compression)
-
-    # Direct-to-CloudWatch (SigV4) path. Use the shared botocore-session helper
-    # the rest of the distro relies on (see aws_opentelemetry_configurator
-    # ._create_aws_otlp_exporter). It returns a ``botocore.session.Session`` —
-    # the type OTLPAwsLogRecordExporter is annotated for — or ``None`` when
-    # botocore is not installed.
-    # pylint: disable=import-outside-toplevel
-    from amazon.opentelemetry.distro._utils import get_aws_session
-
-    session = get_aws_session()
-    if not session:
-        # botocore unavailable: cannot SigV4-sign. Degrade to a plain OTLP
-        # exporter against the same endpoint instead of returning None (the
-        # caller does not handle None) or raising into the host app.
-        logger.warning(
-            "ServiceEvents direct-to-CloudWatch SigV4 export requires botocore, which is not installed; "
-            "falling back to an unsigned OTLP log exporter for %s",
-            logs_endpoint,
-        )
-        return OTLPLogExporter(endpoint=logs_endpoint, headers=headers, compression=compression)
-
-    from amazon.opentelemetry.distro.exporter.otlp.aws.logs.otlp_aws_log_record_exporter import OTLPAwsLogRecordExporter
-
-    region = (logs_endpoint or "").lower().split(".")[1]
-    # OTLPAwsLogRecordExporter hardcodes compression=Gzip (matches ADOT design —
-    # CloudWatch OTLP ingestion assumes gzip for LLO batching). The `compression`
-    # argument is honored only on the collector-proxied branch above.
-    _ = compression  # suppress unused-kwarg lint on this branch
-    return OTLPAwsLogRecordExporter(
-        aws_region=region,
-        session=session,
-        endpoint=logs_endpoint,
-        headers=headers,
-    )
+    return OTLPLogExporter(endpoint=logs_endpoint, headers=headers, compression=compression)
 
 
 def get_serviceevents_instrumentation(
@@ -336,7 +284,6 @@ class ServiceEventsInstrumentation:
                 environment=self.config.environment,
                 service_name=self.config.service_name,
                 sdk_version=self.config.sdk_version,
-                capture_request_body=self.config.incident_snapshot_capture_request_body,
                 max_same_error=self.config.incident_snapshot_max_same_error,
                 resource_attributes=self.config.resource_attributes,
                 otlp_emitter=otlp_emitter,
@@ -354,60 +301,13 @@ class ServiceEventsInstrumentation:
                 self.config.incident_snapshot_flush_interval,
             )
 
-            # Phase 3: Initialize framework hooks (auto-detect via ImportError)
-            try:
-                # Optional framework dep — auto-detected via ImportError.
-                # pylint: disable=import-outside-toplevel
-                from amazon.opentelemetry.distro.serviceevents.instrumentation.flask_instrumentation import (
-                    install_flask_hooks,
-                )
-
-                install_flask_hooks(
-                    endpoint_collector=endpoint_collector,
-                    incident_snapshot_collector=incident_snapshot_collector,
-                    config=self.config,
-                )
-                logger.info("Flask instrumentation hooks installed")
-            except ImportError:
-                logger.debug("Flask not installed, skipping Flask instrumentation")
-            except Exception as exc:  # pylint: disable=broad-exception-caught  # telemetry must not crash app
-                logger.error("Error installing Flask hooks: %s", exc, exc_info=True)
-
-            try:
-                # Optional framework dep — auto-detected via ImportError.
-                # pylint: disable=import-outside-toplevel
-                from amazon.opentelemetry.distro.serviceevents.instrumentation.fastapi_instrumentation import (
-                    install_fastapi_hooks,
-                )
-
-                install_fastapi_hooks(
-                    endpoint_collector=endpoint_collector,
-                    incident_snapshot_collector=incident_snapshot_collector,
-                    config=self.config,
-                )
-                logger.info("FastAPI instrumentation hooks installed")
-            except ImportError:
-                logger.debug("FastAPI not installed, skipping FastAPI instrumentation")
-            except Exception as exc:  # pylint: disable=broad-exception-caught  # telemetry must not crash app
-                logger.error("Error installing FastAPI hooks: %s", exc, exc_info=True)
-
-            try:
-                # Optional framework dep — auto-detected via ImportError.
-                # pylint: disable=import-outside-toplevel
-                from amazon.opentelemetry.distro.serviceevents.instrumentation.django_instrumentation import (
-                    install_django_hooks,
-                )
-
-                install_django_hooks(
-                    endpoint_collector=endpoint_collector,
-                    incident_snapshot_collector=incident_snapshot_collector,
-                    config=self.config,
-                )
-                logger.info("Django instrumentation hooks installed")
-            except ImportError:
-                logger.debug("Django not installed, skipping Django instrumentation")
-            except Exception as exc:  # pylint: disable=broad-exception-caught  # telemetry must not crash app
-                logger.error("Error installing Django hooks: %s", exc, exc_info=True)
+            # Phase 3: Endpoint measurement. ONE framework-agnostic SpanProcessor (the Python port
+            # of Java's ServiceEventsSpanProcessor) reads the request-boundary span OTel already
+            # emits and derives endpoint metrics + incident snapshots from span attributes — covering
+            # every OTel-instrumented framework with no per-framework hook code. A registration miss
+            # (e.g. an API-only NoOp provider with no add_span_processor) is logged and swallowed;
+            # ServiceEvents then emits no endpoint signals rather than crashing the host app.
+            self._install_endpoint_span_processor(endpoint_collector, incident_snapshot_collector)
 
             # Register fork handler for multi-process servers (e.g., gunicorn)
             try:
@@ -431,6 +331,73 @@ class ServiceEventsInstrumentation:
             logger.error("Failed to initialize ServiceEvents instrumentation: %s", exc, exc_info=True)
             # Don't crash application - graceful degradation
             self._initialized = False
+
+    def _install_endpoint_span_processor(self, endpoint_collector, incident_snapshot_collector) -> bool:
+        """Register the framework-agnostic endpoint span processor on the active tracer provider.
+
+        The processor reads SERVER / local-root spans from OTel's own framework instrumentation, so
+        it covers every instrumented framework without bespoke hook code. A failure here is logged
+        and swallowed — telemetry must never crash the host app, and ServiceEvents degrades
+        gracefully rather than aborting the whole initialize().
+
+        Returns True when the processor was registered, False when the active provider has no
+        ``add_span_processor`` (e.g. the API-only NoOp provider) or registration raised — in which
+        case ServiceEvents emits no endpoint signals (there is no span pipeline to read from).
+        """
+        try:
+            # Deferred imports: keep this module importable without the OTel SDK present.
+            # pylint: disable=import-outside-toplevel
+            from amazon.opentelemetry.distro.serviceevents.processor.endpoint_span_processor import (
+                ServiceEventsSpanProcessor,
+            )
+            from opentelemetry.trace import get_tracer_provider
+
+            provider = get_tracer_provider()
+            if not hasattr(provider, "add_span_processor"):
+                # No SDK TracerProvider installed (e.g. the API-only NoOp provider). Without a
+                # span pipeline the processor can never fire, so report failure — ServiceEvents
+                # emits no endpoint signals on such a provider.
+                logger.warning(
+                    "ServiceEvents endpoint span processor: the active tracer provider has no "
+                    "add_span_processor (%s); endpoint signals will not be emitted",
+                    type(provider).__name__,
+                )
+                return False
+
+            # Idempotency guard: the SDK's add_span_processor APPENDS with no de-dup, so
+            # registering again on a provider that already carries our processor (a re-init, or a
+            # forked child that inherited the parent's provider) would fire on_start/on_end twice
+            # per span and double-count every endpoint metric. Skip if one is already present.
+            if self._provider_has_endpoint_processor(provider, ServiceEventsSpanProcessor):
+                logger.info("ServiceEvents endpoint span processor already registered; skipping re-registration")
+                return True
+
+            processor = ServiceEventsSpanProcessor(
+                endpoint_collector=endpoint_collector,
+                incident_snapshot_collector=incident_snapshot_collector,
+                config=self.config,
+            )
+            provider.add_span_processor(processor)
+            logger.info("ServiceEvents endpoint span processor installed (framework-agnostic mode)")
+            return True
+        except Exception as exc:  # pylint: disable=broad-exception-caught  # telemetry must not crash app
+            logger.error("Error installing ServiceEvents endpoint span processor: %s", exc, exc_info=True)
+            return False
+
+    @staticmethod
+    def _provider_has_endpoint_processor(provider, processor_cls) -> bool:
+        """True when the provider already carries an ServiceEventsSpanProcessor.
+
+        Introspects the SDK's ``_active_span_processor._span_processors`` (a
+        ``(Synchronous|Concurrent)MultiSpanProcessor`` holds its children there). Best-effort:
+        any unexpected provider shape returns False so registration proceeds — at worst we fall
+        back to the prior append behavior, which is the pre-guard baseline.
+        """
+        active = getattr(provider, "_active_span_processor", None)
+        registered = getattr(active, "_span_processors", None)
+        if not isinstance(registered, (list, tuple)):
+            return False
+        return any(isinstance(sp, processor_cls) for sp in registered)
 
     # Tested provider/exporter wiring — kept whole rather than fragmented.
     def _create_otlp_emitter(self):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements

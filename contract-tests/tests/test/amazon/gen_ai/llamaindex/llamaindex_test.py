@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import json
 from logging import INFO, Logger, getLogger
 from typing import List
 
@@ -158,6 +159,7 @@ class LlamaIndexTest(ContractTestBase):
             self._assert_str_attribute(attrs, GEN_AI_AGENT_NAME, "TestAgent")
             if "run_agent_step" not in span.name:
                 self._assert_str_attribute(attrs, GEN_AI_AGENT_DESCRIPTION, "A test agent that greets and multiplies.")
+                self._assert_invoke_agent_input_output(attrs)
 
         if execute_tool_spans:
             tool_names = set()
@@ -216,8 +218,6 @@ class LlamaIndexTest(ContractTestBase):
             self.assertIn(GEN_AI_INPUT_MESSAGES, attrs)
             input_messages = attrs[GEN_AI_INPUT_MESSAGES].string_value
             self.assertIsNotNone(input_messages)
-            import json
-
             messages = json.loads(input_messages)
             self.assertIsInstance(messages, list)
             self.assertGreater(len(messages), 0, "Expected at least one message")
@@ -325,8 +325,6 @@ class LlamaIndexTest(ContractTestBase):
             self.assertIn(GEN_AI_TOOL_DEFINITIONS, attrs)
             tool_defs = attrs[GEN_AI_TOOL_DEFINITIONS].string_value
             self.assertIsNotNone(tool_defs)
-            import json
-
             tools = json.loads(tool_defs)
             self.assertIsInstance(tools, list)
             self.assertEqual(len(tools), 2, "Expected exactly two tool definitions (calculate_sum, multiply)")
@@ -373,6 +371,26 @@ class LlamaIndexTest(ContractTestBase):
             self.assertIn(GEN_AI_AGENT_NAME, attrs)
 
         self.assertGreater(len(chat_spans), 0, "Expected at least one chat span")
+
+    def _assert_invoke_agent_input_output(self, attrs) -> None:
+        self.assertIn(GEN_AI_INPUT_MESSAGES, attrs)
+        self.assertIn(GEN_AI_OUTPUT_MESSAGES, attrs)
+        input_messages = json.loads(attrs[GEN_AI_INPUT_MESSAGES].string_value)
+        output_messages = json.loads(attrs[GEN_AI_OUTPUT_MESSAGES].string_value)
+        self.assertTrue(self._text_parts(input_messages, "user"), "Expected the user input on the invoke_agent span")
+        self.assertTrue(
+            self._text_parts(output_messages, "assistant"), "Expected the agent output on the invoke_agent span"
+        )
+
+    @staticmethod
+    def _text_parts(messages: list, role: str) -> list:
+        return [
+            part["content"]
+            for message in messages
+            if message.get("role") == role
+            for part in message.get("parts", [])
+            if part.get("type") == "text" and part.get("content")
+        ]
 
     @override
     def _assert_metric_attributes(self, resource_scope_metrics, metric_name: str, expected_sum: int, **kwargs) -> None:

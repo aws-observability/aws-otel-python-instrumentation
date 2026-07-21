@@ -12,6 +12,29 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat(genai): capture user input and agent output on llama_index invoke_agent spans
+  ([#824](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/824))
+- fix(crewai): use native per-call token usage when crewai provides it
+  ([#822](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/822))
+- fix(crewai): normalize tool description across crewai versions
+  ([#821](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/821))
+- fix(serviceevents): key the incident-snapshot dedup hash on operation + bounded throw-site origin (`module/path.function`)
+  ([#825](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/825))
+- fix(crewai): report per-call LLM token usage instead of cumulative total
+  ([#806](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/806))
+- fix(genai): serialize tool call arguments/results and blob bytes to match OTel util-genai (primitives kept native, bytes base64-encoded)
+  ([#817](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/817))
+- feat(genai): extract gen_ai.tool.call.arguments/result as LLO content
+  ([#816](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/816))
+- feat(genai): capture user input and agent output on invoke_agent spans
+  ([#815](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/815))
+- refactor(serviceevents): make the endpoint span processor framework-agnostic
+- fix(serviceevents): gate incident trace correlation on the SAMPLED flag and harden incident dedup/rate-limiting
+- fix(genai): serialize list-valued message content into typed parts so multimodal/reasoning content is no longer stringified to a Python repr in `gen_ai.input/output.messages` across langchain, llama_index, and crewai
+  ([#805](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/805))
+- feat: add OTel lite SDK for Lambda cold start optimization
+  ([#789](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/789))
+
 ## v0.18.0 - 2026-06-18
 
 - feat: support pluggable session injection for the OTLP HTTP exporter via the upstream OTel SDK hook

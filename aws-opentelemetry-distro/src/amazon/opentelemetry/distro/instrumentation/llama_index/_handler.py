@@ -20,7 +20,10 @@ from llama_index.core.tools import BaseTool
 from llama_index.core.tools.types import ToolOutput
 from pydantic import PrivateAttr
 
-from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import skip_instrumentation_if_suppressed
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
+    skip_instrumentation_if_suppressed,
+    to_tool_attribute_value,
+)
 from opentelemetry import context as context_api
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_NAME,
@@ -181,6 +184,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             if agent_name:
                 span[GEN_AI_AGENT_NAME] = agent_name
                 span._span_name = f"run_agent_step {agent_name}"
+            span.process_agent_setup_input(agent_setup)
         else:
             span.process_instance(instance)
             span.process_input(instance, bound_args)
@@ -209,7 +213,9 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             return None
 
         if isinstance(result, ToolOutput):
-            span._attributes[GEN_AI_TOOL_CALL_RESULT] = result.content
+            span._attributes[GEN_AI_TOOL_CALL_RESULT] = to_tool_attribute_value(result.content)
+        elif span._attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.INVOKE_AGENT.value:
+            span.process_agent_output(result)
         span.end()
         return span
 

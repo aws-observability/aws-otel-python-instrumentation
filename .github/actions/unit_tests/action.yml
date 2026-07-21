@@ -1,0 +1,57 @@
+name: Run unit tests
+description: |
+  This action assumes that the repo was checked out. Sets up the Python/tox environment
+  (via the set_up action) and runs the unit tests/benchmarks with tox, then checks coverage.
+
+inputs:
+  python_version:
+    required: true
+    description: "The python version used in actions"
+  package_name:
+    required: true
+    description: "The package name"
+  os:
+    required: true
+    description: "The os"
+  wheel_path:
+    required: false
+    default: ''
+    description: "Optional path to a prebuilt aws-opentelemetry-distro wheel. When set, tox installs the distro from this wheel (via ADOT_WHEEL) instead of building from source."
+
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python and tox
+      uses: ./.github/actions/set_up
+      with:
+        python_version: ${{ inputs.python_version }}
+        package_name: ${{ inputs.package_name }}
+        os: ${{ inputs.os }}
+
+    - name: Use prebuilt distro wheel
+      if: ${{ inputs.wheel_path != '' }}
+      shell: bash
+      run: echo "ADOT_WHEEL=$(realpath '${{ inputs.wheel_path }}')" >> "$GITHUB_ENV"
+
+    - name: Run unit tests/benchmarks with tox
+      shell: bash
+      run: |
+        PY_VERSION="${{ inputs.python_version }}"
+        # we intend for new or unrecognized Python versions to fail if a new Python version is added to the test
+        # to ensure they are not silently skipped from testing
+        ENVS=$(tox list -q | grep "^${PY_VERSION}-test-" | sed 's/ .*//' | tr '\n' ',' | sed 's/,$//' || true)
+        echo "Running tox envs: $ENVS"
+        tox --parallel auto --parallel-live -e "$ENVS" -- -v
+
+    - name: Combine and check coverage
+      shell: bash
+      run: |
+        pip install coverage
+        if [ "${{ inputs.python_version }}" = "3.14" ]; then
+          RCFILE=.coveragerc-py314
+        else
+          RCFILE=.coveragerc
+        fi
+        coverage combine --rcfile=$RCFILE
+        coverage report --rcfile=$RCFILE

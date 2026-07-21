@@ -9,12 +9,15 @@ from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.messages import convert_to_messages
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     PROVIDER_MAP,
     DictWithLock,
+    content_to_parts,
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
+    to_tool_attribute_value,
     try_detach,
 )
 from opentelemetry import context
@@ -183,8 +186,12 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         if response.generations:
             output_messages = self._format_lc_llm_output(response.generations)
             self._set_span_attribute(span, GEN_AI_OUTPUT_MESSAGES, serialize_to_json_string(output_messages))
-            finish_reasons = self._extract_finish_reasons(response.generations)
-            if finish_reasons is not None:
+            finish_reasons = [
+                self._extract_finish_reason(getattr(gen, "message", None), getattr(gen, "generation_info", None))
+                for batch in response.generations
+                for gen in batch
+            ]
+            if finish_reasons:
                 self._set_span_attribute(span, GEN_AI_RESPONSE_FINISH_REASONS, finish_reasons)
 
         self._set_span_attribute(span, GEN_AI_RESPONSE_MODEL, model)
@@ -198,7 +205,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self._handle_error(error, run_id, **kwargs)
 
     @skip_instrumentation_if_suppressed
-    def on_chain_start(
+    def on_chain_start(  # pylint: disable=too-many-locals
         self,
         serialized: dict[str, Any],
         inputs: dict[str, Any],
@@ -235,10 +242,28 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
         if is_agent_chain:
             self._set_span_attribute(span, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
+            payload = inputs.get("messages") or inputs.get("input") if isinstance(inputs, dict) else None
+            if payload:
+                _, conversation = self._format_lc_messages(
+                    [convert_to_messages([payload] if isinstance(payload, str) else payload)]
+                )
+                if conversation:
+                    self._set_span_attribute(span, GEN_AI_INPUT_MESSAGES, serialize_to_json_string(conversation))
         self._set_span_attribute(span, GEN_AI_AGENT_NAME, agent_name)
 
     @skip_instrumentation_if_suppressed
     def on_chain_end(self, outputs: dict[str, Any], *, run_id: UUID, **kwargs: Any) -> None:
+        entry = self._safe_get_span(run_id)
+        if entry:
+            span, _ = entry
+            payload = outputs.get("messages") or outputs.get("output") if isinstance(outputs, dict) else None
+            if payload and GenAiOperationNameValues.INVOKE_AGENT.value in getattr(span, "name", ""):
+                messages = convert_to_messages([payload] if isinstance(payload, str) else payload)
+                _, conversation = self._format_lc_messages([messages])
+                if conversation:
+                    finish_reason = self._extract_finish_reason(messages[-1]) if messages else "stop"
+                    message = {**conversation[-1], "role": "assistant", "finish_reason": finish_reason}
+                    self._set_span_attribute(span, GEN_AI_OUTPUT_MESSAGES, serialize_to_json_string([message]))
         self._end_span(run_id)
 
     def on_chain_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
@@ -276,7 +301,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self._set_span_attribute(span, GEN_AI_TOOL_DESCRIPTION, description)
         self._set_span_attribute(span, GEN_AI_TOOL_CALL_ID, tool_call_id)
         self._set_span_attribute(
-            span, GEN_AI_TOOL_CALL_ARGUMENTS, serialize_to_json_string(inputs if inputs is not None else input_str)
+            span, GEN_AI_TOOL_CALL_ARGUMENTS, to_tool_attribute_value(inputs if inputs is not None else input_str)
         )
 
     @skip_instrumentation_if_suppressed
@@ -286,7 +311,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         if not entry:
             return
         span, _ = entry
-        self._set_span_attribute(span, GEN_AI_TOOL_CALL_RESULT, serialize_to_json_string(output))
+        self._set_span_attribute(span, GEN_AI_TOOL_CALL_RESULT, to_tool_attribute_value(output))
         self._end_span(run_id)
 
     def on_tool_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
@@ -350,11 +375,11 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                         {
                             "type": "tool_call_response",
                             "id": tool_call_id,
-                            "response": str(content) if content else "",
+                            "response": content if content else "",
                         }
                     )
                 elif content:
-                    parts.append({"type": "text", "content": str(content)})
+                    parts.extend(content_to_parts(content))
                 tool_calls: list[dict] = getattr(msg, "tool_calls", None) or []
                 for tc in tool_calls:
                     parts.append(
@@ -390,14 +415,6 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         #       {"type": "text", "content": "The weather is sunny."},
         #       {"type": "tool_call", "id": "call_abc", "name": "get_weather", "arguments": {...}},
         #   ], "finish_reason": "stop"}]
-        finish_reason_map: dict[str, str] = {
-            "stop": "stop",
-            "end_turn": "stop",
-            "tool_use": "tool_call",
-            "max_tokens": "length",
-            "length": "length",
-            "content_filter": "content_filter",
-        }
         formatted: list[dict] = []
         for batch in generations:
             for gen in batch:
@@ -406,10 +423,9 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
                     _, msgs = OpenTelemetryCallbackHandler._format_lc_messages([[msg]])
                     # https://github.com/langchain-ai/langchain/blob/7a4cc3ec321c4ded3681b57456df365936139333/libs/core/langchain_core/outputs/chat_generation.py#L28
                     # https://github.com/langchain-ai/langchain/blob/7a4cc3ec321c4ded3681b57456df365936139333/libs/core/langchain_core/messages/ai.py#L195
-                    raw_reason: str | None = (getattr(gen, "generation_info", None) or {}).get("finish_reason") or (
-                        getattr(msg, "response_metadata", None) or {}
-                    ).get("stop_reason")
-                    finish_reason: str = finish_reason_map.get(raw_reason, raw_reason) if raw_reason else "stop"
+                    finish_reason: str = OpenTelemetryCallbackHandler._extract_finish_reason(
+                        msg, getattr(gen, "generation_info", None)
+                    )
                     for msg_dict in msgs:
                         msg_dict["finish_reason"] = finish_reason
                     formatted.extend(msgs)
@@ -550,16 +566,21 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         return kwargs.get("name")
 
     @staticmethod
-    def _extract_finish_reasons(generations: list) -> list[str] | None:
-        reasons: list[str] = []
-        for batch in generations:
-            for gen in batch:
-                raw = (getattr(gen, "generation_info", None) or {}).get("finish_reason")
-                if not raw and (msg := getattr(gen, "message", None)):
-                    raw = (getattr(msg, "response_metadata", None) or {}).get("stop_reason")
-                if raw:
-                    reasons.append(raw)
-        return reasons or None
+    def _extract_finish_reason(message: Any, generation_info: Optional[dict] = None) -> str:
+        finish_reason_map: dict[str, str] = {
+            "stop": "stop",
+            "end_turn": "stop",
+            "tool_use": "tool_call",
+            "tool_calls": "tool_call",
+            "max_tokens": "length",
+            "length": "length",
+            "content_filter": "content_filter",
+        }
+        metadata: dict = getattr(message, "response_metadata", None) or {}
+        raw: str | None = (
+            (generation_info or {}).get("finish_reason") or metadata.get("finish_reason") or metadata.get("stop_reason")
+        )
+        return finish_reason_map.get(raw, raw) if raw else "stop"
 
     @staticmethod
     def _extract_llm_model_id(kwargs: dict, serialized: Optional[dict] = None) -> Optional[str]:
