@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat(genai): gate gen_ai.tool.call.arguments/result extraction behind AWS_GENAI_LATEST_LLO_CONTENT_EXTRACTION_OPT_IN (default off)
+  ([#831](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/831))
 - feat(genai): capture user input and agent output on llama_index invoke_agent spans
   ([#824](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/824))
 - fix(crewai): use native per-call token usage when crewai provides it

@@ -5,6 +5,7 @@ import re
 from enum import Enum
 from typing import Any, Dict, List, Optional, Sequence, TypedDict
 
+from amazon.opentelemetry.distro._utils import is_genai_latest_llo_content_extraction_opted_in
 from opentelemetry._events import Event
 from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.sdk._events import EventLoggerProvider
@@ -37,6 +38,7 @@ class PatternConfig(TypedDict, total=False):
     role: Optional[str]
     default_role: Optional[str]
     source: str
+    is_experimental: bool
 
 
 LLO_PATTERNS: Dict[str, PatternConfig] = {
@@ -186,11 +188,13 @@ LLO_PATTERNS: Dict[str, PatternConfig] = {
         "type": PatternType.DIRECT,
         "role": ROLE_TOOL,
         "source": "input",
+        "is_experimental": True,
     },
     "gen_ai.tool.call.result": {
         "type": PatternType.DIRECT,
         "role": ROLE_TOOL,
         "source": "output",
+        "is_experimental": True,
     },
 }
 
@@ -238,7 +242,12 @@ class LLOHandler:
         self._regex_patterns = []
         self._pattern_configs = {}
 
+        experimental_opted_in = is_genai_latest_llo_content_extraction_opted_in()
+
         for pattern_key, config in LLO_PATTERNS.items():
+            if config.get("is_experimental") and not experimental_opted_in:
+                continue
+
             if config["type"] == PatternType.DIRECT:
                 self._exact_match_patterns.add(pattern_key)
                 self._pattern_configs[pattern_key] = config

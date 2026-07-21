@@ -124,8 +124,15 @@ class TestLLOHandlerPatterns(LLOHandlerTestBase):
         self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.input.messages"))
         self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.output.messages"))
         self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.system_instructions"))
-        self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.tool.call.arguments"))
-        self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.tool.call.result"))
+
+    def test_is_llo_attribute_tool_call_content_gated_by_capture_flag(self):
+        """Verify tool.call.arguments/result are recognized as LLO attributes only when opted in."""
+        self.assertFalse(self.llo_handler._is_llo_attribute("gen_ai.tool.call.arguments"))
+        self.assertFalse(self.llo_handler._is_llo_attribute("gen_ai.tool.call.result"))
+
+        handler = self._create_handler(env={"AWS_GENAI_LATEST_LLO_CONTENT_EXTRACTION_OPT_IN": "true"})
+        self.assertTrue(handler._is_llo_attribute("gen_ai.tool.call.arguments"))
+        self.assertTrue(handler._is_llo_attribute("gen_ai.tool.call.result"))
 
     def test_is_llo_attribute_otel_genai_patterns_no_match(self):
         """
