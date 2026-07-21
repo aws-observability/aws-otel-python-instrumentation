@@ -1,7 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import inspect
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -43,43 +42,6 @@ OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION = "OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION
 
 # Context key for storing client transport metadata alongside the session span.
 _TRANSPORT_KEY = context.create_key("mcp_client_transport")
-
-
-def _get_parameter_names(func: Callable[..., Any]) -> Tuple[str, ...]:
-    """Return the parameter names of ``func`` (best-effort, empty on failure)."""
-    try:
-        return tuple(inspect.signature(func).parameters.keys())
-    except (TypeError, ValueError):
-        return ()
-
-
-# Sentinel attribute set on httpx.AsyncClient instances to prevent attaching the
-# propagation hook more than once (closures compare unequal by identity, so a
-# plain ``not in`` list check is insufficient for dedup).
-_HOOK_INSTALLED_ATTR = "_adot_mcp_propagation_hook_installed"
-
-
-def _attach_propagation_hook(client: Any, propagators: Any) -> None:
-    """Attach a request event hook that injects W3C trace context into HTTP headers.
-
-    Idempotent: marks the client with a sentinel attribute to prevent
-    accumulating duplicate hooks across sessions that reuse the same client.
-    """
-    try:
-        if getattr(client, _HOOK_INSTALLED_ATTR, False):
-            return
-
-        async def _inject_trace_context(request: Any) -> None:
-            try:
-                propagators.inject(carrier=request.headers)
-            except Exception:  # pylint: disable=broad-exception-caught
-                _LOG.debug("MCP trace-context header injection failed", exc_info=True)
-
-        request_hooks = client.event_hooks.setdefault("request", [])
-        request_hooks.append(_inject_trace_context)
-        setattr(client, _HOOK_INSTALLED_ATTR, True)
-    except Exception:  # pylint: disable=broad-exception-caught
-        _LOG.debug("Failed to attach MCP trace-context injection hook", exc_info=True)
 
 
 class McpWrapper:
@@ -317,128 +279,38 @@ class ClientWrapper(McpWrapper):
                 }
             )
             try:
-                # Ensure W3C trace context is injected into outbound HTTP
-                # request headers so MCP servers that read context from HTTP
-                # headers (rather than the JSON-RPC ``_meta`` body) can still
-                # join the caller's trace.
-                patched_args, patched_kwargs = self._install_trace_header_injection(wrapped, args, kwargs)
-
-                # If we created a client ourselves (tagged with _adot_mcp_managed),
-                # we must manage its lifecycle since MCP treats it as caller-owned.
-                managed_client = patched_kwargs.get("http_client")
-                if managed_client and getattr(managed_client, "_adot_mcp_managed", False):
-                    await managed_client.__aenter__()
-
-                try:
-                    if self._should_suppress_http_spans:
-                        with suppress_http_instrumentation():
-                            async with wrapped(*patched_args, **patched_kwargs) as streams:
-                                yield streams
-                    else:
-                        async with wrapped(*patched_args, **patched_kwargs) as streams:
+                if self._should_suppress_http_spans:
+                    with suppress_http_instrumentation():
+                        async with wrapped(*args, **kwargs) as streams:
                             yield streams
-                finally:
-                    if managed_client and getattr(managed_client, "_adot_mcp_managed", False):
-                        await managed_client.aclose()
+                else:
+                    async with wrapped(*args, **kwargs) as streams:
+                        yield streams
             finally:
                 session_span.end()
                 context.detach(token)
 
         return wrapper()
 
-    def _install_trace_header_injection(
-        self, wrapped: Callable[..., Any], args: Tuple[Any, ...], kwargs: Dict[str, Any]
-    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
-        """Return ``(args, kwargs)`` with an httpx event hook installed for W3C header injection.
+    def wrap_prepare_headers(self, wrapped: Callable[..., Any], instance: Any, args: Any, kwargs: Any) -> Any:
+        """Wrap ``StreamableHTTPTransport._prepare_headers`` to inject W3C trace context.
 
-        Wraps the caller's ``httpx_client_factory`` (or the transport's default
-        factory) so every ``httpx.AsyncClient`` the MCP transport creates has a
-        request event hook that calls the configured propagator against the
-        outgoing request's headers.
+        ``_prepare_headers`` runs inside ``_handle_post_request``, which our
+        ``wrap_handle_post_request`` wrapper has already restored the per-tool-call
+        context from ``_meta`` for. So the current OTel context at this point is the
+        correct per-request parent — we just need to inject it into the returned
+        headers dict.
 
-        The per-tool-call trace context is available at hook-fire time because
-        ``wrap_handle_post_request`` (also patched by this instrumentor)
-        restores it from the JSON-RPC ``_meta`` field before the HTTP POST
-        is issued. The hook therefore injects the correct per-tool-call
-        ``traceparent``, not just the session-span context.
-
-        Silently no-ops on any unexpected shape so instrumentation never
-        breaks the request path.
+        Only injects when ``_should_suppress_http_spans`` is True (the default);
+        when False, the httpx client instrumentation handles header injection itself.
         """
-        # pylint: disable=import-outside-toplevel
-        try:
-            import httpx
-        except ImportError:
-            _LOG.debug("httpx not importable; skipping MCP header injection")
-            return args, kwargs
-
-        propagators = self._propagators
-        wrapped_params = _get_parameter_names(wrapped)
-
-        # --- streamable_http_client(url, http_client=...) path ---
-        if "http_client" in wrapped_params:
-            pre_built_client = kwargs.get("http_client")
-            if isinstance(pre_built_client, httpx.AsyncClient):
-                _attach_propagation_hook(pre_built_client, propagators)
-                return args, kwargs
-            # When the caller didn't supply a client, we need to create one
-            # ourselves so we can attach the hook. We pass it as http_client=
-            # and manage its lifecycle in the enclosing wrap_http_client wrapper
-            # via _mcp_owned_client (stored on this return so the caller can
-            # enter it into the async exit stack).
+        headers = wrapped(*args, **kwargs)
+        if self._should_suppress_http_spans:
             try:
-                from mcp.client.streamable_http import create_mcp_http_client
-            except ImportError:
-                _LOG.debug("create_mcp_http_client not importable; skipping")
-                return args, kwargs
-
-            new_client = create_mcp_http_client()
-            _attach_propagation_hook(new_client, propagators)
-            new_kwargs = dict(kwargs)
-            new_kwargs["http_client"] = new_client
-            # Tag the client so wrap_http_client knows to manage its lifecycle
-            new_client._adot_mcp_managed = True  # type: ignore[attr-defined]
-            return args, new_kwargs
-
-        # --- streamablehttp_client / sse_client (httpx_client_factory) path ---
-        if "httpx_client_factory" not in wrapped_params:
-            _LOG.debug(
-                "Transport signature has no httpx_client_factory or http_client; " "skipping MCP header injection"
-            )
-            return args, kwargs
-
-        # Resolve the original factory — from kwargs, from args (positional), or
-        # default to MCP's own create_mcp_http_client.
-        original_factory = kwargs.get("httpx_client_factory")
-        new_kwargs = dict(kwargs)
-
-        if original_factory is None:
-            # Check positional args — httpx_client_factory is POSITIONAL_OR_KEYWORD
-            # in streamablehttp_client and sse_client.
-            param_names = list(wrapped_params)
-            if "httpx_client_factory" in param_names:
-                idx = param_names.index("httpx_client_factory")
-                if idx < len(args):
-                    original_factory = args[idx]
-                    # Remove from positional args to avoid "multiple values" TypeError
-                    args = args[:idx] + args[idx + 1 :]
-
-        if original_factory is None:
-            try:
-                from mcp.client.streamable_http import create_mcp_http_client
-
-                original_factory = create_mcp_http_client
-            except ImportError:
-                _LOG.debug("create_mcp_http_client not importable; skipping")
-                return args, kwargs
-
-        def wrapped_factory(*f_args: Any, **f_kwargs: Any) -> "httpx.AsyncClient":
-            client = original_factory(*f_args, **f_kwargs)
-            _attach_propagation_hook(client, propagators)
-            return client
-
-        new_kwargs["httpx_client_factory"] = wrapped_factory
-        return args, new_kwargs
+                self._propagators.inject(carrier=headers)
+            except Exception:  # pylint: disable=broad-exception-caught
+                _LOG.debug("MCP trace-context header injection failed", exc_info=True)
+        return headers
 
     def wrap_handle_post_request(
         self,
