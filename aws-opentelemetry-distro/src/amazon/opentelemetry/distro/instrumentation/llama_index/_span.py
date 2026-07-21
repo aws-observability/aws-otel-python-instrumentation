@@ -358,13 +358,7 @@ class _Span(BaseSpan):
                     self[GEN_AI_INPUT_MESSAGES] = serialize_to_json_string(conversation)
 
     def process_agent_setup_input(self, agent_setup: Any) -> None:
-        """Capture agent-step input messages on a run_agent_step invoke_agent span.
-
-        run_agent_step spans are created from the AgentSetup event (instance is
-        None) so the BaseWorkflowAgent process_input path never runs for them.
-        AgentSetup.input is the list of ChatMessages fed to the agent this turn
-        (system prompt + conversation so far).
-        """
+        """Capture agent-step input messages on a run_agent_step invoke_agent span."""
         messages = getattr(agent_setup, "input", None)
         if not messages:
             return
