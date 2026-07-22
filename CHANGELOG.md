@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- Nightly dependency update: OpenTelemetry 1.44.0/0.65b0; drop `opentelemetry-instrumentation-elasticsearch` (removed upstream in 0.65b0 now that all supported `elasticsearch` versions ship native OTel instrumentation)
+  ([#799](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/799))
 - feat(genai): capture user input and agent output on llama_index invoke_agent spans
   ([#824](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/824))
 - fix(crewai): use native per-call token usage when crewai provides it

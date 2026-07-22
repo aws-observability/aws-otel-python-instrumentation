@@ -772,7 +772,6 @@ def configure_lite_mode():
         "confluent_kafka": "opentelemetry.instrumentation.confluent_kafka:ConfluentKafkaInstrumentor",
         "dbapi": "opentelemetry.instrumentation.dbapi:DatabaseApiIntegration",
         "django": "opentelemetry.instrumentation.django:DjangoInstrumentor",
-        "elasticsearch": "opentelemetry.instrumentation.elasticsearch:ElasticsearchInstrumentor",
         "falcon": "opentelemetry.instrumentation.falcon:FalconInstrumentor",
         "fastapi": "opentelemetry.instrumentation.fastapi:FastAPIInstrumentor",
         "flask": "opentelemetry.instrumentation.flask:FlaskInstrumentor",
