@@ -5,7 +5,7 @@ import re
 from enum import Enum
 from typing import Any, Dict, List, Optional, Sequence, TypedDict
 
-from opentelemetry._logs import LogRecord
+from opentelemetry._logs import LogRecord, SeverityNumber
 from opentelemetry.attributes import BoundedAttributes
 from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk.trace import Event as SpanEvent
@@ -544,6 +544,7 @@ class LLOHandler:
         log_record = LogRecord(
             event_name=span.instrumentation_scope.name,
             timestamp=timestamp,
+            severity_number=SeverityNumber.INFO,
             body=event_body,
             attributes=event_attributes if event_attributes else None,
             trace_id=span.context.trace_id,
