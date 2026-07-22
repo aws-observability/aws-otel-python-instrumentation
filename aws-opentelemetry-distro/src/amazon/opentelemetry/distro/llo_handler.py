@@ -537,7 +537,7 @@ class LLOHandler:
         timestamp = event_timestamp if event_timestamp is not None else span.end_time
         logger = self._logger_provider.get_logger(span.instrumentation_scope.name)
 
-        event_attributes = {}
+        event_attributes = {"event.name": span.instrumentation_scope.name}
         if span.attributes and "session.id" in span.attributes:
             event_attributes["session.id"] = span.attributes["session.id"]
 
