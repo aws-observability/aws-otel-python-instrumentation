@@ -76,6 +76,11 @@ class McpInstrumentor(BaseInstrumentor):
             "StreamableHTTPTransport._handle_post_request",
             self._client_wrapper.wrap_handle_post_request,
         )
+        try_wrap(
+            _HTTP_MODULE,
+            "StreamableHTTPTransport._prepare_headers",
+            self._client_wrapper.wrap_prepare_headers,
+        )
 
         _LOG.debug("Instrument MCP server ASGI apps to suppress redundant HTTP spans.")
 
@@ -114,6 +119,10 @@ class McpInstrumentor(BaseInstrumentor):
                 try_unwrap(
                     streamable_http.StreamableHTTPTransport,
                     "_handle_post_request",
+                )
+                try_unwrap(
+                    streamable_http.StreamableHTTPTransport,
+                    "_prepare_headers",
                 )
             try_unwrap(fastmcp_server.FastMCP, "streamable_http_app")
             try_unwrap(fastmcp_server.FastMCP, "sse_app")
