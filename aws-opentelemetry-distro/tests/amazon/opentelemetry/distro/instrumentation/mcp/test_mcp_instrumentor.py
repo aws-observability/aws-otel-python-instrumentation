@@ -25,6 +25,7 @@ try:
     from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 except ImportError:
     HTTPXClientInstrumentor = None
+from opentelemetry import trace
 from opentelemetry.propagators.aws import AwsXRayPropagator
 from opentelemetry.propagators.composite import CompositePropagator
 from opentelemetry.proto.trace.v1.trace_pb2 import Span as ProtoSpan
@@ -431,6 +432,34 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
         self.assertIsNotNone(server_span.attributes.get(MCP_SESSION_ID))
         self.assertIsNotNone(server_span.attributes.get(CLIENT_ADDRESS))
         self.assertIsNotNone(server_span.attributes.get(CLIENT_PORT))
+
+    def test_server_extracts_context_from_http_headers_when_meta_absent(self):
+        from mcp.shared.message import ServerMessageMetadata  # pylint: disable=import-outside-toplevel
+        from mcp.shared.session import RequestResponder  # pylint: disable=import-outside-toplevel
+        from mcp.types import ClientRequest, PingRequest  # pylint: disable=import-outside-toplevel
+
+        carrier = {}
+        with get_tracer("upstream", tracer_provider=self.tracer_provider).start_as_current_span("upstream"):
+            expected_trace_id = format(trace.get_current_span().get_span_context().trace_id, "032x")
+            self.propagator.inject(carrier)
+
+        request = unittest.mock.Mock()
+        request.headers = carrier
+        incoming_msg = ClientRequest(PingRequest(method="ping")).root
+        responder = unittest.mock.Mock(spec=RequestResponder)
+        responder.message_metadata = ServerMessageMetadata(request_context=request)
+
+        async def run():
+            async def wrapped(*_args, **_kwargs):
+                return None
+
+            await self.instrumentor._server_wrapper._wrap_server_message_handler(
+                wrapped, unittest.mock.Mock(), (responder,), {}, incoming_msg=incoming_msg
+            )
+
+        asyncio.run(run())
+        server_span = self._get_server_span(self.span_exporter.get_finished_spans(), "mcp ping")
+        self.assertEqual(format(server_span.context.trace_id, "032x"), expected_trace_id)
 
     def test_http_span_suppression(self):
         for suppress_value, expect_post_spans in [("false", True), ("true", False), (None, False)]:
