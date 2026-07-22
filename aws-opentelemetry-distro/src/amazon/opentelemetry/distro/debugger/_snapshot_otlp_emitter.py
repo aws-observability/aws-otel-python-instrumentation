@@ -17,7 +17,7 @@ import logging
 import os
 import threading
 
-from opentelemetry._logs import LogRecord
+from opentelemetry._logs import LogRecord, SeverityNumber
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
@@ -164,6 +164,7 @@ class SnapshotOtlpEmitter:
         log_record = LogRecord(
             event_name=_EVENT_NAME,
             timestamp=snapshot.timestamp * 1_000_000,  # ms to ns
+            severity_number=SeverityNumber.INFO,
             body=body if body else None,
             attributes=attributes,
             trace_id=trace_id,
