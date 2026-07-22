@@ -12,7 +12,7 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
-- Nightly dependency update: OpenTelemetry 1.44.0/0.65b0; drop `opentelemetry-instrumentation-elasticsearch` (removed upstream in 0.65b0 now that all supported `elasticsearch` versions ship native OTel instrumentation)
+- Nightly dependency update: OpenTelemetry 1.44.0/0.65b0. Adapts to upstream breaking changes: drop `opentelemetry-instrumentation-elasticsearch` (removed in 0.65b0 now that all supported `elasticsearch` versions ship native OTel instrumentation), migrate off the removed Events API/SDK (`opentelemetry._events`) to `LogRecord` with `event_name` via the Logs API, and implement the now-required `force_flush` on `CompactConsoleLogRecordExporter`
   ([#799](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/799))
 - feat(genai): capture user input and agent output on llama_index invoke_agent spans
   ([#824](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/824))

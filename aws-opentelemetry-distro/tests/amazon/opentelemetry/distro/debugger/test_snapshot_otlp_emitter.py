@@ -37,10 +37,7 @@ class TestSnapshotOtlpEmitter(unittest.TestCase):
         self.emitter = SnapshotOtlpEmitter()
         # Directly set the internals for testing
         self.emitter._logger_provider = self.logger_provider
-        from opentelemetry.sdk._events import EventLoggerProvider
-
-        event_logger_provider = EventLoggerProvider(logger_provider=self.logger_provider)
-        self.emitter._event_logger = event_logger_provider.get_event_logger("aws.dynamic_instrumentation", "1.0")
+        self.emitter._logger = self.logger_provider.get_logger("aws.dynamic_instrumentation", "1.0")
 
     def tearDown(self):
         self.logger_provider.shutdown()
@@ -230,7 +227,7 @@ class TestSnapshotOtlpEmitter(unittest.TestCase):
         self.emitter.reset()
 
         self.assertIsNone(self.emitter._logger_provider)
-        self.assertIsNone(self.emitter._event_logger)
+        self.assertIsNone(self.emitter._logger)
         self.assertFalse(self.emitter._init_failed)
 
     def test_emit_after_init_failure_is_silent(self):

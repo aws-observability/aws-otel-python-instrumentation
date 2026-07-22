@@ -40,7 +40,7 @@ class TestLLOHandlerEvents(LLOHandlerTestBase):  # pylint: disable=too-many-publ
         self.event_logger_mock.emit.assert_called_once()
         emitted_event = self.event_logger_mock.emit.call_args[0][0]
 
-        self.assertEqual(emitted_event.name, "test.scope")
+        self.assertEqual(emitted_event.event_name, "test.scope")
         self.assertEqual(emitted_event.timestamp, span.end_time)
         self.assertEqual(emitted_event.trace_id, span.context.trace_id)
         self.assertEqual(emitted_event.span_id, span.context.span_id)
@@ -122,7 +122,7 @@ class TestLLOHandlerEvents(LLOHandlerTestBase):  # pylint: disable=too-many-publ
         self.event_logger_mock.emit.assert_called_once()
         emitted_event = self.event_logger_mock.emit.call_args[0][0]
 
-        self.assertEqual(emitted_event.name, "test.multi.framework")
+        self.assertEqual(emitted_event.event_name, "test.multi.framework")
         self.assertEqual(emitted_event.timestamp, span.end_time)
 
         event_body = emitted_event.body
@@ -636,8 +636,7 @@ class TestLLOHandlerEvents(LLOHandlerTestBase):  # pylint: disable=too-many-publ
         # Verify session.id was copied to event attributes
         self.assertIsNotNone(emitted_event.attributes)
         self.assertEqual(emitted_event.attributes.get("session.id"), "test-session-123")
-        # Event class always adds event.name
-        self.assertIn("event.name", emitted_event.attributes)
+        self.assertEqual(emitted_event.event_name, "test.scope")
 
         # Verify event body still contains LLO data
         event_body = emitted_event.body
@@ -664,10 +663,8 @@ class TestLLOHandlerEvents(LLOHandlerTestBase):  # pylint: disable=too-many-publ
         emitted_event = self.event_logger_mock.emit.call_args[0][0]
 
         # Verify session.id is not in event attributes
-        self.assertIsNotNone(emitted_event.attributes)
-        self.assertNotIn("session.id", emitted_event.attributes)
-        # Event class always adds event.name
-        self.assertIn("event.name", emitted_event.attributes)
+        self.assertNotIn("session.id", emitted_event.attributes or {})
+        self.assertEqual(emitted_event.event_name, "test.scope")
 
     def test_emit_llo_attributes_with_session_id_and_other_attributes(self):
         """
@@ -691,10 +688,10 @@ class TestLLOHandlerEvents(LLOHandlerTestBase):  # pylint: disable=too-many-publ
         self.event_logger_mock.emit.assert_called_once()
         emitted_event = self.event_logger_mock.emit.call_args[0][0]
 
-        # Verify only session.id was copied to event attributes (plus event.name from Event class)
+        # Verify only session.id was copied to event attributes
         self.assertIsNotNone(emitted_event.attributes)
         self.assertEqual(emitted_event.attributes.get("session.id"), "session-456")
-        self.assertIn("event.name", emitted_event.attributes)
+        self.assertEqual(emitted_event.event_name, "test.scope")
         # Verify other span attributes were not copied
         self.assertNotIn("user.id", emitted_event.attributes)
         self.assertNotIn("other.attribute", emitted_event.attributes)
@@ -725,7 +722,7 @@ class TestLLOHandlerEvents(LLOHandlerTestBase):  # pylint: disable=too-many-publ
         self.event_logger_mock.emit.assert_called_once()
         emitted_event = self.event_logger_mock.emit.call_args[0][0]
 
-        self.assertEqual(emitted_event.name, "strands.genai.scope")
+        self.assertEqual(emitted_event.event_name, "strands.genai.scope")
         self.assertEqual(emitted_event.timestamp, span.end_time)
 
         event_body = emitted_event.body
