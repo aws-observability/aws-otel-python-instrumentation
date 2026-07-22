@@ -145,6 +145,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 name="TestAgent",
                 description="A test agent that greets and multiplies.",
                 system_prompt="You are a helpful assistant.",
+                streaming=False,
             )
 
             async def run_agent():
@@ -185,6 +186,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 description="Greets people by name.",
                 system_prompt="You greet people.",
                 can_handoff_to=["Calculator"],
+                streaming=False,
             )
             calculator = FunctionAgent(
                 tools=[multiply],
@@ -192,6 +194,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 name="Calculator",
                 description="Multiplies numbers.",
                 system_prompt="You multiply numbers.",
+                streaming=False,
             )
             workflow = AgentWorkflow(
                 agents=[greeter, calculator], root_agent="Greeter", workflow_name="multi_agent_workflow"
