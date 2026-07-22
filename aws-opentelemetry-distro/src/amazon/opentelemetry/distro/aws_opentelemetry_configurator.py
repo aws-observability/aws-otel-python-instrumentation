@@ -42,7 +42,6 @@ from amazon.opentelemetry.distro.sampler._aws_xray_adaptive_sampling_config impo
 from amazon.opentelemetry.distro.sampler.aws_xray_remote_sampler import AwsXRayRemoteSampler
 from amazon.opentelemetry.distro.scope_based_exporter import ScopeBasedPeriodicExportingMetricReader
 from amazon.opentelemetry.distro.scope_based_filtering_view import ScopeBasedRetainingView
-from opentelemetry._events import set_event_logger_provider
 from opentelemetry._logs import get_logger_provider, set_logger_provider
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter as OTLPHttpOTLPMetricExporter
@@ -59,7 +58,6 @@ from opentelemetry.sdk._configuration import (
     _OTelSDKConfigurator,
     _overwrite_logging_config_fns,
 )
-from opentelemetry.sdk._events import EventLoggerProvider
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogRecordExporter, LogRecordExporter
 from opentelemetry.sdk.environment_variables import (
@@ -318,9 +316,6 @@ def _init_logging(
         _customize_log_record_processor(
             logger_provider=provider, log_exporter=_customize_logs_exporter(exporter_class(**exporter_args))
         )
-
-    event_logger_provider = EventLoggerProvider(logger_provider=provider)
-    set_event_logger_provider(event_logger_provider)
 
     if setup_logging_handler:
         # Add OTel handler

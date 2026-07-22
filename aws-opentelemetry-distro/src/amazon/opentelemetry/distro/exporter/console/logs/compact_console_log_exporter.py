@@ -82,6 +82,10 @@ class CompactConsoleLogRecordExporter(_BASE_CLASS):
         self._out.flush()
         self._shutdown = True
 
+    def force_flush(self, timeout_millis: int = 10000) -> bool:
+        self._out.flush()
+        return True
+
     @staticmethod
     def _to_compact_json(data) -> str:
         # Support both ReadableLogRecord (1.39+) and LogData (older) APIs.
