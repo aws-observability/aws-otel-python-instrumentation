@@ -198,6 +198,32 @@ class TestCrewAIInstrumentor(TestCase):
                         if isinstance(value, str):
                             self.assertFalse(value.lstrip().startswith("[{") and "'type'" in value)
 
+    def test_per_call_token_usage_prefers_event_usage(self):
+        if "usage" not in LLMCallCompletedEvent.model_fields:
+            self.skipTest("crewai <1.13.0 does not report per-call usage on LLMCallCompletedEvent")
+
+        llm = LLM(model="openai/gpt-4", is_litellm=True)
+        # get_token_usage_summary would report a cumulative total; the event usage must win.
+        llm.get_token_usage_summary = lambda: MagicMock(prompt_tokens=9999, completion_tokens=8888)
+
+        start_event = LLMCallStartedEvent(call_id="c1", messages=[{"role": "user", "content": "hi"}])
+        crewai_event_bus.emit(llm, start_event)
+        crewai_event_bus.emit(
+            llm,
+            LLMCallCompletedEvent(
+                call_id="c1",
+                response="Hello",
+                call_type=LLMCallType.LLM_CALL,
+                started_event_id=start_event.event_id,
+                usage={"prompt_tokens": 123, "completion_tokens": 45},
+            ),
+        )
+
+        chat_span = self._find_span("chat")
+        self.assertIsNotNone(chat_span)
+        self.assertEqual(chat_span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 123)
+        self.assertEqual(chat_span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 45)
+
     def test_crew_kickoff_error_handling(self):
         mock_llm = MagicMock(spec=LLM)
         mock_llm.provider = "openai"
@@ -661,7 +687,10 @@ class TestCrewAIInstrumentor(TestCase):
         )
         self.assertIsNotNone(tool_span)
         self.assertIsNotNone(tool_span.attributes)
-        self.assertIn("get_greeting", tool_span.attributes[GEN_AI_TOOL_DESCRIPTION])
+        self.assertEqual(
+            "Get a greeting message for the given name.",
+            tool_span.attributes[GEN_AI_TOOL_DESCRIPTION],
+        )
         self.assertIn(GEN_AI_TOOL_CALL_ARGUMENTS, tool_span.attributes)
         self.assertEqual("Hello, World!", tool_span.attributes[GEN_AI_TOOL_CALL_RESULT])
 

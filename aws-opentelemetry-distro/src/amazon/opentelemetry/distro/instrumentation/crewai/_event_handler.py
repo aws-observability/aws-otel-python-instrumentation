@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
@@ -396,10 +397,17 @@ class OpenTelemetryEventHandler:
         if model_name:
             attrs[GEN_AI_RESPONSE_MODEL] = model_name
 
-        usage: "UsageMetrics" = source.get_token_usage_summary()
+        # crewai >=1.13.0 reports per-call usage on the completed event; older versions only expose a
+        # cumulative summary, so diff it against the snapshot taken when the call started.
         prev_prompt_tokens, prev_completion_tokens = self._event_id_to_token_usage.pop(event.started_event_id) or (0, 0)
-        input_tokens = usage.prompt_tokens - prev_prompt_tokens
-        output_tokens = usage.completion_tokens - prev_completion_tokens
+        event_usage = getattr(event, "usage", None)
+        if isinstance(event_usage, dict):
+            input_tokens = event_usage.get("prompt_tokens") or 0
+            output_tokens = event_usage.get("completion_tokens") or 0
+        else:
+            usage: "UsageMetrics" = source.get_token_usage_summary()
+            input_tokens = usage.prompt_tokens - prev_prompt_tokens
+            output_tokens = usage.completion_tokens - prev_completion_tokens
         if input_tokens > 0:
             attrs[GEN_AI_USAGE_INPUT_TOKENS] = input_tokens
         if output_tokens > 0:
@@ -538,7 +546,7 @@ class OpenTelemetryEventHandler:
         if tool_class:
             desc = getattr(tool_class, "description", None)
             if desc:
-                return desc
+                return OpenTelemetryEventHandler._normalize_tool_description(desc)
         for tools_holder in [source, getattr(source, "agent", None), getattr(event, "agent", None)]:
             tools = getattr(tools_holder, "tools", None) if tools_holder else None
             if not tools:
@@ -547,7 +555,7 @@ class OpenTelemetryEventHandler:
                 if getattr(tool, "name", None) == tool_name:
                     desc = getattr(tool, "description", None)
                     if desc:
-                        return desc
+                        return OpenTelemetryEventHandler._normalize_tool_description(desc)
         return None
 
     @staticmethod
@@ -557,7 +565,7 @@ class OpenTelemetryEventHandler:
             tool_def: Dict[str, Any] = {"type": "function"}
             if name := getattr(tool, "name", None):
                 tool_def["name"] = name
-            if desc := getattr(tool, "description", None):
+            if desc := OpenTelemetryEventHandler._normalize_tool_description(getattr(tool, "description", None)):
                 tool_def["description"] = desc
             args_schema = getattr(tool, "args_schema", None)
             if args_schema is not None:
@@ -567,3 +575,12 @@ class OpenTelemetryEventHandler:
                     pass
             defs.append(tool_def)
         return defs
+
+    @staticmethod
+    def _normalize_tool_description(desc: Optional[str]) -> Optional[str]:
+        # crewai <1.15.3 stored the LLM prompt composite in description; strip it to the authored text.
+        # See crewai 1.15.3 changelog: https://github.com/crewAIInc/crewAI/releases/tag/1.15.3
+        if not desc:
+            return desc
+        match = re.match(r"^Tool Name:.*\nTool Arguments:.*\nTool Description:\s*", desc, re.DOTALL)
+        return desc[match.end() :] if match else desc

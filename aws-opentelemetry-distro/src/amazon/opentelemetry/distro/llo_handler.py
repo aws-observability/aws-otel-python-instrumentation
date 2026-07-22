@@ -5,9 +5,8 @@ import re
 from enum import Enum
 from typing import Any, Dict, List, Optional, Sequence, TypedDict
 
-from opentelemetry._events import Event
+from opentelemetry._logs import LogRecord, SeverityNumber
 from opentelemetry.attributes import BoundedAttributes
-from opentelemetry.sdk._events import EventLoggerProvider
 from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk.trace import Event as SpanEvent
 from opentelemetry.sdk.trace import ReadableSpan
@@ -180,18 +179,6 @@ LLO_PATTERNS: Dict[str, PatternConfig] = {
         "role": ROLE_SYSTEM,
         "source": "prompt",
     },
-    # OTel GenAI tool call content (execute_tool spans)
-    # Reference: https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/
-    "gen_ai.tool.call.arguments": {
-        "type": PatternType.DIRECT,
-        "role": ROLE_TOOL,
-        "source": "input",
-    },
-    "gen_ai.tool.call.result": {
-        "type": PatternType.DIRECT,
-        "role": ROLE_TOOL,
-        "source": "output",
-    },
 }
 
 
@@ -221,7 +208,6 @@ class LLOHandler:
                            Global LoggerProvider instance injected from our AwsOpenTelemetryConfigurator
         """
         self._logger_provider = logger_provider
-        self._event_logger_provider = EventLoggerProvider(logger_provider=self._logger_provider)
 
         self._build_pattern_matchers()
 
@@ -549,23 +535,24 @@ class LLOHandler:
             return
 
         timestamp = event_timestamp if event_timestamp is not None else span.end_time
-        event_logger = self._event_logger_provider.get_event_logger(span.instrumentation_scope.name)
+        logger = self._logger_provider.get_logger(span.instrumentation_scope.name)
 
-        event_attributes = {}
+        event_attributes = {"event.name": span.instrumentation_scope.name}
         if span.attributes and "session.id" in span.attributes:
             event_attributes["session.id"] = span.attributes["session.id"]
 
-        event = Event(
-            name=span.instrumentation_scope.name,
+        log_record = LogRecord(
+            event_name=span.instrumentation_scope.name,
             timestamp=timestamp,
+            severity_number=SeverityNumber.INFO,
             body=event_body,
-            attributes=event_attributes if event_attributes else None,
+            attributes=event_attributes,
             trace_id=span.context.trace_id,
             span_id=span.context.span_id,
             trace_flags=span.context.trace_flags,
         )
 
-        event_logger.emit(event)
+        logger.emit(log_record)
         _logger.debug("Emitted Gen AI Event with input/output message format")
 
     def _filter_attributes(self, attributes: types.Attributes) -> types.Attributes:

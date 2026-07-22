@@ -12,10 +12,9 @@ class TestLLOHandlerPatterns(LLOHandlerTestBase):
 
     def test_init(self):
         """
-        Verify LLOHandler initializes correctly with logger provider and creates event logger provider.
+        Verify LLOHandler initializes correctly with the logger provider.
         """
         self.assertEqual(self.llo_handler._logger_provider, self.logger_provider_mock)
-        self.assertEqual(self.llo_handler._event_logger_provider, self.event_logger_provider_mock)
 
     def test_is_llo_attribute_match(self):
         """
@@ -124,8 +123,6 @@ class TestLLOHandlerPatterns(LLOHandlerTestBase):
         self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.input.messages"))
         self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.output.messages"))
         self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.system_instructions"))
-        self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.tool.call.arguments"))
-        self.assertTrue(self.llo_handler._is_llo_attribute("gen_ai.tool.call.result"))
 
     def test_is_llo_attribute_otel_genai_patterns_no_match(self):
         """
