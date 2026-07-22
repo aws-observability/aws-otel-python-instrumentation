@@ -269,6 +269,7 @@ jobs:
       aws-region: us-east-1
       python-version: ${{ matrix.python-version }}
       caller-workflow-name: 'main-build'
+
   #
   # Stand-Alone ADOT/ADOT SigV4 test on EC2
   adot-sigv4:
