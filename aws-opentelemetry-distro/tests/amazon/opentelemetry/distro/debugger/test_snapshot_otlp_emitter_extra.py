@@ -19,7 +19,6 @@ from amazon.opentelemetry.distro.debugger._snapshot_otlp_emitter import (
     _LOGS_ENDPOINT_ENV_VAR,
     SnapshotOtlpEmitter,
 )
-from opentelemetry.sdk._events import EventLoggerProvider
 from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk._logs.export import InMemoryLogExporter, SimpleLogRecordProcessor
 
@@ -66,7 +65,7 @@ class TestEnsureInitialized(unittest.TestCase):
     def test_initialization_succeeds_and_is_cached(self, mock_exporter, mock_processor):
         emitter = SnapshotOtlpEmitter(logs_endpoint="http://localhost:4316/v1/logs")
         self.assertTrue(emitter._ensure_initialized())
-        self.assertIsNotNone(emitter._event_logger)
+        self.assertIsNotNone(emitter._logger)
         # Exporter created with the resolved endpoint.
         mock_exporter.assert_called_once_with(endpoint="http://localhost:4316/v1/logs")
 
@@ -151,14 +150,14 @@ class TestShutdownAndReset(unittest.TestCase):
         emitter = SnapshotOtlpEmitter()
         provider = mock.MagicMock()
         emitter._logger_provider = provider
-        emitter._event_logger = mock.MagicMock()
+        emitter._logger = mock.MagicMock()
 
         emitter.shutdown()
 
         provider.force_flush.assert_called_once()
         provider.shutdown.assert_called_once()
         self.assertIsNone(emitter._logger_provider)
-        self.assertIsNone(emitter._event_logger)
+        self.assertIsNone(emitter._logger)
 
     def test_shutdown_without_provider_is_noop(self):
         emitter = SnapshotOtlpEmitter()
@@ -171,22 +170,22 @@ class TestShutdownAndReset(unittest.TestCase):
         provider = mock.MagicMock()
         provider.force_flush.side_effect = RuntimeError("boom")
         emitter._logger_provider = provider
-        emitter._event_logger = mock.MagicMock()
+        emitter._logger = mock.MagicMock()
         # Should not raise; provider/event_logger are still cleared.
         emitter.shutdown()
         self.assertIsNone(emitter._logger_provider)
-        self.assertIsNone(emitter._event_logger)
+        self.assertIsNone(emitter._logger)
 
     def test_reset_clears_state_and_failure_flag(self):
         emitter = SnapshotOtlpEmitter()
         emitter._logger_provider = mock.MagicMock()
-        emitter._event_logger = mock.MagicMock()
+        emitter._logger = mock.MagicMock()
         emitter._init_failed = True
 
         emitter.reset()
 
         self.assertIsNone(emitter._logger_provider)
-        self.assertIsNone(emitter._event_logger)
+        self.assertIsNone(emitter._logger)
         self.assertFalse(emitter._init_failed)
 
 
@@ -199,8 +198,7 @@ class TestEmitSnapshot(unittest.TestCase):
         self.logger_provider.add_log_record_processor(SimpleLogRecordProcessor(self.log_exporter))
         self.emitter = SnapshotOtlpEmitter()
         self.emitter._logger_provider = self.logger_provider
-        event_logger_provider = EventLoggerProvider(logger_provider=self.logger_provider)
-        self.emitter._event_logger = event_logger_provider.get_event_logger("aws.dynamic_instrumentation", "1.0")
+        self.emitter._logger = self.logger_provider.get_logger("aws.dynamic_instrumentation", "1.0")
 
     def tearDown(self):
         self.logger_provider.shutdown()

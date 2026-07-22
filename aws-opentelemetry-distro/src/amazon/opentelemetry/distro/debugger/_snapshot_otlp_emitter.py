@@ -17,9 +17,8 @@ import logging
 import os
 import threading
 
-from opentelemetry._events import Event
+from opentelemetry._logs import LogRecord, SeverityNumber
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
-from opentelemetry.sdk._events import EventLoggerProvider
 from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.resources import Resource
@@ -53,23 +52,23 @@ class SnapshotOtlpEmitter:
         self._resource = resource
         endpoint = logs_endpoint or os.environ.get(_LOGS_ENDPOINT_ENV_VAR, "")
         self._logs_endpoint = endpoint.strip() if endpoint.strip() else _DEFAULT_LOGS_ENDPOINT
-        self._event_logger = None
+        self._logger = None
         self._logger_provider = None
         self._init_failed = False
         self._lock = threading.Lock()
 
     def _ensure_initialized(self):
-        """Lazily initialize the LoggerProvider and EventLogger on first use.
+        """Lazily initialize the LoggerProvider and Logger on first use.
 
         Uses double-checked locking to be thread-safe without contention on the
         common path (already initialized).
         """
-        if self._event_logger is not None:
+        if self._logger is not None:
             return True
         if self._init_failed:
             return False
         with self._lock:
-            if self._event_logger is not None:
+            if self._logger is not None:
                 return True
             if self._init_failed:
                 return False
@@ -81,10 +80,7 @@ class SnapshotOtlpEmitter:
                 self._logger_provider = LoggerProvider(resource=resource)
                 self._logger_provider.add_log_record_processor(BatchLogRecordProcessor(exporter))
 
-                event_logger_provider = EventLoggerProvider(logger_provider=self._logger_provider)
-                self._event_logger = event_logger_provider.get_event_logger(
-                    _INSTRUMENTATION_SCOPE, _INSTRUMENTATION_VERSION
-                )
+                self._logger = self._logger_provider.get_logger(_INSTRUMENTATION_SCOPE, _INSTRUMENTATION_VERSION)
 
                 logger.debug("DI OTLP emitter initialized (endpoint: %s)", self._logs_endpoint)
                 return True
@@ -165,10 +161,10 @@ class SnapshotOtlpEmitter:
             if trace_id and span_id:
                 trace_flags = TraceFlags(0x01)  # SAMPLED
 
-        # Emit as Event
-        event = Event(
-            name=_EVENT_NAME,
+        log_record = LogRecord(
+            event_name=_EVENT_NAME,
             timestamp=snapshot.timestamp * 1_000_000,  # ms to ns
+            severity_number=SeverityNumber.INFO,
             body=body if body else None,
             attributes=attributes,
             trace_id=trace_id,
@@ -176,7 +172,7 @@ class SnapshotOtlpEmitter:
             trace_flags=trace_flags,
         )
 
-        self._event_logger.emit(event)
+        self._logger.emit(log_record)
 
     def shutdown(self):
         """Flush and shutdown the owned LoggerProvider."""
@@ -188,10 +184,10 @@ class SnapshotOtlpEmitter:
             except Exception:  # pylint: disable=broad-exception-caught
                 logger.warning("Error shutting down DI OTLP LoggerProvider", exc_info=True)
             self._logger_provider = None
-            self._event_logger = None
+            self._logger = None
 
     def reset(self):
         """Reset state for post-fork cleanup. Does not flush — parent's threads are dead."""
         self._logger_provider = None
-        self._event_logger = None
+        self._logger = None
         self._init_failed = False
