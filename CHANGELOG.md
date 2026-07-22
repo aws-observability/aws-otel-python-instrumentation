@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix(mcp): fall back to HTTP headers for server-side trace context when `params._meta` is absent
+  ([#829](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/829))
 - fix(mcp-instrumentation): always inject W3C trace context into outbound HTTP request headers so MCP servers that read context only from HTTP (API Gateways, service meshes, non-Python MCP servers) can join the caller's trace, even with `OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION` enabled
   ([#827](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/827))
 - Nightly dependency update: OpenTelemetry 1.44.0/0.65b0
