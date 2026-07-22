@@ -636,7 +636,7 @@ class TestLLOHandlerEvents(LLOHandlerTestBase):  # pylint: disable=too-many-publ
         # Verify session.id was copied to event attributes
         self.assertIsNotNone(emitted_event.attributes)
         self.assertEqual(emitted_event.attributes.get("session.id"), "test-session-123")
-        # Event class always adds event.name
+        # event.name is always set in attributes
         self.assertIn("event.name", emitted_event.attributes)
 
         # Verify event body still contains LLO data
@@ -666,7 +666,7 @@ class TestLLOHandlerEvents(LLOHandlerTestBase):  # pylint: disable=too-many-publ
         # Verify session.id is not in event attributes
         self.assertIsNotNone(emitted_event.attributes)
         self.assertNotIn("session.id", emitted_event.attributes)
-        # Event class always adds event.name
+        # event.name is always set in attributes
         self.assertIn("event.name", emitted_event.attributes)
 
     def test_emit_llo_attributes_with_session_id_and_other_attributes(self):

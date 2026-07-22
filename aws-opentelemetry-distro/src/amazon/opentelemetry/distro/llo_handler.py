@@ -546,7 +546,7 @@ class LLOHandler:
             timestamp=timestamp,
             severity_number=SeverityNumber.INFO,
             body=event_body,
-            attributes=event_attributes if event_attributes else None,
+            attributes=event_attributes,
             trace_id=span.context.trace_id,
             span_id=span.context.span_id,
             trace_flags=span.context.trace_flags,
