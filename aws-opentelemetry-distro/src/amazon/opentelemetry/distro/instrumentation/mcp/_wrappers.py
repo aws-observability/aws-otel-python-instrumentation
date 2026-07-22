@@ -292,6 +292,26 @@ class ClientWrapper(McpWrapper):
 
         return wrapper()
 
+    def wrap_prepare_headers(self, wrapped: Callable[..., Any], instance: Any, args: Any, kwargs: Any) -> Any:
+        """Wrap ``StreamableHTTPTransport._prepare_headers`` to inject W3C trace context.
+
+        ``_prepare_headers`` runs inside ``_handle_post_request``, which our
+        ``wrap_handle_post_request`` wrapper has already restored the per-tool-call
+        context from ``_meta`` for. So the current OTel context at this point is the
+        correct per-request parent — we just need to inject it into the returned
+        headers dict.
+
+        Only injects when ``_should_suppress_http_spans`` is True (the default);
+        when False, the httpx client instrumentation handles header injection itself.
+        """
+        headers = wrapped(*args, **kwargs)
+        if self._should_suppress_http_spans:
+            try:
+                self._propagators.inject(carrier=headers)
+            except Exception:  # pylint: disable=broad-exception-caught
+                _LOG.debug("MCP trace-context header injection failed", exc_info=True)
+        return headers
+
     def wrap_handle_post_request(
         self,
         wrapped: Callable[..., Any],
