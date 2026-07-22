@@ -539,6 +539,52 @@ class TestMcpInstrumentorInProcess(McpInstrumentorTestBase):
         tool_parent_id = format(tool_parent.context.span_id, "016x")
         self.assertEqual(format(tool_call.parent.span_id, "016x"), tool_parent_id)
 
+    def test_prepare_headers_injects_traceparent_when_suppressed(self):
+        """``wrap_prepare_headers`` injects W3C trace context into the headers dict
+        returned by ``_prepare_headers`` when HTTP span suppression is enabled
+        (the default). This is what propagates ``traceparent`` to MCP servers that
+        only read HTTP headers (API Gateways, service meshes, non-Python servers).
+        """
+
+        async def run(session):
+            await session.call_tool("hello", {"name": "World"})
+
+        asyncio.run(self._run_http_inprocess(run))
+        spans = self.span_exporter.get_finished_spans()
+
+        # The server span should have the client tool span as its parent —
+        # proving the injected traceparent carried the right context.
+        client_span = next(s for s in spans if s.name == "mcp tools/call hello" and s.kind == SpanKind.CLIENT)
+        server_span = self._get_server_span(spans, "mcp tools/call hello")
+
+        client_trace_id = format(client_span.context.trace_id, "032x")
+        server_trace_id = (
+            server_span.trace_id.hex()
+            if hasattr(server_span, "trace_id")
+            else format(server_span.context.trace_id, "032x")
+        )
+        self.assertEqual(client_trace_id, server_trace_id, "Server span should be on same trace as client")
+
+    def test_prepare_headers_skips_inject_when_not_suppressed(self):
+        """When ``OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION=false``, the httpx client
+        instrumentation handles header injection itself, so ``wrap_prepare_headers``
+        should NOT inject (to avoid duplicate traceparent writes)."""
+        self.instrumentor.uninstrument()
+        self.span_exporter.clear()
+
+        with unittest.mock.patch.dict(os.environ, {OTEL_MCP_SUPPRESS_HTTP_INSTRUMENTATION: "false"}):
+            self.instrumentor.instrument(tracer_provider=self.tracer_provider, propagators=self.propagator)
+            self.server = self._create_server()
+
+            # Directly test wrap_prepare_headers behavior:
+            # when suppress=false, it should NOT inject.
+            wrapper = self.instrumentor._client_wrapper
+
+            original_headers = {"mcp-session-id": "test-session"}
+            result = wrapper.wrap_prepare_headers(lambda: dict(original_headers), None, (), {})
+            # Should NOT have traceparent (wrap_prepare_headers only injects when suppressed)
+            self.assertNotIn("traceparent", result)
+
     async def _run_inprocess(self, callback, raise_exceptions=False):
         from mcp.server.fastmcp import FastMCP  # pylint: disable=import-outside-toplevel
         from mcp.shared.memory import (  # pylint: disable=import-outside-toplevel
