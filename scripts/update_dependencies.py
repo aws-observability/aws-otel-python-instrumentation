@@ -38,7 +38,6 @@ CONTRIB_DEPS = [
     "opentelemetry-instrumentation-confluent-kafka",
     "opentelemetry-instrumentation-dbapi",
     "opentelemetry-instrumentation-django",
-    "opentelemetry-instrumentation-elasticsearch",
     "opentelemetry-instrumentation-falcon",
     "opentelemetry-instrumentation-fastapi",
     "opentelemetry-instrumentation-flask",

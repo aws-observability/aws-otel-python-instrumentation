@@ -20,9 +20,7 @@ Key findings:
 
 import unittest
 
-from opentelemetry._events import Event
-from opentelemetry._logs import SeverityNumber
-from opentelemetry.sdk._events import EventLoggerProvider
+from opentelemetry._logs import LogRecord, SeverityNumber
 from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk._logs.export import InMemoryLogExporter, SimpleLogRecordProcessor
 from opentelemetry.sdk.resources import Resource
@@ -36,8 +34,7 @@ class TestOtlpAttributeTypeConstraints(unittest.TestCase):
         self.exporter = InMemoryLogExporter()
         self.provider = LoggerProvider(resource=Resource.create({"service.name": "test-service"}))
         self.provider.add_log_record_processor(SimpleLogRecordProcessor(self.exporter))
-        self.event_logger_provider = EventLoggerProvider(logger_provider=self.provider)
-        self.event_logger = self.event_logger_provider.get_event_logger("test.scope")
+        self.logger = self.provider.get_logger("test.scope")
 
     def tearDown(self):
         self.provider.shutdown()
@@ -45,13 +42,13 @@ class TestOtlpAttributeTypeConstraints(unittest.TestCase):
     def _emit_and_get(self, body, attributes):
         """Emit an event and return the exported log record."""
         self.exporter.clear()
-        event = Event(
-            name="test.event",
+        record = LogRecord(
+            event_name="test.event",
             body=body,
             attributes=attributes,
             severity_number=SeverityNumber.INFO,
         )
-        self.event_logger.emit(event)
+        self.logger.emit(record)
         records = self.exporter.get_finished_logs()
         self.assertEqual(len(records), 1)
         return records[0]
@@ -317,8 +314,8 @@ class TestOtlpAttributeTypeConstraints(unittest.TestCase):
         trace_id = int("699e34c662d55e013e833341a5d9f079", 16)
         span_id = int("85b7839f6afbae05", 16)
 
-        event = Event(
-            name="serviceevents.incident",
+        record_to_emit = LogRecord(
+            event_name="serviceevents.incident",
             body=body,
             attributes=attributes,
             severity_number=SeverityNumber.FATAL,  # critical → FATAL
@@ -327,7 +324,7 @@ class TestOtlpAttributeTypeConstraints(unittest.TestCase):
             trace_flags=TraceFlags.SAMPLED,
         )
         self.exporter.clear()
-        self.event_logger.emit(event)
+        self.logger.emit(record_to_emit)
         records = self.exporter.get_finished_logs()
         self.assertEqual(len(records), 1)
         record = records[0].log_record
