@@ -96,6 +96,5 @@ python3 -m pip install mock_collector-1.0.0-py3-none-any.whl --force-reinstall
 cd ../contract-tests/tests
 python3 -m build --outdir ../../dist
 cd ../../dist
-# --force-reinstall causes `ERROR: No matching distribution found for mock-collector==1.0.0`, but uninstalling and reinstalling works pretty reliably.
 python3 -m pip uninstall contract-tests -y
 python3 -m pip install contract_tests-1.0.0-py3-none-any.whl
