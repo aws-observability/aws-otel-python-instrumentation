@@ -173,15 +173,9 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             return
         span, _ = entry
         llm_output: dict | None = response.llm_output
-        usage: dict = (llm_output.get("token_usage") or llm_output.get("usage") or {}) if llm_output else {}
         model: str | None = (llm_output.get("model_name") or llm_output.get("model_id")) if llm_output else None
         response_id: str | None = llm_output.get("id") if llm_output else None
-        input_tokens: int | None = (
-            usage.get("prompt_tokens") or usage.get("input_token_count") or usage.get("input_tokens")
-        )
-        output_tokens: int | None = (
-            usage.get("completion_tokens") or usage.get("generated_token_count") or usage.get("output_tokens")
-        )
+        input_tokens, output_tokens = self._extract_token_usage(response)
 
         if response.generations:
             output_messages = self._format_lc_llm_output(response.generations)
@@ -200,6 +194,35 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self._set_span_attribute(span, GEN_AI_USAGE_OUTPUT_TOKENS, output_tokens)
 
         self._end_span(run_id)
+
+    @staticmethod
+    def _extract_token_usage(response: LLMResult) -> tuple[int | None, int | None]:
+        llm_output = response.llm_output
+        usage: dict = (llm_output.get("token_usage") or llm_output.get("usage") or {}) if llm_output else {}
+
+        usage_metadata: dict = {}
+        for batch in response.generations:
+            for gen in batch:
+                message_usage = getattr(getattr(gen, "message", None), "usage_metadata", None)
+                if message_usage:
+                    usage_metadata = message_usage
+                    break
+            if usage_metadata:
+                break
+
+        input_tokens: int | None = (
+            usage.get("prompt_tokens")
+            or usage.get("input_token_count")
+            or usage.get("input_tokens")
+            or usage_metadata.get("input_tokens")
+        )
+        output_tokens: int | None = (
+            usage.get("completion_tokens")
+            or usage.get("generated_token_count")
+            or usage.get("output_tokens")
+            or usage_metadata.get("output_tokens")
+        )
+        return input_tokens, output_tokens
 
     def on_llm_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
         self._handle_error(error, run_id, **kwargs)
