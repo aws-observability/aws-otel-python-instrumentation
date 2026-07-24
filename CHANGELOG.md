@@ -12,6 +12,9 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat: attribute presigned S3 URLs as `AWS::S3` dependencies in Application Signals, opt-in via
+  `OTEL_AWS_APPLICATION_SIGNALS_PRESIGNED_URL_ATTRIBUTION_ENABLED`
+  ([#841](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/841))
 - fix: redact AWS presigned URL credentials from span attributes
   ([#840](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/840))
 - fix(genai): capture per-call token usage for Amazon Bedrock (and Anthropic) in crewai and langchain by reading provider-specific usage keys — crewai's Converse `inputTokens`/`outputTokens` and langchain's `ChatBedrockConverse` message `usage_metadata`
