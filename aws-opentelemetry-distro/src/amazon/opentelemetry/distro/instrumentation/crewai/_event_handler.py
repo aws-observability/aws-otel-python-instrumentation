@@ -402,8 +402,18 @@ class OpenTelemetryEventHandler:
         prev_prompt_tokens, prev_completion_tokens = self._event_id_to_token_usage.pop(event.started_event_id) or (0, 0)
         event_usage = getattr(event, "usage", None)
         if isinstance(event_usage, dict):
-            input_tokens = event_usage.get("prompt_tokens") or 0
-            output_tokens = event_usage.get("completion_tokens") or 0
+            input_tokens = (
+                event_usage.get("prompt_tokens")
+                or event_usage.get("inputTokens")
+                or event_usage.get("input_tokens")
+                or 0
+            )
+            output_tokens = (
+                event_usage.get("completion_tokens")
+                or event_usage.get("outputTokens")
+                or event_usage.get("output_tokens")
+                or 0
+            )
         else:
             usage: "UsageMetrics" = source.get_token_usage_summary()
             input_tokens = usage.prompt_tokens - prev_prompt_tokens

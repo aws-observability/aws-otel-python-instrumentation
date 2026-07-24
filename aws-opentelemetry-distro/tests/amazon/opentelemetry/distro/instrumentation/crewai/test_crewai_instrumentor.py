@@ -224,6 +224,41 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertEqual(chat_span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 123)
         self.assertEqual(chat_span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 45)
 
+    def test_per_call_token_usage_provider_key_variants(self):
+        if "usage" not in LLMCallCompletedEvent.model_fields:
+            self.skipTest("crewai <1.13.0 does not report per-call usage on LLMCallCompletedEvent")
+
+        variants = [
+            ("openai", {"prompt_tokens": 11, "completion_tokens": 22}),
+            ("bedrock", {"inputTokens": 33, "outputTokens": 44, "totalTokens": 77}),
+            ("anthropic", {"input_tokens": 55, "output_tokens": 66}),
+        ]
+        for name, usage in variants:
+            with self.subTest(provider=name):
+                self.span_exporter.clear()
+                llm = LLM(model="openai/gpt-4", is_litellm=True)
+                start_event = LLMCallStartedEvent(call_id="c1", messages=[{"role": "user", "content": "hi"}])
+                crewai_event_bus.emit(llm, start_event)
+                crewai_event_bus.emit(
+                    llm,
+                    LLMCallCompletedEvent(
+                        call_id="c1",
+                        response="Hello",
+                        call_type=LLMCallType.LLM_CALL,
+                        started_event_id=start_event.event_id,
+                        usage=usage,
+                    ),
+                )
+
+                chat_span = self._find_span("chat")
+                self.assertIsNotNone(chat_span)
+                expected_input = usage.get("prompt_tokens") or usage.get("inputTokens") or usage.get("input_tokens")
+                expected_output = (
+                    usage.get("completion_tokens") or usage.get("outputTokens") or usage.get("output_tokens")
+                )
+                self.assertEqual(chat_span.attributes[GEN_AI_USAGE_INPUT_TOKENS], expected_input)
+                self.assertEqual(chat_span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], expected_output)
+
     def test_crew_kickoff_error_handling(self):
         mock_llm = MagicMock(spec=LLM)
         mock_llm.provider = "openai"
