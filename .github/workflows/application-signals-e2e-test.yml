@@ -128,21 +128,9 @@ jobs:
   # DOCKER DISTRIBUTION LANGUAGE VERSION COVERAGE
   # DEFAULT SETTING: {Python Version}, EKS, AMD64, AL2
   #
-  # The Application Signals addon is cluster-wide. It is installed ONCE by eks-enable-appsignals
-  # before the version jobs fan out in parallel, and removed ONCE by eks-cleanup-appsignals after
-  # they all finish. The per-version jobs no longer install/delete the addon themselves.
-
-  eks-enable-appsignals:
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-enable-appsignals.yml@EKS-test-fix
-    secrets: inherit
-    with:
-      aws-region: us-east-1
-      test-cluster-name: 'e2e-python-adot-test'
-      caller-workflow-name: 'main-build'
 
   eks-py310-amd64:
     if: ${{ always() }}
-    needs: eks-enable-appsignals
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@EKS-test-fix
     secrets: inherit
     with:
@@ -154,7 +142,6 @@ jobs:
 
   eks-py311-amd64:
     if: ${{ always() }}
-    needs: eks-enable-appsignals
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@EKS-test-fix
     secrets: inherit
     with:
@@ -166,7 +153,6 @@ jobs:
 
   eks-py312-amd64:
     if: ${{ always() }}
-    needs: eks-enable-appsignals
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@EKS-test-fix
     secrets: inherit
     with:
@@ -178,7 +164,6 @@ jobs:
 
   eks-py313-amd64:
     if: ${{ always() }}
-    needs: eks-enable-appsignals
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@EKS-test-fix
     secrets: inherit
     with:
@@ -190,7 +175,6 @@ jobs:
 
   eks-py314-amd64:
     if: ${{ always() }}
-    needs: eks-enable-appsignals
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@EKS-test-fix
     secrets: inherit
     with:
@@ -199,18 +183,6 @@ jobs:
       adot-image-name: ${{ inputs.adot-image-name }}
       caller-workflow-name: 'main-build'
       python-version: '3.14'
-
-  eks-cleanup-appsignals:
-    # Runs once after all version jobs. `if: always()` so the shared addon is removed even if some
-    # version jobs failed — otherwise it leaks and the next run's enable races with a lingering addon.
-    if: ${{ always() }}
-    needs: [ eks-py310-amd64, eks-py311-amd64, eks-py312-amd64, eks-py313-amd64, eks-py314-amd64 ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-cleanup-appsignals.yml@EKS-test-fix
-    secrets: inherit
-    with:
-      aws-region: us-east-1
-      test-cluster-name: 'e2e-python-adot-test'
-      caller-workflow-name: 'main-build'
 
   #
   # PACKAGED DISTRIBUTION PLATFORM COVERAGE
@@ -332,11 +304,9 @@ jobs:
 
   service-events-eks:
     if: ${{ always() }}
-    # Serialized after the parallel version matrix AND its addon cleanup. This test shares the
-    # cluster/NodePort with the eks-py* jobs and manages its OWN Application Signals addon lifecycle
-    # (via python-eks-service-events-test.yml@main), so it must run after eks-cleanup-appsignals has
-    # removed the shared addon — otherwise the two addon lifecycles collide.
-    needs: eks-cleanup-appsignals
+    # Chain onto the tail of the eks-py* jobs, service-events-eks shares a NodePort with these jobs,
+    # for now we do not parallelize this test to keep things simple
+    needs: eks-py314-amd64
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@main
     secrets: inherit
     with:
