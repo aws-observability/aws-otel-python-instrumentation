@@ -18,6 +18,14 @@ def apply_instrumentation_patches() -> None:  # pylint: disable=too-many-branche
 
     Where possible, automated testing should be run to catch upstream changes resulting in broken patches
     """
+    # Redact AWS SigV4 pre-signed URL credentials from captured HTTP URLs. Applied unconditionally
+    # because it hardens URL sanitization for every HTTP client instrumentation and has no external
+    # dependency of its own.
+    # pylint: disable=import-outside-toplevel
+    from amazon.opentelemetry.distro.patches._url_query_redaction_patches import _apply_url_query_redaction_patches
+
+    _apply_url_query_redaction_patches()
+
     if is_installed("botocore ~= 1.0"):
         # pylint: disable=import-outside-toplevel
         # Delay import to only occur if patches is safe to apply (e.g. the instrumented library is installed).
