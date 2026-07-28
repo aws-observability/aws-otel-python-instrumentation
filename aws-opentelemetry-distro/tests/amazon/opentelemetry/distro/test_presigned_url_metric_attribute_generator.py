@@ -174,6 +174,10 @@ class TestPresignedUrlMetricAttributeGenerator(TestCase):
         attributes = self._dependency_attributes()
         self.assertEqual(attributes[AWS_REMOTE_SERVICE], "PeerService")
         self.assertEqual(attributes[AWS_REMOTE_OPERATION], "PutObject")
+        # peer.service overrides the remote service but not the resource, mirroring the SDK path:
+        # the S3 bucket resource stays attached even though the service is now the peer value.
+        self.assertEqual(attributes[AWS_REMOTE_RESOURCE_TYPE], "AWS::S3::Bucket")
+        self.assertEqual(attributes[AWS_REMOTE_RESOURCE_IDENTIFIER], "example-bucket")
 
     @patch.dict(os.environ, {_PRESIGNED_URL_ATTRIBUTION_ENABLED_CONFIG: "true"})
     def test_non_s3_presigned_endpoint_is_unchanged(self):

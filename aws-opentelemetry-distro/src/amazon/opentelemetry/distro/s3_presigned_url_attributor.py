@@ -194,4 +194,6 @@ def _get_path_segments(path: str) -> List[str]:
     normalized_path = normalized_path.lstrip("/")
     if normalized_path == "":
         return []
-    return normalized_path.split("/")
+    # Drop empty segments so a trailing slash (e.g. path-style "/bucket/") is not misread as an
+    # object key. Java's String.split already discards trailing empties; Python's str.split does not.
+    return [segment for segment in normalized_path.split("/") if segment != ""]

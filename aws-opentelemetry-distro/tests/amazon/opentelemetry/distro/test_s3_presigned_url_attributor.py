@@ -114,9 +114,13 @@ class TestS3PresignedUrlAttributor(TestCase):
         # method, path, extra query params, expected operation
         cases = [
             ("GET", "/example-bucket", "&list-type=2", "ListObjectsV2"),
+            # Trailing slash after the bucket is bucket-level, not an object key.
+            ("GET", "/example-bucket/", "&list-type=2", "ListObjectsV2"),
+            ("GET", "/example-bucket/", "", "UnknownRemoteOperation"),
             ("GET", "/example-bucket/object", "", "GetObject"),
             ("DELETE", "/example-bucket/object", "", "DeleteObject"),
             ("GET", "/example-bucket", "&acl", "GetBucketAcl"),
+            ("GET", "/example-bucket/", "&acl", "GetBucketAcl"),
             ("GET", "/example-bucket/object", "&acl", "GetObjectAcl"),
         ]
         for method, path, extra_query, expected_operation in cases:
