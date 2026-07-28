@@ -131,8 +131,6 @@ jobs:
 
   eks-py310-amd64:
     if: ${{ always() }}
-    # Run after service-events-eks so it gets the clean (default-image) operator it needs first.
-    needs: service-events-eks
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@EKS-test-fix
     secrets: inherit
     with:
@@ -144,8 +142,6 @@ jobs:
 
   eks-py311-amd64:
     if: ${{ always() }}
-    # Run after service-events-eks so it gets the clean (default-image) operator it needs first.
-    needs: service-events-eks
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@EKS-test-fix
     secrets: inherit
     with:
@@ -157,8 +153,6 @@ jobs:
 
   eks-py312-amd64:
     if: ${{ always() }}
-    # Run after service-events-eks so it gets the clean (default-image) operator it needs first.
-    needs: service-events-eks
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@EKS-test-fix
     secrets: inherit
     with:
@@ -170,8 +164,6 @@ jobs:
 
   eks-py313-amd64:
     if: ${{ always() }}
-    # Run after service-events-eks so it gets the clean (default-image) operator it needs first.
-    needs: service-events-eks
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@EKS-test-fix
     secrets: inherit
     with:
@@ -183,8 +175,6 @@ jobs:
 
   eks-py314-amd64:
     if: ${{ always() }}
-    # Run after service-events-eks so it gets the clean (default-image) operator it needs first.
-    needs: service-events-eks
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@EKS-test-fix
     secrets: inherit
     with:
@@ -313,14 +303,17 @@ jobs:
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
   service-events-eks:
-    # Runs FIRST, alone, before the parallel eks-py* jobs (which declare `needs: service-events-eks`).
-    # service-events uses the shared patch_image_and_check_diff action, which asserts the operator's
-    # ADOT image *changed* (default -> staging). That only holds on an operator still at the default
-    # image. The parallel eks-py* jobs patch the shared cluster-wide operator to the staging image and
-    # intentionally do not revert it (revert would break sibling jobs), so if service-events ran after
-    # them it would see the operator already on staging and the diff check would fail. Running it first,
-    # exclusively, gives it the clean operator state it expects without modifying the test itself.
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@main
+    if: ${{ always() }}
+    # Runs LAST, after ALL parallel eks-py* jobs complete, so no parallel job is alive when it tears
+    # down and rebuilds shared cluster state. service-events uses the shared patch_image_and_check_diff
+    # action (asserts the operator ADOT image changed default -> staging) and its own teardown fully
+    # removes/reinstalls the amazon-cloudwatch-observability addon -- behavior that is only safe when it
+    # runs exclusively. Gating on all five eks-py jobs guarantees exclusivity; it then rebuilds the addon
+    # from scratch (operator back to default image) exactly as it did in the original sequential design,
+    # so no changes to the service-events test itself are needed.
+    needs: [ eks-py310-amd64, eks-py311-amd64, eks-py312-amd64, eks-py313-amd64, eks-py314-amd64 ]
+    # TESTING: pinned to EKS-test-fix for the addon-rebuild step; REVERT to @main before merge.
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@EKS-test-fix
     secrets: inherit
     with:
       aws-region: us-east-1
