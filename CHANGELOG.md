@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- fix: redact AWS presigned URL credentials from span attributes
+  ([#840](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/840))
 - fix(genai): capture per-call token usage for Amazon Bedrock (and Anthropic) in crewai and langchain by reading provider-specific usage keys — crewai's Converse `inputTokens`/`outputTokens` and langchain's `ChatBedrockConverse` message `usage_metadata`
   ([#838](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/838))
 - fix(mcp): fall back to HTTP headers for server-side trace context when `params._meta` is absent
