@@ -131,7 +131,7 @@ jobs:
 
   eks-py310-amd64:
     if: ${{ always() }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@EKS-test-fix
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -142,7 +142,7 @@ jobs:
 
   eks-py311-amd64:
     if: ${{ always() }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@EKS-test-fix
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -153,7 +153,7 @@ jobs:
 
   eks-py312-amd64:
     if: ${{ always() }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@EKS-test-fix
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -164,7 +164,7 @@ jobs:
 
   eks-py313-amd64:
     if: ${{ always() }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@EKS-test-fix
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -175,7 +175,7 @@ jobs:
 
   eks-py314-amd64:
     if: ${{ always() }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@EKS-test-fix
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -308,12 +308,9 @@ jobs:
     # down and rebuilds shared cluster state. service-events uses the shared patch_image_and_check_diff
     # action (asserts the operator ADOT image changed default -> staging) and its own teardown fully
     # removes/reinstalls the amazon-cloudwatch-observability addon -- behavior that is only safe when it
-    # runs exclusively. Gating on all five eks-py jobs guarantees exclusivity; it then rebuilds the addon
-    # from scratch (operator back to default image) exactly as it did in the original sequential design,
-    # so no changes to the service-events test itself are needed.
+    # runs exclusively.
     needs: [ eks-py310-amd64, eks-py311-amd64, eks-py312-amd64, eks-py313-amd64, eks-py314-amd64 ]
-    # TESTING: pinned to EKS-test-fix for the addon-rebuild step; REVERT to @main before merge.
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@EKS-test-fix
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
