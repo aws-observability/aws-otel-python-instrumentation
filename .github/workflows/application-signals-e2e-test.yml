@@ -328,8 +328,7 @@ jobs:
   eks-cleanup:
     if: ${{ always() }}
     needs: [ eks-py310-amd64, eks-py311-amd64, eks-py312-amd64, eks-py313-amd64, eks-py314-amd64, service-events-eks ]
-    # TESTING: pinned to the fix branch; REVERT to @main before merge.
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-cleanup-app-signals.yml@fix-python-se-addon-irsa
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-cleanup-app-signals.yml@main
     secrets: inherit
     with:
       test-cluster-name: 'e2e-python-adot-test'
