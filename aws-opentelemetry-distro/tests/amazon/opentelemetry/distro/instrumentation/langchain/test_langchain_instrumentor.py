@@ -815,6 +815,88 @@ class TestLangChainInstrumentor(TestCase):
         chat_spans = [s for s in spans if "chat" in s.name]
         self.assertGreater(len(chat_spans), 0)
 
+    def test_token_usage_provider_key_variants(self):
+        from langchain_aws import ChatBedrock, ChatBedrockConverse
+        from langchain_openai import ChatOpenAI
+
+        def result_with_llm_output(usage):
+            return ChatResult(
+                generations=[
+                    ChatGeneration(message=AIMessage(content="Hello!"), generation_info={"finish_reason": "stop"})
+                ],
+                llm_output={"model_name": "test", "token_usage": usage},
+            )
+
+        def result_with_usage_metadata(usage_metadata):
+            return ChatResult(
+                generations=[
+                    ChatGeneration(
+                        message=AIMessage(content="Hello!", usage_metadata=usage_metadata),
+                        generation_info={"finish_reason": "stop"},
+                    )
+                ],
+                llm_output=None,
+            )
+
+        # (model class, init kwargs, fake result matching that provider's real usage shape, expected in/out)
+        cases = [
+            (
+                ChatOpenAI,
+                {"api_key": "fake"},
+                result_with_llm_output({"prompt_tokens": 11, "completion_tokens": 22}),
+                11,
+                22,
+            ),
+            (
+                ChatBedrock,
+                {"model_id": "test", "region_name": "us-east-1"},
+                result_with_llm_output({"prompt_tokens": 33, "completion_tokens": 44}),
+                33,
+                44,
+            ),
+            (
+                ChatBedrockConverse,
+                {"model": "test", "region_name": "us-east-1"},
+                result_with_usage_metadata({"input_tokens": 55, "output_tokens": 66, "total_tokens": 121}),
+                55,
+                66,
+            ),
+        ]
+
+        try:
+            from langchain_ibm import ChatWatsonx
+
+            cases.append(
+                (
+                    ChatWatsonx,
+                    {
+                        "model_id": "test",
+                        "url": "https://us-south.ml.cloud.ibm.com",
+                        "apikey": "fake",
+                        "project_id": "p",
+                    },
+                    result_with_llm_output({"input_token_count": 77, "generated_token_count": 88}),
+                    77,
+                    88,
+                )
+            )
+        except ImportError:
+            pass
+
+        for model_cls, init_kwargs, fake_result, expected_input, expected_output in cases:
+            with self.subTest(model=model_cls.__name__):
+                self.span_exporter.clear()
+                llm = model_cls(**init_kwargs)
+                with patch.object(type(llm), "_generate", return_value=fake_result):
+                    llm.invoke("Say hello")
+
+                spans = self.span_exporter.get_finished_spans()
+                chat_spans = [s for s in spans if "chat" in s.name]
+                self.assertGreaterEqual(len(chat_spans), 1, f"No chat span for {model_cls.__name__}")
+                attrs = chat_spans[0].attributes
+                self.assertEqual(attrs[GEN_AI_USAGE_INPUT_TOKENS], expected_input)
+                self.assertEqual(attrs[GEN_AI_USAGE_OUTPUT_TOKENS], expected_output)
+
 
 if __name__ == "__main__":
     unittest.main()
