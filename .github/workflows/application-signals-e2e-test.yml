@@ -310,7 +310,8 @@ jobs:
     # removes/reinstalls the amazon-cloudwatch-observability addon -- behavior that is only safe when it
     # runs exclusively.
     needs: [ eks-py310-amd64, eks-py311-amd64, eks-py312-amd64, eks-py313-amd64, eks-py314-amd64 ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@main
+    # TESTING: pinned to the addon-safe fix branch to validate the IRSA fix; REVERT to @main before merge.
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@fix-python-se-addon-irsa
     secrets: inherit
     with:
       aws-region: us-east-1
