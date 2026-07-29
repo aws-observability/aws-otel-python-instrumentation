@@ -320,6 +320,21 @@ jobs:
       caller-workflow-name: 'main-build'
       python-version: '3.10'
 
+  # Tear down App Signals from the shared EKS cluster LAST, after every EKS job (all eks-py* and
+  # service-events-eks) has finished. Gating on all of them guarantees the cluster is idle, so
+  # deleting the shared addon + cloudwatch-agent IRSA is safe (restores the original pre-parallel
+  # cleanup behavior). always() so it runs even if a test failed; the reusable workflow also refuses
+  # if any ns-* test namespaces are still present.
+  eks-cleanup:
+    if: ${{ always() }}
+    needs: [ eks-py310-amd64, eks-py311-amd64, eks-py312-amd64, eks-py313-amd64, eks-py314-amd64, service-events-eks ]
+    # TESTING: pinned to the fix branch; REVERT to @main before merge.
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-cleanup-app-signals.yml@fix-python-se-addon-irsa
+    secrets: inherit
+    with:
+      test-cluster-name: 'e2e-python-adot-test'
+      aws-region: us-east-1
+
   # This validation is to ensure that all test workflows relevant to this repo are actually
   # being used in this repo, which is referring to all the other jobs in this file.
   #
