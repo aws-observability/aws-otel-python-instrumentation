@@ -350,3 +350,8 @@ jobs:
   #   (see: https://github.com/aws-observability/aws-application-signals-test-framework/blob/main/.github/workflows/validate-e2e-tests-are-accounted-for.yml)
   validate-all-tests-are-accounted-for:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/validate-e2e-tests-are-accounted-for.yml@main
+    with:
+      # eks-cleanup-app-signals.yml is a cluster-teardown workflow, not a test cell, so it is not in
+      # the expected-tests glob (no python- prefix / not *-test.yml). Exclude it so this validation
+      # does not flag it as an "unaccounted-for test".
+      exclusions: 'eks-cleanup-app-signals.yml'
