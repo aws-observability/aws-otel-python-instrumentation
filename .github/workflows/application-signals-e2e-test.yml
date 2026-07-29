@@ -310,8 +310,7 @@ jobs:
     # removes/reinstalls the amazon-cloudwatch-observability addon -- behavior that is only safe when it
     # runs exclusively.
     needs: [ eks-py310-amd64, eks-py311-amd64, eks-py312-amd64, eks-py313-amd64, eks-py314-amd64 ]
-    # TESTING: pinned to the addon-safe fix branch to validate the IRSA fix; REVERT to @main before merge.
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@fix-python-se-addon-irsa
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -323,8 +322,7 @@ jobs:
   # Tear down App Signals from the shared EKS cluster LAST, after every EKS job (all eks-py* and
   # service-events-eks) has finished. Gating on all of them guarantees the cluster is idle, so
   # deleting the shared addon + cloudwatch-agent IRSA is safe (restores the original pre-parallel
-  # cleanup behavior). always() so it runs even if a test failed; the reusable workflow also refuses
-  # if any ns-* test namespaces are still present.
+  # cleanup behavior).
   eks-cleanup:
     if: ${{ always() }}
     needs: [ eks-py310-amd64, eks-py311-amd64, eks-py312-amd64, eks-py313-amd64, eks-py314-amd64, service-events-eks ]
