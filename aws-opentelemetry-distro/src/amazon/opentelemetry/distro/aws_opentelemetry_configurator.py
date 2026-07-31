@@ -507,7 +507,7 @@ def _customize_sampler(sampler: Sampler) -> Sampler:
         if parsed_config is not None:
             sampler.set_adaptive_sampling_config(parsed_config)
 
-    if not _is_application_signals_enabled():
+    if not (_is_application_signals_enabled() or is_agent_observability_enabled()):
         return sampler
     return AlwaysRecordSampler(sampler)
 

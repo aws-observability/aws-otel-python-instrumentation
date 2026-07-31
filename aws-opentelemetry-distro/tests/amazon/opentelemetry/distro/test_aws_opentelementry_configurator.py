@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from requests import Session
 
-from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE, AWS_SERVICE_TYPE
+from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE, AWS_SERVICE_TYPE, AWS_TRACE_FLAG_SAMPLED
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor import AttributePropagatingSpanProcessor
 from amazon.opentelemetry.distro.aws_batch_unsampled_span_processor import BatchUnsampledSpanProcessor
@@ -85,7 +85,8 @@ from opentelemetry.sdk.metrics._internal.export import PeriodicExportingMetricRe
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import Span, SpanProcessor, Tracer, TracerProvider
 from opentelemetry.sdk.trace.export import SpanExporter
-from opentelemetry.sdk.trace.sampling import DEFAULT_ON, Sampler
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.sdk.trace.sampling import ALWAYS_OFF, DEFAULT_ON, Sampler
 from opentelemetry.semconv.resource import ResourceAttributes
 from opentelemetry.trace import get_tracer_provider
 
@@ -454,6 +455,41 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertNotEqual(mock_sampler, customized_sampler)
         self.assertIsInstance(customized_sampler, AlwaysRecordSampler)
         self.assertEqual(mock_sampler, customized_sampler._root_sampler)
+
+    def test_customize_sampler_with_agent_observability(self):
+        mock_sampler: Sampler = MagicMock()
+
+        os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
+        customized_sampler: Sampler = _customize_sampler(mock_sampler)
+        self.assertIsInstance(customized_sampler, AlwaysRecordSampler)
+        self.assertEqual(mock_sampler, customized_sampler._root_sampler)
+
+        os.environ["AGENT_OBSERVABILITY_ENABLED"] = "false"
+        self.assertEqual(mock_sampler, _customize_sampler(mock_sampler))
+
+        os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
+
+    def test_unsampled_span_is_recorded_and_exported_with_agent_observability(self):
+        os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
+
+        exporter = InMemorySpanExporter()
+        tracer_provider = TracerProvider(sampler=_customize_sampler(ALWAYS_OFF))
+        processor = BatchUnsampledSpanProcessor(span_exporter=exporter)
+        tracer_provider.add_span_processor(processor)
+
+        with tracer_provider.get_tracer("test").start_as_current_span("unsampled-span") as span:
+            self.assertTrue(span.is_recording())
+            self.assertFalse(span.get_span_context().trace_flags.sampled)
+
+        processor.force_flush()
+
+        exported_spans = exporter.get_finished_spans()
+        self.assertEqual(len(exported_spans), 1)
+        self.assertEqual(exported_spans[0].name, "unsampled-span")
+        self.assertFalse(exported_spans[0].attributes[AWS_TRACE_FLAG_SAMPLED])
+
+        processor.shutdown()
+        os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
 
     def test_parse_adaptive_sampling_config_valid(self):
         """Tests that _parse_config_string correctly parses a valid configuration"""
