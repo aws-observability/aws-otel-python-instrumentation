@@ -147,6 +147,7 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
     def tearDown(self):
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_ENABLED", None)
         os.environ.pop("OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED", None)
+        os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
 
     # The probability of this passing once without correct IDs is low, 20 times is inconceivable.
     def test_provide_generate_xray_ids(self):
@@ -467,8 +468,6 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ["AGENT_OBSERVABILITY_ENABLED"] = "false"
         self.assertEqual(mock_sampler, _customize_sampler(mock_sampler))
 
-        os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
-
     def test_unsampled_span_is_recorded_and_exported_with_agent_observability(self):
         os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
 
@@ -489,7 +488,6 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         self.assertFalse(exported_spans[0].attributes[AWS_TRACE_FLAG_SAMPLED])
 
         processor.shutdown()
-        os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
 
     def test_parse_adaptive_sampling_config_valid(self):
         """Tests that _parse_config_string correctly parses a valid configuration"""
