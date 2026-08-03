@@ -129,8 +129,31 @@ jobs:
   # DEFAULT SETTING: {Python Version}, EKS, AMD64, AL2
   #
 
-  eks-py310-amd64:
+  # Set up App Signals on the shared EKS cluster EXACTLY ONCE, before any EKS test job runs. This is
+  # the mirror image of the eks-cleanup job below.
+  #
+  # enable-app-signals.sh unconditionally runs
+  # `eksctl create iamserviceaccount --override-existing-serviceaccounts`, so when each parallel
+  # version job ran it, a sibling could recreate the shared cloudwatch-agent service account AFTER the
+  # agent DaemonSet pods were admitted. IRSA credentials inject only at admission, so those pods ran
+  # with no AWS_ROLE_ARN, fell back to the EC2 node role (no logs:PutLogEvents), and got
+  # AccessDeniedException for their entire lifetime -- silently dropping ALL jobs' telemetry and
+  # failing every validator on missing data. Serializing setup here removes that race by construction.
+  #
+  # Because eks-cleanup tears the addon down at the end of every pipeline, main cold-starts on every
+  # run and so re-entered this race every time, while feature branches that never ran cleanup inherited
+  # a warm, already-credentialed cluster and appeared to pass consistently.
+  eks-setup:
     if: ${{ always() }}
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-setup-app-signals.yml@main
+    secrets: inherit
+    with:
+      test-cluster-name: 'e2e-python-adot-test'
+      aws-region: us-east-1
+
+  eks-py310-amd64:
+    needs: [ eks-setup ]
+    if: ${{ always() && needs.eks-setup.result == 'success' }}
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
@@ -141,7 +164,8 @@ jobs:
       python-version: '3.10'
 
   eks-py311-amd64:
-    if: ${{ always() }}
+    needs: [ eks-setup ]
+    if: ${{ always() && needs.eks-setup.result == 'success' }}
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
@@ -152,7 +176,8 @@ jobs:
       python-version: '3.11'
 
   eks-py312-amd64:
-    if: ${{ always() }}
+    needs: [ eks-setup ]
+    if: ${{ always() && needs.eks-setup.result == 'success' }}
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
@@ -163,7 +188,8 @@ jobs:
       python-version: '3.12'
 
   eks-py313-amd64:
-    if: ${{ always() }}
+    needs: [ eks-setup ]
+    if: ${{ always() && needs.eks-setup.result == 'success' }}
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
@@ -174,7 +200,8 @@ jobs:
       python-version: '3.13'
 
   eks-py314-amd64:
-    if: ${{ always() }}
+    needs: [ eks-setup ]
+    if: ${{ always() && needs.eks-setup.result == 'success' }}
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
@@ -303,13 +330,12 @@ jobs:
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
   service-events-eks:
-    if: ${{ always() }}
-    # Runs LAST, after ALL parallel eks-py* jobs complete, so no parallel job is alive when it tears
-    # down and rebuilds shared cluster state. service-events uses the shared patch_image_and_check_diff
-    # action (asserts the operator ADOT image changed default -> staging) and its own teardown fully
-    # removes/reinstalls the amazon-cloudwatch-observability addon -- behavior that is only safe when it
-    # runs exclusively.
-    needs: [ eks-py310-amd64, eks-py311-amd64, eks-py312-amd64, eks-py313-amd64, eks-py314-amd64 ]
+    if: ${{ always() && needs.eks-setup.result == 'success' }}
+    # Runs LAST, after ALL parallel eks-py* jobs complete, so no parallel job is alive when it mutates
+    # shared cluster state. service-events uses the shared patch_image_and_check_diff action (asserts
+    # the operator ADOT image changed default -> staging), which is only safe when it runs exclusively.
+    # Shared App Signals setup is owned by eks-setup, so this job no longer installs it itself.
+    needs: [ eks-setup, eks-py310-amd64, eks-py311-amd64, eks-py312-amd64, eks-py313-amd64, eks-py314-amd64 ]
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@main
     secrets: inherit
     with:
@@ -325,7 +351,7 @@ jobs:
   # cleanup behavior).
   eks-cleanup:
     if: ${{ always() }}
-    needs: [ eks-py310-amd64, eks-py311-amd64, eks-py312-amd64, eks-py313-amd64, eks-py314-amd64, service-events-eks ]
+    needs: [ eks-setup, eks-py310-amd64, eks-py311-amd64, eks-py312-amd64, eks-py313-amd64, eks-py314-amd64, service-events-eks ]
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-cleanup-app-signals.yml@main
     secrets: inherit
     with:
@@ -351,4 +377,4 @@ jobs:
       # eks-cleanup-app-signals.yml is a cluster-teardown workflow, not a test cell, so it is not in
       # the expected-tests glob (no python- prefix / not *-test.yml). Exclude it so this validation
       # does not flag it as an "unaccounted-for test".
-      exclusions: 'eks-cleanup-app-signals.yml'
+      exclusions: 'eks-cleanup-app-signals.yml,eks-setup-app-signals.yml'
