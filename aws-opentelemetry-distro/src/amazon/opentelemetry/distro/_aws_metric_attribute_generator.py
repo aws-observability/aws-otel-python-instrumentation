@@ -138,8 +138,7 @@ _LAMBDA_INVOKE_OPERATION: str = "Invoke"
 _GRAPHQL: str = "graphql"
 
 # Opt-in (default off) config that enables attributing raw-HTTP presigned AWS URL calls (e.g.
-# presigned S3 URLs) as AWS dependencies instead of generic HTTP calls. Must stay in parity with
-# the Java config key otel.aws.application.signals.presigned-url-attribution.enabled.
+# presigned S3 URLs) as AWS dependencies instead of generic HTTP calls.
 _PRESIGNED_URL_ATTRIBUTION_ENABLED_CONFIG: str = "OTEL_AWS_APPLICATION_SIGNALS_PRESIGNED_URL_ATTRIBUTION_ENABLED"
 
 
