@@ -145,7 +145,7 @@ jobs:
   # a warm, already-credentialed cluster and appeared to pass consistently.
   eks-setup:
     if: ${{ always() }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-setup-app-signals.yml@fix-eks-irsa-setup-race
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-setup-app-signals.yml@main
     secrets: inherit
     with:
       test-cluster-name: 'e2e-python-adot-test'
@@ -154,7 +154,7 @@ jobs:
   eks-py310-amd64:
     needs: [ eks-setup ]
     if: ${{ always() && needs.eks-setup.result == 'success' }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@fix-eks-irsa-setup-race
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -166,7 +166,7 @@ jobs:
   eks-py311-amd64:
     needs: [ eks-setup ]
     if: ${{ always() && needs.eks-setup.result == 'success' }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@fix-eks-irsa-setup-race
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -178,7 +178,7 @@ jobs:
   eks-py312-amd64:
     needs: [ eks-setup ]
     if: ${{ always() && needs.eks-setup.result == 'success' }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@fix-eks-irsa-setup-race
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -190,7 +190,7 @@ jobs:
   eks-py313-amd64:
     needs: [ eks-setup ]
     if: ${{ always() && needs.eks-setup.result == 'success' }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@fix-eks-irsa-setup-race
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -202,7 +202,7 @@ jobs:
   eks-py314-amd64:
     needs: [ eks-setup ]
     if: ${{ always() && needs.eks-setup.result == 'success' }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@fix-eks-irsa-setup-race
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -336,7 +336,7 @@ jobs:
     # the operator ADOT image changed default -> staging), which is only safe when it runs exclusively.
     # Shared App Signals setup is owned by eks-setup, so this job no longer installs it itself.
     needs: [ eks-setup, eks-py310-amd64, eks-py311-amd64, eks-py312-amd64, eks-py313-amd64, eks-py314-amd64 ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@fix-eks-irsa-setup-race
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -352,7 +352,7 @@ jobs:
   eks-cleanup:
     if: ${{ always() }}
     needs: [ eks-setup, eks-py310-amd64, eks-py311-amd64, eks-py312-amd64, eks-py313-amd64, eks-py314-amd64, service-events-eks ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-cleanup-app-signals.yml@fix-eks-irsa-setup-race
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-cleanup-app-signals.yml@main
     secrets: inherit
     with:
       test-cluster-name: 'e2e-python-adot-test'
