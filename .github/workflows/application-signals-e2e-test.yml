@@ -142,6 +142,7 @@ jobs:
 
   eks-py311-amd64:
     if: ${{ always() }}
+    needs: eks-py310-amd64
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
@@ -153,6 +154,7 @@ jobs:
 
   eks-py312-amd64:
     if: ${{ always() }}
+    needs: eks-py311-amd64
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
@@ -164,6 +166,7 @@ jobs:
 
   eks-py313-amd64:
     if: ${{ always() }}
+    needs: eks-py312-amd64
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
@@ -175,6 +178,7 @@ jobs:
 
   eks-py314-amd64:
     if: ${{ always() }}
+    needs: eks-py313-amd64
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-test.yml@main
     secrets: inherit
     with:
@@ -304,12 +308,11 @@ jobs:
 
   service-events-eks:
     if: ${{ always() }}
-    # Runs LAST, after ALL parallel eks-py* jobs complete, so no parallel job is alive when it tears
-    # down and rebuilds shared cluster state. service-events uses the shared patch_image_and_check_diff
-    # action (asserts the operator ADOT image changed default -> staging) and its own teardown fully
-    # removes/reinstalls the amazon-cloudwatch-observability addon -- behavior that is only safe when it
-    # runs exclusively.
-    needs: [ eks-py310-amd64, eks-py311-amd64, eks-py312-amd64, eks-py313-amd64, eks-py314-amd64 ]
+    # Chain onto the tail of the eks-py* jobs: they all target e2e-python-adot-test and the
+    # sample-app Service binds cluster-wide NodePort 30100, which this SE test also uses. Running
+    # in parallel would collide on that port ("provided port is already allocated"), so serialize
+    # after the last eks-py* job, matching how eks-py311..314 chain via needs.
+    needs: eks-py314-amd64
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@main
     secrets: inherit
     with:
