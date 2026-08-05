@@ -546,9 +546,7 @@ class TestAwsMetricAttributeGenerator(TestUtil):
                     AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
                     AWS_LOCAL_OPERATION: "POST /api/contests/{id}/leaderboard",
                 }
-                self._validate_attributes_produced_for_non_local_root_span_of_kind(
-                    expected_attributes, SpanKind.SERVER
-                )
+                self._validate_attributes_produced_for_non_local_root_span_of_kind(expected_attributes, SpanKind.SERVER)
             finally:
                 reset_operation_paths()
         self._mock_attribute(SpanAttributes.HTTP_METHOD, None)
