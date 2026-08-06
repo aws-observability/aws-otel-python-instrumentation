@@ -13,7 +13,7 @@ authors = [
   { name = "Amazon Web Services" },
 ]
 classifiers = [
-  "Development Status :: 4 - Alpha",
+  "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
   "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python",
@@ -31,7 +31,7 @@ dependencies = []
 test = []
 
 [project.urls]
-Homepage = "https://github.com/aws-observability/aws-otel-python-instrumentation/tree/main/plugins"
+Homepage = "https://github.com/aws-observability/aws-otel-python-instrumentation/tree/main/cloudwatch-plugin-otel"
 
 [tool.hatch.version]
 path = "src/plugins/opentelemetry/cloudwatch/version.py"
