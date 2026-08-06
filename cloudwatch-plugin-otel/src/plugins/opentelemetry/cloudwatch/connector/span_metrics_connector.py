@@ -96,22 +96,22 @@ class SpanMetricsConnector(SpanProcessor):
     def _build_metric_attributes(self, span: ReadableSpan) -> Dict[str, Any]:
         span_attributes = span.attributes or {}
 
-        service_name = _SpanMetrics.DEFAULT_SERVICE_NAME
-        if span.resource is not None:
-            service_name = span.resource.attributes.get(SERVICE_NAME) or _SpanMetrics.DEFAULT_SERVICE_NAME
-
         status_code = _SpanMetrics.DEFAULT_STATUS_CODE
         if span.status is not None and span.status.status_code is not None:
             status_code = span.status.status_code.name
 
         attributes: Dict[str, Any] = {
-            SERVICE_NAME: service_name,
             _SpanMetrics.SPAN_NAME: span.name,
             _SpanMetrics.SPAN_KIND: span.kind.name if span.kind is not None else _SpanMetrics.DEFAULT_SPAN_KIND,
             _SpanMetrics.STATUS_CODE: status_code,
             _SpanMetrics.SCHEMA: _SpanMetrics.SCHEMA_VERSION,
             _SpanMetrics.LIB_VERSION: self._lib_version,
         }
+
+        if span.resource is not None:
+            service_name = span.resource.attributes.get(SERVICE_NAME)
+            if service_name is not None:
+                attributes[SERVICE_NAME] = service_name
 
         self._copy(attributes, span_attributes, HTTP_REQUEST_METHOD, HTTP_METHOD)
         self._copy(attributes, span_attributes, HTTP_RESPONSE_STATUS_CODE, HTTP_STATUS_CODE)
