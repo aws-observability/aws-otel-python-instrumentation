@@ -35,14 +35,10 @@ class AlwaysRecordSampler(Sampler):
             parent_context, trace_id, name, kind, attributes, links, trace_state
         )
         if self.enabled and result.decision is Decision.DROP:
-            result = _wrap_result_with_record_only_result(result, attributes)
+            merged = {**(attributes or {}), **(result.attributes or {})}
+            result = SamplingResult(Decision.RECORD_ONLY, merged, result.trace_state)
         return result
 
     @override
     def get_description(self) -> str:
         return "AlwaysRecordSampler{" + self._root_sampler.get_description() + "}"
-
-
-def _wrap_result_with_record_only_result(result: SamplingResult, original_attributes: Attributes) -> SamplingResult:
-    merged = {**(original_attributes or {}), **(result.attributes or {})}
-    return SamplingResult(Decision.RECORD_ONLY, merged, result.trace_state)
