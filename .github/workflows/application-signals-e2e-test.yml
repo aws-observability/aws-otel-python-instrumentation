@@ -366,16 +366,6 @@ jobs:
   # - Update the `validate-e2e-tests-are-accounted-for` job to change which "workflow files are expected to be used by this repo"
   #   (see: https://github.com/aws-observability/aws-application-signals-test-framework/blob/main/.github/workflows/validate-e2e-tests-are-accounted-for.yml)
   validate-all-tests-are-accounted-for:
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/validate-e2e-tests-are-accounted-for.yml@main
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/validate-e2e-tests-are-accounted-for.yml@python-eks-parallel-pipeline
     with:
-      # The validator strict-equality-compares TESTS_EXPECTED (framework files matching python-*test.yml)
-      # against TESTS_ACTUALLY_USED (every framework workflow this file `uses:`). Exclusions are applied
-      # to BOTH sides, so anything not in both lists must be excluded:
-      #   - python-eks-test.yml       : sequential EKS workflow. Expected (matches python-*test.yml) but
-      #                                 this repo uses python-eks-parallel-test.yml instead, so it is
-      #                                 never in USED -> exclude to drop it from EXPECTED.
-      #   - eks-setup-app-signals.yml : used here, but does NOT match python-*test.yml, so never in
-      #   - eks-cleanup-app-signals.yml EXPECTED -> exclude to drop them from USED.
-      # (python-eks-parallel-test.yml itself needs NO exclusion: it matches python-*test.yml AND is used,
-      #  so it is in both lists once the framework branch is merged.)
       exclusions: 'python-eks-test.yml,eks-setup-app-signals.yml,eks-cleanup-app-signals.yml'
