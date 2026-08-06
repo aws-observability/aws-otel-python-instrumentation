@@ -2,45 +2,33 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-This library derives call-count and duration metrics from every span produced by
-the active tracer pipeline, and ensures spans are recorded even when the root
-sampler would drop them.
+Derive call-count and duration metrics from every span produced by the active
+tracer pipeline, recording spans even when the root sampler would drop them.
 
-It registers a ``SpanMetricsConnector`` (a read-only ``SpanProcessor``) on the
-installed ``TracerProvider`` and wraps the provider's root sampler with an
-``AlwaysRecordSampler`` so that ``DROP`` decisions become ``RECORD_ONLY`` -- the
-spans still reach the processor to be counted, without changing what gets exported.
+``SpanMetricsInstrumentor`` registers a ``SpanMetricsConnector`` (a read-only
+``SpanProcessor``) on the installed ``TracerProvider`` and wraps the provider's
+root sampler with an ``AlwaysRecordSampler``, so ``DROP`` decisions become
+``RECORD_ONLY`` -- the spans still reach the processor to be counted, without
+changing what gets exported.
+
+There are two options for enabling this. The first is to use the
+``opentelemetry-instrument`` executable, which loads the instrumentor
+automatically via its ``opentelemetry_instrumentor`` entry point. The second is to
+enable it programmatically as shown below.
 
 Usage
 -----
 
-Auto-instrumentation
-********************
-
-Installing this package registers a ``span_metrics`` entry point in the
-``opentelemetry_instrumentor`` group, so ``opentelemetry-instrument`` picks it up
-with no code changes:
-
-.. code-block:: sh
-
-    opentelemetry-instrument python your_app.py
-
-The configurator installs the ``MeterProvider`` before instrumentors load, so the
-derived metrics bind to a real meter automatically.
-
-Manual
-******
-
-.. code-block:: python
+.. code:: python
 
     from plugins.opentelemetry.cloudwatch import SpanMetricsInstrumentor
 
-    # Attach to the active provider (or pass tracer_provider=/meter_provider=).
+    # Attach to the active provider (optionally pass tracer_provider= / meter_provider=).
     SpanMetricsInstrumentor().instrument()
 
-Attach the pieces directly if you manage your own pipeline:
+Or attach the pieces directly if you manage your own pipeline:
 
-.. code-block:: python
+.. code:: python
 
     from plugins.opentelemetry.cloudwatch import (
         AlwaysRecordSampler,
@@ -56,9 +44,11 @@ Attach the pieces directly if you manage your own pipeline:
     The connector binds its meter at construction time. Set the global
     ``MeterProvider`` (or pass ``meter_provider=`` to ``instrument()``) *before*
     instrumenting, otherwise the derived metrics are dropped to a NoOp meter.
+    ``opentelemetry-instrument`` sets up the ``MeterProvider`` before it loads
+    instrumentors, so this is handled for you there.
 
 Uninstrument
-************
+------------
 
 The SDK has no API to detach a span processor, so ``uninstrument()`` restores the
 original sampler and calls ``shutdown()`` on the processor (it stops recording) as
