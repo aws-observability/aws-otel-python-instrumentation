@@ -49,6 +49,21 @@ _logger = logging.getLogger(__name__)
 
 
 class SpanMetricsConnector(SpanProcessor):
+    """Span metrics processor implementation.
+
+    `SpanMetricsConnector` is an implementation of `SpanProcessor` that derives
+    metrics from ended spans, dimensioned by `service.name`, `span.name`,
+    `span.kind`, and `status.code` (plus copied HTTP, RPC, database, and messaging
+    semantic-convention attributes):
+
+    - `traces.span.metrics.calls`: a counter incremented once per span.
+    - `traces.span.metrics.duration`: a histogram of span durations, in seconds.
+
+    Args:
+        meter_provider: The `MeterProvider` used to obtain the meter. Falls back to
+            the global `MeterProvider` when omitted.
+    """
+
     def __init__(self, meter_provider: Optional[MeterProvider] = None) -> None:
         self._lib_version = __version__
         self.enabled = True

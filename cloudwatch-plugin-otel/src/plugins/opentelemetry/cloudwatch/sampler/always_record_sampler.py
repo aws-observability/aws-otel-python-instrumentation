@@ -12,6 +12,17 @@ from opentelemetry.util.types import Attributes
 
 
 class AlwaysRecordSampler(Sampler):
+    """Delegates to `root_sampler`, rewriting a `DROP` decision to `RECORD_ONLY`.
+
+    Ensures every span is recorded, so downstream processors can observe it,
+    without otherwise changing the sampling rate. Attributes added by the root
+    sampler are preserved on the rewritten result.
+
+    Args:
+        root_sampler: Sampler whose decision is delegated to and, when `DROP`,
+            rewritten to `RECORD_ONLY`.
+    """
+
     _root_sampler: Sampler
 
     def __init__(self, root_sampler: Sampler):

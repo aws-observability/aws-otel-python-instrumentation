@@ -69,6 +69,11 @@ _logger = logging.getLogger(__name__)
 
 
 class SpanMetricsInstrumentor(BaseInstrumentor):
+    """An instrumentor that derives span metrics from the active tracer pipeline.
+
+    See `BaseInstrumentor`
+    """
+
     def __init__(self) -> None:
         super().__init__()
         self._processor: Optional[SpanMetricsConnector] = None
