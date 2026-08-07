@@ -9,8 +9,8 @@ import requests
 from botocore.exceptions import ClientError
 from botocore.stub import Stubber
 from flask import Flask
-from plugins.opentelemetry.cloudwatch.connector._constants import _SpanMetrics
-from plugins.opentelemetry.cloudwatch.connector.span_metrics_connector import SpanMetricsConnector
+from plugins.opentelemetry.cloudwatch.span_metrics._constants import _SpanMetrics
+from plugins.opentelemetry.cloudwatch.span_metrics.connector import SpanMetricsConnector
 from plugins.opentelemetry.cloudwatch.version import __version__
 
 from opentelemetry.instrumentation.botocore import BotocoreInstrumentor

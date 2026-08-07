@@ -3,7 +3,7 @@
 import logging
 from typing import Any, Dict, Optional
 
-from plugins.opentelemetry.cloudwatch.connector._constants import _SpanMetrics
+from plugins.opentelemetry.cloudwatch.span_metrics._constants import _SpanMetrics
 from plugins.opentelemetry.cloudwatch.version import __version__
 from typing_extensions import override
 
@@ -65,7 +65,6 @@ class SpanMetricsConnector(SpanProcessor):
     """
 
     def __init__(self, meter_provider: Optional[MeterProvider] = None) -> None:
-        self._lib_version = __version__
         self.enabled = True
         meter: Meter = get_meter(_SpanMetrics.SCOPE_NAME, __version__, meter_provider)
         self._calls_counter = meter.create_counter(_SpanMetrics.CALLS_NAME)
@@ -81,7 +80,7 @@ class SpanMetricsConnector(SpanProcessor):
             return
         try:
             span.set_attribute(_SpanMetrics.SCHEMA, _SpanMetrics.SCHEMA_VERSION)
-            span.set_attribute(_SpanMetrics.LIB_VERSION, self._lib_version)
+            span.set_attribute(_SpanMetrics.LIB_VERSION, __version__)
         # pylint: disable=broad-exception-caught
         except Exception:
             _logger.debug("Failed to stamp span metrics attributes", exc_info=True)
@@ -120,7 +119,7 @@ class SpanMetricsConnector(SpanProcessor):
             _SpanMetrics.SPAN_KIND: span.kind.name if span.kind is not None else _SpanMetrics.DEFAULT_SPAN_KIND,
             _SpanMetrics.STATUS_CODE: status_code,
             _SpanMetrics.SCHEMA: _SpanMetrics.SCHEMA_VERSION,
-            _SpanMetrics.LIB_VERSION: self._lib_version,
+            _SpanMetrics.LIB_VERSION: __version__,
         }
 
         if span.resource is not None:

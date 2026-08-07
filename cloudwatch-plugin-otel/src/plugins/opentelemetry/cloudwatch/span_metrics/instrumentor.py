@@ -58,8 +58,8 @@ a best effort; the processor stays attached to the provider.
 import logging
 from typing import Collection, Optional
 
-from plugins.opentelemetry.cloudwatch.connector.span_metrics_connector import SpanMetricsConnector
 from plugins.opentelemetry.cloudwatch.sampler.always_record_sampler import AlwaysRecordSampler
+from plugins.opentelemetry.cloudwatch.span_metrics.connector import SpanMetricsConnector
 
 from opentelemetry import trace
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor
