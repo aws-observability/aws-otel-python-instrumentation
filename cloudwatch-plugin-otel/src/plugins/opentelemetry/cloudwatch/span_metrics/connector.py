@@ -35,6 +35,8 @@ from opentelemetry.semconv._incubating.attributes.rpc_attributes import RPC_METH
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.semconv.attributes.http_attributes import HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, HTTP_ROUTE
 from opentelemetry.semconv.attributes.service_attributes import SERVICE_NAME
+from opentelemetry.trace import SpanKind
+from opentelemetry.trace.status import StatusCode
 
 try:
     from opentelemetry.semconv._incubating.attributes.rpc_attributes import RPC_SYSTEM_NAME
@@ -106,13 +108,13 @@ class SpanMetricsConnector(SpanProcessor):
     def _build_metric_attributes(self, span: ReadableSpan) -> Dict[str, Any]:
         span_attributes = span.attributes or {}
 
-        status_code = _SpanMetrics.DEFAULT_STATUS_CODE
+        status_code = StatusCode.UNSET.name
         if span.status is not None and span.status.status_code is not None:
             status_code = span.status.status_code.name
 
         attributes: Dict[str, Any] = {
             _SpanMetrics.SPAN_NAME: span.name,
-            _SpanMetrics.SPAN_KIND: span.kind.name if span.kind is not None else _SpanMetrics.DEFAULT_SPAN_KIND,
+            _SpanMetrics.SPAN_KIND: span.kind.name if span.kind is not None else SpanKind.INTERNAL.name,
             _SpanMetrics.STATUS_CODE: status_code,
             _SpanMetrics.SCHEMA: _SpanMetrics.SCHEMA_VERSION,
             _SpanMetrics.LIB_VERSION: __version__,

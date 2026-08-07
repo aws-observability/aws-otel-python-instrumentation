@@ -36,7 +36,4 @@ class _SpanMetrics:
     SCHEMA_VERSION: Final = "v1"
     LIB_VERSION: Final = "aws.otel.extension.lib.version"
 
-    DEFAULT_SPAN_KIND: Final = "INTERNAL"
-    DEFAULT_STATUS_CODE: Final = "UNSET"
-
     MESSAGING_DESTINATION: Final = "messaging.destination"
