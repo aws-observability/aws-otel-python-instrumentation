@@ -464,7 +464,7 @@ class TestSpanMetricsConnectorHttpServer(SpanMetricsConnectorTestBase):
 
         @self.app.route("/items/<item_id>")
         def get_item(item_id):
-            return {"item_id": item_id}
+            return {"status": "ok"}
 
         FlaskInstrumentor().instrument_app(
             self.app,
