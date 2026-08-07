@@ -1,8 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 from plugins.opentelemetry.cloudwatch.connector._constants import _SpanMetrics
+from plugins.opentelemetry.cloudwatch.connector.instrumentor import SpanMetricsInstrumentor
 from plugins.opentelemetry.cloudwatch.connector.span_metrics_connector import SpanMetricsConnector
-from plugins.opentelemetry.cloudwatch.instrumentor import SpanMetricsInstrumentor
 from plugins.opentelemetry.cloudwatch.sampler.always_record_sampler import AlwaysRecordSampler
 
 from opentelemetry.sdk.trace import TracerProvider

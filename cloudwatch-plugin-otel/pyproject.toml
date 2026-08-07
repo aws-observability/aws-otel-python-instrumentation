@@ -37,7 +37,7 @@ dependencies = [
 test = []
 
 [project.entry-points.opentelemetry_instrumentor]
-span_metrics = "plugins.opentelemetry.cloudwatch.instrumentor:SpanMetricsInstrumentor"
+span_metrics = "plugins.opentelemetry.cloudwatch.connector.instrumentor:SpanMetricsInstrumentor"
 
 [project.urls]
 Homepage = "https://github.com/aws-observability/aws-otel-python-instrumentation/tree/main/cloudwatch-plugin-otel"

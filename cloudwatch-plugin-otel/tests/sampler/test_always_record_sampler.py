@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 from flask import Flask
 from plugins.opentelemetry.cloudwatch.connector._constants import _SpanMetrics
-from plugins.opentelemetry.cloudwatch.instrumentor import SpanMetricsInstrumentor
+from plugins.opentelemetry.cloudwatch.connector.instrumentor import SpanMetricsInstrumentor
 from plugins.opentelemetry.cloudwatch.sampler.always_record_sampler import AlwaysRecordSampler
 
 from opentelemetry.context import Context
