@@ -46,11 +46,7 @@ try:
 except ImportError:
     RPC_SYSTEM_NAME = "rpc.system.name"
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
-from opentelemetry.semconv.attributes.http_attributes import (
-    HTTP_REQUEST_METHOD,
-    HTTP_RESPONSE_STATUS_CODE,
-    HTTP_ROUTE,
-)
+from opentelemetry.semconv.attributes.http_attributes import HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, HTTP_ROUTE
 from opentelemetry.semconv.attributes.service_attributes import SERVICE_NAME
 from opentelemetry.test.test_base import TestBase
 from opentelemetry.trace import SpanKind, Status, StatusCode
