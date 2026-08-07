@@ -25,10 +25,19 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
 ]
 
-dependencies = []
+dependencies = [
+  "opentelemetry-api >= 1.39.0",
+  "opentelemetry-sdk >= 1.39.0",
+  "opentelemetry-instrumentation >= 0.60b0",
+  "opentelemetry-semantic-conventions >= 0.60b0",
+  "typing-extensions >= 4.5.0",
+]
 
 [project.optional-dependencies]
 test = []
+
+[project.entry-points.opentelemetry_instrumentor]
+span_metrics = "plugins.opentelemetry.cloudwatch.instrumentor:SpanMetricsInstrumentor"
 
 [project.urls]
 Homepage = "https://github.com/aws-observability/aws-otel-python-instrumentation/tree/main/cloudwatch-plugin-otel"

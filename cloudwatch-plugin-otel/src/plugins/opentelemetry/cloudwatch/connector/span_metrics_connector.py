@@ -53,8 +53,8 @@ class SpanMetricsConnector(SpanProcessor):
 
     `SpanMetricsConnector` is an implementation of `SpanProcessor` that derives
     metrics from ended spans, dimensioned by `service.name`, `span.name`,
-    `span.kind`, and `status.code` (plus copied HTTP, RPC, database, and messaging
-    semantic-convention attributes):
+    `span.kind`, and `status.code` (plus copied low-cardinality HTTP, RPC,
+    database, and messaging semantic-convention attributes):
 
     - `traces.span.metrics.calls`: a counter incremented once per span.
     - `traces.span.metrics.duration`: a histogram of span durations, in seconds.
@@ -105,7 +105,7 @@ class SpanMetricsConnector(SpanProcessor):
         self.enabled = False
 
     @override
-    def force_flush(self, timeout_millis: int = 30000) -> bool:
+    def force_flush(self, timeout_millis: int = 30000) -> bool:  # pylint: disable=no-self-use
         return True
 
     def _build_metric_attributes(self, span: ReadableSpan) -> Dict[str, Any]:
@@ -164,8 +164,8 @@ class SpanMetricsConnector(SpanProcessor):
         return attributes
 
     @staticmethod
-    def _copy(attributes: Dict[str, Any], span_attributes, canonical_key: str, *legacy_keys: str) -> None:
-        for source_key in (canonical_key, *legacy_keys):
+    def _copy(attributes: Dict[str, Any], span_attributes, key: str, *fallback_keys: str) -> None:
+        for source_key in (key, *fallback_keys):
             if source_key in span_attributes:
-                attributes[canonical_key] = span_attributes[source_key]
+                attributes[key] = span_attributes[source_key]
                 return

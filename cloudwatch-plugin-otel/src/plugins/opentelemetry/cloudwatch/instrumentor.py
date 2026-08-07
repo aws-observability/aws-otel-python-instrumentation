@@ -81,8 +81,8 @@ class SpanMetricsInstrumentor(BaseInstrumentor):
         self._original_sampler: Optional[Sampler] = None
         self._installed_sampler: Optional[AlwaysRecordSampler] = None
 
-    def instrumentation_dependencies(self) -> Collection[str]:
-        return ("opentelemetry-sdk >= 1.30.0",)
+    def instrumentation_dependencies(self) -> Collection[str]:  # pylint: disable=no-self-use
+        return ("opentelemetry-sdk >= 1.39.0",)
 
     def _instrument(self, **kwargs) -> None:
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
