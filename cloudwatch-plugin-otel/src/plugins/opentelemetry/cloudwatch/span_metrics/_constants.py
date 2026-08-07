@@ -35,5 +35,3 @@ class _SpanMetrics:
     SCHEMA: Final = "aws.otel.span.metrics.schema"
     SCHEMA_VERSION: Final = "v1"
     LIB_VERSION: Final = "aws.otel.extension.lib.version"
-
-    MESSAGING_DESTINATION: Final = "messaging.destination"

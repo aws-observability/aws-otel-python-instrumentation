@@ -48,6 +48,7 @@ except ImportError:
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.semconv.attributes.http_attributes import HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, HTTP_ROUTE
 from opentelemetry.semconv.attributes.service_attributes import SERVICE_NAME
+from opentelemetry.semconv.trace import SpanAttributes
 from opentelemetry.test.test_base import TestBase
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
@@ -183,7 +184,7 @@ class TestSpanMetricsConnector(SpanMetricsConnectorTestBase):
         calls = self.record_span(
             "messaging-legacy-dest",
             kind=SpanKind.PRODUCER,
-            attributes={MESSAGING_SYSTEM: "kafka", _SpanMetrics.MESSAGING_DESTINATION: "orders"},
+            attributes={MESSAGING_SYSTEM: "kafka", SpanAttributes.MESSAGING_DESTINATION: "orders"},
         )
         self.assertEqual(calls.attributes[MESSAGING_DESTINATION_NAME], "orders")
 
@@ -194,7 +195,7 @@ class TestSpanMetricsConnector(SpanMetricsConnectorTestBase):
             attributes={
                 MESSAGING_SYSTEM: "kafka",
                 MESSAGING_DESTINATION_NAME: "orders",
-                _SpanMetrics.MESSAGING_DESTINATION: "legacy-orders",
+                SpanAttributes.MESSAGING_DESTINATION: "legacy-orders",
             },
         )
         self.assertEqual(calls.attributes[MESSAGING_DESTINATION_NAME], "orders")
@@ -205,7 +206,7 @@ class TestSpanMetricsConnector(SpanMetricsConnectorTestBase):
             kind=SpanKind.PRODUCER,
             attributes={
                 MESSAGING_SYSTEM: "kafka",
-                _SpanMetrics.MESSAGING_DESTINATION: "orders",
+                SpanAttributes.MESSAGING_DESTINATION: "orders",
                 MESSAGING_DESTINATION_TEMPORARY: True,
             },
         )

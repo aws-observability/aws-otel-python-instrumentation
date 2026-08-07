@@ -35,6 +35,7 @@ from opentelemetry.semconv._incubating.attributes.rpc_attributes import RPC_METH
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.semconv.attributes.http_attributes import HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, HTTP_ROUTE
 from opentelemetry.semconv.attributes.service_attributes import SERVICE_NAME
+from opentelemetry.semconv.trace import SpanAttributes
 from opentelemetry.trace import SpanKind
 from opentelemetry.trace.status import StatusCode
 
@@ -155,7 +156,7 @@ class SpanMetricsConnector(SpanProcessor):
                 attributes,
                 span_attributes,
                 MESSAGING_DESTINATION_NAME,
-                _SpanMetrics.MESSAGING_DESTINATION,
+                SpanAttributes.MESSAGING_DESTINATION,
             )
 
         return attributes
