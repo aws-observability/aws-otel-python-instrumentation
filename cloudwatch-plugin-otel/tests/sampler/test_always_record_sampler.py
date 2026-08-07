@@ -224,7 +224,7 @@ class TestAlwaysRecordSamplerInstrumentation(TestBase):
 
         @self.app.route("/orders/<order_id>")
         def get_order(order_id):
-            return {"order_id": order_id}
+            return {"status": "ok"}
 
         FlaskInstrumentor().instrument_app(
             self.app,
