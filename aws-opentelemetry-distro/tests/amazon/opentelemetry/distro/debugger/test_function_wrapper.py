@@ -531,9 +531,10 @@ class TestSyncWrapper(_SnapshotEmitterFixture):
     def _instrument(self, func, *, increment_result=True, has_line0=True, disabled=False, capture_config=None):
         func_name = func.__name__
         module = _register_module(self.module_name, **{func_name: func})
-        # The wrapper keys breakpoint sets by the function's __qualname__, so the
-        # FunctionBreakpointSet must be registered under the same key.
-        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(func)}"
+        # The manager registers breakpoint sets under config.function_key == module.function_name
+        # (the CONFIGURED target name), and the wrapper now keys its lookup the same way,
+        # so register under module.func_name — not the runtime __qualname__.
+        func_key = f"{self.module_name}.{func_name}"
         bp_set = _make_function_bp_set(func_key, self.module_name, func_name, has_line0=has_line0, disabled=disabled)
         manager = _FakeManager({func_key: bp_set}, increment_result=increment_result)
         capture_config = capture_config if capture_config is not None else CaptureConfig(capture_return=True)
@@ -551,6 +552,42 @@ class TestSyncWrapper(_SnapshotEmitterFixture):
         self.assertEqual(result, 7)
         self.assertIs(original, add)
         self.emitter.emit_snapshot.assert_called_once()
+        self.assertEqual(manager.increment_calls, [f"{func_key}:0"])
+
+    def test_partial_target_fires_via_configured_name_key(self):
+        """Regression: a functools.partial has no __qualname__/__name__, so the
+        wrapper's old runtime-name key ("<module>.<anonymous>") missed the breakpoint set
+        the manager registered under "<module>.<function_name>", and the partial silently
+        never fired. The wrapper must key off the CONFIGURED function_name instead."""
+        import functools
+
+        def _base(prefix, value):
+            return prefix + str(value)
+
+        # Module-level name bound to a partial — the case that regressed.
+        add_hello = functools.partial(_base, "hello:")
+        # Sanity: a partial really has neither __qualname__ nor __name__.
+        self.assertFalse(hasattr(add_hello, "__qualname__"))
+        self.assertFalse(hasattr(add_hello, "__name__"))
+
+        func_name = "add_hello"
+        module = _register_module(self.module_name, **{func_name: add_hello})
+        # Manager registers under the CONFIGURED key (module.function_name), as production does.
+        func_key = f"{self.module_name}.{func_name}"
+        bp_set = _make_function_bp_set(func_key, self.module_name, func_name)
+        manager = _FakeManager({func_key: bp_set})
+
+        original, _instrumented = self.wrapper.instrument_function(
+            self.module_name,
+            func_name,
+            capture_config=CaptureConfig(capture_return=True),
+            location_hash="loc-hash-1",
+            manager=manager,
+        )
+
+        result = module.add_hello(9)
+        self.assertEqual(result, "hello:9")  # behavior preserved
+        self.emitter.emit_snapshot.assert_called_once()  # THE FIX: it fires (was 0 before)
         self.assertEqual(manager.increment_calls, [f"{func_key}:0"])
 
     def test_wrapped_reraises_user_exception_and_still_emits(self):
@@ -586,7 +623,7 @@ class TestSyncWrapper(_SnapshotEmitterFixture):
 
         func_name = func.__name__
         module = _register_module(self.module_name, **{func_name: func})
-        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(func)}"
+        func_key = f"{self.module_name}.{func_name}"
         # Build a set with a disabled state but NO line-0 breakpoint registered.
         bp_set = FunctionBreakpointSet(function_key=func_key, module=self.module_name, function_name=func_name)
         bp_set.states[f"{func_key}:5"] = BreakpointState(breakpoint_key=f"{func_key}:5", is_disabled=True)
@@ -677,7 +714,7 @@ class TestAsyncWrapper(_SnapshotEmitterFixture):
         func_name = func.__name__
         module = _register_module(self.module_name, **{func_name: func})
         # The wrapper keys breakpoint sets by the function's __qualname__.
-        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(func)}"
+        func_key = f"{self.module_name}.{func_name}"
         bp_set = _make_function_bp_set(func_key, self.module_name, func_name, has_line0=has_line0, disabled=disabled)
         manager = _FakeManager({func_key: bp_set}, increment_result=increment_result)
         capture_config = capture_config if capture_config is not None else CaptureConfig(capture_return=True)
@@ -723,7 +760,7 @@ class TestAsyncWrapper(_SnapshotEmitterFixture):
 
         func_name = func.__name__
         module = _register_module(self.module_name, **{func_name: func})
-        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(func)}"
+        func_key = f"{self.module_name}.{func_name}"
         bp_set = FunctionBreakpointSet(function_key=func_key, module=self.module_name, function_name=func_name)
         bp_set.states[f"{func_key}:5"] = BreakpointState(breakpoint_key=f"{func_key}:5", is_disabled=True)
         manager = _FakeManager({func_key: bp_set})
@@ -858,7 +895,7 @@ class TestClassMethodInstrumentation(_SnapshotEmitterFixture):
         Service = type("Service", (_Service,), {"handle": _Service.handle})
         _register_module(self.module_name, Service=Service)
         # The wrapper keys by the bound method's __qualname__.
-        func_key = f"{self.module_name}.{FunctionWrapper._get_qualified_name(Service.handle)}"
+        func_key = f"{self.module_name}.Service.handle"
         bp_set = _make_function_bp_set(func_key, self.module_name, "Service.handle")
         manager = _FakeManager({func_key: bp_set})
 
