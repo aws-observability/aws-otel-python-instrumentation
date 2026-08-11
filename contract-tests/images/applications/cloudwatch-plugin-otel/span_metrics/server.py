@@ -25,7 +25,7 @@ from opentelemetry.sdk.trace.sampling import ALWAYS_OFF, ALWAYS_ON
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
 _MODE = os.environ.get("SPAN_METRICS_MODE", "auto")
-_SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", "cloudwatch-span-metrics-contract-test")
+_SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", "cloudwatch-plugin-otel-contract-test")
 _OTLP_ENDPOINT = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4315")
 _AWS_REGION = "us-east-1"
 _QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/123456789012/orders"

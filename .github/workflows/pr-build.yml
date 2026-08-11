@@ -269,8 +269,8 @@ jobs:
 
       - name: Set up and run span metrics contract tests
         run: |
-          bash scripts/set-up-contract-tests.sh "3.12" cloudwatch-span-metrics
-          pytest contract-tests/tests/test/amazon/cloudwatch_span_metrics -v
+          bash scripts/set-up-contract-tests.sh "3.12" cloudwatch-plugin-otel
+          pytest contract-tests/tests/test/amazon/cloudwatch_plugin_otel/span_metrics -v
 
   contract-tests:
     needs: build-wheel

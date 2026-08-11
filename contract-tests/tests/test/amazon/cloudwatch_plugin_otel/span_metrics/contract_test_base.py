@@ -21,14 +21,14 @@ from opentelemetry.proto.common.v1.common_pb2 import AnyValue
 _logger: Logger = getLogger(__name__)
 _logger.setLevel(INFO)
 
-_APPLICATION_IMAGE = "aws-application-signals-tests-cloudwatch-span-metrics-app"
+_APPLICATION_IMAGE = "aws-application-signals-tests-cloudwatch-plugin-otel-app"
 _APPLICATION_PORT = 8080
 _COLLECTOR_ALIAS = "collector"
 _COLLECTOR_IMAGE = "aws-application-signals-mock-collector-python"
 _COLLECTOR_PORT = 4315
 _METRIC_NAMES = {"traces.span.metrics.calls", "traces.span.metrics.duration"}
 _PLUGIN_SCOPE = "cloudwatch.plugin.otel.span-metrics"
-_SERVICE_NAME = "cloudwatch-span-metrics-contract-test"
+_SERVICE_NAME = "cloudwatch-plugin-otel-contract-test"
 _TOPIC_ARN = "arn:aws:sns:us-east-1:123456789012:orders"
 
 
@@ -77,7 +77,7 @@ class SpanMetricsContractTestBase(TestCase):
             .with_kwargs(network=network_name, networking_config=application_networking_config)
         )
         if self.get_mode() == "manual":
-            self.application.with_command("python -u ./span_metrics_server.py")
+            self.application.with_command("python -u ./span_metrics/server.py")
 
         self.application.start()
         wait_for_logs(self.application, "Running on", timeout=30)

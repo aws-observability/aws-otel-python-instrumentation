@@ -74,7 +74,7 @@ for app in "${APPS[@]}"; do
   fi
 
   build_args=(--build-arg "DISTRO=${DISTRO}")
-  if [ "$app" = "cloudwatch-span-metrics" ]; then
+  if [ "$app" = "cloudwatch-plugin-otel" ]; then
     plugin_whls=(dist/cloudwatch_plugin_otel-*-py3-none-any.whl)
     if [ ! -f "${plugin_whls[0]}" ]; then
       echo "Could not find cloudwatch_plugin_otel whl file in dist dir."
