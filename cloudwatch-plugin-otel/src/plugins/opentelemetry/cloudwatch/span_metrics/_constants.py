@@ -4,7 +4,7 @@ from typing import Final
 
 
 class _SpanMetrics:
-    SCOPE_NAME: Final = "otel.span.metrics"
+    SCOPE_NAME: Final = "cloudwatch.plugin.otel.span-metrics"
 
     CALLS_NAME: Final = "traces.span.metrics.calls"
     DURATION_NAME: Final = "traces.span.metrics.duration"
