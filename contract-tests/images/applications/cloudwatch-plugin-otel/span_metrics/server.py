@@ -22,6 +22,15 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.trace.sampling import ALWAYS_OFF, ALWAYS_ON
+from opentelemetry.semconv._incubating.attributes.db_attributes import DB_OPERATION, DB_SQL_TABLE, DB_SYSTEM
+from opentelemetry.semconv._incubating.attributes.messaging_attributes import (
+    MESSAGING_DESTINATION_NAME,
+    MESSAGING_OPERATION_NAME,
+    MESSAGING_OPERATION_TYPE,
+    MESSAGING_SYSTEM,
+)
+from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
+from opentelemetry.semconv.attributes.service_attributes import SERVICE_NAME
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
 _MODE = os.environ.get("SPAN_METRICS_MODE", "auto")
@@ -33,7 +42,7 @@ _TOPIC_ARN = "arn:aws:sns:us-east-1:123456789012:orders"
 
 
 def _configure_manual_instrumentation():
-    resource = Resource.create({"service.name": _SERVICE_NAME})
+    resource = Resource.create({SERVICE_NAME: _SERVICE_NAME})
     sampler = ALWAYS_OFF if os.environ.get("OTEL_TRACES_SAMPLER") == "always_off" else ALWAYS_ON
 
     tracer_provider = TracerProvider(resource=resource, sampler=sampler)
@@ -122,9 +131,9 @@ def exercise():
         "SELECT users",
         kind=SpanKind.CLIENT,
         attributes={
-            "db.system": "sqlite",
-            "db.operation": "SELECT",
-            "db.sql.table": "users",
+            DB_SYSTEM: "sqlite",
+            DB_OPERATION: "SELECT",
+            DB_SQL_TABLE: "users",
         },
     ):
         pass
@@ -145,10 +154,10 @@ def exercise():
         "orders receive",
         kind=SpanKind.CONSUMER,
         attributes={
-            "messaging.system": "contract-broker",
-            "messaging.operation.name": "receive",
-            "messaging.operation.type": "receive",
-            "messaging.destination.name": "orders",
+            MESSAGING_SYSTEM: "contract-broker",
+            MESSAGING_OPERATION_NAME: "receive",
+            MESSAGING_OPERATION_TYPE: "receive",
+            MESSAGING_DESTINATION_NAME: "orders",
         },
     ):
         pass
@@ -159,7 +168,7 @@ def exercise():
 @app.get("/error")
 def error():
     span = trace.get_current_span()
-    span.set_attribute("error.type", "RuntimeError")
+    span.set_attribute(ERROR_TYPE, "RuntimeError")
     span.set_status(Status(StatusCode.ERROR))
     raise RuntimeError("expected contract-test error")
 
