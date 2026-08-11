@@ -614,12 +614,10 @@ class TestSpanMetricsConnectorMessaging(SpanMetricsConnectorTestBase):
 
         span = self.get_finished_spans().by_name("SQS.SendMessage")
         self.assertEqual(span.kind, SpanKind.CLIENT)
-        # The SQS extension emits the legacy messaging.destination attribute...
         self.assertEqual(span.attributes[SpanAttributes.MESSAGING_DESTINATION], "orders")
 
         calls, _ = self.assert_span_metrics("SQS.SendMessage", span_kind="CLIENT", status_code="UNSET")
         self.assertEqual(calls.attributes[MESSAGING_SYSTEM], "aws.sqs")
-        # ...which the connector normalizes to the canonical messaging.destination.name.
         self.assertEqual(calls.attributes[MESSAGING_DESTINATION_NAME], "orders")
         self.assertNotIn(SpanAttributes.MESSAGING_DESTINATION, calls.attributes)
         self.assertEqual(calls.attributes[RPC_SYSTEM_NAME], "aws-api")
@@ -663,11 +661,9 @@ class TestSpanMetricsConnectorSqlAlchemy(SpanMetricsConnectorTestBase):
 
         span = self.get_finished_spans().by_name("SELECT :memory:")
         self.assertEqual(span.kind, SpanKind.CLIENT)
-        # SQLAlchemy emits the legacy db.system / db.operation attributes...
         self.assertEqual(span.attributes[DB_SYSTEM], "sqlite")
 
         calls, _ = self.assert_span_metrics("SELECT :memory:", span_kind="CLIENT", status_code="UNSET")
-        # ...which the connector normalizes to db.system.name / db.operation.name.
         self.assertEqual(calls.attributes[DB_SYSTEM_NAME], "sqlite")
         self.assertEqual(calls.attributes[DB_OPERATION_NAME], "SELECT :memory:")
         self.assertNotIn(DB_SYSTEM, calls.attributes)

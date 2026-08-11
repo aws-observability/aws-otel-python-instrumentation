@@ -213,11 +213,6 @@ jobs:
           os: ubuntu-latest
           wheel_path: ${{ steps.wheel.outputs.path }}
 
-  # Unit tests for the standalone cloudwatch-plugin-otel package. Structured like
-  # OpenTelemetry's contrib instrumentation tests: one job per (Python version, OTel
-  # pin) pair so the oldest- and latest-supported OTel runs are independent, each
-  # executing a single tox env. The job key stays singular so the all-pr-checks-pass
-  # gate needs only one entry.
   cloudwatch-plugin-otel-unit-tests:
     name: cloudwatch-plugin-otel-${{ matrix.otel }} ${{ matrix.python-version }} Ubuntu
     runs-on: ubuntu-latest
