@@ -240,6 +240,7 @@ jobs:
           tox -c cloudwatch-plugin-otel/tox.ini -e "${PY_NODOT}-test-cloudwatch-plugin-otel-${{ matrix.otel }}" -- -ra
 
   cloudwatch-plugin-otel-contract-tests:
+    needs: build-wheel
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -253,6 +254,12 @@ jobs:
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c #v6.0.0
         with:
           python-version: "3.12"
+
+      - name: Download distro wheel
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
+        with:
+          name: distro-wheel
+          path: dist
 
       - name: Build cloudwatch-plugin-otel wheel
         run: |
