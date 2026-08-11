@@ -1,0 +1,6 @@
+[project]
+name = "cloudwatch-span-metrics-server"
+description = "Contract-test application for the CloudWatch OpenTelemetry span metrics plugin"
+version = "1.0.0"
+license = "Apache-2.0"
+requires-python = ">=3.10"

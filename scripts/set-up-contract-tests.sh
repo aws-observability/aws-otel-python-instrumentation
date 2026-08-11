@@ -56,14 +56,6 @@ fi
 docker buildx build contract-tests/images/mock-collector --load \
   -t aws-application-signals-mock-collector-python "${mock_cache[@]}"
 
-# Find and store aws_opentelemetry_distro whl file
-distro_whls=(dist/aws_opentelemetry_distro-*-py3-none-any.whl)
-if [ ! -f "${distro_whls[0]}" ]; then
-  echo "Could not find aws_opentelemetry_distro whl file in dist dir."
-  exit 1
-fi
-DISTRO="$(basename "${distro_whls[0]}")"
-
 # Create application images
 for app in "${APPS[@]}"; do
   dockerfile="contract-tests/images/applications/${app}/Dockerfile"
@@ -73,7 +65,21 @@ for app in "${APPS[@]}"; do
     exit 1
   fi
 
-  build_args=(--build-arg "DISTRO=${DISTRO}")
+  if [ "$app" = "cloudwatch-span-metrics" ]; then
+    plugin_whls=(dist/cloudwatch_plugin_otel-*-py3-none-any.whl)
+    if [ ! -f "${plugin_whls[0]}" ]; then
+      echo "Could not find cloudwatch_plugin_otel whl file in dist dir."
+      exit 1
+    fi
+    build_args=(--build-arg "PLUGIN=$(basename "${plugin_whls[0]}")")
+  else
+    distro_whls=(dist/aws_opentelemetry_distro-*-py3-none-any.whl)
+    if [ ! -f "${distro_whls[0]}" ]; then
+      echo "Could not find aws_opentelemetry_distro whl file in dist dir."
+      exit 1
+    fi
+    build_args=(--build-arg "DISTRO=$(basename "${distro_whls[0]}")")
+  fi
   [ -n "$PYTHON_VERSION" ] && build_args+=(--build-arg "PYTHON_VERSION=${PYTHON_VERSION}")
 
   cache=()
