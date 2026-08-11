@@ -6,4 +6,5 @@ opentelemetry-test-utils==0.63b0
 opentelemetry-instrumentation-botocore==0.63b0
 opentelemetry-instrumentation-flask==0.63b0
 opentelemetry-instrumentation-requests==0.63b0
+opentelemetry-instrumentation-sqlalchemy==0.63b0
 opentelemetry-instrumentation-sqlite3==0.63b0

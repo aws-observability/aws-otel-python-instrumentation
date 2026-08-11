@@ -12,10 +12,12 @@ from flask import Flask
 from plugins.opentelemetry.cloudwatch.span_metrics._constants import _SpanMetrics
 from plugins.opentelemetry.cloudwatch.span_metrics.connector import SpanMetricsConnector
 from plugins.opentelemetry.cloudwatch.version import __version__
+from sqlalchemy import create_engine, text
 
 from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
 from opentelemetry.instrumentation.flask import FlaskInstrumentor
 from opentelemetry.instrumentation.requests import RequestsInstrumentor
+from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.instrumentation.sqlite3 import SQLite3Instrumentor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.semconv._incubating.attributes.db_attributes import (
@@ -585,3 +587,101 @@ class TestSpanMetricsConnectorRpc(SpanMetricsConnectorTestBase):
         self.assertEqual(calls.attributes[_SpanMetrics.STATUS_CODE], "ERROR")
         self.assertEqual(calls.attributes[RPC_SERVICE], "S3")
         self.assertEqual(calls.attributes[RPC_METHOD], "ListBuckets")
+
+
+class TestSpanMetricsConnectorMessaging(SpanMetricsConnectorTestBase):
+    QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/123456789012/orders"
+
+    def setUp(self):
+        super().setUp()
+        BotocoreInstrumentor().instrument(tracer_provider=self.tracer_provider)
+        self.client = botocore.session.get_session().create_client(
+            "sqs",
+            region_name="us-east-1",
+            aws_access_key_id="testing",
+            aws_secret_access_key="testing",
+        )
+
+    def tearDown(self):
+        BotocoreInstrumentor().uninstrument()
+        super().tearDown()
+
+    def test_send_message_records_messaging_attributes(self):
+        stubber = Stubber(self.client)
+        stubber.add_response("send_message", {"MessageId": "msg-1", "MD5OfMessageBody": "abc"})
+        with stubber:
+            self.client.send_message(QueueUrl=self.QUEUE_URL, MessageBody="hello")
+
+        span = self.get_finished_spans().by_name("SQS.SendMessage")
+        self.assertEqual(span.kind, SpanKind.CLIENT)
+        # The SQS extension emits the legacy messaging.destination attribute...
+        self.assertEqual(span.attributes[SpanAttributes.MESSAGING_DESTINATION], "orders")
+
+        calls, _ = self.assert_span_metrics("SQS.SendMessage", span_kind="CLIENT", status_code="UNSET")
+        self.assertEqual(calls.attributes[MESSAGING_SYSTEM], "aws.sqs")
+        # ...which the connector normalizes to the canonical messaging.destination.name.
+        self.assertEqual(calls.attributes[MESSAGING_DESTINATION_NAME], "orders")
+        self.assertNotIn(SpanAttributes.MESSAGING_DESTINATION, calls.attributes)
+        self.assertEqual(calls.attributes[RPC_SYSTEM_NAME], "aws-api")
+        self.assertEqual(calls.attributes[RPC_SERVICE], "SQS")
+        self.assertEqual(calls.attributes[RPC_METHOD], "SendMessage")
+
+    def test_send_message_error_marks_status_error(self):
+        stubber = Stubber(self.client)
+        stubber.add_client_error(
+            "send_message",
+            service_error_code="AWS.SimpleQueueService.NonExistentQueue",
+            http_status_code=400,
+        )
+        with stubber:
+            with self.assertRaises(ClientError):
+                self.client.send_message(QueueUrl=self.QUEUE_URL, MessageBody="hello")
+
+        calls = self.get_metric_data_point(_SpanMetrics.CALLS_NAME, "SQS.SendMessage")
+        self.assertEqual(calls.attributes[_SpanMetrics.STATUS_CODE], "ERROR")
+        self.assertEqual(calls.attributes[MESSAGING_SYSTEM], "aws.sqs")
+        self.assertEqual(calls.attributes[MESSAGING_DESTINATION_NAME], "orders")
+
+
+class TestSpanMetricsConnectorSqlAlchemy(SpanMetricsConnectorTestBase):
+    def setUp(self):
+        super().setUp()
+        self.engine = create_engine("sqlite+pysqlite:///:memory:")
+        SQLAlchemyInstrumentor().instrument(engine=self.engine, tracer_provider=self.tracer_provider)
+        self.connection = self.engine.connect()
+        self.connection.execute(text("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"))
+        self.memory_exporter.clear()
+
+    def tearDown(self):
+        self.connection.close()
+        SQLAlchemyInstrumentor().uninstrument()
+        self.engine.dispose()
+        super().tearDown()
+
+    def test_select_records_db_attributes(self):
+        self.connection.execute(text("SELECT name FROM users WHERE id = 1")).fetchall()
+
+        span = self.get_finished_spans().by_name("SELECT :memory:")
+        self.assertEqual(span.kind, SpanKind.CLIENT)
+        # SQLAlchemy emits the legacy db.system / db.operation attributes...
+        self.assertEqual(span.attributes[DB_SYSTEM], "sqlite")
+
+        calls, _ = self.assert_span_metrics("SELECT :memory:", span_kind="CLIENT", status_code="UNSET")
+        # ...which the connector normalizes to db.system.name / db.operation.name.
+        self.assertEqual(calls.attributes[DB_SYSTEM_NAME], "sqlite")
+        self.assertEqual(calls.attributes[DB_OPERATION_NAME], "SELECT :memory:")
+        self.assertNotIn(DB_SYSTEM, calls.attributes)
+        self.assertNotIn(DB_OPERATION, calls.attributes)
+
+    def test_operations_recorded_under_distinct_span_names(self):
+        self.connection.execute(text("INSERT INTO users (name) VALUES ('alice')"))
+        self.connection.execute(text("SELECT name FROM users")).fetchall()
+
+        insert = self.get_metric_data_point(_SpanMetrics.CALLS_NAME, "INSERT :memory:")
+        select = self.get_metric_data_point(_SpanMetrics.CALLS_NAME, "SELECT :memory:")
+        self.assertEqual(insert.value, 1)
+        self.assertEqual(select.value, 1)
+        self.assertEqual(insert.attributes[DB_SYSTEM_NAME], "sqlite")
+        self.assertEqual(select.attributes[DB_SYSTEM_NAME], "sqlite")
+        self.assertEqual(insert.attributes[DB_OPERATION_NAME], "INSERT :memory:")
+        self.assertEqual(select.attributes[DB_OPERATION_NAME], "SELECT :memory:")

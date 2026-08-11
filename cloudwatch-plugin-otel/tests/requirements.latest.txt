@@ -6,4 +6,5 @@ opentelemetry-test-utils
 opentelemetry-instrumentation-botocore
 opentelemetry-instrumentation-flask
 opentelemetry-instrumentation-requests
+opentelemetry-instrumentation-sqlalchemy
 opentelemetry-instrumentation-sqlite3
