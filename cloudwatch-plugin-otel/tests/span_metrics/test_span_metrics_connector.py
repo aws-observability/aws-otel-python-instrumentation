@@ -370,16 +370,24 @@ class TestSpanMetricsConnector(SpanMetricsConnectorTestBase):
         self.assertTrue(self.processor.force_flush())
 
     def test_shutdown_disables_recording(self):
-        self.assertTrue(self.processor.enabled)
+        tracer = self.tracer_provider.get_tracer(__name__)
+        with tracer.start_as_current_span("before_shutdown"):
+            pass
+        self.assertEqual(self.get_metric_data_point(_SpanMetrics.CALLS_NAME, "before_shutdown").value, 1)
 
         self.processor.shutdown()
 
-        self.assertFalse(self.processor.enabled)
-        tracer = self.tracer_provider.get_tracer(__name__)
         with tracer.start_as_current_span("after_shutdown"):
             pass
 
-        self.assertEqual(self.get_sorted_metrics(), [])
+        after_points = [
+            point
+            for metric in self.get_sorted_metrics()
+            if metric.name == _SpanMetrics.CALLS_NAME
+            for point in metric.data.data_points
+            if point.attributes.get(_SpanMetrics.SPAN_NAME) == "after_shutdown"
+        ]
+        self.assertEqual(after_points, [])
         span = self.get_finished_spans().by_name("after_shutdown")
         self.assertNotIn(_SpanMetrics.SCHEMA, span.attributes or {})
 

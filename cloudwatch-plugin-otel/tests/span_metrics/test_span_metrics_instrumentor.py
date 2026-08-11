@@ -2,9 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import time
 
-from plugins.opentelemetry.cloudwatch.sampler.always_record_sampler import AlwaysRecordSampler
 from plugins.opentelemetry.cloudwatch.span_metrics._constants import _SpanMetrics
-from plugins.opentelemetry.cloudwatch.span_metrics.connector import SpanMetricsConnector
 from plugins.opentelemetry.cloudwatch.span_metrics.instrumentor import SpanMetricsInstrumentor
 
 from opentelemetry.sdk.trace import TracerProvider
@@ -63,50 +61,63 @@ class TestSpanMetricsInstrumentor(TestBase):
         proxy = ProxyTracerProvider()
         self.assertFalse(hasattr(proxy, "add_span_processor"))
 
-        self.instrumentor.instrument(tracer_provider=proxy)
-        self.assertIsNone(self.instrumentor._processor)
+        self.instrumentor.instrument(tracer_provider=proxy, meter_provider=self.meter_provider)
+
+        with proxy.get_tracer(__name__).start_as_current_span("proxied"):
+            pass
+
+        self.assertEqual(self.get_sorted_metrics(), [])
 
     def test_instrumentation_dependencies_gate_the_sdk(self):
         deps = SpanMetricsInstrumentor().instrumentation_dependencies()
         self.assertTrue(any("opentelemetry-sdk" in dep for dep in deps))
 
-    def test_uninstrument_shuts_down_processor(self):
-        shutdown_calls = []
-
-        class _SpyProcessor(SpanMetricsConnector):
-            def shutdown(self):
-                shutdown_calls.append(True)
-                super().shutdown()
-
+    def test_uninstrument_stops_deriving_metrics(self):
         self.instrumentor.instrument(tracer_provider=self.tracer_provider)
-        self.instrumentor._processor = _SpyProcessor(meter_provider=self.meter_provider)
+
+        self._record_span("before_uninstrument")
+        self.assertEqual(self._metric_point(_SpanMetrics.CALLS_NAME, "before_uninstrument").value, 1)
 
         self.instrumentor.uninstrument()
 
-        self.assertEqual(shutdown_calls, [True])
-        self.assertFalse(self.instrumentor._processor.enabled)
+        self._record_span("after_uninstrument")
+        after_points = [
+            point
+            for metric in self.get_sorted_metrics()
+            if metric.name == _SpanMetrics.CALLS_NAME
+            for point in metric.data.data_points
+            if point.attributes.get(_SpanMetrics.SPAN_NAME) == "after_uninstrument"
+        ]
+        self.assertEqual(after_points, [])
 
     def test_uninstrument_safe_when_never_instrumented(self):
-        self.assertIsNone(self.instrumentor._processor)
+        original_sampler = self.tracer_provider.sampler
+
         self.instrumentor.uninstrument()
+
+        self.assertIs(self.tracer_provider.sampler, original_sampler)
+        self._record_span("never_instrumented")
+        self.assertEqual(self.get_sorted_metrics(), [])
 
     def test_double_instrument_registers_once(self):
         self.instrumentor.instrument(tracer_provider=self.tracer_provider)
-        first = self.instrumentor._processor
         self.instrumentor.instrument(tracer_provider=self.tracer_provider)
-        self.assertIs(self.instrumentor._processor, first)
 
         self._record_span("once")
         self.assertEqual(self._metric_point(_SpanMetrics.CALLS_NAME, "once").value, 1)
+        self.assertEqual(self._metric_point(_SpanMetrics.DURATION_NAME, "once").count, 1)
 
-    def test_instrument_wraps_provider_sampler_with_always_record(self):
-        original_sampler = self.tracer_provider.sampler
-        self.assertNotIsInstance(original_sampler, AlwaysRecordSampler)
+    def test_instrument_wraps_provider_sampler_to_record_dropped_spans(self):
+        tracer_provider = TracerProvider(sampler=ALWAYS_OFF)
+        self.assertFalse(tracer_provider.get_tracer("baseline").start_span("dropped").is_recording())
 
-        self.instrumentor.instrument(tracer_provider=self.tracer_provider)
+        self.instrumentor.instrument(tracer_provider=tracer_provider, meter_provider=self.meter_provider)
 
-        self.assertIsInstance(self.tracer_provider.sampler, AlwaysRecordSampler)
-        self.assertIs(self.tracer_provider.sampler._root_sampler, original_sampler)
+        tracer = tracer_provider.get_tracer("instrumented")
+        self.assertTrue(tracer.start_span("after_instrument").is_recording())
+        with tracer.start_as_current_span("wrapped"):
+            pass
+        self.assertEqual(self._metric_point(_SpanMetrics.CALLS_NAME, "wrapped").value, 1)
 
     def test_uninstrument_restores_original_sampler(self):
         original_sampler = self.tracer_provider.sampler
@@ -119,38 +130,33 @@ class TestSpanMetricsInstrumentor(TestBase):
     def test_uninstrument_disables_sampler_held_by_cached_tracers(self):
         tracer_provider = TracerProvider(sampler=ALWAYS_OFF)
         self.instrumentor.instrument(tracer_provider=tracer_provider, meter_provider=self.meter_provider)
-        installed_sampler = tracer_provider.sampler
         cached_tracer = tracer_provider.get_tracer(__name__)
 
+        self.assertTrue(cached_tracer.start_span("before_uninstrument").is_recording())
         with cached_tracer.start_as_current_span("before_uninstrument"):
             pass
         self.assertEqual(self._metric_point(_SpanMetrics.CALLS_NAME, "before_uninstrument").value, 1)
 
         self.instrumentor.uninstrument()
 
-        self.assertFalse(installed_sampler.enabled)
-        self.assertIs(cached_tracer.sampler, installed_sampler)
         self.assertFalse(cached_tracer.start_span("after_uninstrument").is_recording())
 
     def test_reinstrument_after_uninstrument_derives_metrics_again(self):
         tracer_provider = TracerProvider(sampler=ALWAYS_OFF)
-        original_sampler = tracer_provider.sampler
 
         self.instrumentor.instrument(tracer_provider=tracer_provider, meter_provider=self.meter_provider)
-        with tracer_provider.get_tracer(__name__).start_as_current_span("first_cycle"):
+        tracer = tracer_provider.get_tracer(__name__)
+        with tracer.start_as_current_span("first_cycle"):
             pass
         self.assertEqual(self._metric_point(_SpanMetrics.CALLS_NAME, "first_cycle").value, 1)
 
         self.instrumentor.uninstrument()
-        self.assertIs(tracer_provider.sampler, original_sampler)
+        self.assertFalse(tracer.start_span("between_cycles").is_recording())
 
         self.instrumentor.instrument(tracer_provider=tracer_provider, meter_provider=self.meter_provider)
 
-        self.assertIsInstance(tracer_provider.sampler, AlwaysRecordSampler)
-        self.assertTrue(tracer_provider.sampler.enabled)
-        self.assertIs(tracer_provider.sampler._root_sampler, original_sampler)
-
-        with tracer_provider.get_tracer(__name__).start_as_current_span("second_cycle"):
+        self.assertTrue(tracer.start_span("after_reinstrument").is_recording())
+        with tracer.start_as_current_span("second_cycle"):
             pass
         self.assertEqual(self._metric_point(_SpanMetrics.CALLS_NAME, "second_cycle").value, 1)
         self.assertEqual(self._metric_point(_SpanMetrics.CALLS_NAME, "first_cycle").value, 1)
@@ -179,13 +185,18 @@ class TestSpanMetricsInstrumentor(TestBase):
         self.assertEqual(result.decision, Decision.RECORD_ONLY)
 
     def test_double_instrument_does_not_double_wrap_sampler(self):
-        self.instrumentor.instrument(tracer_provider=self.tracer_provider)
-        wrapped = self.tracer_provider.sampler
+        tracer_provider = TracerProvider(sampler=ALWAYS_OFF)
 
-        self.instrumentor.instrument(tracer_provider=self.tracer_provider)
+        self.instrumentor.instrument(tracer_provider=tracer_provider, meter_provider=self.meter_provider)
+        self.instrumentor.instrument(tracer_provider=tracer_provider, meter_provider=self.meter_provider)
 
-        self.assertIs(self.tracer_provider.sampler, wrapped)
-        self.assertNotIsInstance(wrapped._root_sampler, AlwaysRecordSampler)
+        tracer = tracer_provider.get_tracer(__name__)
+        with tracer.start_as_current_span("double_wrapped"):
+            pass
+        self.assertEqual(self._metric_point(_SpanMetrics.CALLS_NAME, "double_wrapped").value, 1)
+
+        self.instrumentor.uninstrument()
+        self.assertFalse(tracer.start_span("after_uninstrument").is_recording())
 
     def test_dropped_spans_derive_metrics_with_measured_duration(self):
         tracer_provider = TracerProvider(sampler=ALWAYS_OFF)
