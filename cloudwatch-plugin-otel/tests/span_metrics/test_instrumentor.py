@@ -28,13 +28,6 @@ class TestSpanMetricsInstrumentor(TestBase):
         self.instrumentor.uninstrument()
         super().tearDown()
 
-    def _record_span(self, name, tracer_provider=None, sleep_seconds=0.0):
-        tracer = (tracer_provider or self.tracer_provider).get_tracer(__name__)
-        with tracer.start_as_current_span(name) as span:
-            if sleep_seconds:
-                time.sleep(sleep_seconds)
-            return span
-
     def test_instrument_registers_processor_and_derives_metrics(self):
         self.instrumentor.instrument(tracer_provider=self.tracer_provider)
 
@@ -245,6 +238,13 @@ class TestSpanMetricsInstrumentor(TestBase):
         self.assertFalse(self._record_span("dropped", tracer_provider=tracer_provider).is_recording())
         self.assertEqual(self._metric_point(_SpanMetrics.CALLS_NAME, "dropped").value, 1)
 
+    def _record_span(self, name, tracer_provider=None, sleep_seconds=0.0):
+        tracer = (tracer_provider or self.tracer_provider).get_tracer(__name__)
+        with tracer.start_as_current_span(name) as span:
+            if sleep_seconds:
+                time.sleep(sleep_seconds)
+            return span
+
     def _metric_point(self, metric_name, span_name):
         point = None
         for metric in self.get_sorted_metrics():
@@ -269,26 +269,6 @@ class TestSpanMetricsAutoInstrumentation(TestBase):
     def tearDown(self):
         SpanMetricsInstrumentor().uninstrument()
         super().tearDown()
-
-    def _run_auto_instrumentation(self):
-        entry_point = EntryPoint(self._ENTRY_POINT_NAME, self._ENTRY_POINT_VALUE, "opentelemetry_instrumentor")
-
-        def only_span_metrics(group):
-            return (entry_point,) if group == "opentelemetry_instrumentor" else ()
-
-        with patch.object(_load, "entry_points", side_effect=only_span_metrics), patch.object(
-            _load, "get_dist_dependency_conflicts", return_value=None
-        ):
-            _load._load_instrumentors(DefaultDistro())
-
-    def _calls_for(self, span_name):
-        return [
-            point
-            for metric in self.get_sorted_metrics()
-            if metric.name == _SpanMetrics.CALLS_NAME
-            for point in metric.data.data_points
-            if point.attributes.get(_SpanMetrics.SPAN_NAME) == span_name
-        ]
 
     def test_entry_point_registered_for_auto_instrumentation(self):
         matches = [ep for ep in entry_points(group="opentelemetry_instrumentor") if ep.name == self._ENTRY_POINT_NAME]
@@ -322,3 +302,23 @@ class TestSpanMetricsAutoInstrumentation(TestBase):
             pass
 
         self.assertEqual(self._calls_for("auto_span"), [])
+
+    def _run_auto_instrumentation(self):
+        entry_point = EntryPoint(self._ENTRY_POINT_NAME, self._ENTRY_POINT_VALUE, "opentelemetry_instrumentor")
+
+        def only_span_metrics(group):
+            return (entry_point,) if group == "opentelemetry_instrumentor" else ()
+
+        with patch.object(_load, "entry_points", side_effect=only_span_metrics), patch.object(
+            _load, "get_dist_dependency_conflicts", return_value=None
+        ):
+            _load._load_instrumentors(DefaultDistro())
+
+    def _calls_for(self, span_name):
+        return [
+            point
+            for metric in self.get_sorted_metrics()
+            if metric.name == _SpanMetrics.CALLS_NAME
+            for point in metric.data.data_points
+            if point.attributes.get(_SpanMetrics.SPAN_NAME) == span_name
+        ]
