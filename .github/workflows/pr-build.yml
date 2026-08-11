@@ -213,6 +213,37 @@ jobs:
           os: ubuntu-latest
           wheel_path: ${{ steps.wheel.outputs.path }}
 
+  # Unit tests for the standalone cloudwatch-plugin-otel package. Structured like
+  # OpenTelemetry's contrib instrumentation tests: one job per (Python version, OTel
+  # pin) pair so the oldest- and latest-supported OTel runs are independent, each
+  # executing a single tox env. The job key stays singular so the all-pr-checks-pass
+  # gate needs only one entry.
+  cloudwatch-plugin-otel-unit-tests:
+    name: cloudwatch-plugin-otel-${{ matrix.otel }} ${{ matrix.python-version }} Ubuntu
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        otel: ["oldest", "latest"]
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c #v6.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install tox
+        run: pip install tox==4.30.3
+
+      - name: Run tests
+        run: |
+          PY_NODOT="py$(echo '${{ matrix.python-version }}' | tr -d '.')"
+          tox -c cloudwatch-plugin-otel/tox.ini -e "${PY_NODOT}-test-cloudwatch-plugin-otel-${{ matrix.otel }}" -- -ra
+
   contract-tests:
     needs: build-wheel
     strategy:
@@ -222,40 +253,6 @@ jobs:
     uses: ./.github/workflows/contract-tests.yml
     with:
       python-version: ${{ matrix.python-version }}
-
-  cloudwatch-plugin-otel-unit-tests:
-    name: cloudwatch-plugin-otel unit tests (py${{ matrix.python-version }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false # ensures the entire test matrix is run, even if one permutation fails
-      matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-    steps:
-      - name: Checkout Repo @ SHA - ${{ github.sha }}
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
-
-      - name: Set up Python
-        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c #v6.0.0
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install tox
-        run: pip install tox==4.30.3
-
-      - name: Run unit tests against oldest and latest supported OTel
-        run: |
-          PY_NODOT="py$(echo '${{ matrix.python-version }}' | tr -d '.')"
-          TOX_CONFIG=cloudwatch-plugin-otel/tox.ini
-          # Run both the -oldest and -latest OTel pins for this Python version.
-          # We intend for new or unrecognized Python versions to fail rather than
-          # be silently skipped, so exit non-zero when no envs match.
-          ENVS=$(tox -c "$TOX_CONFIG" list -q | grep "^${PY_NODOT}-test-cloudwatch-plugin-otel-" | sed 's/ .*//' | tr '\n' ',' | sed 's/,$//')
-          if [ -z "$ENVS" ]; then
-            echo "No tox envs found for ${PY_NODOT}; is Python ${{ matrix.python-version }} wired into $TOX_CONFIG?"
-            exit 1
-          fi
-          echo "Running tox envs: $ENVS"
-          tox -c "$TOX_CONFIG" --parallel auto --parallel-live -e "$ENVS" -- -v
 
   lint:
     runs-on: ubuntu-latest
