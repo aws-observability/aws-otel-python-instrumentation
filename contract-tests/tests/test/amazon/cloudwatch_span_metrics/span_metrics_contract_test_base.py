@@ -200,7 +200,9 @@ class SpanMetricsContractTestBase(TestCase):
                 self.assertTrue(all(metric.scope_metrics.scope.version for metric in plugin_metrics))
                 return plugin_metrics
             time.sleep(0.1)
-        self.fail(f"No calls point matched {required_attributes}; found {len(plugin_metrics)} plugin metrics")
+        raise AssertionError(
+            f"No calls point matched {required_attributes}; found {len(plugin_metrics)} plugin metrics"
+        )
 
     def _assert_http_server(
         self,

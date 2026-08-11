@@ -3,10 +3,10 @@
 import os
 
 import boto3
-import requests
 from botocore.stub import Stubber
 from flask import Flask
 from plugins.opentelemetry.cloudwatch.span_metrics.instrumentor import SpanMetricsInstrumentor
+from requests import get
 from sqlalchemy import create_engine, text
 
 from opentelemetry import metrics, trace
@@ -112,7 +112,7 @@ def exercise():
     with _tracer.start_as_current_span("internal-work"):
         pass
 
-    response = requests.get("http://127.0.0.1:8080/downstream", timeout=5)
+    response = get("http://127.0.0.1:8080/downstream", timeout=5)
     response.raise_for_status()
 
     with _engine.connect() as connection:
