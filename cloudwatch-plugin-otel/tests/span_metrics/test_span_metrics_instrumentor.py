@@ -1,5 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import time
+
 from plugins.opentelemetry.cloudwatch.sampler.always_record_sampler import AlwaysRecordSampler
 from plugins.opentelemetry.cloudwatch.span_metrics._constants import _SpanMetrics
 from plugins.opentelemetry.cloudwatch.span_metrics.connector import SpanMetricsConnector
@@ -23,10 +25,12 @@ class TestSpanMetricsInstrumentor(TestBase):
         self.instrumentor.uninstrument()
         super().tearDown()
 
-    def _record_span(self, name):
-        tracer = self.tracer_provider.get_tracer(__name__)
-        with tracer.start_as_current_span(name):
-            pass
+    def _record_span(self, name, tracer_provider=None, sleep_seconds=0.0):
+        tracer = (tracer_provider or self.tracer_provider).get_tracer(__name__)
+        with tracer.start_as_current_span(name) as span:
+            if sleep_seconds:
+                time.sleep(sleep_seconds)
+            return span
 
     def test_instrument_registers_processor_and_derives_metrics(self):
         self.instrumentor.instrument(tracer_provider=self.tracer_provider)
@@ -182,6 +186,48 @@ class TestSpanMetricsInstrumentor(TestBase):
 
         self.assertIs(self.tracer_provider.sampler, wrapped)
         self.assertNotIsInstance(wrapped._root_sampler, AlwaysRecordSampler)
+
+    def test_dropped_spans_derive_metrics_with_measured_duration(self):
+        tracer_provider = TracerProvider(sampler=ALWAYS_OFF)
+        exporter = InMemorySpanExporter()
+        tracer_provider.add_span_processor(SimpleSpanProcessor(exporter))
+        self.instrumentor.instrument(tracer_provider=tracer_provider, meter_provider=self.meter_provider)
+
+        sleep_seconds = 0.01
+        started = time.perf_counter()
+        for _ in range(4):
+            span = self._record_span("dropped", tracer_provider=tracer_provider, sleep_seconds=sleep_seconds)
+            self.assertFalse(span.is_recording())
+        expected_seconds = time.perf_counter() - started
+
+        calls = self._metric_point(_SpanMetrics.CALLS_NAME, "dropped")
+        self.assertEqual(calls.value, 4)
+        self.assertEqual(calls.attributes[_SpanMetrics.SPAN_KIND], "INTERNAL")
+        self.assertEqual(calls.attributes[_SpanMetrics.STATUS_CODE], "UNSET")
+        self.assertEqual(calls.attributes[_SpanMetrics.SCHEMA], _SpanMetrics.SCHEMA_VERSION)
+
+        duration = self._metric_point(_SpanMetrics.DURATION_NAME, "dropped")
+        self.assertEqual(duration.count, 4)
+        self.assertGreaterEqual(duration.min, sleep_seconds)
+        self.assertLess(duration.max, expected_seconds)
+        self.assertLess(duration.sum, expected_seconds)
+        self.assertEqual(dict(duration.attributes), dict(calls.attributes))
+
+        self.assertEqual([s for s in exporter.get_finished_spans() if s.name == "dropped"], [])
+
+    def test_dropped_spans_stop_deriving_metrics_after_uninstrument(self):
+        tracer_provider = TracerProvider(sampler=ALWAYS_OFF)
+        original_sampler = tracer_provider.sampler
+        self.instrumentor.instrument(tracer_provider=tracer_provider, meter_provider=self.meter_provider)
+
+        self.assertFalse(self._record_span("dropped", tracer_provider=tracer_provider).is_recording())
+        self.assertEqual(self._metric_point(_SpanMetrics.CALLS_NAME, "dropped").value, 1)
+
+        self.instrumentor.uninstrument()
+        self.assertIs(tracer_provider.sampler, original_sampler)
+
+        self.assertFalse(self._record_span("dropped", tracer_provider=tracer_provider).is_recording())
+        self.assertEqual(self._metric_point(_SpanMetrics.CALLS_NAME, "dropped").value, 1)
 
     def _metric_point(self, metric_name, span_name):
         point = None
