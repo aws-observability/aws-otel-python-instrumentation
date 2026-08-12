@@ -1,8 +1,6 @@
 # cloudwatch-plugin-otel
 
-Amazon CloudWatch plugin for OpenTelemetry. The package derives call-count and
-duration metrics from spans produced by the active OpenTelemetry tracer
-pipeline.
+Amazon CloudWatch plugin for OpenTelemetry.
 
 ## Span metrics
 
@@ -20,7 +18,7 @@ The instrumentor also wraps the active root sampler. A `DROP` decision becomes
 `RECORD_ONLY`, allowing the span processor to derive metrics without changing
 which spans are exported.
 
-## Usage
+### Usage
 
 Installing this package registers `SpanMetricsInstrumentor` as an
 `opentelemetry_instrumentor` entry point. It is loaded automatically when the
