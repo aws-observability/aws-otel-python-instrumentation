@@ -46,7 +46,7 @@ class AttributePropagatingSpanProcessor(SpanProcessor):
 
     @override
     def on_start(self, span: Span, parent_context: Optional[Context] = None) -> None:
-        parent_span: ReadableSpan = get_current_span(parent_context)
+        parent_span: Span = get_current_span(parent_context)
         if isinstance(parent_span, ReadableSpan):
             # Add the AWS_SDK_DESCENDANT attribute to the immediate child spans of AWS SDK span.
             # This attribute helps the backend differentiate between SDK spans and their immediate children.
