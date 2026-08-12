@@ -26,21 +26,18 @@ from opentelemetry.sdk.environment_variables import (
     OTEL_SERVICE_NAME,
     OTEL_TRACES_SAMPLER,
 )
-from opentelemetry.semconv._incubating.attributes.db_attributes import (
-    DB_COLLECTION_NAME,
-    DB_OPERATION_NAME,
-    DB_SYSTEM_NAME,
-)
+from opentelemetry.semconv._incubating.attributes.db_attributes import DB_OPERATION, DB_SQL_TABLE, DB_SYSTEM
+from opentelemetry.semconv._incubating.attributes.http_attributes import HTTP_METHOD, HTTP_STATUS_CODE
 from opentelemetry.semconv._incubating.attributes.messaging_attributes import (
     MESSAGING_DESTINATION_NAME,
     MESSAGING_OPERATION_NAME,
-    MESSAGING_OPERATION_TYPE,
     MESSAGING_SYSTEM,
 )
-from opentelemetry.semconv._incubating.attributes.rpc_attributes import RPC_METHOD, RPC_SERVICE, RPC_SYSTEM_NAME
+from opentelemetry.semconv._incubating.attributes.rpc_attributes import RPC_METHOD, RPC_SERVICE, RPC_SYSTEM
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
-from opentelemetry.semconv.attributes.http_attributes import HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, HTTP_ROUTE
+from opentelemetry.semconv.attributes.http_attributes import HTTP_ROUTE
 from opentelemetry.semconv.attributes.service_attributes import SERVICE_NAME
+from opentelemetry.semconv.trace import SpanAttributes
 from opentelemetry.trace import SpanKind, StatusCode
 
 _logger: Logger = getLogger(__name__)
@@ -119,7 +116,7 @@ class SpanMetricsContractTestBase(TestCase):
         self._assert_http_server(metrics, "/error", StatusCode.ERROR, 500, error_type="RuntimeError")
         self._assert_metric_pair(
             metrics,
-            {"span.name": "GET", "span.kind": SpanKind.CLIENT.name, HTTP_REQUEST_METHOD: "GET"},
+            {"span.name": "GET", "span.kind": SpanKind.CLIENT.name, HTTP_METHOD: "GET"},
         )
         self._assert_metric_pair(metrics, {"span.name": "internal-work", "span.kind": SpanKind.INTERNAL.name})
         self._assert_metric_pair(
@@ -127,9 +124,9 @@ class SpanMetricsContractTestBase(TestCase):
             {
                 "span.name": "SELECT users",
                 "span.kind": SpanKind.CLIENT.name,
-                DB_SYSTEM_NAME: "sqlite",
-                DB_OPERATION_NAME: "SELECT",
-                DB_COLLECTION_NAME: "users",
+                DB_SYSTEM: "sqlite",
+                DB_OPERATION: "SELECT",
+                DB_SQL_TABLE: "users",
             },
         )
         self._assert_metric_pair(
@@ -137,7 +134,7 @@ class SpanMetricsContractTestBase(TestCase):
             {
                 "span.name": "S3.ListBuckets",
                 "span.kind": SpanKind.CLIENT.name,
-                RPC_SYSTEM_NAME: "aws-api",
+                RPC_SYSTEM: "aws-api",
                 RPC_SERVICE: "S3",
                 RPC_METHOD: "ListBuckets",
             },
@@ -148,7 +145,7 @@ class SpanMetricsContractTestBase(TestCase):
                 "span.name": "SQS.SendMessage",
                 "span.kind": SpanKind.CLIENT.name,
                 MESSAGING_SYSTEM: "aws.sqs",
-                MESSAGING_DESTINATION_NAME: "orders",
+                SpanAttributes.MESSAGING_DESTINATION: "orders",
             },
         )
         self._assert_metric_pair(
@@ -166,7 +163,6 @@ class SpanMetricsContractTestBase(TestCase):
                 "span.kind": SpanKind.CONSUMER.name,
                 MESSAGING_SYSTEM: "contract-broker",
                 MESSAGING_OPERATION_NAME: "receive",
-                MESSAGING_OPERATION_TYPE: "receive",
                 MESSAGING_DESTINATION_NAME: "orders",
             },
         )
@@ -210,7 +206,7 @@ class SpanMetricsContractTestBase(TestCase):
                 exact_match=False,
             )
             plugin_metrics = [
-                metric for metric in metrics if metric.scope_metrics.scope.name == "cloudwatch.plugin.otel.span-metrics"
+                metric for metric in metrics if metric.scope_metrics.scope.name == "cloudwatch.plugin.otel.span_metrics"
             ]
             if self._matching_data_points(plugin_metrics, "traces.span.metrics.calls", required_attributes):
                 self.assertTrue(all(metric.scope_metrics.scope.version for metric in plugin_metrics))
@@ -232,8 +228,8 @@ class SpanMetricsContractTestBase(TestCase):
         expected = {
             "span.kind": SpanKind.SERVER.name,
             "status.code": status_code.name,
-            HTTP_REQUEST_METHOD: "GET",
-            HTTP_RESPONSE_STATUS_CODE: response_status_code,
+            HTTP_METHOD: "GET",
+            HTTP_STATUS_CODE: response_status_code,
             HTTP_ROUTE: route,
         }
         if error_type is not None:
