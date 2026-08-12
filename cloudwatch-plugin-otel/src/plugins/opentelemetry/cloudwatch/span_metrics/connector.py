@@ -3,14 +3,7 @@
 import logging
 from typing import Any, Dict, Optional
 
-from plugins.opentelemetry.cloudwatch.span_metrics._constants import _SpanMetrics
-from plugins.opentelemetry.cloudwatch.version import __version__
-from typing_extensions import override
-
-from opentelemetry.context import Context
-from opentelemetry.metrics import Meter, MeterProvider, get_meter
-from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
-from opentelemetry.semconv._incubating.attributes.db_attributes import (
+from plugins.opentelemetry.cloudwatch.span_metrics._constants import (
     DB_CASSANDRA_TABLE,
     DB_COLLECTION_NAME,
     DB_COSMOSDB_CONTAINER,
@@ -20,29 +13,33 @@ from opentelemetry.semconv._incubating.attributes.db_attributes import (
     DB_SQL_TABLE,
     DB_SYSTEM,
     DB_SYSTEM_NAME,
-)
-from opentelemetry.semconv._incubating.attributes.http_attributes import HTTP_METHOD, HTTP_STATUS_CODE
-from opentelemetry.semconv._incubating.attributes.messaging_attributes import (
+    ERROR_TYPE,
+    HTTP_METHOD,
+    HTTP_REQUEST_METHOD,
+    HTTP_RESPONSE_STATUS_CODE,
+    HTTP_ROUTE,
+    HTTP_STATUS_CODE,
+    MESSAGING_DESTINATION,
     MESSAGING_DESTINATION_ANONYMOUS,
     MESSAGING_DESTINATION_NAME,
     MESSAGING_DESTINATION_TEMPORARY,
-    MESSAGING_OPERATION,
     MESSAGING_OPERATION_NAME,
-    MESSAGING_OPERATION_TYPE,
     MESSAGING_SYSTEM,
+    RPC_METHOD,
+    RPC_SERVICE,
+    RPC_SYSTEM,
+    RPC_SYSTEM_NAME,
+    SERVICE_NAME,
+    _SpanMetrics,
 )
-from opentelemetry.semconv._incubating.attributes.rpc_attributes import RPC_METHOD, RPC_SERVICE, RPC_SYSTEM
-from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
-from opentelemetry.semconv.attributes.http_attributes import HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, HTTP_ROUTE
-from opentelemetry.semconv.attributes.service_attributes import SERVICE_NAME
-from opentelemetry.semconv.trace import SpanAttributes
+from plugins.opentelemetry.cloudwatch.version import __version__
+from typing_extensions import override
+
+from opentelemetry.context import Context
+from opentelemetry.metrics import Meter, MeterProvider, get_meter
+from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
 from opentelemetry.trace import SpanKind
 from opentelemetry.trace.status import StatusCode
-
-try:
-    from opentelemetry.semconv._incubating.attributes.rpc_attributes import RPC_SYSTEM_NAME
-except ImportError:
-    RPC_SYSTEM_NAME = "rpc.system.name"
 
 _logger = logging.getLogger(__name__)
 
@@ -146,7 +143,6 @@ class SpanMetricsConnector(SpanProcessor):
         )
         self._copy(attributes, span_attributes, MESSAGING_SYSTEM)
         self._copy(attributes, span_attributes, MESSAGING_OPERATION_NAME)
-        self._copy(attributes, span_attributes, MESSAGING_OPERATION_TYPE, MESSAGING_OPERATION)
 
         if (
             span_attributes.get(MESSAGING_DESTINATION_TEMPORARY) is not True
@@ -156,14 +152,15 @@ class SpanMetricsConnector(SpanProcessor):
                 attributes,
                 span_attributes,
                 MESSAGING_DESTINATION_NAME,
-                SpanAttributes.MESSAGING_DESTINATION,
+                MESSAGING_DESTINATION,
             )
 
         return attributes
 
     @staticmethod
-    def _copy(attributes: Dict[str, Any], span_attributes, key: str, *fallback_keys: str) -> None:
-        for source_key in (key, *fallback_keys):
-            if source_key in span_attributes:
-                attributes[key] = span_attributes[source_key]
+    def _copy(metric_attributes: Dict[str, Any], span_attributes, *keys: str) -> None:
+        """Copies the first attribute found in the span to metrics."""
+        for key in keys:
+            if key in span_attributes:
+                metric_attributes[key] = span_attributes[key]
                 return

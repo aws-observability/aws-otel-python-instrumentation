@@ -36,17 +36,15 @@ from opentelemetry.semconv._incubating.attributes.messaging_attributes import (
     MESSAGING_DESTINATION_ANONYMOUS,
     MESSAGING_DESTINATION_NAME,
     MESSAGING_DESTINATION_TEMPORARY,
-    MESSAGING_OPERATION,
     MESSAGING_OPERATION_NAME,
-    MESSAGING_OPERATION_TYPE,
     MESSAGING_SYSTEM,
 )
-from opentelemetry.semconv._incubating.attributes.rpc_attributes import RPC_METHOD, RPC_SERVICE, RPC_SYSTEM
-
-try:
-    from opentelemetry.semconv._incubating.attributes.rpc_attributes import RPC_SYSTEM_NAME
-except ImportError:
-    RPC_SYSTEM_NAME = "rpc.system.name"
+from opentelemetry.semconv._incubating.attributes.rpc_attributes import (
+    RPC_METHOD,
+    RPC_SERVICE,
+    RPC_SYSTEM,
+    RPC_SYSTEM_NAME,
+)
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.semconv.attributes.http_attributes import HTTP_REQUEST_METHOD, HTTP_RESPONSE_STATUS_CODE, HTTP_ROUTE
 from opentelemetry.semconv.attributes.service_attributes import SERVICE_NAME
@@ -140,7 +138,6 @@ class TestSpanMetricsConnector(SpanMetricsConnectorTestBase):
             DB_COLLECTION_NAME: "users",
             MESSAGING_SYSTEM: "kafka",
             MESSAGING_OPERATION_NAME: "publish",
-            MESSAGING_OPERATION_TYPE: "send",
             MESSAGING_DESTINATION_NAME: "orders",
         }
         calls = self.record_span("all-attrs", kind=SpanKind.CLIENT, attributes=attributes)
@@ -182,13 +179,14 @@ class TestSpanMetricsConnector(SpanMetricsConnectorTestBase):
         self.assertEqual(calls.attributes[MESSAGING_SYSTEM], "kafka")
         self.assertNotIn(MESSAGING_DESTINATION_NAME, calls.attributes)
 
-    def test_legacy_messaging_destination_normalized(self):
+    def test_legacy_messaging_destination_copied_under_own_key(self):
         calls = self.record_span(
             "messaging-legacy-dest",
             kind=SpanKind.PRODUCER,
             attributes={MESSAGING_SYSTEM: "kafka", SpanAttributes.MESSAGING_DESTINATION: "orders"},
         )
-        self.assertEqual(calls.attributes[MESSAGING_DESTINATION_NAME], "orders")
+        self.assertEqual(calls.attributes[SpanAttributes.MESSAGING_DESTINATION], "orders")
+        self.assertNotIn(MESSAGING_DESTINATION_NAME, calls.attributes)
 
     def test_canonical_messaging_destination_takes_precedence_over_legacy(self):
         calls = self.record_span(
@@ -214,48 +212,22 @@ class TestSpanMetricsConnector(SpanMetricsConnectorTestBase):
         )
         self.assertNotIn(MESSAGING_DESTINATION_NAME, calls.attributes)
 
-    def test_legacy_messaging_operation_normalized(self):
+    def test_messaging_operation_name_copied(self):
         calls = self.record_span(
-            "messaging-legacy-op",
+            "messaging-op-name",
             kind=SpanKind.PRODUCER,
-            attributes={MESSAGING_SYSTEM: "kafka", MESSAGING_OPERATION: "publish"},
-        )
-        self.assertEqual(calls.attributes[MESSAGING_OPERATION_TYPE], "publish")
-        self.assertNotIn(MESSAGING_OPERATION_NAME, calls.attributes)
-
-    def test_canonical_messaging_operation_type_takes_precedence_over_legacy(self):
-        calls = self.record_span(
-            "messaging-op-precedence",
-            kind=SpanKind.PRODUCER,
-            attributes={
-                MESSAGING_SYSTEM: "kafka",
-                MESSAGING_OPERATION_TYPE: "send",
-                MESSAGING_OPERATION: "publish",
-            },
-        )
-        self.assertEqual(calls.attributes[MESSAGING_OPERATION_TYPE], "send")
-
-    def test_messaging_operation_name_and_type_are_independent(self):
-        calls = self.record_span(
-            "messaging-op-both",
-            kind=SpanKind.PRODUCER,
-            attributes={
-                MESSAGING_SYSTEM: "kafka",
-                MESSAGING_OPERATION_NAME: "publish",
-                MESSAGING_OPERATION_TYPE: "send",
-            },
+            attributes={MESSAGING_SYSTEM: "kafka", MESSAGING_OPERATION_NAME: "publish"},
         )
         self.assertEqual(calls.attributes[MESSAGING_OPERATION_NAME], "publish")
-        self.assertEqual(calls.attributes[MESSAGING_OPERATION_TYPE], "send")
 
-    def test_legacy_rpc_system_normalized(self):
+    def test_legacy_rpc_system_copied_under_own_key(self):
         calls = self.record_span(
             "rpc-legacy-system",
             kind=SpanKind.CLIENT,
             attributes={RPC_SYSTEM: "grpc", RPC_METHOD: "SayHello"},
         )
-        self.assertEqual(calls.attributes[RPC_SYSTEM_NAME], "grpc")
-        self.assertNotIn(RPC_SYSTEM, calls.attributes)
+        self.assertEqual(calls.attributes[RPC_SYSTEM], "grpc")
+        self.assertNotIn(RPC_SYSTEM_NAME, calls.attributes)
 
     def test_canonical_rpc_system_name_takes_precedence_over_legacy(self):
         calls = self.record_span(
@@ -265,21 +237,23 @@ class TestSpanMetricsConnector(SpanMetricsConnectorTestBase):
         )
         self.assertEqual(calls.attributes[RPC_SYSTEM_NAME], "grpc")
 
-    def test_cassandra_table_normalized(self):
+    def test_cassandra_table_copied_under_own_key(self):
         calls = self.record_span(
             "cassandra-select",
             kind=SpanKind.CLIENT,
             attributes={DB_SYSTEM: "cassandra", DB_CASSANDRA_TABLE: "users"},
         )
-        self.assertEqual(calls.attributes[DB_COLLECTION_NAME], "users")
+        self.assertEqual(calls.attributes[DB_CASSANDRA_TABLE], "users")
+        self.assertNotIn(DB_COLLECTION_NAME, calls.attributes)
 
-    def test_cosmosdb_container_normalized(self):
+    def test_cosmosdb_container_copied_under_own_key(self):
         calls = self.record_span(
             "cosmos-read",
             kind=SpanKind.CLIENT,
             attributes={DB_SYSTEM: "cosmosdb", DB_COSMOSDB_CONTAINER: "users"},
         )
-        self.assertEqual(calls.attributes[DB_COLLECTION_NAME], "users")
+        self.assertEqual(calls.attributes[DB_COSMOSDB_CONTAINER], "users")
+        self.assertNotIn(DB_COLLECTION_NAME, calls.attributes)
 
     def test_db_collection_legacy_precedence_order(self):
         calls = self.record_span(
@@ -292,15 +266,17 @@ class TestSpanMetricsConnector(SpanMetricsConnectorTestBase):
                 DB_COSMOSDB_CONTAINER: "cosmos_container",
             },
         )
-        self.assertEqual(calls.attributes[DB_COLLECTION_NAME], "sql_table")
+        self.assertEqual(calls.attributes[DB_SQL_TABLE], "sql_table")
+        self.assertNotIn(DB_COLLECTION_NAME, calls.attributes)
 
-    def test_mongodb_collection_normalized(self):
+    def test_mongodb_collection_copied_under_own_key(self):
         calls = self.record_span(
             "mongo-find",
             kind=SpanKind.CLIENT,
             attributes={DB_SYSTEM: "mongodb", DB_MONGODB_COLLECTION: "users"},
         )
-        self.assertEqual(calls.attributes[DB_COLLECTION_NAME], "users")
+        self.assertEqual(calls.attributes[DB_MONGODB_COLLECTION], "users")
+        self.assertNotIn(DB_COLLECTION_NAME, calls.attributes)
 
     def test_absent_attributes_not_copied(self):
         calls = self.record_span("bare", kind=SpanKind.INTERNAL)
@@ -440,8 +416,8 @@ class TestSpanMetricsConnectorHttpClient(SpanMetricsConnectorTestBase):
         )
 
         calls, _ = self.assert_span_metrics("GET", span_kind="CLIENT", status_code="UNSET")
-        self.assertEqual(calls.attributes[HTTP_REQUEST_METHOD], "GET")
-        self.assertEqual(calls.attributes[HTTP_RESPONSE_STATUS_CODE], 200)
+        self.assertEqual(calls.attributes[HTTP_METHOD], "GET")
+        self.assertEqual(calls.attributes[HTTP_STATUS_CODE], 200)
 
     def test_server_error_marks_status_error(self):
         response = requests.get(self.url("/boom"), timeout=5)
@@ -449,19 +425,19 @@ class TestSpanMetricsConnectorHttpClient(SpanMetricsConnectorTestBase):
 
         calls = self.get_metric_data_point(_SpanMetrics.CALLS_NAME, "GET")
         self.assertEqual(calls.attributes[_SpanMetrics.STATUS_CODE], "ERROR")
-        self.assertEqual(calls.attributes[HTTP_REQUEST_METHOD], "GET")
-        self.assertEqual(calls.attributes[HTTP_RESPONSE_STATUS_CODE], 500)
+        self.assertEqual(calls.attributes[HTTP_METHOD], "GET")
+        self.assertEqual(calls.attributes[HTTP_STATUS_CODE], 500)
 
-    def test_legacy_http_attributes_normalized(self):
+    def test_legacy_http_attributes_copied_under_own_key(self):
         calls = self.record_span(
             "legacy-http",
             kind=SpanKind.CLIENT,
             attributes={HTTP_METHOD: "POST", HTTP_STATUS_CODE: 201},
         )
-        self.assertEqual(calls.attributes[HTTP_REQUEST_METHOD], "POST")
-        self.assertEqual(calls.attributes[HTTP_RESPONSE_STATUS_CODE], 201)
-        self.assertNotIn(HTTP_METHOD, calls.attributes)
-        self.assertNotIn(HTTP_STATUS_CODE, calls.attributes)
+        self.assertEqual(calls.attributes[HTTP_METHOD], "POST")
+        self.assertEqual(calls.attributes[HTTP_STATUS_CODE], 201)
+        self.assertNotIn(HTTP_REQUEST_METHOD, calls.attributes)
+        self.assertNotIn(HTTP_RESPONSE_STATUS_CODE, calls.attributes)
 
 
 class TestSpanMetricsConnectorHttpServer(SpanMetricsConnectorTestBase):
@@ -492,8 +468,8 @@ class TestSpanMetricsConnectorHttpServer(SpanMetricsConnectorTestBase):
         self.assertEqual(span.kind, SpanKind.SERVER)
 
         calls, _ = self.assert_span_metrics("GET /items/<item_id>", span_kind="SERVER", status_code="UNSET")
-        self.assertEqual(calls.attributes[HTTP_REQUEST_METHOD], "GET")
-        self.assertEqual(calls.attributes[HTTP_RESPONSE_STATUS_CODE], 200)
+        self.assertEqual(calls.attributes[HTTP_METHOD], "GET")
+        self.assertEqual(calls.attributes[HTTP_STATUS_CODE], 200)
         self.assertEqual(calls.attributes[HTTP_ROUTE], "/items/<item_id>")
 
 
@@ -522,7 +498,7 @@ class TestSpanMetricsConnectorDb(SpanMetricsConnectorTestBase):
         self.assertEqual(span.kind, SpanKind.CLIENT)
 
         calls, _ = self.assert_span_metrics("SELECT", span_kind="CLIENT", status_code="UNSET")
-        self.assertEqual(calls.attributes[DB_SYSTEM_NAME], "sqlite")
+        self.assertEqual(calls.attributes[DB_SYSTEM], "sqlite")
 
     def test_operations_recorded_under_distinct_span_names(self):
         cursor = self.connection.cursor()
@@ -535,10 +511,10 @@ class TestSpanMetricsConnectorDb(SpanMetricsConnectorTestBase):
         select = self.get_metric_data_point(_SpanMetrics.CALLS_NAME, "SELECT")
         self.assertEqual(insert.value, 1)
         self.assertEqual(select.value, 1)
-        self.assertEqual(insert.attributes[DB_SYSTEM_NAME], "sqlite")
-        self.assertEqual(select.attributes[DB_SYSTEM_NAME], "sqlite")
+        self.assertEqual(insert.attributes[DB_SYSTEM], "sqlite")
+        self.assertEqual(select.attributes[DB_SYSTEM], "sqlite")
 
-    def test_legacy_db_attributes_normalized(self):
+    def test_legacy_db_attributes_copied_under_own_key(self):
         calls = self.record_span(
             "legacy-db",
             kind=SpanKind.CLIENT,
@@ -548,9 +524,12 @@ class TestSpanMetricsConnectorDb(SpanMetricsConnectorTestBase):
                 DB_SQL_TABLE: "users",
             },
         )
-        self.assertEqual(calls.attributes[DB_SYSTEM_NAME], "postgresql")
-        self.assertEqual(calls.attributes[DB_OPERATION_NAME], "SELECT")
-        self.assertEqual(calls.attributes[DB_COLLECTION_NAME], "users")
+        self.assertEqual(calls.attributes[DB_SYSTEM], "postgresql")
+        self.assertEqual(calls.attributes[DB_OPERATION], "SELECT")
+        self.assertEqual(calls.attributes[DB_SQL_TABLE], "users")
+        self.assertNotIn(DB_SYSTEM_NAME, calls.attributes)
+        self.assertNotIn(DB_OPERATION_NAME, calls.attributes)
+        self.assertNotIn(DB_COLLECTION_NAME, calls.attributes)
 
 
 class TestSpanMetricsConnectorRpc(SpanMetricsConnectorTestBase):
@@ -579,8 +558,8 @@ class TestSpanMetricsConnectorRpc(SpanMetricsConnectorTestBase):
 
         calls, _ = self.assert_span_metrics("S3.ListBuckets", span_kind="CLIENT", status_code="UNSET")
         self.assertEqual(span.attributes[RPC_SYSTEM], "aws-api")
-        self.assertEqual(calls.attributes[RPC_SYSTEM_NAME], "aws-api")
-        self.assertNotIn(RPC_SYSTEM, calls.attributes)
+        self.assertEqual(calls.attributes[RPC_SYSTEM], "aws-api")
+        self.assertNotIn(RPC_SYSTEM_NAME, calls.attributes)
         self.assertEqual(calls.attributes[RPC_SERVICE], "S3")
         self.assertEqual(calls.attributes[RPC_METHOD], "ListBuckets")
 
@@ -626,9 +605,9 @@ class TestSpanMetricsConnectorMessaging(SpanMetricsConnectorTestBase):
 
         calls, _ = self.assert_span_metrics("SQS.SendMessage", span_kind="CLIENT", status_code="UNSET")
         self.assertEqual(calls.attributes[MESSAGING_SYSTEM], "aws.sqs")
-        self.assertEqual(calls.attributes[MESSAGING_DESTINATION_NAME], "orders")
-        self.assertNotIn(SpanAttributes.MESSAGING_DESTINATION, calls.attributes)
-        self.assertEqual(calls.attributes[RPC_SYSTEM_NAME], "aws-api")
+        self.assertEqual(calls.attributes[SpanAttributes.MESSAGING_DESTINATION], "orders")
+        self.assertNotIn(MESSAGING_DESTINATION_NAME, calls.attributes)
+        self.assertEqual(calls.attributes[RPC_SYSTEM], "aws-api")
         self.assertEqual(calls.attributes[RPC_SERVICE], "SQS")
         self.assertEqual(calls.attributes[RPC_METHOD], "SendMessage")
 
@@ -646,7 +625,7 @@ class TestSpanMetricsConnectorMessaging(SpanMetricsConnectorTestBase):
         calls = self.get_metric_data_point(_SpanMetrics.CALLS_NAME, "SQS.SendMessage")
         self.assertEqual(calls.attributes[_SpanMetrics.STATUS_CODE], "ERROR")
         self.assertEqual(calls.attributes[MESSAGING_SYSTEM], "aws.sqs")
-        self.assertEqual(calls.attributes[MESSAGING_DESTINATION_NAME], "orders")
+        self.assertEqual(calls.attributes[SpanAttributes.MESSAGING_DESTINATION], "orders")
 
 
 class TestSpanMetricsConnectorSqlAlchemy(SpanMetricsConnectorTestBase):
@@ -672,10 +651,10 @@ class TestSpanMetricsConnectorSqlAlchemy(SpanMetricsConnectorTestBase):
         self.assertEqual(span.attributes[DB_SYSTEM], "sqlite")
 
         calls, _ = self.assert_span_metrics("SELECT :memory:", span_kind="CLIENT", status_code="UNSET")
-        self.assertEqual(calls.attributes[DB_SYSTEM_NAME], "sqlite")
-        self.assertEqual(calls.attributes[DB_OPERATION_NAME], "SELECT :memory:")
-        self.assertNotIn(DB_SYSTEM, calls.attributes)
-        self.assertNotIn(DB_OPERATION, calls.attributes)
+        self.assertEqual(calls.attributes[DB_SYSTEM], "sqlite")
+        self.assertEqual(calls.attributes[DB_OPERATION], "SELECT :memory:")
+        self.assertNotIn(DB_SYSTEM_NAME, calls.attributes)
+        self.assertNotIn(DB_OPERATION_NAME, calls.attributes)
 
     def test_operations_recorded_under_distinct_span_names(self):
         self.connection.execute(text("INSERT INTO users (name) VALUES ('alice')"))
@@ -685,7 +664,7 @@ class TestSpanMetricsConnectorSqlAlchemy(SpanMetricsConnectorTestBase):
         select = self.get_metric_data_point(_SpanMetrics.CALLS_NAME, "SELECT :memory:")
         self.assertEqual(insert.value, 1)
         self.assertEqual(select.value, 1)
-        self.assertEqual(insert.attributes[DB_SYSTEM_NAME], "sqlite")
-        self.assertEqual(select.attributes[DB_SYSTEM_NAME], "sqlite")
-        self.assertEqual(insert.attributes[DB_OPERATION_NAME], "INSERT :memory:")
-        self.assertEqual(select.attributes[DB_OPERATION_NAME], "SELECT :memory:")
+        self.assertEqual(insert.attributes[DB_SYSTEM], "sqlite")
+        self.assertEqual(select.attributes[DB_SYSTEM], "sqlite")
+        self.assertEqual(insert.attributes[DB_OPERATION], "INSERT :memory:")
+        self.assertEqual(select.attributes[DB_OPERATION], "SELECT :memory:")
