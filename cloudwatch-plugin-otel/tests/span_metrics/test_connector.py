@@ -20,6 +20,7 @@ from opentelemetry.instrumentation.requests import RequestsInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.instrumentation.sqlite3 import SQLite3Instrumentor
 from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.semconv._incubating.attributes.db_attributes import (
     DB_CASSANDRA_TABLE,
     DB_COLLECTION_NAME,
@@ -371,6 +372,22 @@ class TestSpanMetricsConnector(SpanMetricsConnectorTestBase):
         self.processor.on_start(object())
         self.processor.on_end(object())
         self.assertEqual(self.get_sorted_metrics(), [])
+
+    def test_missing_end_time_still_counts_the_call(self):
+        span = ReadableSpan(name="no_end_time", kind=SpanKind.INTERNAL, start_time=1, end_time=None)
+        self.processor.on_end(span)
+
+        calls = self.get_metric_data_point(_SpanMetrics.CALLS_NAME, "no_end_time")
+        self.assertEqual(calls.value, 1)
+
+        duration_points = [
+            point
+            for metric in self.get_sorted_metrics()
+            if metric.name == _SpanMetrics.DURATION_NAME
+            for point in metric.data.data_points
+            if point.attributes.get(_SpanMetrics.SPAN_NAME) == "no_end_time"
+        ]
+        self.assertEqual(duration_points, [])
 
 
 class TestSpanMetricsConnectorHttpClient(SpanMetricsConnectorTestBase):
