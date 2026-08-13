@@ -124,23 +124,12 @@ jobs:
       cpu-architecture: 'x86_64'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
-  #
-  # DOCKER DISTRIBUTION LANGUAGE VERSION COVERAGE
-  # DEFAULT SETTING: {Python Version}, EKS, AMD64, AL2
-  #
 
   # --- Parallel Python EKS pipeline -------------------------------------------------------------
   # Shape: eks-setup -> [eks-py310..314 concurrently] -> eks-cleanup -> service-events-eks
-  #
-  # These jobs use python-eks-PARALLEL-test.yml, a fork of python-eks-test.yml owned by this repo.
-  # The sequential python-eks-test.yml is unchanged and still used by other repos. The parallel
-  # workflow only asserts shared App Signals state; installing/tearing it down is owned by the
-  # eks-setup / eks-cleanup bookend jobs so 5 concurrent jobs on one cluster don't race.
 
-  # Install the cluster-wide App Signals addon + cloudwatch-agent IRSA SA exactly once, before the
-  # version fan-out. Gates every eks-py* job so none starts until shared state is ready.
   eks-setup:
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-setup-app-signals.yml@python-eks-parallel-pipeline
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-setup-app-signals.yml@main
     secrets: inherit
     with:
       test-cluster-name: 'e2e-python-adot-test'
@@ -149,7 +138,7 @@ jobs:
   eks-py310-amd64:
     needs: eks-setup
     if: ${{ always() && needs.eks-setup.result == 'success' }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-parallel-test.yml@python-eks-parallel-pipeline
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-parallel-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -161,7 +150,7 @@ jobs:
   eks-py311-amd64:
     needs: eks-setup
     if: ${{ always() && needs.eks-setup.result == 'success' }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-parallel-test.yml@python-eks-parallel-pipeline
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-parallel-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -173,7 +162,7 @@ jobs:
   eks-py312-amd64:
     needs: eks-setup
     if: ${{ always() && needs.eks-setup.result == 'success' }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-parallel-test.yml@python-eks-parallel-pipeline
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-parallel-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -185,7 +174,7 @@ jobs:
   eks-py313-amd64:
     needs: eks-setup
     if: ${{ always() && needs.eks-setup.result == 'success' }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-parallel-test.yml@python-eks-parallel-pipeline
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-parallel-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -197,7 +186,7 @@ jobs:
   eks-py314-amd64:
     needs: eks-setup
     if: ${{ always() && needs.eks-setup.result == 'success' }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-parallel-test.yml@python-eks-parallel-pipeline
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-parallel-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -330,7 +319,7 @@ jobs:
   eks-cleanup:
     if: ${{ always() && needs.eks-setup.result == 'success' }}
     needs: [ eks-setup, eks-py310-amd64, eks-py311-amd64, eks-py312-amd64, eks-py313-amd64, eks-py314-amd64 ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-cleanup-app-signals.yml@python-eks-parallel-pipeline
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-cleanup-app-signals.yml@main
     secrets: inherit
     with:
       test-cluster-name: 'e2e-python-adot-test'
@@ -366,6 +355,6 @@ jobs:
   # - Update the `validate-e2e-tests-are-accounted-for` job to change which "workflow files are expected to be used by this repo"
   #   (see: https://github.com/aws-observability/aws-application-signals-test-framework/blob/main/.github/workflows/validate-e2e-tests-are-accounted-for.yml)
   validate-all-tests-are-accounted-for:
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/validate-e2e-tests-are-accounted-for.yml@python-eks-parallel-pipeline
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/validate-e2e-tests-are-accounted-for.yml@main
     with:
       exclusions: 'python-eks-test.yml,eks-setup-app-signals.yml,eks-cleanup-app-signals.yml'
