@@ -87,9 +87,10 @@ class SpanMetricsConnector(SpanProcessor):
             return
         try:
             attributes = self._build_metric_attributes(span)
-            duration_seconds = (span.end_time - span.start_time) / _SpanMetrics.NANOS_PER_SECOND
             self._calls_counter.add(1, attributes)
-            self._duration_histogram.record(duration_seconds, attributes)
+            if span.end_time is not None and span.start_time is not None:
+                duration_seconds = (span.end_time - span.start_time) / _SpanMetrics.NANOS_PER_SECOND
+                self._duration_histogram.record(duration_seconds, attributes)
         # pylint: disable=broad-exception-caught
         except Exception:
             _logger.debug("Failed to record span metrics", exc_info=True)
