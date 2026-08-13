@@ -17,7 +17,6 @@ from testcontainers.core.waiting_utils import wait_for_logs
 from typing_extensions import override
 
 from opentelemetry.environment_variables import OTEL_METRICS_EXPORTER, OTEL_TRACES_EXPORTER
-from opentelemetry.proto.common.v1.common_pb2 import AnyValue
 from opentelemetry.sdk.environment_variables import (
     OTEL_BSP_SCHEDULE_DELAY,
     OTEL_EXPORTER_OTLP_ENDPOINT,
@@ -112,14 +111,14 @@ class SpanMetricsContractTestBase(TestCase):
         self.assertEqual(self.send_request("GET", "error").status_code, 500)
 
         metrics = self._get_plugin_metrics({HTTP_ROUTE: "/error"})
-        self._assert_http_server(metrics, "/exercise", StatusCode.UNSET, 200)
-        self._assert_http_server(metrics, "/error", StatusCode.ERROR, 500, error_type="RuntimeError")
-        self._assert_metric_pair(
+        self._assert_http_server_metrics(metrics, "/exercise", StatusCode.UNSET, 200)
+        self._assert_http_server_metrics(metrics, "/error", StatusCode.ERROR, 500, error_type="RuntimeError")
+        self._assert_span_metrics_recorded(
             metrics,
             {"span.name": "GET", "span.kind": SpanKind.CLIENT.name, HTTP_METHOD: "GET"},
         )
-        self._assert_metric_pair(metrics, {"span.name": "internal-work", "span.kind": SpanKind.INTERNAL.name})
-        self._assert_metric_pair(
+        self._assert_span_metrics_recorded(metrics, {"span.name": "internal-work", "span.kind": SpanKind.INTERNAL.name})
+        self._assert_span_metrics_recorded(
             metrics,
             {
                 "span.name": "SELECT users",
@@ -129,7 +128,7 @@ class SpanMetricsContractTestBase(TestCase):
                 DB_SQL_TABLE: "users",
             },
         )
-        self._assert_metric_pair(
+        self._assert_span_metrics_recorded(
             metrics,
             {
                 "span.name": "S3.ListBuckets",
@@ -139,7 +138,7 @@ class SpanMetricsContractTestBase(TestCase):
                 RPC_METHOD: "ListBuckets",
             },
         )
-        self._assert_metric_pair(
+        self._assert_span_metrics_recorded(
             metrics,
             {
                 "span.name": "SQS.SendMessage",
@@ -148,7 +147,7 @@ class SpanMetricsContractTestBase(TestCase):
                 SpanAttributes.MESSAGING_DESTINATION: "orders",
             },
         )
-        self._assert_metric_pair(
+        self._assert_span_metrics_recorded(
             metrics,
             {
                 "span.kind": SpanKind.PRODUCER.name,
@@ -156,7 +155,7 @@ class SpanMetricsContractTestBase(TestCase):
                 MESSAGING_DESTINATION_NAME: "arn:aws:sns:us-east-1:123456789012:orders",
             },
         )
-        self._assert_metric_pair(
+        self._assert_span_metrics_recorded(
             metrics,
             {
                 "span.name": "orders receive",
@@ -167,27 +166,30 @@ class SpanMetricsContractTestBase(TestCase):
             },
         )
 
-        trace_ids = {
+        traces = self.mock_collector_client.get_traces()
+        exercise_trace_ids = {
             resource_scope_span.span.trace_id
-            for resource_scope_span in self.mock_collector_client.get_traces()
-            if self._span_attribute(resource_scope_span.span, HTTP_ROUTE) == "/exercise"
+            for resource_scope_span in traces
+            if self._attributes(resource_scope_span.span.attributes).get(HTTP_ROUTE) == "/exercise"
         }
-        self.assertEqual(len(trace_ids), 1)
-        exercise_trace_spans = [
+        self.assertEqual(len(exercise_trace_ids), 1)
+        exercise_spans = [
             resource_scope_span.span
-            for resource_scope_span in self.mock_collector_client.get_traces()
-            if resource_scope_span.span.trace_id in trace_ids
+            for resource_scope_span in traces
+            if resource_scope_span.span.trace_id in exercise_trace_ids
         ]
-        self.assertGreaterEqual(len(exercise_trace_spans), 8)
+        self.assertGreaterEqual(len(exercise_spans), 8)
 
     def test_always_off_records_metrics_without_exporting_spans(self) -> None:
         self.assertEqual(self.send_request("GET", "exercise").status_code, 200)
 
         metrics = self._get_plugin_metrics({HTTP_ROUTE: "/exercise"})
-        self._assert_http_server(metrics, "/exercise", StatusCode.UNSET, 200)
-        self._assert_metric_pair(metrics, {"span.name": "internal-work", "span.kind": SpanKind.INTERNAL.name})
-        self._assert_metric_pair(metrics, {"span.kind": SpanKind.PRODUCER.name, MESSAGING_SYSTEM: "aws.sns"})
-        self._assert_metric_pair(metrics, {"span.name": "orders receive", "span.kind": SpanKind.CONSUMER.name})
+        self._assert_http_server_metrics(metrics, "/exercise", StatusCode.UNSET, 200)
+        self._assert_span_metrics_recorded(metrics, {"span.name": "internal-work", "span.kind": SpanKind.INTERNAL.name})
+        self._assert_span_metrics_recorded(metrics, {"span.kind": SpanKind.PRODUCER.name, MESSAGING_SYSTEM: "aws.sns"})
+        self._assert_span_metrics_recorded(
+            metrics, {"span.name": "orders receive", "span.kind": SpanKind.CONSUMER.name}
+        )
 
         response = self.mock_collector_client.client.get_traces(GetTracesRequest())
         self.assertEqual(list(response.traces), [])
@@ -208,7 +210,7 @@ class SpanMetricsContractTestBase(TestCase):
             plugin_metrics = [
                 metric for metric in metrics if metric.scope_metrics.scope.name == "cloudwatch.plugin.otel.span_metrics"
             ]
-            if self._matching_data_points(plugin_metrics, "traces.span.metrics.calls", required_attributes):
+            if self._get_matching_data_points(plugin_metrics, "traces.span.metrics.calls", required_attributes):
                 self.assertTrue(all(metric.scope_metrics.scope.version for metric in plugin_metrics))
                 return plugin_metrics
             time.sleep(0.1)
@@ -216,7 +218,7 @@ class SpanMetricsContractTestBase(TestCase):
             f"No calls point matched {required_attributes}; found {len(plugin_metrics)} plugin metrics"
         )
 
-    def _assert_http_server(
+    def _assert_http_server_metrics(
         self,
         metrics: List[ResourceScopeMetric],
         route: str,
@@ -234,35 +236,31 @@ class SpanMetricsContractTestBase(TestCase):
         }
         if error_type is not None:
             expected[ERROR_TYPE] = error_type
-        self._assert_metric_pair(metrics, expected)
+        self._assert_span_metrics_recorded(metrics, expected)
 
-    def _assert_metric_pair(self, metrics: List[ResourceScopeMetric], expected: Dict[str, Any]) -> None:
-        calls = self._latest_data_point(metrics, "traces.span.metrics.calls", expected)
+    def _assert_span_metrics_recorded(self, metrics: List[ResourceScopeMetric], expected: Dict[str, Any]) -> None:
+        calls = self._get_latest_data_point(metrics, "traces.span.metrics.calls", expected)
         calls_attributes = self._attributes(calls.attributes)
-        self.assertGreaterEqual(self._number_value(calls), 1)
+        self.assertGreaterEqual(getattr(calls, calls.WhichOneof("value")), 1)
         self.assertEqual(calls_attributes[SERVICE_NAME], "cloudwatch-plugin-otel-contract-test")
         self.assertEqual(calls_attributes["aws.otel.span.metrics.schema"], "v1")
         self.assertTrue(calls_attributes["aws.otel.extension.lib.version"])
 
-        duration = self._latest_data_point(
-            metrics,
-            "traces.span.metrics.duration",
-            calls_attributes,
-        )
+        duration = self._get_latest_data_point(metrics, "traces.span.metrics.duration", calls_attributes)
         self.assertGreaterEqual(duration.count, 1)
         self.assertGreaterEqual(duration.sum, 0)
 
-    def _latest_data_point(
+    def _get_latest_data_point(
         self,
         metrics: List[ResourceScopeMetric],
         metric_name: str,
         expected: Dict[str, Any],
     ):
-        candidates = self._matching_data_points(metrics, metric_name, expected)
+        candidates = self._get_matching_data_points(metrics, metric_name, expected)
         self.assertTrue(candidates, f"No {metric_name} point matched {expected}")
         return max(candidates, key=lambda data_point: data_point.time_unix_nano)
 
-    def _matching_data_points(
+    def _get_matching_data_points(
         self,
         metrics: List[ResourceScopeMetric],
         metric_name: str,
@@ -270,41 +268,28 @@ class SpanMetricsContractTestBase(TestCase):
     ) -> List:
         candidates = []
         for resource_scope_metric in metrics:
-            if resource_scope_metric.metric.name != metric_name:
+            metric = resource_scope_metric.metric
+            if metric.name != metric_name:
                 continue
-            data_points = self._data_points(resource_scope_metric)
+            if metric.HasField("sum"):
+                data_points = metric.sum.data_points
+            elif metric.HasField("histogram"):
+                data_points = metric.histogram.data_points
+            else:
+                data_points = []
             for data_point in data_points:
                 attributes = self._attributes(data_point.attributes)
                 if all(attributes.get(key) == value for key, value in expected.items()):
                     candidates.append(data_point)
         return candidates
 
-    @staticmethod
-    def _data_points(resource_scope_metric: ResourceScopeMetric):
-        metric = resource_scope_metric.metric
-        if metric.HasField("sum"):
-            return metric.sum.data_points
-        if metric.HasField("histogram"):
-            return metric.histogram.data_points
-        return []
-
     @classmethod
     def _attributes(cls, attributes) -> Dict[str, Any]:
-        return {attribute.key: cls._any_value(attribute.value) for attribute in attributes}
-
-    @staticmethod
-    def _any_value(value: AnyValue) -> Any:
-        kind = value.WhichOneof("value")
-        return getattr(value, kind) if kind is not None else None
-
-    @staticmethod
-    def _number_value(data_point) -> float:
-        kind = data_point.WhichOneof("value")
-        return getattr(data_point, kind)
-
-    @classmethod
-    def _span_attribute(cls, span, key: str) -> Any:
-        return cls._attributes(span.attributes).get(key)
+        result: Dict[str, Any] = {}
+        for attribute in attributes:
+            kind = attribute.value.WhichOneof("value")
+            result[attribute.key] = getattr(attribute.value, kind) if kind is not None else None
+        return result
 
     def get_sampler(self) -> str:
         if self._testMethodName == "test_always_off_records_metrics_without_exporting_spans":
