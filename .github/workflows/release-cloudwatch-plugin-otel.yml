@@ -105,7 +105,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create --target "$GITHUB_REF_NAME" \
-            --title "cloudwatch-plugin-otel v$VERSION" \
+            --title "Release cloudwatch-plugin-otel v$VERSION" \
             --notes-file release_notes.md --draft \
             "$TAG" \
             "dist-pypi/$WHEEL_ARTIFACT_NAME" "dist-pypi/$WHEEL_ARTIFACT_NAME.sha256" \
