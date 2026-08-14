@@ -27,3 +27,10 @@ cd ../dist
 DISTRO=(aws_opentelemetry_distro-*-py3-none-any.whl)
 python3 -m pip install $DISTRO --force-reinstall
 cd ..
+
+# Build cloudwatch-plugin-otel wheel (the cloudwatch-plugin-otel contract-test image
+# installs it from dist/; not installed here since it only runs inside the container)
+rm -rf dist/cloudwatch_plugin_otel*
+cd cloudwatch-plugin-otel
+python3 -m build --outdir ../dist
+cd ..
