@@ -56,13 +56,19 @@ fi
 docker buildx build contract-tests/images/mock-collector --load \
   -t aws-application-signals-mock-collector-python "${mock_cache[@]}"
 
+# Find a built wheel by name prefix in dist/ and store its basename in the named variable.
+find_wheel() {
+  local prefix="$1" dest="$2"
+  local whls=(dist/"${prefix}"-*-py3-none-any.whl)
+  if [ ! -f "${whls[0]}" ]; then
+    echo "Could not find ${prefix} whl file in dist dir."
+    exit 1
+  fi
+  printf -v "$dest" '%s' "$(basename "${whls[0]}")"
+}
+
 # Find and store aws_opentelemetry_distro whl file
-distro_whls=(dist/aws_opentelemetry_distro-*-py3-none-any.whl)
-if [ ! -f "${distro_whls[0]}" ]; then
-  echo "Could not find aws_opentelemetry_distro whl file in dist dir."
-  exit 1
-fi
-DISTRO="$(basename "${distro_whls[0]}")"
+find_wheel aws_opentelemetry_distro DISTRO
 
 # Create application images
 for app in "${APPS[@]}"; do
@@ -75,12 +81,8 @@ for app in "${APPS[@]}"; do
 
   build_args=(--build-arg "DISTRO=${DISTRO}")
   if [ "$app" = "cloudwatch-plugin-otel" ]; then
-    plugin_whls=(dist/cloudwatch_plugin_otel-*-py3-none-any.whl)
-    if [ ! -f "${plugin_whls[0]}" ]; then
-      echo "Could not find cloudwatch_plugin_otel whl file in dist dir."
-      exit 1
-    fi
-    build_args+=(--build-arg "PLUGIN=$(basename "${plugin_whls[0]}")")
+    find_wheel cloudwatch_plugin_otel PLUGIN
+    build_args+=(--build-arg "PLUGIN=${PLUGIN}")
   fi
   [ -n "$PYTHON_VERSION" ] && build_args+=(--build-arg "PYTHON_VERSION=${PYTHON_VERSION}")
 
