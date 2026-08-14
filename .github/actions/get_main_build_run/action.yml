@@ -27,30 +27,20 @@ runs:
       id: main_build
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
         TARGET_BRANCH: ${{ inputs.branch }}
         WORKFLOW_NAME: ${{ inputs.workflow-name }}
       run: |
-        set -euo pipefail
-
         WORKFLOW_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows" |
-          jq -r --arg name "$WORKFLOW_NAME" 'first(.workflows[] | select(.name == $name) | .id) // empty')
-        if [ -z "$WORKFLOW_ID" ]; then
-          echo "Workflow '$WORKFLOW_NAME' was not found."
-          exit 1
-        fi
+          jq -r --arg name "$WORKFLOW_NAME" '.workflows[] | select(.name == $name) | .id')
+        LATEST_RUN=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$WORKFLOW_ID/runs" |
+          jq -c --arg branch "$TARGET_BRANCH" \
+            '[.workflow_runs[] | select(.head_branch == $branch)] | sort_by(.created_at) | .[-1]')
+        STATUS=$(echo "$LATEST_RUN" | jq -r '.status')
+        CONCLUSION=$(echo "$LATEST_RUN" | jq -r '.conclusion')
+        RUN_ID=$(echo "$LATEST_RUN" | jq -r '.id')
 
-        LATEST_RUN=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/$WORKFLOW_ID/runs" \
-          -f branch="$TARGET_BRANCH" \
-          -f per_page=1)
-        RUN_ID=$(echo "$LATEST_RUN" | jq -r '.workflow_runs[0].id // empty')
-        STATUS=$(echo "$LATEST_RUN" | jq -r '.workflow_runs[0].status // empty')
-        CONCLUSION=$(echo "$LATEST_RUN" | jq -r '.workflow_runs[0].conclusion // empty')
-
-        if [ -z "$RUN_ID" ]; then
-          echo "No main build was found on branch $TARGET_BRANCH."
-          exit 1
-        elif [ "$STATUS" != "completed" ]; then
+        if [ "$STATUS" = "in_progress" ] || [ "$STATUS" = "queued" ]; then
           echo "Main build is still running (status: $STATUS). Cannot proceed with release."
           exit 1
         elif [ "$CONCLUSION" != "success" ]; then
