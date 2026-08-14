@@ -139,6 +139,22 @@ jobs:
           path: dist/aws_opentelemetry_distro-*-py3-none-any.whl
           retention-days: 1
 
+  build-cloudwatch-plugin-otel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #5.0.0
+
+      - name: Build cloudwatch-plugin-otel release artifacts
+        uses: ./.github/actions/build_cloudwatch_plugin_otel
+
+      - name: Upload cloudwatch-plugin-otel release artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: cloudwatch-plugin-otel-release-artifacts
+          path: plugin-dist/cloudwatch_plugin_otel-*
+          retention-days: 1
+
   build-lambda:
     runs-on: ubuntu-latest
     steps:
@@ -296,7 +312,7 @@ jobs:
 
   all-pr-checks-pass:
     runs-on: ubuntu-latest
-    needs: [static-code-checks, lint, spotless, unit-tests, cloudwatch-plugin-otel-unit-tests, build-wheel, build-and-scan-image, contract-tests, build-lambda]
+    needs: [static-code-checks, lint, spotless, unit-tests, cloudwatch-plugin-otel-unit-tests, build-wheel, build-cloudwatch-plugin-otel, build-and-scan-image, contract-tests, build-lambda]
     if: always()
     steps:
       - name: Checkout to get workflow file
