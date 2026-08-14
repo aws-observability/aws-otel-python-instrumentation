@@ -13,3 +13,4 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 ## v0.1.0 - 2026-08-14
 
 - Initial span metrics release
+  ([#857](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/857))
