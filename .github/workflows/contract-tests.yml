@@ -75,6 +75,13 @@ jobs:
           name: ${{ inputs.wheel-artifact-name }}
           path: dist
 
+      - name: Build cloudwatch-plugin-otel wheel
+        if: matrix.test.name == 'cloudwatch-plugin-otel'
+        run: |
+          pip install build
+          python -m build --wheel --outdir ../dist
+        working-directory: cloudwatch-plugin-otel
+
       - name: Set up and run ${{ matrix.test.name }} contract tests (python ${{ inputs.python-version }})
         run: |
           bash scripts/set-up-contract-tests.sh "${{ inputs.python-version }}" ${{ matrix.test.name }}
