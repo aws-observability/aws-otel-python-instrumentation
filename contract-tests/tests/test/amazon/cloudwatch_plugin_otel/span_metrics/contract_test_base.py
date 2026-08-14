@@ -16,6 +16,7 @@ from testcontainers.core.container import DockerContainer
 from testcontainers.core.waiting_utils import wait_for_logs
 from typing_extensions import override
 
+from amazon.cloudwatch_plugin_otel.span_metrics import InstrumentationMode
 from opentelemetry.environment_variables import OTEL_METRICS_EXPORTER, OTEL_TRACES_EXPORTER
 from opentelemetry.sdk.environment_variables import (
     OTEL_BSP_SCHEDULE_DELAY,
@@ -344,7 +345,7 @@ class SpanMetricsContractTestBase(TestCase):
             "SPAN_METRICS_MODE": self.get_mode(),
         }
 
-    def get_mode(self) -> str:
+    def get_mode(self) -> InstrumentationMode:
         raise NotImplementedError
 
     def command(self) -> str:
