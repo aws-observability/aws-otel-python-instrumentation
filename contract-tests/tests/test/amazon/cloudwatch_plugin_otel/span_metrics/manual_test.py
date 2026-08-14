@@ -6,5 +6,5 @@ from amazon.cloudwatch_plugin_otel.span_metrics.contract_test_base import SpanMe
 class SpanMetricsManualTest(SpanMetricsContractTestBase):
     __test__ = True
 
-    def get_mode(self) -> str:
-        return "manual"
+    def command(self) -> str:
+        return "python -u ./manual_server.py"

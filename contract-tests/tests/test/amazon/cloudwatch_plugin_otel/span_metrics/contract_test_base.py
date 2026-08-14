@@ -341,14 +341,7 @@ class SpanMetricsContractTestBase(TestCase):
             OTEL_BSP_SCHEDULE_DELAY: "50",
             OTEL_SERVICE_NAME: "cloudwatch-plugin-otel-contract-test",
             OTEL_TRACES_SAMPLER: self.get_sampler(),
-            "SPAN_METRICS_MODE": self.get_mode(),
         }
 
-    def get_mode(self) -> str:
-        raise NotImplementedError
-
     def command(self) -> str:
-        # auto instruments via the opentelemetry-instrument wrapper; manual wires instrumentors in server.py itself.
-        if self.get_mode() == "manual":
-            return "python -u ./server.py"
-        return "opentelemetry-instrument python -u ./server.py"
+        raise NotImplementedError

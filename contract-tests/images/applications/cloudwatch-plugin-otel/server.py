@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import os
+from abc import ABC, abstractmethod
 from concurrent import futures
 
 import boto3
@@ -8,7 +9,6 @@ import fakeredis
 import grpc
 from botocore.stub import Stubber
 from flask import Flask
-from plugins.opentelemetry.cloudwatch.span_metrics.instrumentor import SpanMetricsInstrumentor
 from requests import get
 from sqlalchemy import create_engine, text
 
@@ -39,7 +39,6 @@ from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.semconv.attributes.service_attributes import SERVICE_NAME
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
-MODE = os.environ.get("SPAN_METRICS_MODE", "auto")
 SERVICE = os.environ.get(OTEL_SERVICE_NAME, "cloudwatch-plugin-otel-contract-test")
 ENDPOINT = os.environ.get(OTEL_EXPORTER_OTLP_ENDPOINT, "http://collector:4315")
 SAMPLER = os.environ.get(OTEL_TRACES_SAMPLER, "always_on")
@@ -52,42 +51,61 @@ GRPC_SERVICE = "contract.Health"
 GRPC_METHOD = "Check"
 
 
-def configure_manual_instrumentation():
-    resource = Resource.create({SERVICE_NAME: SERVICE})
-    sampler = ALWAYS_OFF if SAMPLER == "always_off" else ALWAYS_ON
+class SpanMetricsApplication(ABC):
+    @staticmethod
+    def create_providers():
+        resource = Resource.create({SERVICE_NAME: SERVICE})
+        sampler = ALWAYS_OFF if SAMPLER == "always_off" else ALWAYS_ON
 
-    tracer_provider = TracerProvider(resource=resource, sampler=sampler)
-    tracer_provider.add_span_processor(
-        BatchSpanProcessor(
-            OTLPSpanExporter(endpoint=ENDPOINT, insecure=True),
-            schedule_delay_millis=50,
-        )
-    )
-    trace.set_tracer_provider(tracer_provider)
-
-    meter_provider = MeterProvider(
-        resource=resource,
-        metric_readers=[
-            PeriodicExportingMetricReader(
-                OTLPMetricExporter(endpoint=ENDPOINT, insecure=True),
-                export_interval_millis=100,
+        tracer_provider = TracerProvider(resource=resource, sampler=sampler)
+        tracer_provider.add_span_processor(
+            BatchSpanProcessor(
+                OTLPSpanExporter(endpoint=ENDPOINT, insecure=True),
+                schedule_delay_millis=50,
             )
-        ],
-    )
-    metrics.set_meter_provider(meter_provider)
+        )
+        trace.set_tracer_provider(tracer_provider)
 
-    SpanMetricsInstrumentor().instrument(tracer_provider=tracer_provider, meter_provider=meter_provider)
-    RequestsInstrumentor().instrument(tracer_provider=tracer_provider)
-    BotocoreInstrumentor().instrument(tracer_provider=tracer_provider)
-    SQLAlchemyInstrumentor().instrument(tracer_provider=tracer_provider)
-    RedisInstrumentor().instrument(tracer_provider=tracer_provider)
-    GrpcInstrumentorServer().instrument(tracer_provider=tracer_provider)
-    GrpcInstrumentorClient().instrument(tracer_provider=tracer_provider)
-    return tracer_provider, meter_provider
+        meter_provider = MeterProvider(
+            resource=resource,
+            metric_readers=[
+                PeriodicExportingMetricReader(
+                    OTLPMetricExporter(endpoint=ENDPOINT, insecure=True),
+                    export_interval_millis=100,
+                )
+            ],
+        )
+        metrics.set_meter_provider(meter_provider)
+        return tracer_provider, meter_provider
 
+    @staticmethod
+    def instrument_libraries(app, tracer_provider, meter_provider):
+        RequestsInstrumentor().instrument(tracer_provider=tracer_provider)
+        BotocoreInstrumentor().instrument(tracer_provider=tracer_provider)
+        SQLAlchemyInstrumentor().instrument(tracer_provider=tracer_provider)
+        RedisInstrumentor().instrument(tracer_provider=tracer_provider)
+        GrpcInstrumentorServer().instrument(tracer_provider=tracer_provider)
+        GrpcInstrumentorClient().instrument(tracer_provider=tracer_provider)
+        FlaskInstrumentor().instrument_app(
+            app,
+            tracer_provider=tracer_provider,
+            meter_provider=meter_provider,
+        )
 
-def configure_auto_instrumentation():
-    return None, None
+    @abstractmethod
+    def configure_instrumentation(self, app):
+        raise NotImplementedError
+
+    def run(self):
+        app = Flask(__name__)
+        self.configure_instrumentation(app)
+
+        database = Database(DATABASE_URL)
+        aws_clients = AwsClients(AWS_REGION)
+        redis_cache = RedisCache()
+        grpc_service = GrpcService()
+        grpc_service.start()
+        FlaskServer(app, database, aws_clients, redis_cache, grpc_service).run()
 
 
 class Database:
@@ -179,13 +197,13 @@ class GrpcService:
 
 
 class FlaskServer:
-    def __init__(self, database, aws_clients, redis_cache, grpc_service):
+    def __init__(self, app, database, aws_clients, redis_cache, grpc_service):
         self._database = database
         self._aws_clients = aws_clients
         self._redis_cache = redis_cache
         self._grpc_service = grpc_service
         self._tracer = trace.get_tracer(__name__)
-        self.app = Flask(__name__)
+        self.app = app
         self.app.add_url_rule("/health", view_func=self._health, methods=["GET"])
         self.app.add_url_rule("/downstream", view_func=self._downstream, methods=["GET"])
         self.app.add_url_rule("/exercise", view_func=self._exercise, methods=["GET"])
@@ -194,10 +212,12 @@ class FlaskServer:
     def run(self):
         self.app.run(host="0.0.0.0", port=8080, threaded=True)
 
-    def _health(self):
+    @staticmethod
+    def _health():
         return {"status": "ok"}
 
-    def _downstream(self):
+    @staticmethod
+    def _downstream():
         return {"status": "ok"}
 
     def _exercise(self):
@@ -241,34 +261,9 @@ class FlaskServer:
 
         return {"status": "ok"}
 
-    def _error(self):
+    @staticmethod
+    def _error():
         span = trace.get_current_span()
         span.set_attribute(ERROR_TYPE, "RuntimeError")
         span.set_status(Status(StatusCode.ERROR))
         raise RuntimeError("expected contract-test error")
-
-
-def main():
-    tracer_provider, meter_provider = (
-        configure_manual_instrumentation() if MODE == "manual" else configure_auto_instrumentation()
-    )
-
-    database = Database(DATABASE_URL)
-    aws_clients = AwsClients(AWS_REGION)
-    redis_cache = RedisCache()
-    grpc_service = GrpcService()
-    grpc_service.start()
-    server = FlaskServer(database, aws_clients, redis_cache, grpc_service)
-
-    if MODE == "manual":
-        FlaskInstrumentor().instrument_app(
-            server.app,
-            tracer_provider=tracer_provider,
-            meter_provider=meter_provider,
-        )
-
-    server.run()
-
-
-if __name__ == "__main__":
-    main()

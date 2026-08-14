@@ -3,8 +3,8 @@
 from amazon.cloudwatch_plugin_otel.span_metrics.contract_test_base import SpanMetricsContractTestBase
 
 
-class SpanMetricsAutoTest(SpanMetricsContractTestBase):
+class SpanMetricsManualGlobalProvidersTest(SpanMetricsContractTestBase):
     __test__ = True
 
     def command(self) -> str:
-        return "opentelemetry-instrument python -u ./auto_server.py"
+        return "python -u ./manual_global_providers_server.py"
