@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import logging
+import os
 from typing import Any, Dict, Optional
 
 from plugins.opentelemetry.cloudwatch.span_metrics._constants import (
@@ -36,7 +37,8 @@ from plugins.opentelemetry.cloudwatch.version import __version__
 from typing_extensions import override
 
 from opentelemetry.context import Context
-from opentelemetry.metrics import Meter, MeterProvider, get_meter
+from opentelemetry.environment_variables import OTEL_METRICS_EXPORTER
+from opentelemetry.metrics import Meter, MeterProvider, NoOpCounter, NoOpHistogram, get_meter
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor
 from opentelemetry.trace import SpanKind
 from opentelemetry.trace.status import StatusCode
@@ -69,10 +71,19 @@ class SpanMetricsConnector(SpanProcessor):
             unit=_SpanMetrics.DURATION_UNIT,
             explicit_bucket_boundaries_advisory=_SpanMetrics.DURATION_BUCKET_BOUNDARIES,
         )
+        self.is_recording = not isinstance(self._calls_counter, NoOpCounter) or not isinstance(
+            self._duration_histogram, NoOpHistogram
+        )
+        # OTLP is the default metrics exporter when OTEL_METRICS_EXPORTER is unset.
+        configured_metrics_exporters = {
+            exporter.strip().lower() for exporter in os.environ.get(OTEL_METRICS_EXPORTER, "otlp").split(",")
+        }
+        is_metrics_exporter_configured = "otlp" in configured_metrics_exporters
+        self.is_metrics_active = self.is_recording and is_metrics_exporter_configured
 
     @override
     def on_start(self, span: Span, parent_context: Optional[Context] = None) -> None:
-        if not self.enabled:
+        if not self.enabled or not self.is_metrics_active:
             return
         try:
             span.set_attribute(_SpanMetrics.SCHEMA, _SpanMetrics.SCHEMA_VERSION)
@@ -83,7 +94,7 @@ class SpanMetricsConnector(SpanProcessor):
 
     @override
     def on_end(self, span: ReadableSpan) -> None:
-        if not self.enabled:
+        if not self.enabled or not self.is_recording:
             return
         try:
             attributes = self._build_metric_attributes(span)
