@@ -1,8 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+import os
 import sqlite3
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from unittest.mock import patch
 
 import botocore.session
 import requests
@@ -14,11 +16,13 @@ from plugins.opentelemetry.cloudwatch.span_metrics.connector import SpanMetricsC
 from plugins.opentelemetry.cloudwatch.version import __version__
 from sqlalchemy import create_engine, text
 
+from opentelemetry.environment_variables import OTEL_METRICS_EXPORTER
 from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
 from opentelemetry.instrumentation.flask import FlaskInstrumentor
 from opentelemetry.instrumentation.requests import RequestsInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.instrumentation.sqlite3 import SQLite3Instrumentor
+from opentelemetry.metrics import NoOpMeterProvider
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.semconv._incubating.attributes.db_attributes import (
@@ -685,3 +689,78 @@ class TestSpanMetricsConnectorSqlAlchemy(SpanMetricsConnectorTestBase):
         self.assertEqual(select.attributes[DB_SYSTEM], "sqlite")
         self.assertEqual(insert.attributes[DB_OPERATION], "INSERT :memory:")
         self.assertEqual(select.attributes[DB_OPERATION], "SELECT :memory:")
+
+
+class TestSpanMetricsConnectorActivation(TestBase):
+    def assert_signing_and_recording(self, *, exporter, recording, signs_span, records_metrics):
+        connector, reader = self.build_connector(exporter=exporter, recording=recording)
+        span = self.record_span(connector)
+
+        self.assertEqual(_SpanMetrics.SCHEMA in (span.attributes or {}), signs_span)
+        self.assertEqual(self.metrics_recorded(reader), records_metrics)
+
+    def test_if_metrics_exporter_unset_then_spans_are_signed_and_metrics_recorded(self):
+        self.assert_signing_and_recording(exporter=None, recording=True, signs_span=True, records_metrics=True)
+
+    def test_if_otlp_metrics_exporter_configured_then_spans_are_signed_and_metrics_recorded(self):
+        self.assert_signing_and_recording(exporter="otlp", recording=True, signs_span=True, records_metrics=True)
+
+    def test_if_otlp_metrics_exporter_configured_uppercase_then_spans_are_signed(self):
+        self.assert_signing_and_recording(exporter="OTLP", recording=True, signs_span=True, records_metrics=True)
+
+    def test_if_otlp_among_configured_metrics_exporters_then_spans_are_signed(self):
+        self.assert_signing_and_recording(
+            exporter="otlp,console", recording=True, signs_span=True, records_metrics=True
+        )
+
+    def test_if_metrics_exporter_only_contains_otlp_then_spans_are_not_signed_but_metrics_recorded(self):
+        self.assert_signing_and_recording(
+            exporter="otlp-vendor", recording=True, signs_span=False, records_metrics=True
+        )
+
+    def test_if_metrics_exporter_is_none_then_spans_are_not_signed_but_metrics_recorded(self):
+        self.assert_signing_and_recording(exporter="none", recording=True, signs_span=False, records_metrics=True)
+
+    def test_if_prometheus_metrics_exporter_configured_then_spans_are_not_signed_but_metrics_recorded(self):
+        self.assert_signing_and_recording(exporter="prometheus", recording=True, signs_span=False, records_metrics=True)
+
+    def test_if_console_metrics_exporter_configured_then_spans_are_not_signed_but_metrics_recorded(self):
+        self.assert_signing_and_recording(exporter="console", recording=True, signs_span=False, records_metrics=True)
+
+    def test_if_metrics_exporter_is_empty_then_spans_are_not_signed_but_metrics_recorded(self):
+        self.assert_signing_and_recording(exporter="", recording=True, signs_span=False, records_metrics=True)
+
+    def test_if_noop_counter_and_otlp_metrics_exporter_configured_then_spans_are_not_signed_and_metrics_not_recorded(
+        self,
+    ):
+        self.assert_signing_and_recording(exporter="otlp", recording=False, signs_span=False, records_metrics=False)
+
+    def test_if_noop_counter_and_metrics_exporter_unset_then_spans_are_not_signed_and_metrics_not_recorded(self):
+        self.assert_signing_and_recording(exporter=None, recording=False, signs_span=False, records_metrics=False)
+
+    def build_connector(self, *, exporter, recording):
+        environ = {key: value for key, value in os.environ.items() if key != OTEL_METRICS_EXPORTER}
+        if exporter is not None:
+            environ[OTEL_METRICS_EXPORTER] = exporter
+        meter_provider, reader = self.create_meter_provider() if recording else (NoOpMeterProvider(), None)
+        with patch.dict(os.environ, environ, clear=True):
+            return SpanMetricsConnector(meter_provider=meter_provider), reader
+
+    def record_span(self, connector):
+        tracer_provider, span_exporter = self.create_tracer_provider()
+        tracer_provider.add_span_processor(connector)
+        with tracer_provider.get_tracer(__name__).start_as_current_span("activation"):
+            pass
+        tracer_provider.force_flush()
+        return span_exporter.get_finished_spans()[0]
+
+    @staticmethod
+    def metrics_recorded(reader):
+        if reader is None:
+            return False
+        return any(
+            metric.name == _SpanMetrics.CALLS_NAME
+            for resource_metric in reader.get_metrics_data().resource_metrics or []
+            for scope_metric in resource_metric.scope_metrics
+            for metric in scope_metric.metrics
+        )
