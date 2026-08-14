@@ -59,7 +59,7 @@ jobs:
           name: ${{ env.SOURCE_ARTIFACT_NAME }}
           path: dist/${{ env.SOURCE_ARTIFACT_NAME }}
 
-  publish-pypi:
+  publish-release:
     needs: download-artifacts
     runs-on: ubuntu-latest
     steps:
@@ -72,71 +72,21 @@ jobs:
           wheel-artifact-name: ${{ env.WHEEL_ARTIFACT_NAME }}
           source-artifact-name: ${{ env.SOURCE_ARTIFACT_NAME }}
 
-  publish-github:
-    needs: publish-pypi
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repo @ SHA - ${{ github.sha }}
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
-
-      - name: Download wheel artifact
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
+      - name: Prepare Python release notes
+        uses: ./.github/actions/prepare_python_release_notes
         with:
-          name: ${{ env.WHEEL_ARTIFACT_NAME }}
+          pyproject-file: cloudwatch-plugin-otel/pyproject.toml
+          changelog-file: cloudwatch-plugin-otel/CHANGELOG.md
+          version: ${{ env.VERSION }}
 
-      - name: Download source artifact
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
-        with:
-          name: ${{ env.SOURCE_ARTIFACT_NAME }}
-
-      - name: Create GitHub release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Complete release notes
         run: |
-          DEPS=$(python3 -c "
-          import os, re
-          with open(os.path.join(os.environ['PACKAGE_DIR'], 'pyproject.toml'), 'r') as f:
-              content = f.read()
-          deps_match = re.search(r'dependencies\s*=\s*\[(.*?)\]', content, re.DOTALL)
-          if deps_match:
-              deps_content = deps_match.group(1)
-              dep_lines = re.findall(r'\"([^\"]+)\"', deps_content)
-              formatted_deps = []
-              for dep_line in dep_lines:
-                  if ' == ' in dep_line:
-                      package, version = dep_line.split(' == ', 1)
-                      formatted_deps.append(f'- \`{package}\` - {version}')
-                  else:
-                      formatted_deps.append(f'- \`{dep_line}\`')
-              print('\n'.join(formatted_deps))
-          ")
-
-          CHANGELOG_ENTRIES=$(python3 -c "
-          import os, re
-          version = os.environ['VERSION']
-          with open(os.path.join(os.environ['PACKAGE_DIR'], 'CHANGELOG.md'), 'r') as f:
-              content = f.read()
-          version_pattern = rf'## v{re.escape(version)}.*?\n(.*?)(?=\n## |\Z)'
-          version_match = re.search(version_pattern, content, re.DOTALL)
-          if version_match:
-              entries = version_match.group(1).strip()
-              if entries:
-                  joined = re.sub(r'\n  +', ' ', entries)
-                  print(joined)
-          ")
-
-          if [ -z "$CHANGELOG_ENTRIES" ]; then
+          if ! grep -q "^## What's Changed$" release_notes.md; then
             echo "No CHANGELOG entries found for v$VERSION."
             exit 1
           fi
 
-          cat > release_notes.md << EOF
-          ## What's Changed
-          $CHANGELOG_ENTRIES
-
-          ## Upstream Components
-
-          $DEPS
+          cat >> release_notes.md << EOF
 
           ## Release Artifacts
 
@@ -144,12 +94,19 @@ jobs:
           https://pypi.org/project/cloudwatch-plugin-otel/
           EOF
 
+      - name: Generate checksums
+        working-directory: dist-pypi
+        run: |
           shasum -a 256 "$WHEEL_ARTIFACT_NAME" > "$WHEEL_ARTIFACT_NAME.sha256"
           shasum -a 256 "$SOURCE_ARTIFACT_NAME" > "$SOURCE_ARTIFACT_NAME.sha256"
 
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
           gh release create --target "$GITHUB_REF_NAME" \
             --title "cloudwatch-plugin-otel v$VERSION" \
             --notes-file release_notes.md --draft \
             "$TAG" \
-            "$WHEEL_ARTIFACT_NAME" "$WHEEL_ARTIFACT_NAME.sha256" \
-            "$SOURCE_ARTIFACT_NAME" "$SOURCE_ARTIFACT_NAME.sha256"
+            "dist-pypi/$WHEEL_ARTIFACT_NAME" "dist-pypi/$WHEEL_ARTIFACT_NAME.sha256" \
+            "dist-pypi/$SOURCE_ARTIFACT_NAME" "dist-pypi/$SOURCE_ARTIFACT_NAME.sha256"
