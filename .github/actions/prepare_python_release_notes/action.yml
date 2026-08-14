@@ -1,0 +1,69 @@
+## Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+## SPDX-License-Identifier: Apache-2.0
+name: Prepare Python release notes
+description: Write changelog entries and Python dependencies to a release notes file.
+
+inputs:
+  pyproject-file:
+    required: true
+    description: Path to the package pyproject.toml.
+  changelog-file:
+    required: true
+    description: Path to the package CHANGELOG.md.
+  version:
+    required: true
+    description: Package version whose changelog entries should be extracted.
+
+runs:
+  using: composite
+  steps:
+    - name: Prepare Python release notes
+      shell: bash
+      env:
+        CHANGELOG_FILE: ${{ inputs.changelog-file }}
+        PYPROJECT_FILE: ${{ inputs.pyproject-file }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        # Extract all dependencies from pyproject.toml
+        DEPS=$(python3 -c "
+        import os, re
+        with open(os.environ['PYPROJECT_FILE'], 'r') as f:
+            content = f.read()
+        deps_match = re.search(r'dependencies\s*=\s*\[(.*?)\]', content, re.DOTALL)
+        if deps_match:
+            deps_content = deps_match.group(1)
+            dep_lines = re.findall(r'\"([^\"]+)\"', deps_content)
+            formatted_deps = []
+            for dep_line in dep_lines:
+                if ' == ' in dep_line:
+                    package, version = dep_line.split(' == ', 1)
+                    formatted_deps.append(f'- \`{package}\` - {version}')
+                else:
+                    formatted_deps.append(f'- \`{dep_line}\`')
+            print('\n'.join(formatted_deps))
+        ")
+
+        # Extract CHANGELOG entries for this version
+        CHANGELOG_ENTRIES=$(python3 -c "
+        import os, re
+        version = os.environ['VERSION']
+        with open(os.environ['CHANGELOG_FILE'], 'r') as f:
+            content = f.read()
+        version_pattern = rf'## v{re.escape(version)}.*?\n(.*?)(?=\n## |\Z)'
+        version_match = re.search(version_pattern, content, re.DOTALL)
+        if version_match:
+            entries = version_match.group(1).strip()
+            if entries:
+                # Join continuation lines (indented lines) with the previous line
+                joined = re.sub(r'\n  +', ' ', entries)
+                print(joined)
+        ")
+
+        # Create release notes
+        cat > release_notes.md << EOF
+        $(if [ -n "$CHANGELOG_ENTRIES" ]; then echo "## What's Changed"; echo "$CHANGELOG_ENTRIES"; echo ""; fi)
+
+        ## Upstream Components
+
+        $DEPS
+        EOF
