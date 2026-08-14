@@ -133,14 +133,14 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.sha }}
 
-      - name: Build cloudwatch-plugin-otel release artifacts
+      - name: Build cloudwatch-plugin-otel distributions
         id: plugin_build
         uses: ./.github/actions/build_cloudwatch_plugin_otel
 
-      - name: Upload cloudwatch-plugin-otel release artifacts
+      - name: Upload cloudwatch-plugin-otel artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
         with:
-          name: cloudwatch-plugin-otel-release-artifacts
+          name: cloudwatch-plugin-otel-artifacts
           path: plugin-dist/cloudwatch_plugin_otel-*
 
   unit-tests:

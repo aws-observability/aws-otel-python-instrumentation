@@ -22,7 +22,7 @@ runs:
         plugin_version=$(grep '__version__' cloudwatch-plugin-otel/src/plugins/opentelemetry/cloudwatch/version.py | awk -F '"' '{print $2}')
         echo "PLUGIN_VERSION=$plugin_version" >> "$GITHUB_OUTPUT"
 
-    - name: Build cloudwatch-plugin-otel release artifacts
+    - name: Build cloudwatch-plugin-otel distributions
       shell: bash
       run: |
         pip install build

@@ -41,11 +41,11 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           branch: ${{ github.ref_name }}
 
-      - name: Download cloudwatch-plugin-otel release artifacts
+      - name: Download cloudwatch-plugin-otel artifacts
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_ID: ${{ steps.main_build.outputs.run_id }}
-        run: gh run download "$RUN_ID" -n cloudwatch-plugin-otel-release-artifacts -D dist
+        run: gh run download "$RUN_ID" -n cloudwatch-plugin-otel-artifacts -D dist
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
