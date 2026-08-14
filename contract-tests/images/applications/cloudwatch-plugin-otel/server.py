@@ -9,6 +9,7 @@ import fakeredis
 import grpc
 from botocore.stub import Stubber
 from flask import Flask
+from plugins.opentelemetry.cloudwatch.span_metrics.instrumentor import SpanMetricsInstrumentor
 from requests import get
 from sqlalchemy import create_engine, text
 
@@ -39,6 +40,7 @@ from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.semconv.attributes.service_attributes import SERVICE_NAME
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
+MODE = os.environ.get("SPAN_METRICS_MODE", "auto")
 SERVICE = os.environ.get(OTEL_SERVICE_NAME, "cloudwatch-plugin-otel-contract-test")
 ENDPOINT = os.environ.get(OTEL_EXPORTER_OTLP_ENDPOINT, "http://collector:4315")
 SAMPLER = os.environ.get(OTEL_TRACES_SAMPLER, "always_on")
@@ -51,7 +53,7 @@ GRPC_SERVICE = "contract.Health"
 GRPC_METHOD = "Check"
 
 
-class SpanMetricsApplication(ABC):
+class SampleApplication(ABC):
     @staticmethod
     def create_providers():
         resource = Resource.create({SERVICE_NAME: SERVICE})
@@ -106,6 +108,25 @@ class SpanMetricsApplication(ABC):
         grpc_service = GrpcService()
         grpc_service.start()
         FlaskServer(app, database, aws_clients, redis_cache, grpc_service).run()
+
+
+class AutoInstrumentedApplication(SampleApplication):
+    def configure_instrumentation(self, app):
+        return None
+
+
+class ManuallyInstrumentedApplication(SampleApplication):
+    def configure_instrumentation(self, app):
+        tracer_provider, meter_provider = self.create_providers()
+        SpanMetricsInstrumentor().instrument(tracer_provider=tracer_provider, meter_provider=meter_provider)
+        self.instrument_libraries(app, tracer_provider, meter_provider)
+
+
+class ManuallyInstrumentedGlobalProvidersApplication(SampleApplication):
+    def configure_instrumentation(self, app):
+        tracer_provider, meter_provider = self.create_providers()
+        SpanMetricsInstrumentor().instrument()
+        self.instrument_libraries(app, tracer_provider, meter_provider)
 
 
 class Database:
@@ -267,3 +288,19 @@ class FlaskServer:
         span.set_attribute(ERROR_TYPE, "RuntimeError")
         span.set_status(Status(StatusCode.ERROR))
         raise RuntimeError("expected contract-test error")
+
+
+def main():
+    if MODE == "auto":
+        application = AutoInstrumentedApplication()
+    elif MODE == "manual":
+        application = ManuallyInstrumentedApplication()
+    elif MODE == "manual-global-providers":
+        application = ManuallyInstrumentedGlobalProvidersApplication()
+    else:
+        raise ValueError(f"Unsupported span metrics mode: {MODE}")
+    application.run()
+
+
+if __name__ == "__main__":
+    main()

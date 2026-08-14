@@ -13,4 +13,4 @@ RUN pip install --upgrade pip \
     && pip install -r requirements.txt \
     && pip install cloudwatch_plugin_otel-*.whl --force-reinstall
 
-CMD ["python", "-u", "./manual_server.py"]
+CMD ["python", "-u", "./server.py"]
