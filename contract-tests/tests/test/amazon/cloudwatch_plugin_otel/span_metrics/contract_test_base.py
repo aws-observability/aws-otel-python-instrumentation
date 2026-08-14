@@ -80,8 +80,7 @@ class SpanMetricsContractTestBase(TestCase):
         )
         for key, value in self.env().items():
             self.application.with_env(key, value)
-        if self.get_mode() == "manual":
-            self.application.with_command("python -u ./span_metrics/server.py")
+        self.application.with_command(self.command())
 
         self.application.start()
         wait_for_logs(self.application, "Running on", timeout=30)
@@ -347,3 +346,9 @@ class SpanMetricsContractTestBase(TestCase):
 
     def get_mode(self) -> str:
         raise NotImplementedError
+
+    def command(self) -> str:
+        # auto instruments via the opentelemetry-instrument wrapper; manual wires instrumentors in server.py itself.
+        if self.get_mode() == "manual":
+            return "python -u ./server.py"
+        return "opentelemetry-instrument python -u ./server.py"

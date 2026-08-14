@@ -13,4 +13,4 @@ RUN pip install --upgrade pip \
     && pip install -r requirements.txt \
     && pip install cloudwatch_plugin_otel-*.whl --force-reinstall
 
-CMD ["opentelemetry-instrument", "python", "-u", "./span_metrics/server.py"]
+CMD ["opentelemetry-instrument", "python", "-u", "./server.py"]
