@@ -150,6 +150,42 @@ class SpanMetricsContractTestBase(TestCase):
         self._assert_span_metrics_recorded(
             metrics,
             {
+                "span.name": "DynamoDB.GetItem",
+                "span.kind": SpanKind.CLIENT.name,
+                DB_SYSTEM: "dynamodb",
+                DB_OPERATION: "GetItem",
+                RPC_SYSTEM: "aws-api",
+                RPC_SERVICE: "DynamoDB",
+                RPC_METHOD: "GetItem",
+            },
+        )
+        self._assert_span_metrics_recorded(
+            metrics,
+            {"span.name": "GET", "span.kind": SpanKind.CLIENT.name, DB_SYSTEM: "redis"},
+        )
+        self._assert_span_metrics_recorded(
+            metrics,
+            {
+                "span.name": "/contract.Health/Check",
+                "span.kind": SpanKind.CLIENT.name,
+                RPC_SYSTEM: "grpc",
+                RPC_SERVICE: "contract.Health",
+                RPC_METHOD: "Check",
+            },
+        )
+        self._assert_span_metrics_recorded(
+            metrics,
+            {
+                "span.name": "/contract.Health/Check",
+                "span.kind": SpanKind.SERVER.name,
+                RPC_SYSTEM: "grpc",
+                RPC_SERVICE: "contract.Health",
+                RPC_METHOD: "Check",
+            },
+        )
+        self._assert_span_metrics_recorded(
+            metrics,
+            {
                 "span.kind": SpanKind.PRODUCER.name,
                 MESSAGING_SYSTEM: "aws.sns",
                 MESSAGING_DESTINATION_NAME: "arn:aws:sns:us-east-1:123456789012:orders",
@@ -178,7 +214,7 @@ class SpanMetricsContractTestBase(TestCase):
             for resource_scope_span in traces
             if resource_scope_span.span.trace_id in exercise_trace_ids
         ]
-        self.assertGreaterEqual(len(exercise_spans), 8)
+        self.assertGreaterEqual(len(exercise_spans), 12)
 
     def test_always_off_records_metrics_without_exporting_spans(self) -> None:
         self.assertEqual(self.send_request("GET", "exercise").status_code, 200)

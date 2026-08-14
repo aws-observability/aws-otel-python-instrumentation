@@ -1,8 +1,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import os
+from concurrent import futures
 
 import boto3
+import fakeredis
+import grpc
 from botocore.stub import Stubber
 from flask import Flask
 from plugins.opentelemetry.cloudwatch.span_metrics.instrumentor import SpanMetricsInstrumentor
@@ -14,6 +17,8 @@ from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExp
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
 from opentelemetry.instrumentation.flask import FlaskInstrumentor
+from opentelemetry.instrumentation.grpc import GrpcInstrumentorClient, GrpcInstrumentorServer
+from opentelemetry.instrumentation.redis import RedisInstrumentor
 from opentelemetry.instrumentation.requests import RequestsInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.sdk.environment_variables import OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME, OTEL_TRACES_SAMPLER
@@ -41,7 +46,10 @@ SAMPLER = os.environ.get(OTEL_TRACES_SAMPLER, "always_on")
 AWS_REGION = "us-east-1"
 QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/123456789012/orders"
 TOPIC_ARN = "arn:aws:sns:us-east-1:123456789012:orders"
+DYNAMODB_TABLE = "users"
 DATABASE_URL = "sqlite:////tmp/span-metrics-contract.db"
+GRPC_SERVICE = "contract.Health"
+GRPC_METHOD = "Check"
 
 
 def configure_manual_instrumentation():
@@ -72,6 +80,9 @@ def configure_manual_instrumentation():
     RequestsInstrumentor().instrument(tracer_provider=tracer_provider)
     BotocoreInstrumentor().instrument(tracer_provider=tracer_provider)
     SQLAlchemyInstrumentor().instrument(tracer_provider=tracer_provider)
+    RedisInstrumentor().instrument(tracer_provider=tracer_provider)
+    GrpcInstrumentorServer().instrument(tracer_provider=tracer_provider)
+    GrpcInstrumentorClient().instrument(tracer_provider=tracer_provider)
     return tracer_provider, meter_provider
 
 
@@ -95,6 +106,7 @@ class AwsClients:
         self.s3 = self._client("s3", region)
         self.sqs = self._client("sqs", region)
         self.sns = self._client("sns", region)
+        self.dynamodb = self._client("dynamodb", region)
 
     @staticmethod
     def _client(service, region):
@@ -120,11 +132,58 @@ class AwsClients:
             stubber.add_response("publish", {"MessageId": "message-2"})
             self.sns.publish(TopicArn=topic_arn, Message="contract test")
 
+    def get_item(self, table_name):
+        with Stubber(self.dynamodb) as stubber:
+            stubber.add_response("get_item", {"Item": {"id": {"S": "1"}, "name": {"S": "contract-test"}}})
+            self.dynamodb.get_item(TableName=table_name, Key={"id": {"S": "1"}})
+
+
+class RedisCache:
+    def __init__(self):
+        self._client = fakeredis.FakeStrictRedis()
+
+    def exercise(self):
+        self._client.set("contract-test", "ok")
+        self._client.get("contract-test")
+
+
+class GrpcService:
+    def __init__(self):
+        self._server = grpc.server(futures.ThreadPoolExecutor(max_workers=2))
+        self._server.add_generic_rpc_handlers(
+            (
+                grpc.method_handlers_generic_handler(
+                    GRPC_SERVICE,
+                    {
+                        GRPC_METHOD: grpc.unary_unary_rpc_method_handler(
+                            lambda request, context: b"ok",
+                            request_deserializer=lambda payload: payload,
+                            response_serializer=lambda payload: payload,
+                        )
+                    },
+                ),
+            )
+        )
+        self._port = self._server.add_insecure_port("127.0.0.1:0")
+
+    def start(self):
+        self._server.start()
+
+    def exercise(self):
+        with grpc.insecure_channel(f"127.0.0.1:{self._port}") as channel:
+            channel.unary_unary(
+                f"/{GRPC_SERVICE}/{GRPC_METHOD}",
+                request_serializer=lambda payload: payload,
+                response_deserializer=lambda payload: payload,
+            )(b"ping")
+
 
 class FlaskServer:
-    def __init__(self, database, aws_clients):
+    def __init__(self, database, aws_clients, redis_cache, grpc_service):
         self._database = database
         self._aws_clients = aws_clients
+        self._redis_cache = redis_cache
+        self._grpc_service = grpc_service
         self._tracer = trace.get_tracer(__name__)
         self.app = Flask(__name__)
         self.app.add_url_rule("/health", view_func=self._health, methods=["GET"])
@@ -163,6 +222,10 @@ class FlaskServer:
         self._aws_clients.list_buckets()
         self._aws_clients.send_message(QUEUE_URL)
         self._aws_clients.publish(TOPIC_ARN)
+        self._aws_clients.get_item(DYNAMODB_TABLE)
+
+        self._redis_cache.exercise()
+        self._grpc_service.exercise()
 
         with self._tracer.start_as_current_span(
             "orders receive",
@@ -192,7 +255,10 @@ def main():
 
     database = Database(DATABASE_URL)
     aws_clients = AwsClients(AWS_REGION)
-    server = FlaskServer(database, aws_clients)
+    redis_cache = RedisCache()
+    grpc_service = GrpcService()
+    grpc_service.start()
+    server = FlaskServer(database, aws_clients, redis_cache, grpc_service)
 
     if MODE == "manual":
         FlaskInstrumentor().instrument_app(
