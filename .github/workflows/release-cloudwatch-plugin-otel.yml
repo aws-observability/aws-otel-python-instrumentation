@@ -34,26 +34,18 @@ jobs:
             exit 1
           fi
 
-      - name: Get main build run ID and download artifacts
+      - name: Get successful main build run
+        id: main_build
+        uses: ./.github/actions/get_main_build_run
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.ref_name }}
+
+      - name: Download cloudwatch-plugin-otel release artifacts
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          WORKFLOW_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows" --jq '.workflows[] | select(.name=="Python Instrumentation Main Build") | .id')
-          LATEST_RUN=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$WORKFLOW_ID/runs" | jq --arg branch "$GITHUB_REF_NAME" '[.workflow_runs[] | select(.head_branch==$branch)] | sort_by(.created_at) | .[-1]')
-          STATUS=$(echo "$LATEST_RUN" | jq -r '.status')
-          CONCLUSION=$(echo "$LATEST_RUN" | jq -r '.conclusion')
-          RUN_ID=$(echo "$LATEST_RUN" | jq -r '.id')
-
-          if [ "$STATUS" = "in_progress" ] || [ "$STATUS" = "queued" ]; then
-            echo "Main build is still running (status: $STATUS). Cannot proceed with release."
-            exit 1
-          elif [ "$CONCLUSION" != "success" ]; then
-            echo "Latest main build on branch $GITHUB_REF_NAME conclusion: $CONCLUSION"
-            exit 1
-          fi
-          echo "Main build succeeded (run ID: $RUN_ID), downloading artifacts..."
-
-          gh run download "$RUN_ID" -n cloudwatch-plugin-otel-release-artifacts -D dist
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ steps.main_build.outputs.run_id }}
+        run: gh run download "$RUN_ID" -n cloudwatch-plugin-otel-release-artifacts -D dist
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
@@ -71,33 +63,14 @@ jobs:
     needs: download-artifacts
     runs-on: ubuntu-latest
     steps:
-      - name: Download wheel artifact
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
-        with:
-          name: ${{ env.WHEEL_ARTIFACT_NAME }}
-          path: dist-pypi
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
 
-      - name: Download source artifact
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
+      - name: Publish Python package
+        uses: ./.github/actions/publish_pypi
         with:
-          name: ${{ env.SOURCE_ARTIFACT_NAME }}
-          path: dist-pypi
-
-      - name: Publish to TestPyPI
-        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e #v1.13.0
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          attestations: false
-          skip-existing: true
-          verbose: true
-          packages-dir: dist-pypi
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e #v1.13.0
-        with:
-          skip-existing: true
-          verbose: true
-          packages-dir: dist-pypi
+          wheel-artifact-name: ${{ env.WHEEL_ARTIFACT_NAME }}
+          source-artifact-name: ${{ env.SOURCE_ARTIFACT_NAME }}
 
   publish-github:
     needs: publish-pypi
