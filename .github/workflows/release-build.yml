@@ -41,27 +41,20 @@ jobs:
       - name: Checkout Repo @ SHA - ${{ github.sha }}
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
 
-      - name: Get main build run ID and download artifacts
+      - name: Get successful main build run
+        id: main_build
+        uses: ./.github/actions/get_main_build_run
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.ref_name }}
+
+      - name: Download main build artifacts
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ steps.main_build.outputs.run_id }}
         run: |
-          WORKFLOW_ID=$(gh api repos/${{ github.repository }}/actions/workflows --jq '.workflows[] | select(.name=="Python Instrumentation Main Build") | .id')
-          LATEST_RUN=$(gh api repos/${{ github.repository }}/actions/workflows/$WORKFLOW_ID/runs --jq '[.workflow_runs[] | select(.head_branch=="${{ github.ref_name }}")] | sort_by(.created_at) | .[-1]')
-          STATUS=$(echo "$LATEST_RUN" | jq -r '.status')
-          CONCLUSION=$(echo "$LATEST_RUN" | jq -r '.conclusion')
-          RUN_ID=$(echo "$LATEST_RUN" | jq -r '.id')
-          
-          if [ "$STATUS" = "in_progress" ] || [ "$STATUS" = "queued" ]; then
-            echo "Main build is still running (status: $STATUS). Cannot proceed with release."
-            exit 1
-          elif [ "$CONCLUSION" != "success" ]; then
-            echo "Latest main build on branch ${{ github.ref_name }} conclusion: $CONCLUSION"
-            exit 1
-          fi
-          echo "Main build succeeded (run ID: $RUN_ID), downloading artifacts..."
-          
-          gh run download $RUN_ID -n release-artifacts -D dist
-          gh run download $RUN_ID -n layer.zip -D layer
+          gh run download "$RUN_ID" -n release-artifacts -D dist
+          gh run download "$RUN_ID" -n layer.zip -D layer
 
       - name: Upload SDK wheel artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
@@ -126,35 +119,11 @@ jobs:
         with:
           registry: public.ecr.aws
      
-      - name: Download SDK wheel artifact
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
+      - name: Publish Python package
+        uses: ./.github/actions/publish_pypi
         with:
-          name: ${{ env.WHEEL_ARTIFACT_NAME }}
-          path: dist-pypi
-
-      - name: Download SDK source artifact
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
-        with:
-          name: ${{ env.SOURCE_ARTIFACT_NAME }}
-          path: dist-pypi
-      
-      # The step below publishes to testpypi in order to catch any issues 
-      - name: Publish to TestPyPI
-        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          attestations: false
-          skip-existing: true
-          verbose: true
-          packages-dir: dist-pypi
-
-      # Publish to prod PyPI
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e
-        with:
-          skip-existing: true
-          verbose: true
-          packages-dir: dist-pypi
+          wheel-artifact-name: ${{ env.WHEEL_ARTIFACT_NAME }}
+          source-artifact-name: ${{ env.SOURCE_ARTIFACT_NAME }}
 
       - name: Build and push image
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
@@ -442,54 +411,20 @@ jobs:
         run: |
           cp ${{ env.LAYER_ARTIFACT_NAME }} layer.zip
 
+      - name: Prepare Python release notes
+        uses: ./.github/actions/prepare_python_release_notes
+        with:
+          pyproject-file: aws-opentelemetry-distro/pyproject.toml
+          changelog-file: CHANGELOG.md
+          version: ${{ env.VERSION }}
+
       # Publish to GitHub releases
       - name: Create GH release
         id: create_release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Extract all dependencies from pyproject.toml
-          DEPS=$(python3 -c "
-          import re
-          with open('aws-opentelemetry-distro/pyproject.toml', 'r') as f:
-              content = f.read()
-          deps_match = re.search(r'dependencies\s*=\s*\[(.*?)\]', content, re.DOTALL)
-          if deps_match:
-              deps_content = deps_match.group(1)
-              dep_lines = re.findall(r'\"([^\"]+)\"', deps_content)
-              formatted_deps = []
-              for dep_line in dep_lines:
-                  if ' == ' in dep_line:
-                      package, version = dep_line.split(' == ', 1)
-                      formatted_deps.append(f'- \`{package}\` - {version}')
-                  else:
-                      formatted_deps.append(f'- \`{dep_line}\`')
-              print('\n'.join(formatted_deps))
-          ")
-
-          # Extract CHANGELOG entries for this version
-          CHANGELOG_ENTRIES=$(python3 -c "
-          import re, os
-          version = os.environ['VERSION']
-          with open('CHANGELOG.md', 'r') as f:
-              content = f.read()
-          version_pattern = rf'## v{re.escape(version)}.*?\n(.*?)(?=\n## |\Z)'
-          version_match = re.search(version_pattern, content, re.DOTALL)
-          if version_match:
-              entries = version_match.group(1).strip()
-              if entries:
-                  # Join continuation lines (indented lines) with the previous line
-                  joined = re.sub(r'\n  +', ' ', entries)
-                  print(joined)
-          ")
-
-          # Create release notes
-          cat > release_notes.md << EOF
-          $(if [ -n "$CHANGELOG_ENTRIES" ]; then echo "## What's Changed"; echo "$CHANGELOG_ENTRIES"; echo ""; fi)
-
-          ## Upstream Components
-
-          $DEPS
+          cat >> release_notes.md << EOF
 
           ## Release Artifacts
 

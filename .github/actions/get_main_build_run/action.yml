@@ -1,0 +1,52 @@
+## Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+## SPDX-License-Identifier: Apache-2.0
+name: Get successful main build run
+description: Find the latest successful run of a workflow on a branch.
+
+inputs:
+  github-token:
+    required: true
+    description: GitHub token used to query workflow runs.
+  branch:
+    required: true
+    description: Branch whose latest workflow run should be used.
+  workflow-name:
+    required: false
+    default: Python Instrumentation Main Build
+    description: Name of the workflow to query.
+
+outputs:
+  run_id:
+    description: ID of the latest successful workflow run.
+    value: ${{ steps.main_build.outputs.run_id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Get successful main build run
+      id: main_build
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        TARGET_BRANCH: ${{ inputs.branch }}
+        WORKFLOW_NAME: ${{ inputs.workflow-name }}
+      run: |
+        WORKFLOW_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows" |
+          jq -r --arg name "$WORKFLOW_NAME" '.workflows[] | select(.name == $name) | .id')
+        LATEST_RUN=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$WORKFLOW_ID/runs" |
+          jq -c --arg branch "$TARGET_BRANCH" \
+            '[.workflow_runs[] | select(.head_branch == $branch)] | sort_by(.created_at) | .[-1]')
+        STATUS=$(echo "$LATEST_RUN" | jq -r '.status')
+        CONCLUSION=$(echo "$LATEST_RUN" | jq -r '.conclusion')
+        RUN_ID=$(echo "$LATEST_RUN" | jq -r '.id')
+
+        if [ "$STATUS" = "in_progress" ] || [ "$STATUS" = "queued" ]; then
+          echo "Main build is still running (status: $STATUS). Cannot proceed with release."
+          exit 1
+        elif [ "$CONCLUSION" != "success" ]; then
+          echo "Latest main build on branch $TARGET_BRANCH conclusion: $CONCLUSION"
+          exit 1
+        fi
+
+        echo "Main build succeeded (run ID: $RUN_ID)."
+        echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"

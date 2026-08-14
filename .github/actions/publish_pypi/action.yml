@@ -1,0 +1,49 @@
+## Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+## SPDX-License-Identifier: Apache-2.0
+name: Publish Python package
+description: Download wheel and source artifacts and publish them to TestPyPI and PyPI.
+
+inputs:
+  wheel-artifact-name:
+    required: true
+    description: Name of the GitHub Actions wheel artifact.
+  source-artifact-name:
+    required: true
+    description: Name of the GitHub Actions source artifact.
+  packages-dir:
+    required: false
+    default: dist-pypi
+    description: Directory used to stage distributions for publication.
+
+runs:
+  using: composite
+  steps:
+    - name: Download wheel artifact
+      uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
+      with:
+        name: ${{ inputs.wheel-artifact-name }}
+        path: ${{ inputs.packages-dir }}
+
+    - name: Download source artifact
+      uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
+      with:
+        name: ${{ inputs.source-artifact-name }}
+        path: ${{ inputs.packages-dir }}
+
+    # The step below publishes to TestPyPI in order to catch any issues
+    - name: Publish to TestPyPI
+      uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e #v1.13.0
+      with:
+        repository-url: https://test.pypi.org/legacy/
+        attestations: false
+        skip-existing: true
+        verbose: true
+        packages-dir: ${{ inputs.packages-dir }}
+
+    # Publish to prod PyPI
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e #v1.13.0
+      with:
+        skip-existing: true
+        verbose: true
+        packages-dir: ${{ inputs.packages-dir }}
