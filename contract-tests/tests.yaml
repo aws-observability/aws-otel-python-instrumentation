@@ -1,5 +1,7 @@
-#   name     - the application image to build AND the CI job label. Resolves to
-#              contract-tests/images/applications/<name>/Dockerfile.
+#   name     - the CI job label (must be unique).
+#   app      - optional application image to build (defaults to `name`). Resolves
+#              to contract-tests/images/applications/<app>/Dockerfile. Set it when
+#              several suites share one image so each is its own parallel job.
 #   paths    - pytest paths to run, relative to test_base.
 #   versions - the Python versions this entry runs on. Omit one the framework can't support.
 test_base: contract-tests/tests/test/amazon
@@ -146,7 +148,8 @@ tests:
       - "3.12"
       - "3.13"
       - "3.14"
-  - name: cloudwatch-plugin-otel
+  - name: cloudwatch-plugin-otel/span_metrics
+    app: cloudwatch-plugin-otel
     paths:
       - cloudwatch_plugin_otel/span_metrics
     versions:
