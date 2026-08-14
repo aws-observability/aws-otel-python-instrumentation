@@ -43,7 +43,7 @@ jobs:
 
       - name: Download cloudwatch-plugin-otel release artifacts
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_ID: ${{ steps.main_build.outputs.run_id }}
         run: gh run download "$RUN_ID" -n cloudwatch-plugin-otel-release-artifacts -D dist
 
