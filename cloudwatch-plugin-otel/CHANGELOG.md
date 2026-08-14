@@ -10,5 +10,7 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- Add independent PyPI and GitHub release automation.
+
 - Initial package scaffold
   ([#850](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/850))
