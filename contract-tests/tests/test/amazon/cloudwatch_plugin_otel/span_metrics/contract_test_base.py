@@ -3,7 +3,7 @@
 import time
 import uuid
 from logging import INFO, Logger, getLogger
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, TypeVar
 from unittest import TestCase
 
 from docker import DockerClient
@@ -42,6 +42,16 @@ from opentelemetry.trace import SpanKind, StatusCode
 
 _logger: Logger = getLogger(__name__)
 _logger.setLevel(INFO)
+
+_TestMethod = TypeVar("_TestMethod", bound=Callable[..., None])
+
+
+def _with_sampler(sampler: str) -> Callable[[_TestMethod], _TestMethod]:
+    def decorator(test_method: _TestMethod) -> _TestMethod:
+        setattr(test_method, "sampler", sampler)
+        return test_method
+
+    return decorator
 
 
 # pylint: disable=broad-exception-caught
@@ -216,6 +226,7 @@ class SpanMetricsContractTestBase(TestCase):
         ]
         self.assertGreaterEqual(len(exercise_spans), 12)
 
+    @_with_sampler("always_off")
     def test_always_off_records_metrics_without_exporting_spans(self) -> None:
         self.assertEqual(self.send_request("GET", "exercise").status_code, 200)
 
@@ -250,8 +261,10 @@ class SpanMetricsContractTestBase(TestCase):
                 self.assertTrue(all(metric.scope_metrics.scope.version for metric in plugin_metrics))
                 return plugin_metrics
             time.sleep(0.1)
+        observed_metric_names = sorted({metric.metric.name for metric in plugin_metrics})
         raise AssertionError(
-            f"No calls point matched {required_attributes}; found {len(plugin_metrics)} plugin metrics"
+            f"No calls point matched {required_attributes}; found {len(plugin_metrics)} plugin metrics with names "
+            f"{observed_metric_names}"
         )
 
     def _assert_http_server_metrics(
@@ -328,9 +341,8 @@ class SpanMetricsContractTestBase(TestCase):
         return result
 
     def get_sampler(self) -> str:
-        if self._testMethodName == "test_always_off_records_metrics_without_exporting_spans":
-            return "always_off"
-        return "always_on"
+        test_method = getattr(self, self._testMethodName)
+        return getattr(test_method, "sampler", "always_on")
 
     def env(self) -> Dict[str, str]:
         return {

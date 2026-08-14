@@ -713,6 +713,11 @@ class TestSpanMetricsConnectorActivation(TestBase):
             exporter="otlp,console", recording=True, signs_span=True, records_metrics=True
         )
 
+    def test_if_metrics_exporter_only_contains_otlp_then_spans_are_not_signed_but_metrics_recorded(self):
+        self.assert_signing_and_recording(
+            exporter="otlp-vendor", recording=True, signs_span=False, records_metrics=True
+        )
+
     def test_if_metrics_exporter_is_none_then_spans_are_not_signed_but_metrics_recorded(self):
         self.assert_signing_and_recording(exporter="none", recording=True, signs_span=False, records_metrics=True)
 

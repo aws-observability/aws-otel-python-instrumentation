@@ -75,8 +75,11 @@ class SpanMetricsConnector(SpanProcessor):
             self._duration_histogram, NoOpHistogram
         )
         # OTLP is the default metrics exporter when OTEL_METRICS_EXPORTER is unset.
-        is_exporter_configured = "otlp" in os.environ.get(OTEL_METRICS_EXPORTER, "otlp").lower()
-        self.is_metrics_active = self.is_recording and is_exporter_configured
+        configured_metrics_exporters = {
+            exporter.strip().lower() for exporter in os.environ.get(OTEL_METRICS_EXPORTER, "otlp").split(",")
+        }
+        is_metrics_exporter_configured = "otlp" in configured_metrics_exporters
+        self.is_metrics_active = self.is_recording and is_metrics_exporter_configured
 
     @override
     def on_start(self, span: Span, parent_context: Optional[Context] = None) -> None:
