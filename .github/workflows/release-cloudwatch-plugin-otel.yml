@@ -1,0 +1,112 @@
+name: Release cloudwatch-plugin-otel
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The version to tag the release with, e.g., 0.1.0
+        required: true
+
+env:
+  PACKAGE_DIR: cloudwatch-plugin-otel
+  VERSION: ${{ github.event.inputs.version }}
+  WHEEL_ARTIFACT_NAME: cloudwatch_plugin_otel-${{ github.event.inputs.version }}-py3-none-any.whl
+  SOURCE_ARTIFACT_NAME: cloudwatch_plugin_otel-${{ github.event.inputs.version }}.tar.gz
+  TAG: cloudwatch-plugin-otel/v${{ github.event.inputs.version }}
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  download-artifacts:
+    environment: Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+
+      - name: Verify release version
+        run: |
+          package_version=$(grep '__version__' "$PACKAGE_DIR/src/plugins/opentelemetry/cloudwatch/version.py" | awk -F '"' '{print $2}')
+          if [ "$VERSION" != "$package_version" ]; then
+            echo "Release version $VERSION does not match package version $package_version."
+            exit 1
+          fi
+
+      - name: Get successful main build run
+        id: main_build
+        uses: ./.github/actions/get_main_build_run
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.ref_name }}
+
+      - name: Download cloudwatch-plugin-otel artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ steps.main_build.outputs.run_id }}
+        run: gh run download "$RUN_ID" -n cloudwatch-plugin-otel-artifacts -D dist
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: ${{ env.WHEEL_ARTIFACT_NAME }}
+          path: dist/${{ env.WHEEL_ARTIFACT_NAME }}
+
+      - name: Upload source artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: ${{ env.SOURCE_ARTIFACT_NAME }}
+          path: dist/${{ env.SOURCE_ARTIFACT_NAME }}
+
+  publish-release:
+    needs: download-artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+
+      - name: Publish Python package
+        uses: ./.github/actions/publish_pypi
+        with:
+          wheel-artifact-name: ${{ env.WHEEL_ARTIFACT_NAME }}
+          source-artifact-name: ${{ env.SOURCE_ARTIFACT_NAME }}
+
+      - name: Prepare Python release notes
+        uses: ./.github/actions/prepare_python_release_notes
+        with:
+          pyproject-file: cloudwatch-plugin-otel/pyproject.toml
+          changelog-file: cloudwatch-plugin-otel/CHANGELOG.md
+          version: ${{ env.VERSION }}
+
+      - name: Complete release notes
+        run: |
+          if ! grep -q "^## What's Changed$" release_notes.md; then
+            echo "No CHANGELOG entries found for v$VERSION."
+            exit 1
+          fi
+
+          cat >> release_notes.md << EOF
+
+          ## Release Artifacts
+
+          This release publishes cloudwatch-plugin-otel version $VERSION to PyPI:
+          https://pypi.org/project/cloudwatch-plugin-otel/
+          EOF
+
+      - name: Generate checksums
+        working-directory: dist-pypi
+        run: |
+          shasum -a 256 "$WHEEL_ARTIFACT_NAME" > "$WHEEL_ARTIFACT_NAME.sha256"
+          shasum -a 256 "$SOURCE_ARTIFACT_NAME" > "$SOURCE_ARTIFACT_NAME.sha256"
+
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create --target "$GITHUB_REF_NAME" \
+            --title "Release cloudwatch-plugin-otel v$VERSION" \
+            --notes-file release_notes.md --draft \
+            "$TAG" \
+            "dist-pypi/$WHEEL_ARTIFACT_NAME" "dist-pypi/$WHEEL_ARTIFACT_NAME.sha256" \
+            "dist-pypi/$SOURCE_ARTIFACT_NAME" "dist-pypi/$SOURCE_ARTIFACT_NAME.sha256"
