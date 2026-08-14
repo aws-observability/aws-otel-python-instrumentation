@@ -5,13 +5,12 @@ FROM python:${PYTHON_VERSION}
 
 WORKDIR /cloudwatch-plugin-otel
 
-ARG PLUGIN
-COPY ./dist/${PLUGIN} .
+COPY ./dist/cloudwatch_plugin_otel-*.whl ./
 COPY ./contract-tests/images/applications/cloudwatch-plugin-otel .
 
 ENV PIP_ROOT_USER_ACTION=ignore
 RUN pip install --upgrade pip \
     && pip install -r requirements.txt \
-    && pip install "${PLUGIN}" --force-reinstall
+    && pip install cloudwatch_plugin_otel-*.whl --force-reinstall
 
 CMD ["opentelemetry-instrument", "python", "-u", "./span_metrics/server.py"]

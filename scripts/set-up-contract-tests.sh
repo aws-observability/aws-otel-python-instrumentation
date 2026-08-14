@@ -56,19 +56,13 @@ fi
 docker buildx build contract-tests/images/mock-collector --load \
   -t aws-application-signals-mock-collector-python "${mock_cache[@]}"
 
-# Find a built wheel by name prefix in dist/ and store its basename in the named variable.
-find_wheel() {
-  local prefix="$1" dest="$2"
-  local whls=(dist/"${prefix}"-*-py3-none-any.whl)
-  if [ ! -f "${whls[0]}" ]; then
-    echo "Could not find ${prefix} whl file in dist dir."
-    exit 1
-  fi
-  printf -v "$dest" '%s' "$(basename "${whls[0]}")"
-}
-
 # Find and store aws_opentelemetry_distro whl file
-find_wheel aws_opentelemetry_distro DISTRO
+distro_whls=(dist/aws_opentelemetry_distro-*-py3-none-any.whl)
+if [ ! -f "${distro_whls[0]}" ]; then
+  echo "Could not find aws_opentelemetry_distro whl file in dist dir."
+  exit 1
+fi
+DISTRO="$(basename "${distro_whls[0]}")"
 
 # Create application images
 for app in "${APPS[@]}"; do
@@ -80,10 +74,6 @@ for app in "${APPS[@]}"; do
   fi
 
   build_args=(--build-arg "DISTRO=${DISTRO}")
-  if [ "$app" = "cloudwatch-plugin-otel" ]; then
-    find_wheel cloudwatch_plugin_otel PLUGIN
-    build_args+=(--build-arg "PLUGIN=${PLUGIN}")
-  fi
   [ -n "$PYTHON_VERSION" ] && build_args+=(--build-arg "PYTHON_VERSION=${PYTHON_VERSION}")
 
   cache=()
@@ -97,10 +87,14 @@ for app in "${APPS[@]}"; do
 done
 
 # Build and install mock-collector
-python3 -m build contract-tests/images/mock-collector --outdir dist
-python3 -m pip install dist/mock_collector-1.0.0-py3-none-any.whl --force-reinstall
+cd contract-tests/images/mock-collector
+python3 -m build --outdir ../../../dist
+cd ../../../dist
+python3 -m pip install mock_collector-1.0.0-py3-none-any.whl --force-reinstall
 
 # Build and install contract-tests
-python3 -m build contract-tests/tests --outdir dist
+cd ../contract-tests/tests
+python3 -m build --outdir ../../dist
+cd ../../dist
 python3 -m pip uninstall contract-tests -y
-python3 -m pip install dist/contract_tests-1.0.0-py3-none-any.whl
+python3 -m pip install contract_tests-1.0.0-py3-none-any.whl
