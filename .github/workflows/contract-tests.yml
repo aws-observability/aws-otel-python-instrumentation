@@ -45,7 +45,7 @@ jobs:
             | [ .tests[]
                 | select(.versions | index($py))
                 | { name,
-                    app: (.app // .name),
+                    app: (.name | split("/") | .[0]),
                     pytest_args: ([ .paths[] | $base + "/" + . ] | join(" ")) } ]')
           echo "tests=$tests" >> "$GITHUB_OUTPUT"
 

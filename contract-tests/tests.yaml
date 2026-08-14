@@ -1,7 +1,9 @@
-#   name     - the CI job label (must be unique).
-#   app      - optional application image to build (defaults to `name`). Resolves
-#              to contract-tests/images/applications/<app>/Dockerfile. Set it when
-#              several suites share one image so each is its own parallel job.
+#   name     - the CI job label (must be unique) AND the application image to
+#              build: the part before the first "/" is the image, resolving to
+#              contract-tests/images/applications/<image>/Dockerfile. So "botocore"
+#              builds the botocore image, and "cloudwatch-plugin-otel/span_metrics"
+#              builds the cloudwatch-plugin-otel image -- letting sibling suites
+#              (e.g. cloudwatch-plugin-otel/logs) share one image as parallel jobs.
 #   paths    - pytest paths to run, relative to test_base.
 #   versions - the Python versions this entry runs on. Omit one the framework can't support.
 test_base: contract-tests/tests/test/amazon
@@ -149,7 +151,6 @@ tests:
       - "3.13"
       - "3.14"
   - name: cloudwatch-plugin-otel/span_metrics
-    app: cloudwatch-plugin-otel
     paths:
       - cloudwatch_plugin_otel/span_metrics
     versions:
