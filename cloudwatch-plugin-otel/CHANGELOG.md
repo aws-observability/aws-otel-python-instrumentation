@@ -10,5 +10,6 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
-- Initial package scaffold
-  ([#850](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/850))
+## v0.1.0 - 2026-08-14
+
+- Initial span metrics release
