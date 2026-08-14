@@ -53,6 +53,18 @@ GRPC_SERVICE = "contract.Health"
 GRPC_METHOD = "Check"
 
 
+def main():
+    if MODE == "auto":
+        application = AutoInstrumentedApplication()
+    elif MODE == "manual":
+        application = ManuallyInstrumentedApplication()
+    elif MODE == "manual-global-providers":
+        application = ManuallyInstrumentedGlobalProvidersApplication()
+    else:
+        raise ValueError(f"Unsupported span metrics mode: {MODE}")
+    application.run()
+
+
 class SampleApplication(ABC):
     @staticmethod
     def create_providers():
@@ -288,18 +300,6 @@ class FlaskServer:
         span.set_attribute(ERROR_TYPE, "RuntimeError")
         span.set_status(Status(StatusCode.ERROR))
         raise RuntimeError("expected contract-test error")
-
-
-def main():
-    if MODE == "auto":
-        application = AutoInstrumentedApplication()
-    elif MODE == "manual":
-        application = ManuallyInstrumentedApplication()
-    elif MODE == "manual-global-providers":
-        application = ManuallyInstrumentedGlobalProvidersApplication()
-    else:
-        raise ValueError(f"Unsupported span metrics mode: {MODE}")
-    application.run()
 
 
 if __name__ == "__main__":
