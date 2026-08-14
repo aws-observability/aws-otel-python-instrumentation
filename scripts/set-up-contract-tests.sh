@@ -97,14 +97,10 @@ for app in "${APPS[@]}"; do
 done
 
 # Build and install mock-collector
-cd contract-tests/images/mock-collector
-python3 -m build --outdir ../../../dist
-cd ../../../dist
-python3 -m pip install mock_collector-1.0.0-py3-none-any.whl --force-reinstall
+python3 -m build contract-tests/images/mock-collector --outdir dist
+python3 -m pip install dist/mock_collector-1.0.0-py3-none-any.whl --force-reinstall
 
 # Build and install contract-tests
-cd ../contract-tests/tests
-python3 -m build --outdir ../../dist
-cd ../../dist
+python3 -m build contract-tests/tests --outdir dist
 python3 -m pip uninstall contract-tests -y
-python3 -m pip install contract_tests-1.0.0-py3-none-any.whl
+python3 -m pip install dist/contract_tests-1.0.0-py3-none-any.whl
