@@ -1,0 +1,182 @@
+name: Release cloudwatch-plugin-otel
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The version to tag the release with, e.g., 0.1.0
+        required: true
+
+env:
+  PACKAGE_DIR: cloudwatch-plugin-otel
+  VERSION: ${{ github.event.inputs.version }}
+  WHEEL_ARTIFACT_NAME: cloudwatch_plugin_otel-${{ github.event.inputs.version }}-py3-none-any.whl
+  SOURCE_ARTIFACT_NAME: cloudwatch_plugin_otel-${{ github.event.inputs.version }}.tar.gz
+  TAG: cloudwatch-plugin-otel/v${{ github.event.inputs.version }}
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  download-artifacts:
+    environment: Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+
+      - name: Verify release version
+        run: |
+          package_version=$(grep '__version__' "$PACKAGE_DIR/src/plugins/opentelemetry/cloudwatch/version.py" | awk -F '"' '{print $2}')
+          if [ "$VERSION" != "$package_version" ]; then
+            echo "Release version $VERSION does not match package version $package_version."
+            exit 1
+          fi
+
+      - name: Get main build run ID and download artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          WORKFLOW_ID=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows" --jq '.workflows[] | select(.name=="Python Instrumentation Main Build") | .id')
+          LATEST_RUN=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$WORKFLOW_ID/runs" | jq --arg branch "$GITHUB_REF_NAME" '[.workflow_runs[] | select(.head_branch==$branch)] | sort_by(.created_at) | .[-1]')
+          STATUS=$(echo "$LATEST_RUN" | jq -r '.status')
+          CONCLUSION=$(echo "$LATEST_RUN" | jq -r '.conclusion')
+          RUN_ID=$(echo "$LATEST_RUN" | jq -r '.id')
+
+          if [ "$STATUS" = "in_progress" ] || [ "$STATUS" = "queued" ]; then
+            echo "Main build is still running (status: $STATUS). Cannot proceed with release."
+            exit 1
+          elif [ "$CONCLUSION" != "success" ]; then
+            echo "Latest main build on branch $GITHUB_REF_NAME conclusion: $CONCLUSION"
+            exit 1
+          fi
+          echo "Main build succeeded (run ID: $RUN_ID), downloading artifacts..."
+
+          gh run download "$RUN_ID" -n cloudwatch-plugin-otel-release-artifacts -D dist
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: ${{ env.WHEEL_ARTIFACT_NAME }}
+          path: dist/${{ env.WHEEL_ARTIFACT_NAME }}
+
+      - name: Upload source artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 #v4.6.2
+        with:
+          name: ${{ env.SOURCE_ARTIFACT_NAME }}
+          path: dist/${{ env.SOURCE_ARTIFACT_NAME }}
+
+  publish-pypi:
+    needs: download-artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download wheel artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
+        with:
+          name: ${{ env.WHEEL_ARTIFACT_NAME }}
+          path: dist-pypi
+
+      - name: Download source artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
+        with:
+          name: ${{ env.SOURCE_ARTIFACT_NAME }}
+          path: dist-pypi
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e #v1.13.0
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          attestations: false
+          skip-existing: true
+          verbose: true
+          packages-dir: dist-pypi
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e #v1.13.0
+        with:
+          skip-existing: true
+          verbose: true
+          packages-dir: dist-pypi
+
+  publish-github:
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo @ SHA - ${{ github.sha }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+
+      - name: Download wheel artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
+        with:
+          name: ${{ env.WHEEL_ARTIFACT_NAME }}
+
+      - name: Download source artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 #v5.0.0
+        with:
+          name: ${{ env.SOURCE_ARTIFACT_NAME }}
+
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DEPS=$(python3 -c "
+          import os, re
+          with open(os.path.join(os.environ['PACKAGE_DIR'], 'pyproject.toml'), 'r') as f:
+              content = f.read()
+          deps_match = re.search(r'dependencies\s*=\s*\[(.*?)\]', content, re.DOTALL)
+          if deps_match:
+              deps_content = deps_match.group(1)
+              dep_lines = re.findall(r'\"([^\"]+)\"', deps_content)
+              formatted_deps = []
+              for dep_line in dep_lines:
+                  if ' == ' in dep_line:
+                      package, version = dep_line.split(' == ', 1)
+                      formatted_deps.append(f'- \`{package}\` - {version}')
+                  else:
+                      formatted_deps.append(f'- \`{dep_line}\`')
+              print('\n'.join(formatted_deps))
+          ")
+
+          CHANGELOG_ENTRIES=$(python3 -c "
+          import os, re
+          version = os.environ['VERSION']
+          with open(os.path.join(os.environ['PACKAGE_DIR'], 'CHANGELOG.md'), 'r') as f:
+              content = f.read()
+          version_pattern = rf'## v{re.escape(version)}.*?\n(.*?)(?=\n## |\Z)'
+          version_match = re.search(version_pattern, content, re.DOTALL)
+          if version_match:
+              entries = version_match.group(1).strip()
+              if entries:
+                  joined = re.sub(r'\n  +', ' ', entries)
+                  print(joined)
+          ")
+
+          if [ -z "$CHANGELOG_ENTRIES" ]; then
+            echo "No CHANGELOG entries found for v$VERSION."
+            exit 1
+          fi
+
+          cat > release_notes.md << EOF
+          ## What's Changed
+          $CHANGELOG_ENTRIES
+
+          ## Upstream Components
+
+          $DEPS
+
+          ## Release Artifacts
+
+          This release publishes cloudwatch-plugin-otel version $VERSION to PyPI:
+          https://pypi.org/project/cloudwatch-plugin-otel/
+          EOF
+
+          shasum -a 256 "$WHEEL_ARTIFACT_NAME" > "$WHEEL_ARTIFACT_NAME.sha256"
+          shasum -a 256 "$SOURCE_ARTIFACT_NAME" > "$SOURCE_ARTIFACT_NAME.sha256"
+
+          gh release create --target "$GITHUB_REF_NAME" \
+            --title "cloudwatch-plugin-otel v$VERSION" \
+            --notes-file release_notes.md --draft \
+            "$TAG" \
+            "$WHEEL_ARTIFACT_NAME" "$WHEEL_ARTIFACT_NAME.sha256" \
+            "$SOURCE_ARTIFACT_NAME" "$SOURCE_ARTIFACT_NAME.sha256"
