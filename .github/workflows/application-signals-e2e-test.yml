@@ -125,19 +125,98 @@ jobs:
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
 
-  # --- Python EKS E2E (setup -> parallel versions -> cleanup) -----------------------------------
-  # The entire EKS flow lives in one reusable workflow (python-eks-e2e.yml) so it re-runs as a
-  # single unit. Re-running just this job (e.g. "Re-run failed jobs") re-executes setup -> eks-py* ->
-  # cleanup together, INCLUDING the shared-cluster setup the version tests depend on, WITHOUT
-  # re-running the rest of this suite. service-events-eks still runs after, on the cold cluster.
-  eks-e2e:
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-e2e.yml@python-eks-parallel-pipeline
+  # --- Python EKS pipeline: service-events (first) -> setup -> parallel versions -> cleanup ------
+  # service-events-eks runs FIRST on a cold cluster: the UNCHANGED shared SE workflow self-installs
+  # and tears down App Signals and binds NodePort 30100, so it must not overlap the parallel eks-py*
+  # jobs. eks-setup waits for SE (needs) but runs regardless of SE's result (if: !cancelled()), so a
+  # SE failure can't block the version tests. Keeping SE UPSTREAM means re-running the eks-setup job
+  # re-runs setup -> eks-py* -> cleanup WITHOUT dragging service-events along.
+  service-events-eks:
+    if: ${{ always() }}
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@main
     secrets: inherit
     with:
-      adot-image-name: ${{ inputs.adot-image-name }}
       aws-region: us-east-1
       test-cluster-name: 'e2e-python-adot-test'
+      adot-image-name: ${{ inputs.adot-image-name }}
       caller-workflow-name: 'main-build'
+      python-version: '3.10'
+
+  eks-setup:
+    needs: service-events-eks
+    if: ${{ !cancelled() }}
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-setup-app-signals.yml@python-eks-parallel-pipeline
+    secrets: inherit
+    with:
+      test-cluster-name: 'e2e-python-adot-test'
+      aws-region: us-east-1
+
+  eks-py310-amd64:
+    needs: eks-setup
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-parallel-test.yml@python-eks-parallel-pipeline
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      test-cluster-name: 'e2e-python-adot-test'
+      adot-image-name: ${{ inputs.adot-image-name }}
+      caller-workflow-name: 'main-build'
+      python-version: '3.10'
+
+  eks-py311-amd64:
+    needs: eks-setup
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-parallel-test.yml@python-eks-parallel-pipeline
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      test-cluster-name: 'e2e-python-adot-test'
+      adot-image-name: ${{ inputs.adot-image-name }}
+      caller-workflow-name: 'main-build'
+      python-version: '3.11'
+
+  eks-py312-amd64:
+    needs: eks-setup
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-parallel-test.yml@python-eks-parallel-pipeline
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      test-cluster-name: 'e2e-python-adot-test'
+      adot-image-name: ${{ inputs.adot-image-name }}
+      caller-workflow-name: 'main-build'
+      python-version: '3.12'
+
+  eks-py313-amd64:
+    needs: eks-setup
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-parallel-test.yml@python-eks-parallel-pipeline
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      test-cluster-name: 'e2e-python-adot-test'
+      adot-image-name: ${{ inputs.adot-image-name }}
+      caller-workflow-name: 'main-build'
+      python-version: '3.13'
+
+  eks-py314-amd64:
+    needs: eks-setup
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-parallel-test.yml@python-eks-parallel-pipeline
+    secrets: inherit
+    with:
+      aws-region: us-east-1
+      test-cluster-name: 'e2e-python-adot-test'
+      adot-image-name: ${{ inputs.adot-image-name }}
+      caller-workflow-name: 'main-build'
+      python-version: '3.14'
+
+  # Tear down cluster-wide App Signals state once, after ALL parallel eks-py* jobs finish.
+  # always() so a failed version job still triggers teardown; gated on eks-setup success so it never
+  # tries to clean up state that was never installed.
+  eks-cleanup:
+    if: ${{ always() && needs.eks-setup.result == 'success' }}
+    needs: [ eks-setup, eks-py310-amd64, eks-py311-amd64, eks-py312-amd64, eks-py313-amd64, eks-py314-amd64 ]
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-cleanup-app-signals.yml@python-eks-parallel-pipeline
+    secrets: inherit
+    with:
+      test-cluster-name: 'e2e-python-adot-test'
+      aws-region: us-east-1
 
   #
   # PACKAGED DISTRIBUTION PLATFORM COVERAGE
@@ -257,23 +336,6 @@ jobs:
       caller-workflow-name: 'main-build'
       staging-wheel-name: ${{ inputs.staging-wheel-name }}
 
-  service-events-eks:
-    if: ${{ always() }}
-    # Runs LAST, after the eks-e2e flow (which ends with its own cleanup). Service Events uses the
-    # UNCHANGED shared workflow, which installs and tears down App Signals itself — safe only with
-    # exclusive cluster access. eks-e2e's cleanup runs first so SE inherits a cold cluster and
-    # self-provisions, exactly as it does standalone. SE also binds cluster-wide NodePort 30100, so
-    # it must not overlap any parallel eks-py* job.
-    needs: eks-e2e
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@main
-    secrets: inherit
-    with:
-      aws-region: us-east-1
-      test-cluster-name: 'e2e-python-adot-test'
-      adot-image-name: ${{ inputs.adot-image-name }}
-      caller-workflow-name: 'main-build'
-      python-version: '3.10'
-
   # This validation is to ensure that all test workflows relevant to this repo are actually
   # being used in this repo, which is referring to all the other jobs in this file.
   #
@@ -290,8 +352,4 @@ jobs:
   validate-all-tests-are-accounted-for:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/validate-e2e-tests-are-accounted-for.yml@python-eks-parallel-pipeline
     with:
-      # python-eks-parallel-test.yml is now used INSIDE python-eks-e2e.yml (not referenced directly
-      # here), and python-eks-e2e.yml is an orchestrator, not a test file. The validation only scans
-      # direct `uses:` in this file, so both are excluded to keep it green. python-eks-test.yml is the
-      # sequential test this repo doesn't use; setup/cleanup are not test files.
-      exclusions: 'python-eks-test.yml,python-eks-parallel-test.yml,python-eks-e2e.yml,eks-setup-app-signals.yml,eks-cleanup-app-signals.yml'
+      exclusions: 'python-eks-test.yml,eks-setup-app-signals.yml,eks-cleanup-app-signals.yml'
