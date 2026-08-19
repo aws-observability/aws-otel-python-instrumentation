@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling==1.25.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cloudwatch-plugin-otel"
+dynamic = ["version"]
+description = "Amazon CloudWatch plugin for OpenTelemetry"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.10"
+authors = [
+  { name = "Amazon Web Services" },
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+]
+
+dependencies = [
+  "opentelemetry-api >= 1.42.0",
+  "opentelemetry-sdk >= 1.42.0",
+  "opentelemetry-instrumentation >= 0.63b0",
+  "opentelemetry-semantic-conventions >= 0.63b0",
+  "typing-extensions >= 4.5.0",
+]
+
+[project.optional-dependencies]
+test = []
+
+[project.entry-points.opentelemetry_instrumentor]
+span_metrics = "plugins.opentelemetry.cloudwatch.span_metrics.instrumentor:SpanMetricsInstrumentor"
+
+[project.urls]
+Homepage = "https://github.com/aws-observability/aws-otel-python-instrumentation/tree/main/cloudwatch-plugin-otel"
+
+[tool.hatch.version]
+path = "src/plugins/opentelemetry/cloudwatch/version.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/tests",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/plugins"]

@@ -6,7 +6,7 @@
 import os
 from typing import Dict, List, Optional
 from unittest import TestCase
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from amazon.opentelemetry.distro._aws_attribute_keys import (
     AWS_AUTH_ACCESS_KEY,
@@ -508,6 +508,47 @@ class TestAwsMetricAttributeGenerator(TestUtil):
             AWS_LOCAL_OPERATION: "POST /payment",
         }
         self._validate_attributes_produced_for_non_local_root_span_of_kind(expected_attributes, SpanKind.SERVER)
+        self._mock_attribute(SpanAttributes.HTTP_METHOD, None)
+        self._mock_attribute(SpanAttributes.HTTP_TARGET, None)
+
+    def test_server_span_local_operation_uses_configured_operation_path(self):
+        # Verifies the end-to-end effect of OTEL_AWS_HTTP_OPERATION_PATHS on aws.local.operation.
+        # The metrics processor applies the override to the span name before the generator runs, so
+        # we replicate that ordering here: apply_operation_path_span_name() then the generator. The
+        # expected value is a multi-segment, wildcarded path that neither the raw span name nor URL
+        # truncation ("POST /api") could produce, so the assertion can only pass if the config won.
+        from amazon.opentelemetry.distro._aws_span_processing_util import (
+            apply_operation_path_span_name,
+            reset_operation_paths,
+        )
+
+        self._update_resource_with_service_name()
+        self.span_mock.name = "POST"
+        self.span_mock._name = "POST"
+        self._mock_attribute(
+            [SpanAttributes.HTTP_METHOD, SpanAttributes.HTTP_TARGET],
+            ["POST", "/api/contests/123/leaderboard"],
+        )
+
+        with patch.dict(
+            os.environ,
+            {"OTEL_AWS_HTTP_OPERATION_PATHS": "/api/contests/{id}/leaderboard,/api/contests/{id}"},
+        ):
+            reset_operation_paths()
+            try:
+                apply_operation_path_span_name(self.span_mock)
+                # A real ReadableSpan exposes ._name through the .name property; the MagicMock does
+                # not, so mirror the mutation the generator will read.
+                self.span_mock.name = self.span_mock._name
+
+                expected_attributes: Attributes = {
+                    AWS_SPAN_KIND: SpanKind.SERVER.name,
+                    AWS_LOCAL_SERVICE: _SERVICE_NAME_VALUE,
+                    AWS_LOCAL_OPERATION: "POST /api/contests/{id}/leaderboard",
+                }
+                self._validate_attributes_produced_for_non_local_root_span_of_kind(expected_attributes, SpanKind.SERVER)
+            finally:
+                reset_operation_paths()
         self._mock_attribute(SpanAttributes.HTTP_METHOD, None)
         self._mock_attribute(SpanAttributes.HTTP_TARGET, None)
 
