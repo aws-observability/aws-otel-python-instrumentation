@@ -132,7 +132,6 @@ jobs:
   # SE failure can't block the version tests. Keeping SE UPSTREAM means re-running the eks-setup job
   # re-runs setup -> eks-py* -> cleanup WITHOUT dragging service-events along.
   service-events-eks:
-    if: ${{ always() }}
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@main
     secrets: inherit
     with:
@@ -153,7 +152,7 @@ jobs:
 
   eks-py310-amd64:
     needs: eks-setup
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-parallel-test.yml@python-eks-parallel-pipeline
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@python-eks-parallel-pipeline
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -164,7 +163,7 @@ jobs:
 
   eks-py311-amd64:
     needs: eks-setup
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-parallel-test.yml@python-eks-parallel-pipeline
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@python-eks-parallel-pipeline
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -175,7 +174,7 @@ jobs:
 
   eks-py312-amd64:
     needs: eks-setup
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-parallel-test.yml@python-eks-parallel-pipeline
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@python-eks-parallel-pipeline
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -186,7 +185,7 @@ jobs:
 
   eks-py313-amd64:
     needs: eks-setup
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-parallel-test.yml@python-eks-parallel-pipeline
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@python-eks-parallel-pipeline
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -197,7 +196,7 @@ jobs:
 
   eks-py314-amd64:
     needs: eks-setup
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-parallel-test.yml@python-eks-parallel-pipeline
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@python-eks-parallel-pipeline
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -210,7 +209,7 @@ jobs:
   # always() so a failed version job still triggers teardown; gated on eks-setup success so it never
   # tries to clean up state that was never installed.
   eks-cleanup:
-    if: ${{ always() && needs.eks-setup.result == 'success' }}
+    if: ${{ always() }}
     needs: [ eks-setup, eks-py310-amd64, eks-py311-amd64, eks-py312-amd64, eks-py313-amd64, eks-py314-amd64 ]
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-cleanup-app-signals.yml@python-eks-parallel-pipeline
     secrets: inherit
