@@ -25,6 +25,10 @@ from typing import Callable, Dict, Mapping, Optional
 
 AWS_LOCAL_ENVIRONMENT_KEY = "aws.local.environment"
 
+# Attributes that indicate the resource has real platform context (i.e. detection has populated),
+# used to distinguish a genuine fallback from a still-populating resource.
+_PLATFORM_CONTEXT_KEYS = ("cloud.platform", "k8s.cluster.name", "aws.ecs.cluster.arn", "host.id")
+
 
 def resolve_local_environment(
     attributes: Mapping[str, object], asg_supplier: Optional[Callable[[], str]] = None
@@ -80,6 +84,17 @@ def resolve_local_environment(
     # 5. Non-AWS / undetected host: the CloudWatch agent runs its "generic" resolver here and
     #    emits "generic:default" (never empty), so mirror that instead of omitting the key.
     return "generic:default"
+
+
+def has_platform_context(attributes: Mapping[str, object]) -> bool:
+    """Return True if the attributes carry enough platform context for a fallback value to be real.
+
+    ``ec2:default`` and ``generic:default`` are also what a half-populated resource momentarily
+    yields before detectors settle, so callers that cache the resolved value use this to avoid
+    caching a fallback prematurely. A specific value (eks:/k8s:/ecs:/ec2:<asg>/explicit env) is
+    always safe to cache.
+    """
+    return any(attributes.get(key) for key in _PLATFORM_CONTEXT_KEYS)
 
 
 def stamp_local_environment(attrs: Dict[str, str]) -> None:

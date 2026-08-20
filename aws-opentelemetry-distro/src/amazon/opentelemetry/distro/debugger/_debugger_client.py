@@ -21,7 +21,10 @@ from amazon.opentelemetry.distro.serviceevents.utils.ec2_asg_detector import (
     EC2_ASG_ATTRIBUTE,
     Ec2AutoScalingGroupResourceDetector,
 )
-from amazon.opentelemetry.distro.serviceevents.utils.environment_resolver import resolve_local_environment
+from amazon.opentelemetry.distro.serviceevents.utils.environment_resolver import (
+    has_platform_context,
+    resolve_local_environment,
+)
 from opentelemetry import trace
 
 try:
@@ -177,12 +180,8 @@ class DebuggerClient:
             # require platform context before caching them — otherwise a still-populating
             # resource would cache the wrong value and never retry. A specific value
             # (eks:/k8s:/ecs:/ec2:<asg>/explicit env) is always safe to cache.
-            has_platform_context = any(
-                global_resource.attributes.get(key)
-                for key in ("cloud.platform", "k8s.cluster.name", "aws.ecs.cluster.arn", "host.id")
-            )
             is_fallback = environment in ("ec2:default", "generic:default")
-            if environment and (not is_fallback or has_platform_context):
+            if environment and (not is_fallback or has_platform_context(global_resource.attributes)):
                 self._cached_environment = environment
                 logger.debug("Deployment environment resolved and cached: %s", environment)
                 return environment
