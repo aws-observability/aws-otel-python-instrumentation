@@ -24,7 +24,8 @@ jobs:
       otel_contrib_version: ${{ steps.get_versions.outputs.otel_contrib_version }}
       aws_sdk_ext_version: ${{ steps.get_versions.outputs.opentelemetry_sdk_extension_aws_version }}
       aws_xray_prop_version: ${{ steps.get_versions.outputs.opentelemetry_propagator_aws_xray_version }}
-      openai_agents_v2_version: ${{ steps.get_versions.outputs.opentelemetry_instrumentation_openai_agents_v2_version }}
+      openai_agents_version: ${{ steps.get_versions.outputs.opentelemetry_instrumentation_genai_openai_agents_version }}
+      openai_client_version: ${{ steps.get_versions.outputs.opentelemetry_instrumentation_genai_openai_version }}
       breaking_changes_info: ${{ steps.breaking_changes.outputs.breaking_changes_info }}
     
     steps:
@@ -76,7 +77,8 @@ jobs:
         OTEL_CONTRIB_VERSION: ${{ steps.get_versions.outputs.otel_contrib_version }}
         OPENTELEMETRY_SDK_EXTENSION_AWS_VERSION: ${{ steps.get_versions.outputs.opentelemetry_sdk_extension_aws_version }}
         OPENTELEMETRY_PROPAGATOR_AWS_XRAY_VERSION: ${{ steps.get_versions.outputs.opentelemetry_propagator_aws_xray_version }}
-        OPENTELEMETRY_INSTRUMENTATION_OPENAI_AGENTS_V2_VERSION: ${{ steps.get_versions.outputs.opentelemetry_instrumentation_openai_agents_v2_version }}
+        OPENTELEMETRY_INSTRUMENTATION_GENAI_OPENAI_AGENTS_VERSION: ${{ steps.get_versions.outputs.opentelemetry_instrumentation_genai_openai_agents_version }}
+        OPENTELEMETRY_INSTRUMENTATION_GENAI_OPENAI_VERSION: ${{ steps.get_versions.outputs.opentelemetry_instrumentation_genai_openai_version }}
       run: python scripts/update_dependencies.py
     
     - name: Check for changes and commit
@@ -147,7 +149,8 @@ jobs:
         - [OpenTelemetry Contrib](https://github.com/open-telemetry/opentelemetry-python-contrib/releases/tag/v${{ needs.update-dependencies.outputs.otel_contrib_version }}): ${{ needs.update-dependencies.outputs.otel_contrib_version }}
         - [opentelemetry-sdk-extension-aws](https://pypi.org/project/opentelemetry-sdk-extension-aws/${{ needs.update-dependencies.outputs.aws_sdk_ext_version }}/): ${{ needs.update-dependencies.outputs.aws_sdk_ext_version }}
         - [opentelemetry-propagator-aws-xray](https://pypi.org/project/opentelemetry-propagator-aws-xray/${{ needs.update-dependencies.outputs.aws_xray_prop_version }}/): ${{ needs.update-dependencies.outputs.aws_xray_prop_version }}
-        - [opentelemetry-instrumentation-openai-agents-v2](https://pypi.org/project/opentelemetry-instrumentation-openai-agents-v2/${{ needs.update-dependencies.outputs.openai_agents_v2_version }}/): ${{ needs.update-dependencies.outputs.openai_agents_v2_version }}
+        - [opentelemetry-instrumentation-genai-openai-agents](https://pypi.org/project/opentelemetry-instrumentation-genai-openai-agents/${{ needs.update-dependencies.outputs.openai_agents_version }}/): ${{ needs.update-dependencies.outputs.openai_agents_version }}
+        - [opentelemetry-instrumentation-genai-openai](https://pypi.org/project/opentelemetry-instrumentation-genai-openai/${{ needs.update-dependencies.outputs.openai_client_version }}/): ${{ needs.update-dependencies.outputs.openai_client_version }}
 
         **Upstream releases with breaking changes:**
         Note: the mechanism to detect upstream breaking changes is not perfect. Be sure to check all new releases and understand if any additional changes need to be addressed.

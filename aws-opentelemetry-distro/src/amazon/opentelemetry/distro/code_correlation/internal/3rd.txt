@@ -4671,6 +4671,8 @@ ocspbuilder
 apache-airflow-providers-apache-livy
 opentelemetry-instrumentation-openai-agents
 opentelemetry-instrumentation-openai-agents-v2
+opentelemetry-instrumentation-genai-openai
+opentelemetry-instrumentation-genai-openai-agents
 pyserde
 mypy-boto3-ssm-guiconnect
 evergreen-lint

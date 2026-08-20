@@ -5,14 +5,15 @@ import unittest
 from importlib.metadata import entry_points
 
 try:
-    from opentelemetry.instrumentation.openai_agents import OpenAIAgentsInstrumentor
+    from opentelemetry.instrumentation.genai.openai import OpenAIInstrumentor
+    from opentelemetry.instrumentation.genai.openai_agents import OpenAIAgentsInstrumentor
 
     _AVAILABLE = True
 except ImportError:
     _AVAILABLE = False
 
 
-@unittest.skipUnless(_AVAILABLE, "opentelemetry-instrumentation-openai-agents-v2 not available")
+@unittest.skipUnless(_AVAILABLE, "OpenTelemetry OpenAI instrumentors not available")
 class TestOpenAIAgentsInstrumentation(unittest.TestCase):
 
     def test_aws_openai_agents_entry_point_resolves(self):
@@ -22,6 +23,14 @@ class TestOpenAIAgentsInstrumentation(unittest.TestCase):
         ep = list(eps)[0]
         instrumentor_class = ep.load()
         self.assertIs(instrumentor_class, OpenAIAgentsInstrumentor)
+
+    def test_openai_client_entry_point_resolves(self):
+        eps = entry_points(group="opentelemetry_instrumentor", name="openai")
+        self.assertEqual(len(list(eps)), 1)
+
+        ep = list(eps)[0]
+        instrumentor_class = ep.load()
+        self.assertIs(instrumentor_class, OpenAIInstrumentor)
 
     def test_aws_entry_point_survives_when_openai_agents_disabled(self):
         disabled = {"openai_agents"}

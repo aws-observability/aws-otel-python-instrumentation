@@ -74,7 +74,8 @@ CONTRIB_DEPS = [
 INDEPENDENT_DEPS = [
     "opentelemetry-sdk-extension-aws",
     "opentelemetry-propagator-aws-xray",
-    "opentelemetry-instrumentation-openai-agents-v2",
+    "opentelemetry-instrumentation-genai-openai-agents",
+    "opentelemetry-instrumentation-genai-openai",
 ]
 
 
@@ -143,20 +144,22 @@ def main():
     otel_contrib_version = os.environ.get("OTEL_CONTRIB_VERSION")
     aws_sdk_ext_version = os.environ.get("OPENTELEMETRY_SDK_EXTENSION_AWS_VERSION")
     aws_xray_prop_version = os.environ.get("OPENTELEMETRY_PROPAGATOR_AWS_XRAY_VERSION")
-    openai_agents_v2_version = os.environ.get("OPENTELEMETRY_INSTRUMENTATION_OPENAI_AGENTS_V2_VERSION")
+    openai_agents_version = os.environ.get("OPENTELEMETRY_INSTRUMENTATION_GENAI_OPENAI_AGENTS_VERSION")
+    openai_version = os.environ.get("OPENTELEMETRY_INSTRUMENTATION_GENAI_OPENAI_VERSION")
 
     if not otel_python_version or not otel_contrib_version:
         print("Error: OTEL_PYTHON_VERSION and OTEL_CONTRIB_VERSION environment variables required")
         sys.exit(1)
 
-    if not aws_sdk_ext_version or not aws_xray_prop_version or not openai_agents_v2_version:
+    if not aws_sdk_ext_version or not aws_xray_prop_version or not openai_agents_version or not openai_version:
         print("Error: independent dependency versions required")
         sys.exit(1)
 
     independent_versions = {
         "opentelemetry-sdk-extension-aws": aws_sdk_ext_version,
         "opentelemetry-propagator-aws-xray": aws_xray_prop_version,
-        "opentelemetry-instrumentation-openai-agents-v2": openai_agents_v2_version,
+        "opentelemetry-instrumentation-genai-openai-agents": openai_agents_version,
+        "opentelemetry-instrumentation-genai-openai": openai_version,
     }
 
     # All files to update

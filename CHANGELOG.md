@@ -12,6 +12,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 
 ## Unreleased
 
+- feat: migrate to the official OpenTelemetry GenAI OpenAI Agents and OpenAI client instrumentors
+  ([#862](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/862))
 - feat: attribute presigned S3 URLs as `AWS::S3` dependencies in Application Signals, opt-in via
   `OTEL_AWS_APPLICATION_SIGNALS_PRESIGNED_URL_ATTRIBUTION_ENABLED`
   ([#841](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/841))

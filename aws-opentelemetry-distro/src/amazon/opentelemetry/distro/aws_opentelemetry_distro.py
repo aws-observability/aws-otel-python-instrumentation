@@ -131,7 +131,7 @@ _THIRDPARTY_TO_AWS_NATIVE = {
 
 # Dist names owned by ADOT that register entry points with the same names as third-party ones.
 # These are excluded from third-party detection to avoid false positives.
-_ADOT_OWNED_DISTS = {"opentelemetry-instrumentation-openai-agents-v2"}
+_ADOT_OWNED_DISTS = {"opentelemetry-instrumentation-genai-openai-agents"}
 
 
 class AwsOpenTelemetryDistro(OpenTelemetryDistro):
@@ -261,7 +261,7 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
         """Skip AWS native agentic instrumentors that should not load.
 
         When agent observability is enabled:
-        - Skip ADOT-owned dists that duplicate an aws_* entry point (e.g. openai-agents-v2).
+        - Skip ADOT-owned dists that duplicate an aws_* entry point (e.g. genai-openai-agents).
         - AWS_AGENTIC_INSTRUMENTATION (auto/enabled/disabled) governs the aws_* side only.
           See the constant docstring for semantics. Third-party instrumentors are never
           touched here.

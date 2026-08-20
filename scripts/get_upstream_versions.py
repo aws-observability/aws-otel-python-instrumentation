@@ -13,7 +13,8 @@ import requests
 INDEPENDENT_DEPS = [
     "opentelemetry-sdk-extension-aws",
     "opentelemetry-propagator-aws-xray",
-    "opentelemetry-instrumentation-openai-agents-v2",
+    "opentelemetry-instrumentation-genai-openai-agents",
+    "opentelemetry-instrumentation-genai-openai",
 ]
 
 
@@ -50,7 +51,11 @@ def get_latest_independent_versions():
     versions = {}
     for dep in INDEPENDENT_DEPS:
         try:
-            result = subprocess.run(["pip", "index", "versions", dep], capture_output=True, text=True, check=True)
+            command = ["pip", "index", "versions"]
+            if dep.startswith("opentelemetry-instrumentation-genai-"):
+                command.append("--pre")
+            command.append(dep)
+            result = subprocess.run(command, capture_output=True, text=True, check=True)
             # Parse output like "package (1.2.3)" from first line
             first_line = result.stdout.strip().split("\n")[0]
             match = re.search(r"\(([^)]+)\)", first_line)
