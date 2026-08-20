@@ -83,10 +83,11 @@ class SpanMetricsConnectorTestBase(TestBase):
         self.assertIsNotNone(data_point, f"found no {metric_name} point for span {span_name!r}")
         return data_point
 
-    def assert_span_metrics(self, span_name, *, span_kind, status_code, service_name="unknown_service"):
+    def assert_span_metrics(self, span_name, *, span_kind, status_code):
         calls = self.get_metric_data_point(_SpanMetrics.CALLS_NAME, span_name)
         self.assertEqual(calls.value, 1)
-        self.assertEqual(calls.attributes[SERVICE_NAME], service_name)
+        # service.name lives on the metric resource, never on the datapoint.
+        self.assertNotIn(SERVICE_NAME, calls.attributes)
         self.assertEqual(calls.attributes[_SpanMetrics.SPAN_NAME], span_name)
         self.assertEqual(calls.attributes[_SpanMetrics.SPAN_KIND], span_kind)
         self.assertEqual(calls.attributes[_SpanMetrics.STATUS_CODE], status_code)
@@ -288,7 +289,6 @@ class TestSpanMetricsConnector(SpanMetricsConnectorTestBase):
         self.assertEqual(
             set(calls.attributes),
             {
-                SERVICE_NAME,
                 _SpanMetrics.SPAN_NAME,
                 _SpanMetrics.SPAN_KIND,
                 _SpanMetrics.STATUS_CODE,
@@ -321,13 +321,32 @@ class TestSpanMetricsConnector(SpanMetricsConnectorTestBase):
         duration = self.get_metric_data_point(_SpanMetrics.DURATION_NAME, "repeat")
         self.assertEqual(duration.count, 2)
 
-    def test_resource_service_name_used(self):
+    def test_service_name_never_on_datapoint_even_with_resource(self):
+        # service.name lives on the metric's resource (the host MeterProvider's resource); the
+        # datapoint must not duplicate it, even when the span's resource carries it.
         tracer_provider, _ = self.create_tracer_provider(resource=Resource.create({SERVICE_NAME: "orders-service"}))
         tracer_provider.add_span_processor(self.processor)
         with tracer_provider.get_tracer(__name__).start_as_current_span("resource-span", kind=SpanKind.CLIENT):
             pass
         calls = self.get_metric_data_point(_SpanMetrics.CALLS_NAME, "resource-span")
-        self.assertEqual(calls.attributes[SERVICE_NAME], "orders-service")
+        self.assertNotIn(SERVICE_NAME, calls.attributes)
+
+    def test_calls_counter_uses_call_annotation_unit_and_resource_carries_service_name(self):
+        self.record_span("unit-span")
+        for resource_metric in self.memory_metrics_reader.get_metrics_data().resource_metrics:
+            for scope_metric in resource_metric.scope_metrics:
+                for metric in scope_metric.metrics:
+                    if metric.name == _SpanMetrics.CALLS_NAME:
+                        # Assert the literal, not _SpanMetrics.CALLS_UNIT — comparing the exported
+                        # unit against the same constant the connector passes would be circular and
+                        # let a typo in the constant slip through.
+                        self.assertEqual(metric.unit, "{call}")
+                        # The positive half of the service.name contract: the metric RESOURCE
+                        # carries it (datapoint absence alone would also pass if it were dropped
+                        # everywhere).
+                        self.assertIn(SERVICE_NAME, resource_metric.resource.attributes)
+                        return
+        self.fail("calls metric not found")
 
     def test_default_meter_uses_global_provider_with_package_scope(self):
         self.tracer_provider.add_span_processor(SpanMetricsConnector())
