@@ -45,6 +45,7 @@ jobs:
             | [ .tests[]
                 | select(.versions | index($py))
                 | { name,
+                    app: (.name | split("/") | .[0]),
                     pytest_args: ([ .paths[] | $base + "/" + . ] | join(" ")) } ]')
           echo "tests=$tests" >> "$GITHUB_OUTPUT"
 
@@ -75,7 +76,14 @@ jobs:
           name: ${{ inputs.wheel-artifact-name }}
           path: dist
 
+      - name: Build cloudwatch-plugin-otel wheel
+        if: matrix.test.app == 'cloudwatch-plugin-otel'
+        run: |
+          pip install build
+          python -m build --wheel --outdir ../dist
+        working-directory: cloudwatch-plugin-otel
+
       - name: Set up and run ${{ matrix.test.name }} contract tests (python ${{ inputs.python-version }})
         run: |
-          bash scripts/set-up-contract-tests.sh "${{ inputs.python-version }}" ${{ matrix.test.name }}
+          bash scripts/set-up-contract-tests.sh "${{ inputs.python-version }}" ${{ matrix.test.app }}
           pytest ${{ matrix.test.pytest_args }} -v
