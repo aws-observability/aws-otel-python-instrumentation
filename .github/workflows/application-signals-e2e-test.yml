@@ -144,7 +144,7 @@ jobs:
   eks-setup:
     needs: service-events-eks
     if: ${{ !cancelled() }}
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-setup-app-signals.yml@python-eks-parallel-pipeline
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-setup-app-signals.yml@main
     secrets: inherit
     with:
       test-cluster-name: 'e2e-python-adot-test'
@@ -152,7 +152,7 @@ jobs:
 
   eks-py310-amd64:
     needs: eks-setup
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@python-eks-parallel-pipeline
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -163,7 +163,7 @@ jobs:
 
   eks-py311-amd64:
     needs: eks-setup
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@python-eks-parallel-pipeline
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -174,7 +174,7 @@ jobs:
 
   eks-py312-amd64:
     needs: eks-setup
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@python-eks-parallel-pipeline
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -185,7 +185,7 @@ jobs:
 
   eks-py313-amd64:
     needs: eks-setup
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@python-eks-parallel-pipeline
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -196,7 +196,7 @@ jobs:
 
   eks-py314-amd64:
     needs: eks-setup
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@python-eks-parallel-pipeline
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-shared-cluster-test.yml@main
     secrets: inherit
     with:
       aws-region: us-east-1
@@ -211,7 +211,7 @@ jobs:
   eks-cleanup:
     if: ${{ always() }}
     needs: [ eks-setup, eks-py310-amd64, eks-py311-amd64, eks-py312-amd64, eks-py313-amd64, eks-py314-amd64 ]
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-cleanup-app-signals.yml@python-eks-parallel-pipeline
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/eks-cleanup-app-signals.yml@main
     secrets: inherit
     with:
       test-cluster-name: 'e2e-python-adot-test'
@@ -349,6 +349,6 @@ jobs:
   # - Update the `validate-e2e-tests-are-accounted-for` job to change which "workflow files are expected to be used by this repo"
   #   (see: https://github.com/aws-observability/aws-application-signals-test-framework/blob/main/.github/workflows/validate-e2e-tests-are-accounted-for.yml)
   validate-all-tests-are-accounted-for:
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/validate-e2e-tests-are-accounted-for.yml@python-eks-parallel-pipeline
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/validate-e2e-tests-are-accounted-for.yml@main
     with:
       exclusions: 'python-eks-test.yml,eks-setup-app-signals.yml,eks-cleanup-app-signals.yml'
