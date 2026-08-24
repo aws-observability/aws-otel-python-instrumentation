@@ -1,1 +1,6 @@
 crewai[litellm,anthropic,bedrock,azure-ai-inference,google-genai]>=1.10.0,<2
+# litellm 1.98.0 (2026-08-22) imports `NotRequired` from `typing`, which only exists on Python 3.11+,
+# so litellm fails to import on the Python 3.10 crewai-latest env (crewai then reports the LiteLLM
+# fallback as "not installed"). Cap below 1.98.0 until litellm restores 3.10 support (importing
+# NotRequired from typing_extensions). Upstream: BerriAI/litellm.
+litellm<1.98.0
