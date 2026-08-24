@@ -126,11 +126,7 @@ jobs:
 
 
   # --- Python EKS pipeline: service-events (first) -> setup -> parallel versions -> cleanup ------
-  # service-events-eks runs FIRST on a cold cluster: the UNCHANGED shared SE workflow self-installs
-  # and tears down App Signals and binds NodePort 30100, so it must not overlap the parallel eks-py*
-  # jobs. eks-setup waits for SE (needs) but runs regardless of SE's result (if: !cancelled()), so a
-  # SE failure can't block the version tests. Keeping SE UPSTREAM means re-running the eks-setup job
-  # re-runs setup -> eks-py* -> cleanup WITHOUT dragging service-events along.
+  # Service events has atomic setup and cleanup
   service-events-eks:
     uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@main
     secrets: inherit
