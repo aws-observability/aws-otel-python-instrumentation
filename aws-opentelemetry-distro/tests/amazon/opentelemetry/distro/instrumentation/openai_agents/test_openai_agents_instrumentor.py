@@ -5,7 +5,7 @@ import json
 import unittest
 from importlib.metadata import entry_points
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from agents import tracing
 from agents.items import ItemHelpers
@@ -21,7 +21,7 @@ from amazon.opentelemetry.distro.instrumentation.openai_agents._processor import
     OpenTelemetryTracingProcessor,
     _GenAIMessageNormalizer,
 )
-from opentelemetry.instrumentation.utils import is_http_instrumentation_enabled
+from opentelemetry.instrumentation.httpx import HTTPX2ClientInstrumentor
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -155,25 +155,28 @@ class TestOpenAIAgentsInstrumentor(unittest.TestCase):
         self.assertIsNone(GenAIContextCapture.get_tool_call().call_id)
         self.assertEqual(GenAIContextCapture.get_request_params(), {})
 
-    def test_instrument_suppresses_http_instrumentation_for_openai_trace_export(self):
-        observed = []
-        exporter = BackendSpanExporter(api_key="test")
-
-        def record_suppression(instance, items, deadline):  # pylint: disable=unused-argument
-            observed.append(is_http_instrumentation_enabled())
-
+    def test_openai_trace_export_produces_no_http_spans(self):
+        exporter = InMemorySpanExporter()
+        tracer_provider = TracerProvider()
+        tracer_provider.add_span_processor(SimpleSpanProcessor(exporter))
+        httpx_instrumentor = HTTPX2ClientInstrumentor()
+        httpx_instrumentor.instrument(tracer_provider=tracer_provider)
+        backend_exporter = BackendSpanExporter(
+            api_key="test", endpoint="http://localhost:1/v1/traces/ingest", max_retries=1
+        )
+        items = [SimpleNamespace(tracing_api_key=None, export=lambda: {"object": "trace"})]
         try:
-            with patch.object(BackendSpanExporter, "_export_with_deadline", record_suppression):
-                exporter.export([])
-                self.instrumentor.instrument(skip_dep_check=True)
-                exporter.export([])
-                self.instrumentor.uninstrument()
-                exporter.export([])
-        finally:
-            exporter.close()
+            backend_exporter.export(items)
+            self.assertEqual(len(exporter.get_finished_spans()), 1)
 
-        self.assertEqual(observed, [True, False, True])
-        self.assertTrue(is_http_instrumentation_enabled())
+            self.instrumentor.instrument(tracer_provider=tracer_provider, skip_dep_check=True)
+            exporter.clear()
+            backend_exporter.export(items)
+            self.assertEqual(exporter.get_finished_spans(), tuple())
+        finally:
+            httpx_instrumentor.uninstrument()
+            backend_exporter.close()
+            tracer_provider.shutdown()
 
     def test_force_flush_delegates_to_tracer_span_processor(self):
         tracer_provider = TracerProvider()

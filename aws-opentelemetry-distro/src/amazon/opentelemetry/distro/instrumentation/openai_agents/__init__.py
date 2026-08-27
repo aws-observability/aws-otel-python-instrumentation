@@ -12,11 +12,6 @@ from opentelemetry.instrumentation.instrumentor import BaseInstrumentor  # type:
 from opentelemetry.instrumentation.utils import suppress_http_instrumentation
 
 
-def _suppress_http_instrumentation(wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
-    with suppress_http_instrumentation():
-        return wrapped(*args, **kwargs)
-
-
 class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
     """Instrument OpenAI Agents SDK tracing callbacks with OpenTelemetry spans."""
 
@@ -57,6 +52,7 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
         )
         try_wrap("agents.items", "ItemHelpers.tool_call_output_item", GenAIContextCapture.record_tool_call)
         try_wrap("agents.tool_context", "ToolContext.from_agent_context", GenAIContextCapture.record_tool_call)
+        # disables http spans created from spans sent OpenAI's tracing backend
         try_wrap("agents.tracing.processors", "BackendSpanExporter.export", _suppress_http_instrumentation)
 
         if kwargs.get("disable_openai_trace_export"):
@@ -99,3 +95,8 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
         finally:
             self._processor = None
             self._previous_processors = None
+
+
+def _suppress_http_instrumentation(wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
+    with suppress_http_instrumentation():
+        return wrapped(*args, **kwargs)
