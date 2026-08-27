@@ -1,12 +1,14 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import json
-from typing import List
+from typing import Any, Dict, List, Optional
 
 from mock_collector_client import ResourceScopeSpan
 from typing_extensions import override
 
 from amazon.base.contract_test_base import ContractTestBase
+from amazon.gen_ai.otel_schema import validate_otel_genai_schema
+from opentelemetry.proto.common.v1.common_pb2 import AnyValue
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (  # noqa: F401
     GEN_AI_AGENT_NAME,
     GEN_AI_INPUT_MESSAGES,
@@ -20,6 +22,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (  # 
     GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_CALL_RESULT,
+    GEN_AI_TOOL_DEFINITIONS,
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
@@ -29,6 +32,15 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (  # 
 )
 
 AGENT_FINAL_OUTPUT = "Hello, World!"
+
+_GEN_AI_ATTRIBUTE_SCHEMAS = {
+    GEN_AI_INPUT_MESSAGES: "gen-ai-input-messages",
+    GEN_AI_OUTPUT_MESSAGES: "gen-ai-output-messages",
+    GEN_AI_SYSTEM_INSTRUCTIONS: "gen-ai-system-instructions",
+    GEN_AI_TOOL_DEFINITIONS: "gen-ai-tool-definitions",
+    GEN_AI_TOOL_CALL_ARGUMENTS: "gen-ai-tool-call-arguments",
+    GEN_AI_TOOL_CALL_RESULT: "gen-ai-tool-call-result",
+}
 
 
 class GenAITestBase(ContractTestBase):
@@ -45,6 +57,8 @@ class GenAITestBase(ContractTestBase):
     def _assert_semantic_conventions_span_attributes(
         self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str, status_code: int, **kwargs
     ) -> None:
+        # Every recorded GenAI content attribute MUST contain data and follow its corresponding OTel JSON schema.
+        self._assert_otel_gen_ai_attribute_formats(resource_scope_spans)
         invoke_agent_spans, execute_tool_spans, chat_spans = self._collect_gen_ai_spans(resource_scope_spans)
         if "agent" in path:
             self._assert_invoke_agent_spans(invoke_agent_spans, kwargs.get("expected_agent_count", 1))
@@ -74,17 +88,8 @@ class GenAITestBase(ContractTestBase):
             self.assertIn(GEN_AI_PROVIDER_NAME, attrs)
             self.assertIn(GEN_AI_REQUEST_MODEL, attrs)
 
-            self.assertIn(GEN_AI_INPUT_MESSAGES, attrs)
-            self.assertIn(GEN_AI_OUTPUT_MESSAGES, attrs)
-            input_messages = json.loads(attrs[GEN_AI_INPUT_MESSAGES].string_value)
-            output_messages = json.loads(attrs[GEN_AI_OUTPUT_MESSAGES].string_value)
-
-            user_inputs = self._text_parts(input_messages, "user")
-            self.assertTrue(user_inputs, "Expected the first user input on the invoke_agent span")
-
-            agent_outputs = self._text_parts(output_messages, "assistant")
-            self.assertTrue(agent_outputs, "Expected the final agent output on the invoke_agent span")
-            self.assertEqual(agent_outputs[-1], AGENT_FINAL_OUTPUT)
+            # invoke_agent spans SHOULD include the initial user input and final agent output.
+            self._assert_invoke_agent_content(attrs, span.name, AGENT_FINAL_OUTPUT)
 
     def _assert_execute_tool_spans(self, execute_tool_spans: list, expected_count: int = 1):
         self.assertGreaterEqual(len(execute_tool_spans), expected_count)
@@ -109,9 +114,9 @@ class GenAITestBase(ContractTestBase):
             self.assertIn(GEN_AI_SYSTEM_INSTRUCTIONS, attrs)
             self.assertIn(GEN_AI_USAGE_INPUT_TOKENS, attrs)
             self.assertIn(GEN_AI_USAGE_OUTPUT_TOKENS, attrs)
-            input_messages.extend(json.loads(attrs[GEN_AI_INPUT_MESSAGES].string_value))
+            input_messages.extend(self._parse_json_attribute(attrs, GEN_AI_INPUT_MESSAGES, span.name))
             if GEN_AI_OUTPUT_MESSAGES in attrs:
-                output_messages.extend(json.loads(attrs[GEN_AI_OUTPUT_MESSAGES].string_value))
+                output_messages.extend(self._parse_json_attribute(attrs, GEN_AI_OUTPUT_MESSAGES, span.name))
         completed_spans = [s for s in chat_spans if GEN_AI_OUTPUT_MESSAGES in self._get_attributes_dict(s.attributes)]
         self.assertGreaterEqual(len(completed_spans), 1)
 
@@ -120,6 +125,79 @@ class GenAITestBase(ContractTestBase):
             self._text_parts(output_messages, "assistant"), "Expected an assistant output message across chat spans"
         )
         self.assertTrue(self._tool_call_parts(input_messages), "Expected a tool call in chat span input messages")
+
+    def _assert_invoke_agent_content(
+        self, attrs: Dict[str, AnyValue], span_name: str, expected_output: Optional[str] = None
+    ) -> None:
+        input_messages = self._parse_json_attribute(attrs, GEN_AI_INPUT_MESSAGES, span_name)
+        output_messages = self._parse_json_attribute(attrs, GEN_AI_OUTPUT_MESSAGES, span_name)
+
+        # gen_ai.input.messages MUST preserve message order, with the initial user input first.
+        self.assertTrue(input_messages, f"{span_name}: expected the first user input on the invoke_agent span")
+        self.assertEqual(
+            input_messages[0].get("role"),
+            "user",
+            f"{span_name}: expected the first invoke_agent input message to be from the user",
+        )
+        first_user_input = self._text_parts(input_messages[:1], "user")
+        self.assertTrue(first_user_input, f"{span_name}: expected non-empty text in the first user input")
+
+        # gen_ai.output.messages SHOULD end with the final output returned by the agent invocation.
+        self.assertTrue(output_messages, f"{span_name}: expected the last agent output on the invoke_agent span")
+        self.assertEqual(
+            output_messages[-1].get("role"),
+            "assistant",
+            f"{span_name}: expected the last invoke_agent output message to be from the assistant",
+        )
+        last_agent_output = self._text_parts(output_messages[-1:], "assistant")
+        self.assertTrue(last_agent_output, f"{span_name}: expected non-empty text in the last agent output")
+        if expected_output is not None:
+            self.assertEqual(last_agent_output[-1], expected_output)
+
+    def _assert_otel_gen_ai_attribute_formats(self, resource_scope_spans: List[ResourceScopeSpan]) -> None:
+        for resource_scope_span in resource_scope_spans:
+            span = resource_scope_span.span
+            attrs = self._get_attributes_dict(span.attributes)
+            for attribute, schema_name in _GEN_AI_ATTRIBUTE_SCHEMAS.items():
+                if attribute in attrs:
+                    schema_value = self._get_schema_value(attrs[attribute])
+                    self.assertIsNotNone(schema_value, f"{span.name}: expected {attribute} to contain data")
+                    if isinstance(schema_value, list):
+                        self.assertTrue(schema_value, f"{span.name}: expected {attribute} to contain data")
+                    validate_otel_genai_schema(
+                        schema_value,
+                        schema_name,
+                    )
+
+    @classmethod
+    def _get_schema_value(cls, value: AnyValue) -> Any:
+        value_type = value.WhichOneof("value")
+        if value_type is None:
+            return None
+        value = getattr(value, value_type)
+        if value_type == "string_value":
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                pass
+        elif value_type == "array_value":
+            return [cls._get_schema_value(item) for item in value.values]
+        elif value_type == "kvlist_value":
+            return {item.key: cls._get_schema_value(item.value) for item in value.values}
+        return value
+
+    def _parse_json_attribute(self, attrs: Dict[str, AnyValue], attribute: str, span_name: str) -> Any:
+        self.assertIn(attribute, attrs, f"{span_name}: expected {attribute}")
+        value = attrs[attribute]
+        self.assertEqual(
+            value.WhichOneof("value"),
+            "string_value",
+            f"{span_name}: {attribute} must be an OTLP string containing JSON",
+        )
+        try:
+            return json.loads(value.string_value)
+        except json.JSONDecodeError as error:
+            self.fail(f"{span_name}: {attribute} must contain valid JSON: {error}")
 
     @staticmethod
     def _text_parts(messages: list, role: str) -> list:
