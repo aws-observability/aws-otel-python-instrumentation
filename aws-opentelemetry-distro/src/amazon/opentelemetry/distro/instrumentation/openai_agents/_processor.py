@@ -3,6 +3,7 @@
 
 import json
 import logging
+import re
 from collections.abc import Callable, Mapping, Sequence
 from contextvars import Token
 from dataclasses import dataclass
@@ -439,7 +440,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         OpenTelemetryTracingProcessor._set_attribute(
             attributes, GEN_AI_TOOL_NAME, OpenTelemetryTracingProcessor._get_handoff_tool_name(span_data)
         )
-        OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_TOOL_TYPE, "handoff")
+        OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_TOOL_TYPE, "function")
         OpenTelemetryTracingProcessor._set_attribute(
             attributes,
             GEN_AI_TOOL_CALL_ARGUMENTS,
@@ -720,7 +721,9 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
     @staticmethod
     def _get_handoff_tool_name(span_data: HandoffSpanData) -> str:
-        return f"transfer_to_{span_data.to_agent}" if span_data.to_agent else "handoff"
+        if not span_data.to_agent:
+            return "handoff"
+        return re.sub(r"[^a-zA-Z0-9_]", "_", f"transfer_to_{span_data.to_agent}").lower()
 
     @staticmethod
     def _to_string_sequence(value: Any) -> Optional[list[str]]:
