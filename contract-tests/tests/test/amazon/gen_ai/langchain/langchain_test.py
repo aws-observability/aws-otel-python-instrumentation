@@ -19,20 +19,29 @@ class LangChainTest(GenAITestBase):
         return "aws-application-signals-tests-langchain-app"
 
     def test_langchain_single_agent(self):
-        self.do_test_requests("langchain/agent", "GET", 200, 0, 0)
-
-    def test_langchain_bedrock_agent(self):
-        self.do_test_requests(
-            "langchain/bedrock-agent",
-            "GET",
-            200,
-            0,
-            0,
-            expected_provider=GenAiProviderNameValues.AWS_BEDROCK.value,
-        )
+        self._do_test_for_each_llm("langchain/agent")
 
     def test_langchain_multi_agent(self):
-        self.do_test_requests("langchain/multiagent", "GET", 200, 0, 0, expected_agent_count=2)
+        self._do_test_for_each_llm("langchain/multiagent", expected_agent_count=2)
+
+    def _do_test_for_each_llm(self, path: str, expected_agent_count: int = 1) -> None:
+        for llm, provider in (
+            ("openai", GenAiProviderNameValues.OPENAI.value),
+            ("bedrock", GenAiProviderNameValues.AWS_BEDROCK.value),
+        ):
+            with self.subTest(llm=llm):
+                try:
+                    self.do_test_requests(
+                        f"{path}/{llm}",
+                        "GET",
+                        200,
+                        0,
+                        0,
+                        expected_agent_count=expected_agent_count,
+                        expected_provider=provider,
+                    )
+                finally:
+                    self.mock_collector_client.clear_signals()
 
     @override
     def _assert_invoke_agent_spans(self, invoke_agent_spans: list, expected_count: int = 1):
