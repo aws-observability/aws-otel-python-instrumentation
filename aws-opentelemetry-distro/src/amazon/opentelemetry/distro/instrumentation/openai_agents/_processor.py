@@ -146,7 +146,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
     @override
     def on_span_start(self, span: AgentsSpan[Any]) -> None:
-        parent_entry = self._resolve_parent_entry(span)
+        parent_entry = self._get_parent_entry(span)
         span_data = span.span_data
         if not isinstance(
             span_data, (AgentSpanData, FunctionSpanData, GenerationSpanData, HandoffSpanData, ResponseSpanData)
@@ -165,15 +165,15 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         if isinstance(span_data, AgentSpanData):
             agent_content = _AgentContent()
 
-        operation = self._set_operation_name(span_data)
+        operation = self._get_operation_name(span_data)
         attributes = {
             GEN_AI_OPERATION_NAME: operation,
             GEN_AI_PROVIDER_NAME: GenAiProviderNameValues.OPENAI.value,
         }
         otel_span = self._tracer.start_span(
-            self._set_span_name(span_data, operation),
+            self._get_span_name(span_data, operation),
             context=set_span_in_context(parent_entry.span) if parent_entry is not None else None,
-            kind=self._set_span_kind(span_data),
+            kind=self._get_span_kind(span_data),
             attributes=attributes,
         )
         token = context.attach(set_span_in_context(otel_span))
@@ -197,9 +197,9 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         otel_span = entry.span
 
         try:
-            attributes, content = self._set_span_attributes(span, entry.agent_content)
+            attributes, content = self._get_span_attributes(span, entry.agent_content)
             if isinstance(span_data, (GenerationSpanData, ResponseSpanData)):
-                operation = self._set_operation_name(span_data)
+                operation = self._get_operation_name(span_data)
                 attributes[GEN_AI_OPERATION_NAME] = operation
                 model = self._first_not_none(
                     attributes.get(GEN_AI_REQUEST_MODEL), attributes.get(GEN_AI_RESPONSE_MODEL)
@@ -257,7 +257,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         if workflow_entry is not None and workflow_entry.error is None:
             workflow_entry.error = span.error
 
-    def _resolve_parent_entry(self, span: AgentsSpan[Any]) -> Optional[_SpanEntry]:
+    def _get_parent_entry(self, span: AgentsSpan[Any]) -> Optional[_SpanEntry]:
         if span.parent_id:
             parent_entry = self._openai_span_id_to_otel_span_entry.get(span.parent_id)
             if parent_entry is not None:
@@ -265,7 +265,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         return self._openai_trace_id_to_otel_workflow_entry.get(span.trace_id)
 
     @staticmethod
-    def _set_operation_name(
+    def _get_operation_name(
         span_data: Union[AgentSpanData, FunctionSpanData, GenerationSpanData, HandoffSpanData, ResponseSpanData],
     ) -> str:
         if isinstance(span_data, AgentSpanData):
@@ -281,53 +281,53 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         return GenAiOperationNameValues.CHAT.value
 
     @staticmethod
-    def _set_span_name(
+    def _get_span_name(
         span_data: Union[AgentSpanData, FunctionSpanData, GenerationSpanData, HandoffSpanData, ResponseSpanData],
         operation_name: str,
     ) -> str:
         if isinstance(span_data, (AgentSpanData, FunctionSpanData)):
             return f"{operation_name} {span_data.name}"
         if isinstance(span_data, HandoffSpanData):
-            return f"{operation_name} {OpenTelemetryTracingProcessor._handoff_tool_name(span_data)}"
+            return f"{operation_name} {OpenTelemetryTracingProcessor._get_handoff_tool_name(span_data)}"
         if isinstance(span_data, GenerationSpanData) and span_data.model:
             return f"{operation_name} {span_data.model}"
         return operation_name
 
     @staticmethod
-    def _set_span_kind(
+    def _get_span_kind(
         span_data: Union[AgentSpanData, FunctionSpanData, GenerationSpanData, HandoffSpanData, ResponseSpanData],
     ) -> SpanKind:
         if isinstance(span_data, (GenerationSpanData, ResponseSpanData)):
             return SpanKind.CLIENT
         return SpanKind.INTERNAL
 
-    def _set_span_attributes(
+    def _get_span_attributes(
         self,
         span: AgentsSpan[Any],
         agent_content: Optional[_AgentContent],
     ) -> tuple[dict[str, AttributeValue], Optional[_AgentContent]]:
         span_data = span.span_data
         if isinstance(span_data, GenerationSpanData):
-            return self._set_generation_attributes(span_data)
+            return self._get_generation_attributes(span_data)
         if isinstance(span_data, ResponseSpanData):
-            return self._set_response_attributes(span_data)
+            return self._get_response_attributes(span_data)
         if isinstance(span_data, FunctionSpanData):
-            return self._set_function_attributes(span_data), None
+            return self._get_function_attributes(span_data), None
         if isinstance(span_data, HandoffSpanData):
-            return self._set_handoff_attributes(span_data), None
+            return self._get_handoff_attributes(span_data), None
         if isinstance(span_data, AgentSpanData):
-            return self._set_agent_attributes(agent_content, span_data), None
+            return self._get_agent_attributes(agent_content, span_data), None
         return {}, None
 
     @staticmethod
-    def _set_generation_attributes(
+    def _get_generation_attributes(
         span_data: GenerationSpanData,
     ) -> tuple[dict[str, AttributeValue], _AgentContent]:
         attributes: dict[str, AttributeValue] = {}
         params = get_request_params()
-        streamed_response = OpenTelemetryTracingProcessor._as_response_payload(span_data.output)
+        streamed_response = OpenTelemetryTracingProcessor._get_response_payload(span_data.output)
         model_config = {
-            **OpenTelemetryTracingProcessor._response_request_config(streamed_response),
+            **OpenTelemetryTracingProcessor._get_response_request_config(streamed_response),
             **(span_data.model_config or {}),
             **params,
         }
@@ -337,7 +337,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         OpenTelemetryTracingProcessor._set_attribute(
             attributes,
             GEN_AI_PROVIDER_NAME,
-            OpenTelemetryTracingProcessor._resolve_provider(request_model, model_config.get("base_url")),
+            OpenTelemetryTracingProcessor._get_provider_name(request_model, model_config.get("base_url")),
         )
         OpenTelemetryTracingProcessor._set_request_attributes(attributes, model_config)
 
@@ -366,16 +366,16 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             output_messages=output_messages or None,
             system_instructions=system_instructions or None,
             request_model=request_model,
-            request_attributes=OpenTelemetryTracingProcessor._rollup_request_attributes(attributes),
+            request_attributes=OpenTelemetryTracingProcessor._get_rollup_request_attributes(attributes),
         )
         return attributes, content
 
     @staticmethod
-    def _set_response_attributes(span_data: ResponseSpanData) -> tuple[dict[str, AttributeValue], _AgentContent]:
+    def _get_response_attributes(span_data: ResponseSpanData) -> tuple[dict[str, AttributeValue], _AgentContent]:
         attributes: dict[str, AttributeValue] = {}
         response = span_data.response
         params = get_request_params()
-        model_config = {**OpenTelemetryTracingProcessor._response_request_config(response), **params}
+        model_config = {**OpenTelemetryTracingProcessor._get_response_request_config(response), **params}
 
         response_model = OpenTelemetryTracingProcessor._get_value(response, "model")
         request_model = OpenTelemetryTracingProcessor._first_not_none(params.get("model"), response_model)
@@ -384,7 +384,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         OpenTelemetryTracingProcessor._set_attribute(
             attributes,
             GEN_AI_PROVIDER_NAME,
-            OpenTelemetryTracingProcessor._resolve_provider(request_model, model_config.get("base_url")),
+            OpenTelemetryTracingProcessor._get_provider_name(request_model, model_config.get("base_url")),
         )
         OpenTelemetryTracingProcessor._set_request_attributes(attributes, model_config)
 
@@ -416,12 +416,12 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             output_messages=output_messages or None,
             system_instructions=system_instructions or None,
             request_model=request_model,
-            request_attributes=OpenTelemetryTracingProcessor._rollup_request_attributes(attributes),
+            request_attributes=OpenTelemetryTracingProcessor._get_rollup_request_attributes(attributes),
         )
         return attributes, content
 
     @staticmethod
-    def _set_function_attributes(span_data: FunctionSpanData) -> dict[str, AttributeValue]:
+    def _get_function_attributes(span_data: FunctionSpanData) -> dict[str, AttributeValue]:
         attributes: dict[str, AttributeValue] = {}
         OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_TOOL_NAME, span_data.name)
         OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_TOOL_TYPE, "function")
@@ -434,10 +434,10 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         return attributes
 
     @staticmethod
-    def _set_handoff_attributes(span_data: HandoffSpanData) -> dict[str, AttributeValue]:
+    def _get_handoff_attributes(span_data: HandoffSpanData) -> dict[str, AttributeValue]:
         attributes: dict[str, AttributeValue] = {}
         OpenTelemetryTracingProcessor._set_attribute(
-            attributes, GEN_AI_TOOL_NAME, OpenTelemetryTracingProcessor._handoff_tool_name(span_data)
+            attributes, GEN_AI_TOOL_NAME, OpenTelemetryTracingProcessor._get_handoff_tool_name(span_data)
         )
         OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_TOOL_TYPE, "handoff")
         OpenTelemetryTracingProcessor._set_attribute(
@@ -447,7 +447,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         )
         return attributes
 
-    def _set_agent_attributes(
+    def _get_agent_attributes(
         self,
         content: Optional[_AgentContent],
         span_data: AgentSpanData,
@@ -459,7 +459,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         for key, value in (content.request_attributes or {}).items():
             self._set_attribute(attributes, key, value)
         self._set_tool_definitions(attributes, span_data.tools)
-        self._set_attribute(attributes, GEN_AI_OUTPUT_TYPE, self._agent_output_type(span_data.output_type))
+        self._set_attribute(attributes, GEN_AI_OUTPUT_TYPE, self._get_agent_output_type(span_data.output_type))
         self._set_message_attributes(
             attributes,
             content.system_instructions or [],
@@ -497,7 +497,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
         OpenTelemetryTracingProcessor._set_tool_definitions(attributes, model_config.get("tools"))
         OpenTelemetryTracingProcessor._set_attribute(
-            attributes, GEN_AI_OUTPUT_TYPE, OpenTelemetryTracingProcessor._request_output_type(model_config)
+            attributes, GEN_AI_OUTPUT_TYPE, OpenTelemetryTracingProcessor._get_request_output_type(model_config)
         )
 
     @staticmethod
@@ -631,7 +631,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         span.set_status(Status(StatusCode.ERROR, description))
 
     @staticmethod
-    def _response_request_config(response: Any) -> dict[str, Any]:
+    def _get_response_request_config(response: Any) -> dict[str, Any]:
         if response is None:
             return {}
         model_config: dict[str, Any] = {}
@@ -656,7 +656,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         return None
 
     @staticmethod
-    def _request_output_type(model_config: Mapping[str, Any]) -> Optional[str]:
+    def _get_request_output_type(model_config: Mapping[str, Any]) -> Optional[str]:
         response_format = OpenTelemetryTracingProcessor._first_not_none(
             OpenTelemetryTracingProcessor._get_value(model_config.get("text"), "format"),
             model_config.get("response_format"),
@@ -674,7 +674,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         }.get(format_type)
 
     @staticmethod
-    def _agent_output_type(output_type: Any) -> Optional[str]:
+    def _get_agent_output_type(output_type: Any) -> Optional[str]:
         if not output_type:
             return None
         if str(output_type) in ("str", "text"):
@@ -682,7 +682,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         return GenAiOutputTypeValues.JSON.value
 
     @staticmethod
-    def _resolve_provider(model: Any, base_url: Any) -> str:
+    def _get_provider_name(model: Any, base_url: Any) -> str:
         candidates: list[str] = []
         if model and "/" in str(model):
             candidates.append(str(model).split("/", 1)[0])
@@ -697,7 +697,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         return GenAiProviderNameValues.OPENAI.value
 
     @staticmethod
-    def _rollup_request_attributes(attributes: Mapping[str, AttributeValue]) -> dict[str, AttributeValue]:
+    def _get_rollup_request_attributes(attributes: Mapping[str, AttributeValue]) -> dict[str, AttributeValue]:
         rollup = {
             key: value
             for key, value in attributes.items()
@@ -709,7 +709,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         return rollup
 
     @staticmethod
-    def _as_response_payload(output: Any) -> Optional[dict[str, Any]]:
+    def _get_response_payload(output: Any) -> Optional[dict[str, Any]]:
         items = _GenAIMessageNormalizer._to_item_list(output)
         if len(items) != 1:
             return None
@@ -719,7 +719,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         return payload
 
     @staticmethod
-    def _handoff_tool_name(span_data: HandoffSpanData) -> str:
+    def _get_handoff_tool_name(span_data: HandoffSpanData) -> str:
         return f"transfer_to_{span_data.to_agent}" if span_data.to_agent else "handoff"
 
     @staticmethod
