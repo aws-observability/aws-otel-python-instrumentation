@@ -161,14 +161,16 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                 otel_span.update_name(self._set_span_name(span_data, operation))
             if content is not None and entry.agent_content is not None:
                 agent_content = entry.agent_content
-                if agent_content.input_messages is None and content.input_messages is not None:
-                    agent_content.input_messages = content.input_messages
-                if agent_content.system_instructions is None and content.system_instructions is not None:
-                    agent_content.system_instructions = content.system_instructions
-                if agent_content.request_model is None and content.request_model is not None:
-                    agent_content.request_model = content.request_model
-                if content.output_messages is not None:
-                    agent_content.output_messages = content.output_messages
+                agent_content.input_messages = self._first_not_none(
+                    agent_content.input_messages, content.input_messages
+                )
+                agent_content.system_instructions = self._first_not_none(
+                    agent_content.system_instructions, content.system_instructions
+                )
+                agent_content.request_model = self._first_not_none(agent_content.request_model, content.request_model)
+                agent_content.output_messages = self._first_not_none(
+                    content.output_messages, agent_content.output_messages
+                )
             otel_span.set_attributes(attributes)
 
             if isinstance(span_data, ResponseSpanData):
