@@ -72,6 +72,12 @@ class DictWithLock:
         with self._lock:
             self._data.clear()
 
+    def pop_all(self) -> list[Any]:
+        with self._lock:
+            values = list(self._data.values())
+            self._data.clear()
+            return values
+
     def __contains__(self, key: Any) -> bool:
         with self._lock:
             return key in self._data
@@ -131,7 +137,7 @@ def content_to_parts(content: Any) -> list:  # pylint: disable=too-many-branches
             continue
 
         block_type = block.get("type", "")
-        if block_type == "text":
+        if block_type in ("text", "input_text", "output_text", "summary_text"):
             text = block.get("text", "")
             if text:
                 parts.append({"type": "text", "content": str(text)})
