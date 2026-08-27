@@ -568,16 +568,6 @@ class _GenAIMessageNormalizer:
             "content_filter": "content_filter",
         }.get(str(raw_reason), str(raw_reason))
 
-    @staticmethod
-    def _to_item_list(items: Any) -> list[Any]:
-        if items is None:
-            return []
-        if isinstance(items, (str, bytes, Mapping, BaseModel)):
-            return [items]
-        if isinstance(items, Sequence):
-            return list(items)
-        return [items]
-
     @classmethod
     def _to_message_parts(cls, content: Any) -> list[dict[str, Any]]:
         if isinstance(content, BaseModel):
@@ -613,6 +603,16 @@ class _GenAIMessageNormalizer:
         if not parts and item.get("content"):
             parts.append({"type": "reasoning", "content": str(item["content"])})
         return parts
+
+    @staticmethod
+    def _to_item_list(items: Any) -> list[Any]:
+        if items is None:
+            return []
+        if isinstance(items, (str, bytes, Mapping, BaseModel)):
+            return [items]
+        if isinstance(items, Sequence):
+            return list(items)
+        return [items]
 
     @staticmethod
     def _as_mapping(value: Any) -> Optional[dict[str, Any]]:
