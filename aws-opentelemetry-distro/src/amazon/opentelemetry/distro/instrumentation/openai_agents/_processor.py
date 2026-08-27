@@ -131,16 +131,16 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                 },
             )
 
-        operation, span_name, span_kind = self._span_identity(span_data)
+        operation = self._set_operation_name(span_data)
         parent_context = self._resolve_parent_context(span)
         attributes = {
             GEN_AI_OPERATION_NAME: operation,
             GEN_AI_PROVIDER_NAME: GenAiProviderNameValues.OPENAI.value,
         }
         otel_span = self._tracer.start_span(
-            span_name,
+            self._set_span_name(span_data, operation),
             context=parent_context,
-            kind=span_kind,
+            kind=self._set_span_kind(span_data),
             attributes=attributes,
         )
         self._otel_spans.put(span.span_id, otel_span)
@@ -160,9 +160,9 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         try:
             attributes, content = self._span_attributes(span)
             if isinstance(span.span_data, GenerationSpanData):
-                operation, span_name, _ = self._span_identity(span.span_data)
+                operation = self._set_operation_name(span.span_data)
                 attributes[GEN_AI_OPERATION_NAME] = operation
-                otel_span.update_name(span_name)
+                otel_span.update_name(self._set_span_name(span.span_data, operation))
             if content:
                 self._roll_up_agent_content(span, content)
             otel_span.set_attributes(attributes)
@@ -200,23 +200,39 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         return None
 
     @staticmethod
-    def _span_identity(
+    def _set_operation_name(
         span_data: Union[AgentSpanData, FunctionSpanData, GenerationSpanData, ResponseSpanData],
-    ) -> tuple[str, str, SpanKind]:
+    ) -> str:
         if isinstance(span_data, AgentSpanData):
-            operation = GenAiOperationNameValues.INVOKE_AGENT.value
-            return operation, f"{operation} {span_data.name}", SpanKind.INTERNAL
+            return GenAiOperationNameValues.INVOKE_AGENT.value
         if isinstance(span_data, FunctionSpanData):
-            operation = GenAiOperationNameValues.EXECUTE_TOOL.value
-            return operation, f"{operation} {span_data.name}", SpanKind.INTERNAL
+            return GenAiOperationNameValues.EXECUTE_TOOL.value
         if isinstance(span_data, GenerationSpanData):
-            operation = (
+            return (
                 GenAiOperationNameValues.CHAT.value
                 if any(_get_value(item, "role") for item in (span_data.input or []))
                 else GenAiOperationNameValues.TEXT_COMPLETION.value
             )
-            return operation, f"{operation} {span_data.model}" if span_data.model else operation, SpanKind.CLIENT
-        return GenAiOperationNameValues.CHAT.value, GenAiOperationNameValues.CHAT.value, SpanKind.CLIENT
+        return GenAiOperationNameValues.CHAT.value
+
+    @staticmethod
+    def _set_span_kind(
+        span_data: Union[AgentSpanData, FunctionSpanData, GenerationSpanData, ResponseSpanData],
+    ) -> SpanKind:
+        if isinstance(span_data, (GenerationSpanData, ResponseSpanData)):
+            return SpanKind.CLIENT
+        return SpanKind.INTERNAL
+
+    @staticmethod
+    def _set_span_name(
+        span_data: Union[AgentSpanData, FunctionSpanData, GenerationSpanData, ResponseSpanData],
+        operation_name: str,
+    ) -> str:
+        if isinstance(span_data, (AgentSpanData, FunctionSpanData)):
+            return f"{operation_name} {span_data.name}"
+        if isinstance(span_data, GenerationSpanData) and span_data.model:
+            return f"{operation_name} {span_data.model}"
+        return operation_name
 
     def _resolve_parent_context(self, span: AgentsSpan[Any]) -> Optional[context.Context]:
         parent_id = span.parent_id
