@@ -77,7 +77,7 @@ def _get_value(value: Any, name: str) -> Any:
     return value.get(name) if isinstance(value, Mapping) else getattr(value, name, None)
 
 
-class _OpenAIAgentsTracingProcessor(TracingProcessor):
+class OpenTelemetryTracingProcessor(TracingProcessor):
     """Translate OpenAI Agents SDK tracing callbacks into OpenTelemetry spans."""
 
     def __init__(self, tracer: Tracer) -> None:
@@ -245,7 +245,7 @@ class _OpenAIAgentsTracingProcessor(TracingProcessor):
     def _generation_attributes(span_data: GenerationSpanData) -> tuple[dict[str, AttributeValue], dict[str, Any]]:
         attributes: dict[str, AttributeValue] = {}
         content: dict[str, Any] = {}
-        _OpenAIAgentsTracingProcessor._set_attribute(attributes, GEN_AI_REQUEST_MODEL, span_data.model)
+        OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_REQUEST_MODEL, span_data.model)
 
         model_config = _as_mapping(span_data.model_config)
         request_attributes = (
@@ -260,19 +260,19 @@ class _OpenAIAgentsTracingProcessor(TracingProcessor):
             (GEN_AI_REQUEST_CHOICE_COUNT, ("choice_count", "n")),
         )
         for attribute, keys in request_attributes:
-            _OpenAIAgentsTracingProcessor._set_attribute(
+            OpenTelemetryTracingProcessor._set_attribute(
                 attributes,
                 attribute,
                 _first_not_none(*(model_config.get(key) for key in keys)),
             )
 
         usage = _as_mapping(span_data.usage)
-        _OpenAIAgentsTracingProcessor._set_attribute(
+        OpenTelemetryTracingProcessor._set_attribute(
             attributes,
             GEN_AI_USAGE_INPUT_TOKENS,
             _first_not_none(usage.get("input_tokens"), usage.get("prompt_tokens")),
         )
-        _OpenAIAgentsTracingProcessor._set_attribute(
+        OpenTelemetryTracingProcessor._set_attribute(
             attributes,
             GEN_AI_USAGE_OUTPUT_TOKENS,
             _first_not_none(usage.get("output_tokens"), usage.get("completion_tokens")),
@@ -280,11 +280,11 @@ class _OpenAIAgentsTracingProcessor(TracingProcessor):
 
         system_instructions, input_messages = normalize_input_messages(span_data.input)
         output_messages = normalize_output_messages(span_data.output)
-        _OpenAIAgentsTracingProcessor._set_message_attributes(
+        OpenTelemetryTracingProcessor._set_message_attributes(
             attributes, system_instructions, input_messages, output_messages
         )
         finish_reasons = [message["finish_reason"] for message in output_messages if message.get("finish_reason")]
-        _OpenAIAgentsTracingProcessor._set_attribute(attributes, GEN_AI_RESPONSE_FINISH_REASONS, finish_reasons or None)
+        OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_RESPONSE_FINISH_REASONS, finish_reasons or None)
 
         content.update(
             {
@@ -302,15 +302,15 @@ class _OpenAIAgentsTracingProcessor(TracingProcessor):
         response = span_data.response
         response_id = getattr(response, "id", None)
         response_model = getattr(response, "model", None)
-        _OpenAIAgentsTracingProcessor._set_attribute(attributes, GEN_AI_RESPONSE_ID, response_id)
-        _OpenAIAgentsTracingProcessor._set_attribute(attributes, GEN_AI_RESPONSE_MODEL, response_model)
-        _OpenAIAgentsTracingProcessor._set_attribute(attributes, GEN_AI_REQUEST_MODEL, response_model)
+        OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_RESPONSE_ID, response_id)
+        OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_RESPONSE_MODEL, response_model)
+        OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_REQUEST_MODEL, response_model)
 
         usage = getattr(span_data, "usage", None) or getattr(response, "usage", None)
-        _OpenAIAgentsTracingProcessor._set_attribute(
+        OpenTelemetryTracingProcessor._set_attribute(
             attributes, GEN_AI_USAGE_INPUT_TOKENS, _get_value(usage, "input_tokens")
         )
-        _OpenAIAgentsTracingProcessor._set_attribute(
+        OpenTelemetryTracingProcessor._set_attribute(
             attributes, GEN_AI_USAGE_OUTPUT_TOKENS, _get_value(usage, "output_tokens")
         )
 
@@ -321,11 +321,11 @@ class _OpenAIAgentsTracingProcessor(TracingProcessor):
         if response_instructions:
             system_instructions = response_instructions
         output_messages = normalize_output_messages(getattr(response, "output", None))
-        _OpenAIAgentsTracingProcessor._set_message_attributes(
+        OpenTelemetryTracingProcessor._set_message_attributes(
             attributes, system_instructions, input_messages, output_messages
         )
         finish_reasons = [message["finish_reason"] for message in output_messages if message.get("finish_reason")]
-        _OpenAIAgentsTracingProcessor._set_attribute(attributes, GEN_AI_RESPONSE_FINISH_REASONS, finish_reasons or None)
+        OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_RESPONSE_FINISH_REASONS, finish_reasons or None)
 
         content = {
             "input_messages": input_messages or None,
@@ -338,12 +338,12 @@ class _OpenAIAgentsTracingProcessor(TracingProcessor):
     @staticmethod
     def _function_attributes(span_data: FunctionSpanData) -> dict[str, AttributeValue]:
         attributes: dict[str, AttributeValue] = {}
-        _OpenAIAgentsTracingProcessor._set_attribute(attributes, GEN_AI_TOOL_NAME, span_data.name)
-        _OpenAIAgentsTracingProcessor._set_attribute(attributes, GEN_AI_TOOL_TYPE, "function")
-        _OpenAIAgentsTracingProcessor._set_attribute(
+        OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_TOOL_NAME, span_data.name)
+        OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_TOOL_TYPE, "function")
+        OpenTelemetryTracingProcessor._set_attribute(
             attributes, GEN_AI_TOOL_CALL_ARGUMENTS, to_tool_attribute_value(span_data.input)
         )
-        _OpenAIAgentsTracingProcessor._set_attribute(
+        OpenTelemetryTracingProcessor._set_attribute(
             attributes, GEN_AI_TOOL_CALL_RESULT, to_tool_attribute_value(span_data.output)
         )
         return attributes

@@ -14,7 +14,7 @@ from amazon.opentelemetry.distro.instrumentation.openai_agents._messages import 
     normalize_input_messages,
     normalize_output_messages,
 )
-from amazon.opentelemetry.distro.instrumentation.openai_agents._processor import _OpenAIAgentsTracingProcessor
+from amazon.opentelemetry.distro.instrumentation.openai_agents._processor import OpenTelemetryTracingProcessor
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -115,7 +115,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
             "amazon.opentelemetry.distro.instrumentation.openai_agents",
             "test",
         )
-        self.processor = _OpenAIAgentsTracingProcessor(tracer)
+        self.processor = OpenTelemetryTracingProcessor(tracer)
         provider = tracing.get_trace_provider()
         self.previous_processors = tuple(provider._multi_processor._processors)  # pylint: disable=protected-access
         tracing.set_trace_processors([self.processor])
