@@ -160,7 +160,7 @@ class GenAITestBase(ContractTestBase):
             attrs = self._get_attributes_dict(span.attributes)
             for attribute, schema_name in _GEN_AI_ATTRIBUTE_SCHEMAS.items():
                 if attribute in attrs:
-                    schema_value = self._get_schema_value(attrs[attribute])
+                    schema_value = self._parse_json_attribute(attrs, attribute, span.name)
                     self.assertIsNotNone(schema_value, f"{span.name}: expected {attribute} to contain data")
                     if isinstance(schema_value, list):
                         self.assertTrue(schema_value, f"{span.name}: expected {attribute} to contain data")
@@ -168,23 +168,6 @@ class GenAITestBase(ContractTestBase):
                         schema_value,
                         schema_name,
                     )
-
-    @classmethod
-    def _get_schema_value(cls, value: AnyValue) -> Any:
-        value_type = value.WhichOneof("value")
-        if value_type is None:
-            return None
-        value = getattr(value, value_type)
-        if value_type == "string_value":
-            try:
-                return json.loads(value)
-            except json.JSONDecodeError:
-                pass
-        elif value_type == "array_value":
-            return [cls._get_schema_value(item) for item in value.values]
-        elif value_type == "kvlist_value":
-            return {item.key: cls._get_schema_value(item.value) for item in value.values}
-        return value
 
     def _parse_json_attribute(self, attrs: Dict[str, AnyValue], attribute: str, span_name: str) -> Any:
         self.assertIn(attribute, attrs, f"{span_name}: expected {attribute}")
