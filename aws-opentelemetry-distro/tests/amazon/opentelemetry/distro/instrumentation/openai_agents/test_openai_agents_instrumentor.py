@@ -153,9 +153,10 @@ class TestOpenAIAgentsInstrumentor(unittest.TestCase):
         self.assertIsNone(GenAIContextCapture.get_tool_call().call_id)
         self.assertEqual(GenAIContextCapture.get_request_params(), {})
 
-    def test_force_flush_delegates_to_tracer_provider(self):
+    def test_force_flush_delegates_to_tracer_span_processor(self):
         tracer_provider = TracerProvider()
-        tracer_provider.force_flush = MagicMock(return_value=True)
+        span_processor = MagicMock()
+        tracer_provider.add_span_processor(span_processor)
         try:
             self.instrumentor.instrument(
                 tracer_provider=tracer_provider,
@@ -164,7 +165,7 @@ class TestOpenAIAgentsInstrumentor(unittest.TestCase):
 
             self.instrumentor._processor.force_flush()  # pylint: disable=protected-access
 
-            tracer_provider.force_flush.assert_called_once_with()
+            span_processor.force_flush.assert_called_once()
         finally:
             self.instrumentor.uninstrument()
             tracer_provider.shutdown()

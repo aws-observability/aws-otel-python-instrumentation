@@ -78,11 +78,6 @@ class DictWithLock:
             self._data.clear()
             return values
 
-    def pop_matching(self, predicate: Callable[[Any], bool]) -> list[Any]:
-        with self._lock:
-            matched = [key for key, value in self._data.items() if predicate(value)]
-            return [self._data.pop(key) for key in matched]
-
     def __contains__(self, key: Any) -> bool:
         with self._lock:
             return key in self._data
