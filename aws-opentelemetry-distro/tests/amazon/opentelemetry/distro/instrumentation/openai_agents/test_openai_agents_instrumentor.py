@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 from agents import tracing
 from agents.items import ItemHelpers
+from agents.tracing.processors import BackendSpanExporter
 from conftest import validate_otel_genai_schema
 from openai import Omit
 from openai.types.responses import ResponseFunctionToolCall
@@ -20,6 +21,7 @@ from amazon.opentelemetry.distro.instrumentation.openai_agents._processor import
     OpenTelemetryTracingProcessor,
     _GenAIMessageNormalizer,
 )
+from opentelemetry.instrumentation.httpx import HTTPX2ClientInstrumentor
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -152,6 +154,29 @@ class TestOpenAIAgentsInstrumentor(unittest.TestCase):
         ItemHelpers.tool_call_output_item(_tool_call("lookup", "call_after"), "sunny")
         self.assertIsNone(GenAIContextCapture.get_tool_call().call_id)
         self.assertEqual(GenAIContextCapture.get_request_params(), {})
+
+    def test_openai_trace_export_produces_no_http_spans(self):
+        exporter = InMemorySpanExporter()
+        tracer_provider = TracerProvider()
+        tracer_provider.add_span_processor(SimpleSpanProcessor(exporter))
+        httpx_instrumentor = HTTPX2ClientInstrumentor()
+        httpx_instrumentor.instrument(tracer_provider=tracer_provider)
+        backend_exporter = BackendSpanExporter(
+            api_key="test", endpoint="http://localhost:1/v1/traces/ingest", max_retries=1
+        )
+        items = [SimpleNamespace(tracing_api_key=None, export=lambda: {"object": "trace"})]
+        try:
+            backend_exporter.export(items)
+            self.assertEqual(len(exporter.get_finished_spans()), 1)
+
+            self.instrumentor.instrument(tracer_provider=tracer_provider, skip_dep_check=True)
+            exporter.clear()
+            backend_exporter.export(items)
+            self.assertEqual(exporter.get_finished_spans(), tuple())
+        finally:
+            httpx_instrumentor.uninstrument()
+            backend_exporter.close()
+            tracer_provider.shutdown()
 
     def test_force_flush_delegates_to_tracer_span_processor(self):
         tracer_provider = TracerProvider()
