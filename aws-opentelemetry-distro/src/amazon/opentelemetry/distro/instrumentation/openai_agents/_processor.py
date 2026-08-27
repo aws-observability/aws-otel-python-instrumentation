@@ -64,7 +64,15 @@ _logger = logging.getLogger(__name__)
 class _SpanEntry:
     span: Span
     token: Optional[Token] = None
-    agent_content: Optional[dict[str, Any]] = None
+    agent_content: Optional["_AgentContent"] = None
+
+
+@dataclass
+class _AgentContent:
+    input_messages: Optional[list[dict[str, Any]]] = None
+    output_messages: Optional[list[dict[str, Any]]] = None
+    system_instructions: Optional[list[dict[str, Any]]] = None
+    request_model: Optional[str] = None
 
 
 class OpenTelemetryTracingProcessor(TracingProcessor):
@@ -114,12 +122,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
         agent_content = parent_entry.agent_content if parent_entry is not None else None
         if isinstance(span_data, AgentSpanData):
-            agent_content = {
-                "input_messages": None,
-                "output_messages": None,
-                "system_instructions": None,
-                "request_model": None,
-            }
+            agent_content = _AgentContent()
 
         operation = self._set_operation_name(span_data)
         attributes = {
@@ -156,8 +159,16 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                 operation = self._set_operation_name(span_data)
                 attributes[GEN_AI_OPERATION_NAME] = operation
                 otel_span.update_name(self._set_span_name(span_data, operation))
-            if content:
-                self._roll_up_agent_content(entry.agent_content, content)
+            if content is not None and entry.agent_content is not None:
+                agent_content = entry.agent_content
+                if agent_content.input_messages is None and content.input_messages is not None:
+                    agent_content.input_messages = content.input_messages
+                if agent_content.system_instructions is None and content.system_instructions is not None:
+                    agent_content.system_instructions = content.system_instructions
+                if agent_content.request_model is None and content.request_model is not None:
+                    agent_content.request_model = content.request_model
+                if content.output_messages is not None:
+                    agent_content.output_messages = content.output_messages
             otel_span.set_attributes(attributes)
 
             if isinstance(span_data, ResponseSpanData):
@@ -234,25 +245,24 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
     def _set_span_attributes(
         self,
         span: AgentsSpan[Any],
-        agent_content: Optional[dict[str, Any]],
-    ) -> tuple[dict[str, AttributeValue], dict[str, Any]]:
+        agent_content: Optional[_AgentContent],
+    ) -> tuple[dict[str, AttributeValue], Optional[_AgentContent]]:
         span_data = span.span_data
         if isinstance(span_data, GenerationSpanData):
             return self._set_generation_attributes(span_data)
         if isinstance(span_data, ResponseSpanData):
             return self._set_response_attributes(span_data)
         if isinstance(span_data, FunctionSpanData):
-            return self._set_function_attributes(span_data), {}
+            return self._set_function_attributes(span_data), None
         if isinstance(span_data, AgentSpanData):
-            return self._set_agent_attributes(agent_content, span_data), {}
-        return {}, {}
+            return self._set_agent_attributes(agent_content, span_data), None
+        return {}, None
 
     @staticmethod
     def _set_generation_attributes(
         span_data: GenerationSpanData,
-    ) -> tuple[dict[str, AttributeValue], dict[str, Any]]:
+    ) -> tuple[dict[str, AttributeValue], _AgentContent]:
         attributes: dict[str, AttributeValue] = {}
-        content: dict[str, Any] = {}
         OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_REQUEST_MODEL, span_data.model)
 
         model_config = dict(span_data.model_config or {})
@@ -300,18 +310,16 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         finish_reasons = [message["finish_reason"] for message in output_messages if message.get("finish_reason")]
         OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_RESPONSE_FINISH_REASONS, finish_reasons or None)
 
-        content.update(
-            {
-                "input_messages": input_messages or None,
-                "output_messages": output_messages or None,
-                "system_instructions": system_instructions or None,
-                "request_model": span_data.model,
-            }
+        content = _AgentContent(
+            input_messages=input_messages or None,
+            output_messages=output_messages or None,
+            system_instructions=system_instructions or None,
+            request_model=span_data.model,
         )
         return attributes, content
 
     @staticmethod
-    def _set_response_attributes(span_data: ResponseSpanData) -> tuple[dict[str, AttributeValue], dict[str, Any]]:
+    def _set_response_attributes(span_data: ResponseSpanData) -> tuple[dict[str, AttributeValue], _AgentContent]:
         attributes: dict[str, AttributeValue] = {}
         response = span_data.response
         response_id = getattr(response, "id", None)
@@ -347,12 +355,12 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         finish_reasons = [message["finish_reason"] for message in output_messages if message.get("finish_reason")]
         OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_RESPONSE_FINISH_REASONS, finish_reasons or None)
 
-        content = {
-            "input_messages": input_messages or None,
-            "output_messages": output_messages or None,
-            "system_instructions": system_instructions or None,
-            "request_model": response_model,
-        }
+        content = _AgentContent(
+            input_messages=input_messages or None,
+            output_messages=output_messages or None,
+            system_instructions=system_instructions or None,
+            request_model=response_model,
+        )
         return attributes, content
 
     @staticmethod
@@ -370,33 +378,20 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
     def _set_agent_attributes(
         self,
-        content: Optional[dict[str, Any]],
+        content: Optional[_AgentContent],
         span_data: AgentSpanData,
     ) -> dict[str, AttributeValue]:
         attributes: dict[str, AttributeValue] = {}
         self._set_attribute(attributes, GEN_AI_AGENT_NAME, span_data.name)
-        content = content or {}
-        self._set_attribute(attributes, GEN_AI_REQUEST_MODEL, content.get("request_model"))
+        content = content or _AgentContent()
+        self._set_attribute(attributes, GEN_AI_REQUEST_MODEL, content.request_model)
         self._set_message_attributes(
             attributes,
-            content.get("system_instructions") or [],
-            content.get("input_messages") or [],
-            content.get("output_messages") or [],
+            content.system_instructions or [],
+            content.input_messages or [],
+            content.output_messages or [],
         )
         return attributes
-
-    @staticmethod
-    def _roll_up_agent_content(
-        agent_content: Optional[dict[str, Any]],
-        content: dict[str, Any],
-    ) -> None:
-        if agent_content is None:
-            return
-        for key in ("input_messages", "system_instructions", "request_model"):
-            if agent_content.get(key) is None and content.get(key) is not None:
-                agent_content[key] = content[key]
-        if content.get("output_messages") is not None:
-            agent_content["output_messages"] = content["output_messages"]
 
     @staticmethod
     def _set_message_attributes(
