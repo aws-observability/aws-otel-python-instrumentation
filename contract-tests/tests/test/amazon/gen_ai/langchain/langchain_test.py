@@ -7,6 +7,7 @@ from amazon.gen_ai.gen_ai_test_base import (
     GEN_AI_RESPONSE_ID,
     GEN_AI_RESPONSE_MODEL,
     GEN_AI_TOOL_DESCRIPTION,
+    GenAiProviderNameValues,
     GenAITestBase,
 )
 
@@ -44,4 +45,6 @@ class LangChainTest(GenAITestBase):
             attrs = self._get_attributes_dict(span.attributes)
             self.assertIn(GEN_AI_REQUEST_TEMPERATURE, attrs)
             self.assertIn(GEN_AI_RESPONSE_MODEL, attrs)
-            self.assertIn(GEN_AI_RESPONSE_ID, attrs)
+            # The OpenAI mock returns a response ID; the Bedrock Converse response does not expose one.
+            if self._get_gen_ai_provider(attrs) == GenAiProviderNameValues.OPENAI.value:
+                self.assertIn(GEN_AI_RESPONSE_ID, attrs)

@@ -136,17 +136,25 @@ class LlamaIndexTest(GenAITestBase):
                     invoke_agent_spans.append(span)
                 elif op_name == GenAiOperationNameValues.EXECUTE_TOOL.value:
                     execute_tool_spans.append(span)
-                elif op_name == GenAiOperationNameValues.CHAT.value and GEN_AI_PROVIDER_NAME in attrs:
+                elif op_name == GenAiOperationNameValues.CHAT.value:
                     chat_spans.append(span)
 
         self.assertGreater(len(invoke_agent_spans), 0, "Expected at least one invoke_agent span")
+        completed_invoke_agent_spans = []
         for span in invoke_agent_spans:
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
             self._assert_str_attribute(attrs, GEN_AI_AGENT_NAME, "TestAgent")
-            self._assert_invoke_agent_content(attrs, span.name)
+            if GEN_AI_INPUT_MESSAGES in attrs and GEN_AI_OUTPUT_MESSAGES in attrs:
+                completed_invoke_agent_spans.append((span, attrs))
             if "run_agent_step" not in span.name:
                 self._assert_str_attribute(attrs, GEN_AI_AGENT_DESCRIPTION, "A test agent that greets and multiplies.")
+
+        # LlamaIndex emits invoke_agent spans for intermediate tool-calling steps. At least one completed invocation
+        # MUST contain the initial user input and final agent output; intermediate steps are schema-validated above.
+        self.assertTrue(completed_invoke_agent_spans, "Expected a completed invoke_agent span with input and output")
+        for span, attrs in completed_invoke_agent_spans:
+            self._assert_invoke_agent_content(attrs, span.name)
 
         if execute_tool_spans:
             tool_names = set()
@@ -163,11 +171,12 @@ class LlamaIndexTest(GenAITestBase):
                 description = attrs[GEN_AI_TOOL_DESCRIPTION].string_value
                 self.assertTrue(len(description) > 0, "Expected non-empty tool description")
 
+        chat_spans = self._select_gen_ai_provider_spans(chat_spans)
         self.assertGreater(len(chat_spans), 0, "Expected at least one chat span from agent LLM calls")
         for span in chat_spans:
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
-            self._assert_str_attribute(attrs, GEN_AI_PROVIDER_NAME, expected_provider)
+            self.assertEqual(self._get_gen_ai_provider(attrs), expected_provider)
             self._assert_str_attribute(attrs, GEN_AI_REQUEST_MODEL, expected_model)
 
     def _assert_chat_spans(
@@ -181,16 +190,17 @@ class LlamaIndexTest(GenAITestBase):
 
             if attrs.get(GEN_AI_OPERATION_NAME):
                 op_name = attrs[GEN_AI_OPERATION_NAME].string_value
-                if op_name == GenAiOperationNameValues.CHAT.value and GEN_AI_PROVIDER_NAME in attrs:
+                if op_name == GenAiOperationNameValues.CHAT.value:
                     chat_spans.append(span)
 
+        chat_spans = self._select_gen_ai_provider_spans(chat_spans)
         self.assertGreater(len(chat_spans), 0, "Expected at least one chat span")
 
         for span in chat_spans:
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
 
-            self._assert_str_attribute(attrs, GEN_AI_PROVIDER_NAME, expected_provider)
+            self.assertEqual(self._get_gen_ai_provider(attrs), expected_provider)
             self._assert_str_attribute(attrs, GEN_AI_REQUEST_MODEL, expected_model)
 
             self.assertIn(GEN_AI_REQUEST_TEMPERATURE, attrs)
@@ -296,16 +306,17 @@ class LlamaIndexTest(GenAITestBase):
             if attrs.get(GEN_AI_OPERATION_NAME):
                 op_name = attrs[GEN_AI_OPERATION_NAME].string_value
 
-                if op_name == GenAiOperationNameValues.CHAT.value and GEN_AI_PROVIDER_NAME in attrs:
+                if op_name == GenAiOperationNameValues.CHAT.value:
                     chat_spans.append(span)
 
+        chat_spans = self._select_gen_ai_provider_spans(chat_spans)
         self.assertGreater(len(chat_spans), 0, "Expected at least one chat span with tool definitions")
 
         for span in chat_spans:
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
 
-            self._assert_str_attribute(attrs, GEN_AI_PROVIDER_NAME, expected_provider)
+            self.assertEqual(self._get_gen_ai_provider(attrs), expected_provider)
             self._assert_str_attribute(attrs, GEN_AI_REQUEST_MODEL, expected_model)
 
             self.assertIn(GEN_AI_TOOL_DEFINITIONS, attrs)
@@ -340,7 +351,7 @@ class LlamaIndexTest(GenAITestBase):
                     invoke_workflow_spans.append(span)
                 elif op_name == GenAiOperationNameValues.INVOKE_AGENT.value:
                     invoke_agent_spans.append(span)
-                elif op_name == GenAiOperationNameValues.CHAT.value and GEN_AI_PROVIDER_NAME in attrs:
+                elif op_name == GenAiOperationNameValues.CHAT.value:
                     chat_spans.append(span)
 
         self.assertEqual(len(invoke_workflow_spans), 1, "Expected exactly one invoke_workflow span")
@@ -349,12 +360,21 @@ class LlamaIndexTest(GenAITestBase):
         self._assert_str_attribute(wf_attrs, GEN_AI_WORKFLOW_NAME, "multi_agent_workflow")
 
         self.assertGreater(len(invoke_agent_spans), 0, "Expected at least one invoke_agent span")
+        completed_invoke_agent_spans = []
         for span in invoke_agent_spans:
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
             self.assertIn(GEN_AI_AGENT_NAME, attrs)
+            if GEN_AI_INPUT_MESSAGES in attrs and GEN_AI_OUTPUT_MESSAGES in attrs:
+                completed_invoke_agent_spans.append((span, attrs))
+
+        # Intermediate workflow steps may end in a tool call. A completed invoke_agent span MUST still preserve the
+        # workflow's first user input and last agent output.
+        self.assertTrue(completed_invoke_agent_spans, "Expected a completed invoke_agent span with input and output")
+        for span, attrs in completed_invoke_agent_spans:
             self._assert_invoke_agent_content(attrs, span.name)
 
+        chat_spans = self._select_gen_ai_provider_spans(chat_spans)
         self.assertGreater(len(chat_spans), 0, "Expected at least one chat span")
 
     @override

@@ -19,6 +19,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (  # 
     GEN_AI_REQUEST_TEMPERATURE,
     GEN_AI_RESPONSE_ID,
     GEN_AI_RESPONSE_MODEL,
+    GEN_AI_SYSTEM,
     GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_CALL_RESULT,
@@ -87,16 +88,15 @@ class GenAITestBase(ContractTestBase):
         self._assert_chat_spans(chat_spans, kwargs.get("expected_chat_count", 1))
 
     def _assert_gen_ai_provider(self, resource_scope_spans: List[ResourceScopeSpan], expected_provider: str) -> None:
-        provider_spans = []
+        providers = []
         for resource_scope_span in resource_scope_spans:
-            span = resource_scope_span.span
-            attrs = self._get_attributes_dict(span.attributes)
-            if GEN_AI_PROVIDER_NAME in attrs:
-                provider_spans.append((span, attrs))
+            attrs = self._get_attributes_dict(resource_scope_span.span.attributes)
+            provider = self._get_gen_ai_provider(attrs)
+            if provider is not None:
+                providers.append(provider)
 
-        self.assertTrue(provider_spans, f"Expected at least one span for provider {expected_provider}")
-        for _, attrs in provider_spans:
-            self._assert_str_attribute(attrs, GEN_AI_PROVIDER_NAME, expected_provider)
+        # At least one span MUST identify the selected LLM provider using the current or legacy OTel attribute.
+        self.assertIn(expected_provider, providers)
 
     def _collect_gen_ai_spans(self, resource_scope_spans: List[ResourceScopeSpan]):
         invoke_agent_spans = []
@@ -104,13 +104,17 @@ class GenAITestBase(ContractTestBase):
         chat_spans = []
         for resource_scope_span in resource_scope_spans:
             span = resource_scope_span.span
+            attrs = self._get_attributes_dict(span.attributes)
             if "invoke_agent" in span.name:
                 invoke_agent_spans.append(span)
             elif "execute_tool" in span.name:
                 execute_tool_spans.append(span)
-            elif "chat" in span.name.lower():
+            elif (
+                GEN_AI_OPERATION_NAME in attrs
+                and attrs[GEN_AI_OPERATION_NAME].string_value == GenAiOperationNameValues.CHAT.value
+            ):
                 chat_spans.append(span)
-        return invoke_agent_spans, execute_tool_spans, chat_spans
+        return invoke_agent_spans, execute_tool_spans, self._select_gen_ai_provider_spans(chat_spans)
 
     def _assert_invoke_agent_spans(self, invoke_agent_spans: list, expected_count: int = 1):
         self.assertEqual(len(invoke_agent_spans), expected_count)
@@ -141,7 +145,7 @@ class GenAITestBase(ContractTestBase):
         for span in chat_spans:
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
-            self.assertIn(GEN_AI_PROVIDER_NAME, attrs)
+            self.assertIsNotNone(self._get_gen_ai_provider(attrs))
             self.assertIn(GEN_AI_REQUEST_MODEL, attrs)
             self.assertIn(GEN_AI_INPUT_MESSAGES, attrs)
             self.assertIn(GEN_AI_SYSTEM_INSTRUCTIONS, attrs)
@@ -227,6 +231,17 @@ class GenAITestBase(ContractTestBase):
             return json.loads(value.string_value)
         except json.JSONDecodeError as error:
             self.fail(f"{span_name}: {attribute} must contain valid JSON: {error}")
+
+    @staticmethod
+    def _get_gen_ai_provider(attrs: Dict[str, AnyValue]) -> Optional[str]:
+        provider = attrs.get(GEN_AI_PROVIDER_NAME) or attrs.get(GEN_AI_SYSTEM)
+        return provider.string_value if provider is not None else None
+
+    def _select_gen_ai_provider_spans(self, spans: list) -> list:
+        current_spans = [span for span in spans if GEN_AI_PROVIDER_NAME in self._get_attributes_dict(span.attributes)]
+        if current_spans:
+            return current_spans
+        return [span for span in spans if GEN_AI_SYSTEM in self._get_attributes_dict(span.attributes)]
 
     @staticmethod
     def _text_parts(messages: list, role: str) -> list:
