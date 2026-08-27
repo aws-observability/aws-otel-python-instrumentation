@@ -3,7 +3,7 @@
 
 import logging
 from collections.abc import Mapping
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from agents.tracing import Span as AgentsSpan
 from agents.tracing import Trace as AgentsTrace
@@ -200,7 +200,9 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         return None
 
     @staticmethod
-    def _span_identity(span_data: Any) -> tuple[str, str, SpanKind]:
+    def _span_identity(
+        span_data: Union[AgentSpanData, FunctionSpanData, GenerationSpanData, ResponseSpanData],
+    ) -> tuple[str, str, SpanKind]:
         if isinstance(span_data, AgentSpanData):
             operation = GenAiOperationNameValues.INVOKE_AGENT.value
             return operation, f"{operation} {span_data.name}", SpanKind.INTERNAL
