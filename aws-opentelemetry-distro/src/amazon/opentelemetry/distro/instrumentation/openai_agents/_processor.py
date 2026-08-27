@@ -9,6 +9,7 @@ from agents.tracing import Span as AgentsSpan
 from agents.tracing import Trace as AgentsTrace
 from agents.tracing import TracingProcessor
 from agents.tracing.span_data import AgentSpanData, FunctionSpanData, GenerationSpanData, ResponseSpanData
+from typing_extensions import override
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     GEN_AI_WORKFLOW_NAME,
@@ -87,6 +88,7 @@ class _OpenAIAgentsTracingProcessor(TracingProcessor):
         self._span_parents = DictWithLock()
         self._agent_content = DictWithLock()
 
+    @override
     def on_trace_start(self, trace: AgentsTrace) -> None:
         attributes = {
             GEN_AI_OPERATION_NAME: OPERATION_INVOKE_WORKFLOW,
@@ -101,6 +103,7 @@ class _OpenAIAgentsTracingProcessor(TracingProcessor):
         self._workflow_spans.put(trace.trace_id, span)
         self._tokens.put(trace.trace_id, context.attach(set_span_in_context(span)))
 
+    @override
     def on_trace_end(self, trace: AgentsTrace) -> None:
         token = self._tokens.pop(trace.trace_id)
         if token is not None:
@@ -110,6 +113,7 @@ class _OpenAIAgentsTracingProcessor(TracingProcessor):
             span.set_status(Status(StatusCode.OK))
             span.end()
 
+    @override
     def on_span_start(self, span: AgentsSpan[Any]) -> None:
         self._span_parents.put(span.span_id, span.parent_id)
         span_data = span.span_data
@@ -142,6 +146,7 @@ class _OpenAIAgentsTracingProcessor(TracingProcessor):
         self._otel_spans.put(span.span_id, otel_span)
         self._tokens.put(span.span_id, context.attach(set_span_in_context(otel_span)))
 
+    @override
     def on_span_end(self, span: AgentsSpan[Any]) -> None:
         token = self._tokens.pop(span.span_id)
         if token is not None:
@@ -176,6 +181,7 @@ class _OpenAIAgentsTracingProcessor(TracingProcessor):
             self._span_parents.pop(span.span_id)
             self._agent_content.pop(span.span_id)
 
+    @override
     def shutdown(self) -> None:
         for token in reversed(self._tokens.pop_all()):
             try_detach(token)
@@ -189,6 +195,7 @@ class _OpenAIAgentsTracingProcessor(TracingProcessor):
         self._span_parents.clear()
         self._agent_content.clear()
 
+    @override
     def force_flush(self) -> None:  # pylint: disable=no-self-use
         return None
 

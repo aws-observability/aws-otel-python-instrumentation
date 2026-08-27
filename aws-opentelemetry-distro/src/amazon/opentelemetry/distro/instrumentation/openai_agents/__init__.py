@@ -3,6 +3,8 @@
 
 from typing import Any, Collection
 
+from typing_extensions import override
+
 from amazon.opentelemetry.distro.version import __version__
 from opentelemetry import trace
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor  # type: ignore
@@ -14,9 +16,11 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
     _processor = None
     _previous_processors = None
 
+    @override
     def instrumentation_dependencies(self) -> Collection[str]:  # pylint: disable=no-self-use
         return ("openai-agents >= 0.3.3",)
 
+    @override
     def _instrument(self, **kwargs: Any) -> None:
         if self._processor is not None:
             return
@@ -41,6 +45,7 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
         else:
             add_trace_processor(self._processor)
 
+    @override
     def _uninstrument(self, **kwargs: Any) -> None:
         if self._processor is None:
             return
