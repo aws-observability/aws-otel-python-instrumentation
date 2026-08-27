@@ -32,10 +32,12 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
         )
 
         from ._processor import OpenTelemetryTracingProcessor  # pylint: disable=import-outside-toplevel
+        from ._request_capture import start_request_capture  # pylint: disable=import-outside-toplevel
 
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
         self._processor = OpenTelemetryTracingProcessor(tracer, getattr(tracer_provider, "force_flush", None))
+        start_request_capture()
 
         if kwargs.get("disable_openai_trace_export"):
             trace_provider = get_trace_provider()
@@ -52,6 +54,9 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
 
         from agents.tracing import get_trace_provider, set_trace_processors  # pylint: disable=import-outside-toplevel
 
+        from ._request_capture import stop_request_capture  # pylint: disable=import-outside-toplevel
+
+        stop_request_capture()
         processor = self._processor
         try:
             if self._previous_processors is not None:
