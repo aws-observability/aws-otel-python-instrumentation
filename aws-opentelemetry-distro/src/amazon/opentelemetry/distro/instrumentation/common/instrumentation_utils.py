@@ -72,6 +72,12 @@ class DictWithLock:
         with self._lock:
             self._data.clear()
 
+    def pop_all(self) -> list[Any]:
+        with self._lock:
+            values = list(self._data.values())
+            self._data.clear()
+            return values
+
     def __contains__(self, key: Any) -> bool:
         with self._lock:
             return key in self._data

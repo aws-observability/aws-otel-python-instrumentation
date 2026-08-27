@@ -528,22 +528,6 @@ class TestAwsOpenTelemetryDistro(TestCase):
             distro.load_instrumentor(ep)
             return mock_super
 
-    def test_skip_adot_owned_dist(self):
-        """ADOT-owned v2 package should be skipped when agent observability is enabled."""
-        ep = self._make_ep("openai_agents", "opentelemetry-instrumentation-openai-agents-v2")
-        mock_super = self._load_instrumentor_with_agent(ep)
-        mock_super.assert_not_called()
-
-    def test_load_adot_owned_dist_when_agent_disabled(self):
-        """ADOT-owned v2 package should load when agent observability is disabled."""
-        distro = AwsOpenTelemetryDistro()
-        ep = self._make_ep("openai_agents", "opentelemetry-instrumentation-openai-agents-v2")
-        with patch(
-            "amazon.opentelemetry.distro.aws_opentelemetry_distro.is_agent_observability_enabled", return_value=False
-        ), patch.object(OpenTelemetryDistro, "load_instrumentor") as mock_super:
-            distro.load_instrumentor(ep)
-            mock_super.assert_called_once_with(ep)
-
     def test_skip_native_when_third_party_registered(self):
         """aws_langchain should be skipped when OpenInference langchain is registered."""
         ep = self._make_ep("aws_langchain", "aws-opentelemetry-distro")
@@ -629,13 +613,6 @@ class TestAwsOpenTelemetryDistro(TestCase):
         third_party = [self._make_ep("openai_agents", "openinference-instrumentation-openai-agents")]
         mock_super = self._load_instrumentor_with_agent(ep, third_party_eps=third_party)
         mock_super.assert_not_called()
-
-    def test_adot_v2_openai_agents_not_treated_as_third_party(self):
-        """ADOT v2 openai_agents should not cause aws_openai_agents to be skipped."""
-        ep = self._make_ep("aws_openai_agents", "aws-opentelemetry-distro")
-        third_party = [self._make_ep("openai_agents", "opentelemetry-instrumentation-openai-agents-v2")]
-        mock_super = self._load_instrumentor_with_agent(ep, third_party_eps=third_party)
-        mock_super.assert_called_once_with(ep)
 
     def _configure_with_agent_observability(self, region="us-west-2"):
         with patch("amazon.opentelemetry.distro.aws_opentelemetry_distro.OpenTelemetryDistro._configure"), patch(

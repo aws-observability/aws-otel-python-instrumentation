@@ -129,10 +129,6 @@ _THIRDPARTY_TO_AWS_NATIVE = {
     "openai_agents": "aws_openai_agents",
 }
 
-# Dist names owned by ADOT that register entry points with the same names as third-party ones.
-# These are excluded from third-party detection to avoid false positives.
-_ADOT_OWNED_DISTS = {"opentelemetry-instrumentation-openai-agents-v2"}
-
 
 class AwsOpenTelemetryDistro(OpenTelemetryDistro):
     def _configure(self, **kwargs):
@@ -261,7 +257,6 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
         """Skip AWS native agentic instrumentors that should not load.
 
         When agent observability is enabled:
-        - Skip ADOT-owned dists that duplicate an aws_* entry point (e.g. openai-agents-v2).
         - AWS_AGENTIC_INSTRUMENTATION (auto/enabled/disabled) governs the aws_* side only.
           See the constant docstring for semantics. Third-party instrumentors are never
           touched here.
@@ -272,9 +267,6 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
 
     @staticmethod
     def _should_skip_instrumentor(entry_point):
-        if entry_point.dist and entry_point.dist.name in _ADOT_OWNED_DISTS:
-            return True
-
         is_native = entry_point.name in _THIRDPARTY_TO_AWS_NATIVE.values()
         if not is_native:
             return False
@@ -296,11 +288,7 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             return True
 
         # mode == "auto": skip the native side if a same-library third-party is registered.
-        third_party_names = {
-            ep.name
-            for ep in entry_points(group="opentelemetry_instrumentor")
-            if not (ep.dist and ep.dist.name in _ADOT_OWNED_DISTS)
-        }
+        third_party_names = {ep.name for ep in entry_points(group="opentelemetry_instrumentor")}
         for tp_name, aws_name in _THIRDPARTY_TO_AWS_NATIVE.items():
             if entry_point.name == aws_name and tp_name in third_party_names:
                 _logger.debug("Skipping %s: third-party %s is registered", aws_name, tp_name)
