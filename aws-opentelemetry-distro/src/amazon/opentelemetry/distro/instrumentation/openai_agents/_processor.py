@@ -56,9 +56,6 @@ from ._messages import normalize_input_messages, normalize_output_messages
 
 _logger = logging.getLogger(__name__)
 
-_OPENAI_PROVIDER = GenAiProviderNameValues.OPENAI.value
-_INCOMPLETE_SPAN_DESCRIPTION = "Trace ended before span completion"
-
 
 def _first_not_none(*values: Any) -> Any:
     return next((value for value in values if value is not None), None)
@@ -94,7 +91,7 @@ class _OpenAIAgentsTracingProcessor(TracingProcessor):
         attributes = {
             GEN_AI_OPERATION_NAME: OPERATION_INVOKE_WORKFLOW,
             GEN_AI_WORKFLOW_NAME: trace.name,
-            GEN_AI_PROVIDER_NAME: _OPENAI_PROVIDER,
+            GEN_AI_PROVIDER_NAME: GenAiProviderNameValues.OPENAI.value,
         }
         span = self._tracer.start_span(
             f"{OPERATION_INVOKE_WORKFLOW} {trace.name}",
@@ -134,7 +131,7 @@ class _OpenAIAgentsTracingProcessor(TracingProcessor):
         parent_context = self._resolve_parent_context(span)
         attributes = {
             GEN_AI_OPERATION_NAME: operation,
-            GEN_AI_PROVIDER_NAME: _OPENAI_PROVIDER,
+            GEN_AI_PROVIDER_NAME: GenAiProviderNameValues.OPENAI.value,
         }
         otel_span = self._tracer.start_span(
             span_name,
@@ -187,7 +184,7 @@ class _OpenAIAgentsTracingProcessor(TracingProcessor):
         for span in open_spans:
             if span.is_recording():
                 span.set_attribute(ERROR_TYPE, "_OTHER")
-                span.set_status(Status(StatusCode.ERROR, _INCOMPLETE_SPAN_DESCRIPTION))
+                span.set_status(Status(StatusCode.ERROR, "Trace ended before span completion"))
                 span.end()
         self._span_parents.clear()
         self._agent_content.clear()
