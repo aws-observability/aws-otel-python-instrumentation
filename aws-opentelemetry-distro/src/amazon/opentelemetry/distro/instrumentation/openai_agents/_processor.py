@@ -4,7 +4,7 @@
 import json
 import logging
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from contextvars import Token
 from dataclasses import dataclass
 from typing import Any, Optional, Union
@@ -89,7 +89,6 @@ class _SpanEntry:
     span: Span
     token: Optional[Token] = None
     agent_content: Optional["_AgentContent"] = None
-    trace_id: Optional[str] = None
     error: Any = None
 
 
@@ -104,9 +103,8 @@ class _AgentContent:
 class OpenTelemetryTracingProcessor(TracingProcessor):
     """Translate OpenAI Agents SDK tracing callbacks into OpenTelemetry spans."""
 
-    def __init__(self, tracer: Tracer, force_flush: Optional[Callable[[], Any]] = None) -> None:
+    def __init__(self, tracer: Tracer) -> None:
         self._tracer = tracer
-        self._force_flush = force_flush
         # Maps OpenAI trace IDs to root OTel workflow spans and context tokens.
         # Used to parent top-level spans and close workflows when traces end.
         self._openai_trace_id_to_otel_workflow_entry = DictWithLock()
@@ -134,11 +132,6 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         entry = self._openai_trace_id_to_otel_workflow_entry.pop(trace.trace_id)
         if entry is None:
             return
-        orphans = self._openai_span_id_to_otel_span_entry.pop_matching(
-            lambda open_entry: open_entry.trace_id == trace.trace_id
-        )
-        for orphan in reversed(orphans):
-            self._close_incomplete_span(orphan)
         if entry.token is not None:
             try_detach(entry.token)
         self._set_span_status(entry.span, entry.error)
@@ -181,7 +174,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         token = context.attach(set_span_in_context(otel_span))
         self._openai_span_id_to_otel_span_entry.put(
             span.span_id,
-            _SpanEntry(span=otel_span, token=token, agent_content=agent_content, trace_id=span.trace_id),
+            _SpanEntry(span=otel_span, token=token, agent_content=agent_content),
         )
 
     @override
@@ -240,8 +233,9 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
     @override
     def force_flush(self) -> None:
-        if self._force_flush is not None:
-            self._force_flush()
+        flush = getattr(getattr(self._tracer, "span_processor", None), "force_flush", None)
+        if flush is not None:
+            flush()
 
     @staticmethod
     def _close_incomplete_span(entry: _SpanEntry) -> None:

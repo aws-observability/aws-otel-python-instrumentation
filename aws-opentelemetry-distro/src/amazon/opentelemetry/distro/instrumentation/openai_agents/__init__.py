@@ -37,7 +37,7 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
 
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
-        self._processor = OpenTelemetryTracingProcessor(tracer, getattr(tracer_provider, "force_flush", None))
+        self._processor = OpenTelemetryTracingProcessor(tracer)
 
         try_wrap("openai.resources.responses.responses", "Responses.create", GenAIContextCapture.record_request)
         try_wrap("openai.resources.responses.responses", "AsyncResponses.create", GenAIContextCapture.record_request)
