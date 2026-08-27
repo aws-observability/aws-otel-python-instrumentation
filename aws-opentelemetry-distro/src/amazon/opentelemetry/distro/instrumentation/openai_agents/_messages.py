@@ -5,6 +5,8 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any, Optional
 
+from pydantic import BaseModel
+
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import content_to_parts
 
 _FINISH_REASON_MAP = {
@@ -21,18 +23,15 @@ _FINISH_REASON_MAP = {
 def _as_mapping(value: Any) -> Optional[dict[str, Any]]:
     if isinstance(value, Mapping):
         return dict(value)
-    model_dump = getattr(value, "model_dump", None)
-    if callable(model_dump):
-        dumped = model_dump()
-        return dict(dumped) if isinstance(dumped, Mapping) else None
-    value_dict = getattr(value, "__dict__", None)
-    return dict(value_dict) if isinstance(value_dict, Mapping) else None
+    if isinstance(value, BaseModel):
+        return value.model_dump()
+    return None
 
 
 def _as_items(items: Any) -> list[Any]:
     if items is None:
         return []
-    if isinstance(items, (str, bytes, Mapping)) or _as_mapping(items) is not None:
+    if isinstance(items, (str, bytes, Mapping, BaseModel)):
         return [items]
     if isinstance(items, Sequence):
         return list(items)
@@ -40,7 +39,7 @@ def _as_items(items: Any) -> list[Any]:
 
 
 def _prepare_content(content: Any) -> Any:
-    if isinstance(content, Mapping) or _as_mapping(content) is not None:
+    if isinstance(content, (Mapping, BaseModel)):
         block = _as_mapping(content) or {}
         block_type = block.get("type")
         if block_type in ("input_text", "output_text", "summary_text"):

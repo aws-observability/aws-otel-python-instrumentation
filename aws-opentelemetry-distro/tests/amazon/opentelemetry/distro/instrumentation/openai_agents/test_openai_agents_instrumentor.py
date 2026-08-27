@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from agents import tracing
+from pydantic import BaseModel
 
 from amazon.opentelemetry.distro.instrumentation.openai_agents import OpenAIAgentsInstrumentor
 from amazon.opentelemetry.distro.instrumentation.openai_agents._messages import (
@@ -44,14 +45,12 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_TYPE,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
+    GEN_AI_WORKFLOW_NAME,
     GenAiOperationNameValues,
     GenAiProviderNameValues,
 )
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.trace import SpanKind, StatusCode
-
-_GEN_AI_WORKFLOW_NAME = "gen_ai.workflow.name"
-_INVOKE_WORKFLOW = "invoke_workflow"
 
 
 class TestOpenAIAgentsInstrumentor(unittest.TestCase):
@@ -198,8 +197,11 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         self.assertEqual(generation_span.kind, SpanKind.CLIENT)
         self.assertEqual(response_span.kind, SpanKind.CLIENT)
 
-        self.assertEqual(workflow_span.attributes[GEN_AI_OPERATION_NAME], _INVOKE_WORKFLOW)
-        self.assertEqual(workflow_span.attributes[_GEN_AI_WORKFLOW_NAME], "Test workflow")
+        self.assertEqual(
+            workflow_span.attributes[GEN_AI_OPERATION_NAME],
+            GenAiOperationNameValues.INVOKE_WORKFLOW.value,
+        )
+        self.assertEqual(workflow_span.attributes[GEN_AI_WORKFLOW_NAME], "Test workflow")
         self.assertEqual(
             workflow_span.attributes[GEN_AI_PROVIDER_NAME],
             GenAiProviderNameValues.OPENAI.value,
@@ -419,11 +421,11 @@ class TestOpenAIAgentsMessages(unittest.TestCase):
         self.assertEqual(outputs[3]["finish_reason"], "content_filter")
 
     def test_object_and_scalar_payloads(self):
-        class ModelDumpPayload:
-            def model_dump(self):  # pylint: disable=no-self-use
-                return {"role": "user", "content": "From an object"}
+        class ModelDumpPayload(BaseModel):
+            role: str
+            content: str
 
-        _, object_messages = normalize_input_messages(ModelDumpPayload())
+        _, object_messages = normalize_input_messages(ModelDumpPayload(role="user", content="From an object"))
         self.assertEqual(
             object_messages,
             [{"role": "user", "parts": [{"type": "text", "content": "From an object"}]}],

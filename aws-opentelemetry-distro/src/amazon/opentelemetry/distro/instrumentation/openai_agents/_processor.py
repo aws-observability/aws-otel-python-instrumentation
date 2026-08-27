@@ -14,8 +14,6 @@ from agents.tracing.span_data import AgentSpanData, FunctionSpanData, Generation
 from typing_extensions import override
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
-    GEN_AI_WORKFLOW_NAME,
-    OPERATION_INVOKE_WORKFLOW,
     DictWithLock,
     serialize_to_json_string,
     to_tool_attribute_value,
@@ -48,6 +46,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_TYPE,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
+    GEN_AI_WORKFLOW_NAME,
     GenAiOperationNameValues,
     GenAiProviderNameValues,
 )
@@ -71,17 +70,6 @@ def _first_not_none(*values: Any) -> Any:
     return next((value for value in values if value is not None), None)
 
 
-def _as_mapping(value: Any) -> dict[str, Any]:
-    if isinstance(value, Mapping):
-        return dict(value)
-    to_traceable_dict = getattr(value, "to_traceable_dict", None)
-    if callable(to_traceable_dict):
-        result = to_traceable_dict()
-        return dict(result) if isinstance(result, Mapping) else {}
-    value_dict = getattr(value, "__dict__", None)
-    return dict(value_dict) if isinstance(value_dict, Mapping) else {}
-
-
 def _get_value(value: Any, name: str) -> Any:
     return value.get(name) if isinstance(value, Mapping) else getattr(value, name, None)
 
@@ -97,12 +85,12 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
     @override
     def on_trace_start(self, trace: AgentsTrace) -> None:
         attributes = {
-            GEN_AI_OPERATION_NAME: OPERATION_INVOKE_WORKFLOW,
+            GEN_AI_OPERATION_NAME: GenAiOperationNameValues.INVOKE_WORKFLOW.value,
             GEN_AI_WORKFLOW_NAME: trace.name,
             GEN_AI_PROVIDER_NAME: GenAiProviderNameValues.OPENAI.value,
         }
         span = self._tracer.start_span(
-            f"{OPERATION_INVOKE_WORKFLOW} {trace.name}",
+            f"{GenAiOperationNameValues.INVOKE_WORKFLOW.value} {trace.name}",
             kind=SpanKind.INTERNAL,
             attributes=attributes,
         )
@@ -274,7 +262,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         content: dict[str, Any] = {}
         OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_REQUEST_MODEL, span_data.model)
 
-        model_config = _as_mapping(span_data.model_config)
+        model_config = dict(span_data.model_config or {})
         request_attributes = (
             (GEN_AI_REQUEST_TEMPERATURE, ("temperature",)),
             (GEN_AI_REQUEST_TOP_P, ("top_p",)),
@@ -293,7 +281,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                 _first_not_none(*(model_config.get(key) for key in keys)),
             )
 
-        usage = _as_mapping(span_data.usage)
+        usage = span_data.usage or {}
         OpenTelemetryTracingProcessor._set_attribute(
             attributes,
             GEN_AI_USAGE_INPUT_TOKENS,
