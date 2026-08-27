@@ -35,7 +35,7 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
 
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
-        self._processor = OpenTelemetryTracingProcessor(tracer)
+        self._processor = OpenTelemetryTracingProcessor(tracer, getattr(tracer_provider, "force_flush", None))
 
         if kwargs.get("disable_openai_trace_export"):
             trace_provider = get_trace_provider()

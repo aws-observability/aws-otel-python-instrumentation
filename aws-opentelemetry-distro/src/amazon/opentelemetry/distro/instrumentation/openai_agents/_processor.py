@@ -3,7 +3,7 @@
 
 import json
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextvars import Token
 from dataclasses import dataclass
 from typing import Any, Optional, Union
@@ -78,8 +78,9 @@ class _AgentContent:
 class OpenTelemetryTracingProcessor(TracingProcessor):
     """Translate OpenAI Agents SDK tracing callbacks into OpenTelemetry spans."""
 
-    def __init__(self, tracer: Tracer) -> None:
+    def __init__(self, tracer: Tracer, force_flush: Optional[Callable[[], Any]] = None) -> None:
         self._tracer = tracer
+        self._force_flush = force_flush
         self._workflow_entries = DictWithLock()
         self._span_entries = DictWithLock()
 
@@ -199,8 +200,9 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                 entry.span.end()
 
     @override
-    def force_flush(self) -> None:  # pylint: disable=no-self-use
-        return None
+    def force_flush(self) -> None:
+        if self._force_flush is not None:
+            self._force_flush()
 
     def _resolve_parent_entry(self, span: AgentsSpan[Any]) -> Optional[_SpanEntry]:
         if span.parent_id:

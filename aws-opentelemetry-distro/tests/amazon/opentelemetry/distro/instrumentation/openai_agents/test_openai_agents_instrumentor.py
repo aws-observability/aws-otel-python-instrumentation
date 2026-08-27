@@ -103,6 +103,22 @@ class TestOpenAIAgentsInstrumentor(unittest.TestCase):
         self.assertEqual(current, (existing_processor,))
         self.assertIsNone(self.instrumentor._processor)  # pylint: disable=protected-access
 
+    def test_force_flush_delegates_to_tracer_provider(self):
+        tracer_provider = TracerProvider()
+        tracer_provider.force_flush = MagicMock(return_value=True)
+        try:
+            self.instrumentor.instrument(
+                tracer_provider=tracer_provider,
+                skip_dep_check=True,
+            )
+
+            self.instrumentor._processor.force_flush()  # pylint: disable=protected-access
+
+            tracer_provider.force_flush.assert_called_once_with()
+        finally:
+            self.instrumentor.uninstrument()
+            tracer_provider.shutdown()
+
 
 class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
     def setUp(self) -> None:
