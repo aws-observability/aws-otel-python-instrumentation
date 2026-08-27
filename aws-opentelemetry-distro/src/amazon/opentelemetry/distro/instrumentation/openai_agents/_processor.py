@@ -81,8 +81,12 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
     def __init__(self, tracer: Tracer, force_flush: Optional[Callable[[], Any]] = None) -> None:
         self._tracer = tracer
         self._force_flush = force_flush
-        self._workflow_entries = DictWithLock()
-        self._span_entries = DictWithLock()
+        # Maps OpenAI trace IDs to root OTel workflow spans and context tokens.
+        # Used to parent top-level spans and close workflows when traces end.
+        self._openai_trace_id_to_otel_workflow_entry = DictWithLock()
+        # Maps OpenAI span IDs to OTel spans, context tokens, and shared agent content.
+        # Used to resolve parents, finish spans, and carry state through unhandled spans.
+        self._openai_span_id_to_otel_span_entry = DictWithLock()
 
     @override
     def on_trace_start(self, trace: AgentsTrace) -> None:
@@ -97,11 +101,11 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             attributes=attributes,
         )
         token = context.attach(set_span_in_context(span))
-        self._workflow_entries.put(trace.trace_id, _SpanEntry(span=span, token=token))
+        self._openai_trace_id_to_otel_workflow_entry.put(trace.trace_id, _SpanEntry(span=span, token=token))
 
     @override
     def on_trace_end(self, trace: AgentsTrace) -> None:
-        entry = self._workflow_entries.pop(trace.trace_id)
+        entry = self._openai_trace_id_to_otel_workflow_entry.pop(trace.trace_id)
         if entry is None:
             return
         if entry.token is not None:
@@ -115,7 +119,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         span_data = span.span_data
         if not isinstance(span_data, (AgentSpanData, FunctionSpanData, GenerationSpanData, ResponseSpanData)):
             if parent_entry is not None:
-                self._span_entries.put(
+                self._openai_span_id_to_otel_span_entry.put(
                     span.span_id,
                     _SpanEntry(span=parent_entry.span, agent_content=parent_entry.agent_content),
                 )
@@ -137,14 +141,14 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             attributes=attributes,
         )
         token = context.attach(set_span_in_context(otel_span))
-        self._span_entries.put(
+        self._openai_span_id_to_otel_span_entry.put(
             span.span_id,
             _SpanEntry(span=otel_span, token=token, agent_content=agent_content),
         )
 
     @override
     def on_span_end(self, span: AgentsSpan[Any]) -> None:
-        entry = self._span_entries.pop(span.span_id)
+        entry = self._openai_span_id_to_otel_span_entry.pop(span.span_id)
         span_data = span.span_data
         if not isinstance(span_data, (AgentSpanData, FunctionSpanData, GenerationSpanData, ResponseSpanData)):
             return
@@ -188,8 +192,8 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
     @override
     def shutdown(self) -> None:
-        open_entries = list(reversed(self._span_entries.pop_all()))
-        open_entries.extend(reversed(self._workflow_entries.pop_all()))
+        open_entries = list(reversed(self._openai_span_id_to_otel_span_entry.pop_all()))
+        open_entries.extend(reversed(self._openai_trace_id_to_otel_workflow_entry.pop_all()))
         for entry in open_entries:
             if entry.token is None:
                 continue
@@ -206,10 +210,10 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
     def _resolve_parent_entry(self, span: AgentsSpan[Any]) -> Optional[_SpanEntry]:
         if span.parent_id:
-            parent_entry = self._span_entries.get(span.parent_id)
+            parent_entry = self._openai_span_id_to_otel_span_entry.get(span.parent_id)
             if parent_entry is not None:
                 return parent_entry
-        return self._workflow_entries.get(span.trace_id)
+        return self._openai_trace_id_to_otel_workflow_entry.get(span.trace_id)
 
     @staticmethod
     def _set_operation_name(
