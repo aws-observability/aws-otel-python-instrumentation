@@ -5,10 +5,11 @@ import json
 import unittest
 from importlib.metadata import entry_points
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from agents import tracing
 from agents.items import ItemHelpers
+from agents.tracing.processors import BackendSpanExporter
 from conftest import validate_otel_genai_schema
 from openai import Omit
 from openai.types.responses import ResponseFunctionToolCall
@@ -20,6 +21,7 @@ from amazon.opentelemetry.distro.instrumentation.openai_agents._processor import
     OpenTelemetryTracingProcessor,
     _GenAIMessageNormalizer,
 )
+from opentelemetry.instrumentation.utils import is_http_instrumentation_enabled
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -152,6 +154,26 @@ class TestOpenAIAgentsInstrumentor(unittest.TestCase):
         ItemHelpers.tool_call_output_item(_tool_call("lookup", "call_after"), "sunny")
         self.assertIsNone(GenAIContextCapture.get_tool_call().call_id)
         self.assertEqual(GenAIContextCapture.get_request_params(), {})
+
+    def test_instrument_suppresses_http_instrumentation_for_openai_trace_export(self):
+        observed = []
+        exporter = BackendSpanExporter(api_key="test")
+
+        def record_suppression(instance, items, deadline):  # pylint: disable=unused-argument
+            observed.append(is_http_instrumentation_enabled())
+
+        try:
+            with patch.object(BackendSpanExporter, "_export_with_deadline", record_suppression):
+                exporter.export([])
+                self.instrumentor.instrument(skip_dep_check=True)
+                exporter.export([])
+                self.instrumentor.uninstrument()
+                exporter.export([])
+        finally:
+            exporter.close()
+
+        self.assertEqual(observed, [True, False, True])
+        self.assertTrue(is_http_instrumentation_enabled())
 
     def test_force_flush_delegates_to_tracer_span_processor(self):
         tracer_provider = TracerProvider()

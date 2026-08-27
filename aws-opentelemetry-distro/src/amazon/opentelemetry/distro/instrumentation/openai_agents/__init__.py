@@ -9,6 +9,12 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
 from amazon.opentelemetry.distro.version import __version__
 from opentelemetry import trace
 from opentelemetry.instrumentation.instrumentor import BaseInstrumentor  # type: ignore
+from opentelemetry.instrumentation.utils import suppress_http_instrumentation
+
+
+def _suppress_http_instrumentation(wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
+    with suppress_http_instrumentation():
+        return wrapped(*args, **kwargs)
 
 
 class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
@@ -51,6 +57,7 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
         )
         try_wrap("agents.items", "ItemHelpers.tool_call_output_item", GenAIContextCapture.record_tool_call)
         try_wrap("agents.tool_context", "ToolContext.from_agent_context", GenAIContextCapture.record_tool_call)
+        try_wrap("agents.tracing.processors", "BackendSpanExporter.export", _suppress_http_instrumentation)
 
         if kwargs.get("disable_openai_trace_export"):
             trace_provider = get_trace_provider()
@@ -75,6 +82,7 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
         try_unwrap("openai.resources.chat.completions.completions.AsyncCompletions", "create")
         try_unwrap("agents.items.ItemHelpers", "tool_call_output_item")
         try_unwrap("agents.tool_context.ToolContext", "from_agent_context")
+        try_unwrap("agents.tracing.processors.BackendSpanExporter", "export")
         GenAIContextCapture.reset_request_params()
         GenAIContextCapture.reset_tool_call()
 
