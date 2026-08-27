@@ -126,9 +126,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             attributes=attributes,
         )
         token = context.attach(set_span_in_context(span))
-        self._openai_trace_id_to_otel_workflow_entry.put(
-            trace.trace_id, _SpanEntry(span=span, token=token, trace_id=trace.trace_id)
-        )
+        self._openai_trace_id_to_otel_workflow_entry.put(trace.trace_id, _SpanEntry(span=span, token=token))
 
     @override
     def on_trace_end(self, trace: AgentsTrace) -> None:
