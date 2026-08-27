@@ -4,14 +4,12 @@
 from contextvars import ContextVar
 from typing import Any, Optional
 
-from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import try_unwrap, try_wrap
-
 _CURRENT_REQUEST_PARAMS: ContextVar[Optional[dict[str, Any]]] = ContextVar(
     "aws_otel_openai_agents_current_request_params", default=None
 )
 
 
-def _record_request(wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
+def record_request(wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
     params = {
         key: value
         for key, value in kwargs.items()
@@ -51,27 +49,6 @@ def _record_request(wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
         params["base_url"] = str(base_url)
     _CURRENT_REQUEST_PARAMS.set(params)
     return wrapped(*args, **kwargs)
-
-
-def start_request_capture() -> None:
-    for module, class_name in (
-        ("openai.resources.responses.responses", "Responses"),
-        ("openai.resources.responses.responses", "AsyncResponses"),
-        ("openai.resources.chat.completions.completions", "Completions"),
-        ("openai.resources.chat.completions.completions", "AsyncCompletions"),
-    ):
-        try_wrap(module, f"{class_name}.create", _record_request)
-
-
-def stop_request_capture() -> None:
-    for module, class_name in (
-        ("openai.resources.responses.responses", "Responses"),
-        ("openai.resources.responses.responses", "AsyncResponses"),
-        ("openai.resources.chat.completions.completions", "Completions"),
-        ("openai.resources.chat.completions.completions", "AsyncCompletions"),
-    ):
-        try_unwrap(f"{module}.{class_name}", "create")
-    reset_request_params()
 
 
 def get_request_params() -> dict[str, Any]:
