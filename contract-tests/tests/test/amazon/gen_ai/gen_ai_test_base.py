@@ -29,12 +29,38 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (  # 
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
     GenAiOperationNameValues,
+    GenAiProviderNameValues,
 )
 
 AGENT_FINAL_OUTPUT = "Hello, World!"
 
 
 class GenAITestBase(ContractTestBase):
+
+    def _do_test_for_each_llm(self, path: str, **kwargs) -> None:
+        # Every model-backed scenario MUST run unchanged against both supported LLM providers.
+        for llm, provider, model in (
+            ("openai", GenAiProviderNameValues.OPENAI.value, "gpt-4"),
+            (
+                "bedrock",
+                GenAiProviderNameValues.AWS_BEDROCK.value,
+                "anthropic.claude-3-haiku-20240307-v1:0",
+            ),
+        ):
+            with self.subTest(llm=llm):
+                try:
+                    self.do_test_requests(
+                        f"{path}/{llm}",
+                        "GET",
+                        200,
+                        0,
+                        0,
+                        expected_provider=provider,
+                        expected_model=model,
+                        **kwargs,
+                    )
+                finally:
+                    self.mock_collector_client.clear_signals()
 
     @override
     def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs) -> None:
@@ -53,13 +79,24 @@ class GenAITestBase(ContractTestBase):
         invoke_agent_spans, execute_tool_spans, chat_spans = self._collect_gen_ai_spans(resource_scope_spans)
         expected_provider = kwargs.get("expected_provider")
         if expected_provider is not None:
-            for span in invoke_agent_spans + chat_spans:
-                attrs = self._get_attributes_dict(span.attributes)
-                self._assert_str_attribute(attrs, GEN_AI_PROVIDER_NAME, expected_provider)
+            # Every span declaring a GenAI provider MUST identify the LLM selected for this test run.
+            self._assert_gen_ai_provider(resource_scope_spans, expected_provider)
         if "agent" in path:
             self._assert_invoke_agent_spans(invoke_agent_spans, kwargs.get("expected_agent_count", 1))
             self._assert_execute_tool_spans(execute_tool_spans, kwargs.get("expected_tool_count", 1))
         self._assert_chat_spans(chat_spans, kwargs.get("expected_chat_count", 1))
+
+    def _assert_gen_ai_provider(self, resource_scope_spans: List[ResourceScopeSpan], expected_provider: str) -> None:
+        provider_spans = []
+        for resource_scope_span in resource_scope_spans:
+            span = resource_scope_span.span
+            attrs = self._get_attributes_dict(span.attributes)
+            if GEN_AI_PROVIDER_NAME in attrs:
+                provider_spans.append((span, attrs))
+
+        self.assertTrue(provider_spans, f"Expected at least one span for provider {expected_provider}")
+        for _, attrs in provider_spans:
+            self._assert_str_attribute(attrs, GEN_AI_PROVIDER_NAME, expected_provider)
 
     def _collect_gen_ai_spans(self, resource_scope_spans: List[ResourceScopeSpan]):
         invoke_agent_spans = []

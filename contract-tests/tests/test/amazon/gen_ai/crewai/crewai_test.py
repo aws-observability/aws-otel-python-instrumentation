@@ -29,10 +29,10 @@ class CrewAITest(GenAITestBase):
         return "aws-application-signals-tests-crewai-app"
 
     def test_crewai_single_agent(self):
-        self.do_test_requests("crewai/agent", "GET", 200, 0, 0)
+        self._do_test_for_each_llm("crewai/agent")
 
     def test_crewai_multi_agent(self):
-        self.do_test_requests("crewai/multiagent", "GET", 200, 0, 0, expected_agent_count=2)
+        self._do_test_for_each_llm("crewai/multiagent", expected_agent_count=2)
 
     @override
     def _assert_invoke_agent_spans(self, invoke_agent_spans: list, expected_count: int = 1):

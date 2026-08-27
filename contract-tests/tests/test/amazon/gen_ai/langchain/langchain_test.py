@@ -9,7 +9,6 @@ from amazon.gen_ai.gen_ai_test_base import (
     GEN_AI_TOOL_DESCRIPTION,
     GenAITestBase,
 )
-from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import GenAiProviderNameValues
 
 
 class LangChainTest(GenAITestBase):
@@ -23,25 +22,6 @@ class LangChainTest(GenAITestBase):
 
     def test_langchain_multi_agent(self):
         self._do_test_for_each_llm("langchain/multiagent", expected_agent_count=2)
-
-    def _do_test_for_each_llm(self, path: str, expected_agent_count: int = 1) -> None:
-        for llm, provider in (
-            ("openai", GenAiProviderNameValues.OPENAI.value),
-            ("bedrock", GenAiProviderNameValues.AWS_BEDROCK.value),
-        ):
-            with self.subTest(llm=llm):
-                try:
-                    self.do_test_requests(
-                        f"{path}/{llm}",
-                        "GET",
-                        200,
-                        0,
-                        0,
-                        expected_agent_count=expected_agent_count,
-                        expected_provider=provider,
-                    )
-                finally:
-                    self.mock_collector_client.clear_signals()
 
     @override
     def _assert_invoke_agent_spans(self, invoke_agent_spans: list, expected_count: int = 1):

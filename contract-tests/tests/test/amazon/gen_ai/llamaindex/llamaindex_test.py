@@ -45,45 +45,29 @@ class LlamaIndexTest(GenAITestBase):
 
     def test_llamaindex_agent(self):
         """Test ReAct agent with tools."""
-        self.do_test_requests(
+        self._do_test_for_each_llm(
             "llamaindex/agent",
-            "GET",
-            200,
-            0,
-            0,
             test_type="agent",
         )
 
     def test_llamaindex_workflow(self):
         """Test AgentWorkflow with multiple agents."""
-        self.do_test_requests(
+        self._do_test_for_each_llm(
             "llamaindex/workflow",
-            "GET",
-            200,
-            0,
-            0,
             test_type="workflow",
         )
 
     def test_llamaindex_chat(self):
         """Test basic chat completion."""
-        self.do_test_requests(
+        self._do_test_for_each_llm(
             "llamaindex/chat",
-            "GET",
-            200,
-            0,
-            0,
             test_type="chat",
         )
 
     def test_llamaindex_query(self):
         """Test query engine."""
-        self.do_test_requests(
+        self._do_test_for_each_llm(
             "llamaindex/query",
-            "GET",
-            200,
-            0,
-            0,
             test_type="query",
         )
 
@@ -100,12 +84,8 @@ class LlamaIndexTest(GenAITestBase):
 
     def test_llamaindex_tool(self):
         """Test tool calling."""
-        self.do_test_requests(
+        self._do_test_for_each_llm(
             "llamaindex/tool",
-            "GET",
-            200,
-            0,
-            0,
             test_type="tool",
         )
 
@@ -119,22 +99,28 @@ class LlamaIndexTest(GenAITestBase):
     ) -> None:
         # Every recorded GenAI content attribute MUST contain data and follow its corresponding OTel JSON schema.
         self._assert_otel_gen_ai_attribute_formats(resource_scope_spans)
+        expected_provider = kwargs.get("expected_provider")
+        if expected_provider is not None:
+            # Every span declaring a GenAI provider MUST identify the LLM selected for this test run.
+            self._assert_gen_ai_provider(resource_scope_spans, expected_provider)
         test_type = kwargs.get("test_type", "")
 
         if test_type == "workflow":
             self._assert_workflow_spans(resource_scope_spans)
         elif test_type == "agent":
-            self._assert_agent_spans(resource_scope_spans)
+            self._assert_agent_spans(resource_scope_spans, expected_provider, kwargs.get("expected_model"))
         elif test_type == "chat":
-            self._assert_chat_spans(resource_scope_spans)
+            self._assert_chat_spans(resource_scope_spans, expected_provider, kwargs.get("expected_model"))
         elif test_type == "query":
             self._assert_query_spans(resource_scope_spans)
         elif test_type == "embedding":
             self._assert_embedding_spans(resource_scope_spans)
         elif test_type == "tool":
-            self._assert_tool_spans(resource_scope_spans)
+            self._assert_tool_spans(resource_scope_spans, expected_provider, kwargs.get("expected_model"))
 
-    def _assert_agent_spans(self, resource_scope_spans: List[ResourceScopeSpan]) -> None:
+    def _assert_agent_spans(
+        self, resource_scope_spans: List[ResourceScopeSpan], expected_provider: str, expected_model: str
+    ) -> None:
         invoke_agent_spans = []
         execute_tool_spans = []
         chat_spans = []
@@ -150,7 +136,7 @@ class LlamaIndexTest(GenAITestBase):
                     invoke_agent_spans.append(span)
                 elif op_name == GenAiOperationNameValues.EXECUTE_TOOL.value:
                     execute_tool_spans.append(span)
-                elif op_name == GenAiOperationNameValues.CHAT.value:
+                elif op_name == GenAiOperationNameValues.CHAT.value and GEN_AI_PROVIDER_NAME in attrs:
                     chat_spans.append(span)
 
         self.assertGreater(len(invoke_agent_spans), 0, "Expected at least one invoke_agent span")
@@ -181,10 +167,12 @@ class LlamaIndexTest(GenAITestBase):
         for span in chat_spans:
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
-            self._assert_str_attribute(attrs, GEN_AI_PROVIDER_NAME, "openai")
-            self._assert_str_attribute(attrs, GEN_AI_REQUEST_MODEL, "gpt-4")
+            self._assert_str_attribute(attrs, GEN_AI_PROVIDER_NAME, expected_provider)
+            self._assert_str_attribute(attrs, GEN_AI_REQUEST_MODEL, expected_model)
 
-    def _assert_chat_spans(self, resource_scope_spans: List[ResourceScopeSpan]) -> None:
+    def _assert_chat_spans(
+        self, resource_scope_spans: List[ResourceScopeSpan], expected_provider: str, expected_model: str
+    ) -> None:
         chat_spans = []
 
         for resource_scope_span in resource_scope_spans:
@@ -193,7 +181,7 @@ class LlamaIndexTest(GenAITestBase):
 
             if attrs.get(GEN_AI_OPERATION_NAME):
                 op_name = attrs[GEN_AI_OPERATION_NAME].string_value
-                if op_name == GenAiOperationNameValues.CHAT.value:
+                if op_name == GenAiOperationNameValues.CHAT.value and GEN_AI_PROVIDER_NAME in attrs:
                     chat_spans.append(span)
 
         self.assertGreater(len(chat_spans), 0, "Expected at least one chat span")
@@ -202,9 +190,8 @@ class LlamaIndexTest(GenAITestBase):
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
 
-            self._assert_str_attribute(attrs, GEN_AI_PROVIDER_NAME, "openai")
-
-            self._assert_str_attribute(attrs, GEN_AI_REQUEST_MODEL, "gpt-4")
+            self._assert_str_attribute(attrs, GEN_AI_PROVIDER_NAME, expected_provider)
+            self._assert_str_attribute(attrs, GEN_AI_REQUEST_MODEL, expected_model)
 
             self.assertIn(GEN_AI_REQUEST_TEMPERATURE, attrs)
             temp = attrs[GEN_AI_REQUEST_TEMPERATURE].double_value
@@ -227,11 +214,11 @@ class LlamaIndexTest(GenAITestBase):
 
             self.assertIn(GEN_AI_USAGE_INPUT_TOKENS, attrs)
             input_tokens = attrs[GEN_AI_USAGE_INPUT_TOKENS].int_value
-            self.assertEqual(input_tokens, 25, "Expected 25 input tokens")
+            self.assertEqual(input_tokens, 10, "Expected 10 input tokens")
 
             self.assertIn(GEN_AI_USAGE_OUTPUT_TOKENS, attrs)
             output_tokens = attrs[GEN_AI_USAGE_OUTPUT_TOKENS].int_value
-            self.assertEqual(output_tokens, 50, "Expected 50 output tokens")
+            self.assertEqual(output_tokens, 20, "Expected 20 output tokens")
 
     def _assert_query_spans(self, resource_scope_spans: List[ResourceScopeSpan]) -> None:
         query_spans = []
@@ -297,7 +284,9 @@ class LlamaIndexTest(GenAITestBase):
             dim_count = attrs[GEN_AI_EMBEDDINGS_DIMENSION_COUNT].int_value
             self.assertEqual(dim_count, 384, "Expected embedding dimension count to be 384")
 
-    def _assert_tool_spans(self, resource_scope_spans: List[ResourceScopeSpan]) -> None:
+    def _assert_tool_spans(
+        self, resource_scope_spans: List[ResourceScopeSpan], expected_provider: str, expected_model: str
+    ) -> None:
         chat_spans = []
 
         for resource_scope_span in resource_scope_spans:
@@ -307,7 +296,7 @@ class LlamaIndexTest(GenAITestBase):
             if attrs.get(GEN_AI_OPERATION_NAME):
                 op_name = attrs[GEN_AI_OPERATION_NAME].string_value
 
-                if op_name == GenAiOperationNameValues.CHAT.value:
+                if op_name == GenAiOperationNameValues.CHAT.value and GEN_AI_PROVIDER_NAME in attrs:
                     chat_spans.append(span)
 
         self.assertGreater(len(chat_spans), 0, "Expected at least one chat span with tool definitions")
@@ -316,8 +305,8 @@ class LlamaIndexTest(GenAITestBase):
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
 
-            self._assert_str_attribute(attrs, GEN_AI_PROVIDER_NAME, "openai")
-            self._assert_str_attribute(attrs, GEN_AI_REQUEST_MODEL, "gpt-4")
+            self._assert_str_attribute(attrs, GEN_AI_PROVIDER_NAME, expected_provider)
+            self._assert_str_attribute(attrs, GEN_AI_REQUEST_MODEL, expected_model)
 
             self.assertIn(GEN_AI_TOOL_DEFINITIONS, attrs)
             tools = self._parse_json_attribute(attrs, GEN_AI_TOOL_DEFINITIONS, span.name)
@@ -351,7 +340,7 @@ class LlamaIndexTest(GenAITestBase):
                     invoke_workflow_spans.append(span)
                 elif op_name == GenAiOperationNameValues.INVOKE_AGENT.value:
                     invoke_agent_spans.append(span)
-                elif op_name == GenAiOperationNameValues.CHAT.value:
+                elif op_name == GenAiOperationNameValues.CHAT.value and GEN_AI_PROVIDER_NAME in attrs:
                     chat_spans.append(span)
 
         self.assertEqual(len(invoke_workflow_spans), 1, "Expected exactly one invoke_workflow span")

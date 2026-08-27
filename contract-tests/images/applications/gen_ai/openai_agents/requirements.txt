@@ -1,2 +1,2 @@
-openai-agents>=0.3.3
+openai-agents[litellm]>=0.3.3
 openai>=1.66.5,<2.45.0

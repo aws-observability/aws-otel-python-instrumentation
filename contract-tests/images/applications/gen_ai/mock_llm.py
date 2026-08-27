@@ -4,7 +4,7 @@ import atexit
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
-from typing import Tuple
+from typing import Any, Dict, Tuple
 
 MOCK_LLM_PORT: int = 8081
 MOCK_BEDROCK_PORT: int = 8082
@@ -12,6 +12,25 @@ APP_PORT: int = 8080
 
 _llm_call_count = 0
 _bedrock_call_count = 0
+
+
+def _tool_arguments(properties: Dict[str, Any]) -> Dict[str, Any]:
+    arguments: Dict[str, Any] = {}
+    for name, schema in properties.items():
+        value_type = schema.get("type")
+        if value_type == "integer":
+            arguments[name] = 3
+        elif value_type == "number":
+            arguments[name] = 3.0
+        elif value_type == "boolean":
+            arguments[name] = True
+        elif value_type == "array":
+            arguments[name] = []
+        elif value_type == "object":
+            arguments[name] = {}
+        else:
+            arguments[name] = "World"
+    return arguments
 
 
 def reset_llm_call_count():
@@ -77,7 +96,7 @@ class MockLLMHandler(BaseHTTPRequestHandler):
         func = tools[0].get("function", {})
         name = func.get("name")
         props = func.get("parameters", {}).get("properties", {})
-        args = {param: "World" for param in props}
+        args = _tool_arguments(props)
         return name, args
 
     def log_message(self, format, *args):  # pylint: disable=redefined-builtin
@@ -136,7 +155,7 @@ class MockBedrockHandler(BaseHTTPRequestHandler):
         tool_spec = tools[0].get("toolSpec", {})
         name = tool_spec.get("name")
         properties = tool_spec.get("inputSchema", {}).get("json", {}).get("properties", {})
-        args = {param: "World" for param in properties}
+        args = _tool_arguments(properties)
         return name, args
 
     def log_message(self, format, *args):  # pylint: disable=redefined-builtin
