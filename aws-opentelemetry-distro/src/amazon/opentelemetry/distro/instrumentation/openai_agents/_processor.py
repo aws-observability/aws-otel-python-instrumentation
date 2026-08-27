@@ -342,20 +342,16 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         OpenTelemetryTracingProcessor._set_request_attributes(attributes, model_config)
 
         output_items = span_data.output
-        default_finish_reason = None
         if streamed_response is not None:
             OpenTelemetryTracingProcessor._set_response_payload_attributes(attributes, streamed_response)
             OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_REQUEST_STREAM, True)
             output_items = OpenTelemetryTracingProcessor._get_value(streamed_response, "output")
-            default_finish_reason = OpenTelemetryTracingProcessor._response_finish_reason(streamed_response)
 
         usage = OpenTelemetryTracingProcessor._first_not_none(
             span_data.usage, OpenTelemetryTracingProcessor._get_value(streamed_response, "usage")
         )
         OpenTelemetryTracingProcessor._set_usage_attributes(attributes, usage)
-        default_finish_reason = default_finish_reason or OpenTelemetryTracingProcessor._truncation_finish_reason(
-            attributes
-        )
+        default_finish_reason = OpenTelemetryTracingProcessor._get_finish_reason(streamed_response, attributes)
 
         system_instructions, input_messages = _GenAIMessageNormalizer.normalize_input_messages(span_data.input)
         output_messages = _GenAIMessageNormalizer.normalize_output_messages(output_items, default_finish_reason)
@@ -405,10 +401,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         )
         if response_instructions:
             system_instructions = response_instructions
-        default_finish_reason = OpenTelemetryTracingProcessor._first_not_none(
-            OpenTelemetryTracingProcessor._response_finish_reason(response),
-            OpenTelemetryTracingProcessor._truncation_finish_reason(attributes),
-        )
+        default_finish_reason = OpenTelemetryTracingProcessor._get_finish_reason(response, attributes)
         output_messages = _GenAIMessageNormalizer.normalize_output_messages(
             OpenTelemetryTracingProcessor._get_value(response, "output"), default_finish_reason
         )
@@ -649,17 +642,13 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         return model_config
 
     @staticmethod
-    def _response_finish_reason(response: Any) -> Optional[str]:
+    def _get_finish_reason(response: Any, attributes: Mapping[str, AttributeValue]) -> Optional[str]:
         incomplete_details = OpenTelemetryTracingProcessor._get_value(response, "incomplete_details")
         reason = OpenTelemetryTracingProcessor._get_value(incomplete_details, "reason")
         if reason:
             return {"max_output_tokens": "length", "content_filter": "content_filter"}.get(str(reason), str(reason))
         if OpenTelemetryTracingProcessor._get_value(response, "status") in ("failed", "cancelled"):
             return "error"
-        return None
-
-    @staticmethod
-    def _truncation_finish_reason(attributes: Mapping[str, AttributeValue]) -> Optional[str]:
         max_tokens = attributes.get(GEN_AI_REQUEST_MAX_TOKENS)
         output_tokens = attributes.get(GEN_AI_USAGE_OUTPUT_TOKENS)
         if isinstance(max_tokens, int) and isinstance(output_tokens, int) and output_tokens >= max_tokens > 0:
