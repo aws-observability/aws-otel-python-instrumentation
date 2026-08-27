@@ -3,6 +3,7 @@ from base64 import b64encode
 from unittest import TestCase
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
+    content_to_parts,
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
     to_tool_attribute_value,
@@ -16,6 +17,22 @@ from opentelemetry.trace import set_span_in_context
 
 
 class TestInstrumentationUtils(TestCase):
+    def test_content_to_parts_openai_text_blocks(self):
+        self.assertEqual(
+            content_to_parts(
+                [
+                    {"type": "input_text", "text": "input"},
+                    {"type": "output_text", "text": "output"},
+                    {"type": "summary_text", "text": "summary"},
+                ]
+            ),
+            [
+                {"type": "text", "content": "input"},
+                {"type": "text", "content": "output"},
+                {"type": "text", "content": "summary"},
+            ],
+        )
+
     def test_serialize_basic_types(self):
         self.assertEqual(serialize_to_json_string({"key": "value"}), '{"key": "value"}')
         self.assertEqual(serialize_to_json_string([1, 2, 3]), "[1, 2, 3]")

@@ -1,8 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextvars import Token
 from dataclasses import dataclass
 from typing import Any, Optional, Union
@@ -11,10 +12,12 @@ from agents.tracing import Span as AgentsSpan
 from agents.tracing import Trace as AgentsTrace
 from agents.tracing import TracingProcessor
 from agents.tracing.span_data import AgentSpanData, FunctionSpanData, GenerationSpanData, ResponseSpanData
+from pydantic import BaseModel
 from typing_extensions import override
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     DictWithLock,
+    content_to_parts,
     serialize_to_json_string,
     to_tool_attribute_value,
     try_detach,
@@ -53,8 +56,6 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
 from opentelemetry.trace import Span, SpanKind, Status, StatusCode, Tracer, set_span_in_context
 from opentelemetry.util.types import AttributeValue
-
-from ._messages import normalize_input_messages, normalize_output_messages
 
 _logger = logging.getLogger(__name__)
 
@@ -293,8 +294,8 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             _first_not_none(usage.get("output_tokens"), usage.get("completion_tokens")),
         )
 
-        system_instructions, input_messages = normalize_input_messages(span_data.input)
-        output_messages = normalize_output_messages(span_data.output)
+        system_instructions, input_messages = _MessageNormalizer.normalize_input_messages(span_data.input)
+        output_messages = _MessageNormalizer.normalize_output_messages(span_data.output)
         OpenTelemetryTracingProcessor._set_message_attributes(
             attributes, system_instructions, input_messages, output_messages
         )
@@ -329,13 +330,15 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             attributes, GEN_AI_USAGE_OUTPUT_TOKENS, _get_value(usage, "output_tokens")
         )
 
-        system_instructions, input_messages = normalize_input_messages(getattr(span_data, "input", None))
-        response_instructions, _ = normalize_input_messages(
+        system_instructions, input_messages = _MessageNormalizer.normalize_input_messages(
+            getattr(span_data, "input", None)
+        )
+        response_instructions, _ = _MessageNormalizer.normalize_input_messages(
             {"role": "system", "content": getattr(response, "instructions", None)}
         )
         if response_instructions:
             system_instructions = response_instructions
-        output_messages = normalize_output_messages(getattr(response, "output", None))
+        output_messages = _MessageNormalizer.normalize_output_messages(getattr(response, "output", None))
         OpenTelemetryTracingProcessor._set_message_attributes(
             attributes, system_instructions, input_messages, output_messages
         )
@@ -425,3 +428,188 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         error_type = _first_not_none(data.get("type"), data.get("error_type"), data.get("exception_type"), "_OTHER")
         span.set_attribute(ERROR_TYPE, error_type)
         span.set_status(Status(StatusCode.ERROR, description))
+
+
+class _MessageNormalizer:
+    @classmethod
+    def normalize_input_messages(cls, items: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Normalize OpenAI Agents input payloads into GenAI semantic convention messages."""
+        system_instructions: list[dict[str, Any]] = []
+        conversation: list[dict[str, Any]] = []
+        for item in cls._as_items(items):
+            item_system, item_messages = cls._normalize_message(item, output=False)
+            system_instructions.extend(item_system)
+            conversation.extend(item_messages)
+        return system_instructions, conversation
+
+    @classmethod
+    def normalize_output_messages(cls, items: Any) -> list[dict[str, Any]]:
+        """Normalize OpenAI Agents output payloads into GenAI semantic convention messages."""
+        messages: list[dict[str, Any]] = []
+        for item in cls._as_items(items):
+            _, item_messages = cls._normalize_message(item, output=True)
+            messages.extend(item_messages)
+        return messages
+
+    @staticmethod
+    def _as_items(items: Any) -> list[Any]:
+        if items is None:
+            return []
+        if isinstance(items, (str, bytes, Mapping, BaseModel)):
+            return [items]
+        if isinstance(items, Sequence):
+            return list(items)
+        return [items]
+
+    @classmethod
+    def _normalize_message(  # pylint: disable=too-many-branches
+        cls,
+        item: Any,
+        output: bool,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        system_instructions: list[dict[str, Any]] = []
+        messages: list[dict[str, Any]] = []
+        item_data = cls._as_mapping(item)
+
+        if item_data is None:
+            parts = cls._parts(item)
+            if parts:
+                message = {"role": "assistant" if output else "user", "parts": parts}
+                if output:
+                    message["finish_reason"] = "stop"
+                messages.append(message)
+            return system_instructions, messages
+
+        item_type = item_data.get("type")
+        role = item_data.get("role")
+
+        if item_type == "function_call":
+            part = {
+                "type": "tool_call",
+                "id": item_data.get("call_id") or item_data.get("id") or "",
+                "name": item_data.get("name") or "",
+                "arguments": cls._parse_arguments(item_data.get("arguments", {})),
+            }
+            message = {"role": "assistant", "parts": [part]}
+            if output:
+                message["finish_reason"] = "tool_call"
+            messages.append(message)
+            return system_instructions, messages
+
+        if item_type == "function_call_output":
+            part = {
+                "type": "tool_call_response",
+                "id": item_data.get("call_id") or item_data.get("id") or "",
+                "response": item_data.get("output", ""),
+            }
+            message = {"role": "tool", "parts": [part]}
+            if output:
+                message["finish_reason"] = "stop"
+            messages.append(message)
+            return system_instructions, messages
+
+        if item_type == "reasoning":
+            reasoning = cls._reasoning_parts(item_data)
+            if reasoning:
+                message = {"role": "assistant", "parts": reasoning}
+                if output:
+                    message["finish_reason"] = cls._raw_finish_reason(item_data, False)
+                messages.append(message)
+            return system_instructions, messages
+
+        parts: list[dict[str, Any]] = []
+        if role == "tool":
+            parts.append(
+                {
+                    "type": "tool_call_response",
+                    "id": item_data.get("tool_call_id") or item_data.get("call_id") or "",
+                    "response": item_data.get("content", ""),
+                }
+            )
+        else:
+            parts.extend(cls._parts(item_data.get("content")))
+
+        tool_call_parts = cls._tool_call_parts(item_data.get("tool_calls"))
+        parts.extend(tool_call_parts)
+
+        if role in ("system", "developer"):
+            system_instructions.extend(parts)
+            return system_instructions, messages
+
+        if not role:
+            role = "assistant" if output else "user"
+        message = {"role": role, "parts": parts}
+        if output:
+            message["finish_reason"] = cls._raw_finish_reason(item_data, bool(tool_call_parts))
+        messages.append(message)
+        return system_instructions, messages
+
+    @staticmethod
+    def _as_mapping(value: Any) -> Optional[dict[str, Any]]:
+        if isinstance(value, Mapping):
+            return dict(value)
+        if isinstance(value, BaseModel):
+            return value.model_dump()
+        return None
+
+    @classmethod
+    def _parts(cls, content: Any) -> list[dict[str, Any]]:
+        if isinstance(content, BaseModel):
+            content = content.model_dump()
+        if isinstance(content, Sequence) and not isinstance(content, (str, bytes)):
+            content = [block.model_dump() if isinstance(block, BaseModel) else block for block in content]
+        return content_to_parts(content)
+
+    @classmethod
+    def _tool_call_parts(cls, tool_calls: Any) -> list[dict[str, Any]]:
+        parts: list[dict[str, Any]] = []
+        for raw_tool_call in cls._as_items(tool_calls):
+            tool_call = cls._as_mapping(raw_tool_call) or {}
+            function = cls._as_mapping(tool_call.get("function")) or {}
+            parts.append(
+                {
+                    "type": "tool_call",
+                    "id": tool_call.get("id") or tool_call.get("call_id") or "",
+                    "name": function.get("name") or tool_call.get("name") or "",
+                    "arguments": cls._parse_arguments(function.get("arguments", tool_call.get("arguments", {}))),
+                }
+            )
+        return parts
+
+    @staticmethod
+    def _parse_arguments(arguments: Any) -> Any:
+        if not isinstance(arguments, str):
+            return arguments
+        try:
+            return json.loads(arguments)
+        except (TypeError, ValueError):
+            return arguments
+
+    @classmethod
+    def _reasoning_parts(cls, item: Mapping[str, Any]) -> list[dict[str, Any]]:
+        parts: list[dict[str, Any]] = []
+        for summary_item in cls._as_items(item.get("summary")):
+            summary = cls._as_mapping(summary_item)
+            content = summary.get("text") if summary else summary_item
+            if content:
+                parts.append({"type": "reasoning", "content": str(content)})
+        if not parts and item.get("content"):
+            parts.append({"type": "reasoning", "content": str(item["content"])})
+        return parts
+
+    @staticmethod
+    def _raw_finish_reason(item: Mapping[str, Any], has_tool_calls: bool) -> str:
+        if has_tool_calls:
+            return "tool_call"
+        raw_reason = item.get("finish_reason") or item.get("stop_reason")
+        if raw_reason is None:
+            return "stop"
+        return {
+            "end_turn": "stop",
+            "stop": "stop",
+            "tool_calls": "tool_call",
+            "tool_use": "tool_call",
+            "max_tokens": "length",
+            "length": "length",
+            "content_filter": "content_filter",
+        }.get(str(raw_reason), str(raw_reason))

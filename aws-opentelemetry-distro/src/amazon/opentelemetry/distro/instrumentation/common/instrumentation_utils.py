@@ -137,7 +137,7 @@ def content_to_parts(content: Any) -> list:  # pylint: disable=too-many-branches
             continue
 
         block_type = block.get("type", "")
-        if block_type == "text":
+        if block_type in ("text", "input_text", "output_text", "summary_text"):
             text = block.get("text", "")
             if text:
                 parts.append({"type": "text", "content": str(text)})

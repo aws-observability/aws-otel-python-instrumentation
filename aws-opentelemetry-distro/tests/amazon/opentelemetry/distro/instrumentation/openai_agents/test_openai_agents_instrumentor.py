@@ -11,11 +11,10 @@ from agents import tracing
 from pydantic import BaseModel
 
 from amazon.opentelemetry.distro.instrumentation.openai_agents import OpenAIAgentsInstrumentor
-from amazon.opentelemetry.distro.instrumentation.openai_agents._messages import (
-    normalize_input_messages,
-    normalize_output_messages,
+from amazon.opentelemetry.distro.instrumentation.openai_agents._processor import (
+    OpenTelemetryTracingProcessor,
+    _MessageNormalizer,
 )
-from amazon.opentelemetry.distro.instrumentation.openai_agents._processor import OpenTelemetryTracingProcessor
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -354,7 +353,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
 
 class TestOpenAIAgentsMessages(unittest.TestCase):
     def test_chat_completions_messages(self):
-        system, conversation = normalize_input_messages(
+        system, conversation = _MessageNormalizer.normalize_input_messages(
             [
                 {"role": "developer", "content": "Follow instructions."},
                 {"role": "user", "content": [{"type": "input_text", "text": "Hello"}]},
@@ -391,7 +390,7 @@ class TestOpenAIAgentsMessages(unittest.TestCase):
         )
 
     def test_responses_api_messages_and_finish_reasons(self):
-        inputs = normalize_input_messages(
+        inputs = _MessageNormalizer.normalize_input_messages(
             [
                 {"type": "function_call", "call_id": "call_2", "name": "search", "arguments": '{"q": "otel"}'},
                 {"type": "function_call_output", "call_id": "call_2", "output": "result"},
@@ -400,7 +399,7 @@ class TestOpenAIAgentsMessages(unittest.TestCase):
         self.assertEqual(inputs[0]["parts"][0]["arguments"], {"q": "otel"})
         self.assertEqual(inputs[1]["parts"][0]["response"], "result")
 
-        outputs = normalize_output_messages(
+        outputs = _MessageNormalizer.normalize_output_messages(
             [
                 {"type": "reasoning", "summary": [{"text": "Think first"}]},
                 {"type": "function_call", "call_id": "call_3", "name": "lookup", "arguments": "not-json"},
@@ -425,16 +424,18 @@ class TestOpenAIAgentsMessages(unittest.TestCase):
             role: str
             content: str
 
-        _, object_messages = normalize_input_messages(ModelDumpPayload(role="user", content="From an object"))
+        _, object_messages = _MessageNormalizer.normalize_input_messages(
+            ModelDumpPayload(role="user", content="From an object")
+        )
         self.assertEqual(
             object_messages,
             [{"role": "user", "parts": [{"type": "text", "content": "From an object"}]}],
         )
 
-        _, scalar_input = normalize_input_messages(123)
+        _, scalar_input = _MessageNormalizer.normalize_input_messages(123)
         self.assertEqual(scalar_input, [{"role": "user", "parts": [{"type": "text", "content": "123"}]}])
         self.assertEqual(
-            normalize_output_messages("plain output"),
+            _MessageNormalizer.normalize_output_messages("plain output"),
             [
                 {
                     "role": "assistant",
@@ -444,12 +445,14 @@ class TestOpenAIAgentsMessages(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            normalize_output_messages({"type": "function_call_output", "call_id": "call_4", "output": "done"})[0][
-                "finish_reason"
-            ],
+            _MessageNormalizer.normalize_output_messages(
+                {"type": "function_call_output", "call_id": "call_4", "output": "done"}
+            )[0]["finish_reason"],
             "stop",
         )
         self.assertEqual(
-            normalize_output_messages({"type": "reasoning", "content": "fallback reasoning"})[0]["parts"],
+            _MessageNormalizer.normalize_output_messages({"type": "reasoning", "content": "fallback reasoning"})[0][
+                "parts"
+            ],
             [{"type": "reasoning", "content": "fallback reasoning"}],
         )
