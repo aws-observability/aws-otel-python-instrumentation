@@ -8,9 +8,14 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from agents import tracing
+from agents.items import ItemHelpers
+from conftest import validate_otel_genai_schema
+from openai import Omit
+from openai.types.responses import ResponseFunctionToolCall
 from pydantic import BaseModel
 
 from amazon.opentelemetry.distro.instrumentation.openai_agents import OpenAIAgentsInstrumentor
+from amazon.opentelemetry.distro.instrumentation.openai_agents._gen_ai_context_capture import GenAIContextCapture
 from amazon.opentelemetry.distro.instrumentation.openai_agents._processor import (
     OpenTelemetryTracingProcessor,
     _GenAIMessageNormalizer,
@@ -21,8 +26,12 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_NAME,
     GEN_AI_INPUT_MESSAGES,
+    GEN_AI_OPENAI_REQUEST_SERVICE_TIER,
+    GEN_AI_OPENAI_RESPONSE_SERVICE_TIER,
+    GEN_AI_OPENAI_RESPONSE_SYSTEM_FINGERPRINT,
     GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
+    GEN_AI_OUTPUT_TYPE,
     GEN_AI_PROVIDER_NAME,
     GEN_AI_REQUEST_CHOICE_COUNT,
     GEN_AI_REQUEST_FREQUENCY_PENALTY,
@@ -31,6 +40,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_REQUEST_PRESENCE_PENALTY,
     GEN_AI_REQUEST_SEED,
     GEN_AI_REQUEST_STOP_SEQUENCES,
+    GEN_AI_REQUEST_STREAM,
     GEN_AI_REQUEST_TEMPERATURE,
     GEN_AI_REQUEST_TOP_K,
     GEN_AI_REQUEST_TOP_P,
@@ -39,17 +49,42 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_RESPONSE_MODEL,
     GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
+    GEN_AI_TOOL_CALL_ID,
     GEN_AI_TOOL_CALL_RESULT,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
+    GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
+    GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
+    GEN_AI_USAGE_REASONING_OUTPUT_TOKENS,
     GEN_AI_WORKFLOW_NAME,
     GenAiOperationNameValues,
+    GenAiOutputTypeValues,
     GenAiProviderNameValues,
 )
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
+from opentelemetry.semconv.attributes.server_attributes import SERVER_ADDRESS, SERVER_PORT
 from opentelemetry.trace import SpanKind, StatusCode
+
+
+def _passthrough(*args, **kwargs):
+    return "wrapped result"
+
+
+def _tool_call(name, call_id):
+    return ResponseFunctionToolCall(call_id=call_id, name=name, arguments="{}", type="function_call")
+
+
+def _record_tool_call(name=None, call_id=None):
+    return GenAIContextCapture.record_tool_call(
+        _passthrough, None, (), {"tool_call": SimpleNamespace(name=name, call_id=call_id)}
+    )
+
+
+def _record_request(base_url=None, **kwargs):
+    instance = SimpleNamespace(_client=SimpleNamespace(base_url=base_url)) if base_url else None
+    return GenAIContextCapture.record_request(_passthrough, instance, (), kwargs)
 
 
 class TestOpenAIAgentsInstrumentor(unittest.TestCase):
@@ -103,6 +138,21 @@ class TestOpenAIAgentsInstrumentor(unittest.TestCase):
         self.assertEqual(current, (existing_processor,))
         self.assertIsNone(self.instrumentor._processor)  # pylint: disable=protected-access
 
+    def test_instrument_wraps_tool_call_capture_and_uninstrument_removes_it(self):
+        GenAIContextCapture.reset_tool_call()
+        ItemHelpers.tool_call_output_item(_tool_call("lookup", "call_before"), "sunny")
+        self.assertIsNone(GenAIContextCapture.get_tool_call().call_id)
+
+        self.instrumentor.instrument(skip_dep_check=True)
+        ItemHelpers.tool_call_output_item(_tool_call("lookup", "call_during"), "sunny")
+        self.assertEqual(GenAIContextCapture.get_tool_call().name, "lookup")
+        self.assertEqual(GenAIContextCapture.get_tool_call().call_id, "call_during")
+
+        self.instrumentor.uninstrument()
+        ItemHelpers.tool_call_output_item(_tool_call("lookup", "call_after"), "sunny")
+        self.assertIsNone(GenAIContextCapture.get_tool_call().call_id)
+        self.assertEqual(GenAIContextCapture.get_request_params(), {})
+
     def test_force_flush_delegates_to_tracer_provider(self):
         tracer_provider = TracerProvider()
         tracer_provider.force_flush = MagicMock(return_value=True)
@@ -133,6 +183,8 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         provider = tracing.get_trace_provider()
         self.previous_processors = tuple(provider._multi_processor._processors)  # pylint: disable=protected-access
         tracing.set_trace_processors([self.processor])
+        GenAIContextCapture.reset_request_params()
+        GenAIContextCapture.reset_tool_call()
 
     def tearDown(self) -> None:
         self.processor.shutdown()
@@ -315,6 +367,186 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         self.assertNotIn(GEN_AI_OUTPUT_MESSAGES, private_span.attributes)
         self.assertNotIn(GEN_AI_SYSTEM_INSTRUCTIONS, private_span.attributes)
 
+    def test_handoff_span_uses_captured_sdk_tool_name(self):
+        with tracing.trace("Handoff workflow"):
+            handoff_span = tracing.handoff_span(from_agent="Triage agent", to_agent=None)
+            with handoff_span:
+                _record_tool_call(name="beam_me_to_french", call_id="call_handoff")
+                handoff_span.span_data.to_agent = "French agent"
+
+        span = self._spans_by_name()["execute_tool beam_me_to_french"]
+        self.assertEqual(span.kind, SpanKind.INTERNAL)
+        self.assertEqual(span.attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.EXECUTE_TOOL.value)
+        self.assertEqual(span.attributes[GEN_AI_TOOL_NAME], "beam_me_to_french")
+        self.assertEqual(span.attributes[GEN_AI_TOOL_TYPE], "function")
+        self.assertEqual(span.attributes[GEN_AI_TOOL_CALL_ID], "call_handoff")
+        self.assertEqual(
+            json.loads(span.attributes[GEN_AI_TOOL_CALL_ARGUMENTS]),
+            {"from_agent": "Triage agent", "to_agent": "French agent"},
+        )
+
+    def test_handoff_span_derives_tool_name_without_capture(self):
+        with tracing.trace("Derived handoff workflow"):
+            derived_span = tracing.handoff_span(from_agent="Triage agent", to_agent=None)
+            with derived_span:
+                derived_span.span_data.to_agent = "Spanish Agent 2"
+            with tracing.handoff_span(from_agent="Triage agent", to_agent=None):
+                pass
+
+        spans = self._spans_by_name()
+        derived = spans["execute_tool transfer_to_spanish_agent_2"]
+        self.assertEqual(derived.attributes[GEN_AI_TOOL_NAME], "transfer_to_spanish_agent_2")
+        self.assertNotIn(GEN_AI_TOOL_CALL_ID, derived.attributes)
+        unknown = spans["execute_tool handoff"]
+        self.assertEqual(unknown.attributes[GEN_AI_TOOL_NAME], "handoff")
+
+    def test_function_span_records_tool_call_id_and_resets_between_calls(self):
+        with tracing.trace("Tool workflow"):
+            with tracing.function_span("get_weather", input='{"city": "Seattle"}', output="sunny"):
+                _record_tool_call(name="get_weather", call_id="call_weather")
+            with tracing.function_span("get_time", input="{}", output="noon"):
+                pass
+
+        spans = self._spans_by_name()
+        self.assertEqual(spans["execute_tool get_weather"].attributes[GEN_AI_TOOL_CALL_ID], "call_weather")
+        self.assertNotIn(GEN_AI_TOOL_CALL_ID, spans["execute_tool get_time"].attributes)
+
+    def test_streamed_generation_response_envelope(self):
+        envelope = {
+            "object": "response",
+            "id": "resp_streamed",
+            "model": "gpt-streamed",
+            "service_tier": "default",
+            "system_fingerprint": "fp_streamed",
+            "temperature": 0.5,
+            "top_p": 0.6,
+            "max_output_tokens": 32,
+            "text": {"format": {"type": "json_schema"}},
+            "incomplete_details": {"reason": "max_output_tokens"},
+            "output": [
+                {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Streamed"}]}
+            ],
+            "usage": {
+                "input_tokens": 21,
+                "output_tokens": 5,
+                "input_tokens_details": {"cached_tokens": 12, "cache_write_tokens": 3},
+                "output_tokens_details": {"reasoning_tokens": 4},
+            },
+        }
+
+        with tracing.trace("Streamed workflow"):
+            with tracing.generation_span(
+                input=[{"role": "user", "content": "Stream it"}],
+                output=[envelope],
+                model=None,
+            ):
+                pass
+
+        span = self._spans_by_name()["chat gpt-streamed"]
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_STREAM], True)
+        self.assertEqual(span.attributes[GEN_AI_RESPONSE_ID], "resp_streamed")
+        self.assertEqual(span.attributes[GEN_AI_RESPONSE_MODEL], "gpt-streamed")
+        self.assertEqual(span.attributes[GEN_AI_OPENAI_RESPONSE_SERVICE_TIER], "default")
+        self.assertEqual(span.attributes[GEN_AI_OPENAI_RESPONSE_SYSTEM_FINGERPRINT], "fp_streamed")
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_TEMPERATURE], 0.5)
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_TOP_P], 0.6)
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 32)
+        self.assertEqual(span.attributes[GEN_AI_OUTPUT_TYPE], GenAiOutputTypeValues.JSON.value)
+        self.assertEqual(span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 21)
+        self.assertEqual(span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 5)
+        self.assertEqual(span.attributes[GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS], 12)
+        self.assertEqual(span.attributes[GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS], 3)
+        self.assertEqual(span.attributes[GEN_AI_USAGE_REASONING_OUTPUT_TOKENS], 4)
+        self.assertEqual(span.attributes[GEN_AI_RESPONSE_FINISH_REASONS], ("length",))
+
+        output_messages = json.loads(span.attributes[GEN_AI_OUTPUT_MESSAGES])
+        validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
+        self.assertEqual(
+            output_messages,
+            [{"role": "assistant", "parts": [{"type": "text", "content": "Streamed"}], "finish_reason": "length"}],
+        )
+
+    def test_chat_completions_usage_aliases(self):
+        with tracing.trace("Usage workflow"):
+            with tracing.generation_span(
+                input=[{"role": "user", "content": "Hi"}],
+                output=[{"role": "assistant", "content": "Hello"}],
+                model="gpt-usage",
+                usage={
+                    "prompt_tokens": 13,
+                    "completion_tokens": 6,
+                    "prompt_tokens_details": {"cached_tokens": 9},
+                    "completion_tokens_details": {"reasoning_tokens": 2},
+                    "cache_creation_input_tokens": 4,
+                },
+            ):
+                pass
+
+        span = self._spans_by_name()["chat gpt-usage"]
+        self.assertEqual(span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 13)
+        self.assertEqual(span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 6)
+        self.assertEqual(span.attributes[GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS], 9)
+        self.assertEqual(span.attributes[GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS], 4)
+        self.assertEqual(span.attributes[GEN_AI_USAGE_REASONING_OUTPUT_TOKENS], 2)
+
+    def test_captured_request_params_set_provider_and_server_attributes(self):
+        with tracing.trace("Capture workflow"):
+            captured_span = tracing.generation_span(
+                input=[{"role": "user", "content": "Hi"}],
+                output=None,
+                model=None,
+            )
+            with captured_span:
+                _record_request(
+                    base_url="https://bedrock-runtime.us-west-2.amazonaws.com:8443/v1",
+                    model="bedrock/anthropic.claude-3-5-haiku",
+                    temperature=0.3,
+                    stream=True,
+                    n=2,
+                    service_tier="flex",
+                    response_format={"type": "json_object"},
+                    stop=["END"],
+                    max_completion_tokens=64,
+                    metadata={"dropped": "not a request parameter"},
+                    top_p=None,
+                )
+
+        span = self._spans_by_name()["chat bedrock/anthropic.claude-3-5-haiku"]
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_MODEL], "bedrock/anthropic.claude-3-5-haiku")
+        self.assertEqual(span.attributes[GEN_AI_PROVIDER_NAME], GenAiProviderNameValues.AWS_BEDROCK.value)
+        self.assertEqual(span.attributes[SERVER_ADDRESS], "bedrock-runtime.us-west-2.amazonaws.com")
+        self.assertEqual(span.attributes[SERVER_PORT], 8443)
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_TEMPERATURE], 0.3)
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_STREAM], True)
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_CHOICE_COUNT], 2)
+        self.assertEqual(span.attributes[GEN_AI_OPENAI_REQUEST_SERVICE_TIER], "flex")
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ("END",))
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 64)
+        self.assertEqual(span.attributes[GEN_AI_OUTPUT_TYPE], GenAiOutputTypeValues.JSON.value)
+        self.assertNotIn(GEN_AI_REQUEST_TOP_P, span.attributes)
+
+    def test_sentinel_request_values_are_not_exported(self):
+        attributes: dict = {}
+        self.processor._set_attribute(
+            attributes, GEN_AI_REQUEST_TEMPERATURE, Omit()
+        )  # pylint: disable=protected-access
+        self.processor._set_attribute(attributes, GEN_AI_REQUEST_TOP_P, 0.4)  # pylint: disable=protected-access
+        self.assertEqual(attributes, {GEN_AI_REQUEST_TOP_P: 0.4})
+
+        with tracing.trace("Sentinel workflow"):
+            sentinel_span = tracing.generation_span(
+                input=[{"role": "user", "content": "Hi"}],
+                output=None,
+                model="gpt-sentinel",
+            )
+            with sentinel_span:
+                _record_request(temperature=Omit(), max_tokens=Omit(), top_p=0.4)
+
+        span = self._spans_by_name()["chat gpt-sentinel"]
+        self.assertNotIn(GEN_AI_REQUEST_TEMPERATURE, span.attributes)
+        self.assertNotIn(GEN_AI_REQUEST_MAX_TOKENS, span.attributes)
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_TOP_P], 0.4)
+
     def test_parenting_skips_unhandled_task_and_turn_spans(self):
         with tracing.trace("Parent workflow"):
             if hasattr(tracing, "task_span"):
@@ -365,6 +597,52 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         self.assertEqual(
             [span.name for span in self.exporter.get_finished_spans()], ["invoke_workflow Unhandled workflow"]
         )
+
+
+class TestGenAIContextCapture(unittest.TestCase):
+    def setUp(self) -> None:
+        GenAIContextCapture.reset_request_params()
+        GenAIContextCapture.reset_tool_call()
+
+    def tearDown(self) -> None:
+        GenAIContextCapture.reset_request_params()
+        GenAIContextCapture.reset_tool_call()
+
+    def test_record_request_keeps_known_params_and_client_base_url(self):
+        result = _record_request(
+            base_url="https://api.openai.com/v1",
+            model="gpt-4o-mini",
+            temperature=0.4,
+            top_p=None,
+            extra_headers={"x-request-id": "dropped"},
+        )
+
+        self.assertEqual(result, "wrapped result")
+        self.assertEqual(
+            GenAIContextCapture.get_request_params(),
+            {"model": "gpt-4o-mini", "temperature": 0.4, "base_url": "https://api.openai.com/v1"},
+        )
+
+    def test_record_tool_call_reads_positional_payload_and_ignores_empty(self):
+        result = GenAIContextCapture.record_tool_call(_passthrough, None, (_tool_call("lookup", "call_1"),), {})
+
+        self.assertEqual(result, "wrapped result")
+        self.assertEqual(GenAIContextCapture.get_tool_call().name, "lookup")
+        self.assertEqual(GenAIContextCapture.get_tool_call().call_id, "call_1")
+
+        GenAIContextCapture.record_tool_call(_passthrough, None, (SimpleNamespace(),), {})
+        self.assertEqual(GenAIContextCapture.get_tool_call().call_id, "call_1")
+
+    def test_reset_clears_captured_state(self):
+        _record_request(model="gpt-4o-mini")
+        _record_tool_call(name="lookup", call_id="call_1")
+
+        GenAIContextCapture.reset_request_params()
+        GenAIContextCapture.reset_tool_call()
+
+        self.assertEqual(GenAIContextCapture.get_request_params(), {})
+        self.assertIsNone(GenAIContextCapture.get_tool_call().name)
+        self.assertIsNone(GenAIContextCapture.get_tool_call().call_id)
 
 
 class TestOpenAIAgentsMessages(unittest.TestCase):
