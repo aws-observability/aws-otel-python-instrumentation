@@ -4,9 +4,10 @@ import os
 from http.server import BaseHTTPRequestHandler
 
 from langchain.agents import create_agent
+from langchain_aws import ChatBedrockConverse
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
-from mock_llm import MOCK_LLM_PORT, reset_llm_call_count, start_servers
+from mock_llm import MOCK_BEDROCK_PORT, MOCK_LLM_PORT, reset_bedrock_call_count, reset_llm_call_count, start_servers
 from typing_extensions import override
 
 os.environ["OPENAI_API_KEY"] = "fake-key"
@@ -19,7 +20,9 @@ class RequestHandler(BaseHTTPRequestHandler):
     # pylint: disable=invalid-name
     def do_GET(self):
         if "langchain" in self.path:
-            if "multiagent" in self.path:
+            if "bedrock-agent" in self.path:
+                self._run_bedrock_agent()
+            elif "multiagent" in self.path:
                 self._run_multi_agent()
             elif "agent" in self.path:
                 self._run_single_agent()
@@ -53,6 +56,31 @@ class RequestHandler(BaseHTTPRequestHandler):
             [get_greeting, get_weather, calculate],
             name="TestAgent",
             system_prompt="You are a helpful assistant with access to greeting, weather, and calculator tools.",
+        )
+        agent.invoke({"messages": [("human", "Greet the world")]})
+
+    def _run_bedrock_agent(self) -> None:  # pylint: disable=no-self-use
+        reset_bedrock_call_count()
+        RequestHandler.main_status = 200
+
+        @tool
+        def get_greeting(name: str) -> str:
+            """Get a greeting message for the given name."""
+            return f"Hello, {name}!"
+
+        llm = ChatBedrockConverse(
+            model="anthropic.claude-3-haiku-20240307-v1:0",
+            region_name="us-east-1",
+            base_url=f"http://localhost:{MOCK_BEDROCK_PORT}",
+            aws_access_key_id="fake-key",
+            aws_secret_access_key="fake-key",
+            temperature=0.7,
+        )
+        agent = create_agent(
+            llm,
+            [get_greeting],
+            name="BedrockTestAgent",
+            system_prompt="You are a helpful assistant with access to a greeting tool.",
         )
         agent.invoke({"messages": [("human", "Greet the world")]})
 

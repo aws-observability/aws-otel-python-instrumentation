@@ -1,2 +1,3 @@
 langchain>=0.3.21
+langchain-aws
 langchain-openai

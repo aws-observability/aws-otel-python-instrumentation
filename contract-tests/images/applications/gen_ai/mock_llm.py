@@ -7,14 +7,21 @@ from threading import Thread
 from typing import Tuple
 
 MOCK_LLM_PORT: int = 8081
+MOCK_BEDROCK_PORT: int = 8082
 APP_PORT: int = 8080
 
 _llm_call_count = 0
+_bedrock_call_count = 0
 
 
 def reset_llm_call_count():
     global _llm_call_count  # pylint: disable=global-statement
     _llm_call_count = 0
+
+
+def reset_bedrock_call_count():
+    global _bedrock_call_count  # pylint: disable=global-statement
+    _bedrock_call_count = 0
 
 
 class MockLLMHandler(BaseHTTPRequestHandler):
@@ -77,16 +84,80 @@ class MockLLMHandler(BaseHTTPRequestHandler):
         pass
 
 
+class MockBedrockHandler(BaseHTTPRequestHandler):
+
+    # pylint: disable=invalid-name
+    def do_POST(self):
+        global _bedrock_call_count  # pylint: disable=global-statement
+        _bedrock_call_count += 1
+
+        body = {}
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length:
+            body = json.loads(self.rfile.read(content_length))
+
+        tool_name, tool_args = self._extract_first_tool(body)
+
+        if _bedrock_call_count % 2 == 1 and tool_name:
+            content = [
+                {
+                    "toolUse": {
+                        "toolUseId": f"call_{_bedrock_call_count}",
+                        "name": tool_name,
+                        "input": tool_args,
+                    }
+                }
+            ]
+            stop_reason = "tool_use"
+        else:
+            content = [{"text": "Hello, World!"}]
+            stop_reason = "end_turn"
+
+        response = {
+            "output": {"message": {"role": "assistant", "content": content}},
+            "stopReason": stop_reason,
+            "usage": {"inputTokens": 10, "outputTokens": 20, "totalTokens": 30},
+            "metrics": {"latencyMs": 1},
+        }
+        response_body = json.dumps(response).encode()
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response_body)))
+        self.send_header("x-amzn-RequestId", "mock-request")
+        self.end_headers()
+        self.wfile.write(response_body)
+
+    @staticmethod
+    def _extract_first_tool(body):
+        tools = body.get("toolConfig", {}).get("tools", [])
+        if not tools:
+            return None, {}
+        tool_spec = tools[0].get("toolSpec", {})
+        name = tool_spec.get("name")
+        properties = tool_spec.get("inputSchema", {}).get("json", {}).get("properties", {})
+        args = {param: "World" for param in properties}
+        return name, args
+
+    def log_message(self, format, *args):  # pylint: disable=redefined-builtin
+        pass
+
+
 def start_servers(request_handler_class):
-    """Start mock LLM server and application server."""
+    """Start mock model servers and application server."""
     mock_llm_server = ThreadingHTTPServer(("0.0.0.0", MOCK_LLM_PORT), MockLLMHandler)
     mock_llm_thread = Thread(target=mock_llm_server.serve_forever, daemon=True)
     mock_llm_thread.start()
+
+    mock_bedrock_server = ThreadingHTTPServer(("0.0.0.0", MOCK_BEDROCK_PORT), MockBedrockHandler)
+    mock_bedrock_thread = Thread(target=mock_bedrock_server.serve_forever, daemon=True)
+    mock_bedrock_thread.start()
 
     server_address: Tuple[str, int] = ("0.0.0.0", APP_PORT)
     server = ThreadingHTTPServer(server_address, request_handler_class)
     atexit.register(server.shutdown)
     atexit.register(mock_llm_server.shutdown)
+    atexit.register(mock_bedrock_server.shutdown)
     server_thread = Thread(target=server.serve_forever)
     server_thread.start()
     print("Ready")

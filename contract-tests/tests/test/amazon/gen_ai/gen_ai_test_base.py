@@ -51,6 +51,11 @@ class GenAITestBase(ContractTestBase):
         # Every recorded GenAI content attribute MUST contain data and follow its corresponding OTel JSON schema.
         self._assert_otel_gen_ai_attribute_formats(resource_scope_spans)
         invoke_agent_spans, execute_tool_spans, chat_spans = self._collect_gen_ai_spans(resource_scope_spans)
+        expected_provider = kwargs.get("expected_provider")
+        if expected_provider is not None:
+            for span in invoke_agent_spans + chat_spans:
+                attrs = self._get_attributes_dict(span.attributes)
+                self._assert_str_attribute(attrs, GEN_AI_PROVIDER_NAME, expected_provider)
         if "agent" in path:
             self._assert_invoke_agent_spans(invoke_agent_spans, kwargs.get("expected_agent_count", 1))
             self._assert_execute_tool_spans(execute_tool_spans, kwargs.get("expected_tool_count", 1))
