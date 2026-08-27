@@ -5,6 +5,7 @@ import json
 import logging
 import threading
 from base64 import b64encode
+from collections.abc import Mapping
 from contextvars import Token
 from functools import wraps
 from typing import Any, Callable, Dict, Optional, Union
@@ -111,6 +112,16 @@ def to_tool_attribute_value(value: Any) -> Union[str, int, float, bool, bytes, N
     if isinstance(value, (bool, str, bytes, int, float)):
         return value
     return serialize_to_json_string(value)
+
+
+def to_tool_result_attribute_value(value: Any) -> str:
+    if isinstance(value, Mapping):
+        result = dict(value)
+    elif isinstance(value, (str, int, float, bool, bytes, list, tuple)) or value is None:
+        result = {"result": value}
+    else:
+        result = {"result": str(value)}
+    return serialize_to_json_string(result)
 
 
 def content_to_parts(content: Any) -> list:  # pylint: disable=too-many-branches

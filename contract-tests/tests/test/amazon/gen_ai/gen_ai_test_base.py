@@ -191,6 +191,11 @@ class GenAITestBase(ContractTestBase):
         for resource_scope_span in resource_scope_spans:
             span = resource_scope_span.span
             attrs = self._get_attributes_dict(span.attributes)
+            is_execute_tool_span = (
+                GEN_AI_OPERATION_NAME in attrs
+                and attrs[GEN_AI_OPERATION_NAME].string_value == GenAiOperationNameValues.EXECUTE_TOOL.value
+            )
+
             for attribute, schema_name in (
                 (GEN_AI_INPUT_MESSAGES, "gen-ai-input-messages"),
                 (GEN_AI_OUTPUT_MESSAGES, "gen-ai-output-messages"),
@@ -199,7 +204,8 @@ class GenAITestBase(ContractTestBase):
                 (GEN_AI_TOOL_CALL_ARGUMENTS, "gen-ai-tool-call-arguments"),
                 (GEN_AI_TOOL_CALL_RESULT, "gen-ai-tool-call-result"),
             ):
-                if attribute in attrs:
+                # execute_tool spans MUST contain a result and always run it through OTel schema validation.
+                if attribute in attrs or (is_execute_tool_span and attribute == GEN_AI_TOOL_CALL_RESULT):
                     schema_value = self._parse_json_attribute(attrs, attribute, span.name)
                     self.assertIsNotNone(schema_value, f"{span.name}: expected {attribute} to contain data")
                     if isinstance(schema_value, list):

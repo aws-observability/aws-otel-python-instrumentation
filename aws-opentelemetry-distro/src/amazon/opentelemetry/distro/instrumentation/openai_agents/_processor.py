@@ -20,6 +20,7 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     content_to_parts,
     serialize_to_json_string,
     to_tool_attribute_value,
+    to_tool_result_attribute_value,
     try_detach,
 )
 from opentelemetry import context
@@ -380,7 +381,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             attributes, GEN_AI_TOOL_CALL_ARGUMENTS, to_tool_attribute_value(span_data.input)
         )
         OpenTelemetryTracingProcessor._set_attribute(
-            attributes, GEN_AI_TOOL_CALL_RESULT, to_tool_attribute_value(span_data.output)
+            attributes, GEN_AI_TOOL_CALL_RESULT, to_tool_result_attribute_value(span_data.output)
         )
         return attributes
 

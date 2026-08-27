@@ -155,6 +155,68 @@ def _safe_get(obj: Any, key: str) -> Any:
     return obj.get(key) if isinstance(obj, Mapping) else getattr(obj, key, None)
 
 
+def _to_otel_tool_definition(tool: Any) -> Optional[dict[str, Any]]:
+    metadata = getattr(tool, "metadata", None)
+    to_openai_tool = getattr(metadata, "to_openai_tool", None)
+    if callable(to_openai_tool):
+        try:
+            tool = to_openai_tool()
+        except Exception:  # pylint: disable=broad-exception-caught
+            tool = metadata
+
+    if isinstance(tool, Mapping):
+        if isinstance(function := tool.get("function"), Mapping):
+            tool = function
+            tool_type = "function"
+        elif isinstance(tool_spec := tool.get("toolSpec"), Mapping):
+            tool = tool_spec
+            tool_type = "function"
+        else:
+            tool_type = tool.get("type") or "function"
+    else:
+        tool_type = _safe_get(tool, "type") or "function"
+
+    name = _safe_get(tool, "name")
+    if not isinstance(name, str) or not name:
+        return None
+
+    tool_definition: dict[str, Any] = {"type": str(tool_type), "name": name}
+    description = _safe_get(tool, "description")
+    if isinstance(description, str) and description:
+        tool_definition["description"] = description
+
+    parameters = _safe_get(tool, "parameters")
+    if parameters is None:
+        input_schema = _safe_get(tool, "inputSchema")
+        parameters = _safe_get(input_schema, "json")
+    if parameters is None:
+        fn_schema = _safe_get(tool, "fn_schema")
+        model_json_schema = getattr(fn_schema, "model_json_schema", None)
+        if callable(model_json_schema):
+            parameters = model_json_schema()
+    if isinstance(parameters, Mapping):
+        tool_definition["parameters"] = dict(parameters)
+    return tool_definition
+
+
+def _to_otel_tool_definitions(tools: Any) -> list[dict[str, Any]]:
+    if isinstance(tools, Mapping):
+        tool_items = tools.get("tools", [tools])
+    elif isinstance(tools, Iterable) and not isinstance(tools, (str, bytes)):
+        tool_items = tools
+    else:
+        tool_items = [tools]
+
+    if isinstance(tool_items, Mapping):
+        tool_items = [tool_items]
+
+    definitions = []
+    for tool in tool_items:
+        if tool_definition := _to_otel_tool_definition(tool):
+            definitions.append(tool_definition)
+    return definitions
+
+
 def _message_to_parts(msg: ChatMessage) -> list:  # pylint: disable=too-many-branches
     """Convert a ChatMessage's blocks to OTel parts format."""
     blocks = getattr(msg, "blocks", None)
@@ -327,20 +389,9 @@ class _Span(BaseSpan):
     def process_input(self, instance: Any, bound_args: inspect.BoundArguments) -> None:
         from llama_index.core.llms.function_calling import FunctionCallingLLM  # pylint: disable=import-outside-toplevel
 
-        if isinstance(instance, FunctionCallingLLM) and isinstance((tools := bound_args.kwargs.get("tools")), Iterable):
-            tools_list = list(tools)
-            if tools_list:
-                # Convert FunctionTool objects to OpenAI tool format
-                tool_defs = []
-                for tool in tools_list:
-                    try:
-                        # Try to get the OpenAI tool format from metadata
-                        if hasattr(tool, "metadata") and hasattr(tool.metadata, "to_openai_tool"):
-                            tool_defs.append(tool.metadata.to_openai_tool())
-                        else:
-                            tool_defs.append(str(tool))
-                    except Exception:  # pylint: disable=broad-exception-caught
-                        tool_defs.append(str(tool))
+        if isinstance(instance, FunctionCallingLLM):
+            tool_defs = _to_otel_tool_definitions(bound_args.kwargs.get("tools"))
+            if tool_defs:
                 self[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs)
 
         # Capture tool call arguments for FunctionTool invocations
