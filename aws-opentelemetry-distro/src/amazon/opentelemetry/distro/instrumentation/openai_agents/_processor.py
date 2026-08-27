@@ -97,7 +97,6 @@ class _AgentContent:
     input_messages: Optional[list[dict[str, Any]]] = None
     output_messages: Optional[list[dict[str, Any]]] = None
     system_instructions: Optional[list[dict[str, Any]]] = None
-    request_model: Optional[str] = None
     request_attributes: Optional[dict[str, AttributeValue]] = None
 
 
@@ -219,7 +218,6 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                 agent_content.system_instructions = self._first_not_none(
                     agent_content.system_instructions, content.system_instructions
                 )
-                agent_content.request_model = self._first_not_none(agent_content.request_model, content.request_model)
                 agent_content.request_attributes = self._first_not_none(
                     agent_content.request_attributes, content.request_attributes
                 )
@@ -371,7 +369,6 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             input_messages=input_messages or None,
             output_messages=output_messages or None,
             system_instructions=system_instructions or None,
-            request_model=request_model,
             request_attributes=OpenTelemetryTracingProcessor._get_rollup_request_attributes(attributes),
         )
         return attributes, content
@@ -421,7 +418,6 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             input_messages=input_messages or None,
             output_messages=output_messages or None,
             system_instructions=system_instructions or None,
-            request_model=request_model,
             request_attributes=OpenTelemetryTracingProcessor._get_rollup_request_attributes(attributes),
         )
         return attributes, content
@@ -467,7 +463,6 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         attributes: dict[str, AttributeValue] = {}
         self._set_attribute(attributes, GEN_AI_AGENT_NAME, span_data.name)
         content = content or _AgentContent()
-        self._set_attribute(attributes, GEN_AI_REQUEST_MODEL, content.request_model)
         for key, value in (content.request_attributes or {}).items():
             self._set_attribute(attributes, key, value)
         self._set_tool_definitions(attributes, span_data.tools)
@@ -713,7 +708,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         rollup = {
             key: value
             for key, value in attributes.items()
-            if key.startswith("gen_ai.request.") and key not in (GEN_AI_REQUEST_MODEL, GEN_AI_REQUEST_STREAM)
+            if key.startswith("gen_ai.request.") and key != GEN_AI_REQUEST_STREAM
         }
         provider = attributes.get(GEN_AI_PROVIDER_NAME)
         if provider is not None:
