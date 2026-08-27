@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 from agents import tracing
 from agents.items import ItemHelpers
+from agents.tracing import processors
 from agents.tracing.processors import BackendSpanExporter
 from conftest import validate_otel_genai_schema
 from openai import Omit
@@ -21,7 +22,7 @@ from amazon.opentelemetry.distro.instrumentation.openai_agents._processor import
     OpenTelemetryTracingProcessor,
     _GenAIMessageNormalizer,
 )
-from opentelemetry.instrumentation.httpx import HTTPX2ClientInstrumentor
+from opentelemetry.instrumentation.httpx import HTTPX2ClientInstrumentor, HTTPXClientInstrumentor
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -159,7 +160,7 @@ class TestOpenAIAgentsInstrumentor(unittest.TestCase):
         exporter = InMemorySpanExporter()
         tracer_provider = TracerProvider()
         tracer_provider.add_span_processor(SimpleSpanProcessor(exporter))
-        httpx_instrumentor = HTTPX2ClientInstrumentor()
+        httpx_instrumentor = HTTPX2ClientInstrumentor() if hasattr(processors, "httpx2") else HTTPXClientInstrumentor()
         httpx_instrumentor.instrument(tracer_provider=tracer_provider)
         backend_exporter = BackendSpanExporter(
             api_key="test", endpoint="http://localhost:1/v1/traces/ingest", max_retries=1
