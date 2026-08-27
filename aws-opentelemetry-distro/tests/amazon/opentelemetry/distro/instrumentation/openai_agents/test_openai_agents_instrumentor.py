@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from amazon.opentelemetry.distro.instrumentation.openai_agents import OpenAIAgentsInstrumentor
 from amazon.opentelemetry.distro.instrumentation.openai_agents._processor import (
     OpenTelemetryTracingProcessor,
-    _MessageNormalizer,
+    _GenAIMessageNormalizer,
 )
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -353,7 +353,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
 
 class TestOpenAIAgentsMessages(unittest.TestCase):
     def test_chat_completions_messages(self):
-        system, conversation = _MessageNormalizer.normalize_input_messages(
+        system, conversation = _GenAIMessageNormalizer.normalize_input_messages(
             [
                 {"role": "developer", "content": "Follow instructions."},
                 {"role": "user", "content": [{"type": "input_text", "text": "Hello"}]},
@@ -390,7 +390,7 @@ class TestOpenAIAgentsMessages(unittest.TestCase):
         )
 
     def test_responses_api_messages_and_finish_reasons(self):
-        inputs = _MessageNormalizer.normalize_input_messages(
+        inputs = _GenAIMessageNormalizer.normalize_input_messages(
             [
                 {"type": "function_call", "call_id": "call_2", "name": "search", "arguments": '{"q": "otel"}'},
                 {"type": "function_call_output", "call_id": "call_2", "output": "result"},
@@ -399,7 +399,7 @@ class TestOpenAIAgentsMessages(unittest.TestCase):
         self.assertEqual(inputs[0]["parts"][0]["arguments"], {"q": "otel"})
         self.assertEqual(inputs[1]["parts"][0]["response"], "result")
 
-        outputs = _MessageNormalizer.normalize_output_messages(
+        outputs = _GenAIMessageNormalizer.normalize_output_messages(
             [
                 {"type": "reasoning", "summary": [{"text": "Think first"}]},
                 {"type": "function_call", "call_id": "call_3", "name": "lookup", "arguments": "not-json"},
@@ -424,7 +424,7 @@ class TestOpenAIAgentsMessages(unittest.TestCase):
             role: str
             content: str
 
-        _, object_messages = _MessageNormalizer.normalize_input_messages(
+        _, object_messages = _GenAIMessageNormalizer.normalize_input_messages(
             ModelDumpPayload(role="user", content="From an object")
         )
         self.assertEqual(
@@ -432,10 +432,10 @@ class TestOpenAIAgentsMessages(unittest.TestCase):
             [{"role": "user", "parts": [{"type": "text", "content": "From an object"}]}],
         )
 
-        _, scalar_input = _MessageNormalizer.normalize_input_messages(123)
+        _, scalar_input = _GenAIMessageNormalizer.normalize_input_messages(123)
         self.assertEqual(scalar_input, [{"role": "user", "parts": [{"type": "text", "content": "123"}]}])
         self.assertEqual(
-            _MessageNormalizer.normalize_output_messages("plain output"),
+            _GenAIMessageNormalizer.normalize_output_messages("plain output"),
             [
                 {
                     "role": "assistant",
@@ -445,14 +445,14 @@ class TestOpenAIAgentsMessages(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            _MessageNormalizer.normalize_output_messages(
+            _GenAIMessageNormalizer.normalize_output_messages(
                 {"type": "function_call_output", "call_id": "call_4", "output": "done"}
             )[0]["finish_reason"],
             "stop",
         )
         self.assertEqual(
-            _MessageNormalizer.normalize_output_messages({"type": "reasoning", "content": "fallback reasoning"})[0][
-                "parts"
-            ],
+            _GenAIMessageNormalizer.normalize_output_messages({"type": "reasoning", "content": "fallback reasoning"})[
+                0
+            ]["parts"],
             [{"type": "reasoning", "content": "fallback reasoning"}],
         )
