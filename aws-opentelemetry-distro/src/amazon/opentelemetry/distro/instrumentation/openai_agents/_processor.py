@@ -3,6 +3,8 @@
 
 import logging
 from collections.abc import Mapping
+from contextvars import Token
+from dataclasses import dataclass
 from typing import Any, Optional, Union
 
 from agents.tracing import Span as AgentsSpan
@@ -58,6 +60,13 @@ from ._messages import normalize_input_messages, normalize_output_messages
 _logger = logging.getLogger(__name__)
 
 
+@dataclass
+class _SpanEntry:
+    span: Span
+    token: Optional[Token] = None
+    agent_content: Optional[dict[str, Any]] = None
+
+
 def _first_not_none(*values: Any) -> Any:
     return next((value for value in values if value is not None), None)
 
@@ -82,11 +91,8 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
     def __init__(self, tracer: Tracer) -> None:
         self._tracer = tracer
-        self._workflow_spans = DictWithLock()
-        self._otel_spans = DictWithLock()
-        self._tokens = DictWithLock()
-        self._span_parents = DictWithLock()
-        self._agent_content = DictWithLock()
+        self._workflow_entries = DictWithLock()
+        self._span_entries = DictWithLock()
 
     @override
     def on_trace_start(self, trace: AgentsTrace) -> None:
@@ -100,74 +106,80 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             kind=SpanKind.INTERNAL,
             attributes=attributes,
         )
-        self._workflow_spans.put(trace.trace_id, span)
-        self._tokens.put(trace.trace_id, context.attach(set_span_in_context(span)))
+        token = context.attach(set_span_in_context(span))
+        self._workflow_entries.put(trace.trace_id, _SpanEntry(span=span, token=token))
 
     @override
     def on_trace_end(self, trace: AgentsTrace) -> None:
-        token = self._tokens.pop(trace.trace_id)
-        if token is not None:
-            try_detach(token)
-        span = self._workflow_spans.pop(trace.trace_id)
-        if span is not None:
-            span.set_status(Status(StatusCode.OK))
-            span.end()
+        entry = self._workflow_entries.pop(trace.trace_id)
+        if entry is None:
+            return
+        if entry.token is not None:
+            try_detach(entry.token)
+        entry.span.set_status(Status(StatusCode.OK))
+        entry.span.end()
 
     @override
     def on_span_start(self, span: AgentsSpan[Any]) -> None:
-        self._span_parents.put(span.span_id, span.parent_id)
+        parent_entry = self._resolve_parent_entry(span)
         span_data = span.span_data
         if not isinstance(span_data, (AgentSpanData, FunctionSpanData, GenerationSpanData, ResponseSpanData)):
+            if parent_entry is not None:
+                self._span_entries.put(
+                    span.span_id,
+                    _SpanEntry(span=parent_entry.span, agent_content=parent_entry.agent_content),
+                )
             return
 
+        agent_content = parent_entry.agent_content if parent_entry is not None else None
         if isinstance(span_data, AgentSpanData):
-            self._agent_content.put(
-                span.span_id,
-                {
-                    "input_messages": None,
-                    "output_messages": None,
-                    "system_instructions": None,
-                    "request_model": None,
-                },
-            )
+            agent_content = {
+                "input_messages": None,
+                "output_messages": None,
+                "system_instructions": None,
+                "request_model": None,
+            }
 
         operation = self._set_operation_name(span_data)
-        parent_context = self._resolve_parent_context(span)
         attributes = {
             GEN_AI_OPERATION_NAME: operation,
             GEN_AI_PROVIDER_NAME: GenAiProviderNameValues.OPENAI.value,
         }
         otel_span = self._tracer.start_span(
             self._set_span_name(span_data, operation),
-            context=parent_context,
+            context=set_span_in_context(parent_entry.span) if parent_entry is not None else None,
             kind=self._set_span_kind(span_data),
             attributes=attributes,
         )
-        self._otel_spans.put(span.span_id, otel_span)
-        self._tokens.put(span.span_id, context.attach(set_span_in_context(otel_span)))
+        token = context.attach(set_span_in_context(otel_span))
+        self._span_entries.put(
+            span.span_id,
+            _SpanEntry(span=otel_span, token=token, agent_content=agent_content),
+        )
 
     @override
     def on_span_end(self, span: AgentsSpan[Any]) -> None:
-        token = self._tokens.pop(span.span_id)
-        if token is not None:
-            try_detach(token)
-        otel_span = self._otel_spans.pop(span.span_id)
-        if otel_span is None:
-            self._span_parents.pop(span.span_id)
-            self._agent_content.pop(span.span_id)
+        entry = self._span_entries.pop(span.span_id)
+        span_data = span.span_data
+        if not isinstance(span_data, (AgentSpanData, FunctionSpanData, GenerationSpanData, ResponseSpanData)):
+            return
+        if entry is None or entry.token is None:
             return
 
+        try_detach(entry.token)
+        otel_span = entry.span
+
         try:
-            attributes, content = self._span_attributes(span)
-            if isinstance(span.span_data, GenerationSpanData):
-                operation = self._set_operation_name(span.span_data)
+            attributes, content = self._set_span_attributes(span, entry.agent_content)
+            if isinstance(span_data, GenerationSpanData):
+                operation = self._set_operation_name(span_data)
                 attributes[GEN_AI_OPERATION_NAME] = operation
-                otel_span.update_name(self._set_span_name(span.span_data, operation))
+                otel_span.update_name(self._set_span_name(span_data, operation))
             if content:
-                self._roll_up_agent_content(span, content)
+                self._roll_up_agent_content(entry.agent_content, content)
             otel_span.set_attributes(attributes)
 
-            if isinstance(span.span_data, ResponseSpanData):
+            if isinstance(span_data, ResponseSpanData):
                 response_model = attributes.get(GEN_AI_RESPONSE_MODEL)
                 if response_model:
                     otel_span.update_name(f"{GenAiOperationNameValues.CHAT.value} {response_model}")
@@ -178,26 +190,30 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             self._set_span_status(otel_span, span.error)
         finally:
             otel_span.end()
-            self._span_parents.pop(span.span_id)
-            self._agent_content.pop(span.span_id)
 
     @override
     def shutdown(self) -> None:
-        for token in reversed(self._tokens.pop_all()):
-            try_detach(token)
-        open_spans = list(reversed(self._otel_spans.pop_all()))
-        open_spans.extend(reversed(self._workflow_spans.pop_all()))
-        for span in open_spans:
-            if span.is_recording():
-                span.set_attribute(ERROR_TYPE, "_OTHER")
-                span.set_status(Status(StatusCode.ERROR, "Trace ended before span completion"))
-                span.end()
-        self._span_parents.clear()
-        self._agent_content.clear()
+        open_entries = list(reversed(self._span_entries.pop_all()))
+        open_entries.extend(reversed(self._workflow_entries.pop_all()))
+        for entry in open_entries:
+            if entry.token is None:
+                continue
+            try_detach(entry.token)
+            if entry.span.is_recording():
+                entry.span.set_attribute(ERROR_TYPE, "_OTHER")
+                entry.span.set_status(Status(StatusCode.ERROR, "Trace ended before span completion"))
+                entry.span.end()
 
     @override
     def force_flush(self) -> None:  # pylint: disable=no-self-use
         return None
+
+    def _resolve_parent_entry(self, span: AgentsSpan[Any]) -> Optional[_SpanEntry]:
+        if span.parent_id:
+            parent_entry = self._span_entries.get(span.parent_id)
+            if parent_entry is not None:
+                return parent_entry
+        return self._workflow_entries.get(span.trace_id)
 
     @staticmethod
     def _set_operation_name(
@@ -216,14 +232,6 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         return GenAiOperationNameValues.CHAT.value
 
     @staticmethod
-    def _set_span_kind(
-        span_data: Union[AgentSpanData, FunctionSpanData, GenerationSpanData, ResponseSpanData],
-    ) -> SpanKind:
-        if isinstance(span_data, (GenerationSpanData, ResponseSpanData)):
-            return SpanKind.CLIENT
-        return SpanKind.INTERNAL
-
-    @staticmethod
     def _set_span_name(
         span_data: Union[AgentSpanData, FunctionSpanData, GenerationSpanData, ResponseSpanData],
         operation_name: str,
@@ -234,33 +242,34 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             return f"{operation_name} {span_data.model}"
         return operation_name
 
-    def _resolve_parent_context(self, span: AgentsSpan[Any]) -> Optional[context.Context]:
-        parent_id = span.parent_id
-        visited = set()
-        while parent_id and parent_id not in visited:
-            visited.add(parent_id)
-            parent_span = self._otel_spans.get(parent_id)
-            if parent_span is not None:
-                return set_span_in_context(parent_span)
-            parent_id = self._span_parents.get(parent_id)
+    @staticmethod
+    def _set_span_kind(
+        span_data: Union[AgentSpanData, FunctionSpanData, GenerationSpanData, ResponseSpanData],
+    ) -> SpanKind:
+        if isinstance(span_data, (GenerationSpanData, ResponseSpanData)):
+            return SpanKind.CLIENT
+        return SpanKind.INTERNAL
 
-        workflow_span = self._workflow_spans.get(span.trace_id)
-        return set_span_in_context(workflow_span) if workflow_span is not None else None
-
-    def _span_attributes(self, span: AgentsSpan[Any]) -> tuple[dict[str, AttributeValue], dict[str, Any]]:
+    def _set_span_attributes(
+        self,
+        span: AgentsSpan[Any],
+        agent_content: Optional[dict[str, Any]],
+    ) -> tuple[dict[str, AttributeValue], dict[str, Any]]:
         span_data = span.span_data
         if isinstance(span_data, GenerationSpanData):
-            return self._generation_attributes(span_data)
+            return self._set_generation_attributes(span_data)
         if isinstance(span_data, ResponseSpanData):
-            return self._response_attributes(span_data)
+            return self._set_response_attributes(span_data)
         if isinstance(span_data, FunctionSpanData):
-            return self._function_attributes(span_data), {}
+            return self._set_function_attributes(span_data), {}
         if isinstance(span_data, AgentSpanData):
-            return self._agent_attributes(span.span_id, span_data), {}
+            return self._set_agent_attributes(agent_content, span_data), {}
         return {}, {}
 
     @staticmethod
-    def _generation_attributes(span_data: GenerationSpanData) -> tuple[dict[str, AttributeValue], dict[str, Any]]:
+    def _set_generation_attributes(
+        span_data: GenerationSpanData,
+    ) -> tuple[dict[str, AttributeValue], dict[str, Any]]:
         attributes: dict[str, AttributeValue] = {}
         content: dict[str, Any] = {}
         OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_REQUEST_MODEL, span_data.model)
@@ -315,7 +324,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         return attributes, content
 
     @staticmethod
-    def _response_attributes(span_data: ResponseSpanData) -> tuple[dict[str, AttributeValue], dict[str, Any]]:
+    def _set_response_attributes(span_data: ResponseSpanData) -> tuple[dict[str, AttributeValue], dict[str, Any]]:
         attributes: dict[str, AttributeValue] = {}
         response = span_data.response
         response_id = getattr(response, "id", None)
@@ -354,7 +363,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         return attributes, content
 
     @staticmethod
-    def _function_attributes(span_data: FunctionSpanData) -> dict[str, AttributeValue]:
+    def _set_function_attributes(span_data: FunctionSpanData) -> dict[str, AttributeValue]:
         attributes: dict[str, AttributeValue] = {}
         OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_TOOL_NAME, span_data.name)
         OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_TOOL_TYPE, "function")
@@ -366,10 +375,14 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         )
         return attributes
 
-    def _agent_attributes(self, span_id: str, span_data: AgentSpanData) -> dict[str, AttributeValue]:
+    def _set_agent_attributes(
+        self,
+        content: Optional[dict[str, Any]],
+        span_data: AgentSpanData,
+    ) -> dict[str, AttributeValue]:
         attributes: dict[str, AttributeValue] = {}
         self._set_attribute(attributes, GEN_AI_AGENT_NAME, span_data.name)
-        content = self._agent_content.get(span_id) or {}
+        content = content or {}
         self._set_attribute(attributes, GEN_AI_REQUEST_MODEL, content.get("request_model"))
         self._set_message_attributes(
             attributes,
@@ -379,20 +392,18 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         )
         return attributes
 
-    def _roll_up_agent_content(self, span: AgentsSpan[Any], content: dict[str, Any]) -> None:
-        parent_id = span.parent_id
-        visited = set()
-        while parent_id and parent_id not in visited:
-            visited.add(parent_id)
-            agent_content = self._agent_content.get(parent_id)
-            if agent_content is not None:
-                for key in ("input_messages", "system_instructions", "request_model"):
-                    if agent_content.get(key) is None and content.get(key) is not None:
-                        agent_content[key] = content[key]
-                if content.get("output_messages") is not None:
-                    agent_content["output_messages"] = content["output_messages"]
-                return
-            parent_id = self._span_parents.get(parent_id)
+    @staticmethod
+    def _roll_up_agent_content(
+        agent_content: Optional[dict[str, Any]],
+        content: dict[str, Any],
+    ) -> None:
+        if agent_content is None:
+            return
+        for key in ("input_messages", "system_instructions", "request_model"):
+            if agent_content.get(key) is None and content.get(key) is not None:
+                agent_content[key] = content[key]
+        if content.get("output_messages") is not None:
+            agent_content["output_messages"] = content["output_messages"]
 
     @staticmethod
     def _set_message_attributes(
