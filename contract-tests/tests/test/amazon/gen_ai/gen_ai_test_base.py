@@ -33,15 +33,6 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (  # 
 
 AGENT_FINAL_OUTPUT = "Hello, World!"
 
-_GEN_AI_ATTRIBUTE_SCHEMAS = {
-    GEN_AI_INPUT_MESSAGES: "gen-ai-input-messages",
-    GEN_AI_OUTPUT_MESSAGES: "gen-ai-output-messages",
-    GEN_AI_SYSTEM_INSTRUCTIONS: "gen-ai-system-instructions",
-    GEN_AI_TOOL_DEFINITIONS: "gen-ai-tool-definitions",
-    GEN_AI_TOOL_CALL_ARGUMENTS: "gen-ai-tool-call-arguments",
-    GEN_AI_TOOL_CALL_RESULT: "gen-ai-tool-call-result",
-}
-
 
 class GenAITestBase(ContractTestBase):
 
@@ -158,7 +149,14 @@ class GenAITestBase(ContractTestBase):
         for resource_scope_span in resource_scope_spans:
             span = resource_scope_span.span
             attrs = self._get_attributes_dict(span.attributes)
-            for attribute, schema_name in _GEN_AI_ATTRIBUTE_SCHEMAS.items():
+            for attribute, schema_name in (
+                (GEN_AI_INPUT_MESSAGES, "gen-ai-input-messages"),
+                (GEN_AI_OUTPUT_MESSAGES, "gen-ai-output-messages"),
+                (GEN_AI_SYSTEM_INSTRUCTIONS, "gen-ai-system-instructions"),
+                (GEN_AI_TOOL_DEFINITIONS, "gen-ai-tool-definitions"),
+                (GEN_AI_TOOL_CALL_ARGUMENTS, "gen-ai-tool-call-arguments"),
+                (GEN_AI_TOOL_CALL_RESULT, "gen-ai-tool-call-result"),
+            ):
                 if attribute in attrs:
                     schema_value = self._parse_json_attribute(attrs, attribute, span.name)
                     self.assertIsNotNone(schema_value, f"{span.name}: expected {attribute} to contain data")
