@@ -31,6 +31,7 @@ from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSp
 from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import (
     CompactConsoleLogRecordExporter,
 )
+from amazon.opentelemetry.distro.gen_ai_http_span_collapsing import GenAiHttpDropSampler
 from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAiNestedClientSpanProcessor
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler._aws_xray_adaptive_sampling_config import (
@@ -507,9 +508,11 @@ def _customize_sampler(sampler: Sampler) -> Sampler:
         if parsed_config is not None:
             sampler.set_adaptive_sampling_config(parsed_config)
 
-    if not _is_application_signals_enabled():
-        return sampler
-    return AlwaysRecordSampler(sampler)
+    if _is_application_signals_enabled():
+        sampler = AlwaysRecordSampler(sampler)
+    if is_agent_observability_enabled():
+        sampler = GenAiHttpDropSampler(sampler)
+    return sampler
 
 
 def _customize_span_exporter(span_exporter: SpanExporter, resource: Resource, sampler: Sampler = None) -> SpanExporter:

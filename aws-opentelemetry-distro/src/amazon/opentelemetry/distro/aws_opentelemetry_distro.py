@@ -74,6 +74,7 @@ from amazon.opentelemetry.distro._utils import (
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import APPLICATION_SIGNALS_ENABLED_CONFIG
 from amazon.opentelemetry.distro.debugger.debugger import initialize_debugger
+from amazon.opentelemetry.distro.gen_ai_http_span_collapsing import GenAiLlmContextPropagator
 from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_instrumentation_patches
 from opentelemetry import propagate
 from opentelemetry.distro import OpenTelemetryDistro
@@ -197,6 +198,11 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             # It's a hack from our end until OpenTelemetry fixes this behavior for distros to
             # override the default propagators.
             importlib.reload(propagate)
+
+        if is_agent_observability_enabled():
+            current_propagator = propagate.get_global_textmap()
+            if not isinstance(current_propagator, GenAiLlmContextPropagator):
+                propagate.set_global_textmap(GenAiLlmContextPropagator(current_propagator))
 
         os.environ.setdefault(OTEL_PYTHON_ID_GENERATOR, "xray")
         os.environ.setdefault(

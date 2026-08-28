@@ -11,6 +11,7 @@ from uuid import UUID
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import convert_to_messages
 
+from amazon.opentelemetry.distro.gen_ai_http_span_collapsing import attach_llm_span_context
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     PROVIDER_MAP,
     DictWithLock,
@@ -20,7 +21,6 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     to_tool_attribute_value,
     try_detach,
 )
-from opentelemetry import context
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_NAME,
     GEN_AI_INPUT_MESSAGES,
@@ -565,7 +565,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         else:
             span = self.tracer.start_span(span_name, kind=kind)
 
-        token = context.attach(set_span_in_context(span))
+        token = attach_llm_span_context(span, collapse_http_span=kind == SpanKind.CLIENT)
         self.run_id_to_span_map.put(run_id, (span, token))
         return span
 
