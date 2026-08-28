@@ -405,7 +405,56 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         tool_defs = json.loads(span._attributes[GEN_AI_TOOL_DEFINITIONS])
         self.assertIsInstance(tool_defs, list)
         self.assertEqual(len(tool_defs), 1)
-        self.assertEqual(tool_defs[0]["function"]["name"], "get_weather")
+        self.assertEqual(tool_defs[0]["type"], "function")
+        self.assertEqual(tool_defs[0]["name"], "get_weather")
+        validate_otel_genai_schema(tool_defs, "gen-ai-tool-definitions")
+        otel_span.end()
+
+    def test_process_input_with_bedrock_tool_config(self):
+        from llama_index.llms.openai import OpenAI
+
+        llm = OpenAI(model="gpt-4", api_key="fake")
+        bound_args = Mock()
+        bound_args.kwargs = {
+            "tools": {
+                "tools": [
+                    {
+                        "toolSpec": {
+                            "name": "get_weather",
+                            "description": "Get the weather.",
+                            "inputSchema": {
+                                "json": {
+                                    "type": "object",
+                                    "properties": {"location": {"type": "string"}},
+                                    "required": ["location"],
+                                }
+                            },
+                        }
+                    }
+                ],
+                "toolChoice": {"auto": {}},
+            }
+        }
+        otel_span = self.tracer.start_span("test")
+        span = self._Span(otel_span=otel_span)
+        span.process_input(llm, bound_args)
+        tool_defs = json.loads(span._attributes[GEN_AI_TOOL_DEFINITIONS])
+        self.assertEqual(
+            tool_defs,
+            [
+                {
+                    "type": "function",
+                    "name": "get_weather",
+                    "description": "Get the weather.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"location": {"type": "string"}},
+                        "required": ["location"],
+                    },
+                }
+            ],
+        )
+        validate_otel_genai_schema(tool_defs, "gen-ai-tool-definitions")
         otel_span.end()
 
     def test_process_input_tool_call_arguments(self):
@@ -974,7 +1023,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         handler.prepare_to_exit_span(
             id_="FunctionTool.call-1", bound_args=self._make_bound_args(), instance=tool, result=tool_output
         )
-        self.assertEqual(span._attributes.get(GEN_AI_TOOL_CALL_RESULT), "42")
+        self.assertEqual(span._attributes[GEN_AI_TOOL_CALL_RESULT], "42")
 
     def test_prepare_to_drop_span_returns_none_when_suppressed(self):
         """Test that prepare_to_drop_span returns None when suppressed."""
@@ -1206,12 +1255,13 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         otel_span.end()
 
     def test_process_input_tool_without_to_openai_tool(self):
-        """Test process_input falls back to str() when tool has no to_openai_tool."""
+        """Test process_input builds an OTel tool definition directly from tool metadata."""
         from llama_index.llms.openai import OpenAI
 
         tool = Mock()
-        tool.metadata = Mock()
-        del tool.metadata.to_openai_tool  # Ensure to_openai_tool doesn't exist
+        tool.metadata = Mock(spec=["name", "description"])
+        tool.metadata.name = "custom_tool"
+        tool.metadata.description = "A custom tool"
         bound_args = Mock()
         bound_args.kwargs = {"tools": [tool]}
         llm = OpenAI(model="gpt-4", api_key="fake")
@@ -1219,6 +1269,12 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         span = self._Span(otel_span=otel_span)
         span.process_input(llm, bound_args)
         self.assertIn(GEN_AI_TOOL_DEFINITIONS, span._attributes)
+        tool_defs = json.loads(span._attributes[GEN_AI_TOOL_DEFINITIONS])
+        self.assertEqual(
+            tool_defs,
+            [{"type": "function", "name": "custom_tool", "description": "A custom tool"}],
+        )
+        validate_otel_genai_schema(tool_defs, "gen-ai-tool-definitions")
         otel_span.end()
 
     def test_context_token_detach_exception_handled(self):
@@ -1274,11 +1330,13 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         otel_span.end()
 
     def test_process_input_tool_exception_fallback(self):
-        """Test process_input falls back to str() when tool.metadata.to_openai_tool raises."""
+        """Test process_input uses tool metadata when to_openai_tool raises."""
         from llama_index.llms.openai import OpenAI
 
         tool = Mock()
-        tool.metadata = Mock()
+        tool.metadata = Mock(spec=["name", "description", "to_openai_tool"])
+        tool.metadata.name = "custom_tool"
+        tool.metadata.description = "A custom tool"
         tool.metadata.to_openai_tool = Mock(side_effect=RuntimeError("fail"))
         bound_args = Mock()
         bound_args.kwargs = {"tools": [tool]}
@@ -1287,6 +1345,12 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         span = self._Span(otel_span=otel_span)
         span.process_input(llm, bound_args)
         self.assertIn(GEN_AI_TOOL_DEFINITIONS, span._attributes)
+        tool_defs = json.loads(span._attributes[GEN_AI_TOOL_DEFINITIONS])
+        self.assertEqual(
+            tool_defs,
+            [{"type": "function", "name": "custom_tool", "description": "A custom tool"}],
+        )
+        validate_otel_genai_schema(tool_defs, "gen-ai-tool-definitions")
         otel_span.end()
 
     # ---- OTel GenAI Schema Validation Tests ----
