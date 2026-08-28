@@ -1268,6 +1268,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
         span.process_input(llm, bound_args)
+        self.assertIn(GEN_AI_TOOL_DEFINITIONS, span._attributes)
         tool_defs = json.loads(span._attributes[GEN_AI_TOOL_DEFINITIONS])
         self.assertEqual(
             tool_defs,
@@ -1343,6 +1344,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
         span.process_input(llm, bound_args)
+        self.assertIn(GEN_AI_TOOL_DEFINITIONS, span._attributes)
         tool_defs = json.loads(span._attributes[GEN_AI_TOOL_DEFINITIONS])
         self.assertEqual(
             tool_defs,
