@@ -168,15 +168,18 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             ),
         )
 
-        ctx = set_span_in_context(otel_span, parent.context if parent else None)
+        span_token = context_api.attach(set_span_in_context(otel_span, parent.context if parent else None))
+        http_client_span_collapsing_token = None
         if kind == SpanKind.CLIENT:
-            ctx = set_http_client_span_collapsing_in_context(otel_span, ctx)
-        token = context_api.attach(ctx)
+            http_client_span_collapsing_token = context_api.attach(
+                set_http_client_span_collapsing_in_context(otel_span)
+            )
 
         span = _Span(
             otel_span=otel_span,
             parent=parent,
-            context_token=token,
+            context_token=span_token,
+            http_client_span_collapsing_token=http_client_span_collapsing_token,
             id_=id_,
             parent_id=parent_span_id,
         )

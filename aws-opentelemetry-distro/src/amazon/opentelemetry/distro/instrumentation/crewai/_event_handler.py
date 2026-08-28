@@ -3,6 +3,7 @@
 
 import logging
 import re
+from contextvars import Token
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
@@ -75,7 +76,8 @@ _LOG = logging.getLogger(__name__)
 @dataclass
 class _SpanEntry:
     span: trace.Span
-    token: Any
+    span_token: Token
+    http_client_span_collapsing_token: Optional[Token] = None
 
 
 class _EventBusEmitWrapper:
@@ -445,11 +447,18 @@ class OpenTelemetryEventHandler:
                 parent_ctx = trace.set_span_in_context(parent_entry.span)
 
         span = self._tracer.start_span(name, kind=kind, attributes=attributes, context=parent_ctx)
-        ctx = trace.set_span_in_context(span)
+        span_token = context.attach(trace.set_span_in_context(span))
+        http_client_span_collapsing_token = None
         if kind == SpanKind.CLIENT:
-            ctx = set_http_client_span_collapsing_in_context(span, ctx)
-        token = context.attach(ctx)
-        self._event_id_to_span.put(event_id, _SpanEntry(span=span, token=token))
+            http_client_span_collapsing_token = context.attach(set_http_client_span_collapsing_in_context(span))
+        self._event_id_to_span.put(
+            event_id,
+            _SpanEntry(
+                span=span,
+                span_token=span_token,
+                http_client_span_collapsing_token=http_client_span_collapsing_token,
+            ),
+        )
 
     def _end_span(
         self,
@@ -471,7 +480,9 @@ class OpenTelemetryEventHandler:
             else:
                 entry.span.set_status(Status(StatusCode.OK))
             entry.span.end()
-            context.detach(entry.token)
+            if entry.http_client_span_collapsing_token is not None:
+                context.detach(entry.http_client_span_collapsing_token)
+            context.detach(entry.span_token)
 
     @staticmethod
     def _extract_provider_and_model(llm: Any) -> Tuple[Optional[str], Optional[str]]:

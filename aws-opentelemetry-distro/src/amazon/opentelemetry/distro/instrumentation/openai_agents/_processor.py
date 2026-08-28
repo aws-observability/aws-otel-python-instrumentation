@@ -88,6 +88,7 @@ _logger = logging.getLogger(__name__)
 class _SpanEntry:
     span: Span
     token: Optional[Token] = None
+    http_client_span_collapsing_token: Optional[Token] = None
     agent_content: Optional["_AgentContent"] = None
     error: Any = None
 
@@ -172,13 +173,18 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             kind=kind,
             attributes=attributes,
         )
-        ctx = set_span_in_context(otel_span)
+        span_token = context.attach(set_span_in_context(otel_span))
+        http_client_span_collapsing_token = None
         if kind == SpanKind.CLIENT:
-            ctx = set_http_client_span_collapsing_in_context(otel_span, ctx)
-        token = context.attach(ctx)
+            http_client_span_collapsing_token = context.attach(set_http_client_span_collapsing_in_context(otel_span))
         self._openai_span_id_to_otel_span_entry.put(
             span.span_id,
-            _SpanEntry(span=otel_span, token=token, agent_content=agent_content),
+            _SpanEntry(
+                span=otel_span,
+                token=span_token,
+                http_client_span_collapsing_token=http_client_span_collapsing_token,
+                agent_content=agent_content,
+            ),
         )
 
     @override
@@ -192,6 +198,8 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         if entry is None or entry.token is None:
             return
 
+        if entry.http_client_span_collapsing_token is not None:
+            try_detach(entry.http_client_span_collapsing_token)
         try_detach(entry.token)
         otel_span = entry.span
 
@@ -245,6 +253,8 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
     def _close_incomplete_span(entry: _SpanEntry) -> None:
         if entry.token is None:
             return
+        if entry.http_client_span_collapsing_token is not None:
+            try_detach(entry.http_client_span_collapsing_token)
         try_detach(entry.token)
         if entry.span.is_recording():
             entry.span.set_attribute(ERROR_TYPE, "_OTHER")
