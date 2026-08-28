@@ -38,29 +38,26 @@ def _tool_argument(name: str, schema: Dict[str, Any]) -> Any:
             if option.get("type") != "null":
                 return _tool_argument(name, option)
 
-    if value_type == "integer":
-        return 3
-    if value_type == "number":
-        return 3.5
-    if value_type == "boolean":
-        return True
+    if value_type in ("integer", "number", "boolean"):
+        return {"integer": 3, "number": 3.5, "boolean": True}[value_type]
     if value_type == "array":
-        return [_tool_argument(name, schema.get("items", {}))]
-    if value_type == "object":
-        return _tool_arguments(schema.get("properties", {}))
-
-    return {
-        "audience": "developers",
-        "bucket": "agent-results",
-        "channel": "email",
-        "city": "Seattle",
-        "content": "Hello, World!",
-        "key": "results/hello-world.txt",
-        "language": "English",
-        "message": "Hello, World!",
-        "name": "World",
-        "style": "celebratory",
-    }.get(name, f"example-{name}")
+        value = [_tool_argument(name, schema.get("items", {}))]
+    elif value_type == "object":
+        value = _tool_arguments(schema.get("properties", {}))
+    else:
+        value = {
+            "audience": "developers",
+            "bucket": "agent-results",
+            "channel": "email",
+            "city": "Seattle",
+            "content": "Hello, World!",
+            "key": "results/hello-world.txt",
+            "language": "English",
+            "message": "Hello, World!",
+            "name": "World",
+            "style": "celebratory",
+        }.get(name, f"example-{name}")
+    return value
 
 
 def reset_llm_call_count():
