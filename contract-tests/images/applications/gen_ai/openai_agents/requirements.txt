@@ -1,5 +1,7 @@
 openai-agents[litellm]>=0.22.0
 boto3
+starlette
+uvicorn
 # LiteLLM 1.97.0 leaves its Message model incompletely defined on Python 3.10.
 # LiteLLM 1.98.0 imports NotRequired from typing, which is unavailable on Python 3.10.
 # TODO: Remove this cap when https://github.com/BerriAI/litellm/issues/38076 is resolved.

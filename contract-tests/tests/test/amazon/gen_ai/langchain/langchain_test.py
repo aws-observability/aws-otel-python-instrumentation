@@ -19,10 +19,19 @@ class LangChainTest(GenAITestBase):
         return "aws-application-signals-tests-langchain-app"
 
     def test_langchain_single_agent(self):
-        self._do_test_for_each_llm("langchain/agent")
+        self._do_test_for_each_llm(
+            "langchain/agent",
+            expected_tool_count=4,
+            expected_s3_call_count=1,
+        )
 
     def test_langchain_multi_agent(self):
-        self._do_test_for_each_llm("langchain/multiagent", expected_agent_count=2)
+        self._do_test_for_each_llm(
+            "langchain/multiagent",
+            expected_agent_count=2,
+            expected_tool_count=4,
+            expected_s3_call_count=2,
+        )
 
     @override
     def _assert_invoke_agent_spans(self, invoke_agent_spans: list, expected_count: int = 1):

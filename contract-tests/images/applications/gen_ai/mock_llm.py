@@ -6,8 +6,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from typing import Any, Dict, List, Tuple
 
+import boto3
+import uvicorn
+from botocore.config import Config
+from typing_extensions import override
+
 MOCK_LLM_PORT: int = 8081
 MOCK_BEDROCK_PORT: int = 8082
+MOCK_AWS_PORT: int = 8083
 APP_PORT: int = 8080
 
 _llm_call_count = 0
@@ -45,8 +51,11 @@ def _tool_argument(name: str, schema: Dict[str, Any]) -> Any:
 
     return {
         "audience": "developers",
+        "bucket": "agent-results",
         "channel": "email",
         "city": "Seattle",
+        "content": "Hello, World!",
+        "key": "results/hello-world.txt",
         "language": "English",
         "message": "Hello, World!",
         "name": "World",
@@ -62,6 +71,30 @@ def reset_llm_call_count():
 def reset_bedrock_call_count():
     global _bedrock_call_count  # pylint: disable=global-statement
     _bedrock_call_count = 0
+
+
+def store_in_s3(bucket: str, key: str, content: str, metadata: Dict[str, str]) -> str:
+    """Store content in the shared fake S3 service."""
+    s3_client = boto3.client(
+        "s3",
+        endpoint_url=f"http://localhost:{MOCK_AWS_PORT}",
+        region_name="us-east-1",
+        aws_access_key_id="fake-key",
+        aws_secret_access_key="fake-key",
+        config=Config(
+            retries={"max_attempts": 0},
+            connect_timeout=3,
+            read_timeout=3,
+            s3={"addressing_style": "path"},
+        ),
+    )
+    response = s3_client.put_object(Bucket=bucket, Key=key, Body=content.encode(), Metadata=metadata)
+    return f"Stored {key} in {bucket} with ETag {response['ETag']}"
+
+
+def store_agent_output(bucket: str, key: str, content: str, tags: List[str]) -> str:
+    """Store an agent's output and classification tags in Amazon S3."""
+    return store_in_s3(bucket, key, content, {"tags": ",".join(tags)})
 
 
 class MockOpenAILLMHandler(BaseHTTPRequestHandler):
@@ -189,8 +222,27 @@ class MockBedrockHandler(BaseHTTPRequestHandler):
         pass
 
 
-def start_servers(request_handler_class):
-    """Start mock model servers and application server."""
+class MockAWSS3Handler(BaseHTTPRequestHandler):
+    @override
+    # pylint: disable=invalid-name
+    def do_PUT(self) -> None:
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length:
+            self.rfile.read(content_length)
+
+        self.send_response(200)
+        self.send_header("ETag", '"mock-etag"')
+        self.send_header("x-amz-request-id", "mock-aws-request")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    @override
+    def log_message(self, format, *args):  # pylint: disable=redefined-builtin
+        pass
+
+
+def start_servers(application: Any) -> None:
+    """Start mock model, AWS, and application servers."""
     mock_llm_server = ThreadingHTTPServer(("0.0.0.0", MOCK_LLM_PORT), MockOpenAILLMHandler)
     mock_llm_thread = Thread(target=mock_llm_server.serve_forever, daemon=True)
     mock_llm_thread.start()
@@ -199,12 +251,11 @@ def start_servers(request_handler_class):
     mock_bedrock_thread = Thread(target=mock_bedrock_server.serve_forever, daemon=True)
     mock_bedrock_thread.start()
 
-    server_address: Tuple[str, int] = ("0.0.0.0", APP_PORT)
-    server = ThreadingHTTPServer(server_address, request_handler_class)
-    atexit.register(server.shutdown)
+    mock_aws_server = ThreadingHTTPServer(("0.0.0.0", MOCK_AWS_PORT), MockAWSS3Handler)
+    mock_aws_thread = Thread(target=mock_aws_server.serve_forever, daemon=True)
+    mock_aws_thread.start()
+
     atexit.register(mock_llm_server.shutdown)
     atexit.register(mock_bedrock_server.shutdown)
-    server_thread = Thread(target=server.serve_forever)
-    server_thread.start()
-    print("Ready")
-    server_thread.join()
+    atexit.register(mock_aws_server.shutdown)
+    uvicorn.run(application, host="0.0.0.0", port=APP_PORT, log_level="info")

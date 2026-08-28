@@ -1,12 +1,21 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 import os
-from http.server import BaseHTTPRequestHandler
 
 from crewai import LLM, Agent, Crew, Task
 from crewai.tools import tool
-from mock_llm import MOCK_BEDROCK_PORT, MOCK_LLM_PORT, reset_bedrock_call_count, reset_llm_call_count, start_servers
-from typing_extensions import override
+from mock_llm import (
+    MOCK_BEDROCK_PORT,
+    MOCK_LLM_PORT,
+    reset_bedrock_call_count,
+    reset_llm_call_count,
+    start_servers,
+    store_agent_output,
+)
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import Response
+from starlette.routing import Route
 
 os.environ["AWS_ACCESS_KEY_ID"] = "fake-key"
 os.environ["AWS_SECRET_ACCESS_KEY"] = "fake-key"
@@ -16,25 +25,23 @@ os.environ["OPENAI_API_KEY"] = "fake-key"
 os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
 
 
-class RequestHandler(BaseHTTPRequestHandler):
-    main_status: int = 200
+class RequestHandler:
+    def __init__(self, path: str) -> None:
+        self.path = path
 
-    @override
-    # pylint: disable=invalid-name
-    def do_GET(self):
+    def handle(self) -> Response:
         if "crewai" in self.path:
             if "multiagent" in self.path:
                 self._run_multi_agent()
             elif "agent" in self.path:
                 self._run_single_agent()
             else:
-                RequestHandler.main_status = 404
-        self.send_response_only(self.main_status)
-        self.end_headers()
+                return Response(status_code=404)
+            return Response(status_code=200)
+        return Response(status_code=404)
 
     def _run_single_agent(self) -> None:
         self._reset_model_call_count()
-        RequestHandler.main_status = 200
 
         @tool
         def get_greeting(name: str) -> str:
@@ -42,12 +49,13 @@ class RequestHandler(BaseHTTPRequestHandler):
             return f"Hello, {name}!"
 
         llm = self._create_llm()
+        store_agent_output_tool = tool(store_agent_output)
         agent = Agent(
             role="Greeter",
             goal="Greet the user",
             backstory="You are a friendly greeter.",
             llm=llm,
-            tools=[get_greeting],
+            tools=[get_greeting, store_agent_output_tool],
             verbose=True,
         )
         task = Task(description="Greet the user warmly.", expected_output="A friendly greeting.", agent=agent)
@@ -55,7 +63,6 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _run_multi_agent(self) -> None:
         self._reset_model_call_count()
-        RequestHandler.main_status = 200
 
         @tool
         def get_greeting(name: str) -> str:
@@ -68,13 +75,15 @@ class RequestHandler(BaseHTTPRequestHandler):
             return f"*** {message} ***"
 
         llm = self._create_llm()
+        greeter_store_agent_output = tool(store_agent_output)
+        formatter_store_agent_output = tool(store_agent_output)
 
         greeter = Agent(
             role="Greeter",
             goal="Greet the user",
             backstory="You are a friendly greeter.",
             llm=llm,
-            tools=[get_greeting],
+            tools=[get_greeting, greeter_store_agent_output],
             verbose=True,
         )
         formatter = Agent(
@@ -82,7 +91,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             goal="Format messages nicely",
             backstory="You are a message formatter.",
             llm=llm,
-            tools=[format_message],
+            tools=[format_message, formatter_store_agent_output],
             verbose=True,
         )
 
@@ -113,5 +122,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             reset_llm_call_count()
 
 
+def handle_request(request: Request) -> Response:
+    return RequestHandler(request.url.path).handle()
+
+
+app = Starlette(routes=[Route("/{path:path}", handle_request, methods=["GET"])])
+
+
 if __name__ == "__main__":
-    start_servers(RequestHandler)
+    start_servers(app)

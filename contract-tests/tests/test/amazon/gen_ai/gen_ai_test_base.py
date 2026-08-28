@@ -4,6 +4,7 @@ import json
 from typing import Any, Dict, List, Optional
 
 from mock_collector_client import ResourceScopeSpan
+from requests import Response, request
 from typing_extensions import override
 
 from amazon.base.contract_test_base import ContractTestBase
@@ -32,11 +33,46 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (  # 
     GenAiOperationNameValues,
     GenAiProviderNameValues,
 )
+from opentelemetry.semconv.trace import SpanAttributes
 
 AGENT_FINAL_OUTPUT = "Hello, World!"
+SESSION_ID = "gen-ai-contract-test-session"
 
 
 class GenAITestBase(ContractTestBase):
+
+    @override
+    def get_application_extra_environment_variables(self) -> Dict[str, str]:
+        return {
+            "AGENT_OBSERVABILITY_ENABLED": "true",
+            "OTEL_AWS_APPLICATION_SIGNALS_ENABLED": "false",
+            "OTEL_AWS_APPLICATION_SIGNALS_RUNTIME_ENABLED": "false",
+            "OTEL_AWS_SERVICE_EVENTS_ENABLED": "false",
+            "OTEL_LOGS_EXPORTER": "none",
+            "OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS": "false",
+        }
+
+    @override
+    def get_application_wait_pattern(self) -> str:
+        return "Uvicorn running on"
+
+    @override
+    def do_test_requests(
+        self, path: str, method: str, status_code: int, expected_error: int, expected_fault: int, **kwargs
+    ) -> None:
+        response = self.send_request(method, path)
+        self.assertEqual(status_code, response.status_code)
+
+        resource_scope_spans = self.mock_collector_client.get_traces()
+        self._assert_aws_span_attributes(resource_scope_spans, path, **kwargs)
+        self._assert_semantic_conventions_span_attributes(resource_scope_spans, method, path, status_code, **kwargs)
+
+    @override
+    def send_request(self, method, path) -> Response:
+        address = self.application.get_container_host_ip()
+        port = self.application.get_exposed_port(self.get_application_port())
+        url = f"http://{address}:{port}/{path}"
+        return request(method, url, headers={"baggage": f"session.id={SESSION_ID}"}, timeout=20)
 
     def _do_test_for_each_llm(self, path: str, **kwargs) -> None:
         # Every model-backed scenario MUST run unchanged against both supported LLM providers.
@@ -65,7 +101,34 @@ class GenAITestBase(ContractTestBase):
 
     @override
     def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs) -> None:
-        pass
+        expected_s3_call_count = kwargs.get("expected_s3_call_count", 0)
+        spans = [resource_scope_span.span for resource_scope_span in resource_scope_spans]
+
+        # Every span created for the inbound request MUST retain the session identifier extracted from W3C baggage.
+        for span in spans:
+            self._assert_str_attribute(self._get_attributes_dict(span.attributes), "session.id", SESSION_ID)
+
+        if expected_s3_call_count:
+            store_tool_spans = []
+            for span in spans:
+                attrs = self._get_attributes_dict(span.attributes)
+                if attrs.get(GEN_AI_TOOL_NAME) and attrs[GEN_AI_TOOL_NAME].string_value == "store_agent_output":
+                    store_tool_spans.append(span)
+
+            s3_spans = [span for span in spans if span.name == "S3.PutObject"]
+
+            # Every tested agent MUST execute the shared storage tool and emit one downstream S3 span.
+            self.assertEqual(len(store_tool_spans), expected_s3_call_count)
+            self.assertEqual(len(s3_spans), expected_s3_call_count)
+
+            # Each S3 call MUST be a direct child of the store_agent_output tool that initiated it.
+            self.assertEqual(
+                {span.parent_span_id for span in s3_spans},
+                {span.span_id for span in store_tool_spans},
+            )
+            for span in s3_spans:
+                attrs = self._get_attributes_dict(span.attributes)
+                self._assert_str_attribute(attrs, SpanAttributes.AWS_S3_BUCKET, "agent-results")
 
     @override
     def _assert_metric_attributes(self, resource_scope_metrics, metric_name: str, expected_sum: int, **kwargs) -> None:

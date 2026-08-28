@@ -48,6 +48,7 @@ class LlamaIndexTest(GenAITestBase):
         self._do_test_for_each_llm(
             "llamaindex/agent",
             test_type="agent",
+            expected_s3_call_count=1,
         )
 
     def test_llamaindex_workflow(self):
@@ -55,6 +56,7 @@ class LlamaIndexTest(GenAITestBase):
         self._do_test_for_each_llm(
             "llamaindex/workflow",
             test_type="workflow",
+            expected_s3_call_count=2,
         )
 
     def test_llamaindex_chat(self):
@@ -88,10 +90,6 @@ class LlamaIndexTest(GenAITestBase):
             "llamaindex/tool",
             test_type="tool",
         )
-
-    @override
-    def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs) -> None:
-        pass
 
     @override
     def _assert_semantic_conventions_span_attributes(
@@ -165,7 +163,11 @@ class LlamaIndexTest(GenAITestBase):
                 self.assertIn(GEN_AI_TOOL_NAME, attrs)
                 tool_name = attrs[GEN_AI_TOOL_NAME].string_value
                 tool_names.add(tool_name)
-                self.assertIn(tool_name, ["get_greeting", "multiply"], f"Unexpected tool name: {tool_name}")
+                self.assertIn(
+                    tool_name,
+                    ["get_greeting", "multiply", "store_agent_output"],
+                    f"Unexpected tool name: {tool_name}",
+                )
 
                 self.assertIn(GEN_AI_TOOL_DESCRIPTION, attrs)
                 description = attrs[GEN_AI_TOOL_DESCRIPTION].string_value

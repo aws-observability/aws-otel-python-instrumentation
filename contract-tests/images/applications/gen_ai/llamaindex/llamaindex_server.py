@@ -3,7 +3,6 @@
 import asyncio
 import os
 import traceback
-from http.server import BaseHTTPRequestHandler
 from typing import Union
 
 from llama_index.core import Document, Settings, VectorStoreIndex
@@ -13,8 +12,18 @@ from llama_index.core.embeddings import MockEmbedding
 from llama_index.core.tools import FunctionTool
 from llama_index.llms.bedrock_converse import BedrockConverse
 from llama_index.llms.openai import OpenAI
-from mock_llm import MOCK_BEDROCK_PORT, MOCK_LLM_PORT, reset_bedrock_call_count, reset_llm_call_count, start_servers
-from typing_extensions import override
+from mock_llm import (
+    MOCK_BEDROCK_PORT,
+    MOCK_LLM_PORT,
+    reset_bedrock_call_count,
+    reset_llm_call_count,
+    start_servers,
+    store_agent_output,
+)
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import Response
+from starlette.routing import Route
 
 os.environ["AWS_ACCESS_KEY_ID"] = "fake-key"
 os.environ["AWS_SECRET_ACCESS_KEY"] = "fake-key"
@@ -22,15 +31,17 @@ os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 os.environ["OPENAI_API_KEY"] = "fake-key"
 
 
-class RequestHandler(BaseHTTPRequestHandler):
-    main_status: int = 200
+class RequestHandler:
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self.main_status = 200
 
-    @override
-    # pylint: disable=invalid-name
-    def do_GET(self):
+    def handle(self) -> Response:
         if self.in_path("llamaindex"):
             self._handle_llamaindex_request()
-        self._end_request(self.main_status)
+        else:
+            self.main_status = 404
+        return Response(status_code=self.main_status)
 
     def in_path(self, sub_path: str) -> bool:
         return sub_path in self.path
@@ -49,11 +60,11 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif self.in_path("tool"):
             self._run_tool_call()
         else:
-            set_main_status(404)
+            self.main_status = 404
 
     def _run_agent(self) -> None:
         self._reset_model_call_count()
-        set_main_status(200)
+        self.main_status = 200
 
         try:
 
@@ -66,7 +77,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             llm = self._create_llm()
 
             agent = FunctionAgent(
-                tools=[multiply, get_greeting],
+                tools=[multiply, get_greeting, store_agent_output],
                 llm=llm,
                 name="TestAgent",
                 description="A test agent that greets and multiplies.",
@@ -87,7 +98,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _run_workflow(self) -> None:
         self._reset_model_call_count()
-        set_main_status(200)
+        self.main_status = 200
 
         try:
 
@@ -100,7 +111,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             llm = self._create_llm()
 
             greeter = FunctionAgent(
-                tools=[get_greeting],
+                tools=[get_greeting, store_agent_output],
                 llm=llm,
                 name="Greeter",
                 description="Greets people by name.",
@@ -109,7 +120,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 streaming=False,
             )
             calculator = FunctionAgent(
-                tools=[multiply],
+                tools=[multiply, store_agent_output],
                 llm=llm,
                 name="Calculator",
                 description="Multiplies numbers.",
@@ -121,7 +132,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             )
 
             async def run_workflow():
-                return await workflow.run(user_msg="Please greet the world")
+                workflow_response = await workflow.run(user_msg="Please greet the world")
+                await calculator.run("Multiply 3.5 by 3.5 and store the result")
+                return workflow_response
 
             response = asyncio.run(run_workflow())
             print(f"Workflow response: {response}")
@@ -132,7 +145,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _run_chat(self) -> None:
         self._reset_model_call_count()
-        set_main_status(200)
+        self.main_status = 200
 
         try:
             llm = self._create_llm()
@@ -150,7 +163,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _run_query(self) -> None:
         self._reset_model_call_count()
-        set_main_status(200)
+        self.main_status = 200
 
         try:
             llm = self._create_llm()
@@ -173,8 +186,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             print(f"Error in _run_query: {exc}")
             traceback.print_exc()
 
-    def _run_embedding(self) -> None:  # pylint: disable=no-self-use
-        set_main_status(200)
+    def _run_embedding(self) -> None:
+        self.main_status = 200
 
         try:
             embed_model = MockEmbedding(embed_dim=384)
@@ -188,7 +201,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _run_tool_call(self) -> None:
         self._reset_model_call_count()
-        set_main_status(200)
+        self.main_status = 200
 
         try:
 
@@ -238,18 +251,13 @@ class RequestHandler(BaseHTTPRequestHandler):
         else:
             reset_llm_call_count()
 
-    def _end_request(self, status_code: int):
-        self.send_response_only(status_code)
-        self.end_headers()
+
+def handle_request(request: Request) -> Response:
+    return RequestHandler(request.url.path).handle()
 
 
-def set_main_status(status: int) -> None:
-    RequestHandler.main_status = status
-
-
-def main() -> None:
-    start_servers(RequestHandler)
+app = Starlette(routes=[Route("/{path:path}", handle_request, methods=["GET"])])
 
 
 if __name__ == "__main__":
-    main()
+    start_servers(app)

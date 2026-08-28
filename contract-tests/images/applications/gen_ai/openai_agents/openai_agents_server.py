@@ -1,12 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-import atexit
 import os
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Thread
 from typing import List, Union
 
-import boto3
 from agents import (
     Agent,
     Model,
@@ -18,12 +14,19 @@ from agents import (
     set_tracing_disabled,
 )
 from agents.extensions.models.litellm_model import LitellmModel
-from botocore.config import Config
-from mock_llm import MOCK_BEDROCK_PORT, MOCK_LLM_PORT, reset_bedrock_call_count, reset_llm_call_count, start_servers
+from mock_llm import (
+    MOCK_BEDROCK_PORT,
+    MOCK_LLM_PORT,
+    reset_bedrock_call_count,
+    reset_llm_call_count,
+    start_servers,
+    store_agent_output,
+)
 from openai import AsyncOpenAI
-from typing_extensions import override
-
-MOCK_AWS_PORT = 8083
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import Response
+from starlette.routing import Route
 
 os.environ["AWS_ACCESS_KEY_ID"] = "fake-key"
 os.environ["AWS_SECRET_ACCESS_KEY"] = "fake-key"
@@ -39,44 +42,23 @@ set_default_openai_api("chat_completions")
 set_tracing_disabled(False)
 
 
-class MockAWSS3Handler(BaseHTTPRequestHandler):
-    @override
-    # pylint: disable=invalid-name
-    def do_PUT(self) -> None:
-        content_length = int(self.headers.get("Content-Length", 0))
-        if content_length:
-            self.rfile.read(content_length)
+class RequestHandler:
+    def __init__(self, path: str) -> None:
+        self.path = path
 
-        self.send_response(200)
-        self.send_header("ETag", '"mock-etag"')
-        self.send_header("x-amz-request-id", "mock-aws-request")
-        self.send_header("Content-Length", "0")
-        self.end_headers()
-
-    @override
-    def log_message(self, format, *args):  # pylint: disable=redefined-builtin
-        pass
-
-
-class RequestHandler(BaseHTTPRequestHandler):
-    main_status: int = 200
-
-    @override
-    # pylint: disable=invalid-name
-    def do_GET(self):
+    def handle(self) -> Response:
         if "openai_agents" in self.path:
             if "multiagent" in self.path:
                 self._run_multi_agent()
             elif "agent" in self.path:
                 self._run_single_agent()
             else:
-                RequestHandler.main_status = 404
-        self.send_response_only(self.main_status)
-        self.end_headers()
+                return Response(status_code=404)
+            return Response(status_code=200)
+        return Response(status_code=404)
 
     def _run_single_agent(self) -> None:
         self._reset_model_call_count()
-        RequestHandler.main_status = 200
 
         @function_tool
         def build_greeting(name: str, language: str, excited: bool) -> str:
@@ -98,27 +80,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             total = subtotal * (1 + tax_rate) if include_tax else subtotal
             return f"Budget total: {total:.2f}"
 
-        @function_tool
-        def store_trip_plan(bucket: str, key: str, itinerary: str, tags: List[str]) -> str:
-            """Store the completed itinerary and its metadata in Amazon S3."""
-            s3_client = boto3.client(
-                "s3",
-                endpoint_url=f"http://localhost:{MOCK_AWS_PORT}",
-                region_name="us-east-1",
-                config=Config(
-                    retries={"max_attempts": 0},
-                    connect_timeout=3,
-                    read_timeout=3,
-                    s3={"addressing_style": "path"},
-                ),
-            )
-            response = s3_client.put_object(
-                Bucket=bucket,
-                Key=key,
-                Body=itinerary.encode(),
-                Metadata={"tags": ",".join(tags)},
-            )
-            return f"Stored {key} in {bucket} with ETag {response['ETag']}"
+        store_agent_output_tool = function_tool(store_agent_output)
 
         agent = Agent(
             name="TestAgent",
@@ -127,14 +89,13 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "weather summary, and budget estimate, then store the completed itinerary before answering."
             ),
             model=self._create_model(),
-            tools=[build_greeting, summarize_weather, calculate_budget, store_trip_plan],
+            tools=[build_greeting, summarize_weather, calculate_budget, store_agent_output_tool],
             model_settings=ModelSettings(temperature=0.7),
         )
         Runner.run_sync(agent, "Plan a cheerful trip to Seattle for World using the available tools.")
 
     def _run_multi_agent(self) -> None:
         self._reset_model_call_count()
-        RequestHandler.main_status = 200
 
         @function_tool
         def build_greeting(name: str, language: str, excited: bool) -> str:
@@ -159,18 +120,19 @@ class RequestHandler(BaseHTTPRequestHandler):
             return f"{channel}; urgent={urgent}; tags={','.join(tags)}"
 
         model = self._create_model()
+        store_agent_output_tool = function_tool(store_agent_output)
         greeter = Agent(
             name="GreeterAgent",
             instructions="Use every available tool to prepare a greeting tailored to the audience.",
             model=model,
-            tools=[build_greeting, describe_audience],
+            tools=[build_greeting, describe_audience, store_agent_output_tool],
             model_settings=ModelSettings(temperature=0.7),
         )
         formatter = Agent(
             name="FormatterAgent",
             instructions="Use every available tool to format the message and prepare its delivery metadata.",
             model=model,
-            tools=[format_message, add_delivery_metadata],
+            tools=[format_message, add_delivery_metadata, store_agent_output_tool],
             model_settings=ModelSettings(temperature=0.7),
         )
 
@@ -193,8 +155,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             reset_llm_call_count()
 
 
+def handle_request(request: Request) -> Response:
+    return RequestHandler(request.url.path).handle()
+
+
+app = Starlette(routes=[Route("/{path:path}", handle_request, methods=["GET"])])
+
+
 if __name__ == "__main__":
-    mock_aws_server = ThreadingHTTPServer(("0.0.0.0", MOCK_AWS_PORT), MockAWSS3Handler)
-    atexit.register(mock_aws_server.shutdown)
-    Thread(target=mock_aws_server.serve_forever, daemon=True).start()
-    start_servers(RequestHandler)
+    start_servers(app)
