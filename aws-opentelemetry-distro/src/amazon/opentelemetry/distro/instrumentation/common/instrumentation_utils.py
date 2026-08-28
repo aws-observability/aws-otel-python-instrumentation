@@ -51,6 +51,13 @@ PROVIDER_MAP = {
 }
 
 
+class _JsonEncoder(json.JSONEncoder):
+    def default(self, o: Any) -> Any:
+        if isinstance(o, bytes):
+            return b64encode(o).decode()
+        return super().default(o)
+
+
 class DictWithLock:
     def __init__(self):
         self._lock = threading.Lock()
@@ -110,7 +117,10 @@ def to_tool_attribute_value(value: Any) -> Union[str, int, float, bool, bytes, N
         return None
     if isinstance(value, (bool, str, bytes, int, float)):
         return value
-    return serialize_to_json_string(value)
+    try:
+        return json.dumps(value, separators=(",", ":"), cls=_JsonEncoder)
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def content_to_parts(content: Any) -> list:  # pylint: disable=too-many-branches

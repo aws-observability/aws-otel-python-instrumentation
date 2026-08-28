@@ -1,13 +1,12 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-import json
 from logging import INFO, Logger, getLogger
 from typing import List
 
 from mock_collector_client import ResourceScopeSpan
 from typing_extensions import override
 
-from amazon.base.contract_test_base import ContractTestBase
+from amazon.gen_ai.gen_ai_test_base import GenAITestBase
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_DESCRIPTION,
     GEN_AI_AGENT_NAME,
@@ -38,7 +37,7 @@ _OPERATION_SYNTHESIZE: str = "synthesize"
 _OPERATION_RERANK: str = "rerank"
 
 
-class LlamaIndexTest(ContractTestBase):
+class LlamaIndexTest(GenAITestBase):
     @override
     @staticmethod
     def get_application_image_name() -> str:
@@ -46,45 +45,31 @@ class LlamaIndexTest(ContractTestBase):
 
     def test_llamaindex_agent(self):
         """Test ReAct agent with tools."""
-        self.do_test_requests(
+        self._do_test_for_each_llm(
             "llamaindex/agent",
-            "GET",
-            200,
-            0,
-            0,
             test_type="agent",
+            expected_s3_call_count=1,
         )
 
     def test_llamaindex_workflow(self):
         """Test AgentWorkflow with multiple agents."""
-        self.do_test_requests(
+        self._do_test_for_each_llm(
             "llamaindex/workflow",
-            "GET",
-            200,
-            0,
-            0,
             test_type="workflow",
+            expected_s3_call_count=2,
         )
 
     def test_llamaindex_chat(self):
         """Test basic chat completion."""
-        self.do_test_requests(
+        self._do_test_for_each_llm(
             "llamaindex/chat",
-            "GET",
-            200,
-            0,
-            0,
             test_type="chat",
         )
 
     def test_llamaindex_query(self):
         """Test query engine."""
-        self.do_test_requests(
+        self._do_test_for_each_llm(
             "llamaindex/query",
-            "GET",
-            200,
-            0,
-            0,
             test_type="query",
         )
 
@@ -101,39 +86,39 @@ class LlamaIndexTest(ContractTestBase):
 
     def test_llamaindex_tool(self):
         """Test tool calling."""
-        self.do_test_requests(
+        self._do_test_for_each_llm(
             "llamaindex/tool",
-            "GET",
-            200,
-            0,
-            0,
             test_type="tool",
         )
-
-    @override
-    def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs) -> None:
-        pass
 
     @override
     def _assert_semantic_conventions_span_attributes(
         self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str, status_code: int, **kwargs
     ) -> None:
+        # Every recorded GenAI content attribute MUST contain data and follow its corresponding OTel JSON schema.
+        self._assert_otel_gen_ai_attribute_formats(resource_scope_spans)
+        expected_provider = kwargs.get("expected_provider")
+        if expected_provider is not None:
+            # Every span declaring a GenAI provider MUST identify the LLM selected for this test run.
+            self._assert_gen_ai_provider(resource_scope_spans, expected_provider)
         test_type = kwargs.get("test_type", "")
 
         if test_type == "workflow":
             self._assert_workflow_spans(resource_scope_spans)
         elif test_type == "agent":
-            self._assert_agent_spans(resource_scope_spans)
+            self._assert_agent_spans(resource_scope_spans, expected_provider, kwargs.get("expected_model"))
         elif test_type == "chat":
-            self._assert_chat_spans(resource_scope_spans)
+            self._assert_chat_spans(resource_scope_spans, expected_provider, kwargs.get("expected_model"))
         elif test_type == "query":
             self._assert_query_spans(resource_scope_spans)
         elif test_type == "embedding":
             self._assert_embedding_spans(resource_scope_spans)
         elif test_type == "tool":
-            self._assert_tool_spans(resource_scope_spans)
+            self._assert_tool_spans(resource_scope_spans, expected_provider, kwargs.get("expected_model"))
 
-    def _assert_agent_spans(self, resource_scope_spans: List[ResourceScopeSpan]) -> None:
+    def _assert_agent_spans(
+        self, resource_scope_spans: List[ResourceScopeSpan], expected_provider: str, expected_model: str
+    ) -> None:
         invoke_agent_spans = []
         execute_tool_spans = []
         chat_spans = []
@@ -153,13 +138,21 @@ class LlamaIndexTest(ContractTestBase):
                     chat_spans.append(span)
 
         self.assertGreater(len(invoke_agent_spans), 0, "Expected at least one invoke_agent span")
+        completed_invoke_agent_spans = []
         for span in invoke_agent_spans:
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
             self._assert_str_attribute(attrs, GEN_AI_AGENT_NAME, "TestAgent")
+            if GEN_AI_INPUT_MESSAGES in attrs and GEN_AI_OUTPUT_MESSAGES in attrs:
+                completed_invoke_agent_spans.append((span, attrs))
             if "run_agent_step" not in span.name:
                 self._assert_str_attribute(attrs, GEN_AI_AGENT_DESCRIPTION, "A test agent that greets and multiplies.")
-                self._assert_invoke_agent_input_output(attrs)
+
+        # LlamaIndex emits invoke_agent spans for intermediate tool-calling steps. At least one completed invocation
+        # MUST contain the initial user input and final agent output; intermediate steps are schema-validated above.
+        self.assertTrue(completed_invoke_agent_spans, "Expected a completed invoke_agent span with input and output")
+        for span, attrs in completed_invoke_agent_spans:
+            self._assert_invoke_agent_content(attrs, span.name)
 
         if execute_tool_spans:
             tool_names = set()
@@ -170,20 +163,27 @@ class LlamaIndexTest(ContractTestBase):
                 self.assertIn(GEN_AI_TOOL_NAME, attrs)
                 tool_name = attrs[GEN_AI_TOOL_NAME].string_value
                 tool_names.add(tool_name)
-                self.assertIn(tool_name, ["get_greeting", "multiply"], f"Unexpected tool name: {tool_name}")
+                self.assertIn(
+                    tool_name,
+                    ["get_greeting", "multiply", "store_agent_output"],
+                    f"Unexpected tool name: {tool_name}",
+                )
 
                 self.assertIn(GEN_AI_TOOL_DESCRIPTION, attrs)
                 description = attrs[GEN_AI_TOOL_DESCRIPTION].string_value
                 self.assertTrue(len(description) > 0, "Expected non-empty tool description")
 
+        chat_spans = self._select_gen_ai_provider_spans(chat_spans)
         self.assertGreater(len(chat_spans), 0, "Expected at least one chat span from agent LLM calls")
         for span in chat_spans:
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
-            self._assert_str_attribute(attrs, GEN_AI_PROVIDER_NAME, "openai")
-            self._assert_str_attribute(attrs, GEN_AI_REQUEST_MODEL, "gpt-4")
+            self.assertEqual(self._get_gen_ai_provider(attrs), expected_provider)
+            self._assert_str_attribute(attrs, GEN_AI_REQUEST_MODEL, expected_model)
 
-    def _assert_chat_spans(self, resource_scope_spans: List[ResourceScopeSpan]) -> None:
+    def _assert_chat_spans(
+        self, resource_scope_spans: List[ResourceScopeSpan], expected_provider: str, expected_model: str
+    ) -> None:
         chat_spans = []
 
         for resource_scope_span in resource_scope_spans:
@@ -195,15 +195,15 @@ class LlamaIndexTest(ContractTestBase):
                 if op_name == GenAiOperationNameValues.CHAT.value:
                     chat_spans.append(span)
 
+        chat_spans = self._select_gen_ai_provider_spans(chat_spans)
         self.assertGreater(len(chat_spans), 0, "Expected at least one chat span")
 
         for span in chat_spans:
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
 
-            self._assert_str_attribute(attrs, GEN_AI_PROVIDER_NAME, "openai")
-
-            self._assert_str_attribute(attrs, GEN_AI_REQUEST_MODEL, "gpt-4")
+            self.assertEqual(self._get_gen_ai_provider(attrs), expected_provider)
+            self._assert_str_attribute(attrs, GEN_AI_REQUEST_MODEL, expected_model)
 
             self.assertIn(GEN_AI_REQUEST_TEMPERATURE, attrs)
             temp = attrs[GEN_AI_REQUEST_TEMPERATURE].double_value
@@ -216,25 +216,21 @@ class LlamaIndexTest(ContractTestBase):
             self.assertIn(GEN_AI_SYSTEM_INSTRUCTIONS, attrs)
 
             self.assertIn(GEN_AI_INPUT_MESSAGES, attrs)
-            input_messages = attrs[GEN_AI_INPUT_MESSAGES].string_value
-            self.assertIsNotNone(input_messages)
-            messages = json.loads(input_messages)
+            messages = self._get_schema_value(attrs, GEN_AI_INPUT_MESSAGES, span.name)
             self.assertIsInstance(messages, list)
             self.assertGreater(len(messages), 0, "Expected at least one message")
 
             self.assertIn(GEN_AI_OUTPUT_MESSAGES, attrs)
-            output_messages = attrs[GEN_AI_OUTPUT_MESSAGES].string_value
-            self.assertIsNotNone(output_messages)
-            output_msgs = json.loads(output_messages)
+            output_msgs = self._get_schema_value(attrs, GEN_AI_OUTPUT_MESSAGES, span.name)
             self.assertIsInstance(output_msgs, list)
 
             self.assertIn(GEN_AI_USAGE_INPUT_TOKENS, attrs)
             input_tokens = attrs[GEN_AI_USAGE_INPUT_TOKENS].int_value
-            self.assertEqual(input_tokens, 25, "Expected 25 input tokens")
+            self.assertEqual(input_tokens, 10, "Expected 10 input tokens")
 
             self.assertIn(GEN_AI_USAGE_OUTPUT_TOKENS, attrs)
             output_tokens = attrs[GEN_AI_USAGE_OUTPUT_TOKENS].int_value
-            self.assertEqual(output_tokens, 50, "Expected 50 output tokens")
+            self.assertEqual(output_tokens, 20, "Expected 20 output tokens")
 
     def _assert_query_spans(self, resource_scope_spans: List[ResourceScopeSpan]) -> None:
         query_spans = []
@@ -300,7 +296,9 @@ class LlamaIndexTest(ContractTestBase):
             dim_count = attrs[GEN_AI_EMBEDDINGS_DIMENSION_COUNT].int_value
             self.assertEqual(dim_count, 384, "Expected embedding dimension count to be 384")
 
-    def _assert_tool_spans(self, resource_scope_spans: List[ResourceScopeSpan]) -> None:
+    def _assert_tool_spans(
+        self, resource_scope_spans: List[ResourceScopeSpan], expected_provider: str, expected_model: str
+    ) -> None:
         chat_spans = []
 
         for resource_scope_span in resource_scope_spans:
@@ -313,19 +311,18 @@ class LlamaIndexTest(ContractTestBase):
                 if op_name == GenAiOperationNameValues.CHAT.value:
                     chat_spans.append(span)
 
+        chat_spans = self._select_gen_ai_provider_spans(chat_spans)
         self.assertGreater(len(chat_spans), 0, "Expected at least one chat span with tool definitions")
 
         for span in chat_spans:
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.CHAT.value)
 
-            self._assert_str_attribute(attrs, GEN_AI_PROVIDER_NAME, "openai")
-            self._assert_str_attribute(attrs, GEN_AI_REQUEST_MODEL, "gpt-4")
+            self.assertEqual(self._get_gen_ai_provider(attrs), expected_provider)
+            self._assert_str_attribute(attrs, GEN_AI_REQUEST_MODEL, expected_model)
 
             self.assertIn(GEN_AI_TOOL_DEFINITIONS, attrs)
-            tool_defs = attrs[GEN_AI_TOOL_DEFINITIONS].string_value
-            self.assertIsNotNone(tool_defs)
-            tools = json.loads(tool_defs)
+            tools = self._get_schema_value(attrs, GEN_AI_TOOL_DEFINITIONS, span.name)
             self.assertIsInstance(tools, list)
             self.assertEqual(len(tools), 2, "Expected exactly two tool definitions (calculate_sum, multiply)")
             if tools and isinstance(tools[0], dict):
@@ -365,32 +362,22 @@ class LlamaIndexTest(ContractTestBase):
         self._assert_str_attribute(wf_attrs, GEN_AI_WORKFLOW_NAME, "multi_agent_workflow")
 
         self.assertGreater(len(invoke_agent_spans), 0, "Expected at least one invoke_agent span")
+        completed_invoke_agent_spans = []
         for span in invoke_agent_spans:
             attrs = self._get_attributes_dict(span.attributes)
             self._assert_str_attribute(attrs, GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
             self.assertIn(GEN_AI_AGENT_NAME, attrs)
+            if GEN_AI_INPUT_MESSAGES in attrs and GEN_AI_OUTPUT_MESSAGES in attrs:
+                completed_invoke_agent_spans.append((span, attrs))
 
+        # Intermediate workflow steps may end in a tool call. A completed invoke_agent span MUST still preserve the
+        # workflow's first user input and last agent output.
+        self.assertTrue(completed_invoke_agent_spans, "Expected a completed invoke_agent span with input and output")
+        for span, attrs in completed_invoke_agent_spans:
+            self._assert_invoke_agent_content(attrs, span.name)
+
+        chat_spans = self._select_gen_ai_provider_spans(chat_spans)
         self.assertGreater(len(chat_spans), 0, "Expected at least one chat span")
-
-    def _assert_invoke_agent_input_output(self, attrs) -> None:
-        self.assertIn(GEN_AI_INPUT_MESSAGES, attrs)
-        self.assertIn(GEN_AI_OUTPUT_MESSAGES, attrs)
-        input_messages = json.loads(attrs[GEN_AI_INPUT_MESSAGES].string_value)
-        output_messages = json.loads(attrs[GEN_AI_OUTPUT_MESSAGES].string_value)
-        self.assertTrue(self._text_parts(input_messages, "user"), "Expected the user input on the invoke_agent span")
-        self.assertTrue(
-            self._text_parts(output_messages, "assistant"), "Expected the agent output on the invoke_agent span"
-        )
-
-    @staticmethod
-    def _text_parts(messages: list, role: str) -> list:
-        return [
-            part["content"]
-            for message in messages
-            if message.get("role") == role
-            for part in message.get("parts", [])
-            if part.get("type") == "text" and part.get("content")
-        ]
 
     @override
     def _assert_metric_attributes(self, resource_scope_metrics, metric_name: str, expected_sum: int, **kwargs) -> None:

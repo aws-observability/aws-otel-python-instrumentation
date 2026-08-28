@@ -2,13 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
-import os
 import urllib.request
+from typing import Any
 
-os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
+import jsonschema
 
 # TODO: Update this version and schema revision when ADOT's OTel dependency versions are bumped.
-# Keep these schema constants in sync with contract-tests/tests/test/amazon/gen_ai/otel_schema.py.
+# Keep these schema constants in sync with
+# aws-opentelemetry-distro/tests/amazon/opentelemetry/distro/instrumentation/conftest.py.
 _OTEL_SEMCONV_VERSION = "v1.43.0"
 # semantic-conventions-genai does not publish version tags. This revision's manifest declares the v1.43.0 dependency
 # used by opentelemetry-semantic-conventions 0.65b0.
@@ -21,14 +22,9 @@ _SCHEMA_FETCH_TIMEOUT_SECONDS = 10
 _SCHEMA_CACHE: dict = {}
 
 
-def validate_otel_schema(data, schema_url: str) -> None:
-    import jsonschema
-
+def validate_otel_genai_schema(data: Any, schema_name: str) -> None:
+    schema_url = f"{_OTEL_GEN_AI_SCHEMA_BASE}/{schema_name}.json"
     if schema_url not in _SCHEMA_CACHE:
-        with urllib.request.urlopen(schema_url, timeout=_SCHEMA_FETCH_TIMEOUT_SECONDS) as resp:
-            _SCHEMA_CACHE[schema_url] = json.loads(resp.read())
+        with urllib.request.urlopen(schema_url, timeout=_SCHEMA_FETCH_TIMEOUT_SECONDS) as response:
+            _SCHEMA_CACHE[schema_url] = json.loads(response.read())
     jsonschema.validate(data, _SCHEMA_CACHE[schema_url])
-
-
-def validate_otel_genai_schema(data: list, schema_name: str) -> None:
-    validate_otel_schema(data, f"{_OTEL_GEN_AI_SCHEMA_BASE}/{schema_name}.json")

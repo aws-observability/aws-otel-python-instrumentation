@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import asyncio
-import json
 import os
 import signal
 import socket
@@ -154,7 +153,7 @@ class TestMcpInstrumentor(McpInstrumentorTestBase):
                         MCP_METHOD_NAME: McpMethodNameValues.TOOLS_CALL.value,
                         GEN_AI_TOOL_NAME: "hello",
                         GEN_AI_OPERATION_NAME: GenAiOperationNameValues.EXECUTE_TOOL.value,
-                        GEN_AI_TOOL_CALL_ARGUMENTS: json.dumps({"name": "World"}),
+                        GEN_AI_TOOL_CALL_ARGUMENTS: '{"name":"World"}',
                     },
                 )
                 self.assertIn("Hello, World", tool_span.attributes.get(GEN_AI_TOOL_CALL_RESULT))

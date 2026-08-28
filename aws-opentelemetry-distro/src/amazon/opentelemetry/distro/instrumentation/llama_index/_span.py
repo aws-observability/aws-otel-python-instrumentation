@@ -324,23 +324,76 @@ class _Span(BaseSpan):
         """
         return set_span_in_context(self._otel_span)
 
-    def process_input(self, instance: Any, bound_args: inspect.BoundArguments) -> None:
+    def process_input(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+        self, instance: Any, bound_args: inspect.BoundArguments
+    ) -> None:
         from llama_index.core.llms.function_calling import FunctionCallingLLM  # pylint: disable=import-outside-toplevel
 
-        if isinstance(instance, FunctionCallingLLM) and isinstance((tools := bound_args.kwargs.get("tools")), Iterable):
-            tools_list = list(tools)
-            if tools_list:
-                # Convert FunctionTool objects to OpenAI tool format
-                tool_defs = []
-                for tool in tools_list:
+        if isinstance(instance, FunctionCallingLLM):
+            tools = bound_args.kwargs.get("tools")
+            if isinstance(tools, Mapping):
+                tool_items = tools.get("tools", [tools])
+            elif isinstance(tools, Iterable) and not isinstance(tools, (str, bytes)):
+                tool_items = tools
+            else:
+                tool_items = [tools]
+
+            if isinstance(tool_items, Mapping):
+                tool_items = [tool_items]
+
+            tool_defs = []
+            for tool in tool_items:
+                metadata = getattr(tool, "metadata", None)
+                to_openai_tool = getattr(metadata, "to_openai_tool", None)
+                tool_candidates = []
+                if callable(to_openai_tool):
                     try:
-                        # Try to get the OpenAI tool format from metadata
-                        if hasattr(tool, "metadata") and hasattr(tool.metadata, "to_openai_tool"):
-                            tool_defs.append(tool.metadata.to_openai_tool())
-                        else:
-                            tool_defs.append(str(tool))
+                        tool_candidates.append(to_openai_tool())
                     except Exception:  # pylint: disable=broad-exception-caught
-                        tool_defs.append(str(tool))
+                        pass
+                if metadata is not None:
+                    tool_candidates.append(metadata)
+                tool_candidates.append(tool)
+
+                for tool_candidate in tool_candidates:
+                    if isinstance(tool_candidate, Mapping):
+                        if isinstance(function := tool_candidate.get("function"), Mapping):
+                            tool_candidate = function
+                            tool_type = "function"
+                        elif isinstance(tool_spec := tool_candidate.get("toolSpec"), Mapping):
+                            tool_candidate = tool_spec
+                            tool_type = "function"
+                        else:
+                            tool_type = tool_candidate.get("type") or "function"
+                    else:
+                        tool_type = _safe_get(tool_candidate, "type") or "function"
+
+                    name = _safe_get(tool_candidate, "name")
+                    if isinstance(name, str) and name:
+                        tool = tool_candidate
+                        break
+                else:
+                    continue
+
+                tool_definition: dict[str, Any] = {"type": str(tool_type), "name": name}
+                description = _safe_get(tool, "description")
+                if isinstance(description, str) and description:
+                    tool_definition["description"] = description
+
+                parameters = _safe_get(tool, "parameters")
+                if parameters is None:
+                    input_schema = _safe_get(tool, "inputSchema")
+                    parameters = _safe_get(input_schema, "json")
+                if parameters is None:
+                    fn_schema = _safe_get(tool, "fn_schema")
+                    model_json_schema = getattr(fn_schema, "model_json_schema", None)
+                    if callable(model_json_schema):
+                        parameters = model_json_schema()
+                if isinstance(parameters, Mapping):
+                    tool_definition["parameters"] = dict(parameters)
+                tool_defs.append(tool_definition)
+
+            if tool_defs:
                 self[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs)
 
         # Capture tool call arguments for FunctionTool invocations
