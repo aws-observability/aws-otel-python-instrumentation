@@ -66,6 +66,7 @@ import os
 import sys
 from logging import ERROR, Logger, getLogger
 
+from amazon.opentelemetry.distro._gen_ai.propagator import GenAiLlmContextPropagator
 from amazon.opentelemetry.distro._utils import (
     OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS,
     get_aws_region,
@@ -74,7 +75,6 @@ from amazon.opentelemetry.distro._utils import (
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import APPLICATION_SIGNALS_ENABLED_CONFIG
 from amazon.opentelemetry.distro.debugger.debugger import initialize_debugger
-from amazon.opentelemetry.distro.gen_ai.propagator import GenAiLlmContextPropagator
 from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_instrumentation_patches
 from opentelemetry import propagate
 from opentelemetry.distro import OpenTelemetryDistro

@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
-from amazon.opentelemetry.distro.gen_ai._context import attach_llm_span_context
+from amazon.opentelemetry.distro._gen_ai._context import attach_llm_span_context
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     GEN_AI_WORKFLOW_NAME,
     OPERATION_INVOKE_WORKFLOW,

@@ -5,7 +5,7 @@ from typing import Optional
 
 from typing_extensions import override
 
-from amazon.opentelemetry.distro.gen_ai._context import _GENAI_LLM_SPAN_CONTEXT_KEY
+from amazon.opentelemetry.distro._gen_ai._context import _GENAI_LLM_SPAN_CONTEXT_KEY
 from opentelemetry import context as otel_context
 from opentelemetry import trace
 from opentelemetry.context import Context
