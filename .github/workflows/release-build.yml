@@ -26,6 +26,7 @@ env:
   LEGACY_COMMERCIAL_REGIONS: us-east-1, us-east-2, us-west-1, us-west-2, ap-south-1, ap-northeast-3, ap-northeast-2, ap-southeast-1, ap-southeast-2, ap-northeast-1, ca-central-1, eu-central-1, eu-west-1, eu-west-2, eu-west-3, eu-north-1, sa-east-1
   LAYER_NAME: AWSOpenTelemetryDistroPython
   LAYER_ARTIFACT_NAME: aws-opentelemetry-python-layer.zip
+  TEST_TAG: adot-autoinstrumentation-python:test
 
 permissions:
   id-token: write
@@ -148,6 +149,22 @@ jobs:
           skip-existing: true
           verbose: true
           packages-dir: dist-pypi
+
+      # Build a single-arch image locally (not pushed) and run the post-build integrity
+      # test against it before publishing, so a bad artifact never reaches ECR.
+      - name: Build image for testing
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
+        with:
+          push: false
+          load: true
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          tags: ${{ env.TEST_TAG }}
+
+      - name: Test docker image
+        shell: bash
+        run: .github/scripts/test-adot-python-image.sh "${{ env.TEST_TAG }}" "${{ env.VERSION }}"
 
       - name: Build and push image
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
