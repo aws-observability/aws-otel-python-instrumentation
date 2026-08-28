@@ -51,11 +51,11 @@ PROVIDER_MAP = {
 }
 
 
-class _GenAIJsonEncoder(json.JSONEncoder):
-    def default(self, value: Any) -> Any:
-        if isinstance(value, bytes):
-            return b64encode(value).decode()
-        return super().default(value)
+class _JsonEncoder(json.JSONEncoder):
+    def default(self, o: Any) -> Any:
+        if isinstance(o, bytes):
+            return b64encode(o).decode()
+        return super().default(o)
 
 
 class DictWithLock:
@@ -118,7 +118,7 @@ def to_tool_attribute_value(value: Any) -> Union[str, int, float, bool, bytes, N
     if isinstance(value, (bool, str, bytes, int, float)):
         return value
     try:
-        return json.dumps(value, separators=(",", ":"), cls=_GenAIJsonEncoder)
+        return json.dumps(value, separators=(",", ":"), cls=_JsonEncoder)
     except (TypeError, ValueError):
         return str(value)
 

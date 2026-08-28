@@ -151,9 +151,9 @@ class GenAITestBase(ContractTestBase):
             self.assertIn(GEN_AI_SYSTEM_INSTRUCTIONS, attrs)
             self.assertIn(GEN_AI_USAGE_INPUT_TOKENS, attrs)
             self.assertIn(GEN_AI_USAGE_OUTPUT_TOKENS, attrs)
-            input_messages.extend(self._parse_json_attribute(attrs, GEN_AI_INPUT_MESSAGES, span.name))
+            input_messages.extend(self._get_schema_value(attrs, GEN_AI_INPUT_MESSAGES, span.name))
             if GEN_AI_OUTPUT_MESSAGES in attrs:
-                output_messages.extend(self._parse_json_attribute(attrs, GEN_AI_OUTPUT_MESSAGES, span.name))
+                output_messages.extend(self._get_schema_value(attrs, GEN_AI_OUTPUT_MESSAGES, span.name))
         completed_spans = [s for s in chat_spans if GEN_AI_OUTPUT_MESSAGES in self._get_attributes_dict(s.attributes)]
         self.assertGreaterEqual(len(completed_spans), 1)
 
@@ -166,8 +166,8 @@ class GenAITestBase(ContractTestBase):
     def _assert_invoke_agent_content(
         self, attrs: Dict[str, AnyValue], span_name: str, expected_output: Optional[str] = None
     ) -> None:
-        input_messages = self._parse_json_attribute(attrs, GEN_AI_INPUT_MESSAGES, span_name)
-        output_messages = self._parse_json_attribute(attrs, GEN_AI_OUTPUT_MESSAGES, span_name)
+        input_messages = self._get_schema_value(attrs, GEN_AI_INPUT_MESSAGES, span_name)
+        output_messages = self._get_schema_value(attrs, GEN_AI_OUTPUT_MESSAGES, span_name)
 
         # gen_ai.input.messages MUST preserve message order, with the initial user input first.
         self.assertTrue(input_messages, f"{span_name}: expected the first user input on the invoke_agent span")
@@ -211,12 +211,16 @@ class GenAITestBase(ContractTestBase):
                 # execute_tool spans MUST contain a result; structured content MUST follow its OTel JSON schema.
                 if attribute in attrs or (is_execute_tool_span and attribute == GEN_AI_TOOL_CALL_RESULT):
                     is_tool_value = attribute in (GEN_AI_TOOL_CALL_ARGUMENTS, GEN_AI_TOOL_CALL_RESULT)
-                    schema_value = self._get_schema_value(attrs, attribute, span.name, allow_native=is_tool_value)
+                    schema_value = self._get_schema_value(
+                        attrs,
+                        attribute,
+                        span.name,
+                        allow_raw_otlp_value=is_tool_value,
+                    )
                     self.assertIsNotNone(schema_value, f"{span.name}: expected {attribute} to contain data")
                     if isinstance(schema_value, (dict, list, str, bytes)):
                         self.assertTrue(schema_value, f"{span.name}: expected {attribute} to contain data")
-                    # Tool arguments and results have type `any`; OTel's object schema applies when the value is
-                    # emitted as structured JSON, while native scalar attribute values remain valid.
+                    # Tool arguments and results have type `any`; validate them when emitted as structured JSON.
                     if not is_tool_value or isinstance(schema_value, dict):
                         validate_otel_genai_schema(
                             schema_value,
@@ -228,12 +232,12 @@ class GenAITestBase(ContractTestBase):
         attrs: Dict[str, AnyValue],
         attribute: str,
         span_name: str,
-        allow_native: bool = False,
+        allow_raw_otlp_value: bool = False,
     ) -> Any:
         self.assertIn(attribute, attrs, f"{span_name}: expected {attribute}")
         value = attrs[attribute]
         value_kind = value.WhichOneof("value")
-        if allow_native and value_kind != "string_value":
+        if allow_raw_otlp_value and value_kind != "string_value":
             return self._any_value_to_python(value)
         self.assertEqual(
             value_kind,
@@ -243,10 +247,10 @@ class GenAITestBase(ContractTestBase):
         try:
             schema_value = json.loads(value.string_value)
         except json.JSONDecodeError as error:
-            if allow_native:
+            if allow_raw_otlp_value:
                 return value.string_value
             self.fail(f"{span_name}: {attribute} must contain valid JSON: {error}")
-        if allow_native and not isinstance(schema_value, (dict, list)):
+        if allow_raw_otlp_value and not isinstance(schema_value, (dict, list)):
             return value.string_value
         return schema_value
 

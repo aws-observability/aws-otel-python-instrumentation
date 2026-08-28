@@ -7,9 +7,14 @@ import urllib.request
 
 os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
 
-_OTEL_SEMCONV_VERSION = "v1.41.0"
-_OTEL_SCHEMA_BASE = (
-    f"https://raw.githubusercontent.com/open-telemetry/semantic-conventions/{_OTEL_SEMCONV_VERSION}/docs"
+# TODO: Update this version and schema revision when ADOT's OTel dependency versions are bumped.
+_OTEL_SEMCONV_VERSION = "v1.43.0"
+# semantic-conventions-genai does not publish version tags. This revision's manifest declares the v1.43.0 dependency
+# used by opentelemetry-semantic-conventions 0.65b0.
+_OTEL_GEN_AI_SCHEMA_REVISION = "647791f1ad23fd7c427dce4a984b3efee40961fc"
+_OTEL_GEN_AI_SCHEMA_BASE = (
+    "https://raw.githubusercontent.com/open-telemetry/semantic-conventions-genai/"
+    f"{_OTEL_GEN_AI_SCHEMA_REVISION}/model/gen-ai"
 )
 _SCHEMA_CACHE: dict = {}
 
@@ -24,4 +29,4 @@ def validate_otel_schema(data, schema_url: str) -> None:
 
 
 def validate_otel_genai_schema(data: list, schema_name: str) -> None:
-    validate_otel_schema(data, f"{_OTEL_SCHEMA_BASE}/gen-ai/{schema_name}.json")
+    validate_otel_schema(data, f"{_OTEL_GEN_AI_SCHEMA_BASE}/{schema_name}.json")

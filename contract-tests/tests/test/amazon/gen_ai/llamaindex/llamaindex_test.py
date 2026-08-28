@@ -214,12 +214,12 @@ class LlamaIndexTest(GenAITestBase):
             self.assertIn(GEN_AI_SYSTEM_INSTRUCTIONS, attrs)
 
             self.assertIn(GEN_AI_INPUT_MESSAGES, attrs)
-            messages = self._parse_json_attribute(attrs, GEN_AI_INPUT_MESSAGES, span.name)
+            messages = self._get_schema_value(attrs, GEN_AI_INPUT_MESSAGES, span.name)
             self.assertIsInstance(messages, list)
             self.assertGreater(len(messages), 0, "Expected at least one message")
 
             self.assertIn(GEN_AI_OUTPUT_MESSAGES, attrs)
-            output_msgs = self._parse_json_attribute(attrs, GEN_AI_OUTPUT_MESSAGES, span.name)
+            output_msgs = self._get_schema_value(attrs, GEN_AI_OUTPUT_MESSAGES, span.name)
             self.assertIsInstance(output_msgs, list)
 
             self.assertIn(GEN_AI_USAGE_INPUT_TOKENS, attrs)
@@ -320,7 +320,7 @@ class LlamaIndexTest(GenAITestBase):
             self._assert_str_attribute(attrs, GEN_AI_REQUEST_MODEL, expected_model)
 
             self.assertIn(GEN_AI_TOOL_DEFINITIONS, attrs)
-            tools = self._parse_json_attribute(attrs, GEN_AI_TOOL_DEFINITIONS, span.name)
+            tools = self._get_schema_value(attrs, GEN_AI_TOOL_DEFINITIONS, span.name)
             self.assertIsInstance(tools, list)
             self.assertEqual(len(tools), 2, "Expected exactly two tool definitions (calculate_sum, multiply)")
             if tools and isinstance(tools[0], dict):
