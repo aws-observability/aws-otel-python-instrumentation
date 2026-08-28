@@ -34,37 +34,36 @@ os.environ["OPENAI_API_KEY"] = "fake-key"
 class RequestHandler:
     def __init__(self, path: str) -> None:
         self.path = path
-        self.main_status = 200
 
     def handle(self) -> Response:
-        if self.in_path("llamaindex"):
-            self._handle_llamaindex_request()
-        else:
-            self.main_status = 404
-        return Response(status_code=self.main_status)
+        if not self.in_path("llamaindex"):
+            return Response(status_code=404)
+        return self._handle_llamaindex_request()
 
     def in_path(self, sub_path: str) -> bool:
         return sub_path in self.path
 
-    def _handle_llamaindex_request(self) -> None:
+    def _handle_llamaindex_request(self) -> Response:
         if self.in_path("workflow"):
-            self._run_workflow()
+            handler = self._run_workflow
         elif self.in_path("agent"):
-            self._run_agent()
+            handler = self._run_agent
         elif self.in_path("chat"):
-            self._run_chat()
+            handler = self._run_chat
         elif self.in_path("query"):
-            self._run_query()
+            handler = self._run_query
         elif self.in_path("embedding"):
-            self._run_embedding()
+            handler = self._run_embedding
         elif self.in_path("tool"):
-            self._run_tool_call()
+            handler = self._run_tool_call
         else:
-            self.main_status = 404
+            return Response(status_code=404)
+
+        handler()
+        return Response(status_code=200)
 
     def _run_agent(self) -> None:
         self._reset_model_call_count()
-        self.main_status = 200
 
         try:
 
@@ -98,7 +97,6 @@ class RequestHandler:
 
     def _run_workflow(self) -> None:
         self._reset_model_call_count()
-        self.main_status = 200
 
         try:
 
@@ -145,7 +143,6 @@ class RequestHandler:
 
     def _run_chat(self) -> None:
         self._reset_model_call_count()
-        self.main_status = 200
 
         try:
             llm = self._create_llm()
@@ -163,7 +160,6 @@ class RequestHandler:
 
     def _run_query(self) -> None:
         self._reset_model_call_count()
-        self.main_status = 200
 
         try:
             llm = self._create_llm()
@@ -187,8 +183,6 @@ class RequestHandler:
             traceback.print_exc()
 
     def _run_embedding(self) -> None:
-        self.main_status = 200
-
         try:
             embed_model = MockEmbedding(embed_dim=384)
 
@@ -201,7 +195,6 @@ class RequestHandler:
 
     def _run_tool_call(self) -> None:
         self._reset_model_call_count()
-        self.main_status = 200
 
         try:
 

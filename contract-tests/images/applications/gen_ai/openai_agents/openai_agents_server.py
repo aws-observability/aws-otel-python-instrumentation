@@ -31,7 +31,6 @@ from starlette.routing import Route
 os.environ["AWS_ACCESS_KEY_ID"] = "fake-key"
 os.environ["AWS_SECRET_ACCESS_KEY"] = "fake-key"
 os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
-os.environ["AWS_ENDPOINT_URL_BEDROCK_RUNTIME"] = f"http://localhost:{MOCK_BEDROCK_PORT}"
 os.environ["OPENAI_API_KEY"] = "fake-key"
 
 set_default_openai_client(
