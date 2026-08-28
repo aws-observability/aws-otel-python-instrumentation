@@ -199,17 +199,16 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
             # override the default propagators.
             importlib.reload(propagate)
 
-        if is_agent_observability_enabled():
-            current_propagator = propagate.get_global_textmap()
-            if not isinstance(current_propagator, GenAiLlmContextPropagator):
-                propagate.set_global_textmap(GenAiLlmContextPropagator(current_propagator))
-
         os.environ.setdefault(OTEL_PYTHON_ID_GENERATOR, "xray")
         os.environ.setdefault(
             OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION, "base2_exponential_bucket_histogram"
         )
 
         if is_agent_observability_enabled():
+            current_propagator = propagate.get_global_textmap()
+            if not isinstance(current_propagator, GenAiLlmContextPropagator):
+                propagate.set_global_textmap(GenAiLlmContextPropagator(current_propagator))
+
             os.environ.setdefault(OTEL_TRACES_EXPORTER, "otlp")
             os.environ.setdefault(OTEL_LOGS_EXPORTER, "otlp")
             os.environ.setdefault(OTEL_METRICS_EXPORTER, "awsemf")
