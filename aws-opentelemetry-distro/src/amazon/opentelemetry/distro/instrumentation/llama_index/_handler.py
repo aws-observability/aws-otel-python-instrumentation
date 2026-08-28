@@ -20,7 +20,7 @@ from llama_index.core.tools import BaseTool
 from llama_index.core.tools.types import ToolOutput
 from pydantic import PrivateAttr
 
-from amazon.opentelemetry.distro.gen_ai_http_span_collapsing import attach_llm_span_context
+from amazon.opentelemetry.distro.gen_ai.http_span_collapsing import attach_llm_span_context
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     skip_instrumentation_if_suppressed,
     to_tool_attribute_value,

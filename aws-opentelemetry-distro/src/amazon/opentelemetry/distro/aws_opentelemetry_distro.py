@@ -74,7 +74,7 @@ from amazon.opentelemetry.distro._utils import (
 )
 from amazon.opentelemetry.distro.aws_opentelemetry_configurator import APPLICATION_SIGNALS_ENABLED_CONFIG
 from amazon.opentelemetry.distro.debugger.debugger import initialize_debugger
-from amazon.opentelemetry.distro.gen_ai_http_span_collapsing import GenAiLlmContextPropagator
+from amazon.opentelemetry.distro.gen_ai.http_span_collapsing import GenAiLlmContextPropagator
 from amazon.opentelemetry.distro.patches._instrumentation_patch import apply_instrumentation_patches
 from opentelemetry import propagate
 from opentelemetry.distro import OpenTelemetryDistro
