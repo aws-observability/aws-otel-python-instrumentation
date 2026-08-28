@@ -1023,7 +1023,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         handler.prepare_to_exit_span(
             id_="FunctionTool.call-1", bound_args=self._make_bound_args(), instance=tool, result=tool_output
         )
-        self.assertEqual(json.loads(span._attributes[GEN_AI_TOOL_CALL_RESULT]), {"result": "42"})
+        self.assertEqual(span._attributes[GEN_AI_TOOL_CALL_RESULT], "42")
 
     def test_prepare_to_drop_span_returns_none_when_suppressed(self):
         """Test that prepare_to_drop_span returns None when suppressed."""

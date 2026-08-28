@@ -5,7 +5,6 @@ import json
 import logging
 import threading
 from base64 import b64encode
-from collections.abc import Mapping
 from contextvars import Token
 from functools import wraps
 from typing import Any, Callable, Dict, Optional, Union
@@ -50,6 +49,13 @@ PROVIDER_MAP = {
     "xai": GenAiProviderNameValues.X_AI.value,
     "langchain_xai": GenAiProviderNameValues.X_AI.value,
 }
+
+
+class _GenAIJsonEncoder(json.JSONEncoder):
+    def default(self, value: Any) -> Any:
+        if isinstance(value, bytes):
+            return b64encode(value).decode()
+        return super().default(value)
 
 
 class DictWithLock:
@@ -111,17 +117,10 @@ def to_tool_attribute_value(value: Any) -> Union[str, int, float, bool, bytes, N
         return None
     if isinstance(value, (bool, str, bytes, int, float)):
         return value
-    return serialize_to_json_string(value)
-
-
-def to_tool_result_attribute_value(value: Any) -> str:
-    if isinstance(value, Mapping):
-        result = dict(value)
-    elif isinstance(value, (str, int, float, bool, bytes, list, tuple)) or value is None:
-        result = {"result": value}
-    else:
-        result = {"result": str(value)}
-    return serialize_to_json_string(result)
+    try:
+        return json.dumps(value, separators=(",", ":"), cls=_GenAIJsonEncoder)
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def content_to_parts(content: Any) -> list:  # pylint: disable=too-many-branches

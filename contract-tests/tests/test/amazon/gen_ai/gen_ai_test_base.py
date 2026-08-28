@@ -75,7 +75,7 @@ class GenAITestBase(ContractTestBase):
     def _assert_semantic_conventions_span_attributes(
         self, resource_scope_spans: List[ResourceScopeSpan], method: str, path: str, status_code: int, **kwargs
     ) -> None:
-        # Every recorded GenAI content attribute MUST contain data and follow its corresponding OTel JSON schema.
+        # Every recorded GenAI content attribute MUST contain data and use its OTel-defined representation.
         self._assert_otel_gen_ai_attribute_formats(resource_scope_spans)
         invoke_agent_spans, execute_tool_spans, chat_spans = self._collect_gen_ai_spans(resource_scope_spans)
         expected_provider = kwargs.get("expected_provider")
@@ -208,29 +208,56 @@ class GenAITestBase(ContractTestBase):
                 (GEN_AI_TOOL_CALL_ARGUMENTS, "gen-ai-tool-call-arguments"),
                 (GEN_AI_TOOL_CALL_RESULT, "gen-ai-tool-call-result"),
             ):
-                # execute_tool spans MUST contain a result and always run it through OTel schema validation.
+                # execute_tool spans MUST contain a result; structured content MUST follow its OTel JSON schema.
                 if attribute in attrs or (is_execute_tool_span and attribute == GEN_AI_TOOL_CALL_RESULT):
-                    schema_value = self._parse_json_attribute(attrs, attribute, span.name)
+                    is_tool_value = attribute in (GEN_AI_TOOL_CALL_ARGUMENTS, GEN_AI_TOOL_CALL_RESULT)
+                    schema_value = self._get_schema_value(attrs, attribute, span.name, allow_native=is_tool_value)
                     self.assertIsNotNone(schema_value, f"{span.name}: expected {attribute} to contain data")
-                    if isinstance(schema_value, list):
+                    if isinstance(schema_value, (dict, list, str, bytes)):
                         self.assertTrue(schema_value, f"{span.name}: expected {attribute} to contain data")
-                    validate_otel_genai_schema(
-                        schema_value,
-                        schema_name,
-                    )
+                    # Tool arguments and results have type `any`; OTel's object schema applies when the value is
+                    # emitted as structured JSON, while native scalar attribute values remain valid.
+                    if not is_tool_value or isinstance(schema_value, dict):
+                        validate_otel_genai_schema(
+                            schema_value,
+                            schema_name,
+                        )
 
-    def _parse_json_attribute(self, attrs: Dict[str, AnyValue], attribute: str, span_name: str) -> Any:
+    def _get_schema_value(
+        self,
+        attrs: Dict[str, AnyValue],
+        attribute: str,
+        span_name: str,
+        allow_native: bool = False,
+    ) -> Any:
         self.assertIn(attribute, attrs, f"{span_name}: expected {attribute}")
         value = attrs[attribute]
+        value_kind = value.WhichOneof("value")
+        if allow_native and value_kind != "string_value":
+            return self._any_value_to_python(value)
         self.assertEqual(
-            value.WhichOneof("value"),
+            value_kind,
             "string_value",
             f"{span_name}: {attribute} must be an OTLP string containing JSON",
         )
         try:
-            return json.loads(value.string_value)
+            schema_value = json.loads(value.string_value)
         except json.JSONDecodeError as error:
+            if allow_native:
+                return value.string_value
             self.fail(f"{span_name}: {attribute} must contain valid JSON: {error}")
+        if allow_native and not isinstance(schema_value, (dict, list)):
+            return value.string_value
+        return schema_value
+
+    @classmethod
+    def _any_value_to_python(cls, value: AnyValue) -> Any:
+        value_kind = value.WhichOneof("value")
+        if value_kind == "array_value":
+            return [cls._any_value_to_python(item) for item in value.array_value.values]
+        if value_kind == "kvlist_value":
+            return {item.key: cls._any_value_to_python(item.value) for item in value.kvlist_value.values}
+        return getattr(value, value_kind)
 
     @staticmethod
     def _get_gen_ai_provider(attrs: Dict[str, AnyValue]) -> Optional[str]:

@@ -9,10 +9,7 @@ from typing import Any, Callable, Coroutine, Dict, Optional, Tuple
 from urllib.parse import urlparse
 
 from amazon.opentelemetry.distro._utils import is_agent_observability_enabled
-from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
-    to_tool_attribute_value,
-    to_tool_result_attribute_value,
-)
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import to_tool_attribute_value
 from opentelemetry import context, trace
 from opentelemetry.instrumentation.utils import suppress_http_instrumentation
 from opentelemetry.propagate import get_global_textmap
@@ -159,7 +156,7 @@ class McpWrapper:
 
         if isinstance(message, types.CallToolRequest) and result is not None:
             try:
-                span.set_attribute(GEN_AI_TOOL_CALL_RESULT, to_tool_result_attribute_value(result))
+                span.set_attribute(GEN_AI_TOOL_CALL_RESULT, to_tool_attribute_value(result))
                 if hasattr(result, "isError") and result.isError:
                     span.set_attribute(ERROR_TYPE, "tool_error")
                     span.set_status(Status(StatusCode.ERROR))

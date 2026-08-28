@@ -7,7 +7,6 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
     to_tool_attribute_value,
-    to_tool_result_attribute_value,
     try_detach,
     try_unwrap,
     try_wrap,
@@ -99,24 +98,14 @@ class TestInstrumentationUtils(TestCase):
         self.assertIsNone(to_tool_attribute_value(None))
 
     def test_to_tool_attribute_value_dict_and_list_json_encoded(self):
-        self.assertEqual(to_tool_attribute_value({"city": "Paris"}), '{"city": "Paris"}')
-        self.assertEqual(to_tool_attribute_value([1, 2, 3]), "[1, 2, 3]")
+        self.assertEqual(to_tool_attribute_value({"city": "Paris"}), '{"city":"Paris"}')
+        self.assertEqual(to_tool_attribute_value([1, 2, 3]), "[1,2,3]")
 
     def test_to_tool_attribute_value_unserializable_falls_back_to_str(self):
         obj = object()
         self.assertEqual(to_tool_attribute_value(obj), str(obj))
-
-    def test_to_tool_result_attribute_value_mapping_preserved(self):
-        self.assertEqual(json.loads(to_tool_result_attribute_value({"result": "sunny"})), {"result": "sunny"})
-
-    def test_to_tool_result_attribute_value_wrapped_in_object(self):
-        self.assertEqual(json.loads(to_tool_result_attribute_value("Hello, World!")), {"result": "Hello, World!"})
-        self.assertEqual(json.loads(to_tool_result_attribute_value([1, 2, 3])), {"result": [1, 2, 3]})
-        self.assertEqual(json.loads(to_tool_result_attribute_value(None)), {"result": None})
-
-    def test_to_tool_result_attribute_value_unserializable_falls_back_to_str(self):
-        obj = object()
-        self.assertEqual(json.loads(to_tool_result_attribute_value(obj)), {"result": str(obj)})
+        value = {"unsupported": obj}
+        self.assertEqual(to_tool_attribute_value(value), str(value))
 
     def test_try_unwrap_not_wrapped(self):
         try_unwrap(json, "dumps")

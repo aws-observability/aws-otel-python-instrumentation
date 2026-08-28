@@ -18,7 +18,6 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
     to_tool_attribute_value,
-    to_tool_result_attribute_value,
     try_detach,
 )
 from opentelemetry import context
@@ -335,7 +334,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         if not entry:
             return
         span, _ = entry
-        self._set_span_attribute(span, GEN_AI_TOOL_CALL_RESULT, to_tool_result_attribute_value(output))
+        self._set_span_attribute(span, GEN_AI_TOOL_CALL_RESULT, to_tool_attribute_value(output))
         self._end_span(run_id)
 
     def on_tool_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:

@@ -258,7 +258,7 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(span.attributes[GEN_AI_TOOL_DESCRIPTION], "Add two numbers")
         self.assertEqual(span.attributes[GEN_AI_TOOL_TYPE], "function")
         self.assertIsNotNone(span.attributes.get(GEN_AI_TOOL_CALL_ARGUMENTS))
-        self.assertEqual(json.loads(span.attributes[GEN_AI_TOOL_CALL_RESULT]), {"result": result})
+        self.assertEqual(span.attributes[GEN_AI_TOOL_CALL_RESULT], result)
 
     def test_internal_chains_suppressed(self):
         chain_factories = [

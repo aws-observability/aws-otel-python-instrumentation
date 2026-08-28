@@ -15,7 +15,6 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
     to_tool_attribute_value,
-    to_tool_result_attribute_value,
 )
 from opentelemetry import context, trace
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
@@ -328,7 +327,7 @@ class OpenTelemetryEventHandler:
         attrs: Dict[str, Any] = {}
         output = getattr(event, "output", None)
         if output is not None:
-            attrs[GEN_AI_TOOL_CALL_RESULT] = to_tool_result_attribute_value(output)
+            attrs[GEN_AI_TOOL_CALL_RESULT] = to_tool_attribute_value(output)
         self._end_span(event.started_event_id, attrs)
 
     def _on_llm_start(self, source: "LLM", event: "LLMCallStartedEvent") -> None:
