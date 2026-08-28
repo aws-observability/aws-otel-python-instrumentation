@@ -5,7 +5,7 @@ from typing import Optional, Sequence
 
 from typing_extensions import override
 
-from amazon.opentelemetry.distro._gen_ai._context import _GENAI_LLM_SPAN_CONTEXT_KEY
+from amazon.opentelemetry.distro._gen_ai._span_context import _GEN_AI_SPAN_CONTEXT_KEY
 from opentelemetry import context as otel_context
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace.sampling import Decision, Sampler, SamplingResult
@@ -40,7 +40,7 @@ class GenAiHttpDropSampler(Sampler):
     ) -> SamplingResult:
         if (
             kind == SpanKind.CLIENT
-            and otel_context.get_value(_GENAI_LLM_SPAN_CONTEXT_KEY, parent_context) is not None
+            and otel_context.get_value(_GEN_AI_SPAN_CONTEXT_KEY, parent_context) is not None
             and any(key in (attributes or {}) for key in _HTTP_METHOD_KEYS)
         ):
             return SamplingResult(Decision.DROP, attributes, trace_state)

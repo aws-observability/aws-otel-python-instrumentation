@@ -66,7 +66,7 @@ import os
 import sys
 from logging import ERROR, Logger, getLogger
 
-from amazon.opentelemetry.distro._gen_ai.propagator import GenAiLlmContextPropagator
+from amazon.opentelemetry.distro._gen_ai.propagator import GenAiSpanContextPropagator
 from amazon.opentelemetry.distro._utils import (
     OTEL_METRICS_ADD_APPLICATION_SIGNALS_DIMENSIONS,
     get_aws_region,
@@ -206,8 +206,8 @@ class AwsOpenTelemetryDistro(OpenTelemetryDistro):
 
         if is_agent_observability_enabled():
             current_propagator = propagate.get_global_textmap()
-            if not isinstance(current_propagator, GenAiLlmContextPropagator):
-                propagate.set_global_textmap(GenAiLlmContextPropagator(current_propagator))
+            if not isinstance(current_propagator, GenAiSpanContextPropagator):
+                propagate.set_global_textmap(GenAiSpanContextPropagator(current_propagator))
 
             os.environ.setdefault(OTEL_TRACES_EXPORTER, "otlp")
             os.environ.setdefault(OTEL_LOGS_EXPORTER, "otlp")

@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
-from amazon.opentelemetry.distro._gen_ai._context import attach_llm_span_context
+from amazon.opentelemetry.distro._gen_ai._span_context import set_http_client_span_collapsing_in_context
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     GEN_AI_WORKFLOW_NAME,
     OPERATION_INVOKE_WORKFLOW,
@@ -445,7 +445,10 @@ class OpenTelemetryEventHandler:
                 parent_ctx = trace.set_span_in_context(parent_entry.span)
 
         span = self._tracer.start_span(name, kind=kind, attributes=attributes, context=parent_ctx)
-        token = attach_llm_span_context(span, collapse_http_span=kind == SpanKind.CLIENT)
+        ctx = trace.set_span_in_context(span)
+        if kind == SpanKind.CLIENT:
+            ctx = set_http_client_span_collapsing_in_context(span, ctx)
+        token = context.attach(ctx)
         self._event_id_to_span.put(event_id, _SpanEntry(span=span, token=token))
 
     def _end_span(

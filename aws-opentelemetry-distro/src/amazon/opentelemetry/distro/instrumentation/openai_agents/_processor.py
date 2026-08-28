@@ -23,7 +23,7 @@ from agents.tracing.span_data import (
 from pydantic import BaseModel
 from typing_extensions import override
 
-from amazon.opentelemetry.distro._gen_ai._context import attach_llm_span_context
+from amazon.opentelemetry.distro._gen_ai._span_context import set_http_client_span_collapsing_in_context
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     PROVIDER_MAP,
     DictWithLock,
@@ -172,7 +172,10 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             kind=kind,
             attributes=attributes,
         )
-        token = attach_llm_span_context(otel_span, collapse_http_span=kind == SpanKind.CLIENT)
+        ctx = set_span_in_context(otel_span)
+        if kind == SpanKind.CLIENT:
+            ctx = set_http_client_span_collapsing_in_context(otel_span, ctx)
+        token = context.attach(ctx)
         self._openai_span_id_to_otel_span_entry.put(
             span.span_id,
             _SpanEntry(span=otel_span, token=token, agent_content=agent_content),
