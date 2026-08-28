@@ -14,10 +14,6 @@ from opentelemetry.trace import Link, SpanKind
 from opentelemetry.trace.span import TraceState
 from opentelemetry.util.types import Attributes
 
-# OTel designates http.request.method a sampling-relevant attribute for HTTP client spans, so instrumentations must
-# populate it at span creation. New-then-old fallback mirrors other HTTP semantic convention handling in the distro.
-_HTTP_METHOD_KEYS = (SpanAttributes.HTTP_REQUEST_METHOD, SpanAttributes.HTTP_METHOD)
-
 
 class GenAiHttpDropSampler(Sampler):
     """Drop HTTP CLIENT spans that duplicate an enclosing native GenAI LLM span."""
@@ -41,7 +37,9 @@ class GenAiHttpDropSampler(Sampler):
         if (
             kind == SpanKind.CLIENT
             and otel_context.get_value(_GEN_AI_SPAN_CONTEXT_KEY, parent_context) is not None
-            and any(key in (attributes or {}) for key in _HTTP_METHOD_KEYS)
+            and any(
+                key in (attributes or {}) for key in (SpanAttributes.HTTP_REQUEST_METHOD, SpanAttributes.HTTP_METHOD)
+            )
         ):
             return SamplingResult(Decision.DROP, attributes, trace_state)
         return self._root_sampler.should_sample(parent_context, trace_id, name, kind, attributes, links, trace_state)
