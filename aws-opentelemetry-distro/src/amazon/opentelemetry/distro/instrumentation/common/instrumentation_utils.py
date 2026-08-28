@@ -51,6 +51,13 @@ PROVIDER_MAP = {
 }
 
 
+class _JsonEncoder(json.JSONEncoder):
+    def default(self, o: Any) -> Any:
+        if isinstance(o, bytes):
+            return b64encode(o).decode()
+        return super().default(o)
+
+
 class DictWithLock:
     def __init__(self):
         self._lock = threading.Lock()
@@ -71,6 +78,12 @@ class DictWithLock:
     def clear(self) -> None:
         with self._lock:
             self._data.clear()
+
+    def pop_all(self) -> list[Any]:
+        with self._lock:
+            values = list(self._data.values())
+            self._data.clear()
+            return values
 
     def __contains__(self, key: Any) -> bool:
         with self._lock:
@@ -104,7 +117,10 @@ def to_tool_attribute_value(value: Any) -> Union[str, int, float, bool, bytes, N
         return None
     if isinstance(value, (bool, str, bytes, int, float)):
         return value
-    return serialize_to_json_string(value)
+    try:
+        return json.dumps(value, separators=(",", ":"), cls=_JsonEncoder)
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def content_to_parts(content: Any) -> list:  # pylint: disable=too-many-branches
@@ -131,7 +147,7 @@ def content_to_parts(content: Any) -> list:  # pylint: disable=too-many-branches
             continue
 
         block_type = block.get("type", "")
-        if block_type == "text":
+        if block_type in ("text", "input_text", "output_text", "summary_text"):
             text = block.get("text", "")
             if text:
                 parts.append({"type": "text", "content": str(text)})
