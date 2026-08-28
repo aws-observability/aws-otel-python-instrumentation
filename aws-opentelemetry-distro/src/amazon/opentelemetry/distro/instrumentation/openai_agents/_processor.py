@@ -23,7 +23,7 @@ from agents.tracing.span_data import (
 from pydantic import BaseModel
 from typing_extensions import override
 
-from amazon.opentelemetry.distro._gen_ai._span_context import set_http_client_span_collapsing_in_context
+from amazon.opentelemetry.distro._gen_ai._span_context import set_span_for_propagation_in_context
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     PROVIDER_MAP,
     DictWithLock,
@@ -88,7 +88,7 @@ _logger = logging.getLogger(__name__)
 class _SpanEntry:
     span: Span
     token: Optional[Token] = None
-    http_client_span_collapsing_token: Optional[Token] = None
+    span_for_propagation_token: Optional[Token] = None
     agent_content: Optional["_AgentContent"] = None
     error: Any = None
 
@@ -174,15 +174,15 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             attributes=attributes,
         )
         span_token = context.attach(set_span_in_context(otel_span))
-        http_client_span_collapsing_token = None
+        span_for_propagation_token = None
         if kind == SpanKind.CLIENT:
-            http_client_span_collapsing_token = context.attach(set_http_client_span_collapsing_in_context(otel_span))
+            span_for_propagation_token = context.attach(set_span_for_propagation_in_context(otel_span))
         self._openai_span_id_to_otel_span_entry.put(
             span.span_id,
             _SpanEntry(
                 span=otel_span,
                 token=span_token,
-                http_client_span_collapsing_token=http_client_span_collapsing_token,
+                span_for_propagation_token=span_for_propagation_token,
                 agent_content=agent_content,
             ),
         )
@@ -198,8 +198,8 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         if entry is None or entry.token is None:
             return
 
-        if entry.http_client_span_collapsing_token is not None:
-            try_detach(entry.http_client_span_collapsing_token)
+        if entry.span_for_propagation_token is not None:
+            try_detach(entry.span_for_propagation_token)
         try_detach(entry.token)
         otel_span = entry.span
 
@@ -253,8 +253,8 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
     def _close_incomplete_span(entry: _SpanEntry) -> None:
         if entry.token is None:
             return
-        if entry.http_client_span_collapsing_token is not None:
-            try_detach(entry.http_client_span_collapsing_token)
+        if entry.span_for_propagation_token is not None:
+            try_detach(entry.span_for_propagation_token)
         try_detach(entry.token)
         if entry.span.is_recording():
             entry.span.set_attribute(ERROR_TYPE, "_OTHER")

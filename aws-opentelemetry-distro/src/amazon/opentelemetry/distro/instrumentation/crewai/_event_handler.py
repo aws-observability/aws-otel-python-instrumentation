@@ -7,7 +7,7 @@ from contextvars import Token
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
-from amazon.opentelemetry.distro._gen_ai._span_context import set_http_client_span_collapsing_in_context
+from amazon.opentelemetry.distro._gen_ai._span_context import set_span_for_propagation_in_context
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     GEN_AI_WORKFLOW_NAME,
     OPERATION_INVOKE_WORKFLOW,
@@ -77,7 +77,7 @@ _LOG = logging.getLogger(__name__)
 class _SpanEntry:
     span: trace.Span
     span_token: Token
-    http_client_span_collapsing_token: Optional[Token] = None
+    span_for_propagation_token: Optional[Token] = None
 
 
 class _EventBusEmitWrapper:
@@ -448,15 +448,15 @@ class OpenTelemetryEventHandler:
 
         span = self._tracer.start_span(name, kind=kind, attributes=attributes, context=parent_ctx)
         span_token = context.attach(trace.set_span_in_context(span))
-        http_client_span_collapsing_token = None
+        span_for_propagation_token = None
         if kind == SpanKind.CLIENT:
-            http_client_span_collapsing_token = context.attach(set_http_client_span_collapsing_in_context(span))
+            span_for_propagation_token = context.attach(set_span_for_propagation_in_context(span))
         self._event_id_to_span.put(
             event_id,
             _SpanEntry(
                 span=span,
                 span_token=span_token,
-                http_client_span_collapsing_token=http_client_span_collapsing_token,
+                span_for_propagation_token=span_for_propagation_token,
             ),
         )
 
@@ -480,8 +480,8 @@ class OpenTelemetryEventHandler:
             else:
                 entry.span.set_status(Status(StatusCode.OK))
             entry.span.end()
-            if entry.http_client_span_collapsing_token is not None:
-                context.detach(entry.http_client_span_collapsing_token)
+            if entry.span_for_propagation_token is not None:
+                context.detach(entry.span_for_propagation_token)
             context.detach(entry.span_token)
 
     @staticmethod

@@ -226,7 +226,7 @@ class _Span(BaseSpan):
     _attributes: Dict[str, AttributeValue] = PrivateAttr()
     _parent: Optional["_Span"] = PrivateAttr()
     _context_token: Optional[object] = PrivateAttr()
-    _http_client_span_collapsing_token: Optional[object] = PrivateAttr()
+    _span_for_propagation_token: Optional[object] = PrivateAttr()
     _deferred: bool = PrivateAttr(default=False)
     _span_name: Optional[str] = PrivateAttr(default=None)
 
@@ -235,7 +235,7 @@ class _Span(BaseSpan):
         otel_span: Span,
         parent: Optional["_Span"] = None,
         context_token: Optional[object] = None,
-        http_client_span_collapsing_token: Optional[object] = None,
+        span_for_propagation_token: Optional[object] = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -243,7 +243,7 @@ class _Span(BaseSpan):
         self._parent = parent
         self._attributes = {}
         self._context_token = context_token
-        self._http_client_span_collapsing_token = http_client_span_collapsing_token
+        self._span_for_propagation_token = span_for_propagation_token
         self._deferred = False
 
     @property
@@ -288,9 +288,9 @@ class _Span(BaseSpan):
         if not self._otel_span.is_recording():
             return
 
-        if self._http_client_span_collapsing_token is not None:
-            try_detach(self._http_client_span_collapsing_token)  # type: ignore[arg-type]
-            self._http_client_span_collapsing_token = None
+        if self._span_for_propagation_token is not None:
+            try_detach(self._span_for_propagation_token)  # type: ignore[arg-type]
+            self._span_for_propagation_token = None
         if self._context_token is not None:
             try_detach(self._context_token)  # type: ignore[arg-type]
             self._context_token = None

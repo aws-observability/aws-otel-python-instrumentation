@@ -20,7 +20,7 @@ from llama_index.core.tools import BaseTool
 from llama_index.core.tools.types import ToolOutput
 from pydantic import PrivateAttr
 
-from amazon.opentelemetry.distro._gen_ai._span_context import set_http_client_span_collapsing_in_context
+from amazon.opentelemetry.distro._gen_ai._span_context import set_span_for_propagation_in_context
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     skip_instrumentation_if_suppressed,
     to_tool_attribute_value,
@@ -169,17 +169,15 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         )
 
         span_token = context_api.attach(set_span_in_context(otel_span, parent.context if parent else None))
-        http_client_span_collapsing_token = None
+        span_for_propagation_token = None
         if kind == SpanKind.CLIENT:
-            http_client_span_collapsing_token = context_api.attach(
-                set_http_client_span_collapsing_in_context(otel_span)
-            )
+            span_for_propagation_token = context_api.attach(set_span_for_propagation_in_context(otel_span))
 
         span = _Span(
             otel_span=otel_span,
             parent=parent,
             context_token=span_token,
-            http_client_span_collapsing_token=http_client_span_collapsing_token,
+            span_for_propagation_token=span_for_propagation_token,
             id_=id_,
             parent_id=parent_span_id,
         )

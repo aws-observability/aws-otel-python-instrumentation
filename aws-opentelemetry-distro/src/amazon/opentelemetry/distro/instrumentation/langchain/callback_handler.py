@@ -11,7 +11,7 @@ from uuid import UUID
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import convert_to_messages
 
-from amazon.opentelemetry.distro._gen_ai._span_context import set_http_client_span_collapsing_in_context
+from amazon.opentelemetry.distro._gen_ai._span_context import set_span_for_propagation_in_context
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     PROVIDER_MAP,
     DictWithLock,
@@ -567,19 +567,19 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             span = self.tracer.start_span(span_name, kind=kind)
 
         span_token = context.attach(set_span_in_context(span))
-        http_client_span_collapsing_token = None
+        span_for_propagation_token = None
         if kind == SpanKind.CLIENT:
-            http_client_span_collapsing_token = context.attach(set_http_client_span_collapsing_in_context(span))
-        self.run_id_to_span_map.put(run_id, (span, span_token, http_client_span_collapsing_token))
+            span_for_propagation_token = context.attach(set_span_for_propagation_in_context(span))
+        self.run_id_to_span_map.put(run_id, (span, span_token, span_for_propagation_token))
         return span
 
     def _end_span(self, run_id: UUID) -> None:
         entry = self.run_id_to_span_map.pop(run_id)
         if not entry:
             return
-        span, span_token, http_client_span_collapsing_token = entry
-        if http_client_span_collapsing_token is not None:
-            try_detach(http_client_span_collapsing_token)
+        span, span_token, span_for_propagation_token = entry
+        if span_for_propagation_token is not None:
+            try_detach(span_for_propagation_token)
         try_detach(span_token)
         span.end()
 
