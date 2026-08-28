@@ -31,8 +31,8 @@ from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSp
 from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import (
     CompactConsoleLogRecordExporter,
 )
-from amazon.opentelemetry.distro.gen_ai.http_span_collapsing import GenAiHttpDropSampler
-from amazon.opentelemetry.distro.gen_ai.nested_client_span_processor import GenAiNestedClientSpanProcessor
+from amazon.opentelemetry.distro.gen_ai.sampler import GenAiHttpDropSampler
+from amazon.opentelemetry.distro.gen_ai.span_processor import GenAiNestedClientSpanProcessor
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler._aws_xray_adaptive_sampling_config import (
     _AnomalyCaptureLimit,
