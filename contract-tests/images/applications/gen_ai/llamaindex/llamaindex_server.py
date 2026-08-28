@@ -182,7 +182,8 @@ class RequestHandler:
             print(f"Error in _run_query: {exc}")
             traceback.print_exc()
 
-    def _run_embedding(self) -> None:
+    @staticmethod
+    def _run_embedding() -> None:
         try:
             embed_model = MockEmbedding(embed_dim=384)
 
