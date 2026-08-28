@@ -1,0 +1,56 @@
+## Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+## SPDX-License-Identifier: Apache-2.0
+# Verifies that the ADOT Python auto-instrumentation image copies its /autoinstrumentation
+# payload into an operator volume correctly, and that the ported distro imports from the
+# volume, reports the expected version, and resolves as the OTel `aws_distro` entry point.
+#
+# This runs the SAME check that release-build.yml runs before publishing, but with no AWS
+# credentials, no ECR, and no publishing -- so it can be exercised on demand or on PRs
+# without cutting a release. Green here == the release-time gate will pass.
+name: Verify image copy
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Expected distro version to assert (blank = skip version check; source is 0.19.0.dev0)"
+        required: false
+        default: ""
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - "tools/cp-utility/**"
+      - "aws-opentelemetry-distro/**"
+      - ".github/scripts/test-adot-python-image.sh"
+      - ".github/workflows/verify-image-copy.yml"
+
+permissions:
+  contents: read
+
+env:
+  TEST_TAG: adot-autoinstrumentation-python:test
+
+jobs:
+  verify-image-copy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 #3.11.1
+
+      # Build the release image locally (not pushed) exactly as release-build.yml does.
+      - name: Build image for testing
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
+        with:
+          push: false
+          load: true
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          tags: ${{ env.TEST_TAG }}
+
+      - name: Verify image copy + ported distro
+        shell: bash
+        run: .github/scripts/test-adot-python-image.sh "${{ env.TEST_TAG }}" "${{ github.event.inputs.version }}"
