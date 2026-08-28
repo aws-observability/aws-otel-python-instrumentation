@@ -64,6 +64,7 @@ class GenAITestBase(ContractTestBase):
         self.assertEqual(status_code, response.status_code)
 
         resource_scope_spans = self.mock_collector_client.get_traces()
+        self._assert_session_id(resource_scope_spans)
         self._assert_aws_span_attributes(resource_scope_spans, path, **kwargs)
         self._assert_semantic_conventions_span_attributes(resource_scope_spans, method, path, status_code, **kwargs)
 
@@ -73,6 +74,13 @@ class GenAITestBase(ContractTestBase):
         port = self.application.get_exposed_port(self.get_application_port())
         url = f"http://{address}:{port}/{path}"
         return request(method, url, headers={"baggage": f"session.id={SESSION_ID}"}, timeout=20)
+
+    def _assert_session_id(self, resource_scope_spans: List[ResourceScopeSpan]) -> None:
+        # Every span created for the inbound request MUST retain the session identifier extracted from W3C baggage.
+        for resource_scope_span in resource_scope_spans:
+            self._assert_str_attribute(
+                self._get_attributes_dict(resource_scope_span.span.attributes), "session.id", SESSION_ID
+            )
 
     def _do_test_for_each_llm(self, path: str, **kwargs) -> None:
         # Every model-backed scenario MUST run unchanged against both supported LLM providers.
@@ -103,10 +111,6 @@ class GenAITestBase(ContractTestBase):
     def _assert_aws_span_attributes(self, resource_scope_spans: List[ResourceScopeSpan], path: str, **kwargs) -> None:
         expected_s3_call_count = kwargs.get("expected_s3_call_count", 0)
         spans = [resource_scope_span.span for resource_scope_span in resource_scope_spans]
-
-        # Every span created for the inbound request MUST retain the session identifier extracted from W3C baggage.
-        for span in spans:
-            self._assert_str_attribute(self._get_attributes_dict(span.attributes), "session.id", SESSION_ID)
 
         if expected_s3_call_count:
             store_tool_spans = []
