@@ -36,13 +36,10 @@ class GenAiHttpDropSampler(Sampler):
         trace_state: TraceState = None,
     ) -> SamplingResult:
         gen_ai_span_context = otel_context.get_value(_GEN_AI_SPAN_CONTEXT_KEY, parent_context)
-        is_direct_gen_ai_child = (
-            gen_ai_span_context is not None
-            and trace.get_current_span(parent_context).get_span_context() == gen_ai_span_context
-        )
         if (
             kind == SpanKind.CLIENT
-            and is_direct_gen_ai_child
+            and gen_ai_span_context is not None
+            and trace.get_current_span(parent_context).get_span_context() == gen_ai_span_context
             and any(
                 key in (attributes or {}) for key in (SpanAttributes.HTTP_REQUEST_METHOD, SpanAttributes.HTTP_METHOD)
             )
