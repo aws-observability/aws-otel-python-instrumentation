@@ -345,26 +345,34 @@ class _Span(BaseSpan):
             for tool in tool_items:
                 metadata = getattr(tool, "metadata", None)
                 to_openai_tool = getattr(metadata, "to_openai_tool", None)
+                tool_candidates = []
                 if callable(to_openai_tool):
                     try:
-                        tool = to_openai_tool()
+                        tool_candidates.append(to_openai_tool())
                     except Exception:  # pylint: disable=broad-exception-caught
-                        tool = metadata
+                        pass
+                if metadata is not None:
+                    tool_candidates.append(metadata)
+                tool_candidates.append(tool)
 
-                if isinstance(tool, Mapping):
-                    if isinstance(function := tool.get("function"), Mapping):
-                        tool = function
-                        tool_type = "function"
-                    elif isinstance(tool_spec := tool.get("toolSpec"), Mapping):
-                        tool = tool_spec
-                        tool_type = "function"
+                for tool_candidate in tool_candidates:
+                    if isinstance(tool_candidate, Mapping):
+                        if isinstance(function := tool_candidate.get("function"), Mapping):
+                            tool_candidate = function
+                            tool_type = "function"
+                        elif isinstance(tool_spec := tool_candidate.get("toolSpec"), Mapping):
+                            tool_candidate = tool_spec
+                            tool_type = "function"
+                        else:
+                            tool_type = tool_candidate.get("type") or "function"
                     else:
-                        tool_type = tool.get("type") or "function"
-                else:
-                    tool_type = _safe_get(tool, "type") or "function"
+                        tool_type = _safe_get(tool_candidate, "type") or "function"
 
-                name = _safe_get(tool, "name")
-                if not isinstance(name, str) or not name:
+                    name = _safe_get(tool_candidate, "name")
+                    if isinstance(name, str) and name:
+                        tool = tool_candidate
+                        break
+                else:
                     continue
 
                 tool_definition: dict[str, Any] = {"type": str(tool_type), "name": name}
