@@ -25,6 +25,7 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     to_tool_attribute_value,
 )
 from opentelemetry import context as context_api
+from opentelemetry.instrumentation.utils import suppress_http_instrumentation
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_NAME,
     GEN_AI_OPERATION_NAME,
@@ -167,12 +168,17 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
             ),
         )
 
-        token = context_api.attach(set_span_in_context(otel_span, parent.context if parent else None))
+        span_token = context_api.attach(set_span_in_context(otel_span, parent.context if parent else None))
+        http_suppression_context = None
+        if kind == SpanKind.CLIENT:
+            http_suppression_context = suppress_http_instrumentation()
+            http_suppression_context.__enter__()
 
         span = _Span(
             otel_span=otel_span,
             parent=parent,
-            context_token=token,
+            context_token=span_token,
+            http_suppression_context=http_suppression_context,
             id_=id_,
             parent_id=parent_span_id,
         )

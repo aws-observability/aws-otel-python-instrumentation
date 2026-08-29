@@ -21,6 +21,7 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     try_detach,
 )
 from opentelemetry import context
+from opentelemetry.instrumentation.utils import suppress_http_instrumentation
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_NAME,
     GEN_AI_INPUT_MESSAGES,
@@ -171,7 +172,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         entry = self._safe_get_span(run_id)
         if not entry:
             return
-        span, _ = entry
+        span, _, _ = entry
         llm_output: dict | None = response.llm_output
         model: str | None = (llm_output.get("model_name") or llm_output.get("model_id")) if llm_output else None
         response_id: str | None = llm_output.get("id") if llm_output else None
@@ -278,7 +279,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
     def on_chain_end(self, outputs: dict[str, Any], *, run_id: UUID, **kwargs: Any) -> None:
         entry = self._safe_get_span(run_id)
         if entry:
-            span, _ = entry
+            span, _, _ = entry
             payload = outputs.get("messages") or outputs.get("output") if isinstance(outputs, dict) else None
             if payload and GenAiOperationNameValues.INVOKE_AGENT.value in getattr(span, "name", ""):
                 messages = convert_to_messages([payload] if isinstance(payload, str) else payload)
@@ -333,7 +334,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         entry = self._safe_get_span(run_id)
         if not entry:
             return
-        span, _ = entry
+        span, _, _ = entry
         self._set_span_attribute(span, GEN_AI_TOOL_CALL_RESULT, to_tool_attribute_value(output))
         self._end_span(run_id)
 
@@ -545,7 +546,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         entry = self._safe_get_span(run_id)
         if not entry:
             return
-        span, _ = entry
+        span, _, _ = entry
         span.record_exception(error)
         span.set_status(Status(StatusCode.ERROR, str(error)))
         span.set_attribute(ERROR_TYPE, type(error).__qualname__)
@@ -560,21 +561,27 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
     ) -> Span:
         parent_entry = self.run_id_to_span_map.get(parent_run_id) if parent_run_id else None
         if parent_entry:
-            parent_span, _ = parent_entry
+            parent_span, _, _ = parent_entry
             span = self.tracer.start_span(span_name, context=set_span_in_context(parent_span), kind=kind)
         else:
             span = self.tracer.start_span(span_name, kind=kind)
 
-        token = context.attach(set_span_in_context(span))
-        self.run_id_to_span_map.put(run_id, (span, token))
+        span_token = context.attach(set_span_in_context(span))
+        http_suppression_context = None
+        if kind == SpanKind.CLIENT:
+            http_suppression_context = suppress_http_instrumentation()
+            http_suppression_context.__enter__()
+        self.run_id_to_span_map.put(run_id, (span, span_token, http_suppression_context))
         return span
 
     def _end_span(self, run_id: UUID) -> None:
         entry = self.run_id_to_span_map.pop(run_id)
         if not entry:
             return
-        span, token = entry
-        try_detach(token)
+        span, span_token, http_suppression_context = entry
+        if http_suppression_context is not None:
+            http_suppression_context.__exit__(None, None, None)
+        try_detach(span_token)
         span.end()
 
     @staticmethod

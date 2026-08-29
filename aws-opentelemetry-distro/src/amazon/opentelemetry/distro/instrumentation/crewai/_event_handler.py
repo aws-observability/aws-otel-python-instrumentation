@@ -3,6 +3,8 @@
 
 import logging
 import re
+from contextlib import AbstractContextManager
+from contextvars import Token
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
@@ -17,6 +19,7 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     to_tool_attribute_value,
 )
 from opentelemetry import context, trace
+from opentelemetry.instrumentation.utils import suppress_http_instrumentation
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_DESCRIPTION,
     GEN_AI_AGENT_ID,
@@ -74,7 +77,8 @@ _LOG = logging.getLogger(__name__)
 @dataclass
 class _SpanEntry:
     span: trace.Span
-    token: Any
+    span_token: Token
+    http_suppression_context: Optional[AbstractContextManager] = None
 
 
 class _EventBusEmitWrapper:
@@ -444,8 +448,19 @@ class OpenTelemetryEventHandler:
                 parent_ctx = trace.set_span_in_context(parent_entry.span)
 
         span = self._tracer.start_span(name, kind=kind, attributes=attributes, context=parent_ctx)
-        token = context.attach(trace.set_span_in_context(span))
-        self._event_id_to_span.put(event_id, _SpanEntry(span=span, token=token))
+        span_token = context.attach(trace.set_span_in_context(span))
+        http_suppression_context = None
+        if kind == SpanKind.CLIENT:
+            http_suppression_context = suppress_http_instrumentation()
+            http_suppression_context.__enter__()
+        self._event_id_to_span.put(
+            event_id,
+            _SpanEntry(
+                span=span,
+                span_token=span_token,
+                http_suppression_context=http_suppression_context,
+            ),
+        )
 
     def _end_span(
         self,
@@ -467,7 +482,9 @@ class OpenTelemetryEventHandler:
             else:
                 entry.span.set_status(Status(StatusCode.OK))
             entry.span.end()
-            context.detach(entry.token)
+            if entry.http_suppression_context is not None:
+                entry.http_suppression_context.__exit__(None, None, None)
+            context.detach(entry.span_token)
 
     @staticmethod
     def _extract_provider_and_model(llm: Any) -> Tuple[Optional[str], Optional[str]]:
