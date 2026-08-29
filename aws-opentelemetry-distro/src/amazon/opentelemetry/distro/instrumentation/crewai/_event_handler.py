@@ -369,7 +369,14 @@ class OpenTelemetryEventHandler:
                     [self._to_input_message(m) for m in non_system_messages]
                 )
 
-        self._start_span(span_name, event.event_id, attributes, event.parent_event_id, kind=SpanKind.CLIENT)
+        self._start_span(
+            span_name,
+            event.event_id,
+            attributes,
+            event.parent_event_id,
+            kind=SpanKind.CLIENT,
+            http_suppression_context=suppress_http_instrumentation(),
+        )
 
     def _on_llm_completed(self, source: "LLM", event: "LLMCallCompletedEvent") -> None:
         attrs: Dict[str, Any] = {}
@@ -440,6 +447,7 @@ class OpenTelemetryEventHandler:
         attributes: Optional[Dict[str, Any]] = None,
         parent_event_id: Optional[str] = None,
         kind: SpanKind = SpanKind.INTERNAL,
+        http_suppression_context: Optional[AbstractContextManager] = None,
     ) -> None:
         parent_ctx = None
         if parent_event_id:
@@ -449,9 +457,7 @@ class OpenTelemetryEventHandler:
 
         span = self._tracer.start_span(name, kind=kind, attributes=attributes, context=parent_ctx)
         span_token = context.attach(trace.set_span_in_context(span))
-        http_suppression_context = None
-        if kind == SpanKind.CLIENT:
-            http_suppression_context = suppress_http_instrumentation()
+        if http_suppression_context is not None:
             http_suppression_context.__enter__()
         self._event_id_to_span.put(
             event_id,

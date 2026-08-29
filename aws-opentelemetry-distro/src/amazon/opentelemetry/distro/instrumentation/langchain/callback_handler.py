@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import AbstractContextManager
 from contextvars import Token
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
@@ -121,7 +122,13 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             f"{GenAiOperationNameValues.CHAT.value} {model_name}" if model_name else GenAiOperationNameValues.CHAT.value
         )
 
-        span: Span = self._start_span(run_id, parent_run_id, span_name, kind=SpanKind.CLIENT)
+        span: Span = self._start_span(
+            run_id,
+            parent_run_id,
+            span_name,
+            kind=SpanKind.CLIENT,
+            http_suppression_context=suppress_http_instrumentation(),
+        )
 
         self._set_langgraph_span_attributes(span, metadata)
         self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
@@ -154,7 +161,13 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             if model_name
             else GenAiOperationNameValues.TEXT_COMPLETION.value
         )
-        span: Span = self._start_span(run_id, parent_run_id, span_name, kind=SpanKind.CLIENT)
+        span: Span = self._start_span(
+            run_id,
+            parent_run_id,
+            span_name,
+            kind=SpanKind.CLIENT,
+            http_suppression_context=suppress_http_instrumentation(),
+        )
 
         self._set_langgraph_span_attributes(span, metadata)
         self._set_span_attribute(span, GEN_AI_PROVIDER_NAME, provider)
@@ -558,6 +571,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         parent_run_id: Optional[UUID],
         span_name: str,
         kind: SpanKind = SpanKind.INTERNAL,
+        http_suppression_context: Optional[AbstractContextManager] = None,
     ) -> Span:
         parent_entry = self.run_id_to_span_map.get(parent_run_id) if parent_run_id else None
         if parent_entry:
@@ -567,9 +581,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             span = self.tracer.start_span(span_name, kind=kind)
 
         span_token = context.attach(set_span_in_context(span))
-        http_suppression_context = None
-        if kind == SpanKind.CLIENT:
-            http_suppression_context = suppress_http_instrumentation()
+        if http_suppression_context is not None:
             http_suppression_context.__enter__()
         self.run_id_to_span_map.put(run_id, (span, span_token, http_suppression_context))
         return span
