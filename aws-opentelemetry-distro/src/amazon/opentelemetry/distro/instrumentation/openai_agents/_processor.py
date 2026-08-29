@@ -167,7 +167,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             GEN_AI_OPERATION_NAME: operation,
             GEN_AI_PROVIDER_NAME: GenAiProviderNameValues.OPENAI.value,
         }
-        is_model_span = isinstance(span_data, (GenerationSpanData, ResponseSpanData))
+        is_inference_span = isinstance(span_data, (GenerationSpanData, ResponseSpanData))
         kind = self._set_span_kind(span_data)
         otel_span = self._tracer.start_span(
             self._set_span_name(span_data, operation),
@@ -177,7 +177,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         )
         span_token = context.attach(set_span_in_context(otel_span))
         http_suppression_context = None
-        if is_model_span:
+        if is_inference_span:
             http_suppression_context = suppress_http_instrumentation()
             http_suppression_context.__enter__()
         self._openai_span_id_to_otel_span_entry.put(

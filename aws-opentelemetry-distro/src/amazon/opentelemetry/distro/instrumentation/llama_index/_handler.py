@@ -154,8 +154,8 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
                 parent_id=parent_span_id,
             )
 
-        is_model_span = isinstance(instance, (BaseLLM, MultiModalLLM, BaseEmbedding))
-        kind = SpanKind.CLIENT if is_model_span else SpanKind.INTERNAL
+        is_inference_span = isinstance(instance, (BaseLLM, MultiModalLLM, BaseEmbedding))
+        kind = SpanKind.CLIENT if is_inference_span else SpanKind.INTERNAL
 
         otel_span = self._otel_tracer.start_span(
             name="llama_index.operation",  # generic operation name, updated in span.end()
@@ -171,7 +171,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
 
         span_token = context_api.attach(set_span_in_context(otel_span, parent.context if parent else None))
         http_suppression_context = None
-        if is_model_span:
+        if is_inference_span:
             http_suppression_context = suppress_http_instrumentation()
             http_suppression_context.__enter__()
 
