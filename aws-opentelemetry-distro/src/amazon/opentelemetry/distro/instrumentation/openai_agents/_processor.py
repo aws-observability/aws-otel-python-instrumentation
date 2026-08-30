@@ -32,6 +32,7 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     to_tool_attribute_value,
     try_detach,
 )
+from opentelemetry import context
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_NAME,
     GEN_AI_INPUT_MESSAGES,
@@ -123,7 +124,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             kind=SpanKind.INTERNAL,
             attributes=attributes,
         )
-        token = attach_otel_context(set_span_in_context(span))
+        token = context.attach(set_span_in_context(span))
         self._openai_trace_id_to_otel_workflow_entry.put(trace.trace_id, _SpanEntry(span=span, token=token))
 
     @override
@@ -164,25 +165,19 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             GEN_AI_OPERATION_NAME: operation,
             GEN_AI_PROVIDER_NAME: GenAiProviderNameValues.OPENAI.value,
         }
-        is_inference_span = isinstance(span_data, (GenerationSpanData, ResponseSpanData))
-        kind = self._set_span_kind(span_data)
         otel_span = self._tracer.start_span(
             self._set_span_name(span_data, operation),
             context=set_span_in_context(parent_entry.span) if parent_entry is not None else None,
-            kind=kind,
+            kind=self._set_span_kind(span_data),
             attributes=attributes,
         )
-        span_token = attach_otel_context(
+        token = attach_otel_context(
             set_span_in_context(otel_span),
-            suppress_http=is_inference_span,
+            suppress_http=isinstance(span_data, (GenerationSpanData, ResponseSpanData)),
         )
         self._openai_span_id_to_otel_span_entry.put(
             span.span_id,
-            _SpanEntry(
-                span=otel_span,
-                token=span_token,
-                agent_content=agent_content,
-            ),
+            _SpanEntry(span=otel_span, token=token, agent_content=agent_content),
         )
 
     @override

@@ -12,7 +12,13 @@ from typing import Any, Dict, Optional, Sequence
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from conftest import validate_otel_genai_schema
+from conftest import (
+    assert_llm_client_spans,
+    call_mock_openai,
+    call_stubbed_bedrock,
+    instrument_llm_clients,
+    validate_otel_genai_schema,
+)
 
 if sys.version_info < (3, 10) or sys.version_info >= (3, 14):
     raise unittest.SkipTest("crewai requires >=3.10, <3.14")
@@ -81,6 +87,85 @@ class TestCrewAIInstrumentor(TestCase):
         self.instrumentor.uninstrument()
         self.span_exporter.clear()
         self._restore_env()
+
+    def test_llm_client_span_suppression(self):
+        with self.subTest(client="openai", is_instrumented=False):
+            self.span_exporter.clear()
+            with instrument_llm_clients(self.tracer_provider):
+                source = LLM(model="openai/gpt-4", is_litellm=True, temperature=0.7)
+                usage = iter(
+                    [
+                        MagicMock(prompt_tokens=0, completion_tokens=0),
+                        MagicMock(prompt_tokens=10, completion_tokens=20),
+                    ]
+                )
+                source.get_token_usage_summary = lambda: next(usage)
+                start_event = LLMCallStartedEvent(
+                    call_id="call-1",
+                    messages=[
+                        {"role": "system", "content": "You are a helpful assistant."},
+                        {"role": "user", "content": "Hello"},
+                    ],
+                )
+                crewai_event_bus.emit(source, start_event)
+                try:
+                    call_mock_openai("gpt-4")
+                finally:
+                    crewai_event_bus.emit(
+                        source,
+                        LLMCallCompletedEvent(
+                            call_id="call-1",
+                            response="Hello, World!",
+                            call_type=LLMCallType.LLM_CALL,
+                            started_event_id=start_event.event_id,
+                        ),
+                    )
+
+            assert_llm_client_spans(
+                self.span_exporter.get_finished_spans(),
+                GenAiProviderNameValues.OPENAI.value,
+                "gpt-4",
+                False,
+            )
+        with self.subTest(client="bedrock", is_instrumented=True):
+            self.span_exporter.clear()
+            model = "anthropic.claude-3-haiku-20240307-v1:0"
+            with instrument_llm_clients(self.tracer_provider):
+                source = LLM(model=f"bedrock/{model}", is_litellm=True, temperature=0.7)
+                usage = iter(
+                    [
+                        MagicMock(prompt_tokens=0, completion_tokens=0),
+                        MagicMock(prompt_tokens=10, completion_tokens=20),
+                    ]
+                )
+                source.get_token_usage_summary = lambda: next(usage)
+                start_event = LLMCallStartedEvent(
+                    call_id="call-1",
+                    messages=[
+                        {"role": "system", "content": "You are a helpful assistant."},
+                        {"role": "user", "content": "Hello"},
+                    ],
+                )
+                crewai_event_bus.emit(source, start_event)
+                try:
+                    call_stubbed_bedrock(model)
+                finally:
+                    crewai_event_bus.emit(
+                        source,
+                        LLMCallCompletedEvent(
+                            call_id="call-1",
+                            response="Hello, World!",
+                            call_type=LLMCallType.LLM_CALL,
+                            started_event_id=start_event.event_id,
+                        ),
+                    )
+
+            assert_llm_client_spans(
+                self.span_exporter.get_finished_spans(),
+                GenAiProviderNameValues.AWS_BEDROCK.value,
+                model,
+                True,
+            )
 
     def _set_env(self, key: str, value: str):
         self._env_backup[key] = os.environ.get(key)

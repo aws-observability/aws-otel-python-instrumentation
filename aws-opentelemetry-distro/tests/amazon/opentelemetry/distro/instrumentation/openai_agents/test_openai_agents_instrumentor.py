@@ -11,7 +11,13 @@ from agents import tracing
 from agents.items import ItemHelpers
 from agents.tracing import processors
 from agents.tracing.processors import BackendSpanExporter
-from conftest import validate_otel_genai_schema
+from conftest import (
+    assert_llm_client_spans,
+    call_mock_openai,
+    call_stubbed_bedrock,
+    instrument_llm_clients,
+    validate_otel_genai_schema,
+)
 from openai import Omit
 from openai.types.responses import ResponseFunctionToolCall
 from pydantic import BaseModel
@@ -220,6 +226,51 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
 
     def _spans_by_name(self) -> dict[str, object]:
         return {span.name: span for span in self.exporter.get_finished_spans()}
+
+    def test_llm_client_span_suppression(self):
+        with self.subTest(client="openai", is_instrumented=False):
+            self.exporter.clear()
+            with instrument_llm_clients(self.tracer_provider), tracing.trace("Test workflow"):
+                with tracing.generation_span(
+                    input=[
+                        {"role": "system", "content": "You are a helpful assistant."},
+                        {"role": "user", "content": "Hello"},
+                    ],
+                    output=[{"role": "assistant", "content": "Hello, World!", "finish_reason": "stop"}],
+                    model="gpt-4",
+                    model_config={"temperature": 0.7},
+                    usage={"input_tokens": 10, "output_tokens": 20},
+                ):
+                    call_mock_openai("gpt-4")
+
+            assert_llm_client_spans(
+                self.exporter.get_finished_spans(),
+                GenAiProviderNameValues.OPENAI.value,
+                "gpt-4",
+                False,
+            )
+        with self.subTest(client="bedrock", is_instrumented=True):
+            self.exporter.clear()
+            model = "anthropic.claude-3-haiku-20240307-v1:0"
+            with instrument_llm_clients(self.tracer_provider), tracing.trace("Test workflow"):
+                with tracing.generation_span(
+                    input=[
+                        {"role": "system", "content": "You are a helpful assistant."},
+                        {"role": "user", "content": "Hello"},
+                    ],
+                    output=[{"role": "assistant", "content": "Hello, World!", "finish_reason": "stop"}],
+                    model=f"bedrock/{model}",
+                    model_config={"temperature": 0.7},
+                    usage={"input_tokens": 10, "output_tokens": 20},
+                ):
+                    call_stubbed_bedrock(model)
+
+            assert_llm_client_spans(
+                self.exporter.get_finished_spans(),
+                GenAiProviderNameValues.AWS_BEDROCK.value,
+                model,
+                True,
+            )
 
     def test_span_mapping_attributes_and_agent_rollup(self):
         first_input = [

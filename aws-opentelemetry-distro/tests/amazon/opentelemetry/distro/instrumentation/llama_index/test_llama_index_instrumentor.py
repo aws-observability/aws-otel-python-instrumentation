@@ -12,7 +12,13 @@ import sys
 import unittest
 from unittest.mock import Mock
 
-from conftest import validate_otel_genai_schema
+from conftest import (
+    assert_llm_client_spans,
+    call_mock_openai,
+    call_stubbed_bedrock,
+    instrument_llm_clients,
+    validate_otel_genai_schema,
+)
 
 if sys.version_info < (3, 10):
     raise unittest.SkipTest("llama-index requires Python >= 3.10")
@@ -27,11 +33,14 @@ from llama_index.core.base.llms.types import (
     MessageRole,
     TextBlock,
 )
+from llama_index.core.instrumentation.events.llm import LLMChatEndEvent as _LLMChatEndEvent
 from llama_index.core.instrumentation.events.llm import LLMChatStartEvent
 from llama_index.core.llms.function_calling import FunctionCallingLLM
 from llama_index.core.llms.llm import ToolSelection
 from llama_index.core.tools import FunctionTool
 from llama_index.core.tools.types import ToolOutput
+from llama_index.llms.bedrock_converse import BedrockConverse as _BedrockConverse
+from llama_index.llms.openai import OpenAI as _OpenAI
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     GEN_AI_WORKFLOW_NAME,
@@ -73,6 +82,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
     GenAiOperationNameValues,
+    GenAiProviderNameValues,
 )
 
 
@@ -97,6 +107,101 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
     def tearDown(self):
         self.instrumentor.uninstrument()
         self.span_exporter.clear()
+
+    def test_llm_client_span_suppression(self):
+        with self.subTest(client="openai", is_instrumented=False):
+            self.span_exporter.clear()
+            client = _OpenAI(model="gpt-4", api_key="fake-key", temperature=0.7)
+            bound_args = Mock(spec=inspect.BoundArguments)
+            bound_args.kwargs = {}
+            span = self.instrumentor._span_handler.new_span(
+                id_=f"{client.__class__.__name__}.chat-1",
+                bound_args=bound_args,
+                instance=client,
+            )
+            span.process_event(
+                LLMChatStartEvent(
+                    messages=[
+                        ChatMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+                        ChatMessage(role=MessageRole.USER, content="Hello"),
+                    ],
+                    additional_kwargs={},
+                    model_dict={},
+                )
+            )
+            with instrument_llm_clients(self.tracer_provider):
+                call_mock_openai("gpt-4")
+            span.process_event(
+                _LLMChatEndEvent(
+                    messages=[],
+                    response=ChatResponse(
+                        message=ChatMessage(role=MessageRole.ASSISTANT, content="Hello, World!"),
+                        raw={
+                            "model": "gpt-4",
+                            "choices": [{"finish_reason": "stop"}],
+                            "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                        },
+                    ),
+                )
+            )
+            span.end()
+
+            assert_llm_client_spans(
+                self.span_exporter.get_finished_spans(),
+                GenAiProviderNameValues.OPENAI.value,
+                "gpt-4",
+                False,
+            )
+        with self.subTest(client="bedrock", is_instrumented=True):
+            self.span_exporter.clear()
+            model = "anthropic.claude-3-haiku-20240307-v1:0"
+            client = _BedrockConverse(
+                model=model,
+                region_name="us-east-1",
+                aws_access_key_id="fake-key",
+                aws_secret_access_key="fake-key",
+                temperature=0.7,
+            )
+            bound_args = Mock(spec=inspect.BoundArguments)
+            bound_args.kwargs = {}
+            span = self.instrumentor._span_handler.new_span(
+                id_=f"{client.__class__.__name__}.chat-1",
+                bound_args=bound_args,
+                instance=client,
+            )
+            span.process_event(
+                LLMChatStartEvent(
+                    messages=[
+                        ChatMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+                        ChatMessage(role=MessageRole.USER, content="Hello"),
+                    ],
+                    additional_kwargs={},
+                    model_dict={},
+                )
+            )
+            with instrument_llm_clients(self.tracer_provider):
+                call_stubbed_bedrock(model)
+            span.process_event(
+                _LLMChatEndEvent(
+                    messages=[],
+                    response=ChatResponse(
+                        message=ChatMessage(role=MessageRole.ASSISTANT, content="Hello, World!"),
+                        raw={
+                            "model": model,
+                            "choices": [{"finish_reason": "stop"}],
+                            "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                        },
+                    ),
+                )
+            )
+            span.end()
+
+            assert_llm_client_spans(
+                self.span_exporter.get_finished_spans(),
+                GenAiProviderNameValues.AWS_BEDROCK.value,
+                model,
+                True,
+            )
 
     def test_llm_chat_start_event(self):
         from llama_index.core.instrumentation.events.llm import LLMChatStartEvent

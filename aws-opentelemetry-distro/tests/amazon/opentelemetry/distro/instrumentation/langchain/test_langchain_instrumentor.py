@@ -7,7 +7,13 @@ import unittest
 from unittest import TestCase
 from unittest.mock import patch
 
-from conftest import validate_otel_genai_schema
+from conftest import (
+    assert_llm_client_spans,
+    call_mock_openai,
+    call_stubbed_bedrock,
+    instrument_llm_clients,
+    validate_otel_genai_schema,
+)
 
 if sys.version_info < (3, 10):
     raise unittest.SkipTest("langchain requires >=3.10")
@@ -24,6 +30,7 @@ except ImportError:
         from langchain_classic.agents import AgentType, initialize_agent
     except ImportError:
         initialize_agent = None
+from langchain_aws import ChatBedrockConverse as _ChatBedrockConverse
 from langchain_core.language_models.fake import FakeListLLM
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -32,6 +39,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_core.tools import StructuredTool, tool
+from langchain_openai import ChatOpenAI as _ChatOpenAI
 
 from amazon.opentelemetry.distro.instrumentation.langchain import LangChainInstrumentor
 from opentelemetry import context
@@ -148,6 +156,87 @@ class TestLangChainInstrumentor(TestCase):
     def tearDown(self):
         self.instrumentor.uninstrument()
         self.span_exporter.clear()
+
+    def test_llm_client_span_suppression(self):
+        with self.subTest(client="openai", is_instrumented=False):
+            self.span_exporter.clear()
+            chat_model = _ChatOpenAI(model="gpt-4", api_key="fake-key", temperature=0.7)
+            result = ChatResult(
+                generations=[
+                    ChatGeneration(
+                        message=AIMessage(content="Hello, World!"),
+                        generation_info={"finish_reason": "stop"},
+                    )
+                ],
+                llm_output={
+                    "model_name": "gpt-4",
+                    "token_usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                },
+            )
+
+            def generate_openai(*args, **kwargs):
+                call_mock_openai("gpt-4")
+                return result
+
+            with instrument_llm_clients(self.tracer_provider), patch.object(
+                type(chat_model), "_generate", side_effect=generate_openai
+            ):
+                chat_model.invoke(
+                    [
+                        SystemMessage(content="You are a helpful assistant."),
+                        HumanMessage(content="Hello"),
+                    ]
+                )
+
+            assert_llm_client_spans(
+                self.span_exporter.get_finished_spans(),
+                GenAiProviderNameValues.OPENAI.value,
+                "gpt-4",
+                False,
+            )
+        with self.subTest(client="bedrock", is_instrumented=True):
+            self.span_exporter.clear()
+            model = "anthropic.claude-3-haiku-20240307-v1:0"
+            chat_model = _ChatBedrockConverse(
+                model=model,
+                region_name="us-east-1",
+                aws_access_key_id="fake-key",
+                aws_secret_access_key="fake-key",
+                temperature=0.7,
+            )
+            result = ChatResult(
+                generations=[
+                    ChatGeneration(
+                        message=AIMessage(content="Hello, World!"),
+                        generation_info={"finish_reason": "stop"},
+                    )
+                ],
+                llm_output={
+                    "model_name": model,
+                    "token_usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                },
+            )
+
+            def generate_bedrock(*args, **kwargs):
+                call_stubbed_bedrock(model)
+                return result
+
+            with instrument_llm_clients(self.tracer_provider), patch.object(
+                type(chat_model), "_generate", side_effect=generate_bedrock
+            ):
+                chat_model.invoke(
+                    [
+                        SystemMessage(content="You are a helpful assistant."),
+                        HumanMessage(content="Hello"),
+                    ]
+                )
+
+            assert_llm_client_spans(
+                self.span_exporter.get_finished_spans(),
+                GenAiProviderNameValues.AWS_BEDROCK.value,
+                model,
+                True,
+            )
 
     def test_suppressed_instrumentation_generates_no_spans(self):
         token = context.attach(context.set_value(_SUPPRESS_INSTRUMENTATION_KEY, True))

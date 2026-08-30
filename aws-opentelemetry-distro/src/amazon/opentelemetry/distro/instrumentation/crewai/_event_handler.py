@@ -3,7 +3,6 @@
 
 import logging
 import re
-from contextvars import Token
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
@@ -19,7 +18,7 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     to_tool_attribute_value,
     try_detach,
 )
-from opentelemetry import trace
+from opentelemetry import context, trace
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_DESCRIPTION,
     GEN_AI_AGENT_ID,
@@ -77,7 +76,7 @@ _LOG = logging.getLogger(__name__)
 @dataclass
 class _SpanEntry:
     span: trace.Span
-    span_token: Token
+    token: Any
 
 
 class _EventBusEmitWrapper:
@@ -455,14 +454,8 @@ class OpenTelemetryEventHandler:
                 parent_ctx = trace.set_span_in_context(parent_entry.span)
 
         span = self._tracer.start_span(name, kind=kind, attributes=attributes, context=parent_ctx)
-        span_token = attach_otel_context(trace.set_span_in_context(span), suppress_http=suppress_http)
-        self._event_id_to_span.put(
-            event_id,
-            _SpanEntry(
-                span=span,
-                span_token=span_token,
-            ),
-        )
+        token = attach_otel_context(trace.set_span_in_context(span), suppress_http=suppress_http)
+        self._event_id_to_span.put(event_id, _SpanEntry(span=span, token=token))
 
     def _end_span(
         self,
@@ -483,10 +476,8 @@ class OpenTelemetryEventHandler:
                 entry.span.set_attribute(ERROR_TYPE, error)
             else:
                 entry.span.set_status(Status(StatusCode.OK))
-            try:
-                entry.span.end()
-            finally:
-                try_detach(entry.span_token)
+            entry.span.end()
+            context.detach(entry.token)
 
     def _detach_unfinished_span_contexts(self, root_event_id: Optional[str]) -> None:
         root_entry = self._event_id_to_span.get(root_event_id) if root_event_id else None
@@ -497,7 +488,7 @@ class OpenTelemetryEventHandler:
             if entry is root_entry or entry_id in detached_entries:
                 continue
             detached_entries.add(entry_id)
-            try_detach(entry.span_token)
+            try_detach(entry.token)
         if root_entry is not None and root_event_id is not None:
             self._event_id_to_span.put(root_event_id, root_entry)
 

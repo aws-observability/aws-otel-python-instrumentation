@@ -578,16 +578,16 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         else:
             span = self.tracer.start_span(span_name, kind=kind)
 
-        span_token = attach_otel_context(set_span_in_context(span), suppress_http=suppress_http)
-        self.run_id_to_span_map.put(run_id, (span, span_token))
+        token = attach_otel_context(set_span_in_context(span), suppress_http=suppress_http)
+        self.run_id_to_span_map.put(run_id, (span, token))
         return span
 
     def _end_span(self, run_id: UUID) -> None:
         entry = self.run_id_to_span_map.pop(run_id)
         if not entry:
             return
-        span, span_token = entry
-        try_detach(span_token)
+        span, token = entry
+        try_detach(token)
         span.end()
 
     @staticmethod
