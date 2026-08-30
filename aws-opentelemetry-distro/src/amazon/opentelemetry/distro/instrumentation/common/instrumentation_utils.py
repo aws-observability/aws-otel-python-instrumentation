@@ -7,7 +7,7 @@ import threading
 from base64 import b64encode
 from contextvars import Token
 from functools import wraps
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Callable, Dict, Mapping, Optional, Union
 
 from wrapt import wrap_function_wrapper
 
@@ -92,6 +92,14 @@ class DictWithLock:
     def __len__(self) -> int:
         with self._lock:
             return len(self._data)
+
+
+def first_not_none(*values: Any) -> Any:
+    return next((value for value in values if value is not None), None)
+
+
+def get_value(source: Any, name: str) -> Any:
+    return source.get(name) if isinstance(source, Mapping) else getattr(source, name, None)
 
 
 def serialize_to_json_string(value: Any, max_depth: int = 10) -> str:

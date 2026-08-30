@@ -53,6 +53,7 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     GEN_AI_WORKFLOW_NAME,
     OPERATION_INVOKE_WORKFLOW,
     content_to_parts,
+    first_not_none,
     serialize_to_json_string,
     to_tool_attribute_value,
     try_detach,
@@ -446,7 +447,9 @@ class _Span(BaseSpan):
 
     @process_instance.register(BaseLLM)
     @process_instance.register(MultiModalLLM)
-    def _(self, instance: Union[BaseLLM, MultiModalLLM]) -> None:  # pylint: disable=too-many-locals,too-many-branches
+    def _(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+        self, instance: Union[BaseLLM, MultiModalLLM]
+    ) -> None:
         if metadata := instance.metadata:
             self[GEN_AI_REQUEST_MODEL] = metadata.model_name
 
@@ -501,32 +504,57 @@ class _Span(BaseSpan):
         if (stream := additional_kwargs.get("stream")) is not None:
             self[GEN_AI_REQUEST_STREAM] = stream
 
-        additional_request_attributes = (
-            (GEN_AI_REQUEST_TOP_P, ("top_p",)),
-            (GEN_AI_REQUEST_TOP_K, ("top_k",)),
-            (GEN_AI_REQUEST_FREQUENCY_PENALTY, ("frequency_penalty",)),
-            (GEN_AI_REQUEST_PRESENCE_PENALTY, ("presence_penalty",)),
-            (GEN_AI_REQUEST_STOP_SEQUENCES, ("stop_sequences", "stop")),
-            (GEN_AI_REQUEST_SEED, ("seed", "random_seed")),
-            (GEN_AI_REQUEST_CHOICE_COUNT, ("choice_count", "n")),
-            (GEN_AI_REQUEST_STREAM, ("stream", "streaming")),
+        top_p = first_not_none(getattr(instance, "top_p", None), additional_kwargs.get("top_p"))
+        if top_p is not None:
+            self[GEN_AI_REQUEST_TOP_P] = top_p
+        top_k = first_not_none(getattr(instance, "top_k", None), additional_kwargs.get("top_k"))
+        if top_k is not None:
+            self[GEN_AI_REQUEST_TOP_K] = top_k
+        frequency_penalty = first_not_none(
+            getattr(instance, "frequency_penalty", None),
+            additional_kwargs.get("frequency_penalty"),
         )
-        for attribute, names in additional_request_attributes:
-            value = next(
-                (
-                    value
-                    for value in (
-                        *(getattr(instance, name, None) for name in names),
-                        *(additional_kwargs.get(name) for name in names),
-                    )
-                    if value is not None and not callable(value)
-                ),
-                None,
-            )
-            if value is not None:
-                if attribute == GEN_AI_REQUEST_STOP_SEQUENCES and isinstance(value, str):
-                    value = [value]
-                self[attribute] = value
+        if frequency_penalty is not None:
+            self[GEN_AI_REQUEST_FREQUENCY_PENALTY] = frequency_penalty
+        presence_penalty = first_not_none(
+            getattr(instance, "presence_penalty", None),
+            additional_kwargs.get("presence_penalty"),
+        )
+        if presence_penalty is not None:
+            self[GEN_AI_REQUEST_PRESENCE_PENALTY] = presence_penalty
+        stop = first_not_none(
+            getattr(instance, "stop_sequences", None),
+            getattr(instance, "stop", None),
+            additional_kwargs.get("stop_sequences"),
+            additional_kwargs.get("stop"),
+        )
+        if stop is not None:
+            self[GEN_AI_REQUEST_STOP_SEQUENCES] = [stop] if isinstance(stop, str) else stop
+        seed = first_not_none(
+            getattr(instance, "seed", None),
+            getattr(instance, "random_seed", None),
+            additional_kwargs.get("seed"),
+            additional_kwargs.get("random_seed"),
+        )
+        if seed is not None:
+            self[GEN_AI_REQUEST_SEED] = seed
+        choice_count = first_not_none(
+            getattr(instance, "choice_count", None),
+            getattr(instance, "n", None),
+            additional_kwargs.get("choice_count"),
+            additional_kwargs.get("n"),
+        )
+        if choice_count is not None:
+            self[GEN_AI_REQUEST_CHOICE_COUNT] = choice_count
+        instance_stream = getattr(instance, "stream", None)
+        stream = first_not_none(
+            None if callable(instance_stream) else instance_stream,
+            getattr(instance, "streaming", None),
+            additional_kwargs.get("stream"),
+            additional_kwargs.get("streaming"),
+        )
+        if stream is not None:
+            self[GEN_AI_REQUEST_STREAM] = stream
 
     @process_instance.register
     def _(self, instance: BaseEmbedding) -> None:

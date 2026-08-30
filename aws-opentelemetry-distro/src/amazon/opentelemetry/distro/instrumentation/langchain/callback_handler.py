@@ -15,6 +15,7 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     PROVIDER_MAP,
     DictWithLock,
     content_to_parts,
+    first_not_none,
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
     to_tool_attribute_value,
@@ -625,46 +626,207 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
 
         params_model_kwargs = params.get("model_kwargs") or {}
         config_model_kwargs = config.get("model_kwargs") or {}
-        nested_additional_model_request_fields = next(
-            (
-                source.get("additional_model_request_fields")
-                for source in (params_model_kwargs, config_model_kwargs)
-                if source.get("additional_model_request_fields") is not None
-            ),
-            {},
-        )
-        request_sources = (
-            params,
-            params_model_kwargs,
-            metadata or {},
-            config,
-            config_model_kwargs,
-            additional_model_request_fields,
-            nested_additional_model_request_fields or {},
-        )
-        request_attributes = (
-            (
-                GEN_AI_REQUEST_MAX_TOKENS,
-                ("max_tokens", "max_new_tokens", "max_output_tokens", "max_completion_tokens", "ls_max_tokens"),
-            ),
-            (GEN_AI_REQUEST_TEMPERATURE, ("temperature", "ls_temperature")),
-            (GEN_AI_REQUEST_TOP_P, ("top_p",)),
-            (GEN_AI_REQUEST_TOP_K, ("top_k",)),
-            (GEN_AI_REQUEST_FREQUENCY_PENALTY, ("frequency_penalty",)),
-            (GEN_AI_REQUEST_PRESENCE_PENALTY, ("presence_penalty",)),
-            (GEN_AI_REQUEST_STOP_SEQUENCES, ("stop", "stop_sequences", "ls_stop")),
-            (GEN_AI_REQUEST_SEED, ("seed", "random_seed")),
-            (GEN_AI_REQUEST_CHOICE_COUNT, ("choice_count", "n")),
-            (GEN_AI_REQUEST_STREAM, ("stream", "streaming")),
-        )
-        for attribute, names in request_attributes:
-            value = next(
-                (source.get(name) for source in request_sources for name in names if source.get(name) is not None),
-                None,
+        nested_additional_model_request_fields = (
+            first_not_none(
+                params_model_kwargs.get("additional_model_request_fields"),
+                config_model_kwargs.get("additional_model_request_fields"),
             )
-            if attribute == GEN_AI_REQUEST_STOP_SEQUENCES and isinstance(value, str):
-                value = [value]
-            self._set_span_attribute(span, attribute, value)
+            or {}
+        )
+        max_tokens = first_not_none(
+            params.get("max_tokens"),
+            params.get("max_new_tokens"),
+            params.get("max_output_tokens"),
+            params.get("max_completion_tokens"),
+            params.get("ls_max_tokens"),
+            params_model_kwargs.get("max_tokens"),
+            params_model_kwargs.get("max_new_tokens"),
+            params_model_kwargs.get("max_output_tokens"),
+            params_model_kwargs.get("max_completion_tokens"),
+            params_model_kwargs.get("ls_max_tokens"),
+            (metadata or {}).get("max_tokens"),
+            (metadata or {}).get("max_new_tokens"),
+            (metadata or {}).get("max_output_tokens"),
+            (metadata or {}).get("max_completion_tokens"),
+            (metadata or {}).get("ls_max_tokens"),
+            config.get("max_tokens"),
+            config.get("max_new_tokens"),
+            config.get("max_output_tokens"),
+            config.get("max_completion_tokens"),
+            config.get("ls_max_tokens"),
+            config_model_kwargs.get("max_tokens"),
+            config_model_kwargs.get("max_new_tokens"),
+            config_model_kwargs.get("max_output_tokens"),
+            config_model_kwargs.get("max_completion_tokens"),
+            config_model_kwargs.get("ls_max_tokens"),
+            additional_model_request_fields.get("max_tokens"),
+            additional_model_request_fields.get("max_new_tokens"),
+            additional_model_request_fields.get("max_output_tokens"),
+            additional_model_request_fields.get("max_completion_tokens"),
+            additional_model_request_fields.get("ls_max_tokens"),
+            nested_additional_model_request_fields.get("max_tokens"),
+            nested_additional_model_request_fields.get("max_new_tokens"),
+            nested_additional_model_request_fields.get("max_output_tokens"),
+            nested_additional_model_request_fields.get("max_completion_tokens"),
+            nested_additional_model_request_fields.get("ls_max_tokens"),
+        )
+        self._set_span_attribute(span, GEN_AI_REQUEST_MAX_TOKENS, max_tokens)
+        self._set_span_attribute(
+            span,
+            GEN_AI_REQUEST_TEMPERATURE,
+            first_not_none(
+                params.get("temperature"),
+                params.get("ls_temperature"),
+                params_model_kwargs.get("temperature"),
+                params_model_kwargs.get("ls_temperature"),
+                (metadata or {}).get("temperature"),
+                (metadata or {}).get("ls_temperature"),
+                config.get("temperature"),
+                config.get("ls_temperature"),
+                config_model_kwargs.get("temperature"),
+                config_model_kwargs.get("ls_temperature"),
+                additional_model_request_fields.get("temperature"),
+                additional_model_request_fields.get("ls_temperature"),
+                nested_additional_model_request_fields.get("temperature"),
+                nested_additional_model_request_fields.get("ls_temperature"),
+            ),
+        )
+        self._set_span_attribute(
+            span,
+            GEN_AI_REQUEST_TOP_P,
+            first_not_none(
+                params.get("top_p"),
+                params_model_kwargs.get("top_p"),
+                (metadata or {}).get("top_p"),
+                config.get("top_p"),
+                config_model_kwargs.get("top_p"),
+                additional_model_request_fields.get("top_p"),
+                nested_additional_model_request_fields.get("top_p"),
+            ),
+        )
+        self._set_span_attribute(
+            span,
+            GEN_AI_REQUEST_TOP_K,
+            first_not_none(
+                params.get("top_k"),
+                params_model_kwargs.get("top_k"),
+                (metadata or {}).get("top_k"),
+                config.get("top_k"),
+                config_model_kwargs.get("top_k"),
+                additional_model_request_fields.get("top_k"),
+                nested_additional_model_request_fields.get("top_k"),
+            ),
+        )
+        self._set_span_attribute(
+            span,
+            GEN_AI_REQUEST_FREQUENCY_PENALTY,
+            first_not_none(
+                params.get("frequency_penalty"),
+                params_model_kwargs.get("frequency_penalty"),
+                (metadata or {}).get("frequency_penalty"),
+                config.get("frequency_penalty"),
+                config_model_kwargs.get("frequency_penalty"),
+                additional_model_request_fields.get("frequency_penalty"),
+                nested_additional_model_request_fields.get("frequency_penalty"),
+            ),
+        )
+        self._set_span_attribute(
+            span,
+            GEN_AI_REQUEST_PRESENCE_PENALTY,
+            first_not_none(
+                params.get("presence_penalty"),
+                params_model_kwargs.get("presence_penalty"),
+                (metadata or {}).get("presence_penalty"),
+                config.get("presence_penalty"),
+                config_model_kwargs.get("presence_penalty"),
+                additional_model_request_fields.get("presence_penalty"),
+                nested_additional_model_request_fields.get("presence_penalty"),
+            ),
+        )
+        stop = first_not_none(
+            params.get("stop"),
+            params.get("stop_sequences"),
+            params.get("ls_stop"),
+            params_model_kwargs.get("stop"),
+            params_model_kwargs.get("stop_sequences"),
+            params_model_kwargs.get("ls_stop"),
+            (metadata or {}).get("stop"),
+            (metadata or {}).get("stop_sequences"),
+            (metadata or {}).get("ls_stop"),
+            config.get("stop"),
+            config.get("stop_sequences"),
+            config.get("ls_stop"),
+            config_model_kwargs.get("stop"),
+            config_model_kwargs.get("stop_sequences"),
+            config_model_kwargs.get("ls_stop"),
+            additional_model_request_fields.get("stop"),
+            additional_model_request_fields.get("stop_sequences"),
+            additional_model_request_fields.get("ls_stop"),
+            nested_additional_model_request_fields.get("stop"),
+            nested_additional_model_request_fields.get("stop_sequences"),
+            nested_additional_model_request_fields.get("ls_stop"),
+        )
+        self._set_span_attribute(span, GEN_AI_REQUEST_STOP_SEQUENCES, [stop] if isinstance(stop, str) else stop)
+        self._set_span_attribute(
+            span,
+            GEN_AI_REQUEST_SEED,
+            first_not_none(
+                params.get("seed"),
+                params.get("random_seed"),
+                params_model_kwargs.get("seed"),
+                params_model_kwargs.get("random_seed"),
+                (metadata or {}).get("seed"),
+                (metadata or {}).get("random_seed"),
+                config.get("seed"),
+                config.get("random_seed"),
+                config_model_kwargs.get("seed"),
+                config_model_kwargs.get("random_seed"),
+                additional_model_request_fields.get("seed"),
+                additional_model_request_fields.get("random_seed"),
+                nested_additional_model_request_fields.get("seed"),
+                nested_additional_model_request_fields.get("random_seed"),
+            ),
+        )
+        self._set_span_attribute(
+            span,
+            GEN_AI_REQUEST_CHOICE_COUNT,
+            first_not_none(
+                params.get("choice_count"),
+                params.get("n"),
+                params_model_kwargs.get("choice_count"),
+                params_model_kwargs.get("n"),
+                (metadata or {}).get("choice_count"),
+                (metadata or {}).get("n"),
+                config.get("choice_count"),
+                config.get("n"),
+                config_model_kwargs.get("choice_count"),
+                config_model_kwargs.get("n"),
+                additional_model_request_fields.get("choice_count"),
+                additional_model_request_fields.get("n"),
+                nested_additional_model_request_fields.get("choice_count"),
+                nested_additional_model_request_fields.get("n"),
+            ),
+        )
+        self._set_span_attribute(
+            span,
+            GEN_AI_REQUEST_STREAM,
+            first_not_none(
+                params.get("stream"),
+                params.get("streaming"),
+                params_model_kwargs.get("stream"),
+                params_model_kwargs.get("streaming"),
+                (metadata or {}).get("stream"),
+                (metadata or {}).get("streaming"),
+                config.get("stream"),
+                config.get("streaming"),
+                config_model_kwargs.get("stream"),
+                config_model_kwargs.get("streaming"),
+                additional_model_request_fields.get("stream"),
+                additional_model_request_fields.get("streaming"),
+                nested_additional_model_request_fields.get("stream"),
+                nested_additional_model_request_fields.get("streaming"),
+            ),
+        )
 
     def _should_skip_chain(
         self, serialized: dict[str, Any], name: Optional[str], metadata: Optional[dict] = None
