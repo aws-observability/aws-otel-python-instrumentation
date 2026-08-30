@@ -462,20 +462,13 @@ class _Span(BaseSpan):
             self[GEN_AI_REQUEST_TEMPERATURE] = instance.temperature
 
         additional_kwargs = getattr(instance, "additional_kwargs", None) or {}
-        max_tokens = next(
-            (
-                value
-                for value in (
-                    getattr(instance, "max_tokens", None),
-                    getattr(instance, "max_output_tokens", None),
-                    getattr(instance, "max_completion_tokens", None),
-                    additional_kwargs.get("max_tokens"),
-                    additional_kwargs.get("max_output_tokens"),
-                    additional_kwargs.get("max_completion_tokens"),
-                )
-                if value is not None
-            ),
-            None,
+        max_tokens = first_not_none(
+            getattr(instance, "max_tokens", None),
+            getattr(instance, "max_output_tokens", None),
+            getattr(instance, "max_completion_tokens", None),
+            additional_kwargs.get("max_tokens"),
+            additional_kwargs.get("max_output_tokens"),
+            additional_kwargs.get("max_completion_tokens"),
         )
         if max_tokens is not None:
             self[GEN_AI_REQUEST_MAX_TOKENS] = max_tokens
@@ -491,14 +484,7 @@ class _Span(BaseSpan):
             self[GEN_AI_REQUEST_STOP_SEQUENCES] = stop
         if (seed := additional_kwargs.get("seed")) is not None:
             self[GEN_AI_REQUEST_SEED] = seed
-        choice_count = next(
-            (
-                value
-                for value in (additional_kwargs.get("choice_count"), additional_kwargs.get("n"))
-                if value is not None
-            ),
-            None,
-        )
+        choice_count = first_not_none(additional_kwargs.get("choice_count"), additional_kwargs.get("n"))
         if choice_count is not None:
             self[GEN_AI_REQUEST_CHOICE_COUNT] = choice_count
         if (stream := additional_kwargs.get("stream")) is not None:
@@ -871,77 +857,42 @@ def _get_token_counts_impl(  # pylint: disable=too-many-branches,too-many-statem
         except BaseException:
             pass
 
-    input_token_details = next(
-        (
-            value
-            for value in (
-                get_value(usage, "input_token_details"),
-                get_value(usage, "input_tokens_details"),
-                get_value(usage, "prompt_tokens_details"),
-            )
-            if value is not None
-        ),
-        None,
+    input_token_details = first_not_none(
+        get_value(usage, "input_token_details"),
+        get_value(usage, "input_tokens_details"),
+        get_value(usage, "prompt_tokens_details"),
     )
-    output_token_details = next(
-        (
-            value
-            for value in (
-                get_value(usage, "output_token_details"),
-                get_value(usage, "output_tokens_details"),
-                get_value(usage, "completion_tokens_details"),
-            )
-            if value is not None
-        ),
-        None,
+    output_token_details = first_not_none(
+        get_value(usage, "output_token_details"),
+        get_value(usage, "output_tokens_details"),
+        get_value(usage, "completion_tokens_details"),
     )
-    cache_read_input_tokens = next(
-        (
-            value
-            for value in (
-                get_value(usage, "cached_prompt_tokens"),
-                get_value(usage, "cache_read_input_tokens"),
-                _safe_get(input_token_details, "cache_read"),
-                _safe_get(input_token_details, "cached_tokens"),
-            )
-            if value is not None
-        ),
-        None,
+    cache_read_input_tokens = first_not_none(
+        get_value(usage, "cached_prompt_tokens"),
+        get_value(usage, "cache_read_input_tokens"),
+        _safe_get(input_token_details, "cache_read"),
+        _safe_get(input_token_details, "cached_tokens"),
     )
     if cache_read_input_tokens is not None:
         try:
             yield GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS, int(cache_read_input_tokens)
         except BaseException:
             pass
-    cache_creation_input_tokens = next(
-        (
-            value
-            for value in (
-                get_value(usage, "cache_creation_tokens"),
-                get_value(usage, "cache_creation_input_tokens"),
-                _safe_get(input_token_details, "cache_creation"),
-                _safe_get(input_token_details, "cache_write_tokens"),
-            )
-            if value is not None
-        ),
-        None,
+    cache_creation_input_tokens = first_not_none(
+        get_value(usage, "cache_creation_tokens"),
+        get_value(usage, "cache_creation_input_tokens"),
+        _safe_get(input_token_details, "cache_creation"),
+        _safe_get(input_token_details, "cache_write_tokens"),
     )
     if cache_creation_input_tokens is not None:
         try:
             yield GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, int(cache_creation_input_tokens)
         except BaseException:
             pass
-    reasoning_output_tokens = next(
-        (
-            value
-            for value in (
-                get_value(usage, "reasoning_tokens"),
-                _safe_get(output_token_details, "reasoning"),
-                _safe_get(output_token_details, "reasoning_tokens"),
-            )
-            if value is not None
-        ),
-        None,
+    reasoning_output_tokens = first_not_none(
+        get_value(usage, "reasoning_tokens"),
+        _safe_get(output_token_details, "reasoning"),
+        _safe_get(output_token_details, "reasoning_tokens"),
     )
     if reasoning_output_tokens is not None:
         try:

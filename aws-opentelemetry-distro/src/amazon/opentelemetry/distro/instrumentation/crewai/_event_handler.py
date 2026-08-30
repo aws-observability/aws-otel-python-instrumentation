@@ -544,6 +544,16 @@ class OpenTelemetryEventHandler:
     ) -> None:
         additional_params = getattr(llm, "additional_params", None) or {}
         additional_model_request_fields = getattr(llm, "additional_model_request_fields", None) or {}
+        stop = first_not_none(
+            getattr(event, "stop_sequences", None),
+            getattr(event, "stop", None),
+            getattr(llm, "stop_sequences", None),
+            getattr(llm, "stop", None),
+            additional_params.get("stop_sequences"),
+            additional_params.get("stop"),
+            additional_model_request_fields.get("stop_sequences"),
+            additional_model_request_fields.get("stop"),
+        )
         request_attributes = {
             GEN_AI_REQUEST_TEMPERATURE: first_not_none(
                 getattr(event, "temperature", None),
@@ -611,21 +621,9 @@ class OpenTelemetryEventHandler:
                 additional_params.get("stream"),
                 additional_model_request_fields.get("stream"),
             ),
+            GEN_AI_REQUEST_STOP_SEQUENCES: [stop] if isinstance(stop, str) else stop,
         }
         attributes.update({attribute: value for attribute, value in request_attributes.items() if value is not None})
-
-        stop = first_not_none(
-            getattr(event, "stop_sequences", None),
-            getattr(event, "stop", None),
-            getattr(llm, "stop_sequences", None),
-            getattr(llm, "stop", None),
-            additional_params.get("stop_sequences"),
-            additional_params.get("stop"),
-            additional_model_request_fields.get("stop_sequences"),
-            additional_model_request_fields.get("stop"),
-        )
-        if stop is not None:
-            attributes[GEN_AI_REQUEST_STOP_SEQUENCES] = [stop] if isinstance(stop, str) else stop
 
     @staticmethod
     def _to_tool_call_parts(tool_calls: list) -> list:

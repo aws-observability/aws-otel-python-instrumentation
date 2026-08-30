@@ -248,43 +248,22 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         )
         input_token_details = usage_metadata.get("input_token_details") or {}
         output_token_details = usage_metadata.get("output_token_details") or {}
-        cache_read_input_tokens = next(
-            (
-                value
-                for value in (
-                    usage.get("cache_read_input_tokens"),
-                    usage.get("cached_prompt_tokens"),
-                    input_token_details.get("cache_read"),
-                    input_token_details.get("cached_tokens"),
-                )
-                if value is not None
-            ),
-            None,
+        cache_read_input_tokens = first_not_none(
+            usage.get("cache_read_input_tokens"),
+            usage.get("cached_prompt_tokens"),
+            input_token_details.get("cache_read"),
+            input_token_details.get("cached_tokens"),
         )
-        cache_creation_input_tokens = next(
-            (
-                value
-                for value in (
-                    usage.get("cache_creation_input_tokens"),
-                    usage.get("cache_creation_tokens"),
-                    input_token_details.get("cache_creation"),
-                    input_token_details.get("cache_write_tokens"),
-                )
-                if value is not None
-            ),
-            None,
+        cache_creation_input_tokens = first_not_none(
+            usage.get("cache_creation_input_tokens"),
+            usage.get("cache_creation_tokens"),
+            input_token_details.get("cache_creation"),
+            input_token_details.get("cache_write_tokens"),
         )
-        reasoning_output_tokens = next(
-            (
-                value
-                for value in (
-                    usage.get("reasoning_tokens"),
-                    output_token_details.get("reasoning"),
-                    output_token_details.get("reasoning_tokens"),
-                )
-                if value is not None
-            ),
-            None,
+        reasoning_output_tokens = first_not_none(
+            usage.get("reasoning_tokens"),
+            output_token_details.get("reasoning"),
+            output_token_details.get("reasoning_tokens"),
         )
         return (
             input_tokens,
@@ -593,34 +572,20 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         stop = params.get("stop") or params.get("stop_sequences") or config.get("stop") or config.get("stop_sequences")
         if stop:
             self._set_span_attribute(span, GEN_AI_REQUEST_STOP_SEQUENCES, stop)
-        seed = next((value for value in (params.get("seed"), config.get("seed")) if value is not None), None)
+        seed = first_not_none(params.get("seed"), config.get("seed"))
         self._set_span_attribute(span, GEN_AI_REQUEST_SEED, seed)
-        choice_count = next(
-            (
-                value
-                for value in (
-                    params.get("choice_count"),
-                    params.get("n"),
-                    config.get("choice_count"),
-                    config.get("n"),
-                )
-                if value is not None
-            ),
-            None,
+        choice_count = first_not_none(
+            params.get("choice_count"),
+            params.get("n"),
+            config.get("choice_count"),
+            config.get("n"),
         )
         self._set_span_attribute(span, GEN_AI_REQUEST_CHOICE_COUNT, choice_count)
-        stream = next(
-            (
-                value
-                for value in (
-                    params.get("stream"),
-                    params.get("streaming"),
-                    config.get("stream"),
-                    config.get("streaming"),
-                )
-                if value is not None
-            ),
-            None,
+        stream = first_not_none(
+            params.get("stream"),
+            params.get("streaming"),
+            config.get("stream"),
+            config.get("streaming"),
         )
         self._set_span_attribute(span, GEN_AI_REQUEST_STREAM, stream)
 
