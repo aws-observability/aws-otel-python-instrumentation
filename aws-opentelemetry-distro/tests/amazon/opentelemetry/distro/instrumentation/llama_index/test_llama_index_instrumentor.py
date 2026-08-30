@@ -10,9 +10,9 @@ import inspect
 import json
 import sys
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, PropertyMock, patch
 
-from conftest import validate_otel_genai_schema
+from conftest import call_mock_llm, validate_otel_genai_schema
 
 if sys.version_info < (3, 10):
     raise unittest.SkipTest("llama-index requires Python >= 3.10")
@@ -53,11 +53,14 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_CHOICE_COUNT,
     GEN_AI_REQUEST_FREQUENCY_PENALTY,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
     GEN_AI_REQUEST_PRESENCE_PENALTY,
+    GEN_AI_REQUEST_SEED,
     GEN_AI_REQUEST_STOP_SEQUENCES,
+    GEN_AI_REQUEST_STREAM,
     GEN_AI_REQUEST_TEMPERATURE,
     GEN_AI_REQUEST_TOP_K,
     GEN_AI_REQUEST_TOP_P,
@@ -72,6 +75,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
     GenAiOperationNameValues,
+    GenAiProviderNameValues,
 )
 
 
@@ -298,16 +302,34 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self.assertEqual(span._attributes[GEN_AI_PROVIDER_NAME], "openai")
         otel_span.end()
 
-    def test_process_instance_llm_with_temperature_and_max_tokens(self):
-        """Test that temperature and max_tokens are captured from LLM instances."""
+    def test_process_instance_llm_with_request_attributes(self):
+        """Test that all request attributes are captured from LLM instances."""
         from llama_index.llms.openai import OpenAI
 
-        llm = OpenAI(model="gpt-4", api_key="fake-key", temperature=0.7, max_tokens=100)
+        llm = OpenAI(
+            model="gpt-4",
+            api_key="fake-key",
+            temperature=0.7,
+            max_tokens=100,
+            additional_kwargs={
+                "top_p": 0.9,
+                "top_k": 40,
+                "frequency_penalty": 0.5,
+                "presence_penalty": 0.3,
+                "stop": ["STOP"],
+            },
+        )
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
         span.process_instance(llm)
+        self.assertEqual(span._attributes[GEN_AI_REQUEST_MODEL], "gpt-4")
         self.assertEqual(span._attributes[GEN_AI_REQUEST_TEMPERATURE], 0.7)
+        self.assertEqual(span._attributes[GEN_AI_REQUEST_TOP_P], 0.9)
+        self.assertEqual(span._attributes[GEN_AI_REQUEST_TOP_K], 40)
         self.assertEqual(span._attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
+        self.assertEqual(span._attributes[GEN_AI_REQUEST_FREQUENCY_PENALTY], 0.5)
+        self.assertEqual(span._attributes[GEN_AI_REQUEST_PRESENCE_PENALTY], 0.3)
+        self.assertEqual(span._attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ["STOP"])
         otel_span.end()
 
     def test_process_instance_embedding(self):
@@ -671,21 +693,125 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
 
     @unittest.skipUnless(_has_module("llama_index.llms.openai"), "llama-index-llms-openai not installed")
     def test_detect_provider_openai(self):
-        """Test OpenAI provider detection via isinstance."""
         handler = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._handler")
         from llama_index.llms.openai import OpenAI
+        from llama_index.llms.openai import utils as openai_utils
 
-        llm = OpenAI(model="gpt-4", api_key="fake")
-        self.assertEqual(handler._detect_llm_provider(llm), "openai")
+        model = "gpt-5.6-sol"
+
+        def invoke_llm(client):
+            llm = OpenAI(
+                model=model,
+                api_key="fake-key",
+                openai_client=client,
+                temperature=1.0,
+                additional_kwargs={
+                    "top_p": 0.9,
+                    "frequency_penalty": 0.5,
+                    "presence_penalty": 0.3,
+                    "stop": ["STOP"],
+                    "seed": 42,
+                    "n": 2,
+                    "max_completion_tokens": 100,
+                },
+            )
+            self.assertEqual(handler._detect_llm_provider(llm), "openai")
+            llm.chat(
+                [
+                    ChatMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+                    ChatMessage(role=MessageRole.USER, content="Hello"),
+                ]
+            )
+
+        with patch.dict(openai_utils.ALL_AVAILABLE_MODELS, {model: 1_050_000}), patch.dict(
+            openai_utils.CHAT_MODELS,
+            {model: 1_050_000},
+        ):
+            call_mock_llm("openai", invoke_llm_callback=invoke_llm)
+
+        chat_span = next(
+            (
+                span
+                for span in self.span_exporter.get_finished_spans()
+                if span.attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.CHAT.value
+            ),
+            None,
+        )
+        self.assertIsNotNone(chat_span)
+        self.assertEqual(chat_span.attributes[GEN_AI_PROVIDER_NAME], GenAiProviderNameValues.OPENAI.value)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MODEL], model)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TEMPERATURE], 1.0)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TOP_P], 0.9)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_FREQUENCY_PENALTY], 0.5)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_PRESENCE_PENALTY], 0.3)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ("STOP",))
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_SEED], 42)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_CHOICE_COUNT], 2)
 
     @unittest.skipUnless(_has_module("llama_index.llms.anthropic"), "llama-index-llms-anthropic not installed")
     def test_detect_provider_anthropic(self):
-        """Test Anthropic provider detection via isinstance."""
         handler = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._handler")
         from llama_index.llms.anthropic import Anthropic
+        from llama_index.llms.anthropic import utils as anthropic_utils
 
-        llm = Anthropic(model="claude-3-haiku-20240307", api_key="fake")
-        self.assertEqual(handler._detect_llm_provider(llm), "anthropic")
+        model = "claude-fable-5"
+
+        def invoke_llm(client):
+            llm = Anthropic(
+                model=model,
+                api_key="fake-key",
+                max_tokens=100,
+                temperature=1.0,
+                additional_kwargs={
+                    "top_p": 0.9,
+                    "top_k": 40,
+                    "stop_sequences": ["STOP"],
+                    "stream": False,
+                },
+            )
+            # LlamaIndex has no public seam for replacing this provider client with the mock transport.
+            llm._client = client
+            self.assertEqual(handler._detect_llm_provider(llm), "anthropic")
+            # The current Anthropic beta endpoint omits sampling parameters, so only pass its supported fields.
+            model_kwargs = {
+                "model": model,
+                "max_tokens": 100,
+                "stop_sequences": ["STOP"],
+            }
+            with patch.object(
+                type(llm),
+                "_model_kwargs",
+                new_callable=PropertyMock,
+                return_value=model_kwargs,
+            ):
+                llm.chat(
+                    [
+                        ChatMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+                        ChatMessage(role=MessageRole.USER, content="Hello"),
+                    ]
+                )
+
+        with patch.dict(anthropic_utils.CLAUDE_MODELS, {model: 1_000_000}):
+            call_mock_llm("anthropic", invoke_llm_callback=invoke_llm)
+
+        chat_span = next(
+            (
+                span
+                for span in self.span_exporter.get_finished_spans()
+                if span.attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.CHAT.value
+            ),
+            None,
+        )
+        self.assertIsNotNone(chat_span)
+        self.assertEqual(chat_span.attributes[GEN_AI_PROVIDER_NAME], GenAiProviderNameValues.ANTHROPIC.value)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MODEL], model)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TEMPERATURE], 1.0)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TOP_P], 0.9)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TOP_K], 40)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ("STOP",))
+        self.assertIs(chat_span.attributes[GEN_AI_REQUEST_STREAM], False)
 
     @unittest.skipUnless(_has_module("llama_index.llms.azure_openai"), "llama-index-llms-azure-openai not installed")
     def test_detect_provider_azure_openai(self):
@@ -715,12 +841,58 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         _has_module("llama_index.llms.bedrock_converse"), "llama-index-llms-bedrock-converse not installed"
     )
     def test_detect_provider_bedrock(self):
-        """Test Bedrock provider detection via isinstance."""
         handler = importlib.import_module("amazon.opentelemetry.distro.instrumentation.llama_index._handler")
         from llama_index.llms.bedrock_converse import BedrockConverse
+        from llama_index.llms.bedrock_converse import utils as bedrock_utils
 
-        llm = BedrockConverse(model="anthropic.claude-3-haiku-20240307-v1:0", region_name="us-east-1")
-        self.assertEqual(handler._detect_llm_provider(llm), "aws.bedrock")
+        model = "anthropic.claude-fable-5"
+
+        def invoke_llm(client):
+            llm = BedrockConverse(
+                model=model,
+                client=client,
+                temperature=0.7,
+                max_tokens=100,
+                additional_kwargs={
+                    "top_p": 0.9,
+                    "top_k": 40,
+                    "stop_sequences": ["STOP"],
+                },
+            )
+            self.assertEqual(handler._detect_llm_provider(llm), "aws.bedrock")
+            with patch.object(
+                type(llm),
+                "_model_kwargs",
+                new_callable=PropertyMock,
+                return_value={"model": model, "temperature": 0.7, "max_tokens": 100},
+            ):
+                llm.chat(
+                    [
+                        ChatMessage(role=MessageRole.SYSTEM, content="You are a helpful assistant."),
+                        ChatMessage(role=MessageRole.USER, content="Hello"),
+                    ]
+                )
+
+        with patch.dict(bedrock_utils.BEDROCK_MODELS, {model: 1_000_000}):
+            call_mock_llm("bedrock", invoke_llm_callback=invoke_llm)
+
+        chat_span = next(
+            (
+                span
+                for span in self.span_exporter.get_finished_spans()
+                if span.attributes.get(GEN_AI_OPERATION_NAME) == GenAiOperationNameValues.CHAT.value
+                and GEN_AI_SYSTEM_INSTRUCTIONS in span.attributes
+            ),
+            None,
+        )
+        self.assertIsNotNone(chat_span)
+        self.assertEqual(chat_span.attributes[GEN_AI_PROVIDER_NAME], GenAiProviderNameValues.AWS_BEDROCK.value)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MODEL], model)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TEMPERATURE], 0.7)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TOP_P], 0.9)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TOP_K], 40)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ("STOP",))
 
     def test_detect_provider_class_name_fallback_anthropic(self):
         """Test class-name fallback for Anthropic."""

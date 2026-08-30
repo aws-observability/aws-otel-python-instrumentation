@@ -27,11 +27,14 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_CHOICE_COUNT,
     GEN_AI_REQUEST_FREQUENCY_PENALTY,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
     GEN_AI_REQUEST_PRESENCE_PENALTY,
+    GEN_AI_REQUEST_SEED,
     GEN_AI_REQUEST_STOP_SEQUENCES,
+    GEN_AI_REQUEST_STREAM,
     GEN_AI_REQUEST_TEMPERATURE,
     GEN_AI_REQUEST_TOP_K,
     GEN_AI_REQUEST_TOP_P,
@@ -486,13 +489,27 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self._set_span_attribute(
             span,
             GEN_AI_REQUEST_MAX_TOKENS,
-            params.get("max_tokens") or params.get("max_new_tokens") or config.get("max_tokens"),
+            params.get("max_tokens")
+            or params.get("max_new_tokens")
+            or params.get("max_output_tokens")
+            or params.get("max_completion_tokens")
+            or config.get("max_tokens")
+            or config.get("max_new_tokens")
+            or config.get("max_output_tokens")
+            or config.get("max_completion_tokens"),
         )
         self._set_span_attribute(
             span, GEN_AI_REQUEST_TEMPERATURE, params.get("temperature") or config.get("temperature")
         )
         self._set_span_attribute(span, GEN_AI_REQUEST_TOP_P, params.get("top_p") or config.get("top_p"))
-        self._set_span_attribute(span, GEN_AI_REQUEST_TOP_K, params.get("top_k") or config.get("top_k"))
+        additional_model_request_fields = (
+            params.get("additional_model_request_fields") or config.get("additional_model_request_fields") or {}
+        )
+        self._set_span_attribute(
+            span,
+            GEN_AI_REQUEST_TOP_K,
+            params.get("top_k") or config.get("top_k") or additional_model_request_fields.get("top_k"),
+        )
         self._set_span_attribute(
             span,
             GEN_AI_REQUEST_FREQUENCY_PENALTY,
@@ -501,9 +518,39 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self._set_span_attribute(
             span, GEN_AI_REQUEST_PRESENCE_PENALTY, params.get("presence_penalty") or config.get("presence_penalty")
         )
-        stop = params.get("stop") or config.get("stop")
+        stop = params.get("stop") or params.get("stop_sequences") or config.get("stop") or config.get("stop_sequences")
         if stop:
             self._set_span_attribute(span, GEN_AI_REQUEST_STOP_SEQUENCES, stop)
+        seed = next((value for value in (params.get("seed"), config.get("seed")) if value is not None), None)
+        self._set_span_attribute(span, GEN_AI_REQUEST_SEED, seed)
+        choice_count = next(
+            (
+                value
+                for value in (
+                    params.get("choice_count"),
+                    params.get("n"),
+                    config.get("choice_count"),
+                    config.get("n"),
+                )
+                if value is not None
+            ),
+            None,
+        )
+        self._set_span_attribute(span, GEN_AI_REQUEST_CHOICE_COUNT, choice_count)
+        stream = next(
+            (
+                value
+                for value in (
+                    params.get("stream"),
+                    params.get("streaming"),
+                    config.get("stream"),
+                    config.get("streaming"),
+                )
+                if value is not None
+            ),
+            None,
+        )
+        self._set_span_attribute(span, GEN_AI_REQUEST_STREAM, stream)
 
     def _should_skip_chain(
         self, serialized: dict[str, Any], name: Optional[str], metadata: Optional[dict] = None

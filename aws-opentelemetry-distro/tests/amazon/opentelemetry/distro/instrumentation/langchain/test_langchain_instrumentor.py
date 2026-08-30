@@ -7,7 +7,7 @@ import unittest
 from unittest import TestCase
 from unittest.mock import patch
 
-from conftest import validate_otel_genai_schema
+from conftest import call_mock_llm, validate_otel_genai_schema
 
 if sys.version_info < (3, 10):
     raise unittest.SkipTest("langchain requires >=3.10")
@@ -45,10 +45,14 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_CHOICE_COUNT,
     GEN_AI_REQUEST_FREQUENCY_PENALTY,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
     GEN_AI_REQUEST_PRESENCE_PENALTY,
+    GEN_AI_REQUEST_SEED,
+    GEN_AI_REQUEST_STOP_SEQUENCES,
+    GEN_AI_REQUEST_STREAM,
     GEN_AI_REQUEST_TEMPERATURE,
     GEN_AI_REQUEST_TOP_K,
     GEN_AI_REQUEST_TOP_P,
@@ -80,6 +84,7 @@ class TestLangChainInstrumentor(TestCase):
         max_tokens: int = 100
         frequency_penalty: float = 0.5
         presence_penalty: float = 0.3
+        stop: tuple[str, ...] = ("STOP",)
 
         @property
         def _default_params(self) -> dict:
@@ -91,6 +96,7 @@ class TestLangChainInstrumentor(TestCase):
                 "max_tokens": self.max_tokens,
                 "frequency_penalty": self.frequency_penalty,
                 "presence_penalty": self.presence_penalty,
+                "stop": self.stop,
             }
 
         @classmethod
@@ -182,6 +188,7 @@ class TestLangChainInstrumentor(TestCase):
         self.assertEqual(span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
         self.assertEqual(span.attributes[GEN_AI_REQUEST_FREQUENCY_PENALTY], 0.5)
         self.assertEqual(span.attributes[GEN_AI_REQUEST_PRESENCE_PENALTY], 0.3)
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ("STOP",))
 
         self.assertIsNotNone(span.attributes.get(GEN_AI_INPUT_MESSAGES))
         input_messages = json.loads(span.attributes[GEN_AI_INPUT_MESSAGES])
@@ -388,6 +395,10 @@ class TestLangChainInstrumentor(TestCase):
                 "token_usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
             },
         )
+        messages = [
+            SystemMessage(content="You are a helpful assistant."),
+            HumanMessage(content="Hello"),
+        ]
 
         cases = [
             (ChatBedrock, {"model_id": "test", "region_name": "us-east-1"}, GenAiProviderNameValues.AWS_BEDROCK.value),
@@ -422,10 +433,92 @@ class TestLangChainInstrumentor(TestCase):
         for model_cls, init_kwargs, expected_provider in cases:
             with self.subTest(model=model_cls.__name__):
                 self.span_exporter.clear()
+                expected_request_attributes = {}
 
-                llm = model_cls(**init_kwargs)
-                with patch.object(type(llm), "_generate", return_value=fake_result):
-                    llm.invoke("test")
+                if model_cls is ChatOpenAI:
+
+                    def invoke_openai(client):
+                        ChatOpenAI(
+                            model="gpt-5.6-sol",
+                            api_key="fake-key",
+                            client=client.chat.completions,
+                            root_client=client,
+                            temperature=1.0,
+                            top_p=0.9,
+                            max_completion_tokens=100,
+                            frequency_penalty=0.5,
+                            presence_penalty=0.3,
+                            seed=42,
+                            streaming=False,
+                            n=2,
+                            stop=["STOP"],
+                        ).invoke(messages)
+
+                    call_mock_llm("openai", invoke_llm_callback=invoke_openai)
+                    expected_request_attributes = {
+                        GEN_AI_REQUEST_MODEL: "gpt-5.6-sol",
+                        GEN_AI_REQUEST_TEMPERATURE: 1.0,
+                        GEN_AI_REQUEST_TOP_P: 0.9,
+                        GEN_AI_REQUEST_MAX_TOKENS: 100,
+                        GEN_AI_REQUEST_FREQUENCY_PENALTY: 0.5,
+                        GEN_AI_REQUEST_PRESENCE_PENALTY: 0.3,
+                        GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
+                        GEN_AI_REQUEST_SEED: 42,
+                        GEN_AI_REQUEST_CHOICE_COUNT: 2,
+                        GEN_AI_REQUEST_STREAM: False,
+                    }
+                elif model_cls is ChatAnthropic:
+
+                    def invoke_anthropic(client):
+                        llm = ChatAnthropic(
+                            model="claude-fable-5",
+                            api_key="fake-key",
+                            max_tokens=100,
+                            temperature=1.0,
+                            top_p=0.9,
+                            top_k=40,
+                            stop=["STOP"],
+                        )
+                        # LangChain has no public seam for replacing this provider client with the mock transport.
+                        llm._client = client
+                        llm.invoke(messages)
+
+                    call_mock_llm("anthropic", invoke_llm_callback=invoke_anthropic)
+                    expected_request_attributes = {
+                        GEN_AI_REQUEST_MODEL: "claude-fable-5",
+                        GEN_AI_REQUEST_TEMPERATURE: 1.0,
+                        GEN_AI_REQUEST_TOP_P: 0.9,
+                        GEN_AI_REQUEST_TOP_K: 40,
+                        GEN_AI_REQUEST_MAX_TOKENS: 100,
+                        GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
+                        GEN_AI_REQUEST_STREAM: False,
+                    }
+                elif model_cls is ChatBedrockConverse:
+
+                    def invoke_bedrock(client):
+                        ChatBedrockConverse(
+                            model="anthropic.claude-fable-5",
+                            client=client,
+                            temperature=0.7,
+                            top_p=0.9,
+                            max_tokens=100,
+                            stop=["STOP"],
+                            additional_model_request_fields={"top_k": 40},
+                        ).invoke(messages)
+
+                    call_mock_llm("bedrock", invoke_llm_callback=invoke_bedrock)
+                    expected_request_attributes = {
+                        GEN_AI_REQUEST_MODEL: "anthropic.claude-fable-5",
+                        GEN_AI_REQUEST_TEMPERATURE: 0.7,
+                        GEN_AI_REQUEST_TOP_P: 0.9,
+                        GEN_AI_REQUEST_TOP_K: 40,
+                        GEN_AI_REQUEST_MAX_TOKENS: 100,
+                        GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
+                    }
+                else:
+                    llm = model_cls(**init_kwargs)
+                    with patch.object(type(llm), "_generate", return_value=fake_result):
+                        llm.invoke("test")
 
                 spans = self.span_exporter.get_finished_spans()
                 chat_spans = [s for s in spans if "chat" in s.name or "text_completion" in s.name]
@@ -438,6 +531,8 @@ class TestLangChainInstrumentor(TestCase):
                 validate_otel_genai_schema(json.loads(attrs[GEN_AI_INPUT_MESSAGES]), "gen-ai-input-messages")
                 validate_otel_genai_schema(json.loads(attrs[GEN_AI_OUTPUT_MESSAGES]), "gen-ai-output-messages")
                 self.assertEqual(attrs.get(GEN_AI_RESPONSE_FINISH_REASONS), ("stop",))
+                for attribute, value in expected_request_attributes.items():
+                    self.assertEqual(attrs.get(attribute), value)
 
     def test_provider_extracted_from_serialized_id(self):
         FakeChatModel = self.FakeChatModel

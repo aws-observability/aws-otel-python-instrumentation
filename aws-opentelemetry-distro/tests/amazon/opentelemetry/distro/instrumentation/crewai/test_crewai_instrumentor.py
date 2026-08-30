@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional, Sequence
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from conftest import validate_otel_genai_schema
+from conftest import call_mock_llm, validate_otel_genai_schema
 
 if sys.version_info < (3, 10) or sys.version_info >= (3, 14):
     raise unittest.SkipTest("crewai requires >=3.10, <3.14")
@@ -38,12 +38,16 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_CHOICE_COUNT,
     GEN_AI_REQUEST_FREQUENCY_PENALTY,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
     GEN_AI_REQUEST_PRESENCE_PENALTY,
+    GEN_AI_REQUEST_SEED,
     GEN_AI_REQUEST_STOP_SEQUENCES,
+    GEN_AI_REQUEST_STREAM,
     GEN_AI_REQUEST_TEMPERATURE,
+    GEN_AI_REQUEST_TOP_K,
     GEN_AI_REQUEST_TOP_P,
     GEN_AI_RESPONSE_FINISH_REASONS,
     GEN_AI_RESPONSE_MODEL,
@@ -97,8 +101,90 @@ class TestCrewAIInstrumentor(TestCase):
             "anthropic.claude-3-haiku-20240307-v1:0",
         )
 
+        self.span_exporter.clear()
+        model = "anthropic.claude-fable-5"
+        llm = LLM(
+            model=f"bedrock/{model}",
+            temperature=0.7,
+            top_p=0.9,
+            max_tokens=100,
+            stream=False,
+            additional_model_request_fields={"top_k": 40},
+            region_name="us-east-1",
+            aws_access_key_id="fake-key",
+            aws_secret_access_key="fake-key",
+        )
+        llm.stop = ["STOP"]
+        if hasattr(llm, "stop_sequences"):
+            llm.stop_sequences = ["STOP"]
+
+        def invoke_llm(client):
+            # CrewAI has no public seam for replacing the provider client with the mock transport.
+            if hasattr(llm, "_client"):
+                llm._client = client
+            else:
+                llm.client = client
+            llm.call([{"role": "user", "content": "Hello"}])
+
+        call_mock_llm("bedrock", invoke_llm_callback=invoke_llm)
+
+        chat_span = self._find_span(f"chat {model}")
+        self.assertIsNotNone(chat_span)
+        self.assertEqual(chat_span.attributes[GEN_AI_PROVIDER_NAME], GenAiProviderNameValues.AWS_BEDROCK.value)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MODEL], model)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TEMPERATURE], 0.7)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TOP_P], 0.9)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TOP_K], 40)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ("STOP",))
+        self.assertIs(chat_span.attributes[GEN_AI_REQUEST_STREAM], False)
+
     def test_openai_crew_kickoff(self):
         self._run_crew_kickoff_test("openai/gpt-4", GenAiProviderNameValues.OPENAI.value, "gpt-4")
+
+        model = "gpt-5.6-sol"
+
+        for provider, is_litellm in (("openai", False), ("litellm", True)):
+            with self.subTest(client=provider):
+                self.span_exporter.clear()
+                llm = LLM(
+                    model=f"openai/{model}",
+                    is_litellm=is_litellm,
+                    temperature=1.0,
+                    top_p=0.9,
+                    max_completion_tokens=100,
+                    frequency_penalty=0.5,
+                    presence_penalty=0.3,
+                    seed=42,
+                    stream=False,
+                    n=2,
+                    stop=["STOP"],
+                )
+
+                def invoke_llm(client):
+                    if client is not None:
+                        # CrewAI has no public seam for replacing the provider client with the mock transport.
+                        if hasattr(llm, "_client"):
+                            llm._client = client
+                        else:
+                            llm.client = client
+                    llm.call([{"role": "user", "content": "Hello"}])
+
+                call_mock_llm(provider, invoke_llm_callback=invoke_llm)
+
+                chat_span = self._find_span(f"chat {model}")
+                self.assertIsNotNone(chat_span)
+                self.assertEqual(chat_span.attributes[GEN_AI_PROVIDER_NAME], GenAiProviderNameValues.OPENAI.value)
+                self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MODEL], model)
+                self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TEMPERATURE], 1.0)
+                self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TOP_P], 0.9)
+                self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
+                self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_FREQUENCY_PENALTY], 0.5)
+                self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_PRESENCE_PENALTY], 0.3)
+                self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ("STOP",))
+                self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_SEED], 42)
+                self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_CHOICE_COUNT], 2)
+                self.assertIs(chat_span.attributes[GEN_AI_REQUEST_STREAM], False)
 
     def test_anthropic_crew_kickoff(self):
         self._run_crew_kickoff_test(
@@ -106,6 +192,41 @@ class TestCrewAIInstrumentor(TestCase):
             GenAiProviderNameValues.ANTHROPIC.value,
             "claude-3-sonnet-20240229",
         )
+
+        self.span_exporter.clear()
+        model = "claude-fable-5"
+        llm = LLM(
+            model=f"anthropic/{model}",
+            temperature=1.0,
+            top_p=0.9,
+            top_k=40,
+            max_tokens=100,
+            stream=False,
+        )
+        llm.stop = ["STOP"]
+        if hasattr(llm, "stop_sequences"):
+            llm.stop_sequences = ["STOP"]
+
+        def invoke_llm(client):
+            # CrewAI has no public seam for replacing the provider client with the mock transport.
+            if hasattr(llm, "_client"):
+                llm._client = client
+            else:
+                llm.client = client
+            llm.call([{"role": "user", "content": "Hello"}])
+
+        call_mock_llm("anthropic", invoke_llm_callback=invoke_llm)
+
+        chat_span = self._find_span(f"chat {model}")
+        self.assertIsNotNone(chat_span)
+        self.assertEqual(chat_span.attributes[GEN_AI_PROVIDER_NAME], GenAiProviderNameValues.ANTHROPIC.value)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MODEL], model)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TEMPERATURE], 1.0)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TOP_P], 0.9)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TOP_K], 40)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ("STOP",))
+        self.assertIs(chat_span.attributes[GEN_AI_REQUEST_STREAM], False)
 
     def test_azure_crew_kickoff(self):
         self._run_crew_kickoff_test("azure/gpt-4", GenAiProviderNameValues.AZURE_AI_OPENAI.value, "gpt-4")
@@ -637,7 +758,16 @@ class TestCrewAIInstrumentor(TestCase):
             with test_tracer.start_as_current_span("custom_downstream_span"):
                 return f"Hello, {name}!"
 
-        llm = LLM(model=model, is_litellm=True, temperature=0.7, max_tokens=1024)
+        llm = LLM(
+            model=model,
+            is_litellm=True,
+            temperature=0.7,
+            top_p=0.9,
+            max_tokens=1024,
+            frequency_penalty=0.1,
+            presence_penalty=0.2,
+            stop=["STOP"],
+        )
         llm.supports_function_calling = lambda: True
         agent = Agent(
             role="Greeter",
@@ -693,9 +823,13 @@ class TestCrewAIInstrumentor(TestCase):
                 GEN_AI_AGENT_ID: str(crew.agents[0].id),
                 GEN_AI_AGENT_DESCRIPTION: "Greet the user",
                 GEN_AI_REQUEST_TEMPERATURE: 0.7,
+                GEN_AI_REQUEST_TOP_P: 0.9,
                 GEN_AI_REQUEST_MAX_TOKENS: 1024,
+                GEN_AI_REQUEST_FREQUENCY_PENALTY: 0.1,
+                GEN_AI_REQUEST_PRESENCE_PENALTY: 0.2,
             },
         )
+        self.assertIn("STOP", agent_span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES])
 
         agent_input_messages = json.loads(agent_span.attributes[GEN_AI_INPUT_MESSAGES])
         validate_otel_genai_schema(agent_input_messages, "gen-ai-input-messages")

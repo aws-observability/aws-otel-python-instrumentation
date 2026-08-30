@@ -69,11 +69,14 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (  # 
     GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_CHOICE_COUNT,
     GEN_AI_REQUEST_FREQUENCY_PENALTY,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
     GEN_AI_REQUEST_PRESENCE_PENALTY,
+    GEN_AI_REQUEST_SEED,
     GEN_AI_REQUEST_STOP_SEQUENCES,
+    GEN_AI_REQUEST_STREAM,
     GEN_AI_REQUEST_TEMPERATURE,
     GEN_AI_REQUEST_TOP_K,
     GEN_AI_REQUEST_TOP_P,
@@ -452,11 +455,24 @@ class _Span(BaseSpan):
         if hasattr(instance, "temperature") and instance.temperature is not None:
             self[GEN_AI_REQUEST_TEMPERATURE] = instance.temperature
 
-        # Capture max_tokens if available
-        if hasattr(instance, "max_tokens") and instance.max_tokens is not None:
-            self[GEN_AI_REQUEST_MAX_TOKENS] = instance.max_tokens
-
         additional_kwargs = getattr(instance, "additional_kwargs", None) or {}
+        max_tokens = next(
+            (
+                value
+                for value in (
+                    getattr(instance, "max_tokens", None),
+                    getattr(instance, "max_output_tokens", None),
+                    getattr(instance, "max_completion_tokens", None),
+                    additional_kwargs.get("max_tokens"),
+                    additional_kwargs.get("max_output_tokens"),
+                    additional_kwargs.get("max_completion_tokens"),
+                )
+                if value is not None
+            ),
+            None,
+        )
+        if max_tokens is not None:
+            self[GEN_AI_REQUEST_MAX_TOKENS] = max_tokens
         if (top_p := additional_kwargs.get("top_p")) is not None:
             self[GEN_AI_REQUEST_TOP_P] = top_p
         if (top_k := additional_kwargs.get("top_k")) is not None:
@@ -467,6 +483,20 @@ class _Span(BaseSpan):
             self[GEN_AI_REQUEST_PRESENCE_PENALTY] = presence_penalty
         if stop := (additional_kwargs.get("stop") or additional_kwargs.get("stop_sequences")):
             self[GEN_AI_REQUEST_STOP_SEQUENCES] = stop
+        if (seed := additional_kwargs.get("seed")) is not None:
+            self[GEN_AI_REQUEST_SEED] = seed
+        choice_count = next(
+            (
+                value
+                for value in (additional_kwargs.get("choice_count"), additional_kwargs.get("n"))
+                if value is not None
+            ),
+            None,
+        )
+        if choice_count is not None:
+            self[GEN_AI_REQUEST_CHOICE_COUNT] = choice_count
+        if (stream := additional_kwargs.get("stream")) is not None:
+            self[GEN_AI_REQUEST_STREAM] = stream
 
     @process_instance.register
     def _(self, instance: BaseEmbedding) -> None:

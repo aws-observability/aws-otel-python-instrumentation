@@ -25,12 +25,16 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_CHOICE_COUNT,
     GEN_AI_REQUEST_FREQUENCY_PENALTY,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
     GEN_AI_REQUEST_PRESENCE_PENALTY,
+    GEN_AI_REQUEST_SEED,
     GEN_AI_REQUEST_STOP_SEQUENCES,
+    GEN_AI_REQUEST_STREAM,
     GEN_AI_REQUEST_TEMPERATURE,
+    GEN_AI_REQUEST_TOP_K,
     GEN_AI_REQUEST_TOP_P,
     GEN_AI_RESPONSE_FINISH_REASONS,
     GEN_AI_RESPONSE_MODEL,
@@ -252,18 +256,7 @@ class OpenTelemetryEventHandler:
             if model:
                 attributes[GEN_AI_REQUEST_MODEL] = model
             if llm:
-                if getattr(llm, "temperature", None) is not None:
-                    attributes[GEN_AI_REQUEST_TEMPERATURE] = llm.temperature
-                if getattr(llm, "max_tokens", None) is not None:
-                    attributes[GEN_AI_REQUEST_MAX_TOKENS] = llm.max_tokens
-                if getattr(llm, "top_p", None) is not None:
-                    attributes[GEN_AI_REQUEST_TOP_P] = llm.top_p
-                if getattr(llm, "frequency_penalty", None) is not None:
-                    attributes[GEN_AI_REQUEST_FREQUENCY_PENALTY] = llm.frequency_penalty
-                if getattr(llm, "presence_penalty", None) is not None:
-                    attributes[GEN_AI_REQUEST_PRESENCE_PENALTY] = llm.presence_penalty
-                if getattr(llm, "stop", None):
-                    attributes[GEN_AI_REQUEST_STOP_SEQUENCES] = llm.stop
+                self._set_llm_request_span_attributes(attributes, llm)
 
         task_prompt = getattr(event, "task_prompt", None)
         if task_prompt:
@@ -340,9 +333,7 @@ class OpenTelemetryEventHandler:
             attributes[GEN_AI_PROVIDER_NAME] = provider
         if model_name:
             attributes[GEN_AI_REQUEST_MODEL] = model_name
-        temperature = getattr(source, "temperature", None)
-        if temperature is not None:
-            attributes[GEN_AI_REQUEST_TEMPERATURE] = temperature
+        self._set_llm_request_span_attributes(attributes, source)
 
         span_name = (
             f"{GenAiOperationNameValues.CHAT.value} {model_name}" if model_name else GenAiOperationNameValues.CHAT.value
@@ -521,6 +512,48 @@ class OpenTelemetryEventHandler:
             "parts": parts,
             "finish_reason": finish_reason,
         }
+
+    @staticmethod
+    def _set_llm_request_span_attributes(attributes: Dict[str, Any], llm: "LLM") -> None:
+        additional_params = getattr(llm, "additional_params", None) or {}
+        additional_model_request_fields = getattr(llm, "additional_model_request_fields", None) or {}
+        request_attributes = (
+            (GEN_AI_REQUEST_TEMPERATURE, ("temperature",)),
+            (GEN_AI_REQUEST_TOP_P, ("top_p",)),
+            (GEN_AI_REQUEST_TOP_K, ("top_k",)),
+            (GEN_AI_REQUEST_MAX_TOKENS, ("max_tokens", "max_output_tokens", "max_completion_tokens")),
+            (GEN_AI_REQUEST_FREQUENCY_PENALTY, ("frequency_penalty",)),
+            (GEN_AI_REQUEST_PRESENCE_PENALTY, ("presence_penalty",)),
+            (GEN_AI_REQUEST_SEED, ("seed",)),
+            (GEN_AI_REQUEST_CHOICE_COUNT, ("choice_count", "n")),
+            (GEN_AI_REQUEST_STREAM, ("stream",)),
+        )
+        for attribute, names in request_attributes:
+            value = next(
+                (
+                    value
+                    for value in (
+                        *(getattr(llm, name, None) for name in names),
+                        *(additional_params.get(name) for name in names),
+                        *(additional_model_request_fields.get(name) for name in names),
+                    )
+                    if value is not None
+                ),
+                None,
+            )
+            if value is not None:
+                attributes[attribute] = value
+
+        stop = (
+            getattr(llm, "stop", None)
+            or getattr(llm, "stop_sequences", None)
+            or additional_params.get("stop")
+            or additional_params.get("stop_sequences")
+            or additional_model_request_fields.get("stop")
+            or additional_model_request_fields.get("stop_sequences")
+        )
+        if stop:
+            attributes[GEN_AI_REQUEST_STOP_SEQUENCES] = stop
 
     @staticmethod
     def _to_tool_call_parts(tool_calls: list) -> list:
