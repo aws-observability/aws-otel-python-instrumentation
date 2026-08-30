@@ -10,7 +10,6 @@ import inspect
 import json
 import sys
 import unittest
-from contextlib import ExitStack
 from unittest.mock import Mock
 
 from conftest import validate_otel_genai_schema
@@ -37,13 +36,11 @@ from llama_index.core.tools.types import ToolOutput
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     GEN_AI_WORKFLOW_NAME,
     OPERATION_INVOKE_WORKFLOW,
-    attach_otel_context,
-    try_detach,
 )
 from amazon.opentelemetry.distro.instrumentation.llama_index import LlamaIndexInstrumentor
 from opentelemetry import context as context_api
 from opentelemetry import trace
-from opentelemetry.context import _SUPPRESS_HTTP_INSTRUMENTATION_KEY, _SUPPRESS_INSTRUMENTATION_KEY, create_key
+from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -528,31 +525,15 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         span.record_exception(exc)
         otel_span.end()
 
-    def test_span_end_closes_context_stack(self):
-        """Test that end() restores the previous OTel context."""
+    def test_span_end_with_context_token(self):
+        """Test that end() detaches the context token."""
         otel_span = self.tracer.start_span("test")
-        key = create_key("test_span_end_closes_context_stack")
-        previous_context = context_api.get_current()
-        context_stack = attach_otel_context(context_api.set_value(key, "value"))
-        span = self._Span(otel_span=otel_span, context_stack=context_stack)
-        self.assertEqual(context_api.get_value(key), "value")
+        token = context_api.attach(context_api.Context())
+        span = self._Span(otel_span=otel_span, context_token=token)
+        self.assertIsNotNone(span._context_token)
         span.end()
-        self.assertIs(context_api.get_current(), previous_context)
+        self.assertIsNone(span._context_token)
         self.assertFalse(span.active)
-
-    def test_span_end_closes_http_suppression_when_not_recording(self):
-        """Test that a non-recording span still restores HTTP instrumentation."""
-        from opentelemetry.trace import INVALID_SPAN
-
-        previous_context = context_api.get_current()
-        context_stack = attach_otel_context(context_api.Context(), suppress_http=True)
-        span = self._Span(otel_span=INVALID_SPAN, context_stack=context_stack)
-        self.assertTrue(context_api.get_value(_SUPPRESS_HTTP_INSTRUMENTATION_KEY))
-
-        span.end()
-
-        self.assertIs(context_api.get_current(), previous_context)
-        self.assertIsNone(context_api.get_value(_SUPPRESS_HTTP_INSTRUMENTATION_KEY))
 
     def test_span_end_idempotent(self):
         """Test that calling end() twice is safe."""
@@ -959,9 +940,8 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         span = handler.new_span(id_="OpenAI.chat-1", bound_args=bound_args, instance=llm)
         self.assertIsNotNone(span)
         self.assertTrue(span.active)
-        self.assertTrue(context_api.get_value(_SUPPRESS_HTTP_INSTRUMENTATION_KEY))
+        self.assertIsNotNone(span._context_token)
         span.end()
-        self.assertIsNone(context_api.get_value(_SUPPRESS_HTTP_INSTRUMENTATION_KEY))
 
     def test_new_span_with_parent(self):
         """Test that new_span correctly links to a parent span."""
@@ -1297,14 +1277,14 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         validate_otel_genai_schema(tool_defs, "gen-ai-tool-definitions")
         otel_span.end()
 
-    def test_context_stack_detach_exception_handled(self):
-        """Test that context detach exceptions are silently caught."""
+    def test_context_token_detach_exception_handled(self):
+        """Test that context token detach exceptions are silently caught."""
         otel_span = self.tracer.start_span("test")
-        context_stack = ExitStack()
-        context_stack.callback(try_detach, "invalid_token")
-        span = self._Span(otel_span=otel_span, context_stack=context_stack)
+        # Use an invalid token that will cause detach to fail
+        span = self._Span(otel_span=otel_span, context_token="invalid_token")
         # Should not raise
         span.end()
+        self.assertIsNone(span._context_token)
         self.assertFalse(span.active)
 
     def test_function_tool_get_name_exception(self):
