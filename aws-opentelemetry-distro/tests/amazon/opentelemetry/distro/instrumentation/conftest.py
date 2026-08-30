@@ -4,8 +4,6 @@
 import json
 import os
 import urllib.request
-from contextlib import contextmanager
-from importlib.util import find_spec
 from typing import Any
 
 os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
@@ -161,27 +159,6 @@ def call_mock_llm(provider: str, **kwargs: Any) -> None:  # pylint: disable=too-
         with Stubber(client) as stubber:
             stubber.add_response("converse", response, request)
             client.converse(**request)
-
-
-@contextmanager
-def instrument_llm_clients(tracer_provider):
-    from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
-    from opentelemetry.instrumentation.httpx import HTTPX2ClientInstrumentor, HTTPXClientInstrumentor
-
-    httpx_instrumentor = HTTPXClientInstrumentor()
-    httpx2_instrumentor = HTTPX2ClientInstrumentor() if find_spec("httpx2") else None
-    botocore_instrumentor = BotocoreInstrumentor()
-    httpx_instrumentor.instrument(tracer_provider=tracer_provider)
-    if httpx2_instrumentor:
-        httpx2_instrumentor.instrument(tracer_provider=tracer_provider)
-    botocore_instrumentor.instrument(tracer_provider=tracer_provider)
-    try:
-        yield
-    finally:
-        botocore_instrumentor.uninstrument()
-        if httpx2_instrumentor:
-            httpx2_instrumentor.uninstrument()
-        httpx_instrumentor.uninstrument()
 
 
 def assert_llm_client_spans(spans, provider: str, model: str, temperature: float, is_instrumented: bool) -> None:

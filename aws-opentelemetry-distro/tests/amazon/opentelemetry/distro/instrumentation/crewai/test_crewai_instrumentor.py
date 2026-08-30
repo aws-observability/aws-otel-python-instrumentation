@@ -8,11 +8,12 @@ import json
 import os
 import sys
 import unittest
+from importlib.util import find_spec
 from typing import Any, Dict, Optional, Sequence
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from conftest import assert_llm_client_spans, call_mock_llm, instrument_llm_clients, validate_otel_genai_schema
+from conftest import assert_llm_client_spans, call_mock_llm, validate_otel_genai_schema
 
 if sys.version_info < (3, 10) or sys.version_info >= (3, 14):
     raise unittest.SkipTest("crewai requires >=3.10, <3.14")
@@ -29,6 +30,8 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
 from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumentor
 from opentelemetry import context
 from opentelemetry.context import _SUPPRESS_HTTP_INSTRUMENTATION_KEY
+from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
+from opentelemetry.instrumentation.httpx import HTTPX2ClientInstrumentor, HTTPXClientInstrumentor
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -87,42 +90,51 @@ class TestCrewAIInstrumentor(TestCase):
         openai_temperature = 1.0
         bedrock_model = "anthropic.claude-fable-5"
         bedrock_temperature = 0.7
+        httpx_instrumentor = HTTPXClientInstrumentor()
+        httpx_instrumentor.instrument(tracer_provider=self.tracer_provider)
+        self.addCleanup(httpx_instrumentor.uninstrument)
+        if find_spec("httpx2"):
+            httpx2_instrumentor = HTTPX2ClientInstrumentor()
+            httpx2_instrumentor.instrument(tracer_provider=self.tracer_provider)
+            self.addCleanup(httpx2_instrumentor.uninstrument)
+        botocore_instrumentor = BotocoreInstrumentor()
+        botocore_instrumentor.instrument(tracer_provider=self.tracer_provider)
+        self.addCleanup(botocore_instrumentor.uninstrument)
         with self.subTest(client="openai", is_instrumented=False):
             self.span_exporter.clear()
-            with instrument_llm_clients(self.tracer_provider):
-                source = LLM(
-                    model=f"openai/{openai_model}",
-                    is_litellm=True,
-                    temperature=openai_temperature,
+            source = LLM(
+                model=f"openai/{openai_model}",
+                is_litellm=True,
+                temperature=openai_temperature,
+            )
+            usage = iter(
+                [
+                    MagicMock(prompt_tokens=0, completion_tokens=0),
+                    MagicMock(prompt_tokens=10, completion_tokens=20),
+                ]
+            )
+            source.get_token_usage_summary = lambda: next(usage)
+            start_event = LLMCallStartedEvent(
+                call_id="call-1",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": "Hello"},
+                ],
+            )
+            crewai_event_bus.emit(source, start_event)
+            try:
+                call_mock_llm("openai")
+                call_mock_llm("anthropic")
+            finally:
+                crewai_event_bus.emit(
+                    source,
+                    LLMCallCompletedEvent(
+                        call_id="call-1",
+                        response="Hello, World!",
+                        call_type=LLMCallType.LLM_CALL,
+                        started_event_id=start_event.event_id,
+                    ),
                 )
-                usage = iter(
-                    [
-                        MagicMock(prompt_tokens=0, completion_tokens=0),
-                        MagicMock(prompt_tokens=10, completion_tokens=20),
-                    ]
-                )
-                source.get_token_usage_summary = lambda: next(usage)
-                start_event = LLMCallStartedEvent(
-                    call_id="call-1",
-                    messages=[
-                        {"role": "system", "content": "You are a helpful assistant."},
-                        {"role": "user", "content": "Hello"},
-                    ],
-                )
-                crewai_event_bus.emit(source, start_event)
-                try:
-                    call_mock_llm("openai")
-                    call_mock_llm("anthropic")
-                finally:
-                    crewai_event_bus.emit(
-                        source,
-                        LLMCallCompletedEvent(
-                            call_id="call-1",
-                            response="Hello, World!",
-                            call_type=LLMCallType.LLM_CALL,
-                            started_event_id=start_event.event_id,
-                        ),
-                    )
 
             assert_llm_client_spans(
                 self.span_exporter.get_finished_spans(),
@@ -133,39 +145,38 @@ class TestCrewAIInstrumentor(TestCase):
             )
         with self.subTest(client="bedrock", is_instrumented=True):
             self.span_exporter.clear()
-            with instrument_llm_clients(self.tracer_provider):
-                source = LLM(
-                    model=f"bedrock/{bedrock_model}",
-                    is_litellm=True,
-                    temperature=bedrock_temperature,
+            source = LLM(
+                model=f"bedrock/{bedrock_model}",
+                is_litellm=True,
+                temperature=bedrock_temperature,
+            )
+            usage = iter(
+                [
+                    MagicMock(prompt_tokens=0, completion_tokens=0),
+                    MagicMock(prompt_tokens=10, completion_tokens=20),
+                ]
+            )
+            source.get_token_usage_summary = lambda: next(usage)
+            start_event = LLMCallStartedEvent(
+                call_id="call-1",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": "Hello"},
+                ],
+            )
+            crewai_event_bus.emit(source, start_event)
+            try:
+                call_mock_llm("bedrock")
+            finally:
+                crewai_event_bus.emit(
+                    source,
+                    LLMCallCompletedEvent(
+                        call_id="call-1",
+                        response="Hello, World!",
+                        call_type=LLMCallType.LLM_CALL,
+                        started_event_id=start_event.event_id,
+                    ),
                 )
-                usage = iter(
-                    [
-                        MagicMock(prompt_tokens=0, completion_tokens=0),
-                        MagicMock(prompt_tokens=10, completion_tokens=20),
-                    ]
-                )
-                source.get_token_usage_summary = lambda: next(usage)
-                start_event = LLMCallStartedEvent(
-                    call_id="call-1",
-                    messages=[
-                        {"role": "system", "content": "You are a helpful assistant."},
-                        {"role": "user", "content": "Hello"},
-                    ],
-                )
-                crewai_event_bus.emit(source, start_event)
-                try:
-                    call_mock_llm("bedrock")
-                finally:
-                    crewai_event_bus.emit(
-                        source,
-                        LLMCallCompletedEvent(
-                            call_id="call-1",
-                            response="Hello, World!",
-                            call_type=LLMCallType.LLM_CALL,
-                            started_event_id=start_event.event_id,
-                        ),
-                    )
 
             assert_llm_client_spans(
                 self.span_exporter.get_finished_spans(),

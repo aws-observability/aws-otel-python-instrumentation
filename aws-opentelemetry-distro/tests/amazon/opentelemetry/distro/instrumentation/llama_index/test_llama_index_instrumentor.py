@@ -12,7 +12,7 @@ import sys
 import unittest
 from unittest.mock import Mock, patch
 
-from conftest import assert_llm_client_spans, call_mock_llm, instrument_llm_clients, validate_otel_genai_schema
+from conftest import assert_llm_client_spans, call_mock_llm, validate_otel_genai_schema
 
 if sys.version_info < (3, 10):
     raise unittest.SkipTest("llama-index requires Python >= 3.10")
@@ -45,6 +45,8 @@ from amazon.opentelemetry.distro.instrumentation.llama_index import LlamaIndexIn
 from opentelemetry import context as context_api
 from opentelemetry import trace
 from opentelemetry.context import _SUPPRESS_HTTP_INSTRUMENTATION_KEY, _SUPPRESS_INSTRUMENTATION_KEY
+from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
+from opentelemetry.instrumentation.httpx import HTTPX2ClientInstrumentor, HTTPXClientInstrumentor
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -110,6 +112,16 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         openai_temperature = 1.0
         bedrock_model = "anthropic.claude-fable-5"
         bedrock_temperature = 0.7
+        httpx_instrumentor = HTTPXClientInstrumentor()
+        httpx_instrumentor.instrument(tracer_provider=self.tracer_provider)
+        self.addCleanup(httpx_instrumentor.uninstrument)
+        if importlib.util.find_spec("httpx2"):
+            httpx2_instrumentor = HTTPX2ClientInstrumentor()
+            httpx2_instrumentor.instrument(tracer_provider=self.tracer_provider)
+            self.addCleanup(httpx2_instrumentor.uninstrument)
+        botocore_instrumentor = BotocoreInstrumentor()
+        botocore_instrumentor.instrument(tracer_provider=self.tracer_provider)
+        self.addCleanup(botocore_instrumentor.uninstrument)
         with self.subTest(client="openai", is_instrumented=False):
             self.span_exporter.clear()
             with patch.dict(
@@ -138,9 +150,8 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
                     model_dict={},
                 )
             )
-            with instrument_llm_clients(self.tracer_provider):
-                call_mock_llm("openai")
-                call_mock_llm("anthropic")
+            call_mock_llm("openai")
+            call_mock_llm("anthropic")
             span.process_event(
                 _LLMChatEndEvent(
                     messages=[],
@@ -193,8 +204,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
                     model_dict={},
                 )
             )
-            with instrument_llm_clients(self.tracer_provider):
-                call_mock_llm("bedrock")
+            call_mock_llm("bedrock")
             span.process_event(
                 _LLMChatEndEvent(
                     messages=[],

@@ -4,6 +4,7 @@
 import json
 import unittest
 from importlib.metadata import entry_points
+from importlib.util import find_spec
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -11,7 +12,7 @@ from agents import tracing
 from agents.items import ItemHelpers
 from agents.tracing import processors
 from agents.tracing.processors import BackendSpanExporter
-from conftest import assert_llm_client_spans, call_mock_llm, instrument_llm_clients, validate_otel_genai_schema
+from conftest import assert_llm_client_spans, call_mock_llm, validate_otel_genai_schema
 from openai import Omit
 from openai.types.responses import ResponseFunctionToolCall
 from pydantic import BaseModel
@@ -22,6 +23,7 @@ from amazon.opentelemetry.distro.instrumentation.openai_agents._processor import
     OpenTelemetryTracingProcessor,
     _GenAIMessageNormalizer,
 )
+from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPX2ClientInstrumentor, HTTPXClientInstrumentor
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -226,9 +228,19 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         openai_temperature = 1.0
         bedrock_model = "anthropic.claude-fable-5"
         bedrock_temperature = 0.7
+        httpx_instrumentor = HTTPXClientInstrumentor()
+        httpx_instrumentor.instrument(tracer_provider=self.tracer_provider)
+        self.addCleanup(httpx_instrumentor.uninstrument)
+        if find_spec("httpx2"):
+            httpx2_instrumentor = HTTPX2ClientInstrumentor()
+            httpx2_instrumentor.instrument(tracer_provider=self.tracer_provider)
+            self.addCleanup(httpx2_instrumentor.uninstrument)
+        botocore_instrumentor = BotocoreInstrumentor()
+        botocore_instrumentor.instrument(tracer_provider=self.tracer_provider)
+        self.addCleanup(botocore_instrumentor.uninstrument)
         with self.subTest(client="openai", is_instrumented=False):
             self.exporter.clear()
-            with instrument_llm_clients(self.tracer_provider), tracing.trace("Test workflow"):
+            with tracing.trace("Test workflow"):
                 with tracing.generation_span(
                     input=[
                         {"role": "system", "content": "You are a helpful assistant."},
@@ -251,7 +263,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
             )
         with self.subTest(client="bedrock", is_instrumented=True):
             self.exporter.clear()
-            with instrument_llm_clients(self.tracer_provider), tracing.trace("Test workflow"):
+            with tracing.trace("Test workflow"):
                 with tracing.generation_span(
                     input=[
                         {"role": "system", "content": "You are a helpful assistant."},

@@ -4,10 +4,11 @@
 import json
 import sys
 import unittest
+from importlib.util import find_spec
 from unittest import TestCase
 from unittest.mock import patch
 
-from conftest import assert_llm_client_spans, call_mock_llm, instrument_llm_clients, validate_otel_genai_schema
+from conftest import assert_llm_client_spans, call_mock_llm, validate_otel_genai_schema
 
 if sys.version_info < (3, 10):
     raise unittest.SkipTest("langchain requires >=3.10")
@@ -38,6 +39,8 @@ from langchain_openai import ChatOpenAI as _ChatOpenAI
 from amazon.opentelemetry.distro.instrumentation.langchain import LangChainInstrumentor
 from opentelemetry import context
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
+from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
+from opentelemetry.instrumentation.httpx import HTTPX2ClientInstrumentor, HTTPXClientInstrumentor
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -156,6 +159,16 @@ class TestLangChainInstrumentor(TestCase):
         openai_temperature = 1.0
         bedrock_model = "anthropic.claude-fable-5"
         bedrock_temperature = 0.7
+        httpx_instrumentor = HTTPXClientInstrumentor()
+        httpx_instrumentor.instrument(tracer_provider=self.tracer_provider)
+        self.addCleanup(httpx_instrumentor.uninstrument)
+        if find_spec("httpx2"):
+            httpx2_instrumentor = HTTPX2ClientInstrumentor()
+            httpx2_instrumentor.instrument(tracer_provider=self.tracer_provider)
+            self.addCleanup(httpx2_instrumentor.uninstrument)
+        botocore_instrumentor = BotocoreInstrumentor()
+        botocore_instrumentor.instrument(tracer_provider=self.tracer_provider)
+        self.addCleanup(botocore_instrumentor.uninstrument)
         with self.subTest(client="openai", is_instrumented=False):
             self.span_exporter.clear()
             chat_model = _ChatOpenAI(model=openai_model, api_key="fake-key")
@@ -177,9 +190,7 @@ class TestLangChainInstrumentor(TestCase):
                 call_mock_llm("anthropic")
                 return result
 
-            with instrument_llm_clients(self.tracer_provider), patch.object(
-                type(chat_model), "_generate", side_effect=generate_openai
-            ):
+            with patch.object(type(chat_model), "_generate", side_effect=generate_openai):
                 chat_model.invoke(
                     [
                         SystemMessage(content="You are a helpful assistant."),
@@ -221,9 +232,7 @@ class TestLangChainInstrumentor(TestCase):
                 call_mock_llm("bedrock")
                 return result
 
-            with instrument_llm_clients(self.tracer_provider), patch.object(
-                type(chat_model), "_generate", side_effect=generate_bedrock
-            ):
+            with patch.object(type(chat_model), "_generate", side_effect=generate_bedrock):
                 chat_model.invoke(
                     [
                         SystemMessage(content="You are a helpful assistant."),
