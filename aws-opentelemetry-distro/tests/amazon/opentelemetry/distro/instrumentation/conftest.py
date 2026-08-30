@@ -5,6 +5,8 @@ import json
 import os
 import urllib.request
 from contextlib import contextmanager
+from importlib.util import find_spec
+from typing import Any
 
 os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
 
@@ -35,79 +37,154 @@ def validate_otel_genai_schema(data: list, schema_name: str) -> None:
     validate_otel_schema(data, f"{_OTEL_GEN_AI_SCHEMA_BASE}/{schema_name}.json")
 
 
-def call_mock_openai(model: str) -> None:
-    import httpx
-    from openai import OpenAI
+def call_mock_llm(provider: str, **kwargs: Any) -> None:  # pylint: disable=too-many-locals
+    config = {
+        "openai": {
+            "model": "gpt-5.6-sol",
+            "temperature": 1.0,
+            "top_k": None,
+            "max_tokens": 100,
+        },
+        "anthropic": {
+            "model": "claude-fable-5",
+            "temperature": 1.0,
+            "top_k": 250,
+            "max_tokens": 100,
+        },
+        "bedrock": {
+            "model": "anthropic.claude-fable-5",
+            "temperature": 0.7,
+            "top_k": 250,
+            "max_tokens": 100,
+        },
+    }.get(provider)
+    if config is None:
+        raise ValueError(f"Unsupported LLM provider: {provider}")
 
-    transport = httpx.MockTransport(
-        lambda request: httpx.Response(
-            200,
-            request=request,
-            json={
-                "id": "chatcmpl-mock",
-                "object": "chat.completion",
-                "created": 1234567890,
-                "model": model,
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {"role": "assistant", "content": "Hello, World!"},
-                        "finish_reason": "stop",
-                    }
-                ],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
-            },
+    model = kwargs.get("model", config["model"])
+    temperature = kwargs.get("temperature", config["temperature"])
+    top_k = kwargs.get("top_k", config["top_k"])
+    max_tokens = kwargs.get("max_tokens", config["max_tokens"])
+
+    if provider == "openai":
+        import httpx
+        from openai import OpenAI
+
+        transport = httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                request=request,
+                json={
+                    "id": "chatcmpl-mock",
+                    "object": "chat.completion",
+                    "created": 1234567890,
+                    "model": model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "Hello, World!"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+                },
+            )
         )
-    )
-    with httpx.Client(transport=transport) as http_client:
-        OpenAI(api_key="fake-key", http_client=http_client).chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": "Hello"}],
+        with httpx.Client(transport=transport) as http_client:
+            OpenAI(api_key="fake-key", http_client=http_client).chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": "Hello"}],
+                temperature=temperature,
+            )
+        return
+
+    if provider == "anthropic":
+        from inspect import signature
+
+        from anthropic import Anthropic, DefaultHttpxClient, _base_client
+
+        anthropic_httpx = getattr(_base_client, "httpx2", None) or _base_client.httpx
+        transport = anthropic_httpx.MockTransport(
+            lambda request: anthropic_httpx.Response(
+                200,
+                request=request,
+                json={
+                    "id": "msg_mock",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": model,
+                    "content": [{"type": "text", "text": "Hello, World!"}],
+                    "stop_reason": "end_turn",
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": 10, "output_tokens": 20},
+                },
+            )
         )
+        request = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        with DefaultHttpxClient(transport=transport) as http_client:
+            client = Anthropic(api_key="fake-key", http_client=http_client)
+            supported_parameters = signature(client.messages.create).parameters
+            if "temperature" in supported_parameters:
+                request["temperature"] = temperature
+            if top_k is not None and "top_k" in supported_parameters:
+                request["top_k"] = top_k
+            client.messages.create(**request)
+        return
 
+    if provider == "bedrock":
+        from botocore.session import get_session
+        from botocore.stub import Stubber
 
-def call_stubbed_bedrock(model: str) -> None:
-    from botocore.session import get_session
-    from botocore.stub import Stubber
-
-    client = get_session().create_client(
-        "bedrock-runtime",
-        region_name="us-east-1",
-        aws_access_key_id="fake-key",
-        aws_secret_access_key="fake-key",
-    )
-    request = {
-        "modelId": model,
-        "messages": [{"role": "user", "content": [{"text": "Hello"}]}],
-    }
-    response = {
-        "output": {"message": {"role": "assistant", "content": [{"text": "Hello, World!"}]}},
-        "stopReason": "end_turn",
-        "usage": {"inputTokens": 10, "outputTokens": 20, "totalTokens": 30},
-        "metrics": {"latencyMs": 1},
-    }
-    with Stubber(client) as stubber:
-        stubber.add_response("converse", response, request)
-        client.converse(**request)
+        client = get_session().create_client(
+            "bedrock-runtime",
+            region_name="us-east-1",
+            aws_access_key_id="fake-key",
+            aws_secret_access_key="fake-key",
+        )
+        request = {
+            "modelId": model,
+            "messages": [{"role": "user", "content": [{"text": "Hello"}]}],
+            "inferenceConfig": {"maxTokens": max_tokens, "temperature": temperature},
+        }
+        if top_k is not None:
+            request["additionalModelRequestFields"] = {"top_k": top_k}
+        response = {
+            "output": {"message": {"role": "assistant", "content": [{"text": "Hello, World!"}]}},
+            "stopReason": "end_turn",
+            "usage": {"inputTokens": 10, "outputTokens": 20, "totalTokens": 30},
+            "metrics": {"latencyMs": 1},
+        }
+        with Stubber(client) as stubber:
+            stubber.add_response("converse", response, request)
+            client.converse(**request)
 
 
 @contextmanager
 def instrument_llm_clients(tracer_provider):
     from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
-    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+    from opentelemetry.instrumentation.httpx import HTTPX2ClientInstrumentor, HTTPXClientInstrumentor
 
     httpx_instrumentor = HTTPXClientInstrumentor()
+    httpx2_instrumentor = HTTPX2ClientInstrumentor() if find_spec("httpx2") else None
     botocore_instrumentor = BotocoreInstrumentor()
     httpx_instrumentor.instrument(tracer_provider=tracer_provider)
+    if httpx2_instrumentor:
+        httpx2_instrumentor.instrument(tracer_provider=tracer_provider)
     botocore_instrumentor.instrument(tracer_provider=tracer_provider)
     try:
         yield
     finally:
         botocore_instrumentor.uninstrument()
+        if httpx2_instrumentor:
+            httpx2_instrumentor.uninstrument()
         httpx_instrumentor.uninstrument()
 
 
-def assert_llm_client_spans(spans, provider: str, model: str, is_instrumented: bool) -> None:
+def assert_llm_client_spans(spans, provider: str, model: str, temperature: float, is_instrumented: bool) -> None:
     from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
         GEN_AI_INPUT_MESSAGES,
         GEN_AI_OPERATION_NAME,
@@ -133,7 +210,7 @@ def assert_llm_client_spans(spans, provider: str, model: str, is_instrumented: b
     attrs = framework_span.attributes
     assert attrs[GEN_AI_OPERATION_NAME] == GenAiOperationNameValues.CHAT.value
     assert attrs[GEN_AI_REQUEST_MODEL].endswith(model)
-    assert attrs[GEN_AI_REQUEST_TEMPERATURE] == 0.7
+    assert attrs[GEN_AI_REQUEST_TEMPERATURE] == temperature
     for attribute in (
         GEN_AI_RESPONSE_FINISH_REASONS,
         GEN_AI_SYSTEM_INSTRUCTIONS,

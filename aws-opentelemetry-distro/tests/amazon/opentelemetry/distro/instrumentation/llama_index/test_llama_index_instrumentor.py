@@ -10,15 +10,9 @@ import inspect
 import json
 import sys
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
-from conftest import (
-    assert_llm_client_spans,
-    call_mock_openai,
-    call_stubbed_bedrock,
-    instrument_llm_clients,
-    validate_otel_genai_schema,
-)
+from conftest import assert_llm_client_spans, call_mock_llm, instrument_llm_clients, validate_otel_genai_schema
 
 if sys.version_info < (3, 10):
     raise unittest.SkipTest("llama-index requires Python >= 3.10")
@@ -109,16 +103,31 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self.span_exporter.clear()
 
     def test_llm_client_span_suppression(self):
+        from llama_index.llms.bedrock_converse import utils as bedrock_utils
+        from llama_index.llms.openai import utils as openai_utils
+
+        openai_model = "gpt-5.6-sol"
+        openai_temperature = 1.0
+        bedrock_model = "anthropic.claude-fable-5"
+        bedrock_temperature = 0.7
         with self.subTest(client="openai", is_instrumented=False):
             self.span_exporter.clear()
-            client = _OpenAI(model="gpt-4", api_key="fake-key", temperature=0.7)
-            bound_args = Mock(spec=inspect.BoundArguments)
-            bound_args.kwargs = {}
-            span = self.instrumentor._span_handler.new_span(
-                id_=f"{client.__class__.__name__}.chat-1",
-                bound_args=bound_args,
-                instance=client,
-            )
+            with patch.dict(
+                openai_utils.ALL_AVAILABLE_MODELS,
+                {openai_model: 1_050_000},
+            ):
+                client = _OpenAI(
+                    model=openai_model,
+                    api_key="fake-key",
+                    temperature=openai_temperature,
+                )
+                bound_args = Mock(spec=inspect.BoundArguments)
+                bound_args.kwargs = {}
+                span = self.instrumentor._span_handler.new_span(
+                    id_=f"{client.__class__.__name__}.chat-1",
+                    bound_args=bound_args,
+                    instance=client,
+                )
             span.process_event(
                 LLMChatStartEvent(
                     messages=[
@@ -130,14 +139,15 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
                 )
             )
             with instrument_llm_clients(self.tracer_provider):
-                call_mock_openai("gpt-4")
+                call_mock_llm("openai")
+                call_mock_llm("anthropic")
             span.process_event(
                 _LLMChatEndEvent(
                     messages=[],
                     response=ChatResponse(
                         message=ChatMessage(role=MessageRole.ASSISTANT, content="Hello, World!"),
                         raw={
-                            "model": "gpt-4",
+                            "model": openai_model,
                             "choices": [{"finish_reason": "stop"}],
                             "usage": {"prompt_tokens": 10, "completion_tokens": 20},
                         },
@@ -149,26 +159,30 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
             assert_llm_client_spans(
                 self.span_exporter.get_finished_spans(),
                 GenAiProviderNameValues.OPENAI.value,
-                "gpt-4",
+                openai_model,
+                openai_temperature,
                 False,
             )
         with self.subTest(client="bedrock", is_instrumented=True):
             self.span_exporter.clear()
-            model = "anthropic.claude-3-haiku-20240307-v1:0"
-            client = _BedrockConverse(
-                model=model,
-                region_name="us-east-1",
-                aws_access_key_id="fake-key",
-                aws_secret_access_key="fake-key",
-                temperature=0.7,
-            )
-            bound_args = Mock(spec=inspect.BoundArguments)
-            bound_args.kwargs = {}
-            span = self.instrumentor._span_handler.new_span(
-                id_=f"{client.__class__.__name__}.chat-1",
-                bound_args=bound_args,
-                instance=client,
-            )
+            with patch.dict(
+                bedrock_utils.BEDROCK_MODELS,
+                {bedrock_model: 1_000_000},
+            ):
+                client = _BedrockConverse(
+                    model=bedrock_model,
+                    region_name="us-east-1",
+                    aws_access_key_id="fake-key",
+                    aws_secret_access_key="fake-key",
+                    temperature=bedrock_temperature,
+                )
+                bound_args = Mock(spec=inspect.BoundArguments)
+                bound_args.kwargs = {}
+                span = self.instrumentor._span_handler.new_span(
+                    id_=f"{client.__class__.__name__}.chat-1",
+                    bound_args=bound_args,
+                    instance=client,
+                )
             span.process_event(
                 LLMChatStartEvent(
                     messages=[
@@ -180,14 +194,14 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
                 )
             )
             with instrument_llm_clients(self.tracer_provider):
-                call_stubbed_bedrock(model)
+                call_mock_llm("bedrock")
             span.process_event(
                 _LLMChatEndEvent(
                     messages=[],
                     response=ChatResponse(
                         message=ChatMessage(role=MessageRole.ASSISTANT, content="Hello, World!"),
                         raw={
-                            "model": model,
+                            "model": bedrock_model,
                             "choices": [{"finish_reason": "stop"}],
                             "usage": {"prompt_tokens": 10, "completion_tokens": 20},
                         },
@@ -199,7 +213,8 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
             assert_llm_client_spans(
                 self.span_exporter.get_finished_spans(),
                 GenAiProviderNameValues.AWS_BEDROCK.value,
-                model,
+                bedrock_model,
+                bedrock_temperature,
                 True,
             )
 

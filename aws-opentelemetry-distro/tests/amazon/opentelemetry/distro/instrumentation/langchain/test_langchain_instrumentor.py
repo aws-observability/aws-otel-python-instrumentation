@@ -7,13 +7,7 @@ import unittest
 from unittest import TestCase
 from unittest.mock import patch
 
-from conftest import (
-    assert_llm_client_spans,
-    call_mock_openai,
-    call_stubbed_bedrock,
-    instrument_llm_clients,
-    validate_otel_genai_schema,
-)
+from conftest import assert_llm_client_spans, call_mock_llm, instrument_llm_clients, validate_otel_genai_schema
 
 if sys.version_info < (3, 10):
     raise unittest.SkipTest("langchain requires >=3.10")
@@ -158,9 +152,13 @@ class TestLangChainInstrumentor(TestCase):
         self.span_exporter.clear()
 
     def test_llm_client_span_suppression(self):
+        openai_model = "gpt-5.6-sol"
+        openai_temperature = 1.0
+        bedrock_model = "anthropic.claude-fable-5"
+        bedrock_temperature = 0.7
         with self.subTest(client="openai", is_instrumented=False):
             self.span_exporter.clear()
-            chat_model = _ChatOpenAI(model="gpt-4", api_key="fake-key", temperature=0.7)
+            chat_model = _ChatOpenAI(model=openai_model, api_key="fake-key")
             result = ChatResult(
                 generations=[
                     ChatGeneration(
@@ -169,13 +167,14 @@ class TestLangChainInstrumentor(TestCase):
                     )
                 ],
                 llm_output={
-                    "model_name": "gpt-4",
+                    "model_name": openai_model,
                     "token_usage": {"prompt_tokens": 10, "completion_tokens": 20},
                 },
             )
 
             def generate_openai(*args, **kwargs):
-                call_mock_openai("gpt-4")
+                call_mock_llm("openai")
+                call_mock_llm("anthropic")
                 return result
 
             with instrument_llm_clients(self.tracer_provider), patch.object(
@@ -185,24 +184,25 @@ class TestLangChainInstrumentor(TestCase):
                     [
                         SystemMessage(content="You are a helpful assistant."),
                         HumanMessage(content="Hello"),
-                    ]
+                    ],
+                    temperature=openai_temperature,
                 )
 
             assert_llm_client_spans(
                 self.span_exporter.get_finished_spans(),
                 GenAiProviderNameValues.OPENAI.value,
-                "gpt-4",
+                openai_model,
+                openai_temperature,
                 False,
             )
         with self.subTest(client="bedrock", is_instrumented=True):
             self.span_exporter.clear()
-            model = "anthropic.claude-3-haiku-20240307-v1:0"
             chat_model = _ChatBedrockConverse(
-                model=model,
+                model=bedrock_model,
                 region_name="us-east-1",
                 aws_access_key_id="fake-key",
                 aws_secret_access_key="fake-key",
-                temperature=0.7,
+                temperature=bedrock_temperature,
             )
             result = ChatResult(
                 generations=[
@@ -212,13 +212,13 @@ class TestLangChainInstrumentor(TestCase):
                     )
                 ],
                 llm_output={
-                    "model_name": model,
+                    "model_name": bedrock_model,
                     "token_usage": {"prompt_tokens": 10, "completion_tokens": 20},
                 },
             )
 
             def generate_bedrock(*args, **kwargs):
-                call_stubbed_bedrock(model)
+                call_mock_llm("bedrock")
                 return result
 
             with instrument_llm_clients(self.tracer_provider), patch.object(
@@ -234,7 +234,8 @@ class TestLangChainInstrumentor(TestCase):
             assert_llm_client_spans(
                 self.span_exporter.get_finished_spans(),
                 GenAiProviderNameValues.AWS_BEDROCK.value,
-                model,
+                bedrock_model,
+                bedrock_temperature,
                 True,
             )
 
