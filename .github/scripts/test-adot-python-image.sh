@@ -43,6 +43,23 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Pre-pull the neutral image with retry/backoff. Unauthenticated public ECR pulls are
+# rate-limited per source IP, which shared CI runners frequently trip ("toomanyrequests").
+# Pulling once up front (with retries) means the later `docker run`s use the cached image.
+pull_with_retry() {
+  image=$1
+  for attempt in 1 2 3 4 5; do
+    if docker pull "${image}"; then
+      return 0
+    fi
+    echo "pull of ${image} failed (attempt ${attempt}/5); retrying in $((attempt * 15))s..."
+    sleep "$((attempt * 15))"
+  done
+  echo "error: could not pull ${image} after 5 attempts"
+  return 1
+}
+pull_with_retry "${NEUTRAL_IMAGE}"
+
 docker volume create "${VOLUME}"
 
 # 1. Exercise the image's own cp-utility exactly as the operator init container does:
