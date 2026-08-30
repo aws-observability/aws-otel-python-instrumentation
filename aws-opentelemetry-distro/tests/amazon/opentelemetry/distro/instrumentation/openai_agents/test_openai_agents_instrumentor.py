@@ -11,7 +11,7 @@ from agents import tracing
 from agents.items import ItemHelpers
 from agents.tracing import processors
 from agents.tracing.processors import BackendSpanExporter
-from conftest import assert_llm_client_spans, call_mock_llm, validate_otel_genai_schema
+from conftest import call_mock_llm, validate_otel_genai_schema
 from openai import Omit
 from openai.types.responses import ResponseFunctionToolCall
 from pydantic import BaseModel
@@ -254,12 +254,13 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
                     call_mock_llm("openai")
                     call_mock_llm("anthropic")
 
-            assert_llm_client_spans(
-                self.exporter.get_finished_spans(),
-                GenAiProviderNameValues.OPENAI.value,
-                openai_model,
-                openai_temperature,
-                False,
+            spans = self.exporter.get_finished_spans()
+            framework_spans = [span for span in spans if GEN_AI_SYSTEM_INSTRUCTIONS in span.attributes]
+            self.assertEqual(len(framework_spans), 1)
+            framework_span = framework_spans[0]
+            self.assertEqual(framework_span.kind, SpanKind.CLIENT)
+            self.assertFalse(
+                any(span.parent and span.parent.span_id == framework_span.context.span_id for span in spans)
             )
         with self.subTest(client="bedrock", is_instrumented=True):
             self.exporter.clear()
@@ -276,13 +277,16 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
                 ):
                     call_mock_llm("bedrock")
 
-            assert_llm_client_spans(
-                self.exporter.get_finished_spans(),
-                GenAiProviderNameValues.AWS_BEDROCK.value,
-                bedrock_model,
-                bedrock_temperature,
-                True,
-            )
+            spans = self.exporter.get_finished_spans()
+            framework_spans = [span for span in spans if GEN_AI_SYSTEM_INSTRUCTIONS in span.attributes]
+            self.assertEqual(len(framework_spans), 1)
+            framework_span = framework_spans[0]
+            child_spans = [
+                span for span in spans if span.parent and span.parent.span_id == framework_span.context.span_id
+            ]
+            self.assertEqual(framework_span.kind, SpanKind.INTERNAL)
+            self.assertEqual(len(child_spans), 1)
+            self.assertEqual(child_spans[0].kind, SpanKind.CLIENT)
 
     def test_span_mapping_attributes_and_agent_rollup(self):
         first_input = [

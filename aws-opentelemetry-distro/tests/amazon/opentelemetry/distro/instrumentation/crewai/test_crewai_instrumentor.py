@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional, Sequence
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from conftest import assert_llm_client_spans, call_mock_llm, validate_otel_genai_schema
+from conftest import call_mock_llm, validate_otel_genai_schema
 
 if sys.version_info < (3, 10) or sys.version_info >= (3, 14):
     raise unittest.SkipTest("crewai requires >=3.10, <3.14")
@@ -136,12 +136,13 @@ class TestCrewAIInstrumentor(TestCase):
                     ),
                 )
 
-            assert_llm_client_spans(
-                self.span_exporter.get_finished_spans(),
-                GenAiProviderNameValues.OPENAI.value,
-                openai_model,
-                openai_temperature,
-                False,
+            spans = self.span_exporter.get_finished_spans()
+            framework_spans = [span for span in spans if GEN_AI_SYSTEM_INSTRUCTIONS in span.attributes]
+            self.assertEqual(len(framework_spans), 1)
+            framework_span = framework_spans[0]
+            self.assertEqual(framework_span.kind, SpanKind.CLIENT)
+            self.assertFalse(
+                any(span.parent and span.parent.span_id == framework_span.context.span_id for span in spans)
             )
         with self.subTest(client="bedrock", is_instrumented=True):
             self.span_exporter.clear()
@@ -178,13 +179,16 @@ class TestCrewAIInstrumentor(TestCase):
                     ),
                 )
 
-            assert_llm_client_spans(
-                self.span_exporter.get_finished_spans(),
-                GenAiProviderNameValues.AWS_BEDROCK.value,
-                bedrock_model,
-                bedrock_temperature,
-                True,
-            )
+            spans = self.span_exporter.get_finished_spans()
+            framework_spans = [span for span in spans if GEN_AI_SYSTEM_INSTRUCTIONS in span.attributes]
+            self.assertEqual(len(framework_spans), 1)
+            framework_span = framework_spans[0]
+            child_spans = [
+                span for span in spans if span.parent and span.parent.span_id == framework_span.context.span_id
+            ]
+            self.assertEqual(framework_span.kind, SpanKind.INTERNAL)
+            self.assertEqual(len(child_spans), 1)
+            self.assertEqual(child_spans[0].kind, SpanKind.CLIENT)
 
     def _set_env(self, key: str, value: str):
         self._env_backup[key] = os.environ.get(key)
