@@ -362,7 +362,9 @@ class OpenTelemetryEventHandler:
 
         self._start_span(span_name, event.event_id, attributes, event.parent_event_id, kind=SpanKind.CLIENT)
 
-    def _on_llm_completed(self, source: "BaseLLM", event: "LLMCallCompletedEvent") -> None:
+    def _on_llm_completed(  # pylint: disable=too-many-locals,too-many-branches
+        self, source: "BaseLLM", event: "LLMCallCompletedEvent"
+    ) -> None:
         attrs: Dict[str, Any] = {}
 
         from crewai.events.types.llm_events import LLMCallType  # pylint: disable=import-outside-toplevel

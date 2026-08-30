@@ -446,7 +446,7 @@ class _Span(BaseSpan):
 
     @process_instance.register(BaseLLM)
     @process_instance.register(MultiModalLLM)
-    def _(self, instance: Union[BaseLLM, MultiModalLLM]) -> None:
+    def _(self, instance: Union[BaseLLM, MultiModalLLM]) -> None:  # pylint: disable=too-many-locals,too-many-branches
         if metadata := instance.metadata:
             self[GEN_AI_REQUEST_MODEL] = metadata.model_name
 
@@ -804,7 +804,7 @@ def _get_token_counts_from_mapping(
     yield from _get_token_counts_impl(usage_mapping, get_value)
 
 
-def _get_token_counts_impl(
+def _get_token_counts_impl(  # pylint: disable=too-many-branches,too-many-statements
     usage: Union[object, Mapping[str, Any]], get_value: Callable[[Any, str], Any]
 ) -> Iterator[Tuple[str, Any]]:
     # OpenAI

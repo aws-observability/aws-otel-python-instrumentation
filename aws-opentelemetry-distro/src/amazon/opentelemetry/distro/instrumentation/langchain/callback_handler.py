@@ -176,7 +176,9 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         )
 
     @skip_instrumentation_if_suppressed
-    def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: Any) -> None:
+    def on_llm_end(  # pylint: disable=too-many-locals
+        self, response: LLMResult, *, run_id: UUID, **kwargs: Any
+    ) -> None:
 
         entry = self._safe_get_span(run_id)
         if not entry:
@@ -538,7 +540,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         OpenTelemetryCallbackHandler._set_span_attribute(span, LANGGRAPH_STEP_SPAN_ATTR, metadata.get("langgraph_step"))
         OpenTelemetryCallbackHandler._set_span_attribute(span, LANGGRAPH_NODE_SPAN_ATTR, metadata.get("langgraph_node"))
 
-    def _set_llm_request_span_attributes(
+    def _set_llm_request_span_attributes(  # pylint: disable=too-many-locals
         self,
         span: Span,
         kwargs: dict,
