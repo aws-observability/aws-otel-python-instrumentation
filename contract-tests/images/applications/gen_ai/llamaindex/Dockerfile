@@ -6,6 +6,7 @@ FROM python:${PYTHON_VERSION}
 WORKDIR /llamaindex
 COPY ./dist/$DISTRO /llamaindex
 COPY ./contract-tests/images/applications/gen_ai/llamaindex /llamaindex
+COPY ./contract-tests/images/applications/gen_ai/mock_llm.py /llamaindex
 
 ENV PIP_ROOT_USER_ACTION=ignore
 ARG DISTRO

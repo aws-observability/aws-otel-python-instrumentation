@@ -7,6 +7,7 @@ from amazon.gen_ai.gen_ai_test_base import (
     GEN_AI_RESPONSE_ID,
     GEN_AI_RESPONSE_MODEL,
     GEN_AI_TOOL_DESCRIPTION,
+    GenAiProviderNameValues,
     GenAITestBase,
 )
 
@@ -18,10 +19,19 @@ class LangChainTest(GenAITestBase):
         return "aws-application-signals-tests-langchain-app"
 
     def test_langchain_single_agent(self):
-        self.do_test_requests("langchain/agent", "GET", 200, 0, 0)
+        self._do_test_for_each_llm(
+            "langchain/agent",
+            expected_tool_count=4,
+            expected_s3_call_count=1,
+        )
 
     def test_langchain_multi_agent(self):
-        self.do_test_requests("langchain/multiagent", "GET", 200, 0, 0, expected_agent_count=2)
+        self._do_test_for_each_llm(
+            "langchain/multiagent",
+            expected_agent_count=2,
+            expected_tool_count=4,
+            expected_s3_call_count=2,
+        )
 
     @override
     def _assert_invoke_agent_spans(self, invoke_agent_spans: list, expected_count: int = 1):
@@ -44,4 +54,6 @@ class LangChainTest(GenAITestBase):
             attrs = self._get_attributes_dict(span.attributes)
             self.assertIn(GEN_AI_REQUEST_TEMPERATURE, attrs)
             self.assertIn(GEN_AI_RESPONSE_MODEL, attrs)
-            self.assertIn(GEN_AI_RESPONSE_ID, attrs)
+            # The OpenAI mock returns a response ID; the Bedrock Converse response does not expose one.
+            if self._get_gen_ai_provider(attrs) == GenAiProviderNameValues.OPENAI.value:
+                self.assertIn(GEN_AI_RESPONSE_ID, attrs)

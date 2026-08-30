@@ -12,11 +12,18 @@ class OpenAIAgentsTest(GenAITestBase):
         return "aws-application-signals-tests-openai_agents-app"
 
     def test_openai_agents_single_agent(self):
-        self.do_test_requests("openai_agents/agent", "GET", 200, 0, 0)
+        self._do_test_for_each_llm(
+            "openai_agents/agent",
+            expected_tool_count=4,
+            expected_s3_call_count=1,
+        )
 
     def test_openai_agents_multi_agent(self):
-        self.do_test_requests(
-            "openai_agents/multiagent", "GET", 200, 0, 0, expected_agent_count=2, expected_tool_count=2
+        self._do_test_for_each_llm(
+            "openai_agents/multiagent",
+            expected_agent_count=2,
+            expected_tool_count=6,
+            expected_s3_call_count=2,
         )
 
     @override
