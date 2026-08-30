@@ -50,6 +50,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_REQUEST_TOP_K,
     GEN_AI_REQUEST_TOP_P,
     GEN_AI_RESPONSE_FINISH_REASONS,
+    GEN_AI_RESPONSE_ID,
     GEN_AI_RESPONSE_MODEL,
     GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
@@ -58,8 +59,11 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
+    GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
+    GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
+    GEN_AI_USAGE_REASONING_OUTPUT_TOKENS,
     GenAiProviderNameValues,
 )
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
@@ -114,9 +118,7 @@ class TestCrewAIInstrumentor(TestCase):
             aws_access_key_id="fake-key",
             aws_secret_access_key="fake-key",
         )
-        llm.stop = ["STOP"]
-        if hasattr(llm, "stop_sequences"):
-            llm.stop_sequences = ["STOP"]
+        llm.stop = "STOP"
 
         def invoke_llm(client):
             # CrewAI has no public seam for replacing the provider client with the mock transport.
@@ -227,6 +229,75 @@ class TestCrewAIInstrumentor(TestCase):
         self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
         self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ("STOP",))
         self.assertIs(chat_span.attributes[GEN_AI_REQUEST_STREAM], False)
+
+    def test_llm_call_uses_effective_request_attributes_from_started_event(self):
+        if "temperature" not in LLMCallStartedEvent.model_fields:
+            self.skipTest("crewai <1.11.0 does not report effective request attributes on LLMCallStartedEvent")
+
+        llm = LLM(
+            model="openai/gpt-4",
+            is_litellm=True,
+            temperature=0.7,
+            top_p=0.9,
+            max_tokens=200,
+            frequency_penalty=0.5,
+            presence_penalty=0.3,
+            seed=42,
+            stream=True,
+            n=1,
+            stop=["SOURCE_STOP"],
+        )
+        start_event = LLMCallStartedEvent(
+            call_id="c1",
+            messages=[{"role": "user", "content": "Hello"}],
+            temperature=0.0,
+            top_p=0.0,
+            max_tokens=100,
+            frequency_penalty=0.0,
+            presence_penalty=0.0,
+            seed=0,
+            stream=False,
+            n=2,
+            stop_sequences=["EVENT_STOP"],
+        )
+        crewai_event_bus.emit(llm, start_event)
+        crewai_event_bus.emit(
+            llm,
+            LLMCallCompletedEvent(
+                call_id="c1",
+                response="Hello",
+                call_type=LLMCallType.LLM_CALL,
+                started_event_id=start_event.event_id,
+                finish_reason="length",
+                response_id="resp_123",
+                usage={
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "cached_prompt_tokens": 3,
+                    "cache_creation_tokens": 2,
+                    "reasoning_tokens": 4,
+                },
+            ),
+        )
+
+        chat_span = self._find_span("chat gpt-4")
+        self.assertIsNotNone(chat_span)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TEMPERATURE], 0.0)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TOP_P], 0.0)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_FREQUENCY_PENALTY], 0.0)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_PRESENCE_PENALTY], 0.0)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_SEED], 0)
+        self.assertIs(chat_span.attributes[GEN_AI_REQUEST_STREAM], False)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_CHOICE_COUNT], 2)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ("EVENT_STOP",))
+        self.assertEqual(chat_span.attributes[GEN_AI_RESPONSE_FINISH_REASONS], ("length",))
+        self.assertEqual(chat_span.attributes[GEN_AI_RESPONSE_ID], "resp_123")
+        self.assertEqual(chat_span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 10)
+        self.assertEqual(chat_span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 5)
+        self.assertEqual(chat_span.attributes[GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS], 3)
+        self.assertEqual(chat_span.attributes[GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS], 2)
+        self.assertEqual(chat_span.attributes[GEN_AI_USAGE_REASONING_OUTPUT_TOKENS], 4)
 
     def test_azure_crew_kickoff(self):
         self._run_crew_kickoff_test("azure/gpt-4", GenAiProviderNameValues.AZURE_AI_OPENAI.value, "gpt-4")

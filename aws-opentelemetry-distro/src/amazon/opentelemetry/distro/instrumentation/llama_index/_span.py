@@ -88,8 +88,11 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (  # 
     GEN_AI_TOOL_DEFINITIONS,
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
+    GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
+    GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
+    GEN_AI_USAGE_REASONING_OUTPUT_TOKENS,
     GenAiOperationNameValues,
 )
 from opentelemetry.trace import Span, Status, StatusCode, set_span_in_context
@@ -498,6 +501,33 @@ class _Span(BaseSpan):
         if (stream := additional_kwargs.get("stream")) is not None:
             self[GEN_AI_REQUEST_STREAM] = stream
 
+        additional_request_attributes = (
+            (GEN_AI_REQUEST_TOP_P, ("top_p",)),
+            (GEN_AI_REQUEST_TOP_K, ("top_k",)),
+            (GEN_AI_REQUEST_FREQUENCY_PENALTY, ("frequency_penalty",)),
+            (GEN_AI_REQUEST_PRESENCE_PENALTY, ("presence_penalty",)),
+            (GEN_AI_REQUEST_STOP_SEQUENCES, ("stop_sequences", "stop")),
+            (GEN_AI_REQUEST_SEED, ("seed", "random_seed")),
+            (GEN_AI_REQUEST_CHOICE_COUNT, ("choice_count", "n")),
+            (GEN_AI_REQUEST_STREAM, ("stream", "streaming")),
+        )
+        for attribute, names in additional_request_attributes:
+            value = next(
+                (
+                    value
+                    for value in (
+                        *(getattr(instance, name, None) for name in names),
+                        *(additional_kwargs.get(name) for name in names),
+                    )
+                    if value is not None and not callable(value)
+                ),
+                None,
+            )
+            if value is not None:
+                if attribute == GEN_AI_REQUEST_STOP_SEQUENCES and isinstance(value, str):
+                    value = [value]
+                self[attribute] = value
+
     @process_instance.register
     def _(self, instance: BaseEmbedding) -> None:
         if name := instance.model_name:
@@ -810,5 +840,83 @@ def _get_token_counts_impl(
     if (candidates_token_count := get_value(usage, "candidates_token_count")) is not None:
         try:
             yield GEN_AI_USAGE_OUTPUT_TOKENS, int(candidates_token_count)
+        except BaseException:
+            pass
+
+    input_token_details = next(
+        (
+            value
+            for value in (
+                get_value(usage, "input_token_details"),
+                get_value(usage, "input_tokens_details"),
+                get_value(usage, "prompt_tokens_details"),
+            )
+            if value is not None
+        ),
+        None,
+    )
+    output_token_details = next(
+        (
+            value
+            for value in (
+                get_value(usage, "output_token_details"),
+                get_value(usage, "output_tokens_details"),
+                get_value(usage, "completion_tokens_details"),
+            )
+            if value is not None
+        ),
+        None,
+    )
+    cache_read_input_tokens = next(
+        (
+            value
+            for value in (
+                get_value(usage, "cached_prompt_tokens"),
+                get_value(usage, "cache_read_input_tokens"),
+                _safe_get(input_token_details, "cache_read"),
+                _safe_get(input_token_details, "cached_tokens"),
+            )
+            if value is not None
+        ),
+        None,
+    )
+    if cache_read_input_tokens is not None:
+        try:
+            yield GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS, int(cache_read_input_tokens)
+        except BaseException:
+            pass
+    cache_creation_input_tokens = next(
+        (
+            value
+            for value in (
+                get_value(usage, "cache_creation_tokens"),
+                get_value(usage, "cache_creation_input_tokens"),
+                _safe_get(input_token_details, "cache_creation"),
+                _safe_get(input_token_details, "cache_write_tokens"),
+            )
+            if value is not None
+        ),
+        None,
+    )
+    if cache_creation_input_tokens is not None:
+        try:
+            yield GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, int(cache_creation_input_tokens)
+        except BaseException:
+            pass
+    reasoning_output_tokens = next(
+        (
+            value
+            for value in (
+                get_value(usage, "reasoning_tokens"),
+                _safe_get(output_token_details, "reasoning"),
+                _safe_get(output_token_details, "reasoning_tokens"),
+            )
+            if value is not None
+        ),
+        None,
+    )
+    if reasoning_output_tokens is not None:
+        try:
+            yield GEN_AI_USAGE_REASONING_OUTPUT_TOKENS, int(reasoning_output_tokens)
         except BaseException:
             pass

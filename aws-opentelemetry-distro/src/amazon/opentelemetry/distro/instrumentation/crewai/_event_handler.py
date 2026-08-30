@@ -37,6 +37,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_REQUEST_TOP_K,
     GEN_AI_REQUEST_TOP_P,
     GEN_AI_RESPONSE_FINISH_REASONS,
+    GEN_AI_RESPONSE_ID,
     GEN_AI_RESPONSE_MODEL,
     GEN_AI_SYSTEM_INSTRUCTIONS,
     GEN_AI_TOOL_CALL_ARGUMENTS,
@@ -45,8 +46,11 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
+    GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
+    GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
+    GEN_AI_USAGE_REASONING_OUTPUT_TOKENS,
     GenAiOperationNameValues,
 )
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
@@ -68,7 +72,7 @@ if TYPE_CHECKING:
     )
     from crewai.events.types.llm_events import LLMCallCompletedEvent, LLMCallFailedEvent, LLMCallStartedEvent
     from crewai.events.types.tool_usage_events import ToolUsageFinishedEvent, ToolUsageStartedEvent
-    from crewai.llm import LLM
+    from crewai.llms.base_llm import BaseLLM
     from crewai.tools.tool_usage import ToolUsage
     from crewai.types.usage_metrics import UsageMetrics
 
@@ -323,7 +327,7 @@ class OpenTelemetryEventHandler:
             attrs[GEN_AI_TOOL_CALL_RESULT] = to_tool_attribute_value(output)
         self._end_span(event.started_event_id, attrs)
 
-    def _on_llm_start(self, source: "LLM", event: "LLMCallStartedEvent") -> None:
+    def _on_llm_start(self, source: "BaseLLM", event: "LLMCallStartedEvent") -> None:
         attributes: Dict[str, Any] = {
             GEN_AI_OPERATION_NAME: GenAiOperationNameValues.CHAT.value,
         }
@@ -333,7 +337,7 @@ class OpenTelemetryEventHandler:
             attributes[GEN_AI_PROVIDER_NAME] = provider
         if model_name:
             attributes[GEN_AI_REQUEST_MODEL] = model_name
-        self._set_llm_request_span_attributes(attributes, source)
+        self._set_llm_request_span_attributes(attributes, source, event)
 
         span_name = (
             f"{GenAiOperationNameValues.CHAT.value} {model_name}" if model_name else GenAiOperationNameValues.CHAT.value
@@ -358,13 +362,17 @@ class OpenTelemetryEventHandler:
 
         self._start_span(span_name, event.event_id, attributes, event.parent_event_id, kind=SpanKind.CLIENT)
 
-    def _on_llm_completed(self, source: "LLM", event: "LLMCallCompletedEvent") -> None:
+    def _on_llm_completed(self, source: "BaseLLM", event: "LLMCallCompletedEvent") -> None:
         attrs: Dict[str, Any] = {}
 
         from crewai.events.types.llm_events import LLMCallType  # pylint: disable=import-outside-toplevel
 
-        finish_reason = "tool_call" if event.call_type == LLMCallType.TOOL_CALL else "stop"
+        finish_reason = getattr(event, "finish_reason", None) or (
+            "tool_call" if event.call_type == LLMCallType.TOOL_CALL else "stop"
+        )
         attrs[GEN_AI_RESPONSE_FINISH_REASONS] = [finish_reason]
+        if response_id := getattr(event, "response_id", None):
+            attrs[GEN_AI_RESPONSE_ID] = response_id
 
         response = event.response
         if response:
@@ -392,6 +400,9 @@ class OpenTelemetryEventHandler:
         # cumulative summary, so diff it against the snapshot taken when the call started.
         prev_prompt_tokens, prev_completion_tokens = self._event_id_to_token_usage.pop(event.started_event_id) or (0, 0)
         event_usage = getattr(event, "usage", None)
+        cache_read_input_tokens = 0
+        cache_creation_input_tokens = 0
+        reasoning_output_tokens = 0
         if isinstance(event_usage, dict):
             input_tokens = (
                 event_usage.get("prompt_tokens")
@@ -405,6 +416,9 @@ class OpenTelemetryEventHandler:
                 or event_usage.get("output_tokens")
                 or 0
             )
+            cache_read_input_tokens = event_usage.get("cached_prompt_tokens") or 0
+            cache_creation_input_tokens = event_usage.get("cache_creation_tokens") or 0
+            reasoning_output_tokens = event_usage.get("reasoning_tokens") or 0
         else:
             usage: "UsageMetrics" = source.get_token_usage_summary()
             input_tokens = usage.prompt_tokens - prev_prompt_tokens
@@ -413,6 +427,12 @@ class OpenTelemetryEventHandler:
             attrs[GEN_AI_USAGE_INPUT_TOKENS] = input_tokens
         if output_tokens > 0:
             attrs[GEN_AI_USAGE_OUTPUT_TOKENS] = output_tokens
+        if cache_read_input_tokens > 0:
+            attrs[GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS] = cache_read_input_tokens
+        if cache_creation_input_tokens > 0:
+            attrs[GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS] = cache_creation_input_tokens
+        if reasoning_output_tokens > 0:
+            attrs[GEN_AI_USAGE_REASONING_OUTPUT_TOKENS] = reasoning_output_tokens
 
         self._end_span(event.started_event_id, attrs)
 
@@ -514,7 +534,11 @@ class OpenTelemetryEventHandler:
         }
 
     @staticmethod
-    def _set_llm_request_span_attributes(attributes: Dict[str, Any], llm: "LLM") -> None:
+    def _set_llm_request_span_attributes(
+        attributes: Dict[str, Any],
+        llm: "BaseLLM",
+        event: Optional["LLMCallStartedEvent"] = None,
+    ) -> None:
         additional_params = getattr(llm, "additional_params", None) or {}
         additional_model_request_fields = getattr(llm, "additional_model_request_fields", None) or {}
         request_attributes = (
@@ -533,6 +557,7 @@ class OpenTelemetryEventHandler:
                 (
                     value
                     for value in (
+                        *(getattr(event, name, None) for name in names),
                         *(getattr(llm, name, None) for name in names),
                         *(additional_params.get(name) for name in names),
                         *(additional_model_request_fields.get(name) for name in names),
@@ -545,15 +570,17 @@ class OpenTelemetryEventHandler:
                 attributes[attribute] = value
 
         stop = (
-            getattr(llm, "stop", None)
+            getattr(event, "stop_sequences", None)
+            or getattr(event, "stop", None)
             or getattr(llm, "stop_sequences", None)
-            or additional_params.get("stop")
+            or getattr(llm, "stop", None)
             or additional_params.get("stop_sequences")
-            or additional_model_request_fields.get("stop")
+            or additional_params.get("stop")
             or additional_model_request_fields.get("stop_sequences")
+            or additional_model_request_fields.get("stop")
         )
         if stop:
-            attributes[GEN_AI_REQUEST_STOP_SEQUENCES] = stop
+            attributes[GEN_AI_REQUEST_STOP_SEQUENCES] = [stop] if isinstance(stop, str) else stop
 
     @staticmethod
     def _to_tool_call_parts(tool_calls: list) -> list:

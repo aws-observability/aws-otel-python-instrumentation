@@ -48,8 +48,11 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
+    GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
+    GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
+    GEN_AI_USAGE_REASONING_OUTPUT_TOKENS,
     GenAiOperationNameValues,
 )
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
@@ -132,7 +135,9 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
 
         if system_instructions:
             self._set_span_attribute(span, GEN_AI_SYSTEM_INSTRUCTIONS, serialize_to_json_string(system_instructions))
-        self._set_llm_request_span_attributes(span, kwargs, serialized=serialized_kwargs, model_name=model_name)
+        self._set_llm_request_span_attributes(
+            span, kwargs, serialized=serialized_kwargs, model_name=model_name, metadata=metadata
+        )
 
     @skip_instrumentation_if_suppressed
     def on_llm_start(
@@ -166,7 +171,9 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             GEN_AI_INPUT_MESSAGES,
             serialize_to_json_string([{"role": "user", "parts": [{"type": "text", "content": p}]} for p in prompts]),
         )
-        self._set_llm_request_span_attributes(span, kwargs, serialized=serialized_kwargs, model_name=model_name)
+        self._set_llm_request_span_attributes(
+            span, kwargs, serialized=serialized_kwargs, model_name=model_name, metadata=metadata
+        )
 
     @skip_instrumentation_if_suppressed
     def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: Any) -> None:
@@ -178,7 +185,13 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         llm_output: dict | None = response.llm_output
         model: str | None = (llm_output.get("model_name") or llm_output.get("model_id")) if llm_output else None
         response_id: str | None = llm_output.get("id") if llm_output else None
-        input_tokens, output_tokens = self._extract_token_usage(response)
+        (
+            input_tokens,
+            output_tokens,
+            cache_read_input_tokens,
+            cache_creation_input_tokens,
+            reasoning_output_tokens,
+        ) = self._extract_token_usage(response)
 
         if response.generations:
             output_messages = self._format_lc_llm_output(response.generations)
@@ -195,11 +208,16 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self._set_span_attribute(span, GEN_AI_RESPONSE_ID, response_id)
         self._set_span_attribute(span, GEN_AI_USAGE_INPUT_TOKENS, input_tokens)
         self._set_span_attribute(span, GEN_AI_USAGE_OUTPUT_TOKENS, output_tokens)
+        self._set_span_attribute(span, GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS, cache_read_input_tokens)
+        self._set_span_attribute(span, GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, cache_creation_input_tokens)
+        self._set_span_attribute(span, GEN_AI_USAGE_REASONING_OUTPUT_TOKENS, reasoning_output_tokens)
 
         self._end_span(run_id)
 
     @staticmethod
-    def _extract_token_usage(response: LLMResult) -> tuple[int | None, int | None]:
+    def _extract_token_usage(
+        response: LLMResult,
+    ) -> tuple[int | None, int | None, int | None, int | None, int | None]:
         llm_output = response.llm_output
         usage: dict = (llm_output.get("token_usage") or llm_output.get("usage") or {}) if llm_output else {}
 
@@ -225,7 +243,53 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             or usage.get("output_tokens")
             or usage_metadata.get("output_tokens")
         )
-        return input_tokens, output_tokens
+        input_token_details = usage_metadata.get("input_token_details") or {}
+        output_token_details = usage_metadata.get("output_token_details") or {}
+        cache_read_input_tokens = next(
+            (
+                value
+                for value in (
+                    usage.get("cache_read_input_tokens"),
+                    usage.get("cached_prompt_tokens"),
+                    input_token_details.get("cache_read"),
+                    input_token_details.get("cached_tokens"),
+                )
+                if value is not None
+            ),
+            None,
+        )
+        cache_creation_input_tokens = next(
+            (
+                value
+                for value in (
+                    usage.get("cache_creation_input_tokens"),
+                    usage.get("cache_creation_tokens"),
+                    input_token_details.get("cache_creation"),
+                    input_token_details.get("cache_write_tokens"),
+                )
+                if value is not None
+            ),
+            None,
+        )
+        reasoning_output_tokens = next(
+            (
+                value
+                for value in (
+                    usage.get("reasoning_tokens"),
+                    output_token_details.get("reasoning"),
+                    output_token_details.get("reasoning_tokens"),
+                )
+                if value is not None
+            ),
+            None,
+        )
+        return (
+            input_tokens,
+            output_tokens,
+            cache_read_input_tokens,
+            cache_creation_input_tokens,
+            reasoning_output_tokens,
+        )
 
     def on_llm_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
         self._handle_error(error, run_id, **kwargs)
@@ -475,8 +539,13 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         OpenTelemetryCallbackHandler._set_span_attribute(span, LANGGRAPH_NODE_SPAN_ATTR, metadata.get("langgraph_node"))
 
     def _set_llm_request_span_attributes(
-        self, span: Span, kwargs: dict, serialized: Optional[dict] = None, model_name: Optional[str] = None
-    ):
+        self,
+        span: Span,
+        kwargs: dict,
+        serialized: Optional[dict] = None,
+        model_name: Optional[str] = None,
+        metadata: Optional[dict] = None,
+    ) -> None:
         config = serialized or {}
         model = self._extract_llm_model_id(kwargs, config) or model_name
         if model:
@@ -551,6 +620,49 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             None,
         )
         self._set_span_attribute(span, GEN_AI_REQUEST_STREAM, stream)
+
+        params_model_kwargs = params.get("model_kwargs") or {}
+        config_model_kwargs = config.get("model_kwargs") or {}
+        nested_additional_model_request_fields = next(
+            (
+                source.get("additional_model_request_fields")
+                for source in (params_model_kwargs, config_model_kwargs)
+                if source.get("additional_model_request_fields") is not None
+            ),
+            {},
+        )
+        request_sources = (
+            params,
+            params_model_kwargs,
+            metadata or {},
+            config,
+            config_model_kwargs,
+            additional_model_request_fields,
+            nested_additional_model_request_fields or {},
+        )
+        request_attributes = (
+            (
+                GEN_AI_REQUEST_MAX_TOKENS,
+                ("max_tokens", "max_new_tokens", "max_output_tokens", "max_completion_tokens", "ls_max_tokens"),
+            ),
+            (GEN_AI_REQUEST_TEMPERATURE, ("temperature", "ls_temperature")),
+            (GEN_AI_REQUEST_TOP_P, ("top_p",)),
+            (GEN_AI_REQUEST_TOP_K, ("top_k",)),
+            (GEN_AI_REQUEST_FREQUENCY_PENALTY, ("frequency_penalty",)),
+            (GEN_AI_REQUEST_PRESENCE_PENALTY, ("presence_penalty",)),
+            (GEN_AI_REQUEST_STOP_SEQUENCES, ("stop", "stop_sequences", "ls_stop")),
+            (GEN_AI_REQUEST_SEED, ("seed", "random_seed")),
+            (GEN_AI_REQUEST_CHOICE_COUNT, ("choice_count", "n")),
+            (GEN_AI_REQUEST_STREAM, ("stream", "streaming")),
+        )
+        for attribute, names in request_attributes:
+            value = next(
+                (source.get(name) for source in request_sources for name in names if source.get(name) is not None),
+                None,
+            )
+            if attribute == GEN_AI_REQUEST_STOP_SEQUENCES and isinstance(value, str):
+                value = [value]
+            self._set_span_attribute(span, attribute, value)
 
     def _should_skip_chain(
         self, serialized: dict[str, Any], name: Optional[str], metadata: Optional[dict] = None

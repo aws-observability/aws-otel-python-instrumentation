@@ -65,8 +65,11 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
+    GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
+    GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
+    GEN_AI_USAGE_REASONING_OUTPUT_TOKENS,
     GenAiOperationNameValues,
     GenAiProviderNameValues,
 )
@@ -423,10 +426,35 @@ class TestLangChainInstrumentor(TestCase):
                 {"google_api_key": "fake", "model": "gemini-pro"},
                 GenAiProviderNameValues.GCP_GEN_AI.value,
             ),
-            (ChatMistralAI, {"api_key": "fake", "model": "test"}, GenAiProviderNameValues.MISTRAL_AI.value),
-            (ChatGroq, {"api_key": "fake", "model": "test"}, GenAiProviderNameValues.GROQ.value),
-            (ChatCohere, {"cohere_api_key": "fake", "model": "test"}, GenAiProviderNameValues.COHERE.value),
-            (ChatDeepSeek, {"api_key": "fake", "model": "test"}, GenAiProviderNameValues.DEEPSEEK.value),
+            (
+                ChatMistralAI,
+                {"api_key": "fake", "model": "test", "random_seed": 11},
+                GenAiProviderNameValues.MISTRAL_AI.value,
+            ),
+            (
+                ChatGroq,
+                {
+                    "api_key": "fake",
+                    "model": "test",
+                    "model_kwargs": {
+                        "seed": 7,
+                        "top_p": 0.0,
+                        "frequency_penalty": 0.0,
+                        "presence_penalty": 0.0,
+                    },
+                },
+                GenAiProviderNameValues.GROQ.value,
+            ),
+            (
+                ChatCohere,
+                {"cohere_api_key": "fake", "model": "test", "temperature": 0.0},
+                GenAiProviderNameValues.COHERE.value,
+            ),
+            (
+                ChatDeepSeek,
+                {"api_key": "fake", "model": "test", "temperature": 0.0},
+                GenAiProviderNameValues.DEEPSEEK.value,
+            ),
             (ChatXAI, {"api_key": "fake", "model": "test"}, GenAiProviderNameValues.X_AI.value),
         ]
 
@@ -451,7 +479,7 @@ class TestLangChainInstrumentor(TestCase):
                             seed=42,
                             streaming=False,
                             n=2,
-                            stop=["STOP"],
+                            stop="STOP",
                         ).invoke(messages)
 
                     call_mock_llm("openai", invoke_llm_callback=invoke_openai)
@@ -519,6 +547,17 @@ class TestLangChainInstrumentor(TestCase):
                     llm = model_cls(**init_kwargs)
                     with patch.object(type(llm), "_generate", return_value=fake_result):
                         llm.invoke("test")
+                    if model_cls is ChatMistralAI:
+                        expected_request_attributes = {GEN_AI_REQUEST_SEED: 11}
+                    elif model_cls is ChatGroq:
+                        expected_request_attributes = {
+                            GEN_AI_REQUEST_TOP_P: 0.0,
+                            GEN_AI_REQUEST_FREQUENCY_PENALTY: 0.0,
+                            GEN_AI_REQUEST_PRESENCE_PENALTY: 0.0,
+                            GEN_AI_REQUEST_SEED: 7,
+                        }
+                    elif model_cls in (ChatCohere, ChatDeepSeek):
+                        expected_request_attributes = {GEN_AI_REQUEST_TEMPERATURE: 0.0}
 
                 spans = self.span_exporter.get_finished_spans()
                 chat_spans = [s for s in spans if "chat" in s.name or "text_completion" in s.name]
@@ -952,7 +991,15 @@ class TestLangChainInstrumentor(TestCase):
             (
                 ChatBedrockConverse,
                 {"model": "test", "region_name": "us-east-1"},
-                result_with_usage_metadata({"input_tokens": 55, "output_tokens": 66, "total_tokens": 121}),
+                result_with_usage_metadata(
+                    {
+                        "input_tokens": 55,
+                        "output_tokens": 66,
+                        "total_tokens": 121,
+                        "input_token_details": {"cache_read": 7, "cache_creation": 8},
+                        "output_token_details": {"reasoning": 9},
+                    }
+                ),
                 55,
                 66,
             ),
@@ -991,6 +1038,10 @@ class TestLangChainInstrumentor(TestCase):
                 attrs = chat_spans[0].attributes
                 self.assertEqual(attrs[GEN_AI_USAGE_INPUT_TOKENS], expected_input)
                 self.assertEqual(attrs[GEN_AI_USAGE_OUTPUT_TOKENS], expected_output)
+                if model_cls is ChatBedrockConverse:
+                    self.assertEqual(attrs[GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS], 7)
+                    self.assertEqual(attrs[GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS], 8)
+                    self.assertEqual(attrs[GEN_AI_USAGE_REASONING_OUTPUT_TOKENS], 9)
 
 
 if __name__ == "__main__":

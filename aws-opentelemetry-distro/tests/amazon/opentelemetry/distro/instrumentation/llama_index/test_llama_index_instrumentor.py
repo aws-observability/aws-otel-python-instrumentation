@@ -72,8 +72,11 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_DEFINITIONS,
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
+    GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
+    GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
+    GEN_AI_USAGE_REASONING_OUTPUT_TOKENS,
     GenAiOperationNameValues,
     GenAiProviderNameValues,
 )
@@ -316,7 +319,10 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
                 "top_k": 40,
                 "frequency_penalty": 0.5,
                 "presence_penalty": 0.3,
-                "stop": ["STOP"],
+                "stop": "STOP",
+                "seed": 0,
+                "n": 2,
+                "stream": False,
             },
         )
         otel_span = self.tracer.start_span("test")
@@ -330,6 +336,9 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self.assertEqual(span._attributes[GEN_AI_REQUEST_FREQUENCY_PENALTY], 0.5)
         self.assertEqual(span._attributes[GEN_AI_REQUEST_PRESENCE_PENALTY], 0.3)
         self.assertEqual(span._attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ["STOP"])
+        self.assertEqual(span._attributes[GEN_AI_REQUEST_SEED], 0)
+        self.assertEqual(span._attributes[GEN_AI_REQUEST_CHOICE_COUNT], 2)
+        self.assertIs(span._attributes[GEN_AI_REQUEST_STREAM], False)
         otel_span.end()
 
     def test_process_instance_embedding(self):
@@ -683,12 +692,20 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         """Test token extraction from additional_kwargs."""
         response = CompletionResponse(text="Test")
         response.raw = None
-        response.additional_kwargs = {"prompt_tokens": 5, "completion_tokens": 3}
+        response.additional_kwargs = {
+            "prompt_tokens": 5,
+            "completion_tokens": 3,
+            "input_token_details": {"cache_read": 2, "cache_creation": 1},
+            "output_token_details": {"reasoning": 4},
+        }
         otel_span = self.tracer.start_span("test")
         span = self._Span(otel_span=otel_span)
         span._extract_token_counts(response)
         self.assertEqual(span._attributes[GEN_AI_USAGE_INPUT_TOKENS], 5)
         self.assertEqual(span._attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 3)
+        self.assertEqual(span._attributes[GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS], 2)
+        self.assertEqual(span._attributes[GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS], 1)
+        self.assertEqual(span._attributes[GEN_AI_USAGE_REASONING_OUTPUT_TOKENS], 4)
         otel_span.end()
 
     @unittest.skipUnless(_has_module("llama_index.llms.openai"), "llama-index-llms-openai not installed")
