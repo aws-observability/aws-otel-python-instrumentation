@@ -228,14 +228,14 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         bedrock_model = "anthropic.claude-fable-5"
         bedrock_temperature = 0.7
         httpx_instrumentor = HTTPXClientInstrumentor()
-        httpx_instrumentor.instrument(tracer_provider=self.tracer_provider)
-        self.addCleanup(httpx_instrumentor.uninstrument)
         httpx2_instrumentor = HTTPX2ClientInstrumentor()
-        httpx2_instrumentor.instrument(tracer_provider=self.tracer_provider)
-        self.addCleanup(httpx2_instrumentor.uninstrument)
         botocore_instrumentor = BotocoreInstrumentor()
-        botocore_instrumentor.instrument(tracer_provider=self.tracer_provider)
+        self.addCleanup(httpx_instrumentor.uninstrument)
+        self.addCleanup(httpx2_instrumentor.uninstrument)
         self.addCleanup(botocore_instrumentor.uninstrument)
+        httpx_instrumentor.instrument(tracer_provider=self.tracer_provider)
+        httpx2_instrumentor.instrument(tracer_provider=self.tracer_provider)
+        botocore_instrumentor.instrument(tracer_provider=self.tracer_provider)
         with self.subTest(client="openai", is_instrumented=False):
             self.exporter.clear()
             with tracing.trace("Test workflow"):
