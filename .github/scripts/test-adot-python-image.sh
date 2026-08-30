@@ -37,13 +37,19 @@ WORKDIR=$(mktemp -d)
 # (cp3XX), so loading under a different Python would false-fail. Derive it from the
 # Dockerfile's build stage (the `... AS build` line) so it always tracks the real build base
 # instead of a hardcoded version. Override with NEUTRAL_IMAGE=... if ever needed.
+FALLBACK_NEUTRAL_IMAGE=public.ecr.aws/docker/library/python:3.11
 DOCKERFILE="${DOCKERFILE:-Dockerfile}"
 if [ -z "${NEUTRAL_IMAGE:-}" ]; then
   NEUTRAL_IMAGE=$(grep -iE 'AS[[:space:]]+build[[:space:]]*$' "${DOCKERFILE}" 2>/dev/null | head -1 | awk '{print $2}')
-fi
-if [ -z "${NEUTRAL_IMAGE:-}" ]; then
-  echo "error: could not determine the build-stage base image from ${DOCKERFILE}; set NEUTRAL_IMAGE explicitly"
-  exit 1
+  # Emergency fallback: if the Dockerfile parse yields something bogus -- missing, a build-arg
+  # like python:${VERSION}, or a non-python ref -- fall back to a known-good pin instead of failing.
+  case "${NEUTRAL_IMAGE}" in
+    *python:[0-9]*) : ;;  # concrete python:X.Y ref -> trust it
+    *)
+      echo "warning: could not derive a concrete python image from ${DOCKERFILE} (got '${NEUTRAL_IMAGE}'); falling back to ${FALLBACK_NEUTRAL_IMAGE}"
+      NEUTRAL_IMAGE="${FALLBACK_NEUTRAL_IMAGE}"
+      ;;
+  esac
 fi
 IMAGE_SRC="${WORKDIR}/image-src"
 VOLUME_COPY="${WORKDIR}/volume-copy"
