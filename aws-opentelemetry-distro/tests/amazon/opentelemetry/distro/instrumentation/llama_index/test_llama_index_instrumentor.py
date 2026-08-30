@@ -36,11 +36,12 @@ from llama_index.core.tools.types import ToolOutput
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     GEN_AI_WORKFLOW_NAME,
     OPERATION_INVOKE_WORKFLOW,
+    attach_otel_context,
 )
 from amazon.opentelemetry.distro.instrumentation.llama_index import LlamaIndexInstrumentor
 from opentelemetry import context as context_api
 from opentelemetry import trace
-from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
+from opentelemetry.context import _SUPPRESS_HTTP_INSTRUMENTATION_KEY, _SUPPRESS_INSTRUMENTATION_KEY
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -534,6 +535,20 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         span.end()
         self.assertIsNone(span._context_token)
         self.assertFalse(span.active)
+
+    def test_span_end_detaches_http_suppression_when_not_recording(self):
+        """Test that non-recording spans still restore HTTP instrumentation."""
+        from opentelemetry.trace import INVALID_SPAN
+
+        previous_context = context_api.get_current()
+        token = attach_otel_context(context_api.Context(), suppress_http=True)
+        span = self._Span(otel_span=INVALID_SPAN, context_token=token)
+        self.assertTrue(context_api.get_value(_SUPPRESS_HTTP_INSTRUMENTATION_KEY))
+
+        span.end()
+
+        self.assertIs(context_api.get_current(), previous_context)
+        self.assertIsNone(context_api.get_value(_SUPPRESS_HTTP_INSTRUMENTATION_KEY))
 
     def test_span_end_idempotent(self):
         """Test that calling end() twice is safe."""

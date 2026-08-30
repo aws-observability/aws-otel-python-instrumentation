@@ -27,6 +27,8 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     OPERATION_INVOKE_WORKFLOW,
 )
 from amazon.opentelemetry.distro.instrumentation.crewai import CrewAIInstrumentor
+from opentelemetry import context
+from opentelemetry.context import _SUPPRESS_HTTP_INSTRUMENTATION_KEY
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -59,6 +61,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GenAiProviderNameValues,
 )
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
+from opentelemetry.trace import SpanKind
 
 
 # https://pypi.org/project/crewai/
@@ -82,6 +85,26 @@ class TestCrewAIInstrumentor(TestCase):
     def _set_env(self, key: str, value: str):
         self._env_backup[key] = os.environ.get(key)
         os.environ[key] = value
+
+    def test_crew_cleanup_detaches_unfinished_http_suppression(self):
+        handler = self.instrumentor._handler
+        previous_context = context.get_current()
+        handler._start_span("root", "root")
+        handler._start_span(
+            "chat model",
+            "child",
+            parent_event_id="root",
+            kind=SpanKind.CLIENT,
+            suppress_http=True,
+        )
+        self.assertTrue(context.get_value(_SUPPRESS_HTTP_INSTRUMENTATION_KEY))
+
+        handler._detach_unfinished_span_contexts("root")
+        self.assertIsNone(context.get_value(_SUPPRESS_HTTP_INSTRUMENTATION_KEY))
+        handler._end_span("root")
+
+        self.assertIs(context.get_current(), previous_context)
+        self.assertEqual(len(handler._event_id_to_span), 0)
 
     def _restore_env(self):
         for key, value in self._env_backup.items():

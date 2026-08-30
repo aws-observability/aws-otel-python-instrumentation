@@ -5,7 +5,6 @@ import json
 import logging
 import re
 from collections.abc import Mapping, Sequence
-from contextlib import AbstractContextManager
 from contextvars import Token
 from dataclasses import dataclass
 from typing import Any, Optional, Union
@@ -27,13 +26,12 @@ from typing_extensions import override
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     PROVIDER_MAP,
     DictWithLock,
+    attach_otel_context,
     content_to_parts,
     serialize_to_json_string,
     to_tool_attribute_value,
     try_detach,
 )
-from opentelemetry import context
-from opentelemetry.instrumentation.utils import suppress_http_instrumentation
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_NAME,
     GEN_AI_INPUT_MESSAGES,
@@ -89,7 +87,6 @@ _logger = logging.getLogger(__name__)
 class _SpanEntry:
     span: Span
     token: Optional[Token] = None
-    http_suppression_context: Optional[AbstractContextManager] = None
     agent_content: Optional["_AgentContent"] = None
     error: Any = None
 
@@ -126,7 +123,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             kind=SpanKind.INTERNAL,
             attributes=attributes,
         )
-        token = context.attach(set_span_in_context(span))
+        token = attach_otel_context(set_span_in_context(span))
         self._openai_trace_id_to_otel_workflow_entry.put(trace.trace_id, _SpanEntry(span=span, token=token))
 
     @override
@@ -175,17 +172,15 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             kind=kind,
             attributes=attributes,
         )
-        span_token = context.attach(set_span_in_context(otel_span))
-        http_suppression_context = None
-        if is_inference_span:
-            http_suppression_context = suppress_http_instrumentation()
-            http_suppression_context.__enter__()
+        span_token = attach_otel_context(
+            set_span_in_context(otel_span),
+            suppress_http=is_inference_span,
+        )
         self._openai_span_id_to_otel_span_entry.put(
             span.span_id,
             _SpanEntry(
                 span=otel_span,
                 token=span_token,
-                http_suppression_context=http_suppression_context,
                 agent_content=agent_content,
             ),
         )
@@ -201,8 +196,6 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         if entry is None or entry.token is None:
             return
 
-        if entry.http_suppression_context is not None:
-            entry.http_suppression_context.__exit__(None, None, None)
         try_detach(entry.token)
         otel_span = entry.span
 
@@ -256,8 +249,6 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
     def _close_incomplete_span(entry: _SpanEntry) -> None:
         if entry.token is None:
             return
-        if entry.http_suppression_context is not None:
-            entry.http_suppression_context.__exit__(None, None, None)
         try_detach(entry.token)
         if entry.span.is_recording():
             entry.span.set_attribute(ERROR_TYPE, "_OTHER")
