@@ -5,6 +5,7 @@ import json
 import logging
 import threading
 from base64 import b64encode
+from contextlib import ExitStack
 from contextvars import Token
 from functools import wraps
 from typing import Any, Callable, Dict, Optional, Union
@@ -12,8 +13,8 @@ from typing import Any, Callable, Dict, Optional, Union
 from wrapt import wrap_function_wrapper
 
 from opentelemetry import context
-from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
-from opentelemetry.instrumentation.utils import unwrap
+from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY, Context
+from opentelemetry.instrumentation.utils import suppress_http_instrumentation, unwrap
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import GenAiProviderNameValues
 
 _logger = logging.getLogger(__name__)
@@ -222,3 +223,13 @@ def try_detach(token: Token) -> None:
         context._RUNTIME_CONTEXT.detach(token)  # pylint: disable=protected-access
     except Exception:  # pylint: disable=broad-except
         pass
+
+
+def attach_otel_context(otel_context: Context, suppress_http: bool = False) -> ExitStack:
+    """Attach an OTel context and return a stack that restores the previous context."""
+    with ExitStack() as context_stack:
+        token = context.attach(otel_context)
+        context_stack.callback(try_detach, token)
+        if suppress_http:
+            context_stack.enter_context(suppress_http_instrumentation())
+        return context_stack.pop_all()

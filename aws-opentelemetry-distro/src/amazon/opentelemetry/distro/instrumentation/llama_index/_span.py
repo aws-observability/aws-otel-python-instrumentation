@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import inspect
 import logging
-from contextlib import AbstractContextManager
+from contextlib import ExitStack
 from functools import singledispatchmethod
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, Iterator, Mapping, Optional, Tuple, Union
 
@@ -56,7 +56,6 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     content_to_parts,
     serialize_to_json_string,
     to_tool_attribute_value,
-    try_detach,
 )
 from opentelemetry import context as context_api
 from opentelemetry.semconv._incubating.attributes.error_attributes import ERROR_TYPE
@@ -226,8 +225,7 @@ class _Span(BaseSpan):
     _otel_span: Span = PrivateAttr()
     _attributes: Dict[str, AttributeValue] = PrivateAttr()
     _parent: Optional["_Span"] = PrivateAttr()
-    _context_token: Optional[object] = PrivateAttr()
-    _http_suppression_context: Optional[AbstractContextManager] = PrivateAttr()
+    _context_stack: ExitStack = PrivateAttr()
     _deferred: bool = PrivateAttr(default=False)
     _span_name: Optional[str] = PrivateAttr(default=None)
 
@@ -235,16 +233,14 @@ class _Span(BaseSpan):
         self,
         otel_span: Span,
         parent: Optional["_Span"] = None,
-        context_token: Optional[object] = None,
-        http_suppression_context: Optional[AbstractContextManager] = None,
+        context_stack: Optional[ExitStack] = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self._otel_span = otel_span
         self._parent = parent
         self._attributes = {}
-        self._context_token = context_token
-        self._http_suppression_context = http_suppression_context
+        self._context_stack = context_stack or ExitStack()
         self._deferred = False
 
     @property
@@ -286,15 +282,9 @@ class _Span(BaseSpan):
         return f"{op} {suffix}" if suffix else op
 
     def end(self, exception: Optional[BaseException] = None) -> None:
+        self._context_stack.close()
         if not self._otel_span.is_recording():
             return
-
-        if self._http_suppression_context is not None:
-            self._http_suppression_context.__exit__(None, None, None)
-            self._http_suppression_context = None
-        if self._context_token is not None:
-            try_detach(self._context_token)  # type: ignore[arg-type]
-            self._context_token = None
 
         if exception is None:
             status = Status(status_code=StatusCode.OK)

@@ -3,8 +3,7 @@
 
 import logging
 import re
-from contextlib import AbstractContextManager
-from contextvars import Token
+from contextlib import ExitStack
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
@@ -13,13 +12,13 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     OPERATION_INVOKE_WORKFLOW,
     PROVIDER_MAP,
     DictWithLock,
+    attach_otel_context,
     content_to_parts,
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
     to_tool_attribute_value,
 )
-from opentelemetry import context, trace
-from opentelemetry.instrumentation.utils import suppress_http_instrumentation
+from opentelemetry import trace
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_DESCRIPTION,
     GEN_AI_AGENT_ID,
@@ -77,8 +76,7 @@ _LOG = logging.getLogger(__name__)
 @dataclass
 class _SpanEntry:
     span: trace.Span
-    span_token: Token
-    http_suppression_context: Optional[AbstractContextManager] = None
+    context_stack: ExitStack
 
 
 class _EventBusEmitWrapper:
@@ -375,7 +373,7 @@ class OpenTelemetryEventHandler:
             attributes,
             event.parent_event_id,
             kind=SpanKind.CLIENT,
-            http_suppression_context=suppress_http_instrumentation(),
+            suppress_http=True,
         )
 
     def _on_llm_completed(self, source: "LLM", event: "LLMCallCompletedEvent") -> None:
@@ -447,7 +445,7 @@ class OpenTelemetryEventHandler:
         attributes: Optional[Dict[str, Any]] = None,
         parent_event_id: Optional[str] = None,
         kind: SpanKind = SpanKind.INTERNAL,
-        http_suppression_context: Optional[AbstractContextManager] = None,
+        suppress_http: bool = False,
     ) -> None:
         parent_ctx = None
         if parent_event_id:
@@ -456,15 +454,12 @@ class OpenTelemetryEventHandler:
                 parent_ctx = trace.set_span_in_context(parent_entry.span)
 
         span = self._tracer.start_span(name, kind=kind, attributes=attributes, context=parent_ctx)
-        span_token = context.attach(trace.set_span_in_context(span))
-        if http_suppression_context is not None:
-            http_suppression_context.__enter__()
+        context_stack = attach_otel_context(trace.set_span_in_context(span), suppress_http=suppress_http)
         self._event_id_to_span.put(
             event_id,
             _SpanEntry(
                 span=span,
-                span_token=span_token,
-                http_suppression_context=http_suppression_context,
+                context_stack=context_stack,
             ),
         )
 
@@ -487,10 +482,10 @@ class OpenTelemetryEventHandler:
                 entry.span.set_attribute(ERROR_TYPE, error)
             else:
                 entry.span.set_status(Status(StatusCode.OK))
-            entry.span.end()
-            if entry.http_suppression_context is not None:
-                entry.http_suppression_context.__exit__(None, None, None)
-            context.detach(entry.span_token)
+            try:
+                entry.span.end()
+            finally:
+                entry.context_stack.close()
 
     @staticmethod
     def _extract_provider_and_model(llm: Any) -> Tuple[Optional[str], Optional[str]]:

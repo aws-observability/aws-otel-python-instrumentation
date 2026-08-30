@@ -5,8 +5,7 @@ import json
 import logging
 import re
 from collections.abc import Mapping, Sequence
-from contextlib import AbstractContextManager
-from contextvars import Token
+from contextlib import ExitStack
 from dataclasses import dataclass
 from typing import Any, Optional, Union
 from urllib.parse import urlparse
@@ -27,13 +26,11 @@ from typing_extensions import override
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     PROVIDER_MAP,
     DictWithLock,
+    attach_otel_context,
     content_to_parts,
     serialize_to_json_string,
     to_tool_attribute_value,
-    try_detach,
 )
-from opentelemetry import context
-from opentelemetry.instrumentation.utils import suppress_http_instrumentation
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_NAME,
     GEN_AI_INPUT_MESSAGES,
@@ -88,8 +85,7 @@ _logger = logging.getLogger(__name__)
 @dataclass
 class _SpanEntry:
     span: Span
-    token: Optional[Token] = None
-    http_suppression_context: Optional[AbstractContextManager] = None
+    context_stack: Optional[ExitStack] = None
     agent_content: Optional["_AgentContent"] = None
     error: Any = None
 
@@ -126,16 +122,19 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             kind=SpanKind.INTERNAL,
             attributes=attributes,
         )
-        token = context.attach(set_span_in_context(span))
-        self._openai_trace_id_to_otel_workflow_entry.put(trace.trace_id, _SpanEntry(span=span, token=token))
+        context_stack = attach_otel_context(set_span_in_context(span))
+        self._openai_trace_id_to_otel_workflow_entry.put(
+            trace.trace_id,
+            _SpanEntry(span=span, context_stack=context_stack),
+        )
 
     @override
     def on_trace_end(self, trace: AgentsTrace) -> None:
         entry = self._openai_trace_id_to_otel_workflow_entry.pop(trace.trace_id)
         if entry is None:
             return
-        if entry.token is not None:
-            try_detach(entry.token)
+        if entry.context_stack is not None:
+            entry.context_stack.close()
         self._set_span_status(entry.span, entry.error)
         entry.span.end()
 
@@ -175,17 +174,15 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             kind=kind,
             attributes=attributes,
         )
-        span_token = context.attach(set_span_in_context(otel_span))
-        http_suppression_context = None
-        if is_inference_span:
-            http_suppression_context = suppress_http_instrumentation()
-            http_suppression_context.__enter__()
+        context_stack = attach_otel_context(
+            set_span_in_context(otel_span),
+            suppress_http=is_inference_span,
+        )
         self._openai_span_id_to_otel_span_entry.put(
             span.span_id,
             _SpanEntry(
                 span=otel_span,
-                token=span_token,
-                http_suppression_context=http_suppression_context,
+                context_stack=context_stack,
                 agent_content=agent_content,
             ),
         )
@@ -198,12 +195,10 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             span_data, (AgentSpanData, FunctionSpanData, GenerationSpanData, HandoffSpanData, ResponseSpanData)
         ):
             return
-        if entry is None or entry.token is None:
+        if entry is None or entry.context_stack is None:
             return
 
-        if entry.http_suppression_context is not None:
-            entry.http_suppression_context.__exit__(None, None, None)
-        try_detach(entry.token)
+        entry.context_stack.close()
         otel_span = entry.span
 
         try:
@@ -254,11 +249,9 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
     @staticmethod
     def _close_incomplete_span(entry: _SpanEntry) -> None:
-        if entry.token is None:
+        if entry.context_stack is None:
             return
-        if entry.http_suppression_context is not None:
-            entry.http_suppression_context.__exit__(None, None, None)
-        try_detach(entry.token)
+        entry.context_stack.close()
         if entry.span.is_recording():
             entry.span.set_attribute(ERROR_TYPE, "_OTHER")
             entry.span.set_status(Status(StatusCode.ERROR, "Trace ended before span completion"))
