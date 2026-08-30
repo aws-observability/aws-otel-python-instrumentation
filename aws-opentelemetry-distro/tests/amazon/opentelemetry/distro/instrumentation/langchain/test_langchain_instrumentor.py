@@ -4,7 +4,6 @@
 import json
 import sys
 import unittest
-from importlib.util import find_spec
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -162,10 +161,9 @@ class TestLangChainInstrumentor(TestCase):
         httpx_instrumentor = HTTPXClientInstrumentor()
         httpx_instrumentor.instrument(tracer_provider=self.tracer_provider)
         self.addCleanup(httpx_instrumentor.uninstrument)
-        if find_spec("httpx2"):
-            httpx2_instrumentor = HTTPX2ClientInstrumentor()
-            httpx2_instrumentor.instrument(tracer_provider=self.tracer_provider)
-            self.addCleanup(httpx2_instrumentor.uninstrument)
+        httpx2_instrumentor = HTTPX2ClientInstrumentor()
+        httpx2_instrumentor.instrument(tracer_provider=self.tracer_provider)
+        self.addCleanup(httpx2_instrumentor.uninstrument)
         botocore_instrumentor = BotocoreInstrumentor()
         botocore_instrumentor.instrument(tracer_provider=self.tracer_provider)
         self.addCleanup(botocore_instrumentor.uninstrument)

@@ -4,7 +4,6 @@
 import json
 import unittest
 from importlib.metadata import entry_points
-from importlib.util import find_spec
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -231,10 +230,9 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         httpx_instrumentor = HTTPXClientInstrumentor()
         httpx_instrumentor.instrument(tracer_provider=self.tracer_provider)
         self.addCleanup(httpx_instrumentor.uninstrument)
-        if find_spec("httpx2"):
-            httpx2_instrumentor = HTTPX2ClientInstrumentor()
-            httpx2_instrumentor.instrument(tracer_provider=self.tracer_provider)
-            self.addCleanup(httpx2_instrumentor.uninstrument)
+        httpx2_instrumentor = HTTPX2ClientInstrumentor()
+        httpx2_instrumentor.instrument(tracer_provider=self.tracer_provider)
+        self.addCleanup(httpx2_instrumentor.uninstrument)
         botocore_instrumentor = BotocoreInstrumentor()
         botocore_instrumentor.instrument(tracer_provider=self.tracer_provider)
         self.addCleanup(botocore_instrumentor.uninstrument)
