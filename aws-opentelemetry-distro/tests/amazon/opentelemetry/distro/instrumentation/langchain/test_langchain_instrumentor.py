@@ -35,6 +35,7 @@ from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_core.tools import StructuredTool, tool
 from langchain_openai import ChatOpenAI as _ChatOpenAI
 
+from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAiNestedClientSpanProcessor
 from amazon.opentelemetry.distro.instrumentation.langchain import LangChainInstrumentor
 from opentelemetry import context
 from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
@@ -145,6 +146,7 @@ class TestLangChainInstrumentor(TestCase):
 
         self.tracer_provider = TracerProvider()
         self.span_exporter = InMemorySpanExporter()
+        self.tracer_provider.add_span_processor(GenAiNestedClientSpanProcessor())
         self.tracer_provider.add_span_processor(SimpleSpanProcessor(self.span_exporter))
         self.instrumentor = LangChainInstrumentor()
         self.instrumentor.instrument(tracer_provider=self.tracer_provider)
@@ -153,7 +155,7 @@ class TestLangChainInstrumentor(TestCase):
         self.instrumentor.uninstrument()
         self.span_exporter.clear()
 
-    def test_llm_client_span_suppression(self):
+    def test_llm_calls_suppresses_child_http_spans(self):
         openai_model = "gpt-5.6-sol"
         openai_temperature = 1.0
         bedrock_model = "anthropic.claude-fable-5"

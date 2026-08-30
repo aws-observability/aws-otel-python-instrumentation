@@ -125,7 +125,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             parent_run_id,
             span_name,
             kind=SpanKind.CLIENT,
-            suppress_http=True,
+            should_suppress_http_instrumentation=True,
         )
 
         self._set_langgraph_span_attributes(span, metadata)
@@ -164,7 +164,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             parent_run_id,
             span_name,
             kind=SpanKind.CLIENT,
-            suppress_http=True,
+            should_suppress_http_instrumentation=True,
         )
 
         self._set_langgraph_span_attributes(span, metadata)
@@ -569,7 +569,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         parent_run_id: Optional[UUID],
         span_name: str,
         kind: SpanKind = SpanKind.INTERNAL,
-        suppress_http: bool = False,
+        should_suppress_http_instrumentation: bool = False,
     ) -> Span:
         parent_entry = self.run_id_to_span_map.get(parent_run_id) if parent_run_id else None
         if parent_entry:
@@ -578,7 +578,10 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         else:
             span = self.tracer.start_span(span_name, kind=kind)
 
-        token = attach_otel_context(set_span_in_context(span), suppress_http=suppress_http)
+        token = attach_otel_context(
+            set_span_in_context(span),
+            should_suppress_http_instrumentation=should_suppress_http_instrumentation,
+        )
         self.run_id_to_span_map.put(run_id, (span, token))
         return span
 

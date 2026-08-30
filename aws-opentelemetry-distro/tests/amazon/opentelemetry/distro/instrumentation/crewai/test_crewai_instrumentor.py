@@ -22,6 +22,7 @@ from crewai.events import crewai_event_bus
 from crewai.events.types.llm_events import LLMCallCompletedEvent, LLMCallStartedEvent, LLMCallType
 from crewai.tools import tool
 
+from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAiNestedClientSpanProcessor
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     GEN_AI_WORKFLOW_NAME,
     OPERATION_INVOKE_WORKFLOW,
@@ -75,6 +76,7 @@ class TestCrewAIInstrumentor(TestCase):
         self._set_env("ANTHROPIC_API_KEY", "fake-key")
         self.tracer_provider = TracerProvider()
         self.span_exporter = InMemorySpanExporter()
+        self.tracer_provider.add_span_processor(GenAiNestedClientSpanProcessor())
         self.tracer_provider.add_span_processor(SimpleSpanProcessor(self.span_exporter))
         self.instrumentor = CrewAIInstrumentor()
         self.instrumentor.instrument(tracer_provider=self.tracer_provider)
@@ -84,7 +86,7 @@ class TestCrewAIInstrumentor(TestCase):
         self.span_exporter.clear()
         self._restore_env()
 
-    def test_llm_client_span_suppression(self):
+    def test_llm_calls_suppresses_child_http_spans(self):
         openai_model = "gpt-5.6-sol"
         openai_temperature = 1.0
         bedrock_model = "anthropic.claude-fable-5"
@@ -188,7 +190,7 @@ class TestCrewAIInstrumentor(TestCase):
         self._env_backup[key] = os.environ.get(key)
         os.environ[key] = value
 
-    def test_crew_cleanup_detaches_unfinished_http_suppression(self):
+    def test_crew_completion_restores_context_with_unfinished_llm_span(self):
         handler = self.instrumentor._handler
         previous_context = context.get_current()
         handler._start_span("root", "root")
@@ -197,15 +199,14 @@ class TestCrewAIInstrumentor(TestCase):
             "child",
             parent_event_id="root",
             kind=SpanKind.CLIENT,
-            suppress_http=True,
+            should_suppress_http_instrumentation=True,
         )
         self.assertTrue(context.get_value(_SUPPRESS_HTTP_INSTRUMENTATION_KEY))
 
-        handler._detach_unfinished_span_contexts("root")
-        self.assertIsNone(context.get_value(_SUPPRESS_HTTP_INSTRUMENTATION_KEY))
-        handler._end_span("root")
+        handler._on_crew_completed(None, MagicMock(started_event_id="root"))
 
         self.assertIs(context.get_current(), previous_context)
+        self.assertIsNone(context.get_value(_SUPPRESS_HTTP_INSTRUMENTATION_KEY))
         self.assertEqual(len(handler._event_id_to_span), 0)
 
     def _restore_env(self):

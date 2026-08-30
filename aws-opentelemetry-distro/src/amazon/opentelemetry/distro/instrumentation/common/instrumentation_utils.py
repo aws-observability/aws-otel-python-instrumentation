@@ -224,8 +224,8 @@ def try_detach(token: Token) -> None:
         pass
 
 
-def attach_otel_context(otel_context: Context, *, suppress_http: bool = False) -> Token:
+def attach_otel_context(otel_context: Context, *, should_suppress_http_instrumentation: bool = False) -> Token:
     """Attach an OTel context, optionally suppressing HTTP instrumentation."""
-    if suppress_http:
+    if should_suppress_http_instrumentation:
         otel_context = context.set_value(_SUPPRESS_HTTP_INSTRUMENTATION_KEY, True, otel_context)
     return context.attach(otel_context)

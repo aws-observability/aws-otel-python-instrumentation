@@ -170,7 +170,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
 
         token = attach_otel_context(
             set_span_in_context(otel_span, parent.context if parent else None),
-            suppress_http=kind == SpanKind.CLIENT,
+            should_suppress_http_instrumentation=kind == SpanKind.CLIENT,
         )
 
         span = _Span(

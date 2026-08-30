@@ -122,7 +122,10 @@ class TestInstrumentationUtils(TestCase):
     def test_attach_otel_context_with_http_suppression(self):
         key = create_key("test_attach_otel_context")
         previous_context = context.get_current()
-        token = attach_otel_context(context.set_value(key, "value"), suppress_http=True)
+        token = attach_otel_context(
+            context.set_value(key, "value"),
+            should_suppress_http_instrumentation=True,
+        )
 
         self.assertEqual(context.get_value(key), "value")
         self.assertTrue(context.get_value(_SUPPRESS_HTTP_INSTRUMENTATION_KEY))

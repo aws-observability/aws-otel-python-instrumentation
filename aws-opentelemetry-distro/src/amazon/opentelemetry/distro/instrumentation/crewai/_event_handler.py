@@ -16,7 +16,6 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
     to_tool_attribute_value,
-    try_detach,
 )
 from opentelemetry import context, trace
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
@@ -214,15 +213,15 @@ class OpenTelemetryEventHandler:
     def _on_crew_completed(
         self, source: "Crew", event: "CrewKickoffCompletedEvent"
     ) -> None:  # pylint: disable=unused-argument
-        self._detach_unfinished_span_contexts(event.started_event_id)
         self._end_span(event.started_event_id)
+        self._event_id_to_span.clear()
         self._event_id_to_token_usage.clear()
 
     def _on_crew_failed(
         self, source: "Crew", event: "CrewKickoffFailedEvent"
     ) -> None:  # pylint: disable=unused-argument
-        self._detach_unfinished_span_contexts(event.started_event_id)
         self._end_span(event.started_event_id, error=getattr(event, "error", None))
+        self._event_id_to_span.clear()
         self._event_id_to_token_usage.clear()
 
     def _on_agent_start(  # pylint: disable=too-many-branches
@@ -373,7 +372,7 @@ class OpenTelemetryEventHandler:
             attributes,
             event.parent_event_id,
             kind=SpanKind.CLIENT,
-            suppress_http=True,
+            should_suppress_http_instrumentation=True,
         )
 
     def _on_llm_completed(self, source: "LLM", event: "LLMCallCompletedEvent") -> None:
@@ -445,7 +444,7 @@ class OpenTelemetryEventHandler:
         attributes: Optional[Dict[str, Any]] = None,
         parent_event_id: Optional[str] = None,
         kind: SpanKind = SpanKind.INTERNAL,
-        suppress_http: bool = False,
+        should_suppress_http_instrumentation: bool = False,
     ) -> None:
         parent_ctx = None
         if parent_event_id:
@@ -454,7 +453,10 @@ class OpenTelemetryEventHandler:
                 parent_ctx = trace.set_span_in_context(parent_entry.span)
 
         span = self._tracer.start_span(name, kind=kind, attributes=attributes, context=parent_ctx)
-        token = attach_otel_context(trace.set_span_in_context(span), suppress_http=suppress_http)
+        token = attach_otel_context(
+            trace.set_span_in_context(span),
+            should_suppress_http_instrumentation=should_suppress_http_instrumentation,
+        )
         self._event_id_to_span.put(event_id, _SpanEntry(span=span, token=token))
 
     def _end_span(
@@ -478,19 +480,6 @@ class OpenTelemetryEventHandler:
                 entry.span.set_status(Status(StatusCode.OK))
             entry.span.end()
             context.detach(entry.token)
-
-    def _detach_unfinished_span_contexts(self, root_event_id: Optional[str]) -> None:
-        root_entry = self._event_id_to_span.get(root_event_id) if root_event_id else None
-        entries = self._event_id_to_span.pop_all()
-        detached_entries = set()
-        for entry in reversed(entries):
-            entry_id = id(entry)
-            if entry is root_entry or entry_id in detached_entries:
-                continue
-            detached_entries.add(entry_id)
-            try_detach(entry.token)
-        if root_entry is not None and root_event_id is not None:
-            self._event_id_to_span.put(root_event_id, root_entry)
 
     @staticmethod
     def _extract_provider_and_model(llm: Any) -> Tuple[Optional[str], Optional[str]]:

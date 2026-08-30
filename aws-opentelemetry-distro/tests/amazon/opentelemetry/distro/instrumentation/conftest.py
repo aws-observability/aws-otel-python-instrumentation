@@ -176,6 +176,7 @@ def assert_llm_client_spans(spans, provider: str, model: str, temperature: float
         GEN_AI_USAGE_OUTPUT_TOKENS,
         GenAiOperationNameValues,
     )
+    from opentelemetry.trace import SpanKind
 
     framework_spans = [
         span
@@ -184,6 +185,8 @@ def assert_llm_client_spans(spans, provider: str, model: str, temperature: float
     ]
     assert len(framework_spans) == 1
     framework_span = framework_spans[0]
+    expected_kind = SpanKind.INTERNAL if is_instrumented else SpanKind.CLIENT
+    assert framework_span.kind == expected_kind
     attrs = framework_span.attributes
     assert attrs[GEN_AI_OPERATION_NAME] == GenAiOperationNameValues.CHAT.value
     assert attrs[GEN_AI_REQUEST_MODEL].endswith(model)

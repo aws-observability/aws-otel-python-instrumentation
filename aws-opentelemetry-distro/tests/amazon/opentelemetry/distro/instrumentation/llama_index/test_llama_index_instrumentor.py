@@ -36,6 +36,7 @@ from llama_index.core.tools.types import ToolOutput
 from llama_index.llms.bedrock_converse import BedrockConverse as _BedrockConverse
 from llama_index.llms.openai import OpenAI as _OpenAI
 
+from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAiNestedClientSpanProcessor
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     GEN_AI_WORKFLOW_NAME,
     OPERATION_INVOKE_WORKFLOW,
@@ -91,6 +92,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
     def setUp(self):
         self.tracer_provider = TracerProvider()
         self.span_exporter = InMemorySpanExporter()
+        self.tracer_provider.add_span_processor(GenAiNestedClientSpanProcessor())
         self.tracer_provider.add_span_processor(SimpleSpanProcessor(self.span_exporter))
         self.instrumentor = LlamaIndexInstrumentor()
         self.instrumentor.instrument(tracer_provider=self.tracer_provider)
@@ -104,7 +106,7 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         self.instrumentor.uninstrument()
         self.span_exporter.clear()
 
-    def test_llm_client_span_suppression(self):
+    def test_llm_calls_suppresses_child_http_spans(self):
         from llama_index.llms.bedrock_converse import utils as bedrock_utils
         from llama_index.llms.openai import utils as openai_utils
 
@@ -670,7 +672,10 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         from opentelemetry.trace import INVALID_SPAN
 
         previous_context = context_api.get_current()
-        token = attach_otel_context(context_api.Context(), suppress_http=True)
+        token = attach_otel_context(
+            context_api.Context(),
+            should_suppress_http_instrumentation=True,
+        )
         span = self._Span(otel_span=INVALID_SPAN, context_token=token)
         self.assertTrue(context_api.get_value(_SUPPRESS_HTTP_INSTRUMENTATION_KEY))
 

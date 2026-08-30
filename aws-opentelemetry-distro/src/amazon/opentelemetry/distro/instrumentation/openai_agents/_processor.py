@@ -173,7 +173,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         )
         token = attach_otel_context(
             set_span_in_context(otel_span),
-            suppress_http=isinstance(span_data, (GenerationSpanData, ResponseSpanData)),
+            should_suppress_http_instrumentation=isinstance(span_data, (GenerationSpanData, ResponseSpanData)),
         )
         self._openai_span_id_to_otel_span_entry.put(
             span.span_id,
