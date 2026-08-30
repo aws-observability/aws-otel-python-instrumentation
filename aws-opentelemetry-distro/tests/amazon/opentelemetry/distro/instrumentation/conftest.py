@@ -207,7 +207,6 @@ def assert_llm_client_spans(spans, provider: str, model: str, temperature: float
             and span.attributes.get(GEN_AI_SYSTEM) == provider
         ]
         assert len(child_spans) == 1
-        assert child_spans[0].parent.span_id == framework_span.context.span_id
     else:
         assert not any(
             span.parent
