@@ -17,7 +17,6 @@ from typing_extensions import override
 
 from amazon.opentelemetry.distro._aws_attribute_keys import AWS_LOCAL_SERVICE, AWS_SERVICE_TYPE
 from amazon.opentelemetry.distro._aws_resource_attribute_configurator import get_service_attribute
-from amazon.opentelemetry.distro._gen_ai.span_processor import GenAiNestedClientSpanProcessor
 from amazon.opentelemetry.distro._utils import get_aws_session, is_agent_observability_enabled
 from amazon.opentelemetry.distro.always_record_sampler import AlwaysRecordSampler
 from amazon.opentelemetry.distro.attribute_propagating_span_processor_builder import (
@@ -32,6 +31,7 @@ from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSp
 from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import (
     CompactConsoleLogRecordExporter,
 )
+from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAiNestedClientSpanProcessor
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler._aws_xray_adaptive_sampling_config import (
     _AnomalyCaptureLimit,
