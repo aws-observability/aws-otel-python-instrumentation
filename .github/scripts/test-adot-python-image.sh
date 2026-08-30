@@ -30,8 +30,21 @@ TEST_TAG=$1
 EXPECTED_VERSION="${2:-}"
 
 VOLUME=operator-volume
-NEUTRAL_IMAGE=public.ecr.aws/docker/library/python:3.11
 WORKDIR=$(mktemp -d)
+
+# The neutral image (used to read the volume and to load the payload) must run the SAME
+# Python the payload was built with -- the payload contains version-specific compiled wheels
+# (cp3XX), so loading under a different Python would false-fail. Derive it from the
+# Dockerfile's build stage (the `... AS build` line) so it always tracks the real build base
+# instead of a hardcoded version. Override with NEUTRAL_IMAGE=... if ever needed.
+DOCKERFILE="${DOCKERFILE:-Dockerfile}"
+if [ -z "${NEUTRAL_IMAGE:-}" ]; then
+  NEUTRAL_IMAGE=$(grep -iE 'AS[[:space:]]+build[[:space:]]*$' "${DOCKERFILE}" 2>/dev/null | head -1 | awk '{print $2}')
+fi
+if [ -z "${NEUTRAL_IMAGE:-}" ]; then
+  echo "error: could not determine the build-stage base image from ${DOCKERFILE}; set NEUTRAL_IMAGE explicitly"
+  exit 1
+fi
 IMAGE_SRC="${WORKDIR}/image-src"
 VOLUME_COPY="${WORKDIR}/volume-copy"
 
