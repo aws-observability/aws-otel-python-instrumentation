@@ -95,10 +95,12 @@ class DictWithLock:
 
 
 def first_not_none(*values: Any) -> Any:
+    # Return the first non-None value while preserving falsy values.
     return next((value for value in values if value is not None), None)
 
 
 def get_value(source: Any, name: str) -> Any:
+    # Read a named value from either a mapping or an object.
     return source.get(name) if isinstance(source, Mapping) else getattr(source, name, None)
 
 

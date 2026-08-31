@@ -1107,10 +1107,13 @@ class TestLangChainInstrumentor(TestCase):
         from langchain_aws import ChatBedrock, ChatBedrockConverse
         from langchain_openai import ChatOpenAI
 
-        def result_with_llm_output(usage):
+        def result_with_llm_output(usage, usage_metadata=None):
             return ChatResult(
                 generations=[
-                    ChatGeneration(message=AIMessage(content="Hello!"), generation_info={"finish_reason": "stop"})
+                    ChatGeneration(
+                        message=AIMessage(content="Hello!", usage_metadata=usage_metadata),
+                        generation_info={"finish_reason": "stop"},
+                    )
                 ],
                 llm_output={"model_name": "test", "token_usage": usage},
             )
@@ -1131,16 +1134,41 @@ class TestLangChainInstrumentor(TestCase):
             (
                 ChatOpenAI,
                 {"api_key": "fake"},
-                result_with_llm_output({"prompt_tokens": 11, "completion_tokens": 22}),
+                result_with_llm_output(
+                    {"prompt_tokens": 11, "completion_tokens": 22},
+                    {
+                        "input_tokens": 11,
+                        "output_tokens": 22,
+                        "total_tokens": 33,
+                        "input_token_details": {"cache_read": 3},
+                        "output_token_details": {"reasoning": 4},
+                    },
+                ),
                 11,
                 22,
+                {
+                    GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS: 3,
+                    GEN_AI_USAGE_REASONING_OUTPUT_TOKENS: 4,
+                },
             ),
             (
                 ChatBedrock,
                 {"model_id": "test", "region_name": "us-east-1"},
-                result_with_llm_output({"prompt_tokens": 33, "completion_tokens": 44}),
+                result_with_llm_output(
+                    {"prompt_tokens": 33, "completion_tokens": 44},
+                    {
+                        "input_tokens": 33,
+                        "output_tokens": 44,
+                        "total_tokens": 77,
+                        "input_token_details": {"cache_read": 5, "cache_creation": 6},
+                    },
+                ),
                 33,
                 44,
+                {
+                    GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS: 5,
+                    GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS: 6,
+                },
             ),
             (
                 ChatBedrockConverse,
@@ -1151,11 +1179,14 @@ class TestLangChainInstrumentor(TestCase):
                         "output_tokens": 66,
                         "total_tokens": 121,
                         "input_token_details": {"cache_read": 7, "cache_creation": 8},
-                        "output_token_details": {"reasoning": 9},
                     }
                 ),
                 55,
                 66,
+                {
+                    GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS: 7,
+                    GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS: 8,
+                },
             ),
         ]
 
@@ -1174,12 +1205,13 @@ class TestLangChainInstrumentor(TestCase):
                     result_with_llm_output({"input_token_count": 77, "generated_token_count": 88}),
                     77,
                     88,
+                    {},
                 )
             )
         except ImportError:
             pass
 
-        for model_cls, init_kwargs, fake_result, expected_input, expected_output in cases:
+        for model_cls, init_kwargs, fake_result, expected_input, expected_output, expected_details in cases:
             with self.subTest(model=model_cls.__name__):
                 self.span_exporter.clear()
                 llm = model_cls(**init_kwargs)
@@ -1192,10 +1224,18 @@ class TestLangChainInstrumentor(TestCase):
                 attrs = chat_spans[0].attributes
                 self.assertEqual(attrs[GEN_AI_USAGE_INPUT_TOKENS], expected_input)
                 self.assertEqual(attrs[GEN_AI_USAGE_OUTPUT_TOKENS], expected_output)
-                if model_cls is ChatBedrockConverse:
-                    self.assertEqual(attrs[GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS], 7)
-                    self.assertEqual(attrs[GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS], 8)
-                    self.assertEqual(attrs[GEN_AI_USAGE_REASONING_OUTPUT_TOKENS], 9)
+                self.assertEqual(
+                    attrs.get(GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS),
+                    expected_details.get(GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS),
+                )
+                self.assertEqual(
+                    attrs.get(GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS),
+                    expected_details.get(GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS),
+                )
+                self.assertEqual(
+                    attrs.get(GEN_AI_USAGE_REASONING_OUTPUT_TOKENS),
+                    expected_details.get(GEN_AI_USAGE_REASONING_OUTPUT_TOKENS),
+                )
 
 
 if __name__ == "__main__":
