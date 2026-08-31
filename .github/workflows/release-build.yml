@@ -150,9 +150,17 @@ jobs:
           verbose: true
           packages-dir: dist-pypi
 
-      # Build a single-arch image locally (not pushed) and run the post-build integrity
-      # test against it before publishing, so a bad artifact never reaches ECR.
-      - name: Build image for testing
+      # QEMU lets this amd64 runner build and run the arm64 image so both released
+      # architectures are verified before publishing.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 #3.6.0
+
+      # Build each released architecture locally (not pushed) and run the post-build
+      # integrity + ported-distro verification against each, so a bad artifact never
+      # reaches ECR. amd64 runs natively; arm64 runs under QEMU emulation. DOCKER_DEFAULT_PLATFORM
+      # makes the script's docker run/create/pull target the arch under test (so the neutral
+      # verifier loads arch-matching wheels).
+      - name: Build amd64 image for testing
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
         with:
           push: false
@@ -160,11 +168,29 @@ jobs:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64
-          tags: ${{ env.TEST_TAG }}
+          tags: ${{ env.TEST_TAG }}-amd64
 
-      - name: Test docker image
+      - name: Verify amd64 image
         shell: bash
-        run: .github/scripts/test-adot-python-image.sh "${{ env.TEST_TAG }}" "${{ env.VERSION }}"
+        env:
+          DOCKER_DEFAULT_PLATFORM: linux/amd64
+        run: .github/scripts/test-adot-python-image.sh "${{ env.TEST_TAG }}-amd64" "${{ env.VERSION }}"
+
+      - name: Build arm64 image for testing
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
+        with:
+          push: false
+          load: true
+          context: .
+          file: ./Dockerfile
+          platforms: linux/arm64
+          tags: ${{ env.TEST_TAG }}-arm64
+
+      - name: Verify arm64 image
+        shell: bash
+        env:
+          DOCKER_DEFAULT_PLATFORM: linux/arm64
+        run: .github/scripts/test-adot-python-image.sh "${{ env.TEST_TAG }}-arm64" "${{ env.VERSION }}"
 
       - name: Build and push image
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
