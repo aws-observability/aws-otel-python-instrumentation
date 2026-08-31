@@ -546,57 +546,9 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         params: dict[str, Any] = (
             kwargs.get("invocation_params", {}).get("params") or kwargs.get("invocation_params") or kwargs
         )
-        self._set_span_attribute(
-            span,
-            GEN_AI_REQUEST_MAX_TOKENS,
-            params.get("max_tokens")
-            or params.get("max_new_tokens")
-            or params.get("max_output_tokens")
-            or params.get("max_completion_tokens")
-            or config.get("max_tokens")
-            or config.get("max_new_tokens")
-            or config.get("max_output_tokens")
-            or config.get("max_completion_tokens"),
-        )
-        self._set_span_attribute(
-            span, GEN_AI_REQUEST_TEMPERATURE, params.get("temperature") or config.get("temperature")
-        )
-        self._set_span_attribute(span, GEN_AI_REQUEST_TOP_P, params.get("top_p") or config.get("top_p"))
         additional_model_request_fields = (
             params.get("additional_model_request_fields") or config.get("additional_model_request_fields") or {}
         )
-        self._set_span_attribute(
-            span,
-            GEN_AI_REQUEST_TOP_K,
-            params.get("top_k") or config.get("top_k") or additional_model_request_fields.get("top_k"),
-        )
-        self._set_span_attribute(
-            span,
-            GEN_AI_REQUEST_FREQUENCY_PENALTY,
-            params.get("frequency_penalty") or config.get("frequency_penalty"),
-        )
-        self._set_span_attribute(
-            span, GEN_AI_REQUEST_PRESENCE_PENALTY, params.get("presence_penalty") or config.get("presence_penalty")
-        )
-        stop = params.get("stop") or params.get("stop_sequences") or config.get("stop") or config.get("stop_sequences")
-        if stop:
-            self._set_span_attribute(span, GEN_AI_REQUEST_STOP_SEQUENCES, stop)
-        seed = first_not_none(params.get("seed"), config.get("seed"))
-        self._set_span_attribute(span, GEN_AI_REQUEST_SEED, seed)
-        choice_count = first_not_none(
-            params.get("choice_count"),
-            params.get("n"),
-            config.get("choice_count"),
-            config.get("n"),
-        )
-        self._set_span_attribute(span, GEN_AI_REQUEST_CHOICE_COUNT, choice_count)
-        stream = first_not_none(
-            params.get("stream"),
-            params.get("streaming"),
-            config.get("stream"),
-            config.get("streaming"),
-        )
-        self._set_span_attribute(span, GEN_AI_REQUEST_STREAM, stream)
 
         params_model_kwargs = {**(params.get("model_kwargs") or {}), **(params.get("extra_body") or {})}
         config_model_kwargs = {**(config.get("model_kwargs") or {}), **(config.get("extra_body") or {})}
