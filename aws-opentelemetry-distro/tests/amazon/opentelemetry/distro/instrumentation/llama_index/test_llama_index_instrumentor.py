@@ -1124,12 +1124,22 @@ class TestLlamaIndexInstrumentor(unittest.TestCase):
         handler = self._make_span_handler()
         from llama_index.llms.openai import OpenAI
 
-        llm = OpenAI(model="gpt-4", api_key="fake")
-        bound_args = self._make_bound_args()
-        span = handler.new_span(id_="OpenAI.chat-1", bound_args=bound_args, instance=llm)
+        llm = OpenAI(
+            model="gpt-4",
+            api_key="fake",
+            temperature=0.1,
+            max_tokens=50,
+            additional_kwargs={"top_p": 0.6},
+        )
+        bound_args = self._make_bound_args(temperature=0.9, top_p=0.7, max_tokens=999)
+        span = handler.new_span(id_="OpenAI.stream_chat-1", bound_args=bound_args, instance=llm)
         self.assertIsNotNone(span)
         self.assertTrue(span.active)
         self.assertIsNotNone(span._context_token)
+        self.assertEqual(span._attributes[GEN_AI_REQUEST_TEMPERATURE], 0.9)
+        self.assertEqual(span._attributes[GEN_AI_REQUEST_TOP_P], 0.6)
+        self.assertEqual(span._attributes[GEN_AI_REQUEST_MAX_TOKENS], 50)
+        self.assertIs(span._attributes[GEN_AI_REQUEST_STREAM], True)
         span.end()
 
     def test_new_span_with_parent(self):

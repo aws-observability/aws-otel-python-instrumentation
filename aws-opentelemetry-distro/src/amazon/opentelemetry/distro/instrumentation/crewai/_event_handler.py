@@ -621,7 +621,7 @@ class OpenTelemetryEventHandler:
                 additional_params.get("stream"),
                 additional_model_request_fields.get("stream"),
             ),
-            GEN_AI_REQUEST_STOP_SEQUENCES: [stop] if isinstance(stop, str) else stop,
+            GEN_AI_REQUEST_STOP_SEQUENCES: ([stop] if isinstance(stop, str) else stop) or None,
         }
         attributes.update({attribute: value for attribute, value in request_attributes.items() if value is not None})
 

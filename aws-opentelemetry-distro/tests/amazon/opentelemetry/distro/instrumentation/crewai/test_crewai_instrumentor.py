@@ -144,6 +144,14 @@ class TestCrewAIInstrumentor(TestCase):
     def test_openai_crew_kickoff(self):
         self._run_crew_kickoff_test("openai/gpt-4", GenAiProviderNameValues.OPENAI.value, "gpt-4")
 
+        from amazon.opentelemetry.distro.instrumentation.crewai._event_handler import OpenTelemetryEventHandler
+
+        attributes = {}
+        OpenTelemetryEventHandler._set_llm_request_span_attributes(
+            attributes, LLM(model="openai/gpt-4", is_litellm=True)
+        )
+        self.assertNotIn(GEN_AI_REQUEST_STOP_SEQUENCES, attributes)
+
         model = "gpt-5.6-sol"
 
         for provider, is_litellm in (("openai", False), ("litellm", True)):

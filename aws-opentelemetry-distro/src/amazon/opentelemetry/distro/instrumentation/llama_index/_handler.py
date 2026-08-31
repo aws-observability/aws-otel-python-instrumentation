@@ -28,6 +28,7 @@ from opentelemetry import context as context_api
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_NAME,
     GEN_AI_OPERATION_NAME,
+    GEN_AI_REQUEST_STREAM,
     GenAiOperationNameValues,
 )
 from opentelemetry.trace import SpanKind, Tracer, set_span_in_context
@@ -188,6 +189,8 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         else:
             span.process_instance(instance)
             span.process_input(instance, bound_args)
+            if id_.partition("-")[0].rpartition(".")[-1] in ("stream_chat", "astream_chat"):
+                span[GEN_AI_REQUEST_STREAM] = True
 
         return span
 

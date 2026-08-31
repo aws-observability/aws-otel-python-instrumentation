@@ -598,8 +598,8 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         )
         self._set_span_attribute(span, GEN_AI_REQUEST_STREAM, stream)
 
-        params_model_kwargs = params.get("model_kwargs") or {}
-        config_model_kwargs = config.get("model_kwargs") or {}
+        params_model_kwargs = {**(params.get("model_kwargs") or {}), **(params.get("extra_body") or {})}
+        config_model_kwargs = {**(config.get("model_kwargs") or {}), **(config.get("extra_body") or {})}
         nested_additional_model_request_fields = (
             first_not_none(
                 params_model_kwargs.get("additional_model_request_fields"),

@@ -403,6 +403,87 @@ class _Span(BaseSpan):
             if tool_defs:
                 self[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs)
 
+        if isinstance(instance, (BaseLLM, MultiModalLLM)):
+            request_params = bound_args.kwargs
+            fallback_params = {}
+            max_tokens_fallback = None
+            if self._attributes.get(GEN_AI_PROVIDER_NAME) in ("openai", "azure.ai.openai"):
+                request_params = getattr(instance, "additional_kwargs", None) or {}
+                fallback_params = bound_args.kwargs
+                max_tokens_fallback = first_not_none(
+                    getattr(instance, "max_tokens", None),
+                    getattr(instance, "max_output_tokens", None),
+                    getattr(instance, "max_completion_tokens", None),
+                )
+
+            temperature = first_not_none(
+                request_params.get("temperature"),
+                fallback_params.get("temperature"),
+            )
+            if temperature is not None:
+                self[GEN_AI_REQUEST_TEMPERATURE] = temperature
+            max_tokens = first_not_none(
+                request_params.get("max_tokens"),
+                request_params.get("max_output_tokens"),
+                request_params.get("max_completion_tokens"),
+                max_tokens_fallback,
+                fallback_params.get("max_tokens"),
+                fallback_params.get("max_output_tokens"),
+                fallback_params.get("max_completion_tokens"),
+            )
+            if max_tokens is not None:
+                self[GEN_AI_REQUEST_MAX_TOKENS] = max_tokens
+            top_p = first_not_none(request_params.get("top_p"), fallback_params.get("top_p"))
+            if top_p is not None:
+                self[GEN_AI_REQUEST_TOP_P] = top_p
+            top_k = first_not_none(request_params.get("top_k"), fallback_params.get("top_k"))
+            if top_k is not None:
+                self[GEN_AI_REQUEST_TOP_K] = top_k
+            frequency_penalty = first_not_none(
+                request_params.get("frequency_penalty"),
+                fallback_params.get("frequency_penalty"),
+            )
+            if frequency_penalty is not None:
+                self[GEN_AI_REQUEST_FREQUENCY_PENALTY] = frequency_penalty
+            presence_penalty = first_not_none(
+                request_params.get("presence_penalty"),
+                fallback_params.get("presence_penalty"),
+            )
+            if presence_penalty is not None:
+                self[GEN_AI_REQUEST_PRESENCE_PENALTY] = presence_penalty
+            stop = first_not_none(
+                request_params.get("stop_sequences"),
+                request_params.get("stop"),
+                fallback_params.get("stop_sequences"),
+                fallback_params.get("stop"),
+            )
+            if stop is not None:
+                self[GEN_AI_REQUEST_STOP_SEQUENCES] = [stop] if isinstance(stop, str) else stop
+            seed = first_not_none(
+                request_params.get("seed"),
+                request_params.get("random_seed"),
+                fallback_params.get("seed"),
+                fallback_params.get("random_seed"),
+            )
+            if seed is not None:
+                self[GEN_AI_REQUEST_SEED] = seed
+            choice_count = first_not_none(
+                request_params.get("choice_count"),
+                request_params.get("n"),
+                fallback_params.get("choice_count"),
+                fallback_params.get("n"),
+            )
+            if choice_count is not None:
+                self[GEN_AI_REQUEST_CHOICE_COUNT] = choice_count
+            stream = first_not_none(
+                request_params.get("stream"),
+                request_params.get("streaming"),
+                fallback_params.get("stream"),
+                fallback_params.get("streaming"),
+            )
+            if stream is not None:
+                self[GEN_AI_REQUEST_STREAM] = stream
+
         # Capture tool call arguments for FunctionTool invocations
         if isinstance(instance, (BaseTool, FunctionTool)):
             kwargs = bound_args.kwargs
