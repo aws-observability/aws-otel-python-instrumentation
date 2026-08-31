@@ -7,11 +7,11 @@ from importlib.metadata import entry_points
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from agents import tracing
+from agents import Agent, ModelSettings, OpenAIChatCompletionsModel, Runner, tracing
 from agents.items import ItemHelpers
 from agents.tracing import processors
 from agents.tracing.processors import BackendSpanExporter
-from conftest import validate_otel_genai_schema
+from conftest import call_mock_llm, validate_otel_genai_schema
 from openai import Omit
 from openai.types.responses import ResponseFunctionToolCall
 from pydantic import BaseModel
@@ -517,6 +517,45 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         self.assertEqual(span.attributes[GEN_AI_USAGE_REASONING_OUTPUT_TOKENS], 2)
 
     def test_captured_request_params_set_provider_and_server_attributes(self):
+        model = "gpt-5.6-sol"
+        instrumentor = OpenAIAgentsInstrumentor()
+        instrumentor.instrument(tracer_provider=self.tracer_provider, skip_dep_check=True)
+        tracing.set_trace_processors([self.processor])
+        self.addCleanup(instrumentor.uninstrument)
+
+        def invoke_agent(client):
+            Runner.run_sync(
+                Agent(
+                    name="Test agent",
+                    instructions="You are a helpful assistant.",
+                    model=OpenAIChatCompletionsModel(model=model, openai_client=client),
+                    model_settings=ModelSettings(
+                        temperature=0.7,
+                        top_p=0.9,
+                        max_tokens=100,
+                        frequency_penalty=0.5,
+                        presence_penalty=0.3,
+                        extra_args={"stop": ["STOP"], "seed": 42, "n": 2},
+                    ),
+                ),
+                "Hello",
+            )
+
+        call_mock_llm("openai", invoke_llm_callback=invoke_agent, is_async=True)
+
+        chat_span = self._spans_by_name()[f"chat {model}"]
+        self.assertEqual(chat_span.attributes[GEN_AI_PROVIDER_NAME], GenAiProviderNameValues.OPENAI.value)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MODEL], model)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TEMPERATURE], 0.7)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_TOP_P], 0.9)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_MAX_TOKENS], 100)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_FREQUENCY_PENALTY], 0.5)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_PRESENCE_PENALTY], 0.3)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ("STOP",))
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_SEED], 42)
+        self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_CHOICE_COUNT], 2)
+
+        self.exporter.clear()
         with tracing.trace("Capture workflow"):
             captured_span = tracing.generation_span(
                 input=[{"role": "user", "content": "Hi"}],

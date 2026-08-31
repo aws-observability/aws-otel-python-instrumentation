@@ -10,11 +10,13 @@ from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import convert_to_messages
+from langchain_core.outputs import ChatGenerationChunk, GenerationChunk
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     PROVIDER_MAP,
     DictWithLock,
     content_to_parts,
+    first_not_none,
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
     to_tool_attribute_value,
@@ -27,11 +29,14 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_CHOICE_COUNT,
     GEN_AI_REQUEST_FREQUENCY_PENALTY,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
     GEN_AI_REQUEST_PRESENCE_PENALTY,
+    GEN_AI_REQUEST_SEED,
     GEN_AI_REQUEST_STOP_SEQUENCES,
+    GEN_AI_REQUEST_STREAM,
     GEN_AI_REQUEST_TEMPERATURE,
     GEN_AI_REQUEST_TOP_K,
     GEN_AI_REQUEST_TOP_P,
@@ -45,8 +50,11 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
+    GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
+    GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
+    GEN_AI_USAGE_REASONING_OUTPUT_TOKENS,
     GenAiOperationNameValues,
 )
 from opentelemetry.semconv.attributes.error_attributes import ERROR_TYPE
@@ -129,7 +137,9 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
 
         if system_instructions:
             self._set_span_attribute(span, GEN_AI_SYSTEM_INSTRUCTIONS, serialize_to_json_string(system_instructions))
-        self._set_llm_request_span_attributes(span, kwargs, serialized=serialized_kwargs, model_name=model_name)
+        self._set_llm_request_span_attributes(
+            span, kwargs, serialized=serialized_kwargs, model_name=model_name, metadata=metadata
+        )
 
     @skip_instrumentation_if_suppressed
     def on_llm_start(
@@ -163,10 +173,14 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             GEN_AI_INPUT_MESSAGES,
             serialize_to_json_string([{"role": "user", "parts": [{"type": "text", "content": p}]} for p in prompts]),
         )
-        self._set_llm_request_span_attributes(span, kwargs, serialized=serialized_kwargs, model_name=model_name)
+        self._set_llm_request_span_attributes(
+            span, kwargs, serialized=serialized_kwargs, model_name=model_name, metadata=metadata
+        )
 
     @skip_instrumentation_if_suppressed
-    def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: Any) -> None:
+    def on_llm_end(  # pylint: disable=too-many-locals
+        self, response: LLMResult, *, run_id: UUID, **kwargs: Any
+    ) -> None:
 
         entry = self._safe_get_span(run_id)
         if not entry:
@@ -175,7 +189,21 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         llm_output: dict | None = response.llm_output
         model: str | None = (llm_output.get("model_name") or llm_output.get("model_id")) if llm_output else None
         response_id: str | None = llm_output.get("id") if llm_output else None
-        input_tokens, output_tokens = self._extract_token_usage(response)
+        (
+            input_tokens,
+            output_tokens,
+            cache_read_input_tokens,
+            cache_creation_input_tokens,
+            reasoning_output_tokens,
+        ) = self._extract_token_usage(response)
+
+        streamed: bool = False
+        for generations in response.generations:
+            for generation in generations:
+                if isinstance(generation, (ChatGenerationChunk, GenerationChunk)):
+                    streamed = True
+        if streamed:
+            self._set_span_attribute(span, GEN_AI_REQUEST_STREAM, True)
 
         if response.generations:
             output_messages = self._format_lc_llm_output(response.generations)
@@ -192,11 +220,16 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         self._set_span_attribute(span, GEN_AI_RESPONSE_ID, response_id)
         self._set_span_attribute(span, GEN_AI_USAGE_INPUT_TOKENS, input_tokens)
         self._set_span_attribute(span, GEN_AI_USAGE_OUTPUT_TOKENS, output_tokens)
+        self._set_span_attribute(span, GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS, cache_read_input_tokens)
+        self._set_span_attribute(span, GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, cache_creation_input_tokens)
+        self._set_span_attribute(span, GEN_AI_USAGE_REASONING_OUTPUT_TOKENS, reasoning_output_tokens)
 
         self._end_span(run_id)
 
     @staticmethod
-    def _extract_token_usage(response: LLMResult) -> tuple[int | None, int | None]:
+    def _extract_token_usage(
+        response: LLMResult,
+    ) -> tuple[int | None, int | None, int | None, int | None, int | None]:
         llm_output = response.llm_output
         usage: dict = (llm_output.get("token_usage") or llm_output.get("usage") or {}) if llm_output else {}
 
@@ -222,7 +255,32 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             or usage.get("output_tokens")
             or usage_metadata.get("output_tokens")
         )
-        return input_tokens, output_tokens
+        input_token_details = usage_metadata.get("input_token_details") or {}
+        output_token_details = usage_metadata.get("output_token_details") or {}
+        cache_read_input_tokens = first_not_none(
+            usage.get("cache_read_input_tokens"),
+            usage.get("cached_prompt_tokens"),
+            input_token_details.get("cache_read"),
+            input_token_details.get("cached_tokens"),
+        )
+        cache_creation_input_tokens = first_not_none(
+            usage.get("cache_creation_input_tokens"),
+            usage.get("cache_creation_tokens"),
+            input_token_details.get("cache_creation"),
+            input_token_details.get("cache_write_tokens"),
+        )
+        reasoning_output_tokens = first_not_none(
+            usage.get("reasoning_tokens"),
+            output_token_details.get("reasoning"),
+            output_token_details.get("reasoning_tokens"),
+        )
+        return (
+            input_tokens,
+            output_tokens,
+            cache_read_input_tokens,
+            cache_creation_input_tokens,
+            reasoning_output_tokens,
+        )
 
     def on_llm_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
         self._handle_error(error, run_id, **kwargs)
@@ -471,9 +529,14 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         OpenTelemetryCallbackHandler._set_span_attribute(span, LANGGRAPH_STEP_SPAN_ATTR, metadata.get("langgraph_step"))
         OpenTelemetryCallbackHandler._set_span_attribute(span, LANGGRAPH_NODE_SPAN_ATTR, metadata.get("langgraph_node"))
 
-    def _set_llm_request_span_attributes(
-        self, span: Span, kwargs: dict, serialized: Optional[dict] = None, model_name: Optional[str] = None
-    ):
+    def _set_llm_request_span_attributes(  # pylint: disable=too-many-locals
+        self,
+        span: Span,
+        kwargs: dict,
+        serialized: Optional[dict] = None,
+        model_name: Optional[str] = None,
+        metadata: Optional[dict] = None,
+    ) -> None:
         config = serialized or {}
         model = self._extract_llm_model_id(kwargs, config) or model_name
         if model:
@@ -483,27 +546,216 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
         params: dict[str, Any] = (
             kwargs.get("invocation_params", {}).get("params") or kwargs.get("invocation_params") or kwargs
         )
+        additional_model_request_fields = (
+            params.get("additional_model_request_fields") or config.get("additional_model_request_fields") or {}
+        )
+
+        params_model_kwargs = {**(params.get("model_kwargs") or {}), **(params.get("extra_body") or {})}
+        config_model_kwargs = {**(config.get("model_kwargs") or {}), **(config.get("extra_body") or {})}
+        nested_additional_model_request_fields = (
+            first_not_none(
+                params_model_kwargs.get("additional_model_request_fields"),
+                config_model_kwargs.get("additional_model_request_fields"),
+            )
+            or {}
+        )
+        max_tokens = first_not_none(
+            params.get("max_tokens"),
+            params.get("max_new_tokens"),
+            params.get("max_output_tokens"),
+            params.get("max_completion_tokens"),
+            params.get("ls_max_tokens"),
+            params_model_kwargs.get("max_tokens"),
+            params_model_kwargs.get("max_new_tokens"),
+            params_model_kwargs.get("max_output_tokens"),
+            params_model_kwargs.get("max_completion_tokens"),
+            params_model_kwargs.get("ls_max_tokens"),
+            (metadata or {}).get("max_tokens"),
+            (metadata or {}).get("max_new_tokens"),
+            (metadata or {}).get("max_output_tokens"),
+            (metadata or {}).get("max_completion_tokens"),
+            (metadata or {}).get("ls_max_tokens"),
+            config.get("max_tokens"),
+            config.get("max_new_tokens"),
+            config.get("max_output_tokens"),
+            config.get("max_completion_tokens"),
+            config.get("ls_max_tokens"),
+            config_model_kwargs.get("max_tokens"),
+            config_model_kwargs.get("max_new_tokens"),
+            config_model_kwargs.get("max_output_tokens"),
+            config_model_kwargs.get("max_completion_tokens"),
+            config_model_kwargs.get("ls_max_tokens"),
+            additional_model_request_fields.get("max_tokens"),
+            additional_model_request_fields.get("max_new_tokens"),
+            additional_model_request_fields.get("max_output_tokens"),
+            additional_model_request_fields.get("max_completion_tokens"),
+            additional_model_request_fields.get("ls_max_tokens"),
+            nested_additional_model_request_fields.get("max_tokens"),
+            nested_additional_model_request_fields.get("max_new_tokens"),
+            nested_additional_model_request_fields.get("max_output_tokens"),
+            nested_additional_model_request_fields.get("max_completion_tokens"),
+            nested_additional_model_request_fields.get("ls_max_tokens"),
+        )
+        self._set_span_attribute(span, GEN_AI_REQUEST_MAX_TOKENS, max_tokens)
         self._set_span_attribute(
             span,
-            GEN_AI_REQUEST_MAX_TOKENS,
-            params.get("max_tokens") or params.get("max_new_tokens") or config.get("max_tokens"),
+            GEN_AI_REQUEST_TEMPERATURE,
+            first_not_none(
+                params.get("temperature"),
+                params.get("ls_temperature"),
+                params_model_kwargs.get("temperature"),
+                params_model_kwargs.get("ls_temperature"),
+                (metadata or {}).get("temperature"),
+                (metadata or {}).get("ls_temperature"),
+                config.get("temperature"),
+                config.get("ls_temperature"),
+                config_model_kwargs.get("temperature"),
+                config_model_kwargs.get("ls_temperature"),
+                additional_model_request_fields.get("temperature"),
+                additional_model_request_fields.get("ls_temperature"),
+                nested_additional_model_request_fields.get("temperature"),
+                nested_additional_model_request_fields.get("ls_temperature"),
+            ),
         )
         self._set_span_attribute(
-            span, GEN_AI_REQUEST_TEMPERATURE, params.get("temperature") or config.get("temperature")
+            span,
+            GEN_AI_REQUEST_TOP_P,
+            first_not_none(
+                params.get("top_p"),
+                params.get("p"),
+                params_model_kwargs.get("top_p"),
+                (metadata or {}).get("top_p"),
+                config.get("top_p"),
+                config_model_kwargs.get("top_p"),
+                additional_model_request_fields.get("top_p"),
+                nested_additional_model_request_fields.get("top_p"),
+            ),
         )
-        self._set_span_attribute(span, GEN_AI_REQUEST_TOP_P, params.get("top_p") or config.get("top_p"))
-        self._set_span_attribute(span, GEN_AI_REQUEST_TOP_K, params.get("top_k") or config.get("top_k"))
+        self._set_span_attribute(
+            span,
+            GEN_AI_REQUEST_TOP_K,
+            first_not_none(
+                params.get("top_k"),
+                params.get("k"),
+                params_model_kwargs.get("top_k"),
+                (metadata or {}).get("top_k"),
+                config.get("top_k"),
+                config_model_kwargs.get("top_k"),
+                additional_model_request_fields.get("top_k"),
+                nested_additional_model_request_fields.get("top_k"),
+            ),
+        )
         self._set_span_attribute(
             span,
             GEN_AI_REQUEST_FREQUENCY_PENALTY,
-            params.get("frequency_penalty") or config.get("frequency_penalty"),
+            first_not_none(
+                params.get("frequency_penalty"),
+                params_model_kwargs.get("frequency_penalty"),
+                (metadata or {}).get("frequency_penalty"),
+                config.get("frequency_penalty"),
+                config_model_kwargs.get("frequency_penalty"),
+                additional_model_request_fields.get("frequency_penalty"),
+                nested_additional_model_request_fields.get("frequency_penalty"),
+            ),
         )
         self._set_span_attribute(
-            span, GEN_AI_REQUEST_PRESENCE_PENALTY, params.get("presence_penalty") or config.get("presence_penalty")
+            span,
+            GEN_AI_REQUEST_PRESENCE_PENALTY,
+            first_not_none(
+                params.get("presence_penalty"),
+                params_model_kwargs.get("presence_penalty"),
+                (metadata or {}).get("presence_penalty"),
+                config.get("presence_penalty"),
+                config_model_kwargs.get("presence_penalty"),
+                additional_model_request_fields.get("presence_penalty"),
+                nested_additional_model_request_fields.get("presence_penalty"),
+            ),
         )
-        stop = params.get("stop") or config.get("stop")
-        if stop:
-            self._set_span_attribute(span, GEN_AI_REQUEST_STOP_SEQUENCES, stop)
+        stop = first_not_none(
+            params.get("stop"),
+            params.get("stop_sequences"),
+            params.get("ls_stop"),
+            params_model_kwargs.get("stop"),
+            params_model_kwargs.get("stop_sequences"),
+            params_model_kwargs.get("ls_stop"),
+            (metadata or {}).get("stop"),
+            (metadata or {}).get("stop_sequences"),
+            (metadata or {}).get("ls_stop"),
+            config.get("stop"),
+            config.get("stop_sequences"),
+            config.get("ls_stop"),
+            config_model_kwargs.get("stop"),
+            config_model_kwargs.get("stop_sequences"),
+            config_model_kwargs.get("ls_stop"),
+            additional_model_request_fields.get("stop"),
+            additional_model_request_fields.get("stop_sequences"),
+            additional_model_request_fields.get("ls_stop"),
+            nested_additional_model_request_fields.get("stop"),
+            nested_additional_model_request_fields.get("stop_sequences"),
+            nested_additional_model_request_fields.get("ls_stop"),
+        )
+        self._set_span_attribute(span, GEN_AI_REQUEST_STOP_SEQUENCES, [stop] if isinstance(stop, str) else stop)
+        self._set_span_attribute(
+            span,
+            GEN_AI_REQUEST_SEED,
+            first_not_none(
+                params.get("seed"),
+                params.get("random_seed"),
+                params_model_kwargs.get("seed"),
+                params_model_kwargs.get("random_seed"),
+                (metadata or {}).get("seed"),
+                (metadata or {}).get("random_seed"),
+                config.get("seed"),
+                config.get("random_seed"),
+                config_model_kwargs.get("seed"),
+                config_model_kwargs.get("random_seed"),
+                additional_model_request_fields.get("seed"),
+                additional_model_request_fields.get("random_seed"),
+                nested_additional_model_request_fields.get("seed"),
+                nested_additional_model_request_fields.get("random_seed"),
+            ),
+        )
+        self._set_span_attribute(
+            span,
+            GEN_AI_REQUEST_CHOICE_COUNT,
+            first_not_none(
+                params.get("choice_count"),
+                params.get("n"),
+                params.get("num_generations"),
+                params_model_kwargs.get("choice_count"),
+                params_model_kwargs.get("n"),
+                (metadata or {}).get("choice_count"),
+                (metadata or {}).get("n"),
+                config.get("choice_count"),
+                config.get("n"),
+                config_model_kwargs.get("choice_count"),
+                config_model_kwargs.get("n"),
+                additional_model_request_fields.get("choice_count"),
+                additional_model_request_fields.get("n"),
+                nested_additional_model_request_fields.get("choice_count"),
+                nested_additional_model_request_fields.get("n"),
+            ),
+        )
+        self._set_span_attribute(
+            span,
+            GEN_AI_REQUEST_STREAM,
+            first_not_none(
+                params.get("stream"),
+                params.get("streaming"),
+                params_model_kwargs.get("stream"),
+                params_model_kwargs.get("streaming"),
+                (metadata or {}).get("stream"),
+                (metadata or {}).get("streaming"),
+                config.get("stream"),
+                config.get("streaming"),
+                config_model_kwargs.get("stream"),
+                config_model_kwargs.get("streaming"),
+                additional_model_request_fields.get("stream"),
+                additional_model_request_fields.get("streaming"),
+                nested_additional_model_request_fields.get("stream"),
+                nested_additional_model_request_fields.get("streaming"),
+            ),
+        )
 
     def _should_skip_chain(
         self, serialized: dict[str, Any], name: Optional[str], metadata: Optional[dict] = None
