@@ -404,7 +404,23 @@ class TestLangChainInstrumentor(TestCase):
         ]
 
         cases = [
-            (ChatBedrock, {"model_id": "test", "region_name": "us-east-1"}, GenAiProviderNameValues.AWS_BEDROCK.value),
+            (
+                ChatBedrock,
+                {
+                    "model_id": "anthropic.claude-v2",
+                    "region_name": "us-east-1",
+                    "temperature": 0.7,
+                    "max_tokens": 100,
+                    "stop": ["STOP"],
+                    "streaming": False,
+                    "beta_use_converse_api": True,
+                    "model_kwargs": {
+                        "top_p": 0.9,
+                        "additional_model_request_fields": {"top_k": 40},
+                    },
+                },
+                GenAiProviderNameValues.AWS_BEDROCK.value,
+            ),
             (
                 ChatBedrockConverse,
                 {"model": "test", "region_name": "us-east-1"},
@@ -413,7 +429,21 @@ class TestLangChainInstrumentor(TestCase):
             (ChatOpenAI, {"api_key": "fake"}, GenAiProviderNameValues.OPENAI.value),
             (
                 AzureChatOpenAI,
-                {"api_key": "fake", "azure_endpoint": "https://fake.openai.azure.com", "api_version": "2024-01-01"},
+                {
+                    "api_key": "fake",
+                    "azure_endpoint": "https://fake.openai.azure.com",
+                    "api_version": "2024-01-01",
+                    "model": "gpt-4o",
+                    "temperature": 0.0,
+                    "top_p": 0.9,
+                    "max_completion_tokens": 100,
+                    "frequency_penalty": 0.0,
+                    "presence_penalty": 0.0,
+                    "seed": 0,
+                    "streaming": False,
+                    "n": 2,
+                    "stop": ["STOP"],
+                },
                 GenAiProviderNameValues.AZURE_AI_OPENAI.value,
             ),
             (
@@ -423,21 +453,44 @@ class TestLangChainInstrumentor(TestCase):
             ),
             (
                 ChatGoogleGenerativeAI,
-                {"google_api_key": "fake", "model": "gemini-pro"},
+                {
+                    "google_api_key": "fake",
+                    "model": "gemini-pro",
+                    "temperature": 0.0,
+                    "top_p": 0.9,
+                    "top_k": 40,
+                    "max_tokens": 100,
+                    "n": 2,
+                    "stop": ["STOP"],
+                    "streaming": False,
+                },
                 GenAiProviderNameValues.GCP_GEN_AI.value,
             ),
             (
                 ChatMistralAI,
-                {"api_key": "fake", "model": "test", "random_seed": 11},
+                {
+                    "api_key": "fake",
+                    "model": "mistral-large-latest",
+                    "temperature": 0.0,
+                    "top_p": 0.9,
+                    "max_tokens": 100,
+                    "random_seed": 0,
+                    "streaming": True,
+                },
                 GenAiProviderNameValues.MISTRAL_AI.value,
             ),
             (
                 ChatGroq,
                 {
                     "api_key": "fake",
-                    "model": "test",
+                    "model": "llama-3.3-70b-versatile",
+                    "temperature": 0.5,
+                    "max_tokens": 100,
+                    "streaming": True,
+                    "n": 1,
+                    "stop": ["STOP"],
                     "model_kwargs": {
-                        "seed": 7,
+                        "seed": 0,
                         "top_p": 0.0,
                         "frequency_penalty": 0.0,
                         "presence_penalty": 0.0,
@@ -447,15 +500,43 @@ class TestLangChainInstrumentor(TestCase):
             ),
             (
                 ChatCohere,
-                {"cohere_api_key": "fake", "model": "test", "temperature": 0.0},
+                {"cohere_api_key": "fake", "model": "command-a-03-2025", "temperature": 0.0},
                 GenAiProviderNameValues.COHERE.value,
             ),
             (
                 ChatDeepSeek,
-                {"api_key": "fake", "model": "test", "temperature": 0.0},
+                {
+                    "api_key": "fake",
+                    "model": "deepseek-chat",
+                    "temperature": 0.0,
+                    "top_p": 0.9,
+                    "max_tokens": 100,
+                    "frequency_penalty": 0.0,
+                    "presence_penalty": 0.0,
+                    "seed": 0,
+                    "streaming": False,
+                    "n": 2,
+                    "stop": ["STOP"],
+                },
                 GenAiProviderNameValues.DEEPSEEK.value,
             ),
-            (ChatXAI, {"api_key": "fake", "model": "test"}, GenAiProviderNameValues.X_AI.value),
+            (
+                ChatXAI,
+                {
+                    "api_key": "fake",
+                    "model": "grok-4",
+                    "temperature": 0.0,
+                    "top_p": 0.9,
+                    "max_tokens": 100,
+                    "frequency_penalty": 0.0,
+                    "presence_penalty": 0.0,
+                    "seed": 0,
+                    "streaming": False,
+                    "n": 2,
+                    "stop": ["STOP"],
+                },
+                GenAiProviderNameValues.X_AI.value,
+            ),
         ]
 
         for model_cls, init_kwargs, expected_provider in cases:
@@ -545,19 +626,92 @@ class TestLangChainInstrumentor(TestCase):
                     }
                 else:
                     llm = model_cls(**init_kwargs)
-                    with patch.object(type(llm), "_generate", return_value=fake_result):
-                        llm.invoke("test")
+                    with (
+                        patch.object(type(llm), "_generate", return_value=fake_result),
+                        patch.object(type(llm), "_should_stream", return_value=False),
+                    ):
+                        if model_cls is ChatMistralAI:
+                            llm.invoke("test", stop=["STOP"])
+                        elif model_cls is ChatCohere:
+                            llm.invoke(
+                                "test",
+                                stop=["STOP"],
+                                max_tokens=100,
+                                p=0.0,
+                                k=0,
+                                seed=0,
+                                num_generations=2,
+                            )
+                        else:
+                            llm.invoke("test")
                     if model_cls is ChatMistralAI:
-                        expected_request_attributes = {GEN_AI_REQUEST_SEED: 11}
+                        expected_request_attributes = {
+                            GEN_AI_REQUEST_MODEL: "mistral-large-latest",
+                            GEN_AI_REQUEST_TEMPERATURE: 0.0,
+                            GEN_AI_REQUEST_TOP_P: 0.9,
+                            GEN_AI_REQUEST_MAX_TOKENS: 100,
+                            GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
+                            GEN_AI_REQUEST_SEED: 0,
+                            GEN_AI_REQUEST_STREAM: True,
+                        }
+                    elif model_cls is ChatBedrock:
+                        expected_request_attributes = {
+                            GEN_AI_REQUEST_MODEL: "anthropic.claude-v2",
+                            GEN_AI_REQUEST_TEMPERATURE: 0.7,
+                            GEN_AI_REQUEST_TOP_P: 0.9,
+                            GEN_AI_REQUEST_TOP_K: 40,
+                            GEN_AI_REQUEST_MAX_TOKENS: 100,
+                            GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
+                            GEN_AI_REQUEST_STREAM: False,
+                        }
+                    elif model_cls is ChatGoogleGenerativeAI:
+                        expected_request_attributes = {
+                            GEN_AI_REQUEST_MODEL: llm.model,
+                            GEN_AI_REQUEST_TEMPERATURE: 0.0,
+                            GEN_AI_REQUEST_TOP_P: 0.9,
+                            GEN_AI_REQUEST_TOP_K: 40,
+                            GEN_AI_REQUEST_MAX_TOKENS: 100,
+                            GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
+                            GEN_AI_REQUEST_CHOICE_COUNT: 2,
+                            GEN_AI_REQUEST_STREAM: False,
+                        }
                     elif model_cls is ChatGroq:
                         expected_request_attributes = {
+                            GEN_AI_REQUEST_MODEL: "llama-3.3-70b-versatile",
+                            GEN_AI_REQUEST_TEMPERATURE: 0.5,
                             GEN_AI_REQUEST_TOP_P: 0.0,
+                            GEN_AI_REQUEST_MAX_TOKENS: 100,
                             GEN_AI_REQUEST_FREQUENCY_PENALTY: 0.0,
                             GEN_AI_REQUEST_PRESENCE_PENALTY: 0.0,
-                            GEN_AI_REQUEST_SEED: 7,
+                            GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
+                            GEN_AI_REQUEST_SEED: 0,
+                            GEN_AI_REQUEST_CHOICE_COUNT: 1,
+                            GEN_AI_REQUEST_STREAM: True,
                         }
-                    elif model_cls in (ChatCohere, ChatDeepSeek):
-                        expected_request_attributes = {GEN_AI_REQUEST_TEMPERATURE: 0.0}
+                    elif model_cls is ChatCohere:
+                        expected_request_attributes = {
+                            GEN_AI_REQUEST_MODEL: "command-a-03-2025",
+                            GEN_AI_REQUEST_TEMPERATURE: 0.0,
+                            GEN_AI_REQUEST_TOP_P: 0.0,
+                            GEN_AI_REQUEST_TOP_K: 0,
+                            GEN_AI_REQUEST_MAX_TOKENS: 100,
+                            GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
+                            GEN_AI_REQUEST_SEED: 0,
+                            GEN_AI_REQUEST_CHOICE_COUNT: 2,
+                        }
+                    elif model_cls in (AzureChatOpenAI, ChatDeepSeek, ChatXAI):
+                        expected_request_attributes = {
+                            GEN_AI_REQUEST_MODEL: init_kwargs["model"],
+                            GEN_AI_REQUEST_TEMPERATURE: 0.0,
+                            GEN_AI_REQUEST_TOP_P: 0.9,
+                            GEN_AI_REQUEST_MAX_TOKENS: 100,
+                            GEN_AI_REQUEST_FREQUENCY_PENALTY: 0.0,
+                            GEN_AI_REQUEST_PRESENCE_PENALTY: 0.0,
+                            GEN_AI_REQUEST_STOP_SEQUENCES: ("STOP",),
+                            GEN_AI_REQUEST_SEED: 0,
+                            GEN_AI_REQUEST_CHOICE_COUNT: 2,
+                            GEN_AI_REQUEST_STREAM: False,
+                        }
 
                 spans = self.span_exporter.get_finished_spans()
                 chat_spans = [s for s in spans if "chat" in s.name or "text_completion" in s.name]

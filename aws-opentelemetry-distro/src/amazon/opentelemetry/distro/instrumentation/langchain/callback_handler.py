@@ -10,6 +10,7 @@ from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import convert_to_messages
+from langchain_core.outputs import ChatGenerationChunk, GenerationChunk
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     PROVIDER_MAP,
@@ -195,6 +196,14 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             cache_creation_input_tokens,
             reasoning_output_tokens,
         ) = self._extract_token_usage(response)
+
+        streamed: bool = False
+        for generations in response.generations:
+            for generation in generations:
+                if isinstance(generation, (ChatGenerationChunk, GenerationChunk)):
+                    streamed = True
+        if streamed:
+            self._set_span_attribute(span, GEN_AI_REQUEST_STREAM, True)
 
         if response.generations:
             output_messages = self._format_lc_llm_output(response.generations)
@@ -661,6 +670,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             GEN_AI_REQUEST_TOP_P,
             first_not_none(
                 params.get("top_p"),
+                params.get("p"),
                 params_model_kwargs.get("top_p"),
                 (metadata or {}).get("top_p"),
                 config.get("top_p"),
@@ -674,6 +684,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             GEN_AI_REQUEST_TOP_K,
             first_not_none(
                 params.get("top_k"),
+                params.get("k"),
                 params_model_kwargs.get("top_k"),
                 (metadata or {}).get("top_k"),
                 config.get("top_k"),
@@ -758,6 +769,7 @@ class OpenTelemetryCallbackHandler(BaseCallbackHandler):
             first_not_none(
                 params.get("choice_count"),
                 params.get("n"),
+                params.get("num_generations"),
                 params_model_kwargs.get("choice_count"),
                 params_model_kwargs.get("n"),
                 (metadata or {}).get("choice_count"),

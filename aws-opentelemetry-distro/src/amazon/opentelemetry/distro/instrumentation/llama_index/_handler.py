@@ -3,7 +3,7 @@
 import inspect
 import logging
 from time import time_ns
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Generator, Optional
 
 from llama_index.core.agent.workflow import AgentWorkflow, BaseWorkflowAgent
 from llama_index.core.agent.workflow.workflow_events import AgentSetup
@@ -208,7 +208,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         if span.is_passthrough:
             return span
 
-        if isinstance(result, AsyncGenerator):
+        if isinstance(result, (AsyncGenerator, Generator)):
             span.set_deferred()
             return None
 
