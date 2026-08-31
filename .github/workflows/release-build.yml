@@ -203,6 +203,22 @@ jobs:
             ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}
             ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ env.VERSION }}
 
+      # Re-run the verification against the ACTUAL published multi-arch image (pulling each
+      # arch back from the registry), so we validate exactly the bits customers receive --
+      # not just the local pre-push builds. A failure here still blocks the rest of the
+      # release (publish-layer-prod / publish-github depend on this job).
+      - name: Verify published amd64 image
+        shell: bash
+        env:
+          DOCKER_DEFAULT_PLATFORM: linux/amd64
+        run: .github/scripts/test-adot-python-image.sh "${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}" "${{ env.VERSION }}"
+
+      - name: Verify published arm64 image
+        shell: bash
+        env:
+          DOCKER_DEFAULT_PLATFORM: linux/arm64
+        run: .github/scripts/test-adot-python-image.sh "${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}" "${{ env.VERSION }}"
+
       - name: Perform image scan
         uses: ./.github/actions/image_scan
         with:
