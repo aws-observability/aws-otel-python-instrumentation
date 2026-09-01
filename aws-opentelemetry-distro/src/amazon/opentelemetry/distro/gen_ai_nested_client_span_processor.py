@@ -9,6 +9,13 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
 )
 from opentelemetry.trace import SpanKind
 
+_GEN_AI_INFERENCE_OPERATIONS = (
+    GenAiOperationNameValues.CHAT.value,
+    GenAiOperationNameValues.TEXT_COMPLETION.value,
+    GenAiOperationNameValues.GENERATE_CONTENT.value,
+    GenAiOperationNameValues.EMBEDDINGS.value,
+)
+
 
 class GenAiNestedClientSpanProcessor(SpanProcessor):
     # OTel GenAI semantic conventions require outgoing LLM calls to be CLIENT spans.
@@ -25,25 +32,24 @@ class GenAiNestedClientSpanProcessor(SpanProcessor):
 
     def on_end(self, span: ReadableSpan) -> None:
         span_id = span.context.span_id if span.context else None
-        has_gen_ai_client_child = bool(span_id and self._has_gen_ai_client_child.pop(span_id))
+        child_operations = {
+            operation
+            for operation in _GEN_AI_INFERENCE_OPERATIONS
+            if span_id and self._has_gen_ai_client_child.pop((span_id, operation))
+        }
 
         if span.kind != SpanKind.CLIENT:
             return
 
-        is_llm_span = (span.attributes or {}).get(GEN_AI_OPERATION_NAME) in (
-            GenAiOperationNameValues.CHAT.value,
-            GenAiOperationNameValues.TEXT_COMPLETION.value,
-            GenAiOperationNameValues.GENERATE_CONTENT.value,
-            GenAiOperationNameValues.EMBEDDINGS.value,
-        )
-        if not is_llm_span:
+        operation = (span.attributes or {}).get(GEN_AI_OPERATION_NAME)
+        if operation not in _GEN_AI_INFERENCE_OPERATIONS:
             return
 
         parent_span_id = span.parent.span_id if span.parent else None
         if parent_span_id:
-            self._has_gen_ai_client_child.put(parent_span_id, True)
+            self._has_gen_ai_client_child.put((parent_span_id, operation), True)
 
-        if has_gen_ai_client_child:
+        if operation in child_operations:
             span._kind = SpanKind.INTERNAL  # noqa: SLF001
 
     def shutdown(self) -> None:

@@ -93,6 +93,19 @@ class TestGenAiNestedClientSpanProcessor(unittest.TestCase):
         self.assertEqual(spans[0].kind, SpanKind.CLIENT)
         self.assertEqual(spans[1].kind, SpanKind.INTERNAL)
 
+    def test_different_llm_operation_child_leaves_parent_client(self):
+        parent = self._make_llm_span()
+        child = self._make_llm_span(
+            op=GenAiOperationNameValues.EMBEDDINGS.value,
+            ctx=trace.set_span_in_context(parent),
+        )
+        child.end()
+        parent.end()
+
+        spans = self.exporter.get_finished_spans()
+        self.assertEqual(spans[0].kind, SpanKind.CLIENT)
+        self.assertEqual(spans[1].kind, SpanKind.CLIENT)
+
     def test_non_llm_operation_ignored(self):
         span = self.tracer.start_span("invoke_agent MyAgent", kind=SpanKind.CLIENT)
         span.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
