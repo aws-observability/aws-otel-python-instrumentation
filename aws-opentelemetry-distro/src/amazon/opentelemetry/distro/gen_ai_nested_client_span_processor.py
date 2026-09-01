@@ -10,14 +10,14 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
 from opentelemetry.trace import SpanKind
 
 
-class GenAiNestedClientSpanProcessor(SpanProcessor):
+class GenAINestedClientSpanProcessor(SpanProcessor):
     # OTel GenAI semantic conventions require outgoing LLM calls to be CLIENT spans.
-    # However, the same call can be instrumented by both the agentic framework
-    # and the underlying LLM client SDK, producing nested CLIENT spans for a single request.
-    # This processor converts the outer span to INTERNAL so only the innermost
-    # SDK spans remains CLIENT, avoiding the nested CLIENT anti-pattern.
+    # Framework and SDK instrumentation can produce nested CLIENT spans for the same call.
+    # Demote the outer span to INTERNAL only when the child has the same GenAI
+    # inference operation; HTTP and different-operation children leave it CLIENT.
 
     def __init__(self):
+        # Maps (parent span ID, operation) to whether a matching GenAI CLIENT child ended.
         self._has_gen_ai_client_child: DictWithLock = DictWithLock()
 
     def on_start(self, span: Span, parent_context=None) -> None:
@@ -30,6 +30,7 @@ class GenAiNestedClientSpanProcessor(SpanProcessor):
             GenAiOperationNameValues.GENERATE_CONTENT.value,
             GenAiOperationNameValues.EMBEDDINGS.value,
         )
+        # Clean up before early returns so child state cannot leak for non-GenAI parents.
         span_id = span.context.span_id if span.context else None
         child_operations = {
             operation

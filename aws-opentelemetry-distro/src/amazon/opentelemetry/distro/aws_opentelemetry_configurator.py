@@ -31,7 +31,7 @@ from amazon.opentelemetry.distro.aws_span_metrics_processor_builder import AwsSp
 from amazon.opentelemetry.distro.exporter.console.logs.compact_console_log_exporter import (
     CompactConsoleLogRecordExporter,
 )
-from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAiNestedClientSpanProcessor
+from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAINestedClientSpanProcessor
 from amazon.opentelemetry.distro.otlp_udp_exporter import OTLPUdpSpanExporter
 from amazon.opentelemetry.distro.sampler._aws_xray_adaptive_sampling_config import (
     _AnomalyCaptureLimit,
@@ -340,7 +340,7 @@ def _init_tracing(
     )
 
     if is_agent_observability_enabled():
-        trace_provider.add_span_processor(GenAiNestedClientSpanProcessor())
+        trace_provider.add_span_processor(GenAINestedClientSpanProcessor())
 
     for _, exporter_class in exporters.items():
         exporter_args: Dict[str, any] = {}

@@ -3,7 +3,7 @@
 
 import unittest
 
-from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAiNestedClientSpanProcessor
+from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAINestedClientSpanProcessor
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -15,11 +15,11 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
 from opentelemetry.trace import SpanKind
 
 
-class TestGenAiNestedClientSpanProcessor(unittest.TestCase):
+class TestGenAINestedClientSpanProcessor(unittest.TestCase):
     def setUp(self):
         self.exporter = InMemorySpanExporter()
         self.provider = TracerProvider()
-        self.provider.add_span_processor(GenAiNestedClientSpanProcessor())
+        self.provider.add_span_processor(GenAINestedClientSpanProcessor())
         self.provider.add_span_processor(SimpleSpanProcessor(self.exporter))
         self.tracer = self.provider.get_tracer("test")
 
@@ -148,14 +148,14 @@ class TestGenAiNestedClientSpanProcessor(unittest.TestCase):
         self.assertEqual(spans[0].kind, SpanKind.CLIENT)
 
     def test_shutdown_clears_state(self):
-        processor = GenAiNestedClientSpanProcessor()
+        processor = GenAINestedClientSpanProcessor()
         processor._has_gen_ai_client_child.put(123, True)
         self.assertEqual(len(processor._has_gen_ai_client_child), 1)
         processor.shutdown()
         self.assertEqual(len(processor._has_gen_ai_client_child), 0)
 
     def test_force_flush_returns_true(self):
-        processor = GenAiNestedClientSpanProcessor()
+        processor = GenAINestedClientSpanProcessor()
         self.assertTrue(processor.force_flush())
 
 
