@@ -23,7 +23,6 @@ TEST_TAG=$1
 EXPECTED_VERSION="${2:-}"
 
 VOLUME=operator-volume
-NEUTRAL_IMAGE=public.ecr.aws/docker/library/python:3.11
 WORKDIR=$(mktemp -d)
 IMAGE_SRC="${WORKDIR}/image-src"
 VOLUME_COPY="${WORKDIR}/volume-copy"
@@ -37,6 +36,18 @@ cleanup() {
 trap cleanup EXIT
 
 docker volume create "${VOLUME}"
+
+# Extract the image's baked-in payload up front (scratch image: create, don't run) -- used both
+# for the copy-fidelity diff in step 4 and to detect which Python the payload was built for.
+docker create --name adot-src "${TEST_TAG}" /bin/cp >/dev/null
+docker cp adot-src:/autoinstrumentation "${IMAGE_SRC}"
+
+# Link the neutral verifier image to the artifact BY CONSTRUCTION: read the CPython tag from a
+# compiled wheel in the payload (e.g. ...cpython-311-...so -> 3.11) rather than hardcoding, so
+# the verifier's Python can't silently drift from the Dockerfile's. Fall back to 3.11 if the
+# payload has no compiled extension to read a tag from.
+pyver=$(find "${IMAGE_SRC}" -name '*.cpython-*-*.so' | head -1 | sed -E 's/.*cpython-([0-9])([0-9]+)-.*/\1.\2/')
+NEUTRAL_IMAGE="public.ecr.aws/docker/library/python:${pyver:-3.11}"
 
 # 1. Exercise the image's own cp-utility exactly as the operator init container does:
 #    recursively copy the baked-in /autoinstrumentation payload into the shared volume.
@@ -100,10 +111,8 @@ print(f"ported image verified: aws-opentelemetry-distro v{version} loaded from t
       f"volume and resolved as OTel distro -> {distro_cls.__name__}")
 PY
 
-# 4. Copy fidelity: the copied tree must be byte-for-byte identical to the image payload.
-#    (scratch image: create -- but never start -- a container to copy the original out of.)
-docker create --name adot-src "${TEST_TAG}" /bin/cp >/dev/null
-docker cp adot-src:/autoinstrumentation "${IMAGE_SRC}"
+# 4. Copy fidelity: the copied tree must be byte-for-byte identical to the image payload
+#    (already extracted to ${IMAGE_SRC} up front).
 if diff -r "${IMAGE_SRC}" "${VOLUME_COPY}"; then
   echo "copied autoinstrumentation payload matched the image payload"
 else
