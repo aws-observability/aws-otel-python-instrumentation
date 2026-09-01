@@ -1,9 +1,12 @@
 import json
 from base64 import b64encode
 from unittest import TestCase
+from unittest.mock import Mock
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
     content_to_parts,
+    first_not_none,
+    get_value,
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
     to_tool_attribute_value,
@@ -17,6 +20,14 @@ from opentelemetry.trace import set_span_in_context
 
 
 class TestInstrumentationUtils(TestCase):
+    def test_first_not_none_and_get_value(self):
+        object_source = Mock()
+        object_source.temperature = 0.0
+
+        self.assertIs(first_not_none(None, False, True), False)
+        self.assertEqual(get_value(object_source, "temperature"), 0.0)
+        self.assertIs(get_value({"stream": False}, "stream"), False)
+
     def test_content_to_parts_openai_text_blocks(self):
         self.assertEqual(
             content_to_parts(
