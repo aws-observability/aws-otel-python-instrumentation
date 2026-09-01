@@ -41,7 +41,7 @@ class TestGenAiNestedClientSpanProcessor(unittest.TestCase):
         self.assertEqual(child_span.kind, SpanKind.CLIENT)
         self.assertEqual(parent_span.kind, SpanKind.INTERNAL)
 
-    def test_http_child_converts_parent(self):
+    def test_http_child_leaves_parent_client(self):
         parent = self._make_llm_span()
         ctx = trace.set_span_in_context(parent)
         child = self.tracer.start_span("POST", kind=SpanKind.CLIENT, context=ctx)
@@ -50,7 +50,7 @@ class TestGenAiNestedClientSpanProcessor(unittest.TestCase):
 
         spans = self.exporter.get_finished_spans()
         parent_span = next(s for s in spans if s.name == "chat model")
-        self.assertEqual(parent_span.kind, SpanKind.INTERNAL)
+        self.assertEqual(parent_span.kind, SpanKind.CLIENT)
 
     def test_no_child_stays_client(self):
         span = self._make_llm_span()
@@ -100,6 +100,17 @@ class TestGenAiNestedClientSpanProcessor(unittest.TestCase):
 
         spans = self.exporter.get_finished_spans()
         self.assertEqual(spans[0].kind, SpanKind.CLIENT)
+
+    def test_llm_child_leaves_non_llm_parent_client(self):
+        parent = self.tracer.start_span("invoke_agent MyAgent", kind=SpanKind.CLIENT)
+        parent.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
+        child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+        child.end()
+        parent.end()
+
+        spans = self.exporter.get_finished_spans()
+        self.assertEqual(spans[0].kind, SpanKind.CLIENT)
+        self.assertEqual(spans[1].kind, SpanKind.CLIENT)
 
     def test_internal_span_ignored(self):
         span = self.tracer.start_span("chat model", kind=SpanKind.INTERNAL)

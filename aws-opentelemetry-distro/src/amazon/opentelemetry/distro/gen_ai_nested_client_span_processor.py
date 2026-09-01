@@ -24,12 +24,11 @@ class GenAiNestedClientSpanProcessor(SpanProcessor):
         pass
 
     def on_end(self, span: ReadableSpan) -> None:
+        span_id = span.context.span_id if span.context else None
+        has_gen_ai_client_child = bool(span_id and self._has_gen_ai_client_child.pop(span_id))
+
         if span.kind != SpanKind.CLIENT:
             return
-
-        parent_span_id = span.parent.span_id if span.parent else None
-        if parent_span_id:
-            self._has_gen_ai_client_child.put(parent_span_id, True)
 
         is_llm_span = (span.attributes or {}).get(GEN_AI_OPERATION_NAME) in (
             GenAiOperationNameValues.CHAT.value,
@@ -37,7 +36,14 @@ class GenAiNestedClientSpanProcessor(SpanProcessor):
             GenAiOperationNameValues.GENERATE_CONTENT.value,
             GenAiOperationNameValues.EMBEDDINGS.value,
         )
-        if is_llm_span and span.context and self._has_gen_ai_client_child.pop(span.context.span_id):
+        if not is_llm_span:
+            return
+
+        parent_span_id = span.parent.span_id if span.parent else None
+        if parent_span_id:
+            self._has_gen_ai_client_child.put(parent_span_id, True)
+
+        if has_gen_ai_client_child:
             span._kind = SpanKind.INTERNAL  # noqa: SLF001
 
     def shutdown(self) -> None:
