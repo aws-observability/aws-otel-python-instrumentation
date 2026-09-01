@@ -339,6 +339,9 @@ def _init_tracing(
         resource=resource,
     )
 
+    if is_agent_observability_enabled():
+        trace_provider.add_span_processor(GenAiNestedClientSpanProcessor())
+
     for _, exporter_class in exporters.items():
         exporter_args: Dict[str, any] = {}
         span_exporter: SpanExporter = exporter_class(**exporter_args)
@@ -606,7 +609,6 @@ def _customize_span_processors(provider: TracerProvider, resource: Resource, sam
     # and quality degradation that sampling could miss.
     if is_agent_observability_enabled():
         _export_unsampled_span_for_agent_observability(provider, resource)
-        provider.add_span_processor(GenAiNestedClientSpanProcessor())
         baggage_keys.add("session.id")
 
     provider.add_span_processor(BaggageSpanProcessor(lambda key: key in baggage_keys))

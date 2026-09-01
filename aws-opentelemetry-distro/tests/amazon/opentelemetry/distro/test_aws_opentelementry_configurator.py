@@ -42,6 +42,7 @@ from amazon.opentelemetry.distro.aws_opentelemetry_configurator import (
     _fetch_logs_header,
     _init_logging,
     _init_serviceevents,
+    _init_tracing,
     _is_application_signals_enabled,
     _is_application_signals_runtime_enabled,
     _is_defer_to_workers_enabled,
@@ -606,14 +607,28 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ["AGENT_OBSERVABILITY_ENABLED"] = "true"
         os.environ["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] = "https://xray.us-east-1.amazonaws.com/v1/traces"
         _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
-        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 3)
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 2)
+        self.assertIsInstance(
+            mock_tracer_provider.add_span_processor.call_args_list[0].args[0], BatchUnsampledSpanProcessor
+        )
+        self.assertIsInstance(mock_tracer_provider.add_span_processor.call_args_list[1].args[0], BaggageSpanProcessor)
 
-        first_processor = mock_tracer_provider.add_span_processor.call_args_list[0].args[0]
-        self.assertIsInstance(first_processor, BatchUnsampledSpanProcessor)
-        second_processor = mock_tracer_provider.add_span_processor.call_args_list[1].args[0]
-        self.assertIsInstance(second_processor, GenAiNestedClientSpanProcessor)
-        third_processor = mock_tracer_provider.add_span_processor.call_args_list[2].args[0]
-        self.assertIsInstance(third_processor, BaggageSpanProcessor)
+        trace_provider = MagicMock()
+        batch_processor = MagicMock()
+        exporter = MagicMock()
+        with patch.multiple(
+            "amazon.opentelemetry.distro.aws_opentelemetry_configurator",
+            TracerProvider=MagicMock(return_value=trace_provider),
+            BatchSpanProcessor=MagicMock(return_value=batch_processor),
+            _customize_span_exporter=MagicMock(return_value=exporter),
+            _customize_span_processors=MagicMock(),
+            set_tracer_provider=MagicMock(),
+        ):
+            _init_tracing({"otlp": MagicMock(return_value=exporter)})
+
+        processors = [call.args[0] for call in trace_provider.add_span_processor.call_args_list]
+        self.assertIsInstance(processors[0], GenAiNestedClientSpanProcessor)
+        self.assertIs(processors[1], batch_processor)
 
         os.environ.pop("AGENT_OBSERVABILITY_ENABLED", None)
         os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", None)
@@ -1016,14 +1031,13 @@ class TestAwsOpenTelemetryConfigurator(TestCase):
         os.environ.setdefault("AGENT_OBSERVABILITY_ENABLED", "true")
         os.environ.setdefault("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "https://xray.us-east-1.amazonaws.com/v1/traces")
         _customize_span_processors(mock_tracer_provider, Resource.get_empty(), mock_sampler)
-        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 5)
+        self.assertEqual(mock_tracer_provider.add_span_processor.call_count, 4)
 
         processors = [call.args[0] for call in mock_tracer_provider.add_span_processor.call_args_list]
         self.assertIsInstance(processors[0], BatchUnsampledSpanProcessor)
-        self.assertIsInstance(processors[1], GenAiNestedClientSpanProcessor)
-        self.assertIsInstance(processors[2], BaggageSpanProcessor)
-        self.assertIsInstance(processors[3], AttributePropagatingSpanProcessor)
-        self.assertIsInstance(processors[4], AwsSpanMetricsProcessor)
+        self.assertIsInstance(processors[1], BaggageSpanProcessor)
+        self.assertIsInstance(processors[2], AttributePropagatingSpanProcessor)
+        self.assertIsInstance(processors[3], AwsSpanMetricsProcessor)
 
         os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
 
