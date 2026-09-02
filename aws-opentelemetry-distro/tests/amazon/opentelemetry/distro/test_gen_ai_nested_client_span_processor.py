@@ -3,7 +3,7 @@
 
 import unittest
 
-from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAiNestedClientSpanProcessor
+from amazon.opentelemetry.distro.gen_ai_nested_client_span_processor import GenAINestedClientSpanProcessor
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -15,11 +15,11 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
 from opentelemetry.trace import SpanKind
 
 
-class TestGenAiNestedClientSpanProcessor(unittest.TestCase):
+class TestGenAINestedClientSpanProcessor(unittest.TestCase):
     def setUp(self):
         self.exporter = InMemorySpanExporter()
         self.provider = TracerProvider()
-        self.provider.add_span_processor(GenAiNestedClientSpanProcessor())
+        self.provider.add_span_processor(GenAINestedClientSpanProcessor())
         self.provider.add_span_processor(SimpleSpanProcessor(self.exporter))
         self.tracer = self.provider.get_tracer("test")
 
@@ -41,7 +41,7 @@ class TestGenAiNestedClientSpanProcessor(unittest.TestCase):
         self.assertEqual(child_span.kind, SpanKind.CLIENT)
         self.assertEqual(parent_span.kind, SpanKind.INTERNAL)
 
-    def test_http_child_converts_parent(self):
+    def test_http_child_leaves_parent_client(self):
         parent = self._make_llm_span()
         ctx = trace.set_span_in_context(parent)
         child = self.tracer.start_span("POST", kind=SpanKind.CLIENT, context=ctx)
@@ -50,7 +50,7 @@ class TestGenAiNestedClientSpanProcessor(unittest.TestCase):
 
         spans = self.exporter.get_finished_spans()
         parent_span = next(s for s in spans if s.name == "chat model")
-        self.assertEqual(parent_span.kind, SpanKind.INTERNAL)
+        self.assertEqual(parent_span.kind, SpanKind.CLIENT)
 
     def test_no_child_stays_client(self):
         span = self._make_llm_span()
@@ -93,6 +93,19 @@ class TestGenAiNestedClientSpanProcessor(unittest.TestCase):
         self.assertEqual(spans[0].kind, SpanKind.CLIENT)
         self.assertEqual(spans[1].kind, SpanKind.INTERNAL)
 
+    def test_different_llm_operation_child_leaves_parent_client(self):
+        parent = self._make_llm_span()
+        child = self._make_llm_span(
+            op=GenAiOperationNameValues.EMBEDDINGS.value,
+            ctx=trace.set_span_in_context(parent),
+        )
+        child.end()
+        parent.end()
+
+        spans = self.exporter.get_finished_spans()
+        self.assertEqual(spans[0].kind, SpanKind.CLIENT)
+        self.assertEqual(spans[1].kind, SpanKind.CLIENT)
+
     def test_non_llm_operation_ignored(self):
         span = self.tracer.start_span("invoke_agent MyAgent", kind=SpanKind.CLIENT)
         span.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
@@ -100,6 +113,17 @@ class TestGenAiNestedClientSpanProcessor(unittest.TestCase):
 
         spans = self.exporter.get_finished_spans()
         self.assertEqual(spans[0].kind, SpanKind.CLIENT)
+
+    def test_llm_child_leaves_non_llm_parent_client(self):
+        parent = self.tracer.start_span("invoke_agent MyAgent", kind=SpanKind.CLIENT)
+        parent.set_attribute(GEN_AI_OPERATION_NAME, GenAiOperationNameValues.INVOKE_AGENT.value)
+        child = self._make_llm_span(ctx=trace.set_span_in_context(parent))
+        child.end()
+        parent.end()
+
+        spans = self.exporter.get_finished_spans()
+        self.assertEqual(spans[0].kind, SpanKind.CLIENT)
+        self.assertEqual(spans[1].kind, SpanKind.CLIENT)
 
     def test_internal_span_ignored(self):
         span = self.tracer.start_span("chat model", kind=SpanKind.INTERNAL)
@@ -124,14 +148,14 @@ class TestGenAiNestedClientSpanProcessor(unittest.TestCase):
         self.assertEqual(spans[0].kind, SpanKind.CLIENT)
 
     def test_shutdown_clears_state(self):
-        processor = GenAiNestedClientSpanProcessor()
-        processor._has_gen_ai_client_child.put(123, True)
-        self.assertEqual(len(processor._has_gen_ai_client_child), 1)
+        processor = GenAINestedClientSpanProcessor()
+        processor._parent_span_id_and_operation_to_gen_ai_client_child.put(123, True)
+        self.assertEqual(len(processor._parent_span_id_and_operation_to_gen_ai_client_child), 1)
         processor.shutdown()
-        self.assertEqual(len(processor._has_gen_ai_client_child), 0)
+        self.assertEqual(len(processor._parent_span_id_and_operation_to_gen_ai_client_child), 0)
 
     def test_force_flush_returns_true(self):
-        processor = GenAiNestedClientSpanProcessor()
+        processor = GenAINestedClientSpanProcessor()
         self.assertTrue(processor.force_flush())
 
 
