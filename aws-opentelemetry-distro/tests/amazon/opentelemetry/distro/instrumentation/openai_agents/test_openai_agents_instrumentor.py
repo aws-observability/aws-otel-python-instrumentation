@@ -156,7 +156,7 @@ class TestOpenAIAgentsInstrumentor(unittest.TestCase):
         self.instrumentor.uninstrument()
         ItemHelpers.tool_call_output_item(_tool_call("lookup", "call_after"), "sunny")
         self.assertIsNone(GenAIContextCapture.get_tool_call().call_id)
-        self.assertEqual(GenAIContextCapture.get_request_params(), {})
+        self.assertIsNone(GenAIContextCapture.get_model_invocation().request_params)
 
     def test_openai_trace_export_produces_no_http_spans(self):
         exporter = InMemorySpanExporter()
@@ -755,7 +755,7 @@ class TestGenAIContextCapture(unittest.TestCase):
 
         self.assertEqual(result, "wrapped result")
         self.assertEqual(
-            GenAIContextCapture.get_request_params(),
+            GenAIContextCapture.get_model_invocation().request_params,
             {"model": "gpt-4o-mini", "temperature": 0.4, "base_url": "https://api.openai.com/v1"},
         )
 
@@ -775,12 +775,12 @@ class TestGenAIContextCapture(unittest.TestCase):
                     "metadata": {"dropped": True},
                 },
             )
-            return result, GenAIContextCapture.get_request_params(), GenAIContextCapture.get_response_params()
+            return result, GenAIContextCapture.get_model_invocation()
 
-        result, request, response = asyncio.run(capture())
+        result, invocation = asyncio.run(capture())
         self.assertEqual(result["id"], "chatcmpl-1")
         self.assertEqual(
-            request,
+            invocation.request_params,
             {
                 "model": "bedrock/anthropic.claude-3-5-haiku",
                 "base_url": "https://bedrock-runtime.us-west-2.amazonaws.com",
@@ -788,7 +788,7 @@ class TestGenAIContextCapture(unittest.TestCase):
             },
         )
         self.assertEqual(
-            response,
+            invocation.response_params,
             {"id": "chatcmpl-1", "model": "bedrock/anthropic.claude-3-5-haiku"},
         )
 
@@ -814,15 +814,15 @@ class TestGenAIContextCapture(unittest.TestCase):
                 {"model": "gpt-4o-mini"},
             )
             GenAIContextCapture.reset_model_invocation()
-            return GenAIContextCapture.get_request_params(), GenAIContextCapture.get_response_params()
+            return GenAIContextCapture.get_model_invocation()
 
-        request, response = asyncio.run(capture_and_reset())
+        invocation = asyncio.run(capture_and_reset())
         _record_tool_call(name="lookup", call_id="call_1")
 
         GenAIContextCapture.reset_tool_call()
 
-        self.assertEqual(request, {})
-        self.assertEqual(response, {})
+        self.assertIsNone(invocation.request_params)
+        self.assertIsNone(invocation.response_params)
         self.assertIsNone(GenAIContextCapture.get_tool_call().name)
         self.assertIsNone(GenAIContextCapture.get_tool_call().call_id)
 

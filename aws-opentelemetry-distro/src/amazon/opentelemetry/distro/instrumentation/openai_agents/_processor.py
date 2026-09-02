@@ -316,7 +316,8 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         span_data: GenerationSpanData,
     ) -> tuple[dict[str, AttributeValue], _AgentContent]:
         attributes: dict[str, AttributeValue] = {}
-        params = GenAIContextCapture.get_request_params()
+        invocation = GenAIContextCapture.get_model_invocation()
+        params = invocation.request_params or {}
         streamed_response = OpenTelemetryTracingProcessor._get_response_payload(span_data.output)
         model_config = {
             **OpenTelemetryTracingProcessor._get_response_request_config(streamed_response),
@@ -339,9 +340,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_REQUEST_STREAM, True)
             output_items = get_value(streamed_response, "output")
         else:
-            OpenTelemetryTracingProcessor._set_response_payload_attributes(
-                attributes, GenAIContextCapture.get_response_params()
-            )
+            OpenTelemetryTracingProcessor._set_response_payload_attributes(attributes, invocation.response_params)
 
         usage = first_not_none(span_data.usage, get_value(streamed_response, "usage"))
         OpenTelemetryTracingProcessor._set_usage_attributes(attributes, usage)
@@ -367,7 +366,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
     def _set_response_attributes(span_data: ResponseSpanData) -> tuple[dict[str, AttributeValue], _AgentContent]:
         attributes: dict[str, AttributeValue] = {}
         response = span_data.response
-        params = GenAIContextCapture.get_request_params()
+        params = GenAIContextCapture.get_model_invocation().request_params or {}
         model_config = {**OpenTelemetryTracingProcessor._get_response_request_config(response), **params}
 
         response_model = get_value(response, "model")
