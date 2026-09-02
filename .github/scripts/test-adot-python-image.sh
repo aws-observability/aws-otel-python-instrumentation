@@ -120,8 +120,11 @@ else
   exit 1
 fi
 
-ORIG_CHECKSUM=$(cd "${IMAGE_SRC}" && find . -type f -exec sha256sum {} \; | LC_ALL=C sort | sha256sum | cut -d' ' -f1)
-COPY_CHECKSUM=$(cd "${VOLUME_COPY}" && find . -type f -exec sha256sum {} \; | LC_ALL=C sort | sha256sum | cut -d' ' -f1)
+# -L follows symlinks so the fingerprint matches diff -r semantics: if the image payload holds
+# any symlinks, cp-utility -r delivers them as regular files in the volume, and find -type f
+# would otherwise count the two sides differently and mis-report a mismatch.
+ORIG_CHECKSUM=$(cd "${IMAGE_SRC}" && find -L . -type f -exec sha256sum {} \; | LC_ALL=C sort | sha256sum | cut -d' ' -f1)
+COPY_CHECKSUM=$(cd "${VOLUME_COPY}" && find -L . -type f -exec sha256sum {} \; | LC_ALL=C sort | sha256sum | cut -d' ' -f1)
 if [ "${COPY_CHECKSUM}" = "${ORIG_CHECKSUM}" ]; then
   echo "copied autoinstrumentation checksum matched (${COPY_CHECKSUM})"
 else
