@@ -140,6 +140,47 @@ def call_mock_llm(
         return
 
     if provider == "bedrock":
+        if kwargs.get("is_litellm"):
+            import asyncio
+            from unittest.mock import patch
+
+            import httpx
+            from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
+
+            response = {
+                "output": {"message": {"role": "assistant", "content": [{"text": "Hello, World!"}]}},
+                "stopReason": "end_turn",
+                "usage": {"inputTokens": 10, "outputTokens": 20, "totalTokens": 30},
+                "metrics": {"latencyMs": 1},
+            }
+
+            def bedrock_response(request):
+                return httpx.Response(
+                    200,
+                    request=request,
+                    headers={"x-amzn-requestid": "bedrock-request-id"},
+                    json=response,
+                )
+
+            mock_http_client = httpx.AsyncClient(transport=httpx.MockTransport(bedrock_response))
+            http_handler = AsyncHTTPHandler()
+            owned_http_client = http_handler.client
+            http_handler.client = mock_http_client
+
+            async def close_clients():
+                await owned_http_client.aclose()
+                await mock_http_client.aclose()
+
+            try:
+                with patch(
+                    "litellm.llms.bedrock.chat.converse_handler.get_async_httpx_client",
+                    return_value=http_handler,
+                ):
+                    invoke_llm_callback(None)
+            finally:
+                asyncio.run(close_clients())
+            return
+
         from botocore.session import get_session
         from botocore.stub import Stubber
 

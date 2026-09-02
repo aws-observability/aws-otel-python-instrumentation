@@ -5,13 +5,11 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import get_value
-
 
 @dataclass
 class _ModelInvocation:
     request_params: Optional[dict[str, Any]] = None
-    response_params: Optional[dict[str, Any]] = None
+    response: Any = None
 
 
 @dataclass
@@ -30,22 +28,23 @@ class GenAIContextCapture:
 
     @classmethod
     def record_request(cls, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
-        cls._capture_request_params(instance, kwargs)
+        cls._capture_model_request_params(instance, kwargs)
         return wrapped(*args, **kwargs)
 
     @classmethod
-    async def record_litellm_acompletion(cls, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
-        cls._capture_request_params(instance, kwargs)
+    async def record_litellm_invocation(cls, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
+        cls._capture_model_request_params(instance, kwargs)
         response = await wrapped(*args, **kwargs)
-        response_params = {key: value for key in ("id", "model") if (value := get_value(response, key)) is not None}
-        invocation = cls._model_invocation.get() or _ModelInvocation()
-        cls._model_invocation.set(
-            _ModelInvocation(request_params=invocation.request_params, response_params=response_params or None)
-        )
+        cls._capture_litellm_response(response)
         return response
 
     @classmethod
-    def _capture_request_params(cls, instance: Any, kwargs: Any) -> None:
+    def _capture_litellm_response(cls, response: Any) -> None:
+        invocation = cls._model_invocation.get() or _ModelInvocation()
+        cls._model_invocation.set(_ModelInvocation(request_params=invocation.request_params, response=response))
+
+    @classmethod
+    def _capture_model_request_params(cls, instance: Any, kwargs: Any) -> None:
         params = {
             key: value
             for key, value in kwargs.items()

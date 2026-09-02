@@ -215,6 +215,8 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         except Exception as error:  # pylint: disable=broad-exception-caught
             _logger.warning("Failed to enrich OpenAI Agents span %s: %s", span.span_id, error)
         finally:
+            if isinstance(span_data, (GenerationSpanData, ResponseSpanData)):
+                GenAIContextCapture.reset_model_invocation()
             self._set_span_status(otel_span, span.error)
             self._record_trace_error(span)
             otel_span.end()
@@ -340,11 +342,18 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_REQUEST_STREAM, True)
             output_items = get_value(streamed_response, "output")
         else:
-            OpenTelemetryTracingProcessor._set_response_payload_attributes(attributes, invocation.response_params)
+            OpenTelemetryTracingProcessor._set_response_payload_attributes(attributes, invocation.response)
 
-        usage = first_not_none(span_data.usage, get_value(streamed_response, "usage"))
+        usage = first_not_none(
+            span_data.usage,
+            get_value(streamed_response, "usage"),
+            get_value(invocation.response, "usage"),
+        )
         OpenTelemetryTracingProcessor._set_usage_attributes(attributes, usage)
-        default_finish_reason = OpenTelemetryTracingProcessor._get_finish_reason(streamed_response, attributes)
+        default_finish_reason = first_not_none(
+            OpenTelemetryTracingProcessor._get_chat_completion_finish_reason(invocation.response),
+            OpenTelemetryTracingProcessor._get_finish_reason(streamed_response, attributes),
+        )
 
         system_instructions, input_messages = _GenAIMessageNormalizer.normalize_input_messages(span_data.input)
         output_messages = _GenAIMessageNormalizer.normalize_output_messages(output_items, default_finish_reason)
@@ -644,6 +653,24 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         if isinstance(max_tokens, int) and isinstance(output_tokens, int) and output_tokens >= max_tokens > 0:
             return "length"
         return None
+
+    @staticmethod
+    def _get_chat_completion_finish_reason(response: Any) -> Optional[str]:
+        choices = _GenAIMessageNormalizer._to_item_list(get_value(response, "choices"))
+        if not choices:
+            return None
+        reason = get_value(choices[0], "finish_reason")
+        if reason is None:
+            return None
+        return {
+            "end_turn": "stop",
+            "stop": "stop",
+            "tool_calls": "tool_call",
+            "tool_use": "tool_call",
+            "max_tokens": "length",
+            "length": "length",
+            "content_filter": "content_filter",
+        }.get(str(reason), str(reason))
 
     @staticmethod
     def _get_request_output_type(model_config: Mapping[str, Any]) -> Optional[str]:

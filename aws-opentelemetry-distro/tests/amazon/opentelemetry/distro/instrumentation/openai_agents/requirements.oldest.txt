@@ -1,1 +1,2 @@
-openai-agents==0.3.3
+openai-agents[litellm]==0.3.3
+litellm<1.97.0; python_version == "3.10"
