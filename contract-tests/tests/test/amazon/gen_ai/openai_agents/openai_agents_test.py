@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from typing_extensions import override
 
-from amazon.gen_ai.gen_ai_test_base import GEN_AI_REQUEST_TEMPERATURE, GenAITestBase
+from amazon.gen_ai.gen_ai_test_base import GEN_AI_REQUEST_TEMPERATURE, GEN_AI_TOOL_DEFINITIONS, GenAITestBase
 
 
 class OpenAIAgentsTest(GenAITestBase):
@@ -33,3 +33,4 @@ class OpenAIAgentsTest(GenAITestBase):
             attrs = self._get_attributes_dict(span.attributes)
             self.assertIn(GEN_AI_REQUEST_TEMPERATURE, attrs)
             self.assertEqual(attrs[GEN_AI_REQUEST_TEMPERATURE].double_value, 0.7)
+            self.assertIn(GEN_AI_TOOL_DEFINITIONS, attrs)

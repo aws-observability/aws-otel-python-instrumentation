@@ -50,6 +50,7 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
             "AsyncCompletions.create",
             GenAIContextCapture.record_request,
         )
+        try_wrap("litellm", "acompletion", GenAIContextCapture.record_litellm_acompletion)
         try_wrap("agents.items", "ItemHelpers.tool_call_output_item", GenAIContextCapture.record_tool_call)
         try_wrap("agents.tool_context", "ToolContext.from_agent_context", GenAIContextCapture.record_tool_call)
         # disables http spans created from spans sent OpenAI's tracing backend
@@ -76,10 +77,11 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
         try_unwrap("openai.resources.responses.responses.AsyncResponses", "create")
         try_unwrap("openai.resources.chat.completions.completions.Completions", "create")
         try_unwrap("openai.resources.chat.completions.completions.AsyncCompletions", "create")
+        try_unwrap("litellm", "acompletion")
         try_unwrap("agents.items.ItemHelpers", "tool_call_output_item")
         try_unwrap("agents.tool_context.ToolContext", "from_agent_context")
         try_unwrap("agents.tracing.processors.BackendSpanExporter", "export")
-        GenAIContextCapture.reset_request_params()
+        GenAIContextCapture.reset_model_invocation()
         GenAIContextCapture.reset_tool_call()
 
         processor = self._processor

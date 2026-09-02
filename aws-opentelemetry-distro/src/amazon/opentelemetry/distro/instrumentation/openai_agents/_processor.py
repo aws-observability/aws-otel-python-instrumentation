@@ -153,7 +153,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             return
 
         if isinstance(span_data, (GenerationSpanData, ResponseSpanData)):
-            GenAIContextCapture.reset_request_params()
+            GenAIContextCapture.reset_model_invocation()
         if isinstance(span_data, (FunctionSpanData, HandoffSpanData)):
             GenAIContextCapture.reset_tool_call()
 
@@ -338,6 +338,10 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             OpenTelemetryTracingProcessor._set_response_payload_attributes(attributes, streamed_response)
             OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_REQUEST_STREAM, True)
             output_items = get_value(streamed_response, "output")
+        else:
+            OpenTelemetryTracingProcessor._set_response_payload_attributes(
+                attributes, GenAIContextCapture.get_response_params()
+            )
 
         usage = first_not_none(span_data.usage, get_value(streamed_response, "usage"))
         OpenTelemetryTracingProcessor._set_usage_attributes(attributes, usage)

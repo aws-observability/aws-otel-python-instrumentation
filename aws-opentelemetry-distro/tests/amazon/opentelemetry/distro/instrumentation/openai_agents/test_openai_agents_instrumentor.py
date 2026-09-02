@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import asyncio
 import json
 import unittest
 from importlib.metadata import entry_points
@@ -54,6 +55,7 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_TOOL_CALL_ARGUMENTS,
     GEN_AI_TOOL_CALL_ID,
     GEN_AI_TOOL_CALL_RESULT,
+    GEN_AI_TOOL_DEFINITIONS,
     GEN_AI_TOOL_NAME,
     GEN_AI_TOOL_TYPE,
     GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
@@ -210,7 +212,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         provider = tracing.get_trace_provider()
         self.previous_processors = tuple(provider._multi_processor._processors)  # pylint: disable=protected-access
         tracing.set_trace_processors([self.processor])
-        GenAIContextCapture.reset_request_params()
+        GenAIContextCapture.reset_model_invocation()
         GenAIContextCapture.reset_tool_call()
 
     def tearDown(self) -> None:
@@ -591,6 +593,74 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         self.assertEqual(span.attributes[GEN_AI_OUTPUT_TYPE], GenAiOutputTypeValues.JSON.value)
         self.assertNotIn(GEN_AI_REQUEST_TOP_P, span.attributes)
 
+    def test_litellm_acompletion_captures_tools_and_response_metadata(self):
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "lookup",
+                    "description": "Look up a city.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                        "required": ["city"],
+                    },
+                },
+            }
+        ]
+
+        async def run_litellm_call():
+            async def acompletion(*args, **kwargs):
+                return SimpleNamespace(
+                    id="chatcmpl-bedrock-1",
+                    model="bedrock/anthropic.claude-3-5-haiku",
+                )
+
+            with tracing.trace("LiteLLM workflow"):
+                with tracing.generation_span(
+                    input=[{"role": "user", "content": "Use the tool"}],
+                    output=[{"role": "assistant", "content": "Done"}],
+                    model=None,
+                ):
+                    await GenAIContextCapture.record_litellm_acompletion(
+                        acompletion,
+                        None,
+                        (),
+                        {
+                            "model": "bedrock/anthropic.claude-3-5-haiku",
+                            "base_url": "https://bedrock-runtime.us-west-2.amazonaws.com:8443",
+                            "temperature": 0.2,
+                            "tools": tools,
+                            "metadata": {"dropped": "not a request parameter"},
+                        },
+                    )
+
+        asyncio.run(run_litellm_call())
+
+        span = self._spans_by_name()["chat bedrock/anthropic.claude-3-5-haiku"]
+        self.assertEqual(span.attributes[GEN_AI_PROVIDER_NAME], GenAiProviderNameValues.AWS_BEDROCK.value)
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_MODEL], "bedrock/anthropic.claude-3-5-haiku")
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_TEMPERATURE], 0.2)
+        self.assertEqual(span.attributes[SERVER_ADDRESS], "bedrock-runtime.us-west-2.amazonaws.com")
+        self.assertEqual(span.attributes[SERVER_PORT], 8443)
+        self.assertEqual(span.attributes[GEN_AI_RESPONSE_ID], "chatcmpl-bedrock-1")
+        self.assertEqual(span.attributes[GEN_AI_RESPONSE_MODEL], "bedrock/anthropic.claude-3-5-haiku")
+        self.assertEqual(
+            json.loads(span.attributes[GEN_AI_TOOL_DEFINITIONS]),
+            [
+                {
+                    "type": "function",
+                    "name": "lookup",
+                    "description": "Look up a city.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                        "required": ["city"],
+                    },
+                }
+            ],
+        )
+
     def test_sentinel_request_values_are_not_exported(self):
         attributes: dict = {}
         self.processor._set_attribute(
@@ -667,11 +737,11 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
 
 class TestGenAIContextCapture(unittest.TestCase):
     def setUp(self) -> None:
-        GenAIContextCapture.reset_request_params()
+        GenAIContextCapture.reset_model_invocation()
         GenAIContextCapture.reset_tool_call()
 
     def tearDown(self) -> None:
-        GenAIContextCapture.reset_request_params()
+        GenAIContextCapture.reset_model_invocation()
         GenAIContextCapture.reset_tool_call()
 
     def test_record_request_keeps_known_params_and_client_base_url(self):
@@ -689,6 +759,39 @@ class TestGenAIContextCapture(unittest.TestCase):
             {"model": "gpt-4o-mini", "temperature": 0.4, "base_url": "https://api.openai.com/v1"},
         )
 
+    def test_record_litellm_acompletion_captures_request_and_response(self):
+        async def capture():
+            async def acompletion(*args, **kwargs):
+                return {"id": "chatcmpl-1", "model": "bedrock/anthropic.claude-3-5-haiku"}
+
+            result = await GenAIContextCapture.record_litellm_acompletion(
+                acompletion,
+                None,
+                (),
+                {
+                    "model": "bedrock/anthropic.claude-3-5-haiku",
+                    "base_url": "https://bedrock-runtime.us-west-2.amazonaws.com",
+                    "tools": [{"type": "function", "function": {"name": "lookup"}}],
+                    "metadata": {"dropped": True},
+                },
+            )
+            return result, GenAIContextCapture.get_request_params(), GenAIContextCapture.get_response_params()
+
+        result, request, response = asyncio.run(capture())
+        self.assertEqual(result["id"], "chatcmpl-1")
+        self.assertEqual(
+            request,
+            {
+                "model": "bedrock/anthropic.claude-3-5-haiku",
+                "base_url": "https://bedrock-runtime.us-west-2.amazonaws.com",
+                "tools": [{"type": "function", "function": {"name": "lookup"}}],
+            },
+        )
+        self.assertEqual(
+            response,
+            {"id": "chatcmpl-1", "model": "bedrock/anthropic.claude-3-5-haiku"},
+        )
+
     def test_record_tool_call_reads_positional_payload_and_ignores_empty(self):
         result = GenAIContextCapture.record_tool_call(_passthrough, None, (_tool_call("lookup", "call_1"),), {})
 
@@ -700,13 +803,26 @@ class TestGenAIContextCapture(unittest.TestCase):
         self.assertEqual(GenAIContextCapture.get_tool_call().call_id, "call_1")
 
     def test_reset_clears_captured_state(self):
-        _record_request(model="gpt-4o-mini")
+        async def capture_and_reset():
+            async def acompletion(*args, **kwargs):
+                return {"id": "chatcmpl-1", "model": "gpt-4o-mini"}
+
+            await GenAIContextCapture.record_litellm_acompletion(
+                acompletion,
+                None,
+                (),
+                {"model": "gpt-4o-mini"},
+            )
+            GenAIContextCapture.reset_model_invocation()
+            return GenAIContextCapture.get_request_params(), GenAIContextCapture.get_response_params()
+
+        request, response = asyncio.run(capture_and_reset())
         _record_tool_call(name="lookup", call_id="call_1")
 
-        GenAIContextCapture.reset_request_params()
         GenAIContextCapture.reset_tool_call()
 
-        self.assertEqual(GenAIContextCapture.get_request_params(), {})
+        self.assertEqual(request, {})
+        self.assertEqual(response, {})
         self.assertIsNone(GenAIContextCapture.get_tool_call().name)
         self.assertIsNone(GenAIContextCapture.get_tool_call().call_id)
 
