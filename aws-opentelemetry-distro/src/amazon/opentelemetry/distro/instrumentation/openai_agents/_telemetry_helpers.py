@@ -1,6 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+"""Telemetry attribute helpers shared by the OpenAI Agents processor and wrappers."""
+
 import re
 from collections.abc import Mapping, Sequence
 from typing import Any, Optional

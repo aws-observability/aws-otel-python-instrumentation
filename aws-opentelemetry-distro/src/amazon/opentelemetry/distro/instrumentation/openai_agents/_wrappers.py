@@ -1,9 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from functools import partial
+from contextlib import suppress
 from inspect import isawaitable, iscoroutinefunction
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from agents.tracing import get_current_span
 from agents.tracing.span_data import FunctionSpanData, GenerationSpanData, HandoffSpanData, ResponseSpanData
@@ -11,7 +11,7 @@ from openai import NotGiven, Omit
 from wrapt import ObjectProxy
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import get_value
-from amazon.opentelemetry.distro.instrumentation.openai_agents._shared import _TelemetryHelpers
+from amazon.opentelemetry.distro.instrumentation.openai_agents._telemetry_helpers import _TelemetryHelpers
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_OPERATION_NAME,
     GEN_AI_PROVIDER_NAME,
@@ -26,18 +26,19 @@ from opentelemetry.util.types import AttributeValue
 
 
 class _ResponseCapturingStream(ObjectProxy):
-    """Preserve the LiteLLM stream interface while capturing each response chunk."""
+    """Preserve the completion stream interface while capturing each response chunk."""
 
-    def __init__(self, stream: Any, capture: Callable[[Any], None]) -> None:
+    def __init__(self, stream: Any, span: Span) -> None:
         super().__init__(stream)
-        self._self_capture = capture
+        self._self_span = span
 
     def __iter__(self) -> Any:
         return self
 
     def __next__(self) -> Any:
         chunk = next(self.__wrapped__)
-        self._self_capture(chunk)
+        with suppress(Exception):
+            OpenAIAgentWrapper._capture_llm_response_attributes(self._self_span, chunk)
         return chunk
 
     def __aiter__(self) -> Any:
@@ -45,7 +46,8 @@ class _ResponseCapturingStream(ObjectProxy):
 
     async def __anext__(self) -> Any:
         chunk = await self.__wrapped__.__anext__()
-        self._self_capture(chunk)
+        with suppress(Exception):
+            OpenAIAgentWrapper._capture_llm_response_attributes(self._self_span, chunk)
         return chunk
 
 
@@ -56,19 +58,35 @@ class OpenAIAgentWrapper:
         self._processor = processor
 
     def capture_openai_request_attributes(self, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
-        """Wrap OpenAI Responses and Chat Completions create methods to capture request attributes."""
+        """Wrap OpenAI Responses create methods to capture request attributes."""
+        openai_span = get_current_span()
+        if not isinstance(get_value(openai_span, "span_data"), ResponseSpanData):
+            return wrapped(*args, **kwargs)
+        span = self._processor.get_otel_span(openai_span.span_id)
+        if span is None:
+            return wrapped(*args, **kwargs)
+        with suppress(Exception):
+            self._capture_llm_request_attributes(span, instance, kwargs)
+        return wrapped(*args, **kwargs)
+
+    def capture_openai_completion_attributes(self, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
+        """Wrap OpenAI Chat Completions create methods to capture request and response attributes."""
         openai_span = get_current_span()
         span_data = get_value(openai_span, "span_data")
-        if not isinstance(span_data, (GenerationSpanData, ResponseSpanData)):
-            return wrapped(*args, **kwargs)
         if (
-            isinstance(span_data, GenerationSpanData)
-            and get_value(get_value(span_data, "model_config"), "model_impl") == "litellm"
+            not isinstance(span_data, GenerationSpanData)
+            or get_value(get_value(span_data, "model_config"), "model_impl") == "litellm"
         ):
             return wrapped(*args, **kwargs)
         span = self._processor.get_otel_span(openai_span.span_id)
-        self._capture_llm_request_attributes(span, instance, kwargs)
-        return wrapped(*args, **kwargs)
+        if span is None:
+            return wrapped(*args, **kwargs)
+        with suppress(Exception):
+            self._capture_llm_request_attributes(span, instance, kwargs)
+        response = wrapped(*args, **kwargs)
+        if isawaitable(response):
+            return self._capture_acompletion_response_attributes(span, response, kwargs.get("stream"))
+        return self._capture_completion_response_attributes(span, response, kwargs.get("stream"))
 
     def capture_litellm_completion_attributes(self, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
         """Wrap LiteLLM completion and acompletion to capture request and response attributes."""
@@ -81,27 +99,22 @@ class OpenAIAgentWrapper:
         span = self._processor.get_otel_span(openai_span.span_id)
         if span is None:
             return wrapped(*args, **kwargs)
-        self._capture_llm_request_attributes(span, instance, kwargs)
+        with suppress(Exception):
+            self._capture_llm_request_attributes(span, instance, kwargs)
         response = wrapped(*args, **kwargs)
         if isawaitable(response):
-            return self._capture_litellm_acompletion_response_attributes(span, response, kwargs.get("stream"))
-        if kwargs.get("stream") and hasattr(response, "__iter__"):
-            return _ResponseCapturingStream(
-                response,
-                partial(self._capture_llm_response_attributes, span),
-            )
-        self._capture_llm_response_attributes(span, response)
+            return self._capture_acompletion_response_attributes(span, response, kwargs.get("stream"))
+        return self._capture_completion_response_attributes(span, response, kwargs.get("stream"))
+
+    def _capture_completion_response_attributes(self, span: Span, response: Any, stream: Any) -> Any:
+        if stream and (hasattr(response, "__iter__") or hasattr(response, "__aiter__")):
+            return _ResponseCapturingStream(response, span)
+        with suppress(Exception):
+            self._capture_llm_response_attributes(span, response)
         return response
 
-    async def _capture_litellm_acompletion_response_attributes(self, span: Span, response: Any, stream: Any) -> Any:
-        awaited_response = await response
-        if stream and hasattr(awaited_response, "__aiter__"):
-            return _ResponseCapturingStream(
-                awaited_response,
-                partial(self._capture_llm_response_attributes, span),
-            )
-        self._capture_llm_response_attributes(span, awaited_response)
-        return awaited_response
+    async def _capture_acompletion_response_attributes(self, span: Span, response: Any, stream: Any) -> Any:
+        return self._capture_completion_response_attributes(span, await response, stream)
 
     def capture_tool_call_attributes(self, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
         """Wrap OpenAI Agents tool-call helpers to capture the tool name and call ID attributes."""

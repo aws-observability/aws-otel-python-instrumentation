@@ -56,12 +56,12 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
         try_wrap(
             "openai.resources.chat.completions.completions",
             "Completions.create",
-            wrapper.capture_openai_request_attributes,
+            wrapper.capture_openai_completion_attributes,
         )
         try_wrap(
             "openai.resources.chat.completions.completions",
             "AsyncCompletions.create",
-            wrapper.capture_openai_request_attributes,
+            wrapper.capture_openai_completion_attributes,
         )
         try_wrap("litellm", "completion", wrapper.capture_litellm_completion_attributes)
         try_wrap("litellm", "acompletion", wrapper.capture_litellm_completion_attributes)

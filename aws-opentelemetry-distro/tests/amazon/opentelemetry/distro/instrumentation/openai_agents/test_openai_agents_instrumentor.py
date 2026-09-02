@@ -23,7 +23,7 @@ from amazon.opentelemetry.distro.instrumentation.openai_agents._processor import
     OpenTelemetryTracingProcessor,
     _GenAIMessageNormalizer,
 )
-from amazon.opentelemetry.distro.instrumentation.openai_agents._shared import (
+from amazon.opentelemetry.distro.instrumentation.openai_agents._telemetry_helpers import (
     GEN_AI_REQUEST_REASONING_LEVEL,
     _TelemetryHelpers,
 )
@@ -94,7 +94,7 @@ def _record_tool_call(wrapper, name=None, call_id=None):
 
 def _record_request(wrapper, base_url=None, **kwargs):
     instance = SimpleNamespace(_client=SimpleNamespace(base_url=base_url)) if base_url else None
-    return wrapper.capture_openai_request_attributes(_passthrough, instance, (), kwargs)
+    return wrapper.capture_openai_completion_attributes(_passthrough, instance, (), kwargs)
 
 
 def _litellm_response(model, finish_reasons):
@@ -595,6 +595,11 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_STOP_SEQUENCES], ("STOP",))
         self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_SEED], 42)
         self.assertEqual(chat_span.attributes[GEN_AI_REQUEST_CHOICE_COUNT], 2)
+        self.assertEqual(chat_span.attributes[GEN_AI_RESPONSE_ID], "chatcmpl-mock")
+        self.assertEqual(chat_span.attributes[GEN_AI_RESPONSE_MODEL], model)
+        self.assertEqual(chat_span.attributes[GEN_AI_RESPONSE_FINISH_REASONS], ("stop",))
+        self.assertEqual(chat_span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 10)
+        self.assertEqual(chat_span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 20)
 
         self.exporter.clear()
         with tracing.trace("Capture workflow"):
