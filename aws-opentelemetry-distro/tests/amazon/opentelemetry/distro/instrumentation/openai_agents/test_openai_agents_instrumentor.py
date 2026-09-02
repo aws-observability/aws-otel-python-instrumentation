@@ -15,7 +15,7 @@ from agents.tracing import processors
 from agents.tracing.processors import BackendSpanExporter
 from conftest import call_mock_llm, validate_otel_genai_schema
 from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
-from openai import Omit
+from openai import NOT_GIVEN, Omit
 from pydantic import BaseModel
 
 from amazon.opentelemetry.distro.instrumentation.openai_agents import OpenAIAgentsInstrumentor
@@ -256,6 +256,8 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         response = SimpleNamespace(
             id="resp_1",
             model="gpt-response",
+            temperature=1.0,
+            top_p=1.0,
             instructions="Response instructions",
             output=final_output,
             usage=SimpleNamespace(input_tokens=7, output_tokens=3),
@@ -290,7 +292,12 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
                 if hasattr(response_trace_span.span_data, "usage"):
                     response_trace_span.span_data.usage = {"input_tokens": 7, "output_tokens": 3}
                 with response_trace_span:
-                    pass
+                    GenAIContextCapture.capture_openai_request_attributes(
+                        _passthrough,
+                        None,
+                        (),
+                        {"temperature": Omit(), "top_p": NOT_GIVEN},
+                    )
 
         spans = self._spans_by_name()
         workflow_span = spans["invoke_workflow Test workflow"]
@@ -346,6 +353,8 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         self.assertEqual(response_span.attributes[GEN_AI_RESPONSE_ID], "resp_1")
         self.assertEqual(response_span.attributes[GEN_AI_RESPONSE_MODEL], "gpt-response")
         self.assertEqual(response_span.attributes[GEN_AI_REQUEST_MODEL], "gpt-response")
+        self.assertEqual(response_span.attributes[GEN_AI_REQUEST_TEMPERATURE], 1.0)
+        self.assertEqual(response_span.attributes[GEN_AI_REQUEST_TOP_P], 1.0)
         self.assertEqual(response_span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 7)
         self.assertEqual(response_span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 3)
 

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from inspect import isawaitable, iscoroutinefunction
 from typing import Any, Optional
 
+from openai import NotGiven, Omit
 from wrapt import ObjectProxy
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import get_value
@@ -118,6 +119,7 @@ class GenAIContextCapture:
             key: value
             for key, value in kwargs.items()
             if value is not None
+            and not isinstance(value, (NotGiven, Omit))
             and key
             in {
                 "api_base",
