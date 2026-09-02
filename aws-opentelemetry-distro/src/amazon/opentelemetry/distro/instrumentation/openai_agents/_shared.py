@@ -49,24 +49,51 @@ GEN_AI_REQUEST_REASONING_LEVEL = "gen_ai.request.reasoning.level"
 class _TelemetryHelpers:
     @staticmethod
     def set_request_attributes(attributes: dict[str, AttributeValue], model_config: Mapping[str, Any]) -> None:
-        request_attributes = (
-            (GEN_AI_REQUEST_TEMPERATURE, ("temperature",)),
-            (GEN_AI_REQUEST_TOP_P, ("top_p",)),
-            (GEN_AI_REQUEST_TOP_K, ("top_k",)),
-            (GEN_AI_REQUEST_MAX_TOKENS, ("max_tokens", "max_output_tokens", "max_completion_tokens")),
-            (GEN_AI_REQUEST_FREQUENCY_PENALTY, ("frequency_penalty",)),
-            (GEN_AI_REQUEST_PRESENCE_PENALTY, ("presence_penalty",)),
-            (GEN_AI_REQUEST_STOP_SEQUENCES, ("stop_sequences", "stop")),
-            (GEN_AI_REQUEST_SEED, ("seed",)),
-            (GEN_AI_REQUEST_CHOICE_COUNT, ("choice_count", "n")),
-            (GEN_AI_REQUEST_STREAM, ("stream",)),
-            (GEN_AI_OPENAI_REQUEST_SERVICE_TIER, ("service_tier",)),
+        _TelemetryHelpers.set_attribute(
+            attributes,
+            GEN_AI_REQUEST_TEMPERATURE,
+            model_config.get("temperature"),
         )
-        for attribute, keys in request_attributes:
-            value = first_not_none(*(model_config.get(key) for key in keys))
-            if attribute == GEN_AI_REQUEST_STOP_SEQUENCES:
-                value = _TelemetryHelpers._to_string_sequence(value)
-            _TelemetryHelpers.set_attribute(attributes, attribute, value)
+        _TelemetryHelpers.set_attribute(attributes, GEN_AI_REQUEST_TOP_P, model_config.get("top_p"))
+        _TelemetryHelpers.set_attribute(attributes, GEN_AI_REQUEST_TOP_K, model_config.get("top_k"))
+        _TelemetryHelpers.set_attribute(
+            attributes,
+            GEN_AI_REQUEST_MAX_TOKENS,
+            first_not_none(
+                model_config.get("max_tokens"),
+                model_config.get("max_output_tokens"),
+                model_config.get("max_completion_tokens"),
+            ),
+        )
+        _TelemetryHelpers.set_attribute(
+            attributes,
+            GEN_AI_REQUEST_FREQUENCY_PENALTY,
+            model_config.get("frequency_penalty"),
+        )
+        _TelemetryHelpers.set_attribute(
+            attributes,
+            GEN_AI_REQUEST_PRESENCE_PENALTY,
+            model_config.get("presence_penalty"),
+        )
+        _TelemetryHelpers.set_attribute(
+            attributes,
+            GEN_AI_REQUEST_STOP_SEQUENCES,
+            _TelemetryHelpers._to_string_sequence(
+                first_not_none(model_config.get("stop_sequences"), model_config.get("stop"))
+            ),
+        )
+        _TelemetryHelpers.set_attribute(attributes, GEN_AI_REQUEST_SEED, model_config.get("seed"))
+        _TelemetryHelpers.set_attribute(
+            attributes,
+            GEN_AI_REQUEST_CHOICE_COUNT,
+            first_not_none(model_config.get("choice_count"), model_config.get("n")),
+        )
+        _TelemetryHelpers.set_attribute(attributes, GEN_AI_REQUEST_STREAM, model_config.get("stream"))
+        _TelemetryHelpers.set_attribute(
+            attributes,
+            GEN_AI_OPENAI_REQUEST_SERVICE_TIER,
+            model_config.get("service_tier"),
+        )
 
         base_url = model_config.get("base_url") or model_config.get("api_base")
         if base_url:

@@ -31,6 +31,7 @@ class OpenAIAgentsWrappers:
         self._processor = processor
 
     def capture_openai_request_attributes(self, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
+        """Wrap OpenAI Responses and Chat Completions create methods to capture request attributes."""
         openai_span = get_current_span()
         span_data = get_value(openai_span, "span_data")
         if not isinstance(span_data, (GenerationSpanData, ResponseSpanData)):
@@ -46,6 +47,7 @@ class OpenAIAgentsWrappers:
 
     @staticmethod
     def capture_litellm_request_model_config(wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
+        """Wrap model_config_for_trace to preserve LiteLLM provider configuration attributes."""
         config = wrapped(*args, **kwargs)
         model_settings = kwargs.get("model_settings") or (args[0] if args else None)
         extra_args = get_value(model_settings, "extra_args")
@@ -63,6 +65,7 @@ class OpenAIAgentsWrappers:
         return config
 
     def capture_litellm_completion_attributes(self, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
+        """Wrap LiteLLM completion and acompletion to capture request and response attributes."""
         if kwargs.get("acompletion") and not iscoroutinefunction(wrapped):
             return wrapped(*args, **kwargs)
         openai_span = get_current_span()
@@ -108,6 +111,7 @@ class OpenAIAgentsWrappers:
                 await close()
 
     def capture_tool_call_attributes(self, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
+        """Wrap OpenAI Agents tool-call helpers to capture the tool name and call ID attributes."""
         openai_span = get_current_span()
         span_data = get_value(openai_span, "span_data")
         if not isinstance(span_data, (FunctionSpanData, HandoffSpanData)):

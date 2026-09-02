@@ -18,7 +18,6 @@ from openai import Omit
 from pydantic import BaseModel
 
 from amazon.opentelemetry.distro.instrumentation.openai_agents import OpenAIAgentsInstrumentor
-from amazon.opentelemetry.distro.instrumentation.openai_agents._wrappers import OpenAIAgentsWrappers
 from amazon.opentelemetry.distro.instrumentation.openai_agents._processor import (
     OpenTelemetryTracingProcessor,
     _GenAIMessageNormalizer,
@@ -27,6 +26,7 @@ from amazon.opentelemetry.distro.instrumentation.openai_agents._shared import (
     GEN_AI_REQUEST_REASONING_LEVEL,
     _TelemetryHelpers,
 )
+from amazon.opentelemetry.distro.instrumentation.openai_agents._wrappers import OpenAIAgentsWrappers
 from opentelemetry.instrumentation.httpx import HTTPX2ClientInstrumentor, HTTPXClientInstrumentor
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor

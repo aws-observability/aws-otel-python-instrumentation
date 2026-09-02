@@ -34,8 +34,8 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
             set_trace_processors,
         )
 
-        from ._wrappers import OpenAIAgentsWrappers  # pylint: disable=import-outside-toplevel
         from ._processor import OpenTelemetryTracingProcessor  # pylint: disable=import-outside-toplevel
+        from ._wrappers import OpenAIAgentsWrappers  # pylint: disable=import-outside-toplevel
 
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
