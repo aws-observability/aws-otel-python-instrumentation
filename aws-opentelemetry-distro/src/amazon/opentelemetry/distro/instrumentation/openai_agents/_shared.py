@@ -88,7 +88,7 @@ class _TelemetryHelpers:
         )
 
     @staticmethod
-    def set_response_payload_attributes(attributes: dict[str, AttributeValue], response: Any) -> None:
+    def set_response_attributes(attributes: dict[str, AttributeValue], response: Any) -> None:
         response_id = get_value(response, "id")
         _TelemetryHelpers.set_attribute(
             attributes, GEN_AI_RESPONSE_ID, None if response_id in ("__fake_id__", "") else response_id
@@ -177,10 +177,10 @@ class _TelemetryHelpers:
             if isinstance(tool, str):
                 definitions.append({"type": "function", "name": tool})
                 continue
-            tool_data = _TelemetryHelpers._as_mapping(tool)
+            tool_data = _TelemetryHelpers._to_mapping(tool)
             if tool_data is None:
                 continue
-            function = _TelemetryHelpers._as_mapping(tool_data.get("function")) or {}
+            function = _TelemetryHelpers._to_mapping(tool_data.get("function")) or {}
             definition: dict[str, Any] = {"type": tool_data.get("type") or "function"}
             for key, source_key in (("name", "name"), ("description", "description"), ("parameters", "parameters")):
                 value = first_not_none(tool_data.get(source_key), function.get(source_key))
@@ -191,9 +191,25 @@ class _TelemetryHelpers:
             attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(definitions)
 
     @staticmethod
-    def set_attribute(attributes: dict[str, AttributeValue], key: str, value: Any) -> None:
-        if isinstance(value, (bool, bytes, float, int, str, list, tuple)):
-            attributes[key] = value
+    def _get_request_output_type(model_config: Mapping[str, Any]) -> Optional[str]:
+        modalities = _TelemetryHelpers._to_string_sequence(model_config.get("modalities")) or []
+        if "audio" in modalities:
+            return GenAiOutputTypeValues.SPEECH.value
+        if "image" in modalities:
+            return GenAiOutputTypeValues.IMAGE.value
+        response_format = first_not_none(
+            get_value(model_config.get("text"), "format"),
+            model_config.get("response_format"),
+        )
+        format_type = first_not_none(get_value(response_format, "type"), response_format)
+        if not isinstance(format_type, str):
+            return None
+        return {
+            "text": GenAiOutputTypeValues.TEXT.value,
+            "json": GenAiOutputTypeValues.JSON.value,
+            "json_object": GenAiOutputTypeValues.JSON.value,
+            "json_schema": GenAiOutputTypeValues.JSON.value,
+        }.get(format_type)
 
     @staticmethod
     def get_finish_reasons(response: Any, attributes: Mapping[str, AttributeValue]) -> list[str]:
@@ -243,74 +259,6 @@ class _TelemetryHelpers:
         return None
 
     @staticmethod
-    def resolve_provider(model: Any, base_url: Any, custom_provider: Any = None) -> str:
-        if custom_provider:
-            candidate = re.sub(r"[^a-z0-9._-]+", "_", str(custom_provider).strip().lower())
-            return PROVIDER_MAP.get(candidate, candidate)
-        if model and "/" in str(model):
-            candidate = re.sub(r"[^a-z0-9._-]+", "_", str(model).split("/", 1)[0].strip().lower())
-            return PROVIDER_MAP.get(candidate, candidate)
-        if base_url:
-            hostname = urlparse(str(base_url)).hostname or ""
-            if hostname.endswith((".services.ai.azure.com", ".models.ai.azure.com")):
-                return GenAiProviderNameValues.AZURE_AI_INFERENCE.value
-            for label in reversed(hostname.split(".")):
-                for candidate in label.split("-"):
-                    provider = PROVIDER_MAP.get(candidate.lower())
-                    if provider is not None:
-                        return provider
-        return GenAiProviderNameValues.OPENAI.value
-
-    @staticmethod
-    def _get_request_output_type(model_config: Mapping[str, Any]) -> Optional[str]:
-        modalities = _TelemetryHelpers._to_string_sequence(model_config.get("modalities")) or []
-        if "audio" in modalities:
-            return GenAiOutputTypeValues.SPEECH.value
-        if "image" in modalities:
-            return GenAiOutputTypeValues.IMAGE.value
-        response_format = first_not_none(
-            get_value(model_config.get("text"), "format"),
-            model_config.get("response_format"),
-        )
-        format_type = first_not_none(get_value(response_format, "type"), response_format)
-        if not isinstance(format_type, str):
-            return None
-        return {
-            "text": GenAiOutputTypeValues.TEXT.value,
-            "json": GenAiOutputTypeValues.JSON.value,
-            "json_object": GenAiOutputTypeValues.JSON.value,
-            "json_schema": GenAiOutputTypeValues.JSON.value,
-        }.get(format_type)
-
-    @staticmethod
-    def _to_string_sequence(value: Any) -> Optional[list[str]]:
-        if value is None:
-            return None
-        if isinstance(value, (str, bytes)):
-            return [str(value)]
-        if isinstance(value, Sequence):
-            return [str(item) for item in value]
-        return [str(value)]
-
-    @staticmethod
-    def _to_item_list(items: Any) -> list[Any]:
-        if items is None:
-            return []
-        if isinstance(items, (str, bytes, Mapping, BaseModel)):
-            return [items]
-        if isinstance(items, Sequence):
-            return list(items)
-        return [items]
-
-    @staticmethod
-    def _as_mapping(value: Any) -> Optional[dict[str, Any]]:
-        if isinstance(value, Mapping):
-            return dict(value)
-        if isinstance(value, BaseModel):
-            return value.model_dump()
-        return None
-
-    @staticmethod
     def _normalize_finish_reason(
         item: Mapping[str, Any],
         has_tool_calls: bool,
@@ -333,3 +281,55 @@ class _TelemetryHelpers:
             "length": "length",
             "content_filter": "content_filter",
         }.get(str(raw_reason), str(raw_reason))
+
+    @staticmethod
+    def resolve_provider(model: Any, base_url: Any, custom_provider: Any = None) -> str:
+        if custom_provider:
+            candidate = re.sub(r"[^a-z0-9._-]+", "_", str(custom_provider).strip().lower())
+            return PROVIDER_MAP.get(candidate, candidate)
+        if model and "/" in str(model):
+            candidate = re.sub(r"[^a-z0-9._-]+", "_", str(model).split("/", 1)[0].strip().lower())
+            return PROVIDER_MAP.get(candidate, candidate)
+        if base_url:
+            hostname = urlparse(str(base_url)).hostname or ""
+            if hostname.endswith((".services.ai.azure.com", ".models.ai.azure.com")):
+                return GenAiProviderNameValues.AZURE_AI_INFERENCE.value
+            for label in reversed(hostname.split(".")):
+                for candidate in label.split("-"):
+                    provider = PROVIDER_MAP.get(candidate.lower())
+                    if provider is not None:
+                        return provider
+        return GenAiProviderNameValues.OPENAI.value
+
+    @staticmethod
+    def _to_string_sequence(value: Any) -> Optional[list[str]]:
+        if value is None:
+            return None
+        if isinstance(value, (str, bytes)):
+            return [str(value)]
+        if isinstance(value, Sequence):
+            return [str(item) for item in value]
+        return [str(value)]
+
+    @staticmethod
+    def _to_item_list(items: Any) -> list[Any]:
+        if items is None:
+            return []
+        if isinstance(items, (str, bytes, Mapping, BaseModel)):
+            return [items]
+        if isinstance(items, Sequence):
+            return list(items)
+        return [items]
+
+    @staticmethod
+    def _to_mapping(value: Any) -> Optional[dict[str, Any]]:
+        if isinstance(value, Mapping):
+            return dict(value)
+        if isinstance(value, BaseModel):
+            return value.model_dump()
+        return None
+
+    @staticmethod
+    def set_attribute(attributes: dict[str, AttributeValue], key: str, value: Any) -> None:
+        if isinstance(value, (bool, bytes, float, int, str, list, tuple)):
+            attributes[key] = value

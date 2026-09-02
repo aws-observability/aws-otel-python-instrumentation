@@ -349,7 +349,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
         output_items = span_data.output
         if streamed_response is not None:
-            _TelemetryHelpers.set_response_payload_attributes(attributes, streamed_response)
+            _TelemetryHelpers.set_response_attributes(attributes, streamed_response)
             _TelemetryHelpers.set_attribute(attributes, GEN_AI_REQUEST_STREAM, True)
             output_items = get_value(streamed_response, "output")
 
@@ -399,7 +399,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
         response_model = get_value(response, "model")
         request_model = response_model
-        _TelemetryHelpers.set_response_payload_attributes(attributes, response)
+        _TelemetryHelpers.set_response_attributes(attributes, response)
         _TelemetryHelpers.set_attribute(attributes, GEN_AI_REQUEST_MODEL, request_model)
         _TelemetryHelpers.set_attribute(
             attributes,

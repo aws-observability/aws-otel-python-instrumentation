@@ -199,7 +199,7 @@ class OpenAIAgentsWrappers:
             return
 
         attributes: dict[str, AttributeValue] = {}
-        _TelemetryHelpers.set_response_payload_attributes(attributes, response)
+        _TelemetryHelpers.set_response_attributes(attributes, response)
         usage = get_value(response, "usage")
         _TelemetryHelpers.set_usage_attributes(attributes, usage, usage)
         current_attributes = get_value(span, "attributes") or {}
