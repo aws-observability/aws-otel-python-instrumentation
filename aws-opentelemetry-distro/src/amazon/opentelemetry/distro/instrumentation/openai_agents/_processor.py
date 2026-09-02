@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+# pylint: disable=too-many-lines
 
 import json
 import logging
@@ -84,6 +85,8 @@ from ._gen_ai_context_capture import GenAIContextCapture
 
 _logger = logging.getLogger(__name__)
 
+GEN_AI_REQUEST_REASONING_LEVEL = "gen_ai.request.reasoning.level"
+
 
 @dataclass
 class _SpanEntry:
@@ -153,7 +156,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             return
 
         if isinstance(span_data, (GenerationSpanData, ResponseSpanData)):
-            GenAIContextCapture.reset_model_invocation()
+            GenAIContextCapture.start_model_invocation()
         if isinstance(span_data, (FunctionSpanData, HandoffSpanData)):
             GenAIContextCapture.reset_tool_call()
 
@@ -166,6 +169,17 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             GEN_AI_OPERATION_NAME: operation,
             GEN_AI_PROVIDER_NAME: GenAiProviderNameValues.OPENAI.value,
         }
+        if isinstance(span_data, GenerationSpanData):
+            model_config = span_data.model_config or {}
+            self._set_attribute(attributes, GEN_AI_REQUEST_MODEL, span_data.model)
+            self._set_attribute(
+                attributes,
+                GEN_AI_PROVIDER_NAME,
+                self._resolve_provider(span_data.model, model_config.get("base_url")),
+            )
+            self._set_request_attributes(attributes, model_config)
+        elif isinstance(span_data, ResponseSpanData):
+            self._set_attribute(attributes, GEN_AI_REQUEST_MODEL, get_value(span_data.response, "model"))
         otel_span = self._tracer.start_span(
             self._set_span_name(span_data, operation),
             context=set_span_in_context(parent_entry.span) if parent_entry is not None else None,
@@ -267,9 +281,11 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         if isinstance(span_data, (FunctionSpanData, HandoffSpanData)):
             return GenAiOperationNameValues.EXECUTE_TOOL.value
         if isinstance(span_data, GenerationSpanData):
+            model_config = span_data.model_config or {}
             return (
                 GenAiOperationNameValues.CHAT.value
-                if any(get_value(item, "role") for item in (span_data.input or []))
+                if model_config.get("model_impl") in ("litellm", "any-llm")
+                or any(get_value(item, "role") for item in (span_data.input or []))
                 else GenAiOperationNameValues.TEXT_COMPLETION.value
             )
         return GenAiOperationNameValues.CHAT.value
@@ -344,12 +360,29 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         else:
             OpenTelemetryTracingProcessor._set_response_payload_attributes(attributes, invocation.response)
 
-        usage = first_not_none(
-            span_data.usage,
-            get_value(streamed_response, "usage"),
-            get_value(invocation.response, "usage"),
+        span_usage = span_data.usage
+        if (
+            invocation.response
+            and "usage" not in invocation.response
+            and not any(
+                get_value(span_usage, key)
+                for key in ("input_tokens", "prompt_tokens", "output_tokens", "completion_tokens")
+            )
+        ):
+            span_usage = None
+        OpenTelemetryTracingProcessor._set_usage_attributes(
+            attributes,
+            first_not_none(
+                span_usage,
+                get_value(streamed_response, "usage"),
+                get_value(invocation.response, "usage"),
+            ),
+            first_not_none(
+                get_value(invocation.response, "usage"),
+                get_value(streamed_response, "usage"),
+                span_usage,
+            ),
         )
-        OpenTelemetryTracingProcessor._set_usage_attributes(attributes, usage)
         default_finish_reason = first_not_none(
             OpenTelemetryTracingProcessor._get_finish_reason(invocation.response, attributes),
             OpenTelemetryTracingProcessor._get_finish_reason(streamed_response, attributes),
@@ -360,7 +393,12 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         OpenTelemetryTracingProcessor._set_message_attributes(
             attributes, system_instructions, input_messages, output_messages
         )
-        finish_reasons = [message["finish_reason"] for message in output_messages if message.get("finish_reason")]
+        finish_reasons = list(
+            dict.fromkeys(
+                (get_value(invocation.response, "finish_reasons") or [])
+                + [message["finish_reason"] for message in output_messages if message.get("finish_reason")]
+            )
+        )
         OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_RESPONSE_FINISH_REASONS, finish_reasons or None)
 
         content = _AgentContent(
@@ -389,8 +427,11 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         )
         OpenTelemetryTracingProcessor._set_request_attributes(attributes, model_config)
 
-        usage = first_not_none(getattr(span_data, "usage", None), get_value(response, "usage"))
-        OpenTelemetryTracingProcessor._set_usage_attributes(attributes, usage)
+        OpenTelemetryTracingProcessor._set_usage_attributes(
+            attributes,
+            first_not_none(getattr(span_data, "usage", None), get_value(response, "usage")),
+            first_not_none(get_value(response, "usage"), getattr(span_data, "usage", None)),
+        )
 
         system_instructions, input_messages = _GenAIMessageNormalizer.normalize_input_messages(
             getattr(span_data, "input", None)
@@ -502,6 +543,11 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         OpenTelemetryTracingProcessor._set_attribute(
             attributes, GEN_AI_OUTPUT_TYPE, OpenTelemetryTracingProcessor._get_request_output_type(model_config)
         )
+        OpenTelemetryTracingProcessor._set_attribute(
+            attributes,
+            GEN_AI_REQUEST_REASONING_LEVEL,
+            first_not_none(model_config.get("reasoning_effort"), get_value(model_config.get("reasoning"), "effort")),
+        )
 
     @staticmethod
     def _set_response_payload_attributes(attributes: dict[str, AttributeValue], response: Any) -> None:
@@ -522,12 +568,17 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         )
 
     @staticmethod
-    def _set_usage_attributes(attributes: dict[str, AttributeValue], usage: Any) -> None:
+    def _set_usage_attributes(attributes: dict[str, AttributeValue], usage: Any, detailed_usage: Any = None) -> None:
+        detailed_usage = first_not_none(detailed_usage, usage)
         input_details = first_not_none(
+            get_value(detailed_usage, "input_tokens_details"),
+            get_value(detailed_usage, "prompt_tokens_details"),
             get_value(usage, "input_tokens_details"),
             get_value(usage, "prompt_tokens_details"),
         )
         output_details = first_not_none(
+            get_value(detailed_usage, "output_tokens_details"),
+            get_value(detailed_usage, "completion_tokens_details"),
             get_value(usage, "output_tokens_details"),
             get_value(usage, "completion_tokens_details"),
         )
@@ -537,6 +588,8 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             first_not_none(
                 get_value(usage, "input_tokens"),
                 get_value(usage, "prompt_tokens"),
+                get_value(detailed_usage, "input_tokens"),
+                get_value(detailed_usage, "prompt_tokens"),
             ),
         )
         OpenTelemetryTracingProcessor._set_attribute(
@@ -545,6 +598,8 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             first_not_none(
                 get_value(usage, "output_tokens"),
                 get_value(usage, "completion_tokens"),
+                get_value(detailed_usage, "output_tokens"),
+                get_value(detailed_usage, "completion_tokens"),
             ),
         )
         OpenTelemetryTracingProcessor._set_attribute(
@@ -552,6 +607,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
             first_not_none(
                 get_value(input_details, "cached_tokens"),
+                get_value(detailed_usage, "cache_read_input_tokens"),
                 get_value(usage, "cache_read_input_tokens"),
             ),
         )
@@ -560,6 +616,9 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
             first_not_none(
                 get_value(input_details, "cache_write_tokens"),
+                get_value(detailed_usage, "cache_write_input_tokens"),
+                get_value(detailed_usage, "cache_creation_input_tokens"),
+                get_value(usage, "cache_write_input_tokens"),
                 get_value(usage, "cache_creation_input_tokens"),
             ),
         )
@@ -568,6 +627,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             GEN_AI_USAGE_REASONING_OUTPUT_TOKENS,
             first_not_none(
                 get_value(output_details, "reasoning_tokens"),
+                get_value(detailed_usage, "reasoning_tokens"),
                 get_value(usage, "reasoning_tokens"),
             ),
         )
@@ -642,9 +702,13 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
     @staticmethod
     def _get_finish_reason(response: Any, attributes: Mapping[str, AttributeValue]) -> Optional[str]:
-        choices = _GenAIMessageNormalizer._to_item_list(get_value(response, "choices"))
-        if choices:
-            reason = get_value(choices[0], "finish_reason")
+        reasons = _GenAIMessageNormalizer._to_item_list(get_value(response, "finish_reasons"))
+        if not reasons:
+            reasons = [
+                get_value(choice, "finish_reason")
+                for choice in _GenAIMessageNormalizer._to_item_list(get_value(response, "choices"))
+            ]
+        for reason in reasons:
             if reason is not None:
                 return {
                     "end_turn": "stop",
@@ -656,8 +720,10 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                     "content_filter": "content_filter",
                 }.get(str(reason), str(reason))
 
-        incomplete_details = get_value(response, "incomplete_details")
-        reason = get_value(incomplete_details, "reason")
+        reason = first_not_none(
+            get_value(response, "incomplete_reason"),
+            get_value(get_value(response, "incomplete_details"), "reason"),
+        )
         if reason:
             return {"max_output_tokens": "length", "content_filter": "content_filter"}.get(str(reason), str(reason))
         if get_value(response, "status") in ("failed", "cancelled"):
@@ -694,17 +760,18 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
     @staticmethod
     def _resolve_provider(model: Any, base_url: Any) -> str:
-        candidates: list[str] = []
         if model and "/" in str(model):
-            candidates.append(str(model).split("/", 1)[0])
+            candidate = re.sub(r"[^a-z0-9._-]+", "_", str(model).split("/", 1)[0].strip().lower())
+            return PROVIDER_MAP.get(candidate, candidate)
         if base_url:
             hostname = urlparse(str(base_url)).hostname or ""
+            if hostname.endswith((".services.ai.azure.com", ".models.ai.azure.com")):
+                return GenAiProviderNameValues.AZURE_AI_INFERENCE.value
             for label in reversed(hostname.split(".")):
-                candidates.extend(label.split("-"))
-        for candidate in candidates:
-            provider = PROVIDER_MAP.get(candidate.lower())
-            if provider is not None:
-                return provider
+                for candidate in label.split("-"):
+                    provider = PROVIDER_MAP.get(candidate.lower())
+                    if provider is not None:
+                        return provider
         return GenAiProviderNameValues.OPENAI.value
 
     @staticmethod

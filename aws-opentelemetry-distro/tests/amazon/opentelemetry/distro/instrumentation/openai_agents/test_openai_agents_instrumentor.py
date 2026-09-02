@@ -8,7 +8,7 @@ from importlib.metadata import entry_points
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from agents import Agent, ModelSettings, OpenAIChatCompletionsModel, Runner, function_tool, tracing
+from agents import Agent, ModelSettings, OpenAIChatCompletionsModel, RunConfig, Runner, function_tool, tracing
 from agents.extensions.models.litellm_model import LitellmModel
 from agents.items import ItemHelpers
 from agents.tracing import processors
@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from amazon.opentelemetry.distro.instrumentation.openai_agents import OpenAIAgentsInstrumentor
 from amazon.opentelemetry.distro.instrumentation.openai_agents._gen_ai_context_capture import GenAIContextCapture
 from amazon.opentelemetry.distro.instrumentation.openai_agents._processor import (
+    GEN_AI_REQUEST_REASONING_LEVEL,
     OpenTelemetryTracingProcessor,
     _GenAIMessageNormalizer,
 )
@@ -28,6 +29,7 @@ from opentelemetry.instrumentation.httpx import HTTPX2ClientInstrumentor, HTTPXC
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.sdk.trace.sampling import Decision, SamplingResult
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_NAME,
     GEN_AI_INPUT_MESSAGES,
@@ -203,7 +205,12 @@ class TestOpenAIAgentsInstrumentor(unittest.TestCase):
 class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
     def setUp(self) -> None:
         self.exporter = InMemorySpanExporter()
-        self.tracer_provider = TracerProvider()
+        self.sampler = MagicMock()
+        self.sampler.should_sample.side_effect = lambda *args, **kwargs: SamplingResult(
+            Decision.RECORD_AND_SAMPLE,
+            attributes=args[4] if len(args) > 4 else kwargs.get("attributes"),
+        )
+        self.tracer_provider = TracerProvider(sampler=self.sampler)
         self.tracer_provider.add_span_processor(SimpleSpanProcessor(self.exporter))
         tracer = self.tracer_provider.get_tracer(
             "amazon.opentelemetry.distro.instrumentation.openai_agents",
@@ -607,30 +614,42 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
             return f"Sunny in {city}"
 
         def invoke_agent(_client):
-            Runner.run_sync(
-                Agent(
-                    name="LiteLLM Bedrock agent",
-                    instructions="Answer directly.",
-                    model=LitellmModel(
-                        model=model,
-                        base_url="https://bedrock-runtime.us-west-2.amazonaws.com",
+            asyncio.run(
+                Runner.run(
+                    Agent(
+                        name="LiteLLM Bedrock agent",
+                        instructions="Answer directly.",
+                        model=LitellmModel(
+                            model=model,
+                            base_url="https://bedrock-runtime.us-west-2.amazonaws.com",
+                        ),
+                        model_settings=ModelSettings(
+                            temperature=0.2,
+                            extra_args={
+                                "aws_region_name": "us-west-2",
+                                "aws_access_key_id": "fake-key",
+                                "aws_secret_access_key": "fake-key",
+                            },
+                        ),
+                        tools=[lookup],
                     ),
-                    model_settings=ModelSettings(
-                        temperature=0.2,
-                        extra_args={
-                            "aws_region_name": "us-west-2",
-                            "aws_access_key_id": "fake-key",
-                            "aws_secret_access_key": "fake-key",
-                        },
-                    ),
-                    tools=[lookup],
+                    "What is the weather in Seattle?",
                 ),
-                "What is the weather in Seattle?",
             )
 
         call_mock_llm("bedrock", invoke_llm_callback=invoke_agent, is_litellm=True)
 
         span = self._spans_by_name()[f"chat {model}"]
+        sampling_call = next(
+            call
+            for call in self.sampler.should_sample.call_args_list
+            if len(call.args) > 2 and call.args[2] == f"chat {model}"
+        )
+        sampling_attributes = sampling_call.args[4]
+        self.assertEqual(sampling_attributes[GEN_AI_PROVIDER_NAME], GenAiProviderNameValues.AWS_BEDROCK.value)
+        self.assertEqual(sampling_attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.CHAT.value)
+        self.assertEqual(sampling_attributes[GEN_AI_REQUEST_MODEL], model)
+        self.assertEqual(sampling_attributes[SERVER_ADDRESS], "bedrock-runtime.us-west-2.amazonaws.com")
         self.assertEqual(span.attributes[GEN_AI_PROVIDER_NAME], GenAiProviderNameValues.AWS_BEDROCK.value)
         self.assertEqual(span.attributes[GEN_AI_REQUEST_MODEL], model)
         self.assertEqual(span.attributes[GEN_AI_REQUEST_TEMPERATURE], 0.2)
@@ -638,8 +657,10 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         self.assertIn(GEN_AI_RESPONSE_ID, span.attributes)
         self.assertEqual(span.attributes[GEN_AI_RESPONSE_MODEL], "anthropic.claude-3-haiku-20240307-v1:0")
         self.assertEqual(span.attributes[GEN_AI_RESPONSE_FINISH_REASONS], ("stop",))
-        self.assertEqual(span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 10)
+        self.assertEqual(span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 14)
         self.assertEqual(span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 20)
+        self.assertEqual(span.attributes[GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS], 3)
+        self.assertEqual(span.attributes[GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS], 1)
         self.assertEqual(
             json.loads(span.attributes[GEN_AI_TOOL_DEFINITIONS]),
             [
@@ -658,6 +679,59 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
             ],
         )
 
+    def test_litellm_run_streamed_captures_metadata_without_content(self):
+        model = "moonshot/test-model"
+        cancelled_model = "ollama/cancelled-model"
+        no_usage_model = "openrouter/no-usage-model"
+        instrumentor = OpenAIAgentsInstrumentor()
+        instrumentor.instrument(tracer_provider=self.tracer_provider, skip_dep_check=True)
+        tracing.set_trace_processors([self.processor])
+        self.addCleanup(instrumentor.uninstrument)
+
+        async def run_streamed(stream_model, include_usage, cancel=False):
+            result = Runner.run_streamed(
+                Agent(
+                    name="Streaming LiteLLM agent",
+                    model=LitellmModel(model=stream_model),
+                    model_settings=ModelSettings(
+                        include_usage=include_usage,
+                        reasoning={"effort": "high"},
+                        extra_args={"mock_response": "Hello", "drop_params": True},
+                    ),
+                ),
+                "Hello",
+                run_config=RunConfig(trace_include_sensitive_data=not include_usage),
+            )
+            async for event in result.stream_events():
+                if cancel and event.type == "raw_response_event":
+                    result.cancel()
+                    cancel = False
+
+        async def run():
+            await run_streamed(model, True)
+            await run_streamed(cancelled_model, True, cancel=True)
+            await run_streamed(no_usage_model, False)
+
+        asyncio.run(run())
+
+        spans = self._spans_by_name()
+        span = spans[f"chat {model}"]
+        self.assertEqual(span.attributes[GEN_AI_PROVIDER_NAME], "moonshot")
+        self.assertIn(GEN_AI_RESPONSE_ID, span.attributes)
+        self.assertEqual(span.attributes[GEN_AI_RESPONSE_MODEL], model)
+        self.assertEqual(span.attributes[GEN_AI_RESPONSE_FINISH_REASONS], ("stop",))
+        self.assertGreater(span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 0)
+        self.assertGreater(span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 0)
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_REASONING_LEVEL], "high")
+        self.assertNotIn(GEN_AI_OUTPUT_MESSAGES, span.attributes)
+
+        self.assertIn(f"chat {cancelled_model}", spans)
+
+        no_usage_span = spans[f"chat {no_usage_model}"]
+        self.assertNotIn(GEN_AI_USAGE_INPUT_TOKENS, no_usage_span.attributes)
+        self.assertNotIn(GEN_AI_USAGE_OUTPUT_TOKENS, no_usage_span.attributes)
+        self.assertIn(GEN_AI_OUTPUT_MESSAGES, no_usage_span.attributes)
+
     def test_generation_span_clears_captured_model_invocation(self):
         async def capture():
             async def acompletion(*args, **kwargs):
@@ -675,7 +749,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
                         (),
                         {"model": "gpt-4o-mini"},
                     )
-                    self.assertIs(GenAIContextCapture.get_model_invocation().response, response)
+                    self.assertEqual(GenAIContextCapture.get_model_invocation().response, response)
                 return GenAIContextCapture.get_model_invocation()
 
         invocation = asyncio.run(capture())
@@ -759,6 +833,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
 class TestGenAIContextCapture(unittest.TestCase):
     def setUp(self) -> None:
         GenAIContextCapture.reset_model_invocation()
+        GenAIContextCapture.start_model_invocation()
         GenAIContextCapture.reset_tool_call()
 
     def tearDown(self) -> None:

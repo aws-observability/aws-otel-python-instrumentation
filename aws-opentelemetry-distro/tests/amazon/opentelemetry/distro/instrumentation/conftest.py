@@ -150,7 +150,13 @@ def call_mock_llm(
             response = {
                 "output": {"message": {"role": "assistant", "content": [{"text": "Hello, World!"}]}},
                 "stopReason": "end_turn",
-                "usage": {"inputTokens": 10, "outputTokens": 20, "totalTokens": 30},
+                "usage": {
+                    "inputTokens": 10,
+                    "outputTokens": 20,
+                    "totalTokens": 30,
+                    "cacheReadInputTokens": 3,
+                    "cacheWriteInputTokens": 1,
+                },
                 "metrics": {"latencyMs": 1},
             }
 
