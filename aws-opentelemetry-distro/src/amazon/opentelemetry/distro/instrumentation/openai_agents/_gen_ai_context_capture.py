@@ -54,50 +54,56 @@ class GenAIContextCapture:
         "aws_otel_openai_agents_current_tool_context", default=None
     )
 
-    def capture_openai_request_attributes(self, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
+    @classmethod
+    def capture_openai_request_attributes(cls, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
         """Wrap OpenAI Responses create methods to capture request attributes."""
-        self.capture_model_request_attributes(instance, kwargs)
+        cls.capture_model_request_attributes(instance, kwargs)
         return wrapped(*args, **kwargs)
 
-    def capture_openai_completion_attributes(self, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
+    @classmethod
+    def capture_openai_completion_attributes(cls, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
         """Wrap OpenAI Chat Completions create methods to capture request and response attributes."""
-        current_model_context = self.get_current_model_context()
+        current_model_context = cls.get_current_model_context()
         if current_model_context is None or current_model_context.model_impl == "litellm":
             return wrapped(*args, **kwargs)
-        self.capture_model_request_attributes(instance, kwargs)
+        cls.capture_model_request_attributes(instance, kwargs)
         response = wrapped(*args, **kwargs)
         if isawaitable(response):
-            return self._capture_acompletion_response_attributes(response, kwargs.get("stream"))
-        return self._capture_completion_response_attributes(response, kwargs.get("stream"))
+            return cls._capture_acompletion_response_attributes(response, kwargs.get("stream"))
+        return cls._capture_completion_response_attributes(response, kwargs.get("stream"))
 
-    def capture_litellm_completion_attributes(self, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
+    @classmethod
+    def capture_litellm_completion_attributes(cls, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
         """Wrap LiteLLM completion and acompletion to capture request and response attributes."""
         # LiteLLM's acompletion calls completion(..., acompletion=True); capture the request only once.
         if kwargs.get("acompletion") and not iscoroutinefunction(wrapped):
             return wrapped(*args, **kwargs)
-        if self.get_current_model_context() is None:
+        if cls.get_current_model_context() is None:
             return wrapped(*args, **kwargs)
-        self.capture_model_request_attributes(instance, kwargs)
+        cls.capture_model_request_attributes(instance, kwargs)
         response = wrapped(*args, **kwargs)
         if isawaitable(response):
-            return self._capture_acompletion_response_attributes(response, kwargs.get("stream"))
-        return self._capture_completion_response_attributes(response, kwargs.get("stream"))
+            return cls._capture_acompletion_response_attributes(response, kwargs.get("stream"))
+        return cls._capture_completion_response_attributes(response, kwargs.get("stream"))
 
-    def _capture_completion_response_attributes(self, response: Any, stream: Any) -> Any:
+    @classmethod
+    def _capture_completion_response_attributes(cls, response: Any, stream: Any) -> Any:
         if stream and (hasattr(response, "__iter__") or hasattr(response, "__aiter__")):
             return _ResponseCapturingStream(response)
-        self.capture_model_response_attributes(response)
+        cls.capture_model_response_attributes(response)
         return response
 
-    async def _capture_acompletion_response_attributes(self, response: Any, stream: Any) -> Any:
-        return self._capture_completion_response_attributes(await response, stream)
+    @classmethod
+    async def _capture_acompletion_response_attributes(cls, response: Any, stream: Any) -> Any:
+        return cls._capture_completion_response_attributes(await response, stream)
 
-    def capture_tool_call_attributes(self, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
+    @classmethod
+    def capture_tool_call_attributes(cls, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
         """Wrap OpenAI Agents tool-call helpers to capture the tool name and call ID attributes."""
         tool_call = kwargs.get("tool_call") or (args[0] if args else None)
         name = get_value(tool_call, "name")
         call_id = get_value(tool_call, "call_id")
-        current_tool_context = self.get_current_tool_context()
+        current_tool_context = cls.get_current_tool_context()
         if current_tool_context is not None and (name or call_id):
             current_tool_context.name = name
             current_tool_context.call_id = call_id

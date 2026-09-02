@@ -16,7 +16,6 @@ from opentelemetry.instrumentation.utils import suppress_http_instrumentation
 class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
     """Instrument OpenAI Agents SDK tracing callbacks with OpenTelemetry spans."""
 
-    _context_capture = None
     _processor = None
     _previous_processors = None
 
@@ -41,32 +40,33 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
         self._processor = OpenTelemetryTracingProcessor(tracer)
-        context_capture = self._context_capture = GenAIContextCapture()
 
         try_wrap(
             "openai.resources.responses.responses",
             "Responses.create",
-            context_capture.capture_openai_request_attributes,
+            GenAIContextCapture.capture_openai_request_attributes,
         )
         try_wrap(
             "openai.resources.responses.responses",
             "AsyncResponses.create",
-            context_capture.capture_openai_request_attributes,
+            GenAIContextCapture.capture_openai_request_attributes,
         )
         try_wrap(
             "openai.resources.chat.completions.completions",
             "Completions.create",
-            context_capture.capture_openai_completion_attributes,
+            GenAIContextCapture.capture_openai_completion_attributes,
         )
         try_wrap(
             "openai.resources.chat.completions.completions",
             "AsyncCompletions.create",
-            context_capture.capture_openai_completion_attributes,
+            GenAIContextCapture.capture_openai_completion_attributes,
         )
-        try_wrap("litellm", "completion", context_capture.capture_litellm_completion_attributes)
-        try_wrap("litellm", "acompletion", context_capture.capture_litellm_completion_attributes)
-        try_wrap("agents.items", "ItemHelpers.tool_call_output_item", context_capture.capture_tool_call_attributes)
-        try_wrap("agents.tool_context", "ToolContext.from_agent_context", context_capture.capture_tool_call_attributes)
+        try_wrap("litellm", "completion", GenAIContextCapture.capture_litellm_completion_attributes)
+        try_wrap("litellm", "acompletion", GenAIContextCapture.capture_litellm_completion_attributes)
+        try_wrap("agents.items", "ItemHelpers.tool_call_output_item", GenAIContextCapture.capture_tool_call_attributes)
+        try_wrap(
+            "agents.tool_context", "ToolContext.from_agent_context", GenAIContextCapture.capture_tool_call_attributes
+        )
         # disables http spans created from spans sent OpenAI's tracing backend
         try_wrap("agents.tracing.processors", "BackendSpanExporter.export", _suppress_http_instrumentation)
 
@@ -107,7 +107,6 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
                 set_trace_processors([item for item in current_processors if item is not processor])
             processor.shutdown()
         finally:
-            self._context_capture = None
             self._processor = None
             self._previous_processors = None
 

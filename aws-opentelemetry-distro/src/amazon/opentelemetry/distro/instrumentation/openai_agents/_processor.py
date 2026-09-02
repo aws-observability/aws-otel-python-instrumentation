@@ -225,12 +225,9 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                 operation = self._set_operation_name(span_data)
                 attributes[GEN_AI_OPERATION_NAME] = operation
                 model = first_not_none(attributes.get(GEN_AI_REQUEST_MODEL), attributes.get(GEN_AI_RESPONSE_MODEL))
-                if model:
-                    otel_span.update_name(f"{operation} {model}")
+                otel_span.update_name(f"{operation} {model}" if model else operation)
             elif isinstance(span_data, HandoffSpanData):
-                tool_name = attributes.get(GEN_AI_TOOL_NAME)
-                if tool_name:
-                    otel_span.update_name(f"{GenAiOperationNameValues.EXECUTE_TOOL.value} {tool_name}")
+                otel_span.update_name(self._set_span_name(span_data, self._set_operation_name(span_data)))
             if content is not None:
                 content.request_attributes = self._get_rollup_request_attributes(attributes)
             if content is not None and entry.agent_content is not None:
@@ -336,7 +333,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         if isinstance(span_data, GenerationSpanData):
             return self._set_generation_attributes(span_data)
         if isinstance(span_data, ResponseSpanData):
-            return self._set_response_span_attributes(span_data)
+            return self._set_response_attributes(span_data)
         if isinstance(span_data, FunctionSpanData):
             return self._set_function_attributes(span_data), None
         if isinstance(span_data, HandoffSpanData):
@@ -403,7 +400,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         return attributes, content
 
     @staticmethod
-    def _set_response_span_attributes(span_data: ResponseSpanData) -> tuple[dict[str, AttributeValue], _AgentContent]:
+    def _set_response_attributes(span_data: ResponseSpanData) -> tuple[dict[str, AttributeValue], _AgentContent]:
         attributes: dict[str, AttributeValue] = {}
         response = span_data.response
         model_config = OpenTelemetryTracingProcessor._get_response_request_config(response)
@@ -509,14 +506,12 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         span_data: AgentSpanData,
     ) -> dict[str, AttributeValue]:
         attributes: dict[str, AttributeValue] = {}
-        OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_AGENT_NAME, span_data.name)
+        self._set_attribute(attributes, GEN_AI_AGENT_NAME, span_data.name)
         content = content or _AgentContent()
         for key, value in (content.request_attributes or {}).items():
-            OpenTelemetryTracingProcessor._set_attribute(attributes, key, value)
-        OpenTelemetryTracingProcessor._set_tool_definitions(attributes, span_data.tools)
-        OpenTelemetryTracingProcessor._set_attribute(
-            attributes, GEN_AI_OUTPUT_TYPE, self._get_agent_output_type(span_data.output_type)
-        )
+            self._set_attribute(attributes, key, value)
+        self._set_tool_definitions(attributes, span_data.tools)
+        self._set_attribute(attributes, GEN_AI_OUTPUT_TYPE, self._get_agent_output_type(span_data.output_type))
         self._set_message_attributes(
             attributes,
             content.system_instructions or [],
@@ -713,14 +708,14 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
     @staticmethod
     def _set_tool_definitions(attributes: dict[str, AttributeValue], tools: Any) -> None:
         definitions: list[dict[str, Any]] = []
-        for tool in OpenTelemetryTracingProcessor._to_item_list(tools):
+        for tool in _GenAIMessageNormalizer._to_item_list(tools):
             if isinstance(tool, str):
                 definitions.append({"type": "function", "name": tool})
                 continue
-            tool_data = OpenTelemetryTracingProcessor._to_mapping(tool)
+            tool_data = _GenAIMessageNormalizer._as_mapping(tool)
             if tool_data is None:
                 continue
-            function = OpenTelemetryTracingProcessor._to_mapping(tool_data.get("function")) or {}
+            function = _GenAIMessageNormalizer._as_mapping(tool_data.get("function")) or {}
             definition: dict[str, Any] = {"type": tool_data.get("type") or "function"}
             for key, source_key in (("name", "name"), ("description", "description"), ("parameters", "parameters")):
                 value = first_not_none(tool_data.get(source_key), function.get(source_key))
@@ -729,151 +724,6 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             definitions.append(definition)
         if definitions:
             attributes[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(definitions)
-
-    @staticmethod
-    def _get_request_output_type(model_config: Mapping[str, Any]) -> Optional[str]:
-        modalities = OpenTelemetryTracingProcessor._to_string_sequence(model_config.get("modalities")) or []
-        if "audio" in modalities:
-            return GenAiOutputTypeValues.SPEECH.value
-        if "image" in modalities:
-            return GenAiOutputTypeValues.IMAGE.value
-        response_format = first_not_none(
-            get_value(model_config.get("text"), "format"),
-            model_config.get("response_format"),
-        )
-        format_type = first_not_none(get_value(response_format, "type"), response_format)
-        if not isinstance(format_type, str):
-            return None
-        return {
-            "text": GenAiOutputTypeValues.TEXT.value,
-            "json": GenAiOutputTypeValues.JSON.value,
-            "json_object": GenAiOutputTypeValues.JSON.value,
-            "json_schema": GenAiOutputTypeValues.JSON.value,
-        }.get(format_type)
-
-    @staticmethod
-    def _get_finish_reasons(response: Any, attributes: Mapping[str, AttributeValue]) -> list[str]:
-        reasons = OpenTelemetryTracingProcessor._to_item_list(get_value(response, "finish_reasons"))
-        reasons.extend(
-            get_value(choice, "finish_reason")
-            for choice in OpenTelemetryTracingProcessor._to_item_list(get_value(response, "choices"))
-        )
-        finish_reason = get_value(response, "finish_reason")
-        if finish_reason is not None:
-            reasons.append(finish_reason)
-        normalized = [
-            OpenTelemetryTracingProcessor._normalize_finish_reason({"finish_reason": reason}, False)
-            for reason in reasons
-            if reason is not None
-        ]
-        if not normalized:
-            fallback = OpenTelemetryTracingProcessor._get_finish_reason(response, attributes)
-            if fallback is not None:
-                normalized.append(fallback)
-        return normalized
-
-    @staticmethod
-    def _get_finish_reason(response: Any, attributes: Mapping[str, AttributeValue]) -> Optional[str]:
-        reasons = OpenTelemetryTracingProcessor._to_item_list(get_value(response, "finish_reasons"))
-        if not reasons:
-            reasons = [
-                get_value(choice, "finish_reason")
-                for choice in OpenTelemetryTracingProcessor._to_item_list(get_value(response, "choices"))
-            ]
-        for reason in reasons:
-            if reason is not None:
-                return OpenTelemetryTracingProcessor._normalize_finish_reason({"finish_reason": reason}, False)
-
-        reason = first_not_none(
-            get_value(response, "incomplete_reason"),
-            get_value(get_value(response, "incomplete_details"), "reason"),
-        )
-        if reason:
-            return OpenTelemetryTracingProcessor._normalize_finish_reason({"finish_reason": reason}, False)
-        if get_value(response, "status") in ("failed", "cancelled"):
-            return "error"
-        max_tokens = attributes.get(GEN_AI_REQUEST_MAX_TOKENS)
-        output_tokens = attributes.get(GEN_AI_USAGE_OUTPUT_TOKENS)
-        if isinstance(max_tokens, int) and isinstance(output_tokens, int) and output_tokens >= max_tokens > 0:
-            return "length"
-        return None
-
-    @staticmethod
-    def _normalize_finish_reason(
-        item: Mapping[str, Any],
-        has_tool_calls: bool,
-        default_finish_reason: Optional[str] = None,
-    ) -> str:
-        if has_tool_calls:
-            return "tool_call"
-        raw_reason = item.get("finish_reason") or item.get("stop_reason")
-        if raw_reason is None and item.get("status") == "incomplete":
-            return "length"
-        if raw_reason is None:
-            return default_finish_reason or "stop"
-        return {
-            "end_turn": "stop",
-            "stop": "stop",
-            "tool_calls": "tool_call",
-            "tool_use": "tool_call",
-            "max_tokens": "length",
-            "max_output_tokens": "length",
-            "length": "length",
-            "content_filter": "content_filter",
-        }.get(str(raw_reason), str(raw_reason))
-
-    @staticmethod
-    def _resolve_provider(model: Any, base_url: Any, custom_provider: Any = None) -> str:
-        """Resolve known OTel providers while preserving explicit custom provider names."""
-        if custom_provider:
-            candidate = re.sub(r"[^a-z0-9._-]+", "_", str(custom_provider).strip().lower())
-            return PROVIDER_MAP.get(candidate, candidate)
-        if model and "/" in str(model):
-            candidate = re.sub(r"[^a-z0-9._-]+", "_", str(model).split("/", 1)[0].strip().lower())
-            return PROVIDER_MAP.get(candidate, candidate)
-        if base_url:
-            hostname = urlparse(str(base_url)).hostname or ""
-            if hostname.endswith((".services.ai.azure.com", ".models.ai.azure.com")):
-                return GenAiProviderNameValues.AZURE_AI_INFERENCE.value
-            for label in reversed(hostname.split(".")):
-                for candidate in label.split("-"):
-                    provider = PROVIDER_MAP.get(candidate.lower())
-                    if provider is not None:
-                        return provider
-        return GenAiProviderNameValues.OPENAI.value
-
-    @staticmethod
-    def _to_string_sequence(value: Any) -> Optional[list[str]]:
-        if value is None:
-            return None
-        if isinstance(value, (str, bytes)):
-            return [str(value)]
-        if isinstance(value, Sequence):
-            return [str(item) for item in value]
-        return [str(value)]
-
-    @staticmethod
-    def _to_item_list(items: Any) -> list[Any]:
-        if items is None:
-            return []
-        if isinstance(items, (str, bytes, Mapping, BaseModel)):
-            return [items]
-        if isinstance(items, Sequence):
-            return list(items)
-        return [items]
-
-    @staticmethod
-    def _to_mapping(value: Any) -> Optional[dict[str, Any]]:
-        if isinstance(value, Mapping):
-            return dict(value)
-        if isinstance(value, BaseModel):
-            return value.model_dump()
-        return None
-
-    @staticmethod
-    def _set_attribute(attributes: dict[str, AttributeValue], key: str, value: Any) -> None:
-        if isinstance(value, (bool, bytes, float, int, str, list, tuple)):
-            attributes[key] = value
 
     @staticmethod
     def _set_message_attributes(
@@ -888,6 +738,11 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             attributes[GEN_AI_INPUT_MESSAGES] = serialize_to_json_string(input_messages)
         if output_messages:
             attributes[GEN_AI_OUTPUT_MESSAGES] = serialize_to_json_string(output_messages)
+
+    @staticmethod
+    def _set_attribute(attributes: dict[str, AttributeValue], key: str, value: Any) -> None:
+        if isinstance(value, (bool, bytes, float, int, str, list, tuple)):
+            attributes[key] = value
 
     @staticmethod
     def _set_span_status(span: Span, error: Any) -> None:
@@ -919,12 +774,100 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         return model_config
 
     @staticmethod
+    def _get_finish_reasons(response: Any, attributes: Mapping[str, AttributeValue]) -> list[str]:
+        reasons = _GenAIMessageNormalizer._to_item_list(get_value(response, "finish_reasons"))
+        reasons.extend(
+            get_value(choice, "finish_reason")
+            for choice in _GenAIMessageNormalizer._to_item_list(get_value(response, "choices"))
+        )
+        finish_reason = get_value(response, "finish_reason")
+        if finish_reason is not None:
+            reasons.append(finish_reason)
+        normalized = [
+            _GenAIMessageNormalizer._normalize_finish_reason({"finish_reason": reason}, False)
+            for reason in reasons
+            if reason is not None
+        ]
+        if not normalized:
+            fallback = OpenTelemetryTracingProcessor._get_finish_reason(response, attributes)
+            if fallback is not None:
+                normalized.append(fallback)
+        return normalized
+
+    @staticmethod
+    def _get_finish_reason(response: Any, attributes: Mapping[str, AttributeValue]) -> Optional[str]:
+        reasons = _GenAIMessageNormalizer._to_item_list(get_value(response, "finish_reasons"))
+        if not reasons:
+            reasons = [
+                get_value(choice, "finish_reason")
+                for choice in _GenAIMessageNormalizer._to_item_list(get_value(response, "choices"))
+            ]
+        for reason in reasons:
+            if reason is not None:
+                return _GenAIMessageNormalizer._normalize_finish_reason({"finish_reason": reason}, False)
+
+        reason = first_not_none(
+            get_value(response, "incomplete_reason"),
+            get_value(get_value(response, "incomplete_details"), "reason"),
+        )
+        if reason:
+            return _GenAIMessageNormalizer._normalize_finish_reason({"finish_reason": reason}, False)
+        if get_value(response, "status") in ("failed", "cancelled"):
+            return "error"
+        max_tokens = attributes.get(GEN_AI_REQUEST_MAX_TOKENS)
+        output_tokens = attributes.get(GEN_AI_USAGE_OUTPUT_TOKENS)
+        if isinstance(max_tokens, int) and isinstance(output_tokens, int) and output_tokens >= max_tokens > 0:
+            return "length"
+        return None
+
+    @staticmethod
+    def _get_request_output_type(model_config: Mapping[str, Any]) -> Optional[str]:
+        modalities = OpenTelemetryTracingProcessor._to_string_sequence(model_config.get("modalities")) or []
+        if "audio" in modalities:
+            return GenAiOutputTypeValues.SPEECH.value
+        if "image" in modalities:
+            return GenAiOutputTypeValues.IMAGE.value
+        response_format = first_not_none(
+            get_value(model_config.get("text"), "format"),
+            model_config.get("response_format"),
+        )
+        format_type = first_not_none(get_value(response_format, "type"), response_format)
+        if not isinstance(format_type, str):
+            return None
+        return {
+            "text": GenAiOutputTypeValues.TEXT.value,
+            "json": GenAiOutputTypeValues.JSON.value,
+            "json_object": GenAiOutputTypeValues.JSON.value,
+            "json_schema": GenAiOutputTypeValues.JSON.value,
+        }.get(format_type)
+
+    @staticmethod
     def _get_agent_output_type(output_type: Any) -> Optional[str]:
         if not output_type:
             return None
         if str(output_type) in ("str", "text"):
             return GenAiOutputTypeValues.TEXT.value
         return GenAiOutputTypeValues.JSON.value
+
+    @staticmethod
+    def _resolve_provider(model: Any, base_url: Any, custom_provider: Any = None) -> str:
+        """Resolve known OTel providers while preserving explicit custom provider names."""
+        if custom_provider:
+            candidate = re.sub(r"[^a-z0-9._-]+", "_", str(custom_provider).strip().lower())
+            return PROVIDER_MAP.get(candidate, candidate)
+        if model and "/" in str(model):
+            candidate = re.sub(r"[^a-z0-9._-]+", "_", str(model).split("/", 1)[0].strip().lower())
+            return PROVIDER_MAP.get(candidate, candidate)
+        if base_url:
+            hostname = urlparse(str(base_url)).hostname or ""
+            if hostname.endswith((".services.ai.azure.com", ".models.ai.azure.com")):
+                return GenAiProviderNameValues.AZURE_AI_INFERENCE.value
+            for label in reversed(hostname.split(".")):
+                for candidate in label.split("-"):
+                    provider = PROVIDER_MAP.get(candidate.lower())
+                    if provider is not None:
+                        return provider
+        return GenAiProviderNameValues.OPENAI.value
 
     @staticmethod
     def _get_rollup_request_attributes(attributes: Mapping[str, AttributeValue]) -> dict[str, AttributeValue]:
@@ -956,6 +899,16 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         if not span_data.to_agent:
             return "handoff"
         return re.sub(r"[^a-zA-Z0-9_]", "_", f"transfer_to_{span_data.to_agent}").lower()
+
+    @staticmethod
+    def _to_string_sequence(value: Any) -> Optional[list[str]]:
+        if value is None:
+            return None
+        if isinstance(value, (str, bytes)):
+            return [str(value)]
+        if isinstance(value, Sequence):
+            return [str(item) for item in value]
+        return [str(value)]
 
 
 class _GenAIMessageNormalizer:
