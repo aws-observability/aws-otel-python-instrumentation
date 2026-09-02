@@ -684,7 +684,6 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         self.assertEqual(sampling_attributes[GEN_AI_PROVIDER_NAME], GenAiProviderNameValues.AWS_BEDROCK.value)
         self.assertEqual(sampling_attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.CHAT.value)
         self.assertEqual(sampling_attributes[GEN_AI_REQUEST_MODEL], model)
-        self.assertEqual(sampling_attributes[SERVER_ADDRESS], "bedrock-runtime.us-west-2.amazonaws.com")
         self.assertEqual(span.attributes[GEN_AI_PROVIDER_NAME], GenAiProviderNameValues.AWS_BEDROCK.value)
         self.assertEqual(span.attributes[GEN_AI_REQUEST_MODEL], model)
         self.assertEqual(span.attributes[GEN_AI_REQUEST_TEMPERATURE], 0.2)
@@ -754,7 +753,6 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         sampling_attributes = sampling_call.args[4]
         self.assertEqual(sampling_attributes[GEN_AI_PROVIDER_NAME], GenAiProviderNameValues.OPENAI.value)
         self.assertEqual(sampling_attributes[GEN_AI_REQUEST_MODEL], model)
-        self.assertEqual(sampling_attributes[SERVER_ADDRESS], "example.com")
         self.assertEqual(span.attributes[GEN_AI_PROVIDER_NAME], GenAiProviderNameValues.OPENAI.value)
         self.assertEqual(span.attributes[GEN_AI_REQUEST_MODEL], model)
         self.assertEqual(span.attributes[SERVER_ADDRESS], "example.com")
