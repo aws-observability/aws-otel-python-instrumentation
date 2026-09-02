@@ -18,11 +18,14 @@ from openai import Omit
 from pydantic import BaseModel
 
 from amazon.opentelemetry.distro.instrumentation.openai_agents import OpenAIAgentsInstrumentor
-from amazon.opentelemetry.distro.instrumentation.openai_agents._wrappers import GenAIContextCapture
+from amazon.opentelemetry.distro.instrumentation.openai_agents._wrappers import OpenAIAgentsWrappers
 from amazon.opentelemetry.distro.instrumentation.openai_agents._processor import (
-    GEN_AI_REQUEST_REASONING_LEVEL,
     OpenTelemetryTracingProcessor,
     _GenAIMessageNormalizer,
+)
+from amazon.opentelemetry.distro.instrumentation.openai_agents._shared import (
+    GEN_AI_REQUEST_REASONING_LEVEL,
+    _TelemetryHelpers,
 )
 from opentelemetry.instrumentation.httpx import HTTPX2ClientInstrumentor, HTTPXClientInstrumentor
 from opentelemetry.sdk.trace import TracerProvider
@@ -200,7 +203,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
             "test",
         )
         self.processor = OpenTelemetryTracingProcessor(tracer)
-        self.capture = GenAIContextCapture(self.processor)
+        self.capture = OpenAIAgentsWrappers(self.processor)
         provider = tracing.get_trace_provider()
         self.previous_processors = tuple(provider._multi_processor._processors)  # pylint: disable=protected-access
         tracing.set_trace_processors([self.processor])
@@ -847,10 +850,8 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
 
     def test_sentinel_request_values_are_not_exported(self):
         attributes: dict = {}
-        self.processor._set_attribute(
-            attributes, GEN_AI_REQUEST_TEMPERATURE, Omit()
-        )  # pylint: disable=protected-access
-        self.processor._set_attribute(attributes, GEN_AI_REQUEST_TOP_P, 0.4)  # pylint: disable=protected-access
+        _TelemetryHelpers.set_attribute(attributes, GEN_AI_REQUEST_TEMPERATURE, Omit())
+        _TelemetryHelpers.set_attribute(attributes, GEN_AI_REQUEST_TOP_P, 0.4)
         self.assertEqual(attributes, {GEN_AI_REQUEST_TOP_P: 0.4})
 
         with tracing.trace("Sentinel workflow"):

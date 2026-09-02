@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from collections.abc import Mapping
+from inspect import isawaitable, iscoroutinefunction
 from typing import Any, Optional
 from urllib.parse import urlsplit, urlunsplit
 
@@ -10,6 +11,7 @@ from agents.tracing.span_data import FunctionSpanData, GenerationSpanData, Hando
 from openai import NotGiven, Omit
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import get_value
+from amazon.opentelemetry.distro.instrumentation.openai_agents._shared import _TelemetryHelpers
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_PROVIDER_NAME,
     GEN_AI_REQUEST_MODEL,
@@ -22,7 +24,7 @@ from opentelemetry.trace import Span
 from opentelemetry.util.types import AttributeValue
 
 
-class GenAIContextCapture:
+class OpenAIAgentsWrappers:
     """Wrap GenAI calls to capture details that OpenAI Agents tracing callbacks do not expose."""
 
     def __init__(self, processor: Any) -> None:
@@ -61,7 +63,7 @@ class GenAIContextCapture:
         return config
 
     def capture_litellm_completion_attributes(self, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
-        if kwargs.get("acompletion"):
+        if kwargs.get("acompletion") and not iscoroutinefunction(wrapped):
             return wrapped(*args, **kwargs)
         openai_span = get_current_span()
         if not isinstance(get_value(openai_span, "span_data"), (GenerationSpanData, ResponseSpanData)):
@@ -71,24 +73,19 @@ class GenAIContextCapture:
             return wrapped(*args, **kwargs)
         self._capture_llm_request_attributes(span, instance, kwargs)
         response = wrapped(*args, **kwargs)
+        if isawaitable(response):
+            return self._capture_litellm_acompletion_response_attributes(span, response, kwargs.get("stream"))
         if kwargs.get("stream") and hasattr(response, "__iter__"):
             return self._capture_litellm_completion_stream_response_attributes(span, response)
         self._capture_llm_response_attributes(span, response)
         return response
 
-    async def capture_litellm_acompletion_attributes(self, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
-        openai_span = get_current_span()
-        if not isinstance(get_value(openai_span, "span_data"), (GenerationSpanData, ResponseSpanData)):
-            return await wrapped(*args, **kwargs)
-        span = self._processor.get_otel_span(openai_span.span_id)
-        if span is None:
-            return await wrapped(*args, **kwargs)
-        self._capture_llm_request_attributes(span, instance, kwargs)
-        response = await wrapped(*args, **kwargs)
-        if kwargs.get("stream") and hasattr(response, "__aiter__"):
-            return self._capture_litellm_acompletion_stream_response_attributes(span, response)
-        self._capture_llm_response_attributes(span, response)
-        return response
+    async def _capture_litellm_acompletion_response_attributes(self, span: Span, response: Any, stream: Any) -> Any:
+        awaited_response = await response
+        if stream and hasattr(awaited_response, "__aiter__"):
+            return self._capture_litellm_acompletion_stream_response_attributes(span, awaited_response)
+        self._capture_llm_response_attributes(span, awaited_response)
+        return awaited_response
 
     def _capture_litellm_completion_stream_response_attributes(self, span: Span, stream: Any) -> Any:
         try:
@@ -112,7 +109,8 @@ class GenAIContextCapture:
 
     def capture_tool_call_attributes(self, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
         openai_span = get_current_span()
-        if not isinstance(get_value(openai_span, "span_data"), (FunctionSpanData, HandoffSpanData)):
+        span_data = get_value(openai_span, "span_data")
+        if not isinstance(span_data, (FunctionSpanData, HandoffSpanData)):
             return wrapped(*args, **kwargs)
         span = self._processor.get_otel_span(openai_span.span_id)
         tool_call = kwargs.get("tool_call") or (args[0] if args else None)
@@ -120,15 +118,16 @@ class GenAIContextCapture:
         call_id = get_value(tool_call, "call_id")
         if span is not None and (name or call_id):
             attributes: dict[str, AttributeValue] = {}
-            self._processor._set_attribute(attributes, GEN_AI_TOOL_CALL_ID, call_id)
-            if get_value(span, "name") == f"{GenAiOperationNameValues.EXECUTE_TOOL.value} handoff":
-                self._processor._set_attribute(attributes, GEN_AI_TOOL_NAME, name)
+            _TelemetryHelpers.set_attribute(attributes, GEN_AI_TOOL_CALL_ID, call_id)
+            if isinstance(span_data, HandoffSpanData):
+                _TelemetryHelpers.set_attribute(attributes, GEN_AI_TOOL_NAME, name)
                 if name:
                     span.update_name(f"{GenAiOperationNameValues.EXECUTE_TOOL.value} {name}")
             span.set_attributes(attributes)
         return wrapped(*args, **kwargs)
 
-    def _capture_llm_request_attributes(self, span: Optional[Span], instance: Any, kwargs: Any) -> None:
+    @staticmethod
+    def _capture_llm_request_attributes(span: Optional[Span], instance: Any, kwargs: Any) -> None:
         if span is None or not span.is_recording():
             return
         params = {
@@ -178,38 +177,39 @@ class GenAIContextCapture:
 
         attributes: dict[str, AttributeValue] = {}
         request_model = params.get("model")
-        self._processor._set_attribute(attributes, GEN_AI_REQUEST_MODEL, request_model)
-        self._processor._set_attribute(
+        _TelemetryHelpers.set_attribute(attributes, GEN_AI_REQUEST_MODEL, request_model)
+        _TelemetryHelpers.set_attribute(
             attributes,
             GEN_AI_PROVIDER_NAME,
-            self._processor._resolve_provider(
+            _TelemetryHelpers.resolve_provider(
                 request_model,
                 params.get("base_url") or params.get("api_base"),
                 params.get("custom_llm_provider"),
             ),
         )
-        self._processor._set_request_attributes(attributes, params)
+        _TelemetryHelpers.set_request_attributes(attributes, params)
         if request_model:
             operation = str(get_value(span, "name")).split(" ", 1)[0]
             span.update_name(f"{operation} {request_model}")
         span.set_attributes(attributes)
 
-    def _capture_llm_response_attributes(self, span: Span, response: Any) -> None:
+    @staticmethod
+    def _capture_llm_response_attributes(span: Span, response: Any) -> None:
         if not span.is_recording():
             return
 
         attributes: dict[str, AttributeValue] = {}
-        self._processor._set_response_payload_attributes(attributes, response)
+        _TelemetryHelpers.set_response_payload_attributes(attributes, response)
         usage = get_value(response, "usage")
-        self._processor._set_usage_attributes(attributes, usage, usage)
+        _TelemetryHelpers.set_usage_attributes(attributes, usage, usage)
         current_attributes = get_value(span, "attributes") or {}
-        self._processor._set_attribute(
+        _TelemetryHelpers.set_attribute(
             attributes,
             GEN_AI_RESPONSE_FINISH_REASONS,
             list(
                 dict.fromkeys(
                     list(get_value(current_attributes, GEN_AI_RESPONSE_FINISH_REASONS) or ())
-                    + self._processor._get_finish_reasons(
+                    + _TelemetryHelpers.get_finish_reasons(
                         response,
                         {**current_attributes, **attributes},
                     )
