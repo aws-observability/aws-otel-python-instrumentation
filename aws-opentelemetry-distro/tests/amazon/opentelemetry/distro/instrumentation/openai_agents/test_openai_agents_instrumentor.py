@@ -19,15 +19,12 @@ from openai import Omit
 from pydantic import BaseModel
 
 from amazon.opentelemetry.distro.instrumentation.openai_agents import OpenAIAgentsInstrumentor
+from amazon.opentelemetry.distro.instrumentation.openai_agents._gen_ai_context_capture import GenAIContextCapture
 from amazon.opentelemetry.distro.instrumentation.openai_agents._processor import (
+    GEN_AI_REQUEST_REASONING_LEVEL,
     OpenTelemetryTracingProcessor,
     _GenAIMessageNormalizer,
 )
-from amazon.opentelemetry.distro.instrumentation.openai_agents._telemetry_helpers import (
-    GEN_AI_REQUEST_REASONING_LEVEL,
-    _TelemetryHelpers,
-)
-from amazon.opentelemetry.distro.instrumentation.openai_agents._wrappers import OpenAIAgentWrapper
 from opentelemetry.instrumentation.httpx import HTTPX2ClientInstrumentor, HTTPXClientInstrumentor
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -226,7 +223,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
             "test",
         )
         self.processor = OpenTelemetryTracingProcessor(tracer)
-        self.wrapper = OpenAIAgentWrapper(self.processor)
+        self.context_capture = GenAIContextCapture()
         provider = tracing.get_trace_provider()
         self.previous_processors = tuple(provider._multi_processor._processors)  # pylint: disable=protected-access
         tracing.set_trace_processors([self.processor])
@@ -423,7 +420,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         with tracing.trace("Handoff workflow"):
             handoff_span = tracing.handoff_span(from_agent="Triage agent", to_agent=None)
             with handoff_span:
-                _record_tool_call(self.wrapper, name="beam_me_to_french", call_id="call_handoff")
+                _record_tool_call(self.context_capture, name="beam_me_to_french", call_id="call_handoff")
                 handoff_span.span_data.to_agent = "French agent"
 
         span = self._spans_by_name()["execute_tool beam_me_to_french"]
@@ -455,7 +452,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
     def test_function_span_records_tool_call_id_and_resets_between_calls(self):
         with tracing.trace("Tool workflow"):
             with tracing.function_span("get_weather", input='{"city": "Seattle"}', output="sunny"):
-                _record_tool_call(self.wrapper, name="get_weather", call_id="call_weather")
+                _record_tool_call(self.context_capture, name="get_weather", call_id="call_weather")
             with tracing.function_span("get_time", input="{}", output="noon"):
                 pass
 
@@ -610,7 +607,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
             )
             with captured_span:
                 _record_request(
-                    instrumentor._wrapper,  # pylint: disable=protected-access
+                    instrumentor._context_capture,  # pylint: disable=protected-access
                     base_url="https://bedrock-runtime.us-west-2.amazonaws.com:8443/v1",
                     model="bedrock/anthropic.claude-3-5-haiku",
                     temperature=0.3,
@@ -899,8 +896,8 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
 
     def test_sentinel_request_values_are_not_exported(self):
         attributes: dict = {}
-        _TelemetryHelpers.set_attribute(attributes, GEN_AI_REQUEST_TEMPERATURE, Omit())
-        _TelemetryHelpers.set_attribute(attributes, GEN_AI_REQUEST_TOP_P, 0.4)
+        OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_REQUEST_TEMPERATURE, Omit())
+        OpenTelemetryTracingProcessor._set_attribute(attributes, GEN_AI_REQUEST_TOP_P, 0.4)
         self.assertEqual(attributes, {GEN_AI_REQUEST_TOP_P: 0.4})
 
         with tracing.trace("Sentinel workflow"):
@@ -910,7 +907,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
                 model="gpt-sentinel",
             )
             with sentinel_span:
-                _record_request(self.wrapper, temperature=Omit(), max_tokens=Omit(), top_p=0.4)
+                _record_request(self.context_capture, temperature=Omit(), max_tokens=Omit(), top_p=0.4)
 
         span = self._spans_by_name()["chat gpt-sentinel"]
         self.assertNotIn(GEN_AI_REQUEST_TEMPERATURE, span.attributes)
