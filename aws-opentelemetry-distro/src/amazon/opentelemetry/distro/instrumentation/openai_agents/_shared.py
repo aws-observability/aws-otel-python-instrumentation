@@ -311,6 +311,7 @@ class _TelemetryHelpers:
 
     @staticmethod
     def resolve_provider(model: Any, base_url: Any, custom_provider: Any = None) -> str:
+        """Resolve known OTel providers while preserving explicit custom provider names."""
         if custom_provider:
             candidate = re.sub(r"[^a-z0-9._-]+", "_", str(custom_provider).strip().lower())
             return PROVIDER_MAP.get(candidate, candidate)

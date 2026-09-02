@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import sys
 from typing import Any, Collection
 
 from typing_extensions import override
@@ -62,11 +63,6 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
             "AsyncCompletions.create",
             wrapper.capture_openai_request_attributes,
         )
-        try_wrap(
-            "agents.extensions.models.litellm_model",
-            "model_config_for_trace",
-            wrapper.capture_litellm_request_model_config,
-        )
         try_wrap("litellm", "completion", wrapper.capture_litellm_completion_attributes)
         try_wrap("litellm", "acompletion", wrapper.capture_litellm_completion_attributes)
         try_wrap("agents.items", "ItemHelpers.tool_call_output_item", wrapper.capture_tool_call_attributes)
@@ -93,9 +89,10 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
         try_unwrap("openai.resources.responses.responses.AsyncResponses", "create")
         try_unwrap("openai.resources.chat.completions.completions.Completions", "create")
         try_unwrap("openai.resources.chat.completions.completions.AsyncCompletions", "create")
-        try_unwrap("agents.extensions.models.litellm_model", "model_config_for_trace")
-        try_unwrap("litellm", "completion")
-        try_unwrap("litellm", "acompletion")
+        litellm_module = sys.modules.get("litellm")
+        if litellm_module is not None:
+            try_unwrap(litellm_module, "completion")
+            try_unwrap(litellm_module, "acompletion")
         try_unwrap("agents.items.ItemHelpers", "tool_call_output_item")
         try_unwrap("agents.tool_context.ToolContext", "from_agent_context")
         try_unwrap("agents.tracing.processors.BackendSpanExporter", "export")

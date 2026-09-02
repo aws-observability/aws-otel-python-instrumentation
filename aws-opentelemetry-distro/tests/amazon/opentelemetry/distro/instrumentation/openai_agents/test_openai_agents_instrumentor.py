@@ -14,6 +14,7 @@ from agents.extensions.models.litellm_model import LitellmModel
 from agents.tracing import processors
 from agents.tracing.processors import BackendSpanExporter
 from conftest import call_mock_llm, validate_otel_genai_schema
+from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
 from openai import Omit
 from pydantic import BaseModel
 
@@ -134,6 +135,8 @@ class TestOpenAIAgentsInstrumentor(unittest.TestCase):
         existing_processor = MagicMock()
         tracing.set_trace_processors([existing_processor])
         self.assertEqual(self.instrumentor.instrumentation_dependencies(), ("openai-agents >= 0.3.3",))
+        original_completion = litellm.completion
+        original_acompletion = litellm.acompletion
 
         self.instrumentor.instrument(skip_dep_check=True)
         first_processor = self.instrumentor._processor  # pylint: disable=protected-access
@@ -142,12 +145,16 @@ class TestOpenAIAgentsInstrumentor(unittest.TestCase):
 
         processors = tracing.get_trace_provider()._multi_processor._processors  # pylint: disable=protected-access
         self.assertEqual(processors, (existing_processor, first_processor))
+        self.assertIsNot(litellm.completion, original_completion)
+        self.assertIsNot(litellm.acompletion, original_acompletion)
 
         self.instrumentor.uninstrument()
         self.instrumentor._uninstrument()  # pylint: disable=protected-access
         processors = tracing.get_trace_provider()._multi_processor._processors  # pylint: disable=protected-access
         self.assertEqual(processors, (existing_processor,))
         self.assertIsNone(self.instrumentor._processor)  # pylint: disable=protected-access
+        self.assertIs(litellm.completion, original_completion)
+        self.assertIs(litellm.acompletion, original_acompletion)
 
     def test_disable_openai_trace_export_restores_previous_processors(self):
         existing_processor = MagicMock()
@@ -797,14 +804,15 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
                 model=model,
                 model_config={"model_impl": "litellm"},
             ):
-                list(
-                    litellm.completion(
-                        model=model,
-                        messages=[{"role": "user", "content": "Hello"}],
-                        stream=True,
-                        mock_response="Hello",
-                    )
+                stream = litellm.completion(
+                    model=model,
+                    messages=[{"role": "user", "content": "Hello"}],
+                    stream=True,
+                    mock_response="Hello",
                 )
+                self.assertIsInstance(stream, CustomStreamWrapper)
+                list(stream)
+                self.assertTrue(hasattr(stream, "response_id"))
 
         span = self._spans_by_name()[f"chat {model}"]
         self.assertEqual(span.attributes[GEN_AI_REQUEST_MODEL], model)
@@ -861,7 +869,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
 
         spans = self._spans_by_name()
         span = spans[f"chat {model}"]
-        self.assertEqual(span.attributes[GEN_AI_PROVIDER_NAME], "moonshot")
+        self.assertEqual(span.attributes[GEN_AI_PROVIDER_NAME], "moonshot_ai")
         self.assertIn(GEN_AI_RESPONSE_ID, span.attributes)
         self.assertEqual(span.attributes[GEN_AI_RESPONSE_MODEL], model)
         self.assertEqual(span.attributes[GEN_AI_RESPONSE_FINISH_REASONS], ("stop",))
@@ -874,14 +882,6 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         self.assertIn(f"chat {cancelled_model}", spans)
 
         no_usage_span = spans[f"chat {no_usage_model}"]
-        sampling_call = next(
-            call
-            for call in self.sampler.should_sample.call_args_list
-            if len(call.args) > 2 and call.args[2] == f"chat {no_usage_model}"
-        )
-        sampling_attributes = sampling_call.args[4]
-        self.assertEqual(sampling_attributes[GEN_AI_PROVIDER_NAME], "openrouter")
-        self.assertEqual(sampling_attributes[SERVER_ADDRESS], "openrouter.ai")
         self.assertEqual(no_usage_span.attributes[GEN_AI_PROVIDER_NAME], "openrouter")
         self.assertEqual(no_usage_span.attributes[SERVER_ADDRESS], "openrouter.ai")
         self.assertEqual(

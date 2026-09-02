@@ -50,6 +50,8 @@ PROVIDER_MAP = {
     "deepseek": GenAiProviderNameValues.DEEPSEEK.value,
     "langchain_deepseek": GenAiProviderNameValues.DEEPSEEK.value,
     "perplexity": GenAiProviderNameValues.PERPLEXITY.value,
+    "moonshot": "moonshot_ai",
+    "moonshot_ai": "moonshot_ai",
     "xai": GenAiProviderNameValues.X_AI.value,
     "langchain_xai": GenAiProviderNameValues.X_AI.value,
 }

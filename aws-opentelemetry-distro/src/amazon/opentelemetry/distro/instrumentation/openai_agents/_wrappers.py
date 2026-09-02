@@ -1,18 +1,19 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from collections.abc import Mapping
+from functools import partial
 from inspect import isawaitable, iscoroutinefunction
-from typing import Any, Optional
-from urllib.parse import urlsplit, urlunsplit
+from typing import Any, Callable, Optional
 
 from agents.tracing import get_current_span
 from agents.tracing.span_data import FunctionSpanData, GenerationSpanData, HandoffSpanData, ResponseSpanData
 from openai import NotGiven, Omit
+from wrapt import ObjectProxy
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import get_value
 from amazon.opentelemetry.distro.instrumentation.openai_agents._shared import _TelemetryHelpers
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
+    GEN_AI_OPERATION_NAME,
     GEN_AI_PROVIDER_NAME,
     GEN_AI_REQUEST_MODEL,
     GEN_AI_RESPONSE_FINISH_REASONS,
@@ -22,6 +23,30 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
 )
 from opentelemetry.trace import Span
 from opentelemetry.util.types import AttributeValue
+
+
+class _ResponseCapturingStream(ObjectProxy):
+    """Preserve the LiteLLM stream interface while capturing each response chunk."""
+
+    def __init__(self, stream: Any, capture: Callable[[Any], None]) -> None:
+        super().__init__(stream)
+        self._self_capture = capture
+
+    def __iter__(self) -> Any:
+        return self
+
+    def __next__(self) -> Any:
+        chunk = next(self.__wrapped__)
+        self._self_capture(chunk)
+        return chunk
+
+    def __aiter__(self) -> Any:
+        return self
+
+    async def __anext__(self) -> Any:
+        chunk = await self.__wrapped__.__anext__()
+        self._self_capture(chunk)
+        return chunk
 
 
 class OpenAIAgentWrapper:
@@ -45,27 +70,9 @@ class OpenAIAgentWrapper:
         self._capture_llm_request_attributes(span, instance, kwargs)
         return wrapped(*args, **kwargs)
 
-    @staticmethod
-    def capture_litellm_request_model_config(wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
-        """Wrap model_config_for_trace to preserve LiteLLM provider configuration attributes."""
-        config = wrapped(*args, **kwargs)
-        model_settings = kwargs.get("model_settings") or (args[0] if args else None)
-        extra_args = get_value(model_settings, "extra_args")
-        if isinstance(config, dict) and isinstance(extra_args, Mapping):
-            for key in ("api_base", "base_url", "custom_llm_provider"):
-                value = extra_args.get(key)
-                if value is not None and key in ("api_base", "base_url"):
-                    try:
-                        parts = urlsplit(str(value))
-                        value = urlunsplit((parts.scheme, parts.netloc.rsplit("@", 1)[-1], parts.path, "", ""))
-                    except ValueError:
-                        value = None
-                if value is not None and not config.get(key):
-                    config[key] = value
-        return config
-
     def capture_litellm_completion_attributes(self, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
         """Wrap LiteLLM completion and acompletion to capture request and response attributes."""
+        # LiteLLM's acompletion calls completion(..., acompletion=True); capture the request only once.
         if kwargs.get("acompletion") and not iscoroutinefunction(wrapped):
             return wrapped(*args, **kwargs)
         openai_span = get_current_span()
@@ -79,36 +86,22 @@ class OpenAIAgentWrapper:
         if isawaitable(response):
             return self._capture_litellm_acompletion_response_attributes(span, response, kwargs.get("stream"))
         if kwargs.get("stream") and hasattr(response, "__iter__"):
-            return self._capture_litellm_completion_stream_response_attributes(span, response)
+            return _ResponseCapturingStream(
+                response,
+                partial(self._capture_llm_response_attributes, span),
+            )
         self._capture_llm_response_attributes(span, response)
         return response
 
     async def _capture_litellm_acompletion_response_attributes(self, span: Span, response: Any, stream: Any) -> Any:
         awaited_response = await response
         if stream and hasattr(awaited_response, "__aiter__"):
-            return self._capture_litellm_acompletion_stream_response_attributes(span, awaited_response)
+            return _ResponseCapturingStream(
+                awaited_response,
+                partial(self._capture_llm_response_attributes, span),
+            )
         self._capture_llm_response_attributes(span, awaited_response)
         return awaited_response
-
-    def _capture_litellm_completion_stream_response_attributes(self, span: Span, stream: Any) -> Any:
-        try:
-            for chunk in stream:
-                self._capture_llm_response_attributes(span, chunk)
-                yield chunk
-        finally:
-            close = get_value(stream, "close")
-            if callable(close):
-                close()
-
-    async def _capture_litellm_acompletion_stream_response_attributes(self, span: Span, stream: Any) -> Any:
-        try:
-            async for chunk in stream:
-                self._capture_llm_response_attributes(span, chunk)
-                yield chunk
-        finally:
-            close = get_value(stream, "aclose")
-            if callable(close):
-                await close()
 
     def capture_tool_call_attributes(self, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
         """Wrap OpenAI Agents tool-call helpers to capture the tool name and call ID attributes."""
@@ -192,8 +185,8 @@ class OpenAIAgentWrapper:
             ),
         )
         _TelemetryHelpers.set_request_attributes(attributes, params)
-        if request_model:
-            operation = str(get_value(span, "name")).split(" ", 1)[0]
+        operation = get_value(get_value(span, "attributes"), GEN_AI_OPERATION_NAME)
+        if request_model and operation:
             span.update_name(f"{operation} {request_model}")
         span.set_attributes(attributes)
 
