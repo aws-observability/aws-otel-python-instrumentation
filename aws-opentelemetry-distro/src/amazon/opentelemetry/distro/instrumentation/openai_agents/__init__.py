@@ -81,7 +81,7 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
         try_unwrap("agents.items.ItemHelpers", "tool_call_output_item")
         try_unwrap("agents.tool_context.ToolContext", "from_agent_context")
         try_unwrap("agents.tracing.processors.BackendSpanExporter", "export")
-        GenAIContextCapture.reset_model_invocation()
+        GenAIContextCapture.reset_model_request_response()
         GenAIContextCapture.reset_tool_call()
 
         processor = self._processor
