@@ -105,12 +105,17 @@ def call_mock_llm(
             if provider == "litellm":
                 import litellm
 
+                async_http_client = httpx.AsyncClient(transport=transport)
                 previous_client_session = litellm.client_session
+                previous_aclient_session = litellm.aclient_session
                 litellm.client_session = http_client
+                litellm.aclient_session = async_http_client
                 try:
                     invoke_llm_callback(None)
                 finally:
                     litellm.client_session = previous_client_session
+                    litellm.aclient_session = previous_aclient_session
+                    asyncio.run(async_http_client.aclose())
             else:
                 invoke_llm_callback(OpenAI(api_key="fake-key", http_client=http_client))
         return

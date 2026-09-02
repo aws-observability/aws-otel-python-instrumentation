@@ -8,14 +8,13 @@ from importlib.metadata import entry_points
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import litellm
 from agents import Agent, ModelSettings, OpenAIChatCompletionsModel, RunConfig, Runner, function_tool, tracing
 from agents.extensions.models.litellm_model import LitellmModel
-from agents.items import ItemHelpers
 from agents.tracing import processors
 from agents.tracing.processors import BackendSpanExporter
 from conftest import call_mock_llm, validate_otel_genai_schema
 from openai import Omit
-from openai.types.responses import ResponseFunctionToolCall
 from pydantic import BaseModel
 
 from amazon.opentelemetry.distro.instrumentation.openai_agents import OpenAIAgentsInstrumentor
@@ -80,19 +79,13 @@ def _passthrough(*args, **kwargs):
     return "wrapped result"
 
 
-def _tool_call(name, call_id):
-    return ResponseFunctionToolCall(call_id=call_id, name=name, arguments="{}", type="function_call")
+def _record_tool_call(capture, name=None, call_id=None):
+    return capture.record_tool_call(_passthrough, None, (), {"tool_call": SimpleNamespace(name=name, call_id=call_id)})
 
 
-def _record_tool_call(name=None, call_id=None):
-    return GenAIContextCapture.record_tool_call(
-        _passthrough, None, (), {"tool_call": SimpleNamespace(name=name, call_id=call_id)}
-    )
-
-
-def _record_request(base_url=None, **kwargs):
+def _record_request(capture, base_url=None, **kwargs):
     instance = SimpleNamespace(_client=SimpleNamespace(base_url=base_url)) if base_url else None
-    return GenAIContextCapture.record_request(_passthrough, instance, (), kwargs)
+    return capture.record_openai_request(_passthrough, instance, (), kwargs)
 
 
 class TestOpenAIAgentsInstrumentor(unittest.TestCase):
@@ -145,21 +138,6 @@ class TestOpenAIAgentsInstrumentor(unittest.TestCase):
         current = tracing.get_trace_provider()._multi_processor._processors  # pylint: disable=protected-access
         self.assertEqual(current, (existing_processor,))
         self.assertIsNone(self.instrumentor._processor)  # pylint: disable=protected-access
-
-    def test_instrument_wraps_tool_call_capture_and_uninstrument_removes_it(self):
-        GenAIContextCapture.reset_tool_call()
-        ItemHelpers.tool_call_output_item(_tool_call("lookup", "call_before"), "sunny")
-        self.assertIsNone(GenAIContextCapture.get_tool_call().call_id)
-
-        self.instrumentor.instrument(skip_dep_check=True)
-        ItemHelpers.tool_call_output_item(_tool_call("lookup", "call_during"), "sunny")
-        self.assertEqual(GenAIContextCapture.get_tool_call().name, "lookup")
-        self.assertEqual(GenAIContextCapture.get_tool_call().call_id, "call_during")
-
-        self.instrumentor.uninstrument()
-        ItemHelpers.tool_call_output_item(_tool_call("lookup", "call_after"), "sunny")
-        self.assertIsNone(GenAIContextCapture.get_tool_call().call_id)
-        self.assertIsNone(GenAIContextCapture.get_model_invocation().request_params)
 
     def test_openai_trace_export_produces_no_http_spans(self):
         exporter = InMemorySpanExporter()
@@ -217,11 +195,10 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
             "test",
         )
         self.processor = OpenTelemetryTracingProcessor(tracer)
+        self.capture = GenAIContextCapture(self.processor.get_otel_span)
         provider = tracing.get_trace_provider()
         self.previous_processors = tuple(provider._multi_processor._processors)  # pylint: disable=protected-access
         tracing.set_trace_processors([self.processor])
-        GenAIContextCapture.reset_model_invocation()
-        GenAIContextCapture.reset_tool_call()
 
     def tearDown(self) -> None:
         self.processor.shutdown()
@@ -408,7 +385,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         with tracing.trace("Handoff workflow"):
             handoff_span = tracing.handoff_span(from_agent="Triage agent", to_agent=None)
             with handoff_span:
-                _record_tool_call(name="beam_me_to_french", call_id="call_handoff")
+                _record_tool_call(self.capture, name="beam_me_to_french", call_id="call_handoff")
                 handoff_span.span_data.to_agent = "French agent"
 
         span = self._spans_by_name()["execute_tool beam_me_to_french"]
@@ -440,7 +417,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
     def test_function_span_records_tool_call_id_and_resets_between_calls(self):
         with tracing.trace("Tool workflow"):
             with tracing.function_span("get_weather", input='{"city": "Seattle"}', output="sunny"):
-                _record_tool_call(name="get_weather", call_id="call_weather")
+                _record_tool_call(self.capture, name="get_weather", call_id="call_weather")
             with tracing.function_span("get_time", input="{}", output="noon"):
                 pass
 
@@ -529,8 +506,11 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
     def test_captured_request_params_set_provider_and_server_attributes(self):
         model = "gpt-5.6-sol"
         instrumentor = OpenAIAgentsInstrumentor()
-        instrumentor.instrument(tracer_provider=self.tracer_provider, skip_dep_check=True)
-        tracing.set_trace_processors([self.processor])
+        instrumentor.instrument(
+            tracer_provider=self.tracer_provider,
+            disable_openai_trace_export=True,
+            skip_dep_check=True,
+        )
         self.addCleanup(instrumentor.uninstrument)
 
         def invoke_agent(client):
@@ -574,6 +554,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
             )
             with captured_span:
                 _record_request(
+                    instrumentor._capture,  # pylint: disable=protected-access
                     base_url="https://bedrock-runtime.us-west-2.amazonaws.com:8443/v1",
                     model="bedrock/anthropic.claude-3-5-haiku",
                     temperature=0.3,
@@ -604,8 +585,11 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
     def test_litellm_bedrock_model_captures_tools_and_response_metadata(self):
         model = "bedrock/anthropic.claude-3-haiku-20240307-v1:0"
         instrumentor = OpenAIAgentsInstrumentor()
-        instrumentor.instrument(tracer_provider=self.tracer_provider, skip_dep_check=True)
-        tracing.set_trace_processors([self.processor])
+        instrumentor.instrument(
+            tracer_provider=self.tracer_provider,
+            disable_openai_trace_export=True,
+            skip_dep_check=True,
+        )
         self.addCleanup(instrumentor.uninstrument)
 
         @function_tool
@@ -679,16 +663,117 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
             ],
         )
 
+    def test_litellm_openai_sdk_call_preserves_litellm_attributes(self):
+        model = "openai/test-model"
+        instrumentor = OpenAIAgentsInstrumentor()
+        instrumentor.instrument(
+            tracer_provider=self.tracer_provider,
+            disable_openai_trace_export=True,
+            skip_dep_check=True,
+        )
+        self.addCleanup(instrumentor.uninstrument)
+
+        def invoke_agent(_client):
+            asyncio.run(
+                Runner.run(
+                    Agent(
+                        name="LiteLLM OpenAI agent",
+                        model=LitellmModel(
+                            model=model,
+                            base_url="https://example.com/v1",
+                            api_key="fake-key",
+                        ),
+                    ),
+                    "Hello",
+                ),
+            )
+
+        call_mock_llm("litellm", invoke_llm_callback=invoke_agent, model="test-model")
+
+        span = self._spans_by_name()[f"chat {model}"]
+        sampling_call = next(
+            call
+            for call in self.sampler.should_sample.call_args_list
+            if len(call.args) > 2 and call.args[2] == f"chat {model}"
+        )
+        sampling_attributes = sampling_call.args[4]
+        self.assertEqual(sampling_attributes[GEN_AI_PROVIDER_NAME], GenAiProviderNameValues.OPENAI.value)
+        self.assertEqual(sampling_attributes[GEN_AI_REQUEST_MODEL], model)
+        self.assertEqual(sampling_attributes[SERVER_ADDRESS], "example.com")
+        self.assertEqual(span.attributes[GEN_AI_PROVIDER_NAME], GenAiProviderNameValues.OPENAI.value)
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_MODEL], model)
+        self.assertEqual(span.attributes[SERVER_ADDRESS], "example.com")
+        self.assertEqual(span.attributes[GEN_AI_RESPONSE_ID], "chatcmpl-mock")
+        self.assertEqual(span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 10)
+        self.assertEqual(span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 20)
+
+        self.exporter.clear()
+        model = "openai/sync-model"
+
+        def invoke_completion(_client):
+            with tracing.trace("Synchronous LiteLLM workflow"):
+                with tracing.generation_span(
+                    input=[{"role": "user", "content": "Hello"}],
+                    output=None,
+                    model=model,
+                    model_config={"model_impl": "litellm"},
+                ):
+                    litellm.completion(
+                        model=model,
+                        messages=[{"role": "user", "content": "Hello"}],
+                        base_url="https://example.com/v1",
+                        api_key="fake-key",
+                        temperature=0.4,
+                    )
+
+        call_mock_llm("litellm", invoke_llm_callback=invoke_completion, model="sync-model")
+
+        span = self._spans_by_name()[f"chat {model}"]
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_MODEL], model)
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_TEMPERATURE], 0.4)
+        self.assertEqual(span.attributes[SERVER_ADDRESS], "example.com")
+        self.assertEqual(span.attributes[GEN_AI_RESPONSE_ID], "chatcmpl-mock")
+        self.assertEqual(span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 10)
+        self.assertEqual(span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 20)
+
+        self.exporter.clear()
+        model = "openai/sync-stream-model"
+        with tracing.trace("Synchronous streaming LiteLLM workflow"):
+            with tracing.generation_span(
+                input=[{"role": "user", "content": "Hello"}],
+                output=None,
+                model=model,
+                model_config={"model_impl": "litellm"},
+            ):
+                list(
+                    litellm.completion(
+                        model=model,
+                        messages=[{"role": "user", "content": "Hello"}],
+                        stream=True,
+                        mock_response="Hello",
+                    )
+                )
+
+        span = self._spans_by_name()[f"chat {model}"]
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_MODEL], model)
+        self.assertEqual(span.attributes[GEN_AI_REQUEST_STREAM], True)
+        self.assertIn(GEN_AI_RESPONSE_ID, span.attributes)
+        self.assertEqual(span.attributes[GEN_AI_RESPONSE_MODEL], "sync-stream-model")
+        self.assertEqual(span.attributes[GEN_AI_RESPONSE_FINISH_REASONS], ("stop",))
+
     def test_litellm_run_streamed_captures_metadata_without_content(self):
         model = "moonshot/test-model"
         cancelled_model = "ollama/cancelled-model"
-        no_usage_model = "openrouter/no-usage-model"
+        no_usage_model = "no-usage-model"
         instrumentor = OpenAIAgentsInstrumentor()
-        instrumentor.instrument(tracer_provider=self.tracer_provider, skip_dep_check=True)
-        tracing.set_trace_processors([self.processor])
+        instrumentor.instrument(
+            tracer_provider=self.tracer_provider,
+            disable_openai_trace_export=True,
+            skip_dep_check=True,
+        )
         self.addCleanup(instrumentor.uninstrument)
 
-        async def run_streamed(stream_model, include_usage, cancel=False):
+        async def run_streamed(stream_model, include_usage, extra_args=None, cancel=False):
             result = Runner.run_streamed(
                 Agent(
                     name="Streaming LiteLLM agent",
@@ -696,7 +781,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
                     model_settings=ModelSettings(
                         include_usage=include_usage,
                         reasoning={"effort": "high"},
-                        extra_args={"mock_response": "Hello", "drop_params": True},
+                        extra_args={"mock_response": "Hello", "drop_params": True, **(extra_args or {})},
                     ),
                 ),
                 "Hello",
@@ -708,9 +793,17 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
                     cancel = False
 
         async def run():
-            await run_streamed(model, True)
+            await run_streamed(model, True, {"modalities": ["text", "audio"]})
             await run_streamed(cancelled_model, True, cancel=True)
-            await run_streamed(no_usage_model, False)
+            await run_streamed(
+                no_usage_model,
+                False,
+                {
+                    "api_base": "https://openrouter.ai/api/v1",
+                    "custom_llm_provider": "openrouter",
+                    "functions": [{"name": "lookup", "description": "Look up a city."}],
+                },
+            )
 
         asyncio.run(run())
 
@@ -723,38 +816,29 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         self.assertGreater(span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 0)
         self.assertGreater(span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 0)
         self.assertEqual(span.attributes[GEN_AI_REQUEST_REASONING_LEVEL], "high")
+        self.assertEqual(span.attributes[GEN_AI_OUTPUT_TYPE], GenAiOutputTypeValues.SPEECH.value)
         self.assertNotIn(GEN_AI_OUTPUT_MESSAGES, span.attributes)
 
         self.assertIn(f"chat {cancelled_model}", spans)
 
         no_usage_span = spans[f"chat {no_usage_model}"]
+        sampling_call = next(
+            call
+            for call in self.sampler.should_sample.call_args_list
+            if len(call.args) > 2 and call.args[2] == f"chat {no_usage_model}"
+        )
+        sampling_attributes = sampling_call.args[4]
+        self.assertEqual(sampling_attributes[GEN_AI_PROVIDER_NAME], "openrouter")
+        self.assertEqual(sampling_attributes[SERVER_ADDRESS], "openrouter.ai")
+        self.assertEqual(no_usage_span.attributes[GEN_AI_PROVIDER_NAME], "openrouter")
+        self.assertEqual(no_usage_span.attributes[SERVER_ADDRESS], "openrouter.ai")
+        self.assertEqual(
+            json.loads(no_usage_span.attributes[GEN_AI_TOOL_DEFINITIONS]),
+            [{"type": "function", "name": "lookup", "description": "Look up a city."}],
+        )
         self.assertNotIn(GEN_AI_USAGE_INPUT_TOKENS, no_usage_span.attributes)
         self.assertNotIn(GEN_AI_USAGE_OUTPUT_TOKENS, no_usage_span.attributes)
         self.assertIn(GEN_AI_OUTPUT_MESSAGES, no_usage_span.attributes)
-
-    def test_generation_span_clears_captured_model_invocation(self):
-        async def capture():
-            async def acompletion(*args, **kwargs):
-                return {"id": "chatcmpl-1", "model": "gpt-4o-mini"}
-
-            with tracing.trace("Clear capture workflow"):
-                with tracing.generation_span(
-                    input=[{"role": "user", "content": "Hello"}],
-                    output=[{"role": "assistant", "content": "Hi"}],
-                    model="gpt-4o-mini",
-                ):
-                    response = await GenAIContextCapture.record_litellm_invocation(
-                        acompletion,
-                        None,
-                        (),
-                        {"model": "gpt-4o-mini"},
-                    )
-                    self.assertEqual(GenAIContextCapture.get_model_invocation().response, response)
-                return GenAIContextCapture.get_model_invocation()
-
-        invocation = asyncio.run(capture())
-        self.assertIsNone(invocation.request_params)
-        self.assertIsNone(invocation.response)
 
     def test_sentinel_request_values_are_not_exported(self):
         attributes: dict = {}
@@ -771,7 +855,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
                 model="gpt-sentinel",
             )
             with sentinel_span:
-                _record_request(temperature=Omit(), max_tokens=Omit(), top_p=0.4)
+                _record_request(self.capture, temperature=Omit(), max_tokens=Omit(), top_p=0.4)
 
         span = self._spans_by_name()["chat gpt-sentinel"]
         self.assertNotIn(GEN_AI_REQUEST_TEMPERATURE, span.attributes)
@@ -828,99 +912,6 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         self.assertEqual(
             [span.name for span in self.exporter.get_finished_spans()], ["invoke_workflow Unhandled workflow"]
         )
-
-
-class TestGenAIContextCapture(unittest.TestCase):
-    def setUp(self) -> None:
-        GenAIContextCapture.reset_model_invocation()
-        GenAIContextCapture.start_model_invocation()
-        GenAIContextCapture.reset_tool_call()
-
-    def tearDown(self) -> None:
-        GenAIContextCapture.reset_model_invocation()
-        GenAIContextCapture.reset_tool_call()
-
-    def test_record_request_keeps_known_params_and_client_base_url(self):
-        result = _record_request(
-            base_url="https://api.openai.com/v1",
-            model="gpt-4o-mini",
-            temperature=0.4,
-            top_p=None,
-            extra_headers={"x-request-id": "dropped"},
-        )
-
-        self.assertEqual(result, "wrapped result")
-        self.assertEqual(
-            GenAIContextCapture.get_model_invocation().request_params,
-            {"model": "gpt-4o-mini", "temperature": 0.4, "base_url": "https://api.openai.com/v1"},
-        )
-
-    def test_record_litellm_invocation_captures_request_and_response(self):
-        async def capture():
-            async def acompletion(*args, **kwargs):
-                return {"id": "chatcmpl-1", "model": "bedrock/anthropic.claude-3-5-haiku"}
-
-            result = await GenAIContextCapture.record_litellm_invocation(
-                acompletion,
-                None,
-                (),
-                {
-                    "model": "bedrock/anthropic.claude-3-5-haiku",
-                    "base_url": "https://bedrock-runtime.us-west-2.amazonaws.com",
-                    "tools": [{"type": "function", "function": {"name": "lookup"}}],
-                    "metadata": {"dropped": True},
-                },
-            )
-            return result, GenAIContextCapture.get_model_invocation()
-
-        result, invocation = asyncio.run(capture())
-        self.assertEqual(result["id"], "chatcmpl-1")
-        self.assertEqual(
-            invocation.request_params,
-            {
-                "model": "bedrock/anthropic.claude-3-5-haiku",
-                "base_url": "https://bedrock-runtime.us-west-2.amazonaws.com",
-                "tools": [{"type": "function", "function": {"name": "lookup"}}],
-            },
-        )
-        self.assertEqual(
-            invocation.response,
-            result,
-        )
-
-    def test_record_tool_call_reads_positional_payload_and_ignores_empty(self):
-        result = GenAIContextCapture.record_tool_call(_passthrough, None, (_tool_call("lookup", "call_1"),), {})
-
-        self.assertEqual(result, "wrapped result")
-        self.assertEqual(GenAIContextCapture.get_tool_call().name, "lookup")
-        self.assertEqual(GenAIContextCapture.get_tool_call().call_id, "call_1")
-
-        GenAIContextCapture.record_tool_call(_passthrough, None, (SimpleNamespace(),), {})
-        self.assertEqual(GenAIContextCapture.get_tool_call().call_id, "call_1")
-
-    def test_reset_clears_captured_state(self):
-        async def capture_and_reset():
-            async def acompletion(*args, **kwargs):
-                return {"id": "chatcmpl-1", "model": "gpt-4o-mini"}
-
-            await GenAIContextCapture.record_litellm_invocation(
-                acompletion,
-                None,
-                (),
-                {"model": "gpt-4o-mini"},
-            )
-            GenAIContextCapture.reset_model_invocation()
-            return GenAIContextCapture.get_model_invocation()
-
-        invocation = asyncio.run(capture_and_reset())
-        _record_tool_call(name="lookup", call_id="call_1")
-
-        GenAIContextCapture.reset_tool_call()
-
-        self.assertIsNone(invocation.request_params)
-        self.assertIsNone(invocation.response)
-        self.assertIsNone(GenAIContextCapture.get_tool_call().name)
-        self.assertIsNone(GenAIContextCapture.get_tool_call().call_id)
 
 
 class TestOpenAIAgentsMessages(unittest.TestCase):
