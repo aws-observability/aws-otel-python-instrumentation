@@ -5,6 +5,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import get_value
+
 
 @dataclass
 class _ModelInvocation:
@@ -35,9 +37,7 @@ class GenAIContextCapture:
     async def record_litellm_acompletion(cls, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
         cls._capture_request_params(instance, kwargs)
         response = await wrapped(*args, **kwargs)
-        response_params = {
-            key: value for key in ("id", "model") if (value := cls._get_value(response, key)) is not None
-        }
+        response_params = {key: value for key in ("id", "model") if (value := get_value(response, key)) is not None}
         invocation = cls._model_invocation.get() or _ModelInvocation()
         cls._model_invocation.set(
             _ModelInvocation(request_params=invocation.request_params, response_params=response_params or None)
@@ -110,7 +110,3 @@ class GenAIContextCapture:
     @classmethod
     def reset_tool_call(cls) -> None:
         cls._tool_call.set(None)
-
-    @staticmethod
-    def _get_value(source: Any, name: str) -> Any:
-        return source.get(name) if isinstance(source, dict) else getattr(source, name, None)
