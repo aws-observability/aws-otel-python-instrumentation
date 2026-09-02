@@ -24,7 +24,7 @@ from opentelemetry.trace import Span
 from opentelemetry.util.types import AttributeValue
 
 
-class OpenAIAgentsWrappers:
+class OpenAIAgentWrapper:
     """Wrap GenAI calls to capture details that OpenAI Agents tracing callbacks do not expose."""
 
     def __init__(self, processor: Any) -> None:
@@ -207,18 +207,16 @@ class OpenAIAgentsWrappers:
         usage = get_value(response, "usage")
         _TelemetryHelpers.set_usage_attributes(attributes, usage, usage)
         current_attributes = get_value(span, "attributes") or {}
+        finish_reasons = list(get_value(current_attributes, GEN_AI_RESPONSE_FINISH_REASONS) or ())
+        finish_reasons.extend(
+            _TelemetryHelpers.get_finish_reasons(
+                response,
+                {**current_attributes, **attributes},
+            )
+        )
         _TelemetryHelpers.set_attribute(
             attributes,
             GEN_AI_RESPONSE_FINISH_REASONS,
-            list(
-                dict.fromkeys(
-                    list(get_value(current_attributes, GEN_AI_RESPONSE_FINISH_REASONS) or ())
-                    + _TelemetryHelpers.get_finish_reasons(
-                        response,
-                        {**current_attributes, **attributes},
-                    )
-                )
-            )
-            or None,
+            finish_reasons or None,
         )
         span.set_attributes(attributes)

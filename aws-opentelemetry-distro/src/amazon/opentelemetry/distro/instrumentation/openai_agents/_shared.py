@@ -257,7 +257,7 @@ class _TelemetryHelpers:
             fallback = _TelemetryHelpers.get_finish_reason(response, attributes)
             if fallback is not None:
                 normalized.append(fallback)
-        return list(dict.fromkeys(normalized))
+        return normalized
 
     @staticmethod
     def get_finish_reason(response: Any, attributes: Mapping[str, AttributeValue]) -> Optional[str]:

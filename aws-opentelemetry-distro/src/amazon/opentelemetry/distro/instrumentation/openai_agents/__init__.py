@@ -15,7 +15,7 @@ from opentelemetry.instrumentation.utils import suppress_http_instrumentation
 class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
     """Instrument OpenAI Agents SDK tracing callbacks with OpenTelemetry spans."""
 
-    _capture = None
+    _wrapper = None
     _processor = None
     _previous_processors = None
 
@@ -35,42 +35,42 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
         )
 
         from ._processor import OpenTelemetryTracingProcessor  # pylint: disable=import-outside-toplevel
-        from ._wrappers import OpenAIAgentsWrappers  # pylint: disable=import-outside-toplevel
+        from ._wrappers import OpenAIAgentWrapper  # pylint: disable=import-outside-toplevel
 
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
         self._processor = OpenTelemetryTracingProcessor(tracer)
-        capture = self._capture = OpenAIAgentsWrappers(self._processor)
+        wrapper = self._wrapper = OpenAIAgentWrapper(self._processor)
 
         try_wrap(
             "openai.resources.responses.responses",
             "Responses.create",
-            capture.capture_openai_request_attributes,
+            wrapper.capture_openai_request_attributes,
         )
         try_wrap(
             "openai.resources.responses.responses",
             "AsyncResponses.create",
-            capture.capture_openai_request_attributes,
+            wrapper.capture_openai_request_attributes,
         )
         try_wrap(
             "openai.resources.chat.completions.completions",
             "Completions.create",
-            capture.capture_openai_request_attributes,
+            wrapper.capture_openai_request_attributes,
         )
         try_wrap(
             "openai.resources.chat.completions.completions",
             "AsyncCompletions.create",
-            capture.capture_openai_request_attributes,
+            wrapper.capture_openai_request_attributes,
         )
         try_wrap(
             "agents.extensions.models.litellm_model",
             "model_config_for_trace",
-            capture.capture_litellm_request_model_config,
+            wrapper.capture_litellm_request_model_config,
         )
-        try_wrap("litellm", "completion", capture.capture_litellm_completion_attributes)
-        try_wrap("litellm", "acompletion", capture.capture_litellm_completion_attributes)
-        try_wrap("agents.items", "ItemHelpers.tool_call_output_item", capture.capture_tool_call_attributes)
-        try_wrap("agents.tool_context", "ToolContext.from_agent_context", capture.capture_tool_call_attributes)
+        try_wrap("litellm", "completion", wrapper.capture_litellm_completion_attributes)
+        try_wrap("litellm", "acompletion", wrapper.capture_litellm_completion_attributes)
+        try_wrap("agents.items", "ItemHelpers.tool_call_output_item", wrapper.capture_tool_call_attributes)
+        try_wrap("agents.tool_context", "ToolContext.from_agent_context", wrapper.capture_tool_call_attributes)
         # disables http spans created from spans sent OpenAI's tracing backend
         try_wrap("agents.tracing.processors", "BackendSpanExporter.export", _suppress_http_instrumentation)
 
@@ -110,7 +110,7 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
                 set_trace_processors([item for item in current_processors if item is not processor])
             processor.shutdown()
         finally:
-            self._capture = None
+            self._wrapper = None
             self._processor = None
             self._previous_processors = None
 

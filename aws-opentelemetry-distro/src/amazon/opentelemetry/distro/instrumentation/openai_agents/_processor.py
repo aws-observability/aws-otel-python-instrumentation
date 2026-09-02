@@ -190,13 +190,14 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         otel_span = entry.span
 
         try:
-            captured_attributes = dict(get_value(otel_span, "attributes") or {})
-            attributes, content = self._set_span_attributes(
+            wrapper_attributes = dict(get_value(otel_span, "attributes") or {})
+            processor_attributes, content = self._set_span_attributes(
                 span,
                 entry.agent_content,
-                captured_attributes,
+                wrapper_attributes,
             )
-            attributes.update(captured_attributes)
+            # Wrapper attributes reflect the actual SDK call and override processor-derived fallbacks.
+            attributes = {**processor_attributes, **wrapper_attributes}
             if isinstance(span_data, (GenerationSpanData, ResponseSpanData)):
                 operation = self._set_operation_name(span_data)
                 attributes[GEN_AI_OPERATION_NAME] = operation
@@ -307,11 +308,11 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         self,
         span: AgentsSpan[Any],
         agent_content: Optional[_AgentContent],
-        captured_attributes: Mapping[str, AttributeValue],
+        wrapper_attributes: Mapping[str, AttributeValue],
     ) -> tuple[dict[str, AttributeValue], Optional[_AgentContent]]:
         span_data = span.span_data
         if isinstance(span_data, GenerationSpanData):
-            return self._set_generation_attributes(span_data, captured_attributes)
+            return self._set_generation_attributes(span_data, wrapper_attributes)
         if isinstance(span_data, ResponseSpanData):
             return self._set_response_attributes(span_data)
         if isinstance(span_data, FunctionSpanData):
@@ -325,7 +326,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
     @staticmethod
     def _set_generation_attributes(
         span_data: GenerationSpanData,
-        captured_attributes: Mapping[str, AttributeValue],
+        wrapper_attributes: Mapping[str, AttributeValue],
     ) -> tuple[dict[str, AttributeValue], _AgentContent]:
         attributes: dict[str, AttributeValue] = {}
         streamed_response = OpenTelemetryTracingProcessor._get_response_payload(span_data.output)
@@ -364,9 +365,9 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             first_not_none(span_usage, get_value(streamed_response, "usage")),
             first_not_none(get_value(streamed_response, "usage"), span_usage),
         )
-        captured_finish_reasons = list(captured_attributes.get(GEN_AI_RESPONSE_FINISH_REASONS, ()))
+        wrapper_finish_reasons = list(wrapper_attributes.get(GEN_AI_RESPONSE_FINISH_REASONS, ()))
         default_finish_reason = first_not_none(
-            captured_finish_reasons[0] if captured_finish_reasons else None,
+            wrapper_finish_reasons[0] if wrapper_finish_reasons else None,
             _TelemetryHelpers.get_finish_reason(streamed_response, attributes),
         )
 
@@ -375,13 +376,9 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         OpenTelemetryTracingProcessor._set_message_attributes(
             attributes, system_instructions, input_messages, output_messages
         )
-        finish_reasons = list(
-            dict.fromkeys(
-                captured_finish_reasons
-                + [message["finish_reason"] for message in output_messages if message.get("finish_reason")]
-            )
-        )
-        _TelemetryHelpers.set_attribute(attributes, GEN_AI_RESPONSE_FINISH_REASONS, finish_reasons or None)
+        if GEN_AI_RESPONSE_FINISH_REASONS not in wrapper_attributes:
+            finish_reasons = [message["finish_reason"] for message in output_messages if message.get("finish_reason")]
+            _TelemetryHelpers.set_attribute(attributes, GEN_AI_RESPONSE_FINISH_REASONS, finish_reasons or None)
 
         content = _AgentContent(
             input_messages=input_messages or None,

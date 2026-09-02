@@ -26,7 +26,7 @@ from amazon.opentelemetry.distro.instrumentation.openai_agents._shared import (
     GEN_AI_REQUEST_REASONING_LEVEL,
     _TelemetryHelpers,
 )
-from amazon.opentelemetry.distro.instrumentation.openai_agents._wrappers import OpenAIAgentsWrappers
+from amazon.opentelemetry.distro.instrumentation.openai_agents._wrappers import OpenAIAgentWrapper
 from opentelemetry.instrumentation.httpx import HTTPX2ClientInstrumentor, HTTPXClientInstrumentor
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -82,8 +82,8 @@ def _passthrough(*args, **kwargs):
     return "wrapped result"
 
 
-def _record_tool_call(capture, name=None, call_id=None):
-    return capture.capture_tool_call_attributes(
+def _record_tool_call(wrapper, name=None, call_id=None):
+    return wrapper.capture_tool_call_attributes(
         _passthrough,
         None,
         (),
@@ -91,9 +91,25 @@ def _record_tool_call(capture, name=None, call_id=None):
     )
 
 
-def _record_request(capture, base_url=None, **kwargs):
+def _record_request(wrapper, base_url=None, **kwargs):
     instance = SimpleNamespace(_client=SimpleNamespace(base_url=base_url)) if base_url else None
-    return capture.capture_openai_request_attributes(_passthrough, instance, (), kwargs)
+    return wrapper.capture_openai_request_attributes(_passthrough, instance, (), kwargs)
+
+
+def _litellm_response(model, finish_reasons):
+    return litellm.ModelResponse(
+        id="chatcmpl-mock",
+        model=model,
+        choices=[
+            litellm.Choices(
+                index=index,
+                message=litellm.Message(role="assistant", content=f"Choice {index}"),
+                finish_reason=finish_reason,
+            )
+            for index, finish_reason in enumerate(finish_reasons)
+        ],
+        usage=litellm.Usage(prompt_tokens=10, completion_tokens=20, total_tokens=30),
+    )
 
 
 class TestOpenAIAgentsInstrumentor(unittest.TestCase):
@@ -203,7 +219,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
             "test",
         )
         self.processor = OpenTelemetryTracingProcessor(tracer)
-        self.capture = OpenAIAgentsWrappers(self.processor)
+        self.wrapper = OpenAIAgentWrapper(self.processor)
         provider = tracing.get_trace_provider()
         self.previous_processors = tuple(provider._multi_processor._processors)  # pylint: disable=protected-access
         tracing.set_trace_processors([self.processor])
@@ -351,10 +367,14 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         )
 
     def test_input_output_usage_styles_and_sensitive_data_none(self):
+        completion_finish_reasons = ("length", "length", "stop")
         with tracing.trace("Generation variants"):
             with tracing.generation_span(
                 input=[{"content": "plain prompt"}],
-                output=[{"content": "plain completion", "finish_reason": "length"}],
+                output=[
+                    {"content": f"plain completion {index}", "finish_reason": finish_reason}
+                    for index, finish_reason in enumerate(completion_finish_reasons)
+                ],
                 model="completion-model",
                 usage={"input_tokens": 9, "output_tokens": 4},
             ):
@@ -379,7 +399,10 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         )
         self.assertEqual(completion_span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 9)
         self.assertEqual(completion_span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 4)
-        self.assertEqual(completion_span.attributes[GEN_AI_RESPONSE_FINISH_REASONS], ("length",))
+        self.assertEqual(
+            completion_span.attributes[GEN_AI_RESPONSE_FINISH_REASONS],
+            completion_finish_reasons,
+        )
 
         delayed_chat = spans["chat delayed-chat-model"]
         self.assertEqual(delayed_chat.attributes[GEN_AI_OPERATION_NAME], GenAiOperationNameValues.CHAT.value)
@@ -393,7 +416,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         with tracing.trace("Handoff workflow"):
             handoff_span = tracing.handoff_span(from_agent="Triage agent", to_agent=None)
             with handoff_span:
-                _record_tool_call(self.capture, name="beam_me_to_french", call_id="call_handoff")
+                _record_tool_call(self.wrapper, name="beam_me_to_french", call_id="call_handoff")
                 handoff_span.span_data.to_agent = "French agent"
 
         span = self._spans_by_name()["execute_tool beam_me_to_french"]
@@ -425,7 +448,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
     def test_function_span_records_tool_call_id_and_resets_between_calls(self):
         with tracing.trace("Tool workflow"):
             with tracing.function_span("get_weather", input='{"city": "Seattle"}', output="sunny"):
-                _record_tool_call(self.capture, name="get_weather", call_id="call_weather")
+                _record_tool_call(self.wrapper, name="get_weather", call_id="call_weather")
             with tracing.function_span("get_time", input="{}", output="noon"):
                 pass
 
@@ -434,6 +457,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         self.assertNotIn(GEN_AI_TOOL_CALL_ID, spans["execute_tool get_time"].attributes)
 
     def test_streamed_generation_response_envelope(self):
+        finish_reasons = ("length", "length", "length")
         envelope = {
             "object": "response",
             "id": "resp_streamed",
@@ -446,7 +470,12 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
             "text": {"format": {"type": "json_schema"}},
             "incomplete_details": {"reason": "max_output_tokens"},
             "output": [
-                {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Streamed"}]}
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": f"Streamed {index}"}],
+                }
+                for index in range(len(finish_reasons))
             ],
             "usage": {
                 "input_tokens": 21,
@@ -479,13 +508,20 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         self.assertEqual(span.attributes[GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS], 12)
         self.assertEqual(span.attributes[GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS], 3)
         self.assertEqual(span.attributes[GEN_AI_USAGE_REASONING_OUTPUT_TOKENS], 4)
-        self.assertEqual(span.attributes[GEN_AI_RESPONSE_FINISH_REASONS], ("length",))
+        self.assertEqual(span.attributes[GEN_AI_RESPONSE_FINISH_REASONS], finish_reasons)
 
         output_messages = json.loads(span.attributes[GEN_AI_OUTPUT_MESSAGES])
         validate_otel_genai_schema(output_messages, "gen-ai-output-messages")
         self.assertEqual(
             output_messages,
-            [{"role": "assistant", "parts": [{"type": "text", "content": "Streamed"}], "finish_reason": "length"}],
+            [
+                {
+                    "role": "assistant",
+                    "parts": [{"type": "text", "content": f"Streamed {index}"}],
+                    "finish_reason": finish_reason,
+                }
+                for index, finish_reason in enumerate(finish_reasons)
+            ],
         )
 
     def test_chat_completions_usage_aliases(self):
@@ -562,7 +598,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
             )
             with captured_span:
                 _record_request(
-                    instrumentor._capture,  # pylint: disable=protected-access
+                    instrumentor._wrapper,  # pylint: disable=protected-access
                     base_url="https://bedrock-runtime.us-west-2.amazonaws.com:8443/v1",
                     model="bedrock/anthropic.claude-3-5-haiku",
                     temperature=0.3,
@@ -673,6 +709,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
 
     def test_litellm_openai_sdk_call_preserves_litellm_attributes(self):
         model = "openai/test-model"
+        agent_finish_reasons = ("stop", "stop", "length")
         instrumentor = OpenAIAgentsInstrumentor()
         instrumentor.instrument(
             tracer_provider=self.tracer_provider,
@@ -690,6 +727,9 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
                             model=model,
                             base_url="https://example.com/v1",
                             api_key="fake-key",
+                        ),
+                        model_settings=ModelSettings(
+                            extra_args={"mock_response": _litellm_response("test-model", agent_finish_reasons)}
                         ),
                     ),
                     "Hello",
@@ -712,11 +752,13 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         self.assertEqual(span.attributes[GEN_AI_REQUEST_MODEL], model)
         self.assertEqual(span.attributes[SERVER_ADDRESS], "example.com")
         self.assertEqual(span.attributes[GEN_AI_RESPONSE_ID], "chatcmpl-mock")
+        self.assertEqual(span.attributes[GEN_AI_RESPONSE_FINISH_REASONS], agent_finish_reasons)
         self.assertEqual(span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 10)
         self.assertEqual(span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 20)
 
         self.exporter.clear()
         model = "openai/sync-model"
+        completion_finish_reasons = ("stop", "length", "stop", "content_filter")
 
         def invoke_completion(_client):
             with tracing.trace("Synchronous LiteLLM workflow"):
@@ -732,6 +774,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
                         base_url="https://example.com/v1",
                         api_key="fake-key",
                         temperature=0.4,
+                        mock_response=_litellm_response("sync-model", completion_finish_reasons),
                     )
 
         call_mock_llm("litellm", invoke_llm_callback=invoke_completion, model="sync-model")
@@ -741,6 +784,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         self.assertEqual(span.attributes[GEN_AI_REQUEST_TEMPERATURE], 0.4)
         self.assertEqual(span.attributes[SERVER_ADDRESS], "example.com")
         self.assertEqual(span.attributes[GEN_AI_RESPONSE_ID], "chatcmpl-mock")
+        self.assertEqual(span.attributes[GEN_AI_RESPONSE_FINISH_REASONS], completion_finish_reasons)
         self.assertEqual(span.attributes[GEN_AI_USAGE_INPUT_TOKENS], 10)
         self.assertEqual(span.attributes[GEN_AI_USAGE_OUTPUT_TOKENS], 20)
 
@@ -861,7 +905,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
                 model="gpt-sentinel",
             )
             with sentinel_span:
-                _record_request(self.capture, temperature=Omit(), max_tokens=Omit(), top_p=0.4)
+                _record_request(self.wrapper, temperature=Omit(), max_tokens=Omit(), top_p=0.4)
 
         span = self._spans_by_name()["chat gpt-sentinel"]
         self.assertNotIn(GEN_AI_REQUEST_TEMPERATURE, span.attributes)
