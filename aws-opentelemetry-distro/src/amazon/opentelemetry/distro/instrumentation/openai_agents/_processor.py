@@ -709,6 +709,27 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         return model_config
 
     @staticmethod
+    def _get_finish_reasons(response: Any, attributes: Mapping[str, AttributeValue]) -> list[str]:
+        reasons = _GenAIMessageNormalizer._to_item_list(get_value(response, "finish_reasons"))
+        reasons.extend(
+            get_value(choice, "finish_reason")
+            for choice in _GenAIMessageNormalizer._to_item_list(get_value(response, "choices"))
+        )
+        finish_reason = get_value(response, "finish_reason")
+        if finish_reason is not None:
+            reasons.append(finish_reason)
+        normalized = [
+            _GenAIMessageNormalizer._normalize_finish_reason({"finish_reason": reason}, False)
+            for reason in reasons
+            if reason is not None
+        ]
+        if not normalized:
+            fallback = OpenTelemetryTracingProcessor._get_finish_reason(response, attributes)
+            if fallback is not None:
+                normalized.append(fallback)
+        return list(dict.fromkeys(normalized))
+
+    @staticmethod
     def _get_finish_reason(response: Any, attributes: Mapping[str, AttributeValue]) -> Optional[str]:
         reasons = _GenAIMessageNormalizer._to_item_list(get_value(response, "finish_reasons"))
         if not reasons:
@@ -733,27 +754,6 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         if isinstance(max_tokens, int) and isinstance(output_tokens, int) and output_tokens >= max_tokens > 0:
             return "length"
         return None
-
-    @staticmethod
-    def _get_finish_reasons(response: Any, attributes: Mapping[str, AttributeValue]) -> list[str]:
-        reasons = _GenAIMessageNormalizer._to_item_list(get_value(response, "finish_reasons"))
-        reasons.extend(
-            get_value(choice, "finish_reason")
-            for choice in _GenAIMessageNormalizer._to_item_list(get_value(response, "choices"))
-        )
-        finish_reason = get_value(response, "finish_reason")
-        if finish_reason is not None:
-            reasons.append(finish_reason)
-        normalized = [
-            _GenAIMessageNormalizer._normalize_finish_reason({"finish_reason": reason}, False)
-            for reason in reasons
-            if reason is not None
-        ]
-        if not normalized:
-            fallback = OpenTelemetryTracingProcessor._get_finish_reason(response, attributes)
-            if fallback is not None:
-                normalized.append(fallback)
-        return list(dict.fromkeys(normalized))
 
     @staticmethod
     def _get_request_output_type(model_config: Mapping[str, Any]) -> Optional[str]:

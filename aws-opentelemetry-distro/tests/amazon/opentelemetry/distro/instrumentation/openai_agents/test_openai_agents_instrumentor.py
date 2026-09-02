@@ -18,7 +18,7 @@ from openai import Omit
 from pydantic import BaseModel
 
 from amazon.opentelemetry.distro.instrumentation.openai_agents import OpenAIAgentsInstrumentor
-from amazon.opentelemetry.distro.instrumentation.openai_agents._gen_ai_context_capture import GenAIContextCapture
+from amazon.opentelemetry.distro.instrumentation.openai_agents._wrappers import GenAIContextCapture
 from amazon.opentelemetry.distro.instrumentation.openai_agents._processor import (
     GEN_AI_REQUEST_REASONING_LEVEL,
     OpenTelemetryTracingProcessor,
@@ -80,12 +80,17 @@ def _passthrough(*args, **kwargs):
 
 
 def _record_tool_call(capture, name=None, call_id=None):
-    return capture.record_tool_call(_passthrough, None, (), {"tool_call": SimpleNamespace(name=name, call_id=call_id)})
+    return capture.capture_tool_call_attributes(
+        _passthrough,
+        None,
+        (),
+        {"tool_call": SimpleNamespace(name=name, call_id=call_id)},
+    )
 
 
 def _record_request(capture, base_url=None, **kwargs):
     instance = SimpleNamespace(_client=SimpleNamespace(base_url=base_url)) if base_url else None
-    return capture.record_openai_request(_passthrough, instance, (), kwargs)
+    return capture.capture_openai_request_attributes(_passthrough, instance, (), kwargs)
 
 
 class TestOpenAIAgentsInstrumentor(unittest.TestCase):
@@ -195,7 +200,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
             "test",
         )
         self.processor = OpenTelemetryTracingProcessor(tracer)
-        self.capture = GenAIContextCapture(self.processor.get_otel_span)
+        self.capture = GenAIContextCapture(self.processor)
         provider = tracing.get_trace_provider()
         self.previous_processors = tuple(provider._multi_processor._processors)  # pylint: disable=protected-access
         tracing.set_trace_processors([self.processor])

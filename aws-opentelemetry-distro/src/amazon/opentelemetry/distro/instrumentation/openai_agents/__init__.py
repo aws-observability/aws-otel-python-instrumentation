@@ -34,39 +34,32 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
             set_trace_processors,
         )
 
-        from ._gen_ai_context_capture import GenAIContextCapture  # pylint: disable=import-outside-toplevel
+        from ._wrappers import GenAIContextCapture  # pylint: disable=import-outside-toplevel
         from ._processor import OpenTelemetryTracingProcessor  # pylint: disable=import-outside-toplevel
 
         tracer_provider = kwargs.get("tracer_provider") or trace.get_tracer_provider()
         tracer = trace.get_tracer(__name__, __version__, tracer_provider=tracer_provider)
         self._processor = OpenTelemetryTracingProcessor(tracer)
-        self._capture = GenAIContextCapture(self._processor.get_otel_span)
+        capture = self._capture = GenAIContextCapture(self._processor)
+        capture_openai_request = capture.capture_openai_request_attributes
 
-        try_wrap(
-            "agents.extensions.models.litellm_model",
-            "model_config_for_trace",
-            self._capture.record_litellm_model_config,
-        )
-        try_wrap("openai.resources.responses.responses", "Responses.create", self._capture.record_openai_request)
-        try_wrap(
-            "openai.resources.responses.responses",
-            "AsyncResponses.create",
-            self._capture.record_openai_request,
-        )
-        try_wrap(
-            "openai.resources.chat.completions.completions",
-            "Completions.create",
-            self._capture.record_openai_request,
-        )
+        try_wrap("openai.resources.responses.responses", "Responses.create", capture_openai_request)
+        try_wrap("openai.resources.responses.responses", "AsyncResponses.create", capture_openai_request)
+        try_wrap("openai.resources.chat.completions.completions", "Completions.create", capture_openai_request)
         try_wrap(
             "openai.resources.chat.completions.completions",
             "AsyncCompletions.create",
-            self._capture.record_openai_request,
+            capture_openai_request,
         )
-        try_wrap("litellm", "completion", self._capture.record_litellm_completion)
-        try_wrap("litellm", "acompletion", self._capture.record_litellm_acompletion)
-        try_wrap("agents.items", "ItemHelpers.tool_call_output_item", self._capture.record_tool_call)
-        try_wrap("agents.tool_context", "ToolContext.from_agent_context", self._capture.record_tool_call)
+        try_wrap(
+            "agents.extensions.models.litellm_model",
+            "model_config_for_trace",
+            capture.capture_litellm_request_model_config,
+        )
+        try_wrap("litellm", "completion", capture.capture_litellm_completion_attributes)
+        try_wrap("litellm", "acompletion", capture.capture_litellm_acompletion_attributes)
+        try_wrap("agents.items", "ItemHelpers.tool_call_output_item", capture.capture_tool_call_attributes)
+        try_wrap("agents.tool_context", "ToolContext.from_agent_context", capture.capture_tool_call_attributes)
         # disables http spans created from spans sent OpenAI's tracing backend
         try_wrap("agents.tracing.processors", "BackendSpanExporter.export", _suppress_http_instrumentation)
 
@@ -85,11 +78,11 @@ class OpenAIAgentsInstrumentor(BaseInstrumentor):  # type: ignore
 
         from agents.tracing import get_trace_provider, set_trace_processors  # pylint: disable=import-outside-toplevel
 
-        try_unwrap("agents.extensions.models.litellm_model", "model_config_for_trace")
         try_unwrap("openai.resources.responses.responses.Responses", "create")
         try_unwrap("openai.resources.responses.responses.AsyncResponses", "create")
         try_unwrap("openai.resources.chat.completions.completions.Completions", "create")
         try_unwrap("openai.resources.chat.completions.completions.AsyncCompletions", "create")
+        try_unwrap("agents.extensions.models.litellm_model", "model_config_for_trace")
         try_unwrap("litellm", "completion")
         try_unwrap("litellm", "acompletion")
         try_unwrap("agents.items.ItemHelpers", "tool_call_output_item")
