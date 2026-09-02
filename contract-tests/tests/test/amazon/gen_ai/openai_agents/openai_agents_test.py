@@ -6,12 +6,6 @@ from amazon.gen_ai.gen_ai_test_base import GEN_AI_REQUEST_TEMPERATURE, GEN_AI_TO
 
 
 class OpenAIAgentsTest(GenAITestBase):
-    _SINGLE_AGENT_TOOLS = frozenset({"build_greeting", "summarize_weather", "calculate_budget", "store_agent_output"})
-    _MULTI_AGENT_TOOL_SETS = {
-        frozenset({"build_greeting", "describe_audience", "store_agent_output"}),
-        frozenset({"format_message", "add_delivery_metadata", "store_agent_output"}),
-    }
-
     @override
     @staticmethod
     def get_application_image_name() -> str:
@@ -49,7 +43,16 @@ class OpenAIAgentsTest(GenAITestBase):
                 self.assertIsInstance(tool["parameters"], dict)
             observed_tool_sets.add(frozenset(tool["name"] for tool in tools))
 
-        if self._SINGLE_AGENT_TOOLS in observed_tool_sets:
-            self.assertEqual(observed_tool_sets, {self._SINGLE_AGENT_TOOLS})
+        single_agent_tools = frozenset(
+            {"build_greeting", "summarize_weather", "calculate_budget", "store_agent_output"}
+        )
+        if single_agent_tools in observed_tool_sets:
+            self.assertEqual(observed_tool_sets, {single_agent_tools})
         else:
-            self.assertEqual(observed_tool_sets, self._MULTI_AGENT_TOOL_SETS)
+            self.assertEqual(
+                observed_tool_sets,
+                {
+                    frozenset({"build_greeting", "describe_audience", "store_agent_output"}),
+                    frozenset({"format_message", "add_delivery_metadata", "store_agent_output"}),
+                },
+            )

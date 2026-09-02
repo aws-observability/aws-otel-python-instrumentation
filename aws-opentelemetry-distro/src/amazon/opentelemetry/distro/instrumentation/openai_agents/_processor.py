@@ -351,7 +351,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         )
         OpenTelemetryTracingProcessor._set_usage_attributes(attributes, usage)
         default_finish_reason = first_not_none(
-            OpenTelemetryTracingProcessor._get_chat_completion_finish_reason(invocation.response),
+            OpenTelemetryTracingProcessor._get_finish_reason(invocation.response, attributes),
             OpenTelemetryTracingProcessor._get_finish_reason(streamed_response, attributes),
         )
 
@@ -642,6 +642,20 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
     @staticmethod
     def _get_finish_reason(response: Any, attributes: Mapping[str, AttributeValue]) -> Optional[str]:
+        choices = _GenAIMessageNormalizer._to_item_list(get_value(response, "choices"))
+        if choices:
+            reason = get_value(choices[0], "finish_reason")
+            if reason is not None:
+                return {
+                    "end_turn": "stop",
+                    "stop": "stop",
+                    "tool_calls": "tool_call",
+                    "tool_use": "tool_call",
+                    "max_tokens": "length",
+                    "length": "length",
+                    "content_filter": "content_filter",
+                }.get(str(reason), str(reason))
+
         incomplete_details = get_value(response, "incomplete_details")
         reason = get_value(incomplete_details, "reason")
         if reason:
@@ -653,24 +667,6 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         if isinstance(max_tokens, int) and isinstance(output_tokens, int) and output_tokens >= max_tokens > 0:
             return "length"
         return None
-
-    @staticmethod
-    def _get_chat_completion_finish_reason(response: Any) -> Optional[str]:
-        choices = _GenAIMessageNormalizer._to_item_list(get_value(response, "choices"))
-        if not choices:
-            return None
-        reason = get_value(choices[0], "finish_reason")
-        if reason is None:
-            return None
-        return {
-            "end_turn": "stop",
-            "stop": "stop",
-            "tool_calls": "tool_call",
-            "tool_use": "tool_call",
-            "max_tokens": "length",
-            "length": "length",
-            "content_filter": "content_filter",
-        }.get(str(reason), str(reason))
 
     @staticmethod
     def _get_request_output_type(model_config: Mapping[str, Any]) -> Optional[str]:
