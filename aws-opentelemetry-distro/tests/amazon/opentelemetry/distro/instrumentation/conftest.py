@@ -58,6 +58,7 @@ def call_mock_llm(
 
     is_async = kwargs.get("is_async", False)
     model = kwargs.get("model", config["model"])
+    responses = iter(kwargs["responses"]) if "responses" in kwargs else None
 
     if provider in ("openai", "litellm"):
         import asyncio
@@ -69,6 +70,12 @@ def call_mock_llm(
             raise NotImplementedError("Async LiteLLM mock calls are not supported")
 
         def openai_response(request):
+            if responses is not None:
+                try:
+                    response = next(responses)
+                except StopIteration as error:
+                    raise AssertionError("Mock LLM response sequence exhausted") from error
+                return httpx.Response(200, request=request, json=response)
             return httpx.Response(
                 200,
                 request=request,
@@ -105,12 +112,17 @@ def call_mock_llm(
             if provider == "litellm":
                 import litellm
 
+                async_http_client = httpx.AsyncClient(transport=transport)
                 previous_client_session = litellm.client_session
+                previous_aclient_session = litellm.aclient_session
                 litellm.client_session = http_client
+                litellm.aclient_session = async_http_client
                 try:
                     invoke_llm_callback(None)
                 finally:
                     litellm.client_session = previous_client_session
+                    litellm.aclient_session = previous_aclient_session
+                    asyncio.run(async_http_client.aclose())
             else:
                 invoke_llm_callback(OpenAI(api_key="fake-key", http_client=http_client))
         return
@@ -140,6 +152,53 @@ def call_mock_llm(
         return
 
     if provider == "bedrock":
+        if kwargs.get("is_litellm"):
+            import asyncio
+            from unittest.mock import patch
+
+            import httpx
+            from litellm.llms.custom_httpx.http_handler import AsyncHTTPHandler
+
+            response = {
+                "output": {"message": {"role": "assistant", "content": [{"text": "Hello, World!"}]}},
+                "stopReason": "end_turn",
+                "usage": {
+                    "inputTokens": 10,
+                    "outputTokens": 20,
+                    "totalTokens": 30,
+                    "cacheReadInputTokens": 3,
+                    "cacheWriteInputTokens": 1,
+                },
+                "metrics": {"latencyMs": 1},
+            }
+
+            def bedrock_response(request):
+                return httpx.Response(
+                    200,
+                    request=request,
+                    headers={"x-amzn-requestid": "bedrock-request-id"},
+                    json=response,
+                )
+
+            mock_http_client = httpx.AsyncClient(transport=httpx.MockTransport(bedrock_response))
+            http_handler = AsyncHTTPHandler()
+            owned_http_client = http_handler.client
+            http_handler.client = mock_http_client
+
+            async def close_clients():
+                await owned_http_client.aclose()
+                await mock_http_client.aclose()
+
+            try:
+                with patch(
+                    "litellm.llms.bedrock.chat.converse_handler.get_async_httpx_client",
+                    return_value=http_handler,
+                ):
+                    invoke_llm_callback(None)
+            finally:
+                asyncio.run(close_clients())
+            return
+
         from botocore.session import get_session
         from botocore.stub import Stubber
 
