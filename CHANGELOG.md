@@ -21,6 +21,8 @@ If your change does not need a CHANGELOG entry, add the "skip changelog" label t
 - feat(openai-agents): [BREAKING CHANGE] add native ADOT OpenAI Agents instrumentation and remove the
   `opentelemetry-instrumentation-openai-agents-v2` dependency
   ([#865](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/865))
+- fix: support non-recording parent spans in `AttributePropagatingSpanProcessor`
+  ([#744](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/744))
 - feat: attribute presigned S3 URLs as `AWS::S3` dependencies in Application Signals, opt-in via
   `OTEL_AWS_APPLICATION_SIGNALS_PRESIGNED_URL_ATTRIBUTION_ENABLED`
   ([#841](https://github.com/aws-observability/aws-otel-python-instrumentation/pull/841))
