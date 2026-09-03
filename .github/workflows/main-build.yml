@@ -84,8 +84,7 @@ jobs:
 
       # Verify the freshly pushed staging image the same way release-build does: pull each arch
       # back and check the operator copies + loads the payload, the version matches, and the
-      # library matches the built wheel. Catches a broken image on merge to main, before release.
-      # amd64 runs natively; arm64 under QEMU (set up by artifacts_build's multi-arch build).
+      # library matches the built wheel. 
       - name: Verify staging image (amd64)
         shell: bash
         env:

@@ -156,10 +156,7 @@ jobs:
         uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 #3.6.0
 
       # Pre-publish gate: build each released architecture locally (not pushed) and verify it, so
-      # a failure here stops the job before the push. (The pushed image is a separate multi-arch
-      # build, re-verified against the live registry post-push below.) amd64 runs natively; arm64
-      # under QEMU. DOCKER_DEFAULT_PLATFORM makes the script target the arch under test so the
-      # neutral verifier loads arch-matching wheels.
+      # a failure here stops the job before the push.
       - name: Build amd64 image for testing
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
         with:
@@ -204,10 +201,7 @@ jobs:
             ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ env.VERSION }}
 
       # Re-run the verification against the ACTUAL published multi-arch image (pulling each arch
-      # back from the registry), so we validate exactly the bits customers receive -- not just the
-      # local pre-push builds. Note: this runs AFTER the push, so on failure the image is already
-      # live at :v (no auto-untag/rollback); the failure blocks the rest of the release
-      # (publish-layer-prod / publish-github depend on this job) but does not unpublish the image.
+      # back from the registry)
       - name: Verify published amd64 image
         shell: bash
         env:
