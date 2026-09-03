@@ -36,7 +36,8 @@ to model calls, tool invocations, and downstream dependencies.
 - [OpenAI Agents SDK](aws-opentelemetry-distro/src/amazon/opentelemetry/distro/instrumentation/openai_agents/README.rst) (`openai-agents >= 0.3.3`)
 
 > [!NOTE]
-> Instrumentation is skipped when a conflicting third-party instrumentation is
+> When agent observability is enabled (`AGENT_OBSERVABILITY_ENABLED=true`),
+> instrumentation is skipped when a conflicting third-party instrumentation is
 > detected for the same framework. Set
 > `AWS_AGENTIC_INSTRUMENTATION=enabled` to force the ADOT instrumentation to
 > load.
