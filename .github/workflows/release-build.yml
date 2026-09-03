@@ -155,11 +155,11 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 #3.6.0
 
-      # Build each released architecture locally (not pushed) and run the post-build
-      # integrity + ported-distro verification against each, so a bad artifact never
-      # reaches ECR. amd64 runs natively; arm64 runs under QEMU emulation. DOCKER_DEFAULT_PLATFORM
-      # makes the script's docker run/create/pull target the arch under test (so the neutral
-      # verifier loads arch-matching wheels).
+      # Pre-publish gate: build each released architecture locally (not pushed) and verify it, so
+      # a failure here stops the job before the push. (The pushed image is a separate multi-arch
+      # build, re-verified against the live registry post-push below.) amd64 runs natively; arm64
+      # under QEMU. DOCKER_DEFAULT_PLATFORM makes the script target the arch under test so the
+      # neutral verifier loads arch-matching wheels.
       - name: Build amd64 image for testing
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
         with:
@@ -174,7 +174,7 @@ jobs:
         shell: bash
         env:
           DOCKER_DEFAULT_PLATFORM: linux/amd64
-        run: .github/scripts/test-adot-python-image.sh "${{ env.TEST_TAG }}-amd64" "${{ env.VERSION }}"
+        run: .github/scripts/test-adot-python-image.sh "${{ env.TEST_TAG }}-amd64" "${{ env.VERSION }}" "dist-pypi/${{ env.WHEEL_ARTIFACT_NAME }}"
 
       - name: Build arm64 image for testing
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
@@ -190,7 +190,7 @@ jobs:
         shell: bash
         env:
           DOCKER_DEFAULT_PLATFORM: linux/arm64
-        run: .github/scripts/test-adot-python-image.sh "${{ env.TEST_TAG }}-arm64" "${{ env.VERSION }}"
+        run: .github/scripts/test-adot-python-image.sh "${{ env.TEST_TAG }}-arm64" "${{ env.VERSION }}" "dist-pypi/${{ env.WHEEL_ARTIFACT_NAME }}"
 
       - name: Build and push image
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
@@ -203,29 +203,22 @@ jobs:
             ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}
             ${{ env.RELEASE_PRIVATE_REPOSITORY }}:v${{ env.VERSION }}
 
-      # Re-run the verification against the ACTUAL published multi-arch image (pulling each
-      # arch back from the registry), so we validate exactly the bits customers receive --
-      # not just the local pre-push builds. A failure here still blocks the rest of the
-      # release (publish-layer-prod / publish-github depend on this job).
+      # Re-run the verification against the ACTUAL published multi-arch image (pulling each arch
+      # back from the registry), so we validate exactly the bits customers receive -- not just the
+      # local pre-push builds. Note: this runs AFTER the push, so on failure the image is already
+      # live at :v (no auto-untag/rollback); the failure blocks the rest of the release
+      # (publish-layer-prod / publish-github depend on this job) but does not unpublish the image.
       - name: Verify published amd64 image
         shell: bash
         env:
           DOCKER_DEFAULT_PLATFORM: linux/amd64
-        run: .github/scripts/test-adot-python-image.sh "${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}" "${{ env.VERSION }}"
+        run: .github/scripts/test-adot-python-image.sh "${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}" "${{ env.VERSION }}" "dist-pypi/${{ env.WHEEL_ARTIFACT_NAME }}"
 
       - name: Verify published arm64 image
         shell: bash
         env:
           DOCKER_DEFAULT_PLATFORM: linux/arm64
-        run: .github/scripts/test-adot-python-image.sh "${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}" "${{ env.VERSION }}"
-
-      - name: Perform image scan
-        uses: ./.github/actions/image_scan
-        with:
-          image-ref: ${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}
-          severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'
-          logout: 'false'
-          trivyignore-file: .github/trivy/daily-scan.trivyignore.yaml
+        run: .github/scripts/test-adot-python-image.sh "${{ env.RELEASE_PUBLIC_REPOSITORY }}:v${{ env.VERSION }}" "${{ env.VERSION }}" "dist-pypi/${{ env.WHEEL_ARTIFACT_NAME }}"
 
       - name: Tag platform images in private ECR
         env:

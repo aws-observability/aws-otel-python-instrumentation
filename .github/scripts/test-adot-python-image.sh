@@ -12,15 +12,19 @@
 # Steps 1-2 + 4 are copy fidelity (bytes moved intact); step 3 is the "ported correctly" check
 # a pure checksum can't give -- it proves the payload actually loads and self-identifies.
 
-# Usage: test-adot-python-image.sh <TEST_TAG> [EXPECTED_VERSION]
+# Usage: test-adot-python-image.sh <TEST_TAG> [EXPECTED_VERSION] [WHEEL]
 #   TEST_TAG         image ref to test (a locally built, not-yet-pushed image)
 #   EXPECTED_VERSION optional; when set (release runs pass env.VERSION) the ported distro's
 #                    __version__ must match exactly. Omit for local runs against source.
+#   WHEEL            optional path to the release wheel. When set, the image's ADOT library
+#                    files are cross-checked against this independently-built artifact (a
+#                    reference from BEFORE the image), not just the image against itself.
 
 set -x -e -u
 
 TEST_TAG=$1
 EXPECTED_VERSION="${2:-}"
+WHEEL="${3:-}"
 
 VOLUME=operator-volume
 WORKDIR=$(mktemp -d)
@@ -110,6 +114,27 @@ assert distro_cls.__name__ == "AwsOpenTelemetryDistro", f"unexpected distro clas
 print(f"ported image verified: aws-opentelemetry-distro v{version} loaded from the operator "
       f"volume and resolved as OTel distro -> {distro_cls.__name__}")
 PY
+
+#    Independent-reference check (optional): compare the ADOT library files baked into the image
+#    against the separately-built release wheel -- an artifact from BEFORE the image. Unlike the
+#    copy-fidelity check above (image vs a copy of itself), this validates the shipped library
+#    against a reference we built independently, matching adot-java's build-artifact comparison.
+#    Scoped to the distro source tree we author; __pycache__ (pip-compiled, not in the wheel) is
+#    excluded, and the dist-info/RECORD (pip rewrites on install) is out of scope by only diffing
+#    amazon/opentelemetry/distro. Transitive deps have no independent artifact, so are not covered.
+if [ -n "${WHEEL}" ]; then
+  REF="${WORKDIR}/wheel-ref"
+  mkdir -p "${REF}"
+  unzip -q "${WHEEL}" -d "${REF}"
+  if diff -r --exclude='__pycache__' "${REF}/amazon/opentelemetry/distro" "${IMAGE_SRC}/amazon/opentelemetry/distro"; then
+    echo "image library matched the independently-built wheel"
+  else
+    echo "error: image library differs from the independently-built wheel"
+    exit 1
+  fi
+fi
+
+
 
 # 4. Copy fidelity: the copied tree must be byte-for-byte identical to the image payload
 #    (already extracted to ${IMAGE_SRC} up front).
