@@ -21,7 +21,7 @@ Check out the [getting started documentation](https://aws-otel.github.io/docs/ge
 ## Supported Python libraries and frameworks
 For the complete list of supported frameworks, please refer to the [OpenTelemetry for Python documentation](https://github.com/open-telemetry/opentelemetry-python-contrib/blob/main/instrumentation/README.md).
 
-## Agent Observability
+## Generative AI
 
 Instrumentation is also available for the supported agent frameworks and SDKs
 listed below. These libraries complement the auto-instrumentation already
