@@ -1,8 +1,12 @@
 import json
 from base64 import b64encode
 from unittest import TestCase
+from unittest.mock import Mock
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import (
+    content_to_parts,
+    first_not_none,
+    get_value,
     serialize_to_json_string,
     skip_instrumentation_if_suppressed,
     to_tool_attribute_value,
@@ -16,6 +20,30 @@ from opentelemetry.trace import set_span_in_context
 
 
 class TestInstrumentationUtils(TestCase):
+    def test_first_not_none_and_get_value(self):
+        object_source = Mock()
+        object_source.temperature = 0.0
+
+        self.assertIs(first_not_none(None, False, True), False)
+        self.assertEqual(get_value(object_source, "temperature"), 0.0)
+        self.assertIs(get_value({"stream": False}, "stream"), False)
+
+    def test_content_to_parts_openai_text_blocks(self):
+        self.assertEqual(
+            content_to_parts(
+                [
+                    {"type": "input_text", "text": "input"},
+                    {"type": "output_text", "text": "output"},
+                    {"type": "summary_text", "text": "summary"},
+                ]
+            ),
+            [
+                {"type": "text", "content": "input"},
+                {"type": "text", "content": "output"},
+                {"type": "text", "content": "summary"},
+            ],
+        )
+
     def test_serialize_basic_types(self):
         self.assertEqual(serialize_to_json_string({"key": "value"}), '{"key": "value"}')
         self.assertEqual(serialize_to_json_string([1, 2, 3]), "[1, 2, 3]")
@@ -81,12 +109,14 @@ class TestInstrumentationUtils(TestCase):
         self.assertIsNone(to_tool_attribute_value(None))
 
     def test_to_tool_attribute_value_dict_and_list_json_encoded(self):
-        self.assertEqual(to_tool_attribute_value({"city": "Paris"}), '{"city": "Paris"}')
-        self.assertEqual(to_tool_attribute_value([1, 2, 3]), "[1, 2, 3]")
+        self.assertEqual(to_tool_attribute_value({"city": "Paris"}), '{"city":"Paris"}')
+        self.assertEqual(to_tool_attribute_value([1, 2, 3]), "[1,2,3]")
 
     def test_to_tool_attribute_value_unserializable_falls_back_to_str(self):
         obj = object()
         self.assertEqual(to_tool_attribute_value(obj), str(obj))
+        value = {"unsupported": obj}
+        self.assertEqual(to_tool_attribute_value(value), str(value))
 
     def test_try_unwrap_not_wrapped(self):
         try_unwrap(json, "dumps")

@@ -15,7 +15,8 @@ dependencies = [
     "testcontainers==3.7.1",
     "grpcio==1.76.0",
     "docker==7.1.0",
-    "requests==2.32.5"
+    "requests==2.32.5",
+    "jsonschema==4.26.0"
 ]
 
 [project.optional-dependencies]

@@ -53,6 +53,7 @@ from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils im
     GEN_AI_WORKFLOW_NAME,
     OPERATION_INVOKE_WORKFLOW,
     content_to_parts,
+    first_not_none,
     serialize_to_json_string,
     to_tool_attribute_value,
     try_detach,
@@ -69,11 +70,14 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (  # 
     GEN_AI_OPERATION_NAME,
     GEN_AI_OUTPUT_MESSAGES,
     GEN_AI_PROVIDER_NAME,
+    GEN_AI_REQUEST_CHOICE_COUNT,
     GEN_AI_REQUEST_FREQUENCY_PENALTY,
     GEN_AI_REQUEST_MAX_TOKENS,
     GEN_AI_REQUEST_MODEL,
     GEN_AI_REQUEST_PRESENCE_PENALTY,
+    GEN_AI_REQUEST_SEED,
     GEN_AI_REQUEST_STOP_SEQUENCES,
+    GEN_AI_REQUEST_STREAM,
     GEN_AI_REQUEST_TEMPERATURE,
     GEN_AI_REQUEST_TOP_K,
     GEN_AI_REQUEST_TOP_P,
@@ -85,8 +89,11 @@ from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (  # 
     GEN_AI_TOOL_DEFINITIONS,
     GEN_AI_TOOL_DESCRIPTION,
     GEN_AI_TOOL_NAME,
+    GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS,
+    GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS,
     GEN_AI_USAGE_INPUT_TOKENS,
     GEN_AI_USAGE_OUTPUT_TOKENS,
+    GEN_AI_USAGE_REASONING_OUTPUT_TOKENS,
     GenAiOperationNameValues,
 )
 from opentelemetry.trace import Span, Status, StatusCode, set_span_in_context
@@ -324,24 +331,158 @@ class _Span(BaseSpan):
         """
         return set_span_in_context(self._otel_span)
 
-    def process_input(self, instance: Any, bound_args: inspect.BoundArguments) -> None:
+    def process_input(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+        self, instance: Any, bound_args: inspect.BoundArguments
+    ) -> None:
         from llama_index.core.llms.function_calling import FunctionCallingLLM  # pylint: disable=import-outside-toplevel
 
-        if isinstance(instance, FunctionCallingLLM) and isinstance((tools := bound_args.kwargs.get("tools")), Iterable):
-            tools_list = list(tools)
-            if tools_list:
-                # Convert FunctionTool objects to OpenAI tool format
-                tool_defs = []
-                for tool in tools_list:
+        if isinstance(instance, FunctionCallingLLM):
+            tools = bound_args.kwargs.get("tools")
+            if isinstance(tools, Mapping):
+                tool_items = tools.get("tools", [tools])
+            elif isinstance(tools, Iterable) and not isinstance(tools, (str, bytes)):
+                tool_items = tools
+            else:
+                tool_items = [tools]
+
+            if isinstance(tool_items, Mapping):
+                tool_items = [tool_items]
+
+            tool_defs = []
+            for tool in tool_items:
+                metadata = getattr(tool, "metadata", None)
+                to_openai_tool = getattr(metadata, "to_openai_tool", None)
+                tool_candidates = []
+                if callable(to_openai_tool):
                     try:
-                        # Try to get the OpenAI tool format from metadata
-                        if hasattr(tool, "metadata") and hasattr(tool.metadata, "to_openai_tool"):
-                            tool_defs.append(tool.metadata.to_openai_tool())
-                        else:
-                            tool_defs.append(str(tool))
+                        tool_candidates.append(to_openai_tool())
                     except Exception:  # pylint: disable=broad-exception-caught
-                        tool_defs.append(str(tool))
+                        pass
+                if metadata is not None:
+                    tool_candidates.append(metadata)
+                tool_candidates.append(tool)
+
+                for tool_candidate in tool_candidates:
+                    if isinstance(tool_candidate, Mapping):
+                        if isinstance(function := tool_candidate.get("function"), Mapping):
+                            tool_candidate = function
+                            tool_type = "function"
+                        elif isinstance(tool_spec := tool_candidate.get("toolSpec"), Mapping):
+                            tool_candidate = tool_spec
+                            tool_type = "function"
+                        else:
+                            tool_type = tool_candidate.get("type") or "function"
+                    else:
+                        tool_type = _safe_get(tool_candidate, "type") or "function"
+
+                    name = _safe_get(tool_candidate, "name")
+                    if isinstance(name, str) and name:
+                        tool = tool_candidate
+                        break
+                else:
+                    continue
+
+                tool_definition: dict[str, Any] = {"type": str(tool_type), "name": name}
+                description = _safe_get(tool, "description")
+                if isinstance(description, str) and description:
+                    tool_definition["description"] = description
+
+                parameters = _safe_get(tool, "parameters")
+                if parameters is None:
+                    input_schema = _safe_get(tool, "inputSchema")
+                    parameters = _safe_get(input_schema, "json")
+                if parameters is None:
+                    fn_schema = _safe_get(tool, "fn_schema")
+                    model_json_schema = getattr(fn_schema, "model_json_schema", None)
+                    if callable(model_json_schema):
+                        parameters = model_json_schema()
+                if isinstance(parameters, Mapping):
+                    tool_definition["parameters"] = dict(parameters)
+                tool_defs.append(tool_definition)
+
+            if tool_defs:
                 self[GEN_AI_TOOL_DEFINITIONS] = serialize_to_json_string(tool_defs)
+
+        if isinstance(instance, (BaseLLM, MultiModalLLM)):
+            request_params = bound_args.kwargs
+            fallback_params = {}
+            max_tokens_fallback = None
+            if self._attributes.get(GEN_AI_PROVIDER_NAME) in ("openai", "azure.ai.openai"):
+                request_params = getattr(instance, "additional_kwargs", None) or {}
+                fallback_params = bound_args.kwargs
+                max_tokens_fallback = first_not_none(
+                    getattr(instance, "max_tokens", None),
+                    getattr(instance, "max_output_tokens", None),
+                    getattr(instance, "max_completion_tokens", None),
+                )
+
+            temperature = first_not_none(
+                request_params.get("temperature"),
+                fallback_params.get("temperature"),
+            )
+            if temperature is not None:
+                self[GEN_AI_REQUEST_TEMPERATURE] = temperature
+            max_tokens = first_not_none(
+                request_params.get("max_tokens"),
+                request_params.get("max_output_tokens"),
+                request_params.get("max_completion_tokens"),
+                max_tokens_fallback,
+                fallback_params.get("max_tokens"),
+                fallback_params.get("max_output_tokens"),
+                fallback_params.get("max_completion_tokens"),
+            )
+            if max_tokens is not None:
+                self[GEN_AI_REQUEST_MAX_TOKENS] = max_tokens
+            top_p = first_not_none(request_params.get("top_p"), fallback_params.get("top_p"))
+            if top_p is not None:
+                self[GEN_AI_REQUEST_TOP_P] = top_p
+            top_k = first_not_none(request_params.get("top_k"), fallback_params.get("top_k"))
+            if top_k is not None:
+                self[GEN_AI_REQUEST_TOP_K] = top_k
+            frequency_penalty = first_not_none(
+                request_params.get("frequency_penalty"),
+                fallback_params.get("frequency_penalty"),
+            )
+            if frequency_penalty is not None:
+                self[GEN_AI_REQUEST_FREQUENCY_PENALTY] = frequency_penalty
+            presence_penalty = first_not_none(
+                request_params.get("presence_penalty"),
+                fallback_params.get("presence_penalty"),
+            )
+            if presence_penalty is not None:
+                self[GEN_AI_REQUEST_PRESENCE_PENALTY] = presence_penalty
+            stop = first_not_none(
+                request_params.get("stop_sequences"),
+                request_params.get("stop"),
+                fallback_params.get("stop_sequences"),
+                fallback_params.get("stop"),
+            )
+            if stop is not None:
+                self[GEN_AI_REQUEST_STOP_SEQUENCES] = [stop] if isinstance(stop, str) else stop
+            seed = first_not_none(
+                request_params.get("seed"),
+                request_params.get("random_seed"),
+                fallback_params.get("seed"),
+                fallback_params.get("random_seed"),
+            )
+            if seed is not None:
+                self[GEN_AI_REQUEST_SEED] = seed
+            choice_count = first_not_none(
+                request_params.get("choice_count"),
+                request_params.get("n"),
+                fallback_params.get("choice_count"),
+                fallback_params.get("n"),
+            )
+            if choice_count is not None:
+                self[GEN_AI_REQUEST_CHOICE_COUNT] = choice_count
+            stream = first_not_none(
+                request_params.get("stream"),
+                request_params.get("streaming"),
+                fallback_params.get("stream"),
+                fallback_params.get("streaming"),
+            )
+            if stream is not None:
+                self[GEN_AI_REQUEST_STREAM] = stream
 
         # Capture tool call arguments for FunctionTool invocations
         if isinstance(instance, (BaseTool, FunctionTool)):
@@ -387,7 +528,9 @@ class _Span(BaseSpan):
 
     @process_instance.register(BaseLLM)
     @process_instance.register(MultiModalLLM)
-    def _(self, instance: Union[BaseLLM, MultiModalLLM]) -> None:
+    def _(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+        self, instance: Union[BaseLLM, MultiModalLLM]
+    ) -> None:
         if metadata := instance.metadata:
             self[GEN_AI_REQUEST_MODEL] = metadata.model_name
 
@@ -399,11 +542,17 @@ class _Span(BaseSpan):
         if hasattr(instance, "temperature") and instance.temperature is not None:
             self[GEN_AI_REQUEST_TEMPERATURE] = instance.temperature
 
-        # Capture max_tokens if available
-        if hasattr(instance, "max_tokens") and instance.max_tokens is not None:
-            self[GEN_AI_REQUEST_MAX_TOKENS] = instance.max_tokens
-
         additional_kwargs = getattr(instance, "additional_kwargs", None) or {}
+        max_tokens = first_not_none(
+            getattr(instance, "max_tokens", None),
+            getattr(instance, "max_output_tokens", None),
+            getattr(instance, "max_completion_tokens", None),
+            additional_kwargs.get("max_tokens"),
+            additional_kwargs.get("max_output_tokens"),
+            additional_kwargs.get("max_completion_tokens"),
+        )
+        if max_tokens is not None:
+            self[GEN_AI_REQUEST_MAX_TOKENS] = max_tokens
         if (top_p := additional_kwargs.get("top_p")) is not None:
             self[GEN_AI_REQUEST_TOP_P] = top_p
         if (top_k := additional_kwargs.get("top_k")) is not None:
@@ -414,6 +563,65 @@ class _Span(BaseSpan):
             self[GEN_AI_REQUEST_PRESENCE_PENALTY] = presence_penalty
         if stop := (additional_kwargs.get("stop") or additional_kwargs.get("stop_sequences")):
             self[GEN_AI_REQUEST_STOP_SEQUENCES] = stop
+        if (seed := additional_kwargs.get("seed")) is not None:
+            self[GEN_AI_REQUEST_SEED] = seed
+        choice_count = first_not_none(additional_kwargs.get("choice_count"), additional_kwargs.get("n"))
+        if choice_count is not None:
+            self[GEN_AI_REQUEST_CHOICE_COUNT] = choice_count
+        if (stream := additional_kwargs.get("stream")) is not None:
+            self[GEN_AI_REQUEST_STREAM] = stream
+
+        top_p = first_not_none(getattr(instance, "top_p", None), additional_kwargs.get("top_p"))
+        if top_p is not None:
+            self[GEN_AI_REQUEST_TOP_P] = top_p
+        top_k = first_not_none(getattr(instance, "top_k", None), additional_kwargs.get("top_k"))
+        if top_k is not None:
+            self[GEN_AI_REQUEST_TOP_K] = top_k
+        frequency_penalty = first_not_none(
+            getattr(instance, "frequency_penalty", None),
+            additional_kwargs.get("frequency_penalty"),
+        )
+        if frequency_penalty is not None:
+            self[GEN_AI_REQUEST_FREQUENCY_PENALTY] = frequency_penalty
+        presence_penalty = first_not_none(
+            getattr(instance, "presence_penalty", None),
+            additional_kwargs.get("presence_penalty"),
+        )
+        if presence_penalty is not None:
+            self[GEN_AI_REQUEST_PRESENCE_PENALTY] = presence_penalty
+        stop = first_not_none(
+            getattr(instance, "stop_sequences", None),
+            getattr(instance, "stop", None),
+            additional_kwargs.get("stop_sequences"),
+            additional_kwargs.get("stop"),
+        )
+        if stop is not None:
+            self[GEN_AI_REQUEST_STOP_SEQUENCES] = [stop] if isinstance(stop, str) else stop
+        seed = first_not_none(
+            getattr(instance, "seed", None),
+            getattr(instance, "random_seed", None),
+            additional_kwargs.get("seed"),
+            additional_kwargs.get("random_seed"),
+        )
+        if seed is not None:
+            self[GEN_AI_REQUEST_SEED] = seed
+        choice_count = first_not_none(
+            getattr(instance, "choice_count", None),
+            getattr(instance, "n", None),
+            additional_kwargs.get("choice_count"),
+            additional_kwargs.get("n"),
+        )
+        if choice_count is not None:
+            self[GEN_AI_REQUEST_CHOICE_COUNT] = choice_count
+        instance_stream = getattr(instance, "stream", None)
+        stream = first_not_none(
+            None if callable(instance_stream) else instance_stream,
+            getattr(instance, "streaming", None),
+            additional_kwargs.get("stream"),
+            additional_kwargs.get("streaming"),
+        )
+        if stream is not None:
+            self[GEN_AI_REQUEST_STREAM] = stream
 
     @process_instance.register
     def _(self, instance: BaseEmbedding) -> None:
@@ -691,7 +899,7 @@ def _get_token_counts_from_mapping(
     yield from _get_token_counts_impl(usage_mapping, get_value)
 
 
-def _get_token_counts_impl(
+def _get_token_counts_impl(  # pylint: disable=too-many-branches,too-many-statements
     usage: Union[object, Mapping[str, Any]], get_value: Callable[[Any, str], Any]
 ) -> Iterator[Tuple[str, Any]]:
     # OpenAI
@@ -727,5 +935,48 @@ def _get_token_counts_impl(
     if (candidates_token_count := get_value(usage, "candidates_token_count")) is not None:
         try:
             yield GEN_AI_USAGE_OUTPUT_TOKENS, int(candidates_token_count)
+        except BaseException:
+            pass
+
+    input_token_details = first_not_none(
+        get_value(usage, "input_token_details"),
+        get_value(usage, "input_tokens_details"),
+        get_value(usage, "prompt_tokens_details"),
+    )
+    output_token_details = first_not_none(
+        get_value(usage, "output_token_details"),
+        get_value(usage, "output_tokens_details"),
+        get_value(usage, "completion_tokens_details"),
+    )
+    cache_read_input_tokens = first_not_none(
+        get_value(usage, "cached_prompt_tokens"),
+        get_value(usage, "cache_read_input_tokens"),
+        _safe_get(input_token_details, "cache_read"),
+        _safe_get(input_token_details, "cached_tokens"),
+    )
+    if cache_read_input_tokens is not None:
+        try:
+            yield GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS, int(cache_read_input_tokens)
+        except BaseException:
+            pass
+    cache_creation_input_tokens = first_not_none(
+        get_value(usage, "cache_creation_tokens"),
+        get_value(usage, "cache_creation_input_tokens"),
+        _safe_get(input_token_details, "cache_creation"),
+        _safe_get(input_token_details, "cache_write_tokens"),
+    )
+    if cache_creation_input_tokens is not None:
+        try:
+            yield GEN_AI_USAGE_CACHE_CREATION_INPUT_TOKENS, int(cache_creation_input_tokens)
+        except BaseException:
+            pass
+    reasoning_output_tokens = first_not_none(
+        get_value(usage, "reasoning_tokens"),
+        _safe_get(output_token_details, "reasoning"),
+        _safe_get(output_token_details, "reasoning_tokens"),
+    )
+    if reasoning_output_tokens is not None:
+        try:
+            yield GEN_AI_USAGE_REASONING_OUTPUT_TOKENS, int(reasoning_output_tokens)
         except BaseException:
             pass

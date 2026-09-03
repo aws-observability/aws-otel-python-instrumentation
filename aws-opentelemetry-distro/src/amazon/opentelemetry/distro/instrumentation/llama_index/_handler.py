@@ -3,7 +3,7 @@
 import inspect
 import logging
 from time import time_ns
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Generator, Optional
 
 from llama_index.core.agent.workflow import AgentWorkflow, BaseWorkflowAgent
 from llama_index.core.agent.workflow.workflow_events import AgentSetup
@@ -28,6 +28,7 @@ from opentelemetry import context as context_api
 from opentelemetry.semconv._incubating.attributes.gen_ai_attributes import (
     GEN_AI_AGENT_NAME,
     GEN_AI_OPERATION_NAME,
+    GEN_AI_REQUEST_STREAM,
     GenAiOperationNameValues,
 )
 from opentelemetry.trace import SpanKind, Tracer, set_span_in_context
@@ -188,6 +189,8 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         else:
             span.process_instance(instance)
             span.process_input(instance, bound_args)
+            if id_.partition("-")[0].rpartition(".")[-1] in ("stream_chat", "astream_chat"):
+                span[GEN_AI_REQUEST_STREAM] = True
 
         return span
 
@@ -208,7 +211,7 @@ class _SpanHandler(BaseSpanHandler[_Span], extra="allow"):
         if span.is_passthrough:
             return span
 
-        if isinstance(result, AsyncGenerator):
+        if isinstance(result, (AsyncGenerator, Generator)):
             span.set_deferred()
             return None
 
