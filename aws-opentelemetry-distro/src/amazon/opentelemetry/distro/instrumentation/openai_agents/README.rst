@@ -8,7 +8,7 @@ telemetry that follows OpenTelemetry's Generative AI semantic conventions.
 Features
 --------
 
-* Creates spans for agents, model generations, tools, guardrails, and handoffs.
+* Creates spans for agents, model generations, tools, and handoffs.
 * Records model, token usage, message, tool, and operation attributes when they
   are available from the Agents SDK.
 
