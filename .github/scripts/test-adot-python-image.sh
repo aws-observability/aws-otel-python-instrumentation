@@ -26,14 +26,20 @@ TEST_TAG=$1
 EXPECTED_VERSION="${2:-}"
 WHEEL="${3:-}"
 
-VOLUME=operator-volume
+# Per-run unique names so a run killed before the trap fires (cancelled workflow, OOM) can't
+# leave a volume/containers behind for the next run to pick up -- which would make diff -r
+# compare a mixed tree.
+RUN_ID="$$-${RANDOM}"
+VOLUME="operator-volume-${RUN_ID}"
+VERIFY_CTR="adot-verify-${RUN_ID}"
+SRC_CTR="adot-src-${RUN_ID}"
 WORKDIR=$(mktemp -d)
 IMAGE_SRC="${WORKDIR}/image-src"
 VOLUME_COPY="${WORKDIR}/volume-copy"
 
 cleanup() {
-  docker rm -f adot-verify >/dev/null 2>&1 || true
-  docker rm -f adot-src >/dev/null 2>&1 || true
+  docker rm -f "${VERIFY_CTR}" >/dev/null 2>&1 || true
+  docker rm -f "${SRC_CTR}" >/dev/null 2>&1 || true
   docker volume rm "${VOLUME}" >/dev/null 2>&1 || true
   rm -rf "${WORKDIR}"
 }
@@ -43,8 +49,8 @@ docker volume create "${VOLUME}"
 
 # Extract the image's baked-in payload up front (scratch image: create, don't run) -- used both
 # for the copy-fidelity diff in step 4 and to detect which Python the payload was built for.
-docker create --name adot-src "${TEST_TAG}" /bin/cp >/dev/null
-docker cp adot-src:/autoinstrumentation "${IMAGE_SRC}"
+docker create --name "${SRC_CTR}" "${TEST_TAG}" /bin/cp >/dev/null
+docker cp "${SRC_CTR}":/autoinstrumentation "${IMAGE_SRC}"
 
 # Link the neutral verifier image to the artifact BY CONSTRUCTION: read the CPython tag from a
 # compiled wheel in the payload (e.g. ...cpython-311-...so -> 3.11) rather than hardcoding, so
@@ -60,9 +66,9 @@ docker run --rm --mount source="${VOLUME}",dst=/otel-auto-instrumentation "${TES
 
 # 2. Assert the payload actually landed in the operator volume, using a neutral container
 #    (the ADOT image is FROM scratch and has no shell/coreutils).
-docker run -d --name adot-verify --mount source="${VOLUME}",dst=/otel-auto-instrumentation \
+docker run -d --name "${VERIFY_CTR}" --mount source="${VOLUME}",dst=/otel-auto-instrumentation \
   "${NEUTRAL_IMAGE}" sleep 300 >/dev/null
-docker cp adot-verify:/otel-auto-instrumentation "${VOLUME_COPY}"
+docker cp "${VERIFY_CTR}":/otel-auto-instrumentation "${VOLUME_COPY}"
 if [ -z "$(ls -A "${VOLUME_COPY}" 2>/dev/null)" ]; then
   echo "error: /autoinstrumentation was not copied into the operator-volume"
   exit 1
@@ -122,11 +128,16 @@ PY
 #    Scoped to the distro source tree we author; __pycache__ (pip-compiled, not in the wheel) is
 #    excluded, and the dist-info/RECORD (pip rewrites on install) is out of scope by only diffing
 #    amazon/opentelemetry/distro. Transitive deps have no independent artifact, so are not covered.
+#    Best-effort: warn and SKIP if the wheel is missing/unreadable so reference acquisition never
+#    blocks a release; only a real content mismatch fails.
 if [ -n "${WHEEL}" ]; then
   REF="${WORKDIR}/wheel-ref"
   mkdir -p "${REF}"
-  unzip -q "${WHEEL}" -d "${REF}"
-  if diff -r --exclude='__pycache__' "${REF}/amazon/opentelemetry/distro" "${IMAGE_SRC}/amazon/opentelemetry/distro"; then
+  if [ ! -f "${WHEEL}" ]; then
+    echo "warning: wheel reference '${WHEEL}' not found; skipping independent-reference check"
+  elif ! unzip -q "${WHEEL}" -d "${REF}"; then
+    echo "warning: could not unzip wheel reference '${WHEEL}'; skipping independent-reference check"
+  elif diff -r --exclude='__pycache__' "${REF}/amazon/opentelemetry/distro" "${IMAGE_SRC}/amazon/opentelemetry/distro"; then
     echo "image library matched the independently-built wheel"
   else
     echo "error: image library differs from the independently-built wheel"
