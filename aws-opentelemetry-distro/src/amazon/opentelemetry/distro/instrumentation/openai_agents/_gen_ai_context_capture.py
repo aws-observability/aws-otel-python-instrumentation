@@ -1,28 +1,37 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from contextvars import ContextVar
+import logging
 from dataclasses import dataclass, field
 from inspect import isawaitable, iscoroutinefunction
-from typing import Any, Optional
+from typing import Any, Optional, TypeVar
 
 from openai import NotGiven, Omit
 from wrapt import ObjectProxy
 
 from amazon.opentelemetry.distro.instrumentation.common.instrumentation_utils import get_value
+from opentelemetry import context as otel_context
+from opentelemetry.context import Context
+
+_GEN_AI_CAPTURING_CONTEXT_KEY = otel_context.create_key("aws_otel_openai_agents_capturing_context")
+_CapturingContextT = TypeVar("_CapturingContextT", bound="GenAICapturingContext")
+_logger = logging.getLogger(__name__)
 
 
-@dataclass
-class ModelCapturingContext:
-    model_impl: Optional[str] = None
-    request_params: dict[str, Any] = field(default_factory=dict)
-    responses: list[dict[str, Any]] = field(default_factory=list)
+def set_gen_ai_capturing_context_in_context(
+    capture: "GenAICapturingContext",
+    context: Optional[Context] = None,
+) -> Context:
+    ctx = otel_context.set_value(_GEN_AI_CAPTURING_CONTEXT_KEY, capture, context=context)
+    return ctx
 
 
-@dataclass
-class ToolCapturingContext:
-    name: Optional[str] = None
-    call_id: Optional[str] = None
+def get_gen_ai_capturing_context(
+    capturing_context_type: type[_CapturingContextT],
+    context: Optional[Context] = None,
+) -> Optional[_CapturingContextT]:
+    capture = otel_context.get_value(_GEN_AI_CAPTURING_CONTEXT_KEY, context)
+    return capture if isinstance(capture, capturing_context_type) else None
 
 
 class _ResponseCapturingStream(ObjectProxy):
@@ -33,7 +42,10 @@ class _ResponseCapturingStream(ObjectProxy):
 
     def __next__(self) -> Any:
         chunk = next(self.__wrapped__)
-        GenAIContextCapture.capture_model_response_attributes(chunk)
+        try:
+            GenAICapturingContext.capture_model_response_attributes(chunk)
+        except Exception:  # pylint: disable=broad-exception-caught
+            _logger.debug("Failed to capture GenAI stream response attributes", exc_info=True)
         return chunk
 
     def __aiter__(self) -> Any:
@@ -41,37 +53,51 @@ class _ResponseCapturingStream(ObjectProxy):
 
     async def __anext__(self) -> Any:
         chunk = await self.__wrapped__.__anext__()
-        GenAIContextCapture.capture_model_response_attributes(chunk)
+        try:
+            GenAICapturingContext.capture_model_response_attributes(chunk)
+        except Exception:  # pylint: disable=broad-exception-caught
+            _logger.debug("Failed to capture GenAI stream response attributes", exc_info=True)
         return chunk
 
 
-class GenAIContextCapture:
+class GenAICapturingContext:
     """Capture GenAI call details that the OpenAI Agents tracing callbacks do not expose."""
 
-    _current_model_context: ContextVar[Optional[ModelCapturingContext]] = ContextVar(
-        "aws_otel_openai_agents_current_model_context", default=None
-    )
-    _current_tool_context: ContextVar[Optional[ToolCapturingContext]] = ContextVar(
-        "aws_otel_openai_agents_current_tool_context", default=None
-    )
+    @classmethod
+    def for_model(cls, model_impl: Optional[str] = None) -> "GenAICapturingContext":
+        return ModelCapturingContext(model_impl=model_impl)
+
+    @classmethod
+    def for_tool(cls) -> "GenAICapturingContext":
+        return ToolCapturingContext()
 
     @classmethod
     def capture_openai_request_attributes(cls, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
         """Wrap OpenAI Responses create methods to capture request attributes."""
-        cls.capture_model_request_attributes(instance, kwargs)
+        try:
+            cls.capture_model_request_attributes(instance, kwargs)
+        except Exception:  # pylint: disable=broad-exception-caught
+            _logger.debug("Failed to capture GenAI request attributes", exc_info=True)
         return wrapped(*args, **kwargs)
 
     @classmethod
     def capture_openai_completion_attributes(cls, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
         """Wrap OpenAI Chat Completions create methods to capture request and response attributes."""
-        current_model_context = cls.get_current_model_context()
+        current_model_context = get_gen_ai_capturing_context(ModelCapturingContext)
         if current_model_context is None or current_model_context.model_impl == "litellm":
             return wrapped(*args, **kwargs)
-        cls.capture_model_request_attributes(instance, kwargs)
+        try:
+            cls.capture_model_request_attributes(instance, kwargs)
+        except Exception:  # pylint: disable=broad-exception-caught
+            _logger.debug("Failed to capture GenAI request attributes", exc_info=True)
         response = wrapped(*args, **kwargs)
-        if isawaitable(response):
-            return cls._capture_acompletion_response_attributes(response, kwargs.get("stream"))
-        return cls._capture_completion_response_attributes(response, kwargs.get("stream"))
+        try:
+            if isawaitable(response):
+                return cls._capture_acompletion_response_attributes(response, kwargs.get("stream"))
+            return cls._capture_completion_response_attributes(response, kwargs.get("stream"))
+        except Exception:  # pylint: disable=broad-exception-caught
+            _logger.debug("Failed to prepare GenAI response capture", exc_info=True)
+            return response
 
     @classmethod
     def capture_litellm_completion_attributes(cls, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
@@ -79,19 +105,33 @@ class GenAIContextCapture:
         # LiteLLM's acompletion calls completion(..., acompletion=True); capture the request only once.
         if kwargs.get("acompletion") and not iscoroutinefunction(wrapped):
             return wrapped(*args, **kwargs)
-        if cls.get_current_model_context() is None:
+        if get_gen_ai_capturing_context(ModelCapturingContext) is None:
             return wrapped(*args, **kwargs)
-        cls.capture_model_request_attributes(instance, kwargs)
+        try:
+            cls.capture_model_request_attributes(instance, kwargs)
+        except Exception:  # pylint: disable=broad-exception-caught
+            _logger.debug("Failed to capture GenAI request attributes", exc_info=True)
         response = wrapped(*args, **kwargs)
-        if isawaitable(response):
-            return cls._capture_acompletion_response_attributes(response, kwargs.get("stream"))
-        return cls._capture_completion_response_attributes(response, kwargs.get("stream"))
+        try:
+            if isawaitable(response):
+                return cls._capture_acompletion_response_attributes(response, kwargs.get("stream"))
+            return cls._capture_completion_response_attributes(response, kwargs.get("stream"))
+        except Exception:  # pylint: disable=broad-exception-caught
+            _logger.debug("Failed to prepare GenAI response capture", exc_info=True)
+            return response
 
     @classmethod
     def _capture_completion_response_attributes(cls, response: Any, stream: Any) -> Any:
         if stream and (hasattr(response, "__iter__") or hasattr(response, "__aiter__")):
-            return _ResponseCapturingStream(response)
-        cls.capture_model_response_attributes(response)
+            try:
+                return _ResponseCapturingStream(response)
+            except Exception:  # pylint: disable=broad-exception-caught
+                _logger.debug("Failed to wrap GenAI response stream", exc_info=True)
+                return response
+        try:
+            cls.capture_model_response_attributes(response)
+        except Exception:  # pylint: disable=broad-exception-caught
+            _logger.debug("Failed to capture GenAI response attributes", exc_info=True)
         return response
 
     @classmethod
@@ -101,18 +141,21 @@ class GenAIContextCapture:
     @classmethod
     def capture_tool_call_attributes(cls, wrapped: Any, instance: Any, args: Any, kwargs: Any) -> Any:
         """Wrap OpenAI Agents tool-call helpers to capture the tool name and call ID attributes."""
-        tool_call = kwargs.get("tool_call") or (args[0] if args else None)
-        name = get_value(tool_call, "name")
-        call_id = get_value(tool_call, "call_id")
-        current_tool_context = cls.get_current_tool_context()
-        if current_tool_context is not None and (name or call_id):
-            current_tool_context.name = name
-            current_tool_context.call_id = call_id
+        try:
+            tool_call = kwargs.get("tool_call") or (args[0] if args else None)
+            name = get_value(tool_call, "name")
+            call_id = get_value(tool_call, "call_id")
+            current_tool_context = get_gen_ai_capturing_context(ToolCapturingContext)
+            if current_tool_context is not None and (name or call_id):
+                current_tool_context.name = name
+                current_tool_context.call_id = call_id
+        except Exception:  # pylint: disable=broad-exception-caught
+            _logger.debug("Failed to capture GenAI tool attributes", exc_info=True)
         return wrapped(*args, **kwargs)
 
     @classmethod
     def capture_model_request_attributes(cls, instance: Any, kwargs: Any) -> None:
-        current_model_context = cls.get_current_model_context()
+        current_model_context = get_gen_ai_capturing_context(ModelCapturingContext)
         if current_model_context is None:
             return
         current_model_context.request_params = {
@@ -162,7 +205,7 @@ class GenAIContextCapture:
 
     @classmethod
     def capture_model_response_attributes(cls, response: Any) -> None:
-        current_model_context = cls.get_current_model_context()
+        current_model_context = get_gen_ai_capturing_context(ModelCapturingContext)
         if current_model_context is None:
             return
         response_params: dict[str, Any] = {}
@@ -224,18 +267,18 @@ class GenAIContextCapture:
         if response_params:
             current_model_context.responses.append(response_params)
 
-    @classmethod
-    def reset_current_model_context(cls, model_impl: Optional[str] = None) -> None:
-        cls._current_model_context.set(ModelCapturingContext(model_impl=model_impl))
 
-    @classmethod
-    def get_current_model_context(cls) -> Optional[ModelCapturingContext]:
-        return cls._current_model_context.get()
+INVALID_GEN_AI_CAPTURING_CONTEXT = GenAICapturingContext()
 
-    @classmethod
-    def reset_current_tool_context(cls) -> None:
-        cls._current_tool_context.set(ToolCapturingContext())
 
-    @classmethod
-    def get_current_tool_context(cls) -> Optional[ToolCapturingContext]:
-        return cls._current_tool_context.get()
+@dataclass
+class ModelCapturingContext(GenAICapturingContext):
+    model_impl: Optional[str] = None
+    request_params: dict[str, Any] = field(default_factory=dict)
+    responses: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class ToolCapturingContext(GenAICapturingContext):
+    name: Optional[str] = None
+    call_id: Optional[str] = None
