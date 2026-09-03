@@ -128,7 +128,7 @@ jobs:
   # --- Python EKS pipeline: service-events (first) -> setup -> parallel versions -> cleanup ------
   # Service events has atomic setup and cleanup
   service-events-eks:
-    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@main
+    uses: aws-observability/aws-application-signals-test-framework/.github/workflows/python-eks-service-events-test.yml@fix-se-loggroup-tag-permission
     secrets: inherit
     with:
       aws-region: us-east-1
