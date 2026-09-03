@@ -19,7 +19,7 @@ from openai import NOT_GIVEN, Omit
 from pydantic import BaseModel
 
 from amazon.opentelemetry.distro.instrumentation.openai_agents import OpenAIAgentsInstrumentor
-from amazon.opentelemetry.distro.instrumentation.openai_agents._gen_ai_context_capture import GenAIContextCapture
+from amazon.opentelemetry.distro.instrumentation.openai_agents._gen_ai_context_capture import GenAICapturingContext
 from amazon.opentelemetry.distro.instrumentation.openai_agents._processor import (
     GEN_AI_REQUEST_REASONING_LEVEL,
     OpenTelemetryTracingProcessor,
@@ -81,7 +81,7 @@ def _passthrough(*args, **kwargs):
 
 
 def _record_tool_call(name=None, call_id=None):
-    return GenAIContextCapture.capture_tool_call_attributes(
+    return GenAICapturingContext.capture_tool_call_attributes(
         _passthrough,
         None,
         (),
@@ -91,7 +91,7 @@ def _record_tool_call(name=None, call_id=None):
 
 def _record_request(base_url=None, **kwargs):
     instance = SimpleNamespace(_client=SimpleNamespace(base_url=base_url)) if base_url else None
-    return GenAIContextCapture.capture_openai_completion_attributes(_passthrough, instance, (), kwargs)
+    return GenAICapturingContext.capture_openai_completion_attributes(_passthrough, instance, (), kwargs)
 
 
 def _litellm_response(model, finish_reasons):
@@ -292,7 +292,7 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
                 if hasattr(response_trace_span.span_data, "usage"):
                     response_trace_span.span_data.usage = {"input_tokens": 7, "output_tokens": 3}
                 with response_trace_span:
-                    GenAIContextCapture.capture_openai_request_attributes(
+                    GenAICapturingContext.capture_openai_request_attributes(
                         _passthrough,
                         None,
                         (),
@@ -920,6 +920,197 @@ class TestOpenAIAgentsTracingProcessor(unittest.TestCase):
         self.assertNotIn(GEN_AI_REQUEST_TEMPERATURE, span.attributes)
         self.assertNotIn(GEN_AI_REQUEST_MAX_TOKENS, span.attributes)
         self.assertEqual(span.attributes[GEN_AI_REQUEST_TOP_P], 0.4)
+
+    def test_capture_failures_are_fail_open(self):
+        class InvalidBaseUrl:
+            def __str__(self):
+                raise RuntimeError("invalid base URL")
+
+        class InvalidToolCall:
+            @property
+            def name(self):
+                raise RuntimeError("invalid tool call")
+
+        response = SimpleNamespace(id="response-id", model="response-model", choices=1)
+        instance = SimpleNamespace(_client=SimpleNamespace(base_url=InvalidBaseUrl()))
+
+        with tracing.trace("Fail-open workflow"):
+            with tracing.generation_span(input=[], output=[], model="fallback-model"):
+                returned_response = GenAICapturingContext.capture_openai_completion_attributes(
+                    lambda **_kwargs: response,
+                    instance,
+                    (),
+                    {"model": "request-model"},
+                )
+                self.assertIs(returned_response, response)
+
+                returned_stream = GenAICapturingContext.capture_openai_completion_attributes(
+                    lambda **_kwargs: iter([response]),
+                    None,
+                    (),
+                    {"model": "request-model", "stream": True},
+                )
+                self.assertIs(next(returned_stream), response)
+
+            with tracing.function_span("fail-open tool"):
+                returned_tool_result = GenAICapturingContext.capture_tool_call_attributes(
+                    lambda **_kwargs: "tool result",
+                    None,
+                    (),
+                    {"tool_call": InvalidToolCall()},
+                )
+                self.assertEqual(returned_tool_result, "tool result")
+
+    def test_wrapped_exceptions_are_preserved(self):
+        class WrappedError(Exception):
+            pass
+
+        def fail(**_kwargs):
+            raise WrappedError("wrapped failure")
+
+        with tracing.trace("Wrapped error workflow"):
+            with tracing.generation_span(input=[], output=[], model="test-model"):
+                with self.assertRaisesRegex(WrappedError, "wrapped failure"):
+                    GenAICapturingContext.capture_openai_completion_attributes(
+                        fail,
+                        None,
+                        (),
+                        {"model": "test-model"},
+                    )
+
+    def test_nested_agent_tool_run_preserves_capture_context(self):
+        outer_model = "outer-model"
+        inner_model = "inner-model"
+
+        def completion(response_id, response_model, message, finish_reason):
+            return {
+                "id": response_id,
+                "object": "chat.completion",
+                "created": 1234567890,
+                "model": response_model,
+                "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            }
+
+        responses = [
+            completion(
+                "outer-tool-response",
+                "outer-response-model",
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "outer-call",
+                            "type": "function",
+                            "function": {
+                                "name": "ask_inner",
+                                "arguments": json.dumps({"input": "Run the inner lookup"}),
+                            },
+                        }
+                    ],
+                },
+                "tool_calls",
+            ),
+            completion(
+                "inner-tool-response",
+                "inner-response-model",
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "inner-call",
+                            "type": "function",
+                            "function": {
+                                "name": "inner_lookup",
+                                "arguments": json.dumps({"query": "context"}),
+                            },
+                        }
+                    ],
+                },
+                "tool_calls",
+            ),
+            completion(
+                "inner-final-response",
+                "inner-response-model",
+                {"role": "assistant", "content": "Inner complete"},
+                "stop",
+            ),
+            completion(
+                "outer-final-response",
+                "outer-response-model",
+                {"role": "assistant", "content": "Outer complete"},
+                "stop",
+            ),
+        ]
+
+        instrumentor = OpenAIAgentsInstrumentor()
+        instrumentor.instrument(
+            tracer_provider=self.tracer_provider,
+            disable_openai_trace_export=True,
+            skip_dep_check=True,
+        )
+        self.addCleanup(instrumentor.uninstrument)
+
+        @function_tool
+        def inner_lookup(query: str) -> str:
+            """Look up a value."""
+            return f"Found {query}"
+
+        def invoke_agents(client):
+            inner_agent = Agent(
+                name="Inner agent",
+                model=OpenAIChatCompletionsModel(model=inner_model, openai_client=client),
+                tools=[inner_lookup],
+            )
+            outer_agent = Agent(
+                name="Outer agent",
+                model=OpenAIChatCompletionsModel(model=outer_model, openai_client=client),
+                tools=[
+                    inner_agent.as_tool(
+                        tool_name="ask_inner",
+                        tool_description="Ask the inner agent to perform a lookup.",
+                    )
+                ],
+            )
+            result = Runner.run_sync(outer_agent, "Start the nested run")
+            self.assertEqual(result.final_output, "Outer complete")
+
+        call_mock_llm(
+            "openai",
+            invoke_llm_callback=invoke_agents,
+            is_async=True,
+            responses=responses,
+        )
+
+        spans = self.exporter.get_finished_spans()
+        model_spans = {
+            span.attributes[GEN_AI_RESPONSE_ID]: span for span in spans if GEN_AI_RESPONSE_ID in span.attributes
+        }
+        request_models = [span.attributes[GEN_AI_REQUEST_MODEL] for span in model_spans.values()]
+        self.assertEqual(request_models.count(outer_model), 2)
+        self.assertEqual(request_models.count(inner_model), 2)
+        self.assertEqual(model_spans["outer-tool-response"].attributes[GEN_AI_REQUEST_MODEL], outer_model)
+        self.assertEqual(
+            model_spans["outer-tool-response"].attributes[GEN_AI_RESPONSE_MODEL],
+            "outer-response-model",
+        )
+        self.assertEqual(model_spans["inner-tool-response"].attributes[GEN_AI_REQUEST_MODEL], inner_model)
+        self.assertEqual(
+            model_spans["inner-tool-response"].attributes[GEN_AI_RESPONSE_MODEL],
+            "inner-response-model",
+        )
+        self.assertEqual(model_spans["inner-final-response"].attributes[GEN_AI_REQUEST_MODEL], inner_model)
+        self.assertEqual(model_spans["outer-final-response"].attributes[GEN_AI_REQUEST_MODEL], outer_model)
+
+        tool_spans = {
+            span.attributes[GEN_AI_TOOL_NAME]: span
+            for span in spans
+            if GEN_AI_TOOL_NAME in span.attributes and GEN_AI_TOOL_CALL_ID in span.attributes
+        }
+        self.assertEqual(tool_spans["ask_inner"].attributes[GEN_AI_TOOL_CALL_ID], "outer-call")
+        self.assertEqual(tool_spans["inner_lookup"].attributes[GEN_AI_TOOL_CALL_ID], "inner-call")
 
     def test_parenting_skips_unhandled_task_and_turn_spans(self):
         with tracing.trace("Parent workflow"):

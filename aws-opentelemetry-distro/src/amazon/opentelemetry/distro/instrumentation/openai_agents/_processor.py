@@ -81,7 +81,14 @@ from opentelemetry.semconv.attributes.server_attributes import SERVER_ADDRESS, S
 from opentelemetry.trace import Span, SpanKind, Status, StatusCode, Tracer, set_span_in_context
 from opentelemetry.util.types import AttributeValue
 
-from ._gen_ai_context_capture import GenAIContextCapture
+from ._gen_ai_context_capture import (
+    INVALID_GEN_AI_CAPTURING_CONTEXT,
+    GenAICapturingContext,
+    ModelCapturingContext,
+    ToolCapturingContext,
+    get_gen_ai_capturing_context,
+    set_gen_ai_capturing_context_in_context,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -128,7 +135,9 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             kind=SpanKind.INTERNAL,
             attributes=attributes,
         )
-        token = context.attach(set_span_in_context(span))
+        otel_context = set_span_in_context(span)
+        otel_context = set_gen_ai_capturing_context_in_context(INVALID_GEN_AI_CAPTURING_CONTEXT, otel_context)
+        token = context.attach(otel_context)
         self._openai_trace_id_to_otel_workflow_entry.put(trace.trace_id, _SpanEntry(span=span, token=token))
 
     @override
@@ -154,12 +163,6 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
                     _SpanEntry(span=parent_entry.span, agent_content=parent_entry.agent_content),
                 )
             return
-
-        if isinstance(span_data, (GenerationSpanData, ResponseSpanData)):
-            model_config = get_value(span_data, "model_config") or {}
-            GenAIContextCapture.reset_current_model_context(get_value(model_config, "model_impl"))
-        if isinstance(span_data, (FunctionSpanData, HandoffSpanData)):
-            GenAIContextCapture.reset_current_tool_context()
 
         agent_content = parent_entry.agent_content if parent_entry is not None else None
         if isinstance(span_data, AgentSpanData):
@@ -198,7 +201,17 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             kind=self._set_span_kind(span_data),
             attributes=attributes,
         )
-        token = context.attach(set_span_in_context(otel_span))
+        otel_context = set_span_in_context(otel_span)
+        if isinstance(span_data, (GenerationSpanData, ResponseSpanData)):
+            model_config = get_value(span_data, "model_config") or {}
+            capture = GenAICapturingContext.for_model(get_value(model_config, "model_impl"))
+            otel_context = set_gen_ai_capturing_context_in_context(capture, otel_context)
+        elif isinstance(span_data, (FunctionSpanData, HandoffSpanData)):
+            capture = GenAICapturingContext.for_tool()
+            otel_context = set_gen_ai_capturing_context_in_context(capture, otel_context)
+        else:
+            otel_context = set_gen_ai_capturing_context_in_context(INVALID_GEN_AI_CAPTURING_CONTEXT, otel_context)
+        token = context.attach(otel_context)
         self._openai_span_id_to_otel_span_entry.put(
             span.span_id,
             _SpanEntry(span=otel_span, token=token, agent_content=agent_content),
@@ -214,8 +227,6 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
             return
         if entry is None or entry.token is None:
             return
-
-        try_detach(entry.token)
         otel_span = entry.span
 
         try:
@@ -243,6 +254,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         except Exception as error:  # pylint: disable=broad-exception-caught
             _logger.warning("Failed to enrich OpenAI Agents span %s: %s", span.span_id, error)
         finally:
+            try_detach(entry.token)
             self._set_span_status(otel_span, span.error)
             self._record_trace_error(span)
             otel_span.end()
@@ -457,7 +469,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         OpenTelemetryTracingProcessor._set_attribute(
             attributes,
             GEN_AI_TOOL_CALL_ID,
-            get_value(GenAIContextCapture.get_current_tool_context(), "call_id"),
+            get_value(get_gen_ai_capturing_context(ToolCapturingContext), "call_id"),
         )
         OpenTelemetryTracingProcessor._set_attribute(
             attributes, GEN_AI_TOOL_CALL_ARGUMENTS, to_tool_attribute_value(span_data.input)
@@ -477,7 +489,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         OpenTelemetryTracingProcessor._set_attribute(
             attributes,
             GEN_AI_TOOL_CALL_ID,
-            get_value(GenAIContextCapture.get_current_tool_context(), "call_id"),
+            get_value(get_gen_ai_capturing_context(ToolCapturingContext), "call_id"),
         )
         OpenTelemetryTracingProcessor._set_attribute(
             attributes,
@@ -512,7 +524,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         model_config: Mapping[str, Any],
         fallback_model: Any,
     ) -> None:
-        current_model_context = GenAIContextCapture.get_current_model_context()
+        current_model_context = get_gen_ai_capturing_context(ModelCapturingContext)
         request_params = get_value(current_model_context, "request_params") or {}
         model_config = {**model_config, **request_params}
         request_model = first_not_none(request_params.get("model"), fallback_model)
@@ -599,7 +611,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
         detailed_usage: Any = None,
     ) -> list[str]:
         OpenTelemetryTracingProcessor._set_usage_attributes(attributes, usage, detailed_usage)
-        current_model_context = GenAIContextCapture.get_current_model_context()
+        current_model_context = get_gen_ai_capturing_context(ModelCapturingContext)
         responses = [(fallback_response, False)] if fallback_response is not None else []
         responses.extend((response, True) for response in get_value(current_model_context, "responses") or [])
         finish_reasons: list[str] = []
@@ -886,7 +898,7 @@ class OpenTelemetryTracingProcessor(TracingProcessor):
 
     @staticmethod
     def _get_handoff_tool_name(span_data: HandoffSpanData) -> str:
-        tool_name = get_value(GenAIContextCapture.get_current_tool_context(), "name")
+        tool_name = get_value(get_gen_ai_capturing_context(ToolCapturingContext), "name")
         if tool_name:
             return str(tool_name)
         if not span_data.to_agent:

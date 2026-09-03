@@ -58,6 +58,7 @@ def call_mock_llm(
 
     is_async = kwargs.get("is_async", False)
     model = kwargs.get("model", config["model"])
+    responses = iter(kwargs["responses"]) if "responses" in kwargs else None
 
     if provider in ("openai", "litellm"):
         import asyncio
@@ -69,6 +70,12 @@ def call_mock_llm(
             raise NotImplementedError("Async LiteLLM mock calls are not supported")
 
         def openai_response(request):
+            if responses is not None:
+                try:
+                    response = next(responses)
+                except StopIteration as error:
+                    raise AssertionError("Mock LLM response sequence exhausted") from error
+                return httpx.Response(200, request=request, json=response)
             return httpx.Response(
                 200,
                 request=request,
