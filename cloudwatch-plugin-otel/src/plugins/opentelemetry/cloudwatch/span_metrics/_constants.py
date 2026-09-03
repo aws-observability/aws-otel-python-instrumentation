@@ -14,9 +14,6 @@ def _semconv(module_path: str, name: str, literal: str) -> str:
         return literal
 
 
-_SERVICE = "opentelemetry.semconv.attributes.service_attributes"
-SERVICE_NAME = _semconv(_SERVICE, "SERVICE_NAME", "service.name")
-
 _HTTP = "opentelemetry.semconv.attributes.http_attributes"
 HTTP_REQUEST_METHOD = _semconv(_HTTP, "HTTP_REQUEST_METHOD", "http.request.method")
 HTTP_RESPONSE_STATUS_CODE = _semconv(_HTTP, "HTTP_RESPONSE_STATUS_CODE", "http.response.status_code")
@@ -63,6 +60,10 @@ class _SpanMetrics:
     SCOPE_NAME: Final = "cloudwatch.plugin.otel.span_metrics"
 
     CALLS_NAME: Final = "traces.span.metrics.calls"
+    # {call} is the UCUM annotation for counted things, matching OTel semconv counter conventions
+    # (cf. {request}, {operation}). The collector spanmetrics connector leaves the unit unset; the
+    # annotation is preferred because it states what is being counted.
+    CALLS_UNIT: Final = "{call}"
     DURATION_NAME: Final = "traces.span.metrics.duration"
     DURATION_UNIT: Final = "s"
     DURATION_BUCKET_BOUNDARIES: Final = [
