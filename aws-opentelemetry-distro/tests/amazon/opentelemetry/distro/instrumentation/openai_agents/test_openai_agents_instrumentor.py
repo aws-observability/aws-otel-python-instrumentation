@@ -131,7 +131,7 @@ class TestOpenAIAgentsInstrumentor(unittest.TestCase):
     def test_instrument_is_idempotent_and_additive(self):
         existing_processor = MagicMock()
         tracing.set_trace_processors([existing_processor])
-        self.assertEqual(self.instrumentor.instrumentation_dependencies(), ("openai-agents >= 0.3.3",))
+        self.assertEqual(self.instrumentor.instrumentation_dependencies(), ("openai-agents >= 0.3.3, < 1",))
         original_completion = litellm.completion
         original_acompletion = litellm.acompletion
 
