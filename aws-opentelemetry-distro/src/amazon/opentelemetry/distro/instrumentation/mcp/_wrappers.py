@@ -168,17 +168,20 @@ class McpWrapper:
     @staticmethod
     def _set_error_attrs(span: trace.Span, exc: Exception) -> None:
         """Set error attributes on span from exception."""
-        span.set_status(Status(StatusCode.ERROR, str(exc)))
-        span.record_exception(exc)
-        span.set_attribute(ERROR_TYPE, type(exc).__name__)
-
         try:
-            from mcp.shared.exceptions import McpError  # pylint: disable=import-outside-toplevel
+            span.set_status(Status(StatusCode.ERROR, str(exc)))
+            span.record_exception(exc)
+            span.set_attribute(ERROR_TYPE, type(exc).__name__)
 
-            if isinstance(exc, McpError):
-                span.set_attribute(RPC_RESPONSE_STATUS_CODE, str(exc.error.code))
-        except ImportError:
-            pass
+            try:
+                from mcp.shared.exceptions import McpError  # pylint: disable=import-outside-toplevel
+
+                if isinstance(exc, McpError):
+                    span.set_attribute(RPC_RESPONSE_STATUS_CODE, str(exc.error.code))
+            except ImportError:
+                pass
+        except Exception:  # pylint: disable=broad-exception-caught
+            _LOG.debug("Failed to record MCP span error", exc_info=True)
 
 
 class ClientWrapper(McpWrapper):
@@ -259,6 +262,9 @@ class ClientWrapper(McpWrapper):
             try:
                 async with wrapped(*args, **kwargs) as streams:
                     yield streams
+            except Exception as exc:
+                self._set_error_attrs(session_span, exc)
+                raise
             finally:
                 session_span.end()
                 context.detach(token)
@@ -271,13 +277,12 @@ class ClientWrapper(McpWrapper):
         async def wrapper():
             url = args[0] if args else kwargs.get("url", "")
             parsed = urlparse(url)
-            session_span, token = self._start_mcp_session_span(
-                {
-                    NETWORK_TRANSPORT: NetworkTransportValues.TCP.value,
-                    SERVER_ADDRESS: parsed.hostname,
-                    SERVER_PORT: parsed.port or (443 if parsed.scheme == "https" else 80),
-                }
-            )
+            transport_info = {
+                NETWORK_TRANSPORT: NetworkTransportValues.TCP.value,
+                SERVER_ADDRESS: parsed.hostname,
+                SERVER_PORT: parsed.port or (443 if parsed.scheme == "https" else 80),
+            }
+            session_span, token = self._start_mcp_session_span(transport_info)
             try:
                 if self._should_suppress_http_spans:
                     with suppress_http_instrumentation():
@@ -286,7 +291,16 @@ class ClientWrapper(McpWrapper):
                 else:
                     async with wrapped(*args, **kwargs) as streams:
                         yield streams
+            except Exception as exc:
+                self._set_error_attrs(session_span, exc)
+                raise
             finally:
+                try:
+                    session_id = transport_info.get(MCP_SESSION_ID)
+                    if session_id:
+                        session_span.set_attribute(MCP_SESSION_ID, session_id)
+                except Exception:  # pylint: disable=broad-exception-caught
+                    _LOG.debug("Failed to record MCP session ID", exc_info=True)
                 session_span.end()
                 context.detach(token)
 
